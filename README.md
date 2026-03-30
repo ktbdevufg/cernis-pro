@@ -13,3 +13,4 @@ LAN Scanner and Network Monitoring Desktop Application
 - Windows x64
 - Linux x64 (.deb)
 - Linux x64 (.rpm)
+- macOS ARM64
