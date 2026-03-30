@@ -52,6 +52,15 @@
     "branches": {
       "main": "stabil, getesteter Code",
       "dev": "aktive Entwicklung"
+    },
+    "system_paths": {
+      "macos_parallels_host": "/Volumes/KINGDATA/Github-Repos/Cernis-Pro",
+      "macos_m4_macbook": "/Volumes/SAMDATA/Github-Repos/Cernis-Pro",
+      "windows_arm64": "C:\\Users\\karlbach\\Github-Repos\\Cernis-Pro",
+      "windows_x64": "C:\\Users\\Claude\\Github-Repos\\Cernis-Pro",
+      "linux_x64_fedora": "/home/kbach/Dokumente/Github-Repos/Cernis-Pro",
+      "linux_x64_ubuntu": "/home/kbach/Dokumente/Github-Repos/Cernis-Pro",
+      "root_server": "/home/gitboy/Github-Repos/Cernis-Pro"
     }
   },
   "dev_environments": {
@@ -123,6 +132,13 @@
       "build_dir": "build/linux-rpm",
       "version": "v14",
       "notes": "Rocky Linux 9 inkompatibel (glib2 2.68 < 2.70). Fedora 43 verwendet."
+    },
+    "root_server": {
+      "role": "Server-Projekte (Docker), kein Cernis",
+      "os": "Debian",
+      "user": "gitboy",
+      "git_repo": "/home/gitboy/Github-Repos/Cernis-Pro",
+      "notes": "Separates Repo fuer Server-Projekte wird spaeter angelegt. gitboy zur docker-Gruppe hinzufuegen fuer Docker ohne root."
     }
   },
   "targets": {
@@ -252,7 +268,8 @@
     "rocky_linux_incompatible": "Rocky Linux 9 liefert glib2 2.68.4 — inkompatibel mit Tauri v2 (benoetigt >= 2.70). Fedora 43 ist die korrekte RPM Build-Plattform.",
     "lto_codegen_units_x64": "lto=true + codegen-units=1 in Cargo.toml verursacht STATUS_ACCESS_VIOLATION (0xc0000005) Rust Compiler Crash auf x64. Fix: lto=false, codegen-units=8",
     "spec_location": "PyInstaller .spec Datei muss in backend/ liegen — gleicher Ordner wie main.py und runtime_hook.py",
-    "linux_pyinstaller_install": "Ubuntu: pip3 install pyinstaller --break-system-packages && export PATH=$HOME/.local/bin:$PATH. Fedora: pip3 install pyinstaller --user"
+    "linux_pyinstaller_install": "Ubuntu: pip3 install pyinstaller --break-system-packages && export PATH=$HOME/.local/bin:$PATH. Fedora: pip3 install pyinstaller --user",
+    "windows_git_ssh": "Git unter Windows verwendet eigenen SSH-Client der den Windows OpenSSH Agent ignoriert. Fix: git config --global core.sshCommand C:/Windows/System32/OpenSSH/ssh.exe — auf allen Windows-Systemen direkt nach Git-Installation setzen."
   },
   "session_workflow": [
     "Snapshot lesen und als Ground Truth verwenden",
@@ -262,5 +279,30 @@
     "Build erst nach allen Code-Aenderungen",
     "Test auf sauberem System zuletzt",
     "Snapshot nach jedem erfolgreichen Fix aktualisieren"
-  ]
+  ],
+  "git_setup": {
+    "all_systems": {
+      "user_name": "Karl Bach",
+      "user_email": "ktbufg@gmail.com",
+      "default_branch": "main"
+    },
+    "windows_specific": {
+      "autocrlf": "false",
+      "sshCommand": "C:/Windows/System32/OpenSSH/ssh.exe",
+      "ssh_agent_service": "Set-Service ssh-agent -StartupType Automatic (Admin)"
+    },
+    "unix_specific": {
+      "autocrlf": "input"
+    },
+    "ssh_key": "ed25519, ~/.ssh/id_github auf allen Systemen",
+    "github_keys": [
+      "MacBook Parallels Host",
+      "MacBook M4",
+      "Windows ARM64",
+      "Windows x64",
+      "Fedora x64",
+      "Ubuntu x64",
+      "Root Server"
+    ]
+  }
 }
