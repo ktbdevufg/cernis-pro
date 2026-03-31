@@ -1,0 +1,90 @@
+#!/bin/bash
+# ============================================================
+#  CERNIS PRO – Linux Build Script
+#  Plattform: Ubuntu 24.04 LTS x64
+#  Ergebnis:  cernis-pro_1.0.0_amd64.deb
+#             cernis-pro_1.0.0_amd64.AppImage
+#
+#  Aufruf: bash build.sh
+# ============================================================
+
+set -e  # Bei Fehler sofort abbrechen
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$SCRIPT_DIR/cernis-pro"
+BACKEND_DIR="$PROJECT_DIR/backend"
+FRONTEND_DIR="$PROJECT_DIR/frontend"
+TAURI_DIR="$SCRIPT_DIR/tauri-app"
+TAURI_SRC="$TAURI_DIR/src-tauri"
+
+echo "============================================"
+echo " CERNIS PRO Linux Build"
+echo " Arbeitsverzeichnis: $SCRIPT_DIR"
+echo "============================================"
+
+# ── Schritt 1: Python-Abhängigkeiten installieren ────────────
+echo ""
+echo "[1/5] Python-Abhängigkeiten installieren..."
+cd "$BACKEND_DIR"
+pip3 install -r requirements.txt --break-system-packages --quiet
+echo "      OK"
+
+# ── Schritt 2: Frontend bauen ─────────────────────────────────
+echo ""
+echo "[2/5] Frontend bauen (npm)..."
+cd "$FRONTEND_DIR"
+npm install --silent
+npm run build
+echo "      OK — dist/ erstellt"
+
+# ── Schritt 3: PyInstaller — Backend Binary erstellen ─────────
+echo ""
+echo "[3/5] Backend Binary erstellen (PyInstaller)..."
+cd "$BACKEND_DIR"
+
+# Altes Build-Verzeichnis aufräumen
+rm -rf dist/ build/
+
+pyinstaller cernis_linux.spec --noconfirm
+
+BACKEND_BIN="$BACKEND_DIR/dist/cernis-backend"
+if [ ! -f "$BACKEND_BIN" ]; then
+    echo "FEHLER: cernis-backend Binary nicht gefunden!"
+    exit 1
+fi
+echo "      OK — $BACKEND_BIN"
+
+# ── Schritt 4: Binary für Tauri-Bundler bereitstellen ─────────
+echo ""
+echo "[4/5] Backend Binary für Tauri bereitstellen..."
+
+# Tauri externalBin erwartet: cernis-backend-x86_64-unknown-linux-gnu
+TAURI_BIN_NAME="cernis-backend-x86_64-unknown-linux-gnu"
+cp "$BACKEND_BIN" "$TAURI_SRC/$TAURI_BIN_NAME"
+chmod +x "$TAURI_SRC/$TAURI_BIN_NAME"
+
+# Auch in target/x86_64-unknown-linux-gnu/release/ ablegen
+TAURI_RELEASE="$TAURI_DIR/src-tauri/target/x86_64-unknown-linux-gnu/release"
+mkdir -p "$TAURI_RELEASE"
+cp "$BACKEND_BIN" "$TAURI_RELEASE/cernis-backend"
+chmod +x "$TAURI_RELEASE/cernis-backend"
+
+echo "      OK"
+
+# ── Schritt 5: Tauri bauen ────────────────────────────────────
+echo ""
+echo "[5/5] Tauri Build (.deb + .AppImage)..."
+cd "$TAURI_DIR"
+npm install --silent
+npm run build-tauri
+
+echo ""
+echo "============================================"
+echo " BUILD ERFOLGREICH"
+echo "============================================"
+echo ""
+echo "Pakete:"
+find "$TAURI_DIR/src-tauri/target" -name "*.deb" -o -name "*.AppImage" 2>/dev/null | while read f; do
+    echo "  $f"
+done
+echo ""
