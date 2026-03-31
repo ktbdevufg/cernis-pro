@@ -20,7 +20,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self' 'unsafe-inline' 'unsafe-eval' http://127.0.0.1:8765 ws://127.0.0.1:8765; img-src 'self' data: http://127.0.0.1:8765; connect-src 'self' http://127.0.0.1:8765 ws://127.0.0.1:8765 https://*; font-src 'self' data: https://fonts.gstatic.com"
+      "csp": null
     }
   },
   "bundle": {

@@ -16,7 +16,7 @@ ureq  = { version = "2.9", default-features = false, features = ["native-tls"] }
 dirs  = "5.0"
 
 [features]
-default         = ["custom-protocol"]
+default         = []
 custom-protocol = ["tauri/custom-protocol"]
 
 [profile.release]
