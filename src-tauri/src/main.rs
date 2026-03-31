@@ -126,6 +126,13 @@ fn start_backend() -> Option<Child> {
     cmd.env("CERNIS_PORT", BACKEND_PORT.to_string())
         .env("CERNIS_DATA_DIR", data_dir.to_string_lossy().to_string());
 
+    // Start in own process group so we can kill the entire tree on exit
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+
     // Redirect backend output to log file
     if let Some(f) = stdout_file {
         cmd.stdout(Stdio::from(f));
@@ -361,21 +368,52 @@ fn main() {
 
     let backend_process = Arc::new(Mutex::new(child));
     let backend_cleanup = Arc::clone(&backend_process);
+    let backend_exit = Arc::clone(&backend_cleanup);
 
     tauri::Builder::default()
         .manage(BackendProcess(backend_process))
         .on_window_event(move |_window, event| {
             if let WindowEvent::Destroyed = event {
-                log("Window destroyed — killing backend");
-                if let Ok(mut g) = backend_cleanup.lock() {
-                    if let Some(mut c) = g.take() {
-                        let _ = c.kill();
-                    }
-                }
+                kill_backend_tree(&backend_cleanup);
             }
         })
         .run(tauri::generate_context!())
         .expect("error running app");
+
+    // App exited (window closed, signal, etc.) — ensure backend is dead
+    kill_backend_tree(&backend_exit);
+}
+
+fn kill_backend_tree(process: &Arc<Mutex<Option<Child>>>) {
+    if let Ok(mut guard) = process.lock() {
+        if let Some(ref mut child) = *guard {
+            let pid = child.id();
+            log(&format!("Killing backend process tree (PID {})", pid));
+
+            // Kill entire process group (backend + uvicorn workers)
+            #[cfg(unix)]
+            {
+                unsafe {
+                    // Send SIGTERM to the process group
+                    libc::kill(-(pid as i32), libc::SIGTERM);
+                }
+                thread::sleep(Duration::from_millis(500));
+                // Force kill if still alive
+                unsafe {
+                    libc::kill(-(pid as i32), libc::SIGKILL);
+                }
+            }
+
+            #[cfg(not(unix))]
+            {
+                let _ = child.kill();
+            }
+
+            let _ = child.wait(); // reap zombie
+            log("Backend process tree killed");
+        }
+        *guard = None;
+    }
 }
 
 struct BackendProcess(Arc<Mutex<Option<Child>>>);

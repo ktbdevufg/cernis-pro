@@ -52,6 +52,7 @@
           "psmisc",
           "libpcap0.8"
         ],
+        "preInstallScript": "deb-preinst.sh",
         "postInstallScript": "deb-postinst.sh"
       }
     },
