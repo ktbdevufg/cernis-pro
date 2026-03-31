@@ -129,10 +129,31 @@ export default function AlertsView() {
     setSmtpDirty(false)
   }
 
+  const [smtpLog, setSmtpLog]       = useState([])
+  const [smtpTesting, setSmtpTesting] = useState(false)
+  const [smtpResult, setSmtpResult]   = useState(null)  // 'success' | 'failed' | null
+
   const testAlert = async () => {
-    await fetch('/api/alerts/test', { method:'POST' })
-    setTestSent(true)
-    setTimeout(() => setTestSent(false), 3000)
+    setSmtpTesting(true)
+    setSmtpLog([])
+    setSmtpResult(null)
+    setTestSent(false)
+    try {
+      const res = await fetch('/api/alerts/test', { method:'POST' })
+      const data = await res.json()
+      setSmtpLog(data.log || [])
+      if (data.success) {
+        setSmtpResult('success')
+        setTestSent(true)
+        setTimeout(() => setTestSent(false), 5000)
+      } else {
+        setSmtpResult('failed')
+      }
+    } catch (e) {
+      setSmtpLog([`Connection error: ${e.message}`])
+      setSmtpResult('failed')
+    }
+    setSmtpTesting(false)
   }
 
   return (
@@ -250,17 +271,49 @@ export default function AlertsView() {
                   </div>
                 ))}
               </div>
-              <div style={{ marginTop:12, display:'flex', gap:8 }}>
+              <div style={{ marginTop:12, display:'flex', gap:8, alignItems:'center' }}>
                 <button className="sv-btn primary" onClick={saveSmtp} disabled={!smtpDirty}>
                   Save SMTP Config
                 </button>
-                <button className="sv-btn secondary" onClick={testAlert}>
-                  {testSent ? '✓ Test sent!' : 'Send Test Email'}
+                <button className="sv-btn secondary" onClick={testAlert} disabled={smtpTesting}>
+                  {smtpTesting ? '⏳ Testing…' : testSent ? '✓ Test sent!' : 'Send Test Email'}
                 </button>
+                {smtpResult === 'success' && (
+                  <span style={{ fontSize:12, color:'var(--green)', fontWeight:700, display:'flex', alignItems:'center', gap:4 }}>
+                    <CheckCircle size={14} /> SUCCESS
+                  </span>
+                )}
+                {smtpResult === 'failed' && (
+                  <span style={{ fontSize:12, color:'var(--red)', fontWeight:700, display:'flex', alignItems:'center', gap:4 }}>
+                    <AlertTriangle size={14} /> FAILED
+                  </span>
+                )}
               </div>
               <div style={{ marginTop:10, fontSize:10, color:'var(--text-muted)' }}>
-                Password is stored encrypted (AES-128). Port 587 = STARTTLS, 465 = SSL.
+                Password is stored encrypted (AES-128). Port 587 = STARTTLS, 465 = SSL/SMTPS.
               </div>
+
+              {/* SMTP Log */}
+              {smtpLog.length > 0 && (
+                <div style={{ marginTop:12 }}>
+                  <div style={{ fontSize:9, fontWeight:700, letterSpacing:'0.1em', textTransform:'uppercase', color:'var(--text-muted)', marginBottom:6 }}>SMTP Log</div>
+                  <div style={{
+                    background:'var(--bg-0)', border:'1px solid var(--border)', borderRadius:4,
+                    padding:10, maxHeight:250, overflowY:'auto', fontFamily:'var(--font-mono)', fontSize:11, lineHeight:1.7
+                  }}>
+                    {smtpLog.map((line, i) => {
+                      const isError = /ERROR|FAILED|REFUSED|TIMEOUT/i.test(line)
+                      const isOk = /OK|success|sent/i.test(line)
+                      return (
+                        <div key={i} style={{ color: isError ? 'var(--red)' : isOk ? 'var(--green)' : 'var(--text-secondary)' }}>
+                          <span style={{ color:'var(--text-muted)', marginRight:6 }}>{String(i+1).padStart(2,'0')}</span>
+                          {line}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

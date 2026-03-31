@@ -1005,7 +1005,7 @@ async def api_set_smtp(payload: dict = Body(...)):
 
 @app.post("/api/alerts/test")
 async def api_test_alert():
-    """Send a test notification — directly tests SMTP without requiring alert rules."""
+    """Send a test notification — returns detailed SMTP log."""
     smtp_config = get_setting("smtp_config", {}) or {}
     from modules.crypto import decrypt
     if smtp_config.get("password"):
@@ -1013,20 +1013,20 @@ async def api_test_alert():
 
     if not smtp_config.get("host") or not smtp_config.get("to"):
         return JSONResponse(status_code=400, content={
-            "error": "SMTP not configured — set host and recipient address first"
+            "success": False,
+            "log": ["ERROR: SMTP not configured — set host and recipient address first"]
         })
 
-    # Test SMTP directly instead of going through fire_alert (which requires rules)
-    from modules.alerting import notify_email
+    from modules.alerting import notify_email_with_log
     body = (f"Test alert from CERNIS PRO\n"
             f"Time: {__import__('time').strftime('%Y-%m-%d %H:%M:%S')}\n"
             f"This confirms your SMTP configuration is working.")
-    success = notify_email("Test Alert", body, smtp_config)
-    if success:
-        return {"ok": True, "message": "Test email sent successfully"}
-    return JSONResponse(status_code=503, content={
-        "error": "SMTP connection failed — check host, port, username and password"
-    })
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(
+        None, lambda: notify_email_with_log("Test Alert", body, smtp_config)
+    )
+    status_code = 200 if result["success"] else 503
+    return JSONResponse(status_code=status_code, content=result)
 
 
 
