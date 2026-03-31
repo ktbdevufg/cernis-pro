@@ -171,22 +171,36 @@ def unsubscribe(cb: Callable):
         _subscribers.remove(cb)
 
 
+_capture_error = ""
+
 async def start_capture(interface: str = None, bpf_filter: str = "",
-                         max_packets: int = 10000) -> bool:
-    """Start background packet capture."""
-    global _capture_running, _capture_packets, _capture_stats, _raw_packets, _pcap_file
+                         max_packets: int = 10000) -> dict:
+    """Start background packet capture. Returns {ok, error}."""
+    global _capture_running, _capture_packets, _capture_stats, _raw_packets, _pcap_file, _capture_error
     if not HAS_SCAPY:
-        return False
+        return {"ok": False, "error": "scapy not installed"}
     if _capture_running:
-        return True
+        return {"ok": True, "error": ""}
+
+    # Quick permission check before starting the thread
+    try:
+        import socket
+        s = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(3))
+        s.close()
+    except PermissionError:
+        return {"ok": False, "error": "Permission denied — packet capture requires root or CAP_NET_RAW. Run: sudo setcap cap_net_raw+eip /usr/bin/cernis-backend"}
+    except Exception:
+        pass  # AF_PACKET might not exist on all platforms
 
     _capture_running = True
+    _capture_error = ""
     _capture_packets = []
     _raw_packets = []
     _capture_stats = CaptureStats()
     _pcap_file = os.path.join(tempfile.gettempdir(), f"cernis_capture_{int(time.time())}.pcap")
 
     def _run():
+        global _capture_error
         kwargs = {"prn": _handle_packet, "store": 0, "count": max_packets}
         if interface:
             kwargs["iface"] = interface
@@ -194,8 +208,10 @@ async def start_capture(interface: str = None, bpf_filter: str = "",
             kwargs["filter"] = bpf_filter
         try:
             sniff(**kwargs)
+        except PermissionError as e:
+            _capture_error = f"Permission denied: {e}. Run: sudo setcap cap_net_raw+eip /usr/bin/cernis-backend"
         except Exception as e:
-            print(f"Capture error: {e}")
+            _capture_error = f"Capture error: {e}"
         finally:
             global _capture_running
             _capture_running = False
@@ -207,7 +223,7 @@ async def start_capture(interface: str = None, bpf_filter: str = "",
 
     loop = asyncio.get_event_loop()
     loop.run_in_executor(None, _run)
-    return True
+    return {"ok": True, "error": ""}
 
 
 def stop_capture():
@@ -222,6 +238,7 @@ def get_capture_status() -> dict:
         "stats": _capture_stats.to_dict(),
         "pcap_available": bool(_pcap_file and os.path.exists(_pcap_file or "")),
         "pcap_path": _pcap_file,
+        "error": _capture_error,
     }
 
 

@@ -1353,8 +1353,10 @@ async def api_pcap_start(payload: dict = Body(default={})):
     interface  = payload.get("interface", "")
     bpf_filter = payload.get("filter", "")
     max_pkts   = int(payload.get("max_packets", 5000))
-    ok = await pcap_start(interface or None, bpf_filter, max_pkts)
-    return {"ok": ok, "available": pcap_available()}
+    result = await pcap_start(interface or None, bpf_filter, max_pkts)
+    if not result["ok"]:
+        return JSONResponse(status_code=403, content=result)
+    return {**result, "available": pcap_available()}
 
 @app.post("/api/pcap/stop")
 async def api_pcap_stop():

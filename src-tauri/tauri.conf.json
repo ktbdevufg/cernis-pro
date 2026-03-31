@@ -51,7 +51,8 @@
           "traceroute",
           "psmisc",
           "libpcap0.8"
-        ]
+        ],
+        "postInstallScript": "deb-postinst.sh"
       }
     },
     "externalBin": [
