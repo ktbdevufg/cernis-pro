@@ -66,7 +66,36 @@ fn find_backend_exe() -> Option<std::path::PathBuf> {
     None
 }
 
+fn kill_stale_backend() {
+    // Check if something is already listening on the backend port.
+    // If so, kill it — it's a leftover from a previous run.
+    match std::net::TcpStream::connect_timeout(
+        &format!("127.0.0.1:{}", BACKEND_PORT).parse().unwrap(),
+        Duration::from_millis(500),
+    ) {
+        Ok(_) => {
+            log(&format!(
+                "Port {} already in use — killing stale process",
+                BACKEND_PORT
+            ));
+            #[cfg(unix)]
+            {
+                // Use fuser to find and kill the process holding the port
+                let _ = Command::new("fuser")
+                    .args(["-k", &format!("{}/tcp", BACKEND_PORT)])
+                    .output();
+                thread::sleep(Duration::from_millis(500));
+            }
+        }
+        Err(_) => {
+            log(&format!("Port {} is free", BACKEND_PORT));
+        }
+    }
+}
+
 fn start_backend() -> Option<Child> {
+    kill_stale_backend();
+
     let backend = match find_backend_exe() {
         Some(p) => p,
         None => {
@@ -158,6 +187,20 @@ fn wait_for_backend(child: &mut Option<Child>) -> bool {
         // Try to reach the backend
         match ureq::get(&url).call() {
             Ok(r) if r.status() == 200 => {
+                // Verify our process survived (not a stale leftover answering)
+                thread::sleep(Duration::from_millis(500));
+                if let Some(ref mut c) = child {
+                    match c.try_wait() {
+                        Ok(Some(status)) => {
+                            log(&format!(
+                                "ERROR: Backend died right after responding (port conflict?): {}",
+                                status
+                            ));
+                            return false;
+                        }
+                        _ => {}
+                    }
+                }
                 let elapsed = start.elapsed().as_millis();
                 log(&format!(
                     "Backend ready after {}ms ({} attempts)",
