@@ -145,6 +145,7 @@ export default function InfraView({ selectedIface }) {
   const [pcapStats, setPcapStats]     = useState(null)
   const [packets, setPackets]         = useState([])
   const [pcapFilter, setPcapFilter]   = useState('')
+  const [pcapSaveMsg, setPcapSaveMsg] = useState('')
   const pcapTimer = useRef(null)
 
   // LLDP
@@ -452,9 +453,26 @@ export default function InfraView({ selectedIface }) {
                   <button className="i-btn danger" onClick={stopPcap}><Square size={12}/> Stop</button>
                 )}
                 {!pcapRunning && packets.length > 0 && (
-                  <a href="/api/pcap/download" className="i-btn secondary" style={{ textDecoration:'none' }}>
-                    <Download size={12}/> Download .pcap
-                  </a>
+                  <button className="i-btn secondary" onClick={async () => {
+                    try {
+                      const res = await fetch('/api/pcap/save', { method: 'POST' })
+                      const data = await res.json()
+                      if (data.ok) {
+                        setPcapSaveMsg(`Saved: ${data.path}`)
+                        setTimeout(() => setPcapSaveMsg(''), 5000)
+                      } else {
+                        setPcapSaveMsg(`Error: ${data.error}`)
+                        setTimeout(() => setPcapSaveMsg(''), 5000)
+                      }
+                    } catch (e) { setPcapSaveMsg(`Error: ${e.message}`) }
+                  }}>
+                    <Download size={12}/> Save .pcap
+                  </button>
+                )}
+                {pcapSaveMsg && (
+                  <span style={{ fontSize:10, fontFamily:'var(--font-mono)', color: pcapSaveMsg.startsWith('Error') ? 'var(--red)' : 'var(--green)' }}>
+                    {pcapSaveMsg}
+                  </span>
                 )}
               </div>
 

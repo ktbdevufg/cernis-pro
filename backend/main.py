@@ -1452,6 +1452,26 @@ async def api_pcap_download():
     return FileResponse(path, media_type="application/octet-stream",
                         filename=os.path.basename(path))
 
+@app.post("/api/pcap/save")
+async def api_pcap_save():
+    """Copy capture file to user's Desktop/Downloads."""
+    import shutil
+    from pathlib import Path
+    path = get_pcap_path()
+    if not path:
+        return JSONResponse(status_code=404, content={"error": "No capture file available. Start and stop a capture first."})
+    home = Path.home()
+    for candidate in [home / "Desktop", home / "Schreibtisch", home / "Downloads", home]:
+        if candidate.is_dir():
+            out_dir = candidate
+            break
+    else:
+        out_dir = home
+    dest = out_dir / os.path.basename(path)
+    shutil.copy2(path, dest)
+    return {"ok": True, "path": str(dest), "size": dest.stat().st_size}
+
+
 @app.websocket("/ws/pcap")
 async def ws_pcap(websocket: WebSocket):
     """Stream live packets to browser."""
