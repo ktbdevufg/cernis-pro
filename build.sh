@@ -105,13 +105,33 @@ cd "$TAURI_DIR"
 npm install --silent
 npm run build-tauri
 
+# ── Schritt 6: Pakete nach /home/kbach/ kopieren ─────────────
+echo ""
+echo "[6] Pakete kopieren..."
+
+VERSION=$(python3 -c "import json; print(json.load(open('$TAURI_SRC/tauri.conf.json'))['version'])")
+DEST="/home/kbach"
+mkdir -p "$DEST"
+
+DEB=$(find "$TAURI_DIR/src-tauri/target" -name "*.deb" -print -quit 2>/dev/null)
+APPIMAGE=$(find "$TAURI_DIR/src-tauri/target" -name "*.AppImage" -print -quit 2>/dev/null)
+
+if [ -n "$DEB" ]; then
+    cp "$DEB" "$DEST/cernis-pro_${VERSION}_amd64.deb"
+    echo "      → $DEST/cernis-pro_${VERSION}_amd64.deb"
+fi
+if [ -n "$APPIMAGE" ]; then
+    cp "$APPIMAGE" "$DEST/cernis-pro_${VERSION}_amd64.AppImage"
+    chmod +x "$DEST/cernis-pro_${VERSION}_amd64.AppImage"
+    echo "      → $DEST/cernis-pro_${VERSION}_amd64.AppImage"
+fi
+
 echo ""
 echo "============================================"
 echo " BUILD ERFOLGREICH"
 echo "============================================"
 echo ""
 echo "Pakete:"
-find "$TAURI_DIR/src-tauri/target" -name "*.deb" -o -name "*.AppImage" 2>/dev/null | while read f; do
-    echo "  $f"
-done
+[ -n "$DEB" ]      && echo "  $DEST/cernis-pro_${VERSION}_amd64.deb"
+[ -n "$APPIMAGE" ] && echo "  $DEST/cernis-pro_${VERSION}_amd64.AppImage"
 echo ""

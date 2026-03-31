@@ -88,8 +88,27 @@ from modules.scheduler import (
 
 
 
+def _check_version_upgrade():
+    """Clear stale cache/database when app version changes (clean install)."""
+    from modules.db_path import DATA_DIR
+    from pathlib import Path
+    version_file = Path(DATA_DIR) / ".version"
+    try:
+        old_version = version_file.read_text().strip() if version_file.exists() else ""
+    except Exception:
+        old_version = ""
+    if old_version != VERSION:
+        # Version changed or first run — clear old database for clean start
+        db_file = Path(DATA_DIR) / "cernis.db"
+        if db_file.exists() and old_version:
+            print(f"Version upgrade {old_version} → {VERSION}: clearing old database")
+            db_file.unlink(missing_ok=True)
+        version_file.write_text(VERSION)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _check_version_upgrade()
     init_db()
     init_devices_db()
 

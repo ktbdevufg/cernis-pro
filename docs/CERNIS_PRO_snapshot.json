@@ -162,6 +162,20 @@
       "issue": "SMTP Alert-Test gibt immer ok:true zurück, braucht Alert-Regel um zu funktionieren",
       "fix": "Test-Endpoint sendet direkt via SMTP ohne Alert-Regeln, gibt klare Fehlermeldung bei SMTP-Fehler",
       "fixed_date": "2026-03-31"
+    },
+    {
+      "id": 16,
+      "file": "backend/main.py",
+      "issue": "Bei Neuinstallation/Upgrade bleibt alte DB mit inkompatiblen Daten bestehen",
+      "fix": "Version-Check beim Start: .version Datei in DATA_DIR, bei Versionsänderung wird cernis.db gelöscht für sauberen Neustart",
+      "fixed_date": "2026-03-31"
+    },
+    {
+      "id": 17,
+      "file": "build.sh",
+      "issue": "Fehlende System-Abhängigkeiten (nmap, libpcap-dev, net-tools, traceroute, scapy, pysnmp, reportlab, dnspython)",
+      "fix": "build.sh prüft und installiert fehlende apt- und pip3-Pakete automatisch in Schritt 0",
+      "fixed_date": "2026-03-31"
     }
   ],
   "not_tested": {
