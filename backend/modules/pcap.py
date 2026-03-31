@@ -215,11 +215,15 @@ async def start_capture(interface: str = None, bpf_filter: str = "",
         finally:
             global _capture_running
             _capture_running = False
-            if _raw_packets:
-                try:
-                    wrpcap(_pcap_file, _raw_packets)
-                except Exception:
-                    pass
+            _save_pcap()
+
+    def _save_pcap():
+        """Write captured packets to pcap file."""
+        if _raw_packets and _pcap_file:
+            try:
+                wrpcap(_pcap_file, _raw_packets)
+            except Exception:
+                pass
 
     loop = asyncio.get_event_loop()
     loop.run_in_executor(None, _run)
@@ -229,6 +233,12 @@ async def start_capture(interface: str = None, bpf_filter: str = "",
 def stop_capture():
     global _capture_running
     _capture_running = False
+    # Write pcap file immediately so download is available right after stop
+    if _raw_packets and _pcap_file:
+        try:
+            wrpcap(_pcap_file, _raw_packets)
+        except Exception:
+            pass
 
 
 def get_capture_status() -> dict:
