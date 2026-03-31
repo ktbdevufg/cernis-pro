@@ -55,27 +55,30 @@
     "target_triple": "x86_64-unknown-linux-gnu",
     "build_targets": ["deb", "appimage"]
   },
-  "open_fixes": [
+  "open_fixes": [],
+  "completed_fixes_linux": [
     {
       "id": 1,
       "file": "build.sh",
       "issue": "Pfade zeigen noch auf alte Verzeichnisstruktur (cernis-pro/ und tauri-app/)",
-      "fix": "BACKEND_DIR=$SCRIPT_DIR/backend, FRONTEND_DIR=$SCRIPT_DIR/frontend, TAURI_DIR=$SCRIPT_DIR, TAURI_SRC=$SCRIPT_DIR/src-tauri"
+      "fix": "BACKEND_DIR=$SCRIPT_DIR/backend, FRONTEND_DIR=$SCRIPT_DIR/frontend, TAURI_DIR=$SCRIPT_DIR, TAURI_SRC=$SCRIPT_DIR/src-tauri",
+      "fixed_date": "2026-03-31"
     },
     {
       "id": 2,
       "file": "src-tauri/tauri.conf.json",
       "issue": "frontendDist zeigt auf ../web (existiert nicht)",
-      "fix": "frontendDist: ../frontend/dist"
+      "fix": "frontendDist: ../frontend/dist",
+      "fixed_date": "2026-03-31"
     },
     {
       "id": 3,
       "file": "src-tauri/tauri.conf.json",
       "issue": "installMode: both fehlt im bundle-Abschnitt",
-      "fix": "\"installMode\": \"both\" unter bundle ergänzen"
+      "fix": "\"installMode\": \"both\" unter bundle ergänzen",
+      "fixed_date": "2026-03-31"
     }
   ],
-  "completed_fixes_linux": [],
   "build_lessons_linux": {
     "tauri_window_url": "Window URL muss direkt auf http://127.0.0.1:8765 gesetzt sein - about:blank mit JS-Navigation schlägt unter WebKit2GTK fehl",
     "icons": "Icons müssen RGBA PNG Format sein für Linux",

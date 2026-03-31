@@ -11,11 +11,10 @@
 set -e  # Bei Fehler sofort abbrechen
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$SCRIPT_DIR/cernis-pro"
-BACKEND_DIR="$PROJECT_DIR/backend"
-FRONTEND_DIR="$PROJECT_DIR/frontend"
-TAURI_DIR="$SCRIPT_DIR/tauri-app"
-TAURI_SRC="$TAURI_DIR/src-tauri"
+BACKEND_DIR="$SCRIPT_DIR/backend"
+FRONTEND_DIR="$SCRIPT_DIR/frontend"
+TAURI_DIR="$SCRIPT_DIR"
+TAURI_SRC="$SCRIPT_DIR/src-tauri"
 
 echo "============================================"
 echo " CERNIS PRO Linux Build"
