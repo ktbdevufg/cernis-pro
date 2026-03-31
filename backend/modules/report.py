@@ -25,8 +25,10 @@ try:
     C_RED      = colors.HexColor("#ff3d3d")
     C_ORANGE   = colors.HexColor("#ff9900")
     REPORTLAB_AVAILABLE = True
-except ImportError:
+except Exception as _reportlab_err:
     REPORTLAB_AVAILABLE = False
+    import sys
+    print(f"reportlab import failed: {type(_reportlab_err).__name__}: {_reportlab_err}", file=sys.stderr, flush=True)
     # Dummy colors for when reportlab not available
     class _DummyColor:
         def HexColor(self, x): return None

@@ -103,7 +103,7 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=['runtime_hook.py'],
     excludes=[
-        'tkinter', 'matplotlib', 'numpy', 'pandas', 'PIL',
+        'tkinter', 'matplotlib', 'numpy', 'pandas',
         'PyQt5', 'PySide2', 'wx', 'gi', 'cv2',
         'torch', 'tensorflow',
         # Windows-only
