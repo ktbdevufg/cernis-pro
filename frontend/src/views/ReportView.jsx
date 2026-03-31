@@ -124,19 +124,44 @@ export default function ReportView({ hosts }) {
     }).catch(() => {})
   }, [])
 
+  const downloadFile = async (url, fallbackName) => {
+    try {
+      setExporting(true)
+      const res = await fetch(url)
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
+        alert(err.error || `Export failed: HTTP ${res.status}`)
+        setExporting(false)
+        return
+      }
+      const blob = await res.blob()
+      const disposition = res.headers.get('Content-Disposition') || ''
+      const match = disposition.match(/filename="?([^"]+)"?/)
+      const filename = match ? match[1] : fallbackName
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = filename
+      a.click()
+      URL.revokeObjectURL(a.href)
+    } catch (e) {
+      alert('Export failed: ' + e.message)
+    }
+    setExporting(false)
+  }
+
   const exportPDF = () => {
     if (!selectedScan) return
-    window.open(`/api/export/pdf?scan_id=${selectedScan}`, '_blank')
+    downloadFile(`/api/export/pdf?scan_id=${selectedScan}`, `cernis_scan_${selectedScan}.pdf`)
   }
 
   const exportCSV = () => {
     if (!selectedScan) return
-    window.open(`/api/export/csv?scan_id=${selectedScan}`, '_blank')
+    downloadFile(`/api/export/csv?scan_id=${selectedScan}`, `cernis_scan_${selectedScan}.csv`)
   }
 
   const exportJSON = () => {
     if (!selectedScan) return
-    window.open(`/api/export/json?scan_id=${selectedScan}`, '_blank')
+    downloadFile(`/api/export/json?scan_id=${selectedScan}`, `cernis_scan_${selectedScan}.json`)
   }
 
   const runCveLookup = async () => {

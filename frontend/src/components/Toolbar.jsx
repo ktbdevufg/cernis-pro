@@ -155,7 +155,21 @@ export default function Toolbar({
 
   const handleExport = async (fmt) => {
     if (!lastScanId) return alert('Run a scan first')
-    window.open(`/api/export/${fmt}?scan_id=${lastScanId}`, '_blank')
+    try {
+      const res = await fetch(`/api/export/${fmt}?scan_id=${lastScanId}`)
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
+        return alert(err.error || `Export failed`)
+      }
+      const blob = await res.blob()
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = `cernis_scan_${lastScanId}.${fmt}`
+      a.click()
+      URL.revokeObjectURL(a.href)
+    } catch (e) {
+      alert('Export failed: ' + e.message)
+    }
   }
 
   return (
