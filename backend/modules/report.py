@@ -35,12 +35,12 @@ except Exception as _reportlab_err:
     colors = _DummyColor()
     C_BG = C_ACCENT = C_GREEN = C_RED = C_ORANGE = None
 C_YELLOW   = colors.HexColor("#ffe033")
-C_TEXT     = colors.HexColor("#e8ecf4")
-C_MUTED    = colors.HexColor("#8a9ab8")
-C_ROW_ALT  = colors.HexColor("#0f1218")
-C_ROW_BASE = colors.HexColor("#141820")
-C_HEADER   = colors.HexColor("#1c2230")
-C_BORDER   = colors.HexColor("#2a3448")
+C_TEXT     = colors.HexColor("#d0d8e8")
+C_MUTED    = colors.HexColor("#a0b0c8")
+C_ROW_ALT  = colors.HexColor("#12161e")
+C_ROW_BASE = colors.HexColor("#181e28")
+C_HEADER   = colors.HexColor("#1e2636")
+C_BORDER   = colors.HexColor("#3a4a60")
 
 
 def _sev_color(sev: str) -> object:
@@ -90,9 +90,9 @@ def generate_report(
     sSubtitle = S("ST", fontName="Helvetica", fontSize=11, textColor=C_MUTED, spaceAfter=16)
     sSection  = S("SEC", fontName="Helvetica-Bold", fontSize=11, textColor=C_ACCENT,
                   spaceBefore=14, spaceAfter=6, borderPadding=(0,0,4,0))
-    sBody     = S("B", fontName="Helvetica", fontSize=8.5, textColor=C_TEXT, spaceAfter=4)
-    sMono     = S("M", fontName="Courier", fontSize=8, textColor=C_TEXT)
-    sSmall    = S("SM", fontName="Helvetica", fontSize=7.5, textColor=C_MUTED)
+    sBody     = S("B", fontName="Helvetica", fontSize=9, textColor=C_TEXT, spaceAfter=4)
+    sMono     = S("M", fontName="Courier", fontSize=8.5, textColor=C_TEXT)
+    sSmall    = S("SM", fontName="Helvetica", fontSize=8, textColor=C_MUTED)
     sHostIP   = S("HIP", fontName="Courier-Bold", fontSize=9, textColor=C_ACCENT)
     sSev      = S("SEV", fontName="Helvetica-Bold", fontSize=7.5, textColor=C_TEXT)
 
@@ -177,8 +177,9 @@ def generate_report(
     # ── Host table ────────────────────────────────────────────
     story.append(Paragraph(f"Discovered Hosts ({host_count})", sSection))
 
-    col_w = [30*mm, 42*mm, 50*mm, 40*mm, W - 162*mm]
-    header = ["IPv4", "MAC / Vendor", "Hostname", "OS Guess", "Open Ports"]
+    # Landscape A4 = 277mm usable width (297 - 2×15 margins ≈ 267)
+    col_w = [28*mm, 44*mm, 55*mm, 42*mm, 35*mm, W - 204*mm]
+    header = ["IPv4", "MAC / Vendor", "Hostname", "OS Guess", "Open Ports", "RTT"]
     rows = [header]
 
     for h in sorted(hosts, key=lambda x: [int(o) for o in (x.get("ip","0.0.0.0")).split(".")]):
@@ -190,17 +191,20 @@ def generate_report(
         ports    = h.get("ports") or []
         label    = h.get("label", "")
 
-        mac_vendor = f"{mac}\n{vendor[:22]}" if vendor else mac or "—"
-        ports_str  = ", ".join(str(p["port"]) for p in ports[:8])
-        if len(ports) > 8: ports_str += f" +{len(ports)-8}"
+        mac_vendor = f"{mac}\n{vendor[:25]}" if vendor else mac or "—"
+        ports_str  = ", ".join(str(p["port"]) for p in ports[:10])
+        if len(ports) > 10: ports_str += f" +{len(ports)-10}"
         if label: hostname = f"{label} ({hostname})"
+        rtt = h.get("rtt_ms")
+        rtt_str = f"{rtt:.1f}ms" if rtt and rtt > 0 else "—"
 
         rows.append([
             Paragraph(ip, sHostIP),
             Paragraph(mac_vendor, sSmall),
-            Paragraph(hostname[:35], sBody),
-            Paragraph(os_guess, sSmall),
+            Paragraph(hostname[:40], sBody),
+            Paragraph(os_guess, sBody),
             Paragraph(ports_str or "—", sMono),
+            Paragraph(rtt_str, sMono),
         ])
 
     host_table = Table(rows, colWidths=col_w, repeatRows=1)

@@ -30,18 +30,10 @@ const css = `
 .app { height: 100vh; display: flex; overflow: hidden; background: var(--bg-0); }
 .app-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .app-topbar {
-  display: flex; flex-direction: column;
-  flex-shrink: 0;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-1);
-}
-.app-topbar-row1 {
   display: flex; align-items: center;
   height: var(--toolbar-h); flex-shrink: 0;
-}
-.app-topbar-actions {
-  display: flex; align-items: center; gap: 6px;
-  padding: 0 12px 6px 12px; flex-shrink: 0; flex-wrap: wrap;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-1);
 }
 .app-body { flex: 1; display: flex; overflow: hidden; min-height: 0; }
 .app-main  { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
@@ -252,7 +244,6 @@ export default function App() {
           {activeView === 'scan' && (
             <>
               <div className="app-topbar">
-                <div className="app-topbar-row1">
                   <Toolbar
                     interfaces={interfaces}
                     selectedIface={selectedIface}
@@ -268,25 +259,24 @@ export default function App() {
                     onAutoRescanChange={setAutoRescan}
                     profile={scanProfile}
                     onProfileChange={setScanProfile}
+                    extraButtons={<>
+                      {countdown > 0 && !scanning && (
+                        <span className="rescan-countdown">⟳ {countdown}s</span>
+                      )}
+                      <button className="icon-btn" onClick={() => setShowTopo(true)}
+                        disabled={hosts.length === 0} title="Network Topology">
+                        <Network size={12} /> Topo
+                      </button>
+                      <button className="icon-btn" onClick={() => setShowDiff(true)} title="Compare Scans">
+                        <GitCompare size={12} /> Diff
+                      </button>
+                      <ColumnManager
+                        order={columnOrder || DEFAULT_ORDER}
+                        visible={columnVisible || DEFAULT_VISIBLE}
+                        onChange={(o,v) => { setColumnOrder(o); setColumnVisible(v) }}
+                      />
+                    </>}
                   />
-                </div>
-                <div className="app-topbar-actions">
-                  {countdown > 0 && !scanning && (
-                    <span className="rescan-countdown">⟳ {countdown}s</span>
-                  )}
-                  <button className="view-btn" onClick={() => setShowTopo(true)}
-                    disabled={hosts.length === 0} title="Network Topology">
-                    <Network size={13} /> Topology
-                  </button>
-                  <button className="view-btn" onClick={() => setShowDiff(true)} title="Compare Scans">
-                    <GitCompare size={13} /> Diff
-                  </button>
-                  <ColumnManager
-                    order={columnOrder || DEFAULT_ORDER}
-                    visible={columnVisible || DEFAULT_VISIBLE}
-                    onChange={(o,v) => { setColumnOrder(o); setColumnVisible(v) }}
-                  />
-                </div>
               </div>
               <ProgressBar progress={progress} scanning={scanning} done={done} />
               {error && <div className="error-bar">⚠ {error}</div>}

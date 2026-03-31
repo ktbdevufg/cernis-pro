@@ -116,6 +116,7 @@ export default function Toolbar({
   hostCount, lastScanId,
   autoRescan, onAutoRescanChange,
   profile = 'standard', onProfileChange,
+  extraButtons,
 }) {
   const [open, setOpen] = useState(false)
   const [localCidr, setLocalCidr] = useState(cidr)
@@ -256,6 +257,8 @@ export default function Toolbar({
 
         <div className="toolbar-right">
           <span className="host-count"><span>{hostCount}</span> hosts</span>
+
+          {extraButtons}
 
           {/* Auto-rescan */}
           <div style={{ display:'flex', alignItems:'center', gap:4 }}>
