@@ -104,7 +104,7 @@ fn start_backend() -> Option<Child> {
         }
     };
 
-    let data_dir = dirs::data_dir().unwrap_or_default().join("CernisPro");
+    let data_dir = dirs::data_dir().unwrap_or_default().join("cernis-pro");
     if let Err(e) = std::fs::create_dir_all(&data_dir) {
         log(&format!("WARN: Could not create data dir {:?}: {}", data_dir, e));
     }
