@@ -124,9 +124,12 @@ export default function ReportView({ hosts }) {
     }).catch(() => {})
   }, [])
 
-  const downloadFile = async (url, fallbackName) => {
+  const downloadFile = async (url) => {
+    // WebKit2GTK/Tauri: window.location.href with Content-Disposition: attachment
+    // triggers a download without navigating away from the page
+    setExporting(true)
     try {
-      setExporting(true)
+      // Pre-check for errors (PDF might fail with reportlab missing etc.)
       const res = await fetch(url)
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
@@ -134,15 +137,8 @@ export default function ReportView({ hosts }) {
         setExporting(false)
         return
       }
-      const blob = await res.blob()
-      const disposition = res.headers.get('Content-Disposition') || ''
-      const match = disposition.match(/filename="?([^"]+)"?/)
-      const filename = match ? match[1] : fallbackName
-      const a = document.createElement('a')
-      a.href = URL.createObjectURL(blob)
-      a.download = filename
-      a.click()
-      URL.revokeObjectURL(a.href)
+      // Response is OK — trigger actual download via location
+      window.location.href = url
     } catch (e) {
       alert('Export failed: ' + e.message)
     }
@@ -151,17 +147,17 @@ export default function ReportView({ hosts }) {
 
   const exportPDF = () => {
     if (!selectedScan) return
-    downloadFile(`/api/export/pdf?scan_id=${selectedScan}`, `cernis_scan_${selectedScan}.pdf`)
+    downloadFile(`/api/export/pdf?scan_id=${selectedScan}`)
   }
 
   const exportCSV = () => {
     if (!selectedScan) return
-    downloadFile(`/api/export/csv?scan_id=${selectedScan}`, `cernis_scan_${selectedScan}.csv`)
+    downloadFile(`/api/export/csv?scan_id=${selectedScan}`)
   }
 
   const exportJSON = () => {
     if (!selectedScan) return
-    downloadFile(`/api/export/json?scan_id=${selectedScan}`, `cernis_scan_${selectedScan}.json`)
+    downloadFile(`/api/export/json?scan_id=${selectedScan}`)
   }
 
   const runCveLookup = async () => {

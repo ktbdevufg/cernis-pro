@@ -153,23 +153,10 @@ export default function Toolbar({
     if (validateCIDR(v)) onCidrChange(v)
   }
 
-  const handleExport = async (fmt) => {
+  const handleExport = (fmt) => {
     if (!lastScanId) return alert('Run a scan first')
-    try {
-      const res = await fetch(`/api/export/${fmt}?scan_id=${lastScanId}`)
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
-        return alert(err.error || `Export failed`)
-      }
-      const blob = await res.blob()
-      const a = document.createElement('a')
-      a.href = URL.createObjectURL(blob)
-      a.download = `cernis_scan_${lastScanId}.${fmt}`
-      a.click()
-      URL.revokeObjectURL(a.href)
-    } catch (e) {
-      alert('Export failed: ' + e.message)
-    }
+    // Direct navigation triggers download via Content-Disposition: attachment
+    window.location.href = `/api/export/${fmt}?scan_id=${lastScanId}`
   }
 
   return (

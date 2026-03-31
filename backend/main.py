@@ -483,7 +483,11 @@ async def api_export_json(scan_id: int = Query(...)):
     scan = get_scan_by_id(scan_id)
     if not scan:
         return JSONResponse(status_code=404, content={"error": "Not found"})
-    return JSONResponse(content=scan["hosts"])
+    return Response(
+        content=json.dumps(scan["hosts"], indent=2),
+        media_type="application/json",
+        headers={"Content-Disposition": f"attachment; filename=cernis_scan_{scan_id}.json"}
+    )
 
 @app.get("/api/export/csv")
 async def api_export_csv(scan_id: int = Query(...)):
