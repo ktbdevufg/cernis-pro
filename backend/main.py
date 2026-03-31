@@ -1438,12 +1438,17 @@ def _classify_host(ports: list, vendor: str, mac: str, mdns_services: list,
                                      "lexmark", "xerox", "kyocera", "ricoh"]):
         return "Printer", "printer"
 
-    # ── Smart TV ──────────────────────────────────────────────
+    # ── Smart TV / Streaming ─────────────────────────────────
     if port_nums & {8008, 8009, 8060, 9080} or "_googlecast" in mdns_types:
         return "Smart TV / Chromecast", "tv"
+    if "nvidia" in vendor_l:
+        return "Android TV (NVIDIA Shield)", "tv"
     if any(x in vendor_l for x in ["lg electronics", "sony", "philips", "hisense",
-                                     "vestel", "tcl", "vizio"]):
+                                     "vestel", "tcl", "vizio", "roku", "amazon"]):
         if not port_nums & {22, 445}: return "Smart TV", "tv"
+    if any(x in host_l for x in ["fire-tv", "firetv", "roku", "shield", "androidtv",
+                                    "chromecast", "smart-tv", "smarttv"]):
+        return "Smart TV / Streaming", "tv"
 
     # ── Apple mobile (iOS) ────────────────────────────────────
     if any(x in host_l for x in ["iphone", "ipad", "ipod"]):
@@ -1462,25 +1467,44 @@ def _classify_host(ports: list, vendor: str, mac: str, mdns_services: list,
     # ── Android / Mobile ─────────────────────────────────────
     if any(x in vendor_l for x in ["samsung", "huawei", "xiaomi", "oneplus",
                                      "google", "motorola", "oppo", "realme", "nothing"]):
+        if port_nums & {8008, 8009, 8443, 9000}:
+            return "Android TV", "tv"
         return "Android", "mobile"
-    if any(x in host_l for x in ["android", "galaxy", "pixel", "iphone", "phone"]):
+    if any(x in host_l for x in ["android", "galaxy", "pixel", "phone"]):
         return "Android", "mobile"
 
-    # ── Windows ───────────────────────────────────────────────
-    if port_nums & {135, 139, 445}:
-        if 3389 in port_nums: return "Windows (RDP)", "desktop"
-        return "Windows", "desktop"
+    # ── Linux with Samba (must check BEFORE Windows) ────────
+    # SSH + SMB ports without port 135 (DCE/RPC) → Linux running Samba
+    has_smb = bool(port_nums & {139, 445})
+    has_ssh = 22 in port_nums
+    has_rpc = 135 in port_nums  # DCE/RPC is Windows-only
+    has_webmin = 10000 in port_nums
 
-    # ── Linux Server ─────────────────────────────────────────
-    if 22 in port_nums and (80 in port_nums or 443 in port_nums or 8080 in port_nums):
-        return "Linux Server", "server"
-    if 22 in port_nums and port_nums & {25, 110, 143, 3306, 5432, 6379, 27017}:
-        return "Linux Server", "server"
+    if has_ssh and has_smb and not has_rpc:
+        if has_webmin or any(x in host_l for x in ["omv", "openmediavault", "nas", "srv", "server"]):
+            return "Linux NAS (Samba)", "nas"
+        if port_nums & {80, 443, 8080, 3306, 5432}:
+            return "Linux Server (Samba)", "server"
+        return "Linux (Samba)", "server"
 
     # ── Raspberry Pi / Linux ──────────────────────────────────
     if "raspberry" in vendor_l or "raspberry" in host_l:
         return "Linux (Raspberry Pi)", "iot"
-    if 22 in port_nums and not port_nums & {135, 445}:
+
+    # ── Windows (requires port 135 OR only SMB without SSH) ──
+    if has_rpc:
+        if 3389 in port_nums: return "Windows (RDP)", "desktop"
+        return "Windows", "desktop"
+    if has_smb and not has_ssh:
+        if 3389 in port_nums: return "Windows (RDP)", "desktop"
+        return "Windows", "desktop"
+
+    # ── Linux Server ─────────────────────────────────────────
+    if has_ssh and (80 in port_nums or 443 in port_nums or 8080 in port_nums):
+        return "Linux Server", "server"
+    if has_ssh and port_nums & {25, 110, 143, 3306, 5432, 6379, 27017}:
+        return "Linux Server", "server"
+    if has_ssh:
         return "Linux", "server"
 
     # ── IoT ───────────────────────────────────────────────────
