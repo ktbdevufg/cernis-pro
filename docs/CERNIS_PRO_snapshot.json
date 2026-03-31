@@ -1,33 +1,19 @@
 {
   "meta": {
     "project": "CERNIS_PRO",
-    "snapshot_date": "2026-03-30",
+    "snapshot_date": "2026-03-31",
     "purpose": "claude_session_handoff",
-    "instruction": "READ THIS FIRST. Apply all entries in 'rules' unconditionally. Treat 'state' as ground truth. Do not re-derive what is already decided."
+    "instruction": "READ THIS FIRST. Apply all entries in 'rules' unconditionally. Treat 'state' as ground truth. Do not re-derive what is already decided. Other platforms (Windows, macOS) are added when work begins on them."
   },
   "rules": {
     "editor": "vim",
     "paths": "always_absolute",
-    "shell_commands": "always_specify_shell_and_privilege",
-    "shell_types": [
-      "PowerShell (User)",
-      "PowerShell (Admin)",
-      "cmd (User)",
-      "cmd (Admin)",
-      "bash (User)",
-      "bash (sudo)"
-    ],
+    "shell_commands": "always_specify_shell_type_and_privilege",
     "changes": "one_at_a_time_in_defined_order",
     "debugging": "understand_first_then_fix_never_try_and_see",
-    "fixes": "document_successful_fixes_update_this_snapshot",
+    "fixes": "document_successful_fixes_and_update_this_snapshot",
     "snapshot": "save_new_snapshot_file_when_approaching_context_limit",
-    "deployments": "keep_all_fixes_documented_for_arm64_x64_linux_redeployment",
-    "additional": [
-      "Installer muss alle Komponenten enthalten die fuer den Betrieb benoetigt werden",
-      "3rd-Party-Komponenten (z.B. Npcap) muessen vor Installation gemeldet und Mitinstallation angeboten werden",
-      "Auf Build-Maschine darf alles installiert werden - auf Ziel-PC nichts ausser dem Installer",
-      "Vor Build alle benoetigten Komponenten sammeln und klare Installationsanweisungen geben"
-    ]
+    "deployments": "keep_all_fixes_documented_for_redeployment_on_other_platforms"
   },
   "stack": {
     "backend": "FastAPI/Python",
@@ -36,231 +22,80 @@
     "distribution": "PyInstaller",
     "window_url": "http://127.0.0.1:8765",
     "backend_start": "synchronous_before_tauri_window_in_main.rs",
+    "frontend_serving": "FastAPI_StaticFiles",
     "uac_admin": false
   },
   "decisions_final": {
     "desktop_framework": "Tauri_v2",
     "tauri_v1_rejected": "TLS_bug_ARM64",
     "electron_rejected": true,
-    "frontend_serving": "FastAPI_StaticFiles",
-    "install_mode_windows": "both",
+    "install_mode": "both",
     "uac": "uac_admin=False"
   },
-  "repository": {
-    "url": "git@github.com:ktbdevufg/cernis-pro.git",
-    "local_path_mac": "/Volumes/KINGDATA/Github-Repos/Cernis-Pro",
-    "branches": {
-      "main": "stabil, getesteter Code",
-      "dev": "aktive Entwicklung"
-    }
+  "git": {
+    "repo": "git@github.com:ktbdevufg/cernis-pro.git",
+    "branches": ["main", "dev"],
+    "active_branch": "dev",
+    "linux_x64_clone": "/home/kbach/Dokumente/Github-Repos/Cernis-Pro"
   },
-  "dev_environments": {
-    "macos_parallels_host": {
-      "role": "Git-Host, macOS Build-Koordination",
-      "git_repo": "/Volumes/KINGDATA/Github-Repos/Cernis-Pro"
-    },
-    "macos_m4_macbook": {
-      "role": "macOS Build (Xcode Signierung)",
-      "build_dir": "build/macos-arm64",
-      "tools": {
-        "xcode": "ja",
-        "pyinstaller_spec": "cernis_backend.spec",
-        "build_script": "setup_xcode.sh"
-      },
-      "notes": "Kein Claude Agent auf diesem System — nur Signierung und Xcode"
-    },
-    "windows_arm64": {
-      "role": "Windows ARM64 Build",
-      "user": "karlbach",
-      "project_dir": "C:\\Users\\karlbach\\Documents\\CernisPro",
-      "build_dir": "build/windows-arm64",
-      "version": "v12",
-      "msvc_version": "14.43.34808",
-      "vs_build_tools": "C:\\Program Files (x86)\\Microsoft Visual Studio\\18\\BuildTools",
-      "clang_arm64": "C:\\Program Files (x86)\\Microsoft Visual Studio\\18\\BuildTools\\Llvm\\ARM64\\bin",
-      "msvc_bin": "C:\\Program Files (x86)\\Microsoft Visual Studio\\18\\BuildTools\\VC\\Tools\\MSVC\\14.43.34808\\bin\\HostARM64\\ARM64",
-      "rust_target": "aarch64-pc-windows-msvc"
-    },
-    "windows_x64": {
-      "role": "Windows x64 Build",
-      "user": "Claude",
-      "project_dir": "C:\\Users\\Claude\\Documents\\Cernis Pro\\CERNIS-PRO-WINDOWSx64-TAURI-v13",
-      "build_dir": "build/windows-x64",
-      "version": "v13",
-      "python": "C:\\Users\\Claude\\AppData\\Local\\Programs\\Python\\Python311\\python.exe",
-      "python_version": "3.11.9 AMD64",
-      "pip_version": "26.0.1",
-      "pyinstaller_version": "6.19.0",
-      "nodejs_version": "22.20.0",
-      "rust_version": "1.94.0",
-      "rust_target": "x86_64-pc-windows-msvc",
-      "vs_build_tools": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools",
-      "vcvarsall": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Auxiliary\\Build\\vcvarsall.bat",
-      "cargo_bin": "C:\\Users\\Claude\\.cargo\\bin"
-    },
-    "linux_x64_ubuntu": {
-      "role": "Linux x64 deb + AppImage Build",
-      "os": "Ubuntu 24.04.4 LTS",
-      "kernel": "6.17.0-19-generic",
-      "build_dir": "build/linux-deb",
-      "version": "v14",
-      "ram": "16GB",
-      "disk": "80GB",
-      "cpu": "8 cores",
-      "tools": {
-        "rust": "1.94.1",
-        "cargo": "1.94.1",
-        "node": "20.20.2",
-        "npm": "10.8.2",
-        "python": "3.12.3",
-        "pyinstaller": "6.19.0",
-        "tauri_cli": "2.10.1"
-      }
-    },
-    "linux_x64_fedora": {
-      "role": "Linux x64 RPM Build",
-      "os": "Fedora 43 x64",
-      "build_dir": "build/linux-rpm",
-      "version": "v14",
-      "notes": "Rocky Linux 9 inkompatibel (glib2 2.68 < 2.70). Fedora 43 verwendet."
-    }
+  "project_structure": {
+    "root": "/home/kbach/Dokumente/Github-Repos/Cernis-Pro",
+    "backend": "backend/",
+    "frontend": "frontend/",
+    "tauri": "src-tauri/",
+    "build_script": "build.sh",
+    "pyinstaller_spec": "backend/cernis_linux.spec",
+    "tauri_config": "src-tauri/tauri.conf.json",
+    "package_json": "package.json"
   },
-  "targets": {
-    "windows_arm64": {
-      "status": "ausstehend — noch nicht gebaut",
-      "version": "v12",
-      "installer": "CernisPro_1.0.0_arm64-setup.exe",
-      "build_command": "cd C:\\Users\\karlbach\\Documents\\CernisPro\\CERNIS-PRO-WINDOWS-TAURI-v12 && .\\build.ps1"
-    },
-    "windows_x64": {
-      "status": "Build abgeschlossen — about:blank Bug + weitere Fixes ausstehend",
-      "version": "v13",
-      "installer": "CernisPro_1.0.0_x64-setup.exe",
-      "build_command": "cd \"C:\\Users\\Claude\\Documents\\Cernis Pro\\CERNIS-PRO-WINDOWSx64-TAURI-v13\" && .\\build.ps1",
-      "tested": "negativ — App zeigt leeres Fenster"
-    },
-    "macos_arm64": {
-      "status": "Build abgeschlossen — Bug-Fixes ausstehend",
-      "version": "v1.0b",
-      "build_script": "setup_xcode.sh",
-      "notes": "Xcode-Projekt auf MacBook M4, Parallels VM baut, MacBook signiert"
-    },
-    "linux_x64_deb": {
-      "status": "Build abgeschlossen — Bug-Fixes ausstehend",
-      "version": "v14",
-      "installer": "CernisPro_1.0.0_amd64.deb + CernisPro_1.0.0_amd64.AppImage",
-      "build_command": "cd CERNIS-PRO-LINUX-TAURI-v14 && bash build.sh"
-    },
-    "linux_x64_rpm": {
-      "status": "Build abgeschlossen — Bug-Fixes ausstehend",
-      "version": "v14",
-      "installer": "cernis-pro-1.0.0-1.x86_64.rpm",
-      "build_command": "cd CERNIS-PRO-LINUX-TAURI-v14-RPM && bash build.sh"
-    }
+  "current_platform": {
+    "os": "Ubuntu_24.04_x64",
+    "user": "kbach",
+    "hostname": "ubultsvm",
+    "target_triple": "x86_64-unknown-linux-gnu",
+    "build_targets": ["deb", "appimage"]
   },
-  "open_issues": [
-    "Windows ARM64: Build noch nicht ausgefuehrt",
-    "Windows x64: tauri.conf.json url ist about:blank — App zeigt leeres Fenster, muss auf http://127.0.0.1:8765 geaendert werden",
-    "Linux ARM64: noch nicht gebaut",
-    "Debian 12/13 Kompatibilitaet noch nicht getestet"
+  "open_fixes": [
+    {
+      "id": 1,
+      "file": "build.sh",
+      "issue": "Pfade zeigen noch auf alte Verzeichnisstruktur (cernis-pro/ und tauri-app/)",
+      "fix": "BACKEND_DIR=$SCRIPT_DIR/backend, FRONTEND_DIR=$SCRIPT_DIR/frontend, TAURI_DIR=$SCRIPT_DIR, TAURI_SRC=$SCRIPT_DIR/src-tauri"
+    },
+    {
+      "id": 2,
+      "file": "src-tauri/tauri.conf.json",
+      "issue": "frontendDist zeigt auf ../web (existiert nicht)",
+      "fix": "frontendDist: ../frontend/dist"
+    },
+    {
+      "id": 3,
+      "file": "src-tauri/tauri.conf.json",
+      "issue": "installMode: both fehlt im bundle-Abschnitt",
+      "fix": "\"installMode\": \"both\" unter bundle ergänzen"
+    }
   ],
-  "third_party_components": {
-    "npcap": {
-      "required_for": [
-        "PCAP",
-        "LLDP",
-        "Rogue DHCP Detection"
-      ],
-      "installer_handling": "NSIS prueft Registry + Service + Treiberdatei, bietet Download an",
-      "download_url": "https://npcap.com/dist/npcap-1.79.exe",
-      "included_in_installer": false,
-      "user_notification": true
-    },
-    "webview2": {
-      "required_for": "Tauri Window Rendering",
-      "included_in_installer": "automatisch_via_tauri_nsis_bootstrapper",
-      "notes": "Ab Windows 10 1803 systemseitig vorhanden"
-    },
-    "msvc_redist": {
-      "required_for": "PyInstaller EXE Runtime",
-      "included_in_installer": "automatisch_via_pyinstaller_bundle"
-    }
+  "completed_fixes_linux": [],
+  "build_lessons_linux": {
+    "tauri_window_url": "Window URL muss direkt auf http://127.0.0.1:8765 gesetzt sein - about:blank mit JS-Navigation schlägt unter WebKit2GTK fehl",
+    "icons": "Icons müssen RGBA PNG Format sein für Linux",
+    "pyinstaller_spec_location": "Spec-Datei muss im selben Verzeichnis wie main.py liegen",
+    "traceroute": "Flag -n verwenden (nicht --no-resolve); Binary-Pfad mit shutil.which() auflösen da PyInstaller-Prozesse keinen vollen PATH erben",
+    "pip_install": "Auf älteren Systemen --user statt --break-system-packages verwenden (pip 21 / Python 3.9 kennt --break-system-packages nicht)",
+    "externalBin_naming": "Binary muss cernis-backend-x86_64-unknown-linux-gnu heissen in src-tauri/",
+    "scapy_permission": "SCAPY_CACHE_DIR=tempdir vor Import setzen; except Exception statt ImportError verwenden"
   },
-  "completed_fixes": {
-    "windows_arm64": [
-      "German Windows ipconfig output parsing",
-      "Windows ping syntax",
-      "Unicode encoding all backend modules",
-      "Network scanning + monitoring + FritzBox detection",
-      "Tauri v2 ARM64 build pipeline",
-      "ARM64 toolchain: Clang, WindowsSDK, NSIS, Rust",
-      "/api/status route added to main.py",
-      "Windows patches applied in backend/modules (discovery, interfaces, ipv6, nettools)",
-      "uac_admin=False in cernis_windows.spec",
-      "installMode=both in tauri.conf.json",
-      "build.ps1 created with vcvarsall.bat ARM64 init",
-      "externalBin replaces resources in tauri.conf.json",
-      "tauri build --target aarch64-pc-windows-msvc in package.json",
-      "EXE copied to aarch64.../release/ for bundler",
-      "Scapy PermissionError fix: SCAPY_CACHE_DIR -> tempdir, except Exception in lldp.py + pcap.py",
-      "build.ps1: New-Item fuer TAURI_RELEASE vor Copy-Item"
-    ],
-    "windows_x64": [
-      "x64 Build-VM eingerichtet: Python 3.11.9 AMD64, Node.js 22.20.0, VS BuildTools 2022, Rust 1.94.0 x86_64",
-      "Python App Execution Alias deaktiviert (Settings > Apps > Advanced app settings)",
-      "Python PATH manuell gesetzt fuer User Claude",
-      "package.json: target auf x86_64-pc-windows-msvc umgestellt",
-      "build.ps1: alle ARM64-Referenzen auf x64 umgestellt",
-      "build.ps1: VS_BASE Pfad auf VS 2022 korrigiert",
-      "build.ps1: cargo_bin Pfad auf C:\\Users\\Claude\\.cargo\\bin gesetzt",
-      "build.ps1: New-Item fuer TAURI_RELEASE vor Copy-Item (x64)",
-      "Cargo.toml: lto=false, codegen-units=8 fuer ersten Build (STATUS_ACCESS_VIOLATION Fix)"
-    ],
-    "macos_arm64": [
-      "Xcode-Projekt angelegt mit setup_xcode.sh",
-      "Frontend Build via npm in setup_xcode.sh",
-      "PyInstaller Backend Binary via cernis_backend.spec",
-      "StaticFiles Import und frontend-dist Pfad-Logik in main.py",
-      "start.sh fuer Web-Version (dev mode)"
-    ],
-    "linux_x64": [
-      "cernis_linux.spec neu erstellt, Windows/macOS-only Imports entfernt, in backend/ abgelegt",
-      "main.py api_interfaces() — networksetup (macOS-only) ersetzt durch /sys/class/net + sys.platform Switch",
-      "main.rs find_backend_exe() — cfg!(target_os) Switch: .exe nur auf Windows, /usr/bin/ als Suchpfad ergaenzt",
-      "main.rs — Backend synchron vor Tauri-Fenster starten, url direkt auf http://127.0.0.1:8765",
-      "tauri.conf.json — targets: deb + appimage, url: http://127.0.0.1:8765, linux deb depends",
-      "package.json — target: x86_64-unknown-linux-gnu",
-      "Icons — 32x32.png, 128x128.png, 128x128@2x.png zu RGBA konvertiert (Tauri Linux Pflicht)",
-      "nettools.py traceroute — --no-resolve durch -n ersetzt, Parser fuer Linux-Format ergaenzt, shutil.which() fuer vollstaendigen Pfad"
-    ]
-  },
-  "build_lessons": {
-    "tauri_build_resources_bug": "canonicalize() on target_dir fails if dir doesnt exist — use externalBin instead",
-    "externalBin_naming_windows": "EXE muss heissen: cernis-backend-<triple>.exe in src-tauri/ UND <triple>/release/",
-    "externalBin_naming_linux": "cernis-backend-x86_64-unknown-linux-gnu (kein .exe)",
-    "tauri_target": "CARGO_BUILD_TARGET env var wird vom Tauri Bundler NICHT gelesen — --target Flag in tauri build Befehl verwenden",
-    "vcvarsall": "Frischen cmd.exe Prozess mit minimalem PATH verwenden um PATH-Laengenproblem zu vermeiden",
-    "build_script_cache": "target/release/build/cernis-pro-* loeschen wenn tauri-build sich aendert",
-    "scapy_permission": "Scapy versucht Cache ins User-Home zu schreiben — schlaegt auf eingeschraenkten Accounts fehl. Fix: SCAPY_CACHE_DIR=tempdir vor Import setzen. Exception statt ImportError abfangen.",
-    "python_app_alias_windows": "Windows App Execution Alias fuer python.exe ueberschreibt PATH — in Settings > Apps > Advanced app settings > App execution aliases deaktivieren",
-    "python_path_x64": "Python 3.11 silent install fuegt PATH nicht immer hinzu — manuell via SetEnvironmentVariable setzen",
-    "linux_icons_must_be_rgba": "Tauri auf Linux erfordert RGBA PNGs — RGB wird abgelehnt",
-    "about_blank_webkit_bug": "window.eval Navigation von about:blank zu http:// funktioniert nicht mit WebKit2GTK — url direkt in tauri.conf.json auf http://127.0.0.1:8765 setzen",
-    "backend_before_window": "Backend synchron starten und warten BEVOR tauri Builder laeuft",
-    "pyinstaller_path_linux": "PyInstaller-Prozess erbt nicht den vollen User-PATH — shutil.which() oder absoluten Pfad verwenden",
-    "traceroute_linux_flag": "-n statt --no-resolve, Output-Format ohne Hostname bei -n: '  1  1.2.3.4  1.0 ms'",
-    "rocky_linux_incompatible": "Rocky Linux 9 liefert glib2 2.68.4 — inkompatibel mit Tauri v2 (benoetigt >= 2.70). Fedora 43 ist die korrekte RPM Build-Plattform.",
-    "lto_codegen_units_x64": "lto=true + codegen-units=1 in Cargo.toml verursacht STATUS_ACCESS_VIOLATION (0xc0000005) Rust Compiler Crash auf x64. Fix: lto=false, codegen-units=8",
-    "spec_location": "PyInstaller .spec Datei muss in backend/ liegen — gleicher Ordner wie main.py und runtime_hook.py",
-    "linux_pyinstaller_install": "Ubuntu: pip3 install pyinstaller --break-system-packages && export PATH=$HOME/.local/bin:$PATH. Fedora: pip3 install pyinstaller --user"
+  "build_lessons_cross_platform": {
+    "tauri_target": "CARGO_BUILD_TARGET wird vom Tauri-Bundler NICHT gelesen - --target Flag im tauri build Befehl verwenden",
+    "frontend_serving": "FastAPI serviert Frontend als StaticFiles - Pfad muss im backend/main.py korrekt auf frontend/dist zeigen",
+    "install_mode": "installMode: both in tauri.conf.json bundle-Abschnitt - gilt für alle Plattformen"
   },
   "session_workflow": [
-    "Snapshot lesen und als Ground Truth verwenden",
-    "Karl stellt Dateien bereit: main.rs, tauri.conf.json, backend/main.py, cernis_pro.spec, package.json, build-Script",
-    "Claude analysiert alle auf einmal",
-    "Fixes in definierter Reihenfolge anwenden — eine Aenderung nach der anderen",
-    "Build erst nach allen Code-Aenderungen",
-    "Test auf sauberem System zuletzt",
-    "Snapshot nach jedem erfolgreichen Fix aktualisieren"
+    "Snapshot lesen bevor irgendetwas gemacht wird",
+    "Relevante Dateien ansehen bevor Änderungen gemacht werden",
+    "Fixes in der Reihenfolge aus open_fixes abarbeiten",
+    "Erst alle Code-Änderungen, dann Build",
+    "Erfolgreiche Fixes in completed_fixes_linux dokumentieren",
+    "Snapshot nach erfolgreichen Fixes aktualisieren und committen"
   ]
 }
