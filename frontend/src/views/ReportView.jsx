@@ -124,41 +124,33 @@ export default function ReportView({ hosts }) {
     }).catch(() => {})
   }, [])
 
-  const downloadFile = async (url) => {
-    // WebKit2GTK/Tauri: window.location.href with Content-Disposition: attachment
-    // triggers a download without navigating away from the page
+  const [exportResult, setExportResult] = useState(null)
+
+  const saveExport = async (fmt) => {
+    if (!selectedScan) return
     setExporting(true)
+    setExportResult(null)
     try {
-      // Pre-check for errors (PDF might fail with reportlab missing etc.)
-      const res = await fetch(url)
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
-        alert(err.error || `Export failed: HTTP ${res.status}`)
-        setExporting(false)
-        return
+      const res = await fetch('/api/export/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scan_id: selectedScan, format: fmt }),
+      })
+      const data = await res.json()
+      if (data.ok) {
+        setExportResult({ ok: true, path: data.path, filename: data.filename })
+      } else {
+        setExportResult({ ok: false, error: data.error })
       }
-      // Response is OK — trigger actual download via location
-      window.location.href = url
     } catch (e) {
-      alert('Export failed: ' + e.message)
+      setExportResult({ ok: false, error: e.message })
     }
     setExporting(false)
   }
 
-  const exportPDF = () => {
-    if (!selectedScan) return
-    downloadFile(`/api/export/pdf?scan_id=${selectedScan}`)
-  }
-
-  const exportCSV = () => {
-    if (!selectedScan) return
-    downloadFile(`/api/export/csv?scan_id=${selectedScan}`)
-  }
-
-  const exportJSON = () => {
-    if (!selectedScan) return
-    downloadFile(`/api/export/json?scan_id=${selectedScan}`)
-  }
+  const exportPDF  = () => saveExport('pdf')
+  const exportCSV  = () => saveExport('csv')
+  const exportJSON = () => saveExport('json')
 
   const runCveLookup = async () => {
     const host = hosts.find(h => h.ip === cveHost)
@@ -221,6 +213,21 @@ export default function ReportView({ hosts }) {
             {!selectedScan && (
               <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:8 }}>
                 Run a scan first to generate a report. The PDF includes all hosts, open ports, OS guesses and security highlights.
+              </div>
+            )}
+            {exporting && (
+              <div style={{ fontSize:11, color:'var(--accent)', marginTop:8, fontFamily:'var(--font-mono)' }}>
+                Exporting...
+              </div>
+            )}
+            {exportResult && (
+              <div style={{ fontSize:11, marginTop:8, fontFamily:'var(--font-mono)', padding:'8px 12px', borderRadius:4,
+                background: exportResult.ok ? 'rgba(0,230,118,0.08)' : 'rgba(255,61,61,0.08)',
+                border: `1px solid ${exportResult.ok ? 'rgba(0,230,118,0.3)' : 'rgba(255,61,61,0.3)'}`,
+                color: exportResult.ok ? 'var(--green)' : 'var(--red)' }}>
+                {exportResult.ok
+                  ? <>Saved: {exportResult.path}</>
+                  : <>Error: {exportResult.error}</>}
               </div>
             )}
           </div>

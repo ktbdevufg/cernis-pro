@@ -478,6 +478,74 @@ async def api_history_detail(scan_id: int):
         return JSONResponse(status_code=404, content={"error": "Not found"})
     return scan
 
+@app.post("/api/export/save")
+async def api_export_save(payload: dict = Body(...)):
+    """Save export file to user's home directory. Returns the file path."""
+    import os, tempfile
+    from pathlib import Path
+
+    scan_id = payload.get("scan_id")
+    fmt = payload.get("format", "csv")  # csv, json, pdf
+    if not scan_id:
+        return JSONResponse(status_code=400, content={"error": "scan_id required"})
+
+    scan = get_scan_by_id(int(scan_id))
+    if not scan:
+        return JSONResponse(status_code=404, content={"error": "Scan not found"})
+
+    # Determine output directory (Desktop > Downloads > Home)
+    home = Path.home()
+    for candidate in [home / "Desktop", home / "Schreibtisch", home / "Downloads", home]:
+        if candidate.is_dir():
+            out_dir = candidate
+            break
+    else:
+        out_dir = home
+
+    date_str = (scan.get("scanned_at", "") or "")[:10]
+    filename = f"cernis_scan_{scan_id}_{date_str}.{fmt}" if date_str else f"cernis_scan_{scan_id}.{fmt}"
+    filepath = out_dir / filename
+
+    try:
+        if fmt == "csv":
+            lines = ["ip,mac,vendor,hostname,ports,os_guess,rtt_ms"]
+            for h in scan["hosts"]:
+                ports = "|".join(str(p["port"]) for p in (h.get("ports") or []))
+                lines.append(",".join([h.get("ip",""), h.get("mac",""), h.get("vendor",""),
+                                        h.get("hostname",""), ports,
+                                        h.get("os_guess",""), str(h.get("rtt_ms",""))]))
+            filepath.write_text("\n".join(lines))
+
+        elif fmt == "json":
+            filepath.write_text(json.dumps(scan["hosts"], indent=2))
+
+        elif fmt == "pdf":
+            if not REPORTLAB_AVAILABLE:
+                return JSONResponse(status_code=501, content={"error": "reportlab not installed"})
+            fritz_status = None
+            fritz_host = get_setting("fritz_host", None)
+            if fritz_host:
+                try:
+                    fritz = _fritz_cache.get(fritz_host) or FritzBox(fritz_host)
+                    loop = asyncio.get_event_loop()
+                    fs = await loop.run_in_executor(None, fritz.get_status)
+                    fritz_status = fs.to_dict() if fs.reachable else None
+                except Exception:
+                    pass
+            loop = asyncio.get_event_loop()
+            pdf_bytes = await loop.run_in_executor(
+                None, lambda: generate_report(scan, fritz_status)
+            )
+            filepath.write_bytes(pdf_bytes)
+        else:
+            return JSONResponse(status_code=400, content={"error": f"Unknown format: {fmt}"})
+
+        return {"ok": True, "path": str(filepath), "filename": filename, "size": filepath.stat().st_size}
+
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
 @app.get("/api/export/json")
 async def api_export_json(scan_id: int = Query(...)):
     scan = get_scan_by_id(scan_id)

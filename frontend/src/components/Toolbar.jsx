@@ -153,10 +153,28 @@ export default function Toolbar({
     if (validateCIDR(v)) onCidrChange(v)
   }
 
-  const handleExport = (fmt) => {
+  const [exportMsg, setExportMsg] = useState('')
+  const handleExport = async (fmt) => {
     if (!lastScanId) return alert('Run a scan first')
-    // Direct navigation triggers download via Content-Disposition: attachment
-    window.location.href = `/api/export/${fmt}?scan_id=${lastScanId}`
+    setExportMsg('Exporting...')
+    try {
+      const res = await fetch('/api/export/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scan_id: lastScanId, format: fmt }),
+      })
+      const data = await res.json()
+      if (data.ok) {
+        setExportMsg(`Saved: ${data.path}`)
+        setTimeout(() => setExportMsg(''), 5000)
+      } else {
+        setExportMsg(`Error: ${data.error}`)
+        setTimeout(() => setExportMsg(''), 5000)
+      }
+    } catch (e) {
+      setExportMsg(`Error: ${e.message}`)
+      setTimeout(() => setExportMsg(''), 5000)
+    }
   }
 
   return (
@@ -259,6 +277,11 @@ export default function Toolbar({
           <button className="icon-btn" onClick={() => handleExport('json')} title="Export JSON">
             <Download size={12} /> JSON
           </button>
+          {exportMsg && (
+            <span style={{ fontSize:10, fontFamily:'var(--font-mono)', color: exportMsg.startsWith('Error') ? 'var(--red)' : 'var(--green)', whiteSpace:'nowrap' }}>
+              {exportMsg}
+            </span>
+          )}
         </div>
       </div>
       {open && <div style={{ position:'fixed', inset:0, zIndex:299 }} onClick={() => setOpen(false)} />}
