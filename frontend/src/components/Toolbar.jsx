@@ -3,8 +3,9 @@ import { Wifi, ChevronDown, Play, Square, RefreshCw, Download, Clock } from 'luc
 
 const css = `
 .toolbar {
-  flex: 1; display: flex; align-items: center; gap: 8px;
-  padding: 0 16px; height: var(--toolbar-h);
+  flex: 1; display: flex; align-items: center; gap: 6px;
+  padding: 0 10px; height: var(--toolbar-h);
+  min-width: 0;
 }
 .toolbar-logo {
   font-family: var(--font-ui); font-size: 20px; font-weight: 700;
@@ -42,8 +43,8 @@ const css = `
 .kv-v { font-family: var(--font-mono); color: var(--text-secondary); }
 .cidr-input {
   background: var(--bg-3); border: 1px solid var(--border);
-  color: var(--text-primary); padding: 6px 10px; border-radius: 4px;
-  font-size: 13px; font-family: var(--font-mono); width: 158px;
+  color: var(--text-primary); padding: 6px 8px; border-radius: 4px;
+  font-size: 12px; font-family: var(--font-mono); width: 140px;
   transition: border-color 0.15s;
 }
 .cidr-input:focus { border-color: var(--accent-dim); }
@@ -162,10 +163,9 @@ export default function Toolbar({
       <style>{css}</style>
       <div className="toolbar">
         {/* Logo */}
-        <div className="toolbar-logo" style={{ display:'flex', alignItems:'center', gap:8 }}>
-          <img src="/cernis-logo.png" alt="CERNIS" style={{ height:28, width:28, objectFit:'contain', borderRadius:3, flexShrink:0 }} />
-          <span style={{ fontWeight:700, fontSize:13, letterSpacing:'0.08em' }}>CERNIS PRO</span>
-          <span style={{ fontSize:9, color:'var(--text-muted)', fontWeight:400, letterSpacing:'0.06em' }}>v1.0b · Professional Network Scanner & Monitor</span>
+        <div className="toolbar-logo" style={{ display:'flex', alignItems:'center', gap:6 }}>
+          <img src="/cernis-logo.png" alt="CERNIS" style={{ height:24, width:24, objectFit:'contain', borderRadius:3, flexShrink:0 }} />
+          <span style={{ fontWeight:700, fontSize:12, letterSpacing:'0.08em', whiteSpace:'nowrap' }}>CERNIS PRO</span>
         </div>
 
         {/* Interface selector */}

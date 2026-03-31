@@ -30,14 +30,18 @@ const css = `
 .app { height: 100vh; display: flex; overflow: hidden; background: var(--bg-0); }
 .app-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .app-topbar {
-  display: flex; align-items: center;
-  height: var(--toolbar-h); flex-shrink: 0;
+  display: flex; flex-direction: column;
+  flex-shrink: 0;
   border-bottom: 1px solid var(--border);
   background: var(--bg-1);
 }
+.app-topbar-row1 {
+  display: flex; align-items: center;
+  height: var(--toolbar-h); flex-shrink: 0;
+}
 .app-topbar-actions {
   display: flex; align-items: center; gap: 6px;
-  padding-right: 12px; flex-shrink: 0;
+  padding: 0 12px 6px 12px; flex-shrink: 0; flex-wrap: wrap;
 }
 .app-body { flex: 1; display: flex; overflow: hidden; min-height: 0; }
 .app-main  { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
@@ -248,22 +252,24 @@ export default function App() {
           {activeView === 'scan' && (
             <>
               <div className="app-topbar">
-                <Toolbar
-                  interfaces={interfaces}
-                  selectedIface={selectedIface}
-                  onSelectIface={setSelectedIface}
-                  cidr={cidr}
-                  onCidrChange={setCidr}
-                  onScan={handleScan}
-                  onStop={stopScan}
-                  scanning={scanning}
-                  hostCount={hosts.length}
-                  lastScanId={lastScanId}
-                  autoRescan={autoRescan || 0}
-                  onAutoRescanChange={setAutoRescan}
-                  profile={scanProfile}
-                  onProfileChange={setScanProfile}
-                />
+                <div className="app-topbar-row1">
+                  <Toolbar
+                    interfaces={interfaces}
+                    selectedIface={selectedIface}
+                    onSelectIface={setSelectedIface}
+                    cidr={cidr}
+                    onCidrChange={setCidr}
+                    onScan={handleScan}
+                    onStop={stopScan}
+                    scanning={scanning}
+                    hostCount={hosts.length}
+                    lastScanId={lastScanId}
+                    autoRescan={autoRescan || 0}
+                    onAutoRescanChange={setAutoRescan}
+                    profile={scanProfile}
+                    onProfileChange={setScanProfile}
+                  />
+                </div>
                 <div className="app-topbar-actions">
                   {countdown > 0 && !scanning && (
                     <span className="rescan-countdown">⟳ {countdown}s</span>
