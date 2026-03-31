@@ -184,7 +184,7 @@ async def start_capture(interface: str = None, bpf_filter: str = "",
     _capture_packets = []
     _raw_packets = []
     _capture_stats = CaptureStats()
-    _pcap_file = os.path.join(tempfile.gettempdir(), f"pulsar_capture_{int(time.time())}.pcap")
+    _pcap_file = os.path.join(tempfile.gettempdir(), f"cernis_capture_{int(time.time())}.pcap")
 
     def _run():
         kwargs = {"prn": _handle_packet, "store": 0, "count": max_packets}

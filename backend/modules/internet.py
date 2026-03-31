@@ -129,29 +129,37 @@ async def run_speedtest() -> dict:
     except Exception:
         pass
 
-    # Download test (10MB from Cloudflare)
+    # Download test — multiple parallel streams (100MB total) for Gigabit accuracy
     try:
-        def _dl():
-            url = "https://speed.cloudflare.com/__down?bytes=10000000"
+        import concurrent.futures
+
+        def _dl_chunk(chunk_bytes=25_000_000):
+            url = f"https://speed.cloudflare.com/__down?bytes={chunk_bytes}"
             req = urllib.request.Request(url, headers={"User-Agent": "CERNIS PRO/1.0b"})
-            start = time.time()
-            with urllib.request.urlopen(req, timeout=20) as r:
+            with urllib.request.urlopen(req, timeout=30) as r:
                 data = r.read()
-            elapsed = time.time() - start
-            return len(data), elapsed
+            return len(data)
+
+        def _dl_parallel():
+            start = time.time()
+            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+                futures = [pool.submit(_dl_chunk) for _ in range(4)]
+                total = sum(f.result() for f in concurrent.futures.as_completed(futures))
+            return total, time.time() - start
 
         size_bytes, elapsed = await asyncio.wait_for(
-            loop.run_in_executor(None, _dl), timeout=25
+            loop.run_in_executor(None, _dl_parallel), timeout=40
         )
         results["download_mbps"] = round((size_bytes * 8) / elapsed / 1_000_000, 1)
     except Exception as e:
         results["error"] = str(e)
 
-    # Upload test (1MB to Cloudflare)
+    # Upload test — multiple parallel streams (10MB total)
     try:
-        def _ul():
-            import os
-            data = os.urandom(1_000_000)
+        import os as _os, concurrent.futures
+
+        def _ul_chunk(chunk_bytes=2_500_000):
+            data = _os.urandom(chunk_bytes)
             req = urllib.request.Request(
                 "https://speed.cloudflare.com/__up",
                 data=data,
@@ -159,13 +167,21 @@ async def run_speedtest() -> dict:
                          "User-Agent": "CERNIS PRO/1.0b"},
                 method="POST"
             )
-            start = time.time()
-            with urllib.request.urlopen(req, timeout=20) as r:
+            with urllib.request.urlopen(req, timeout=30) as r:
                 r.read()
-            return time.time() - start
+            return chunk_bytes
 
-        elapsed = await asyncio.wait_for(loop.run_in_executor(None, _ul), timeout=25)
-        results["upload_mbps"] = round((1_000_000 * 8) / elapsed / 1_000_000, 1)
+        def _ul_parallel():
+            start = time.time()
+            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+                futures = [pool.submit(_ul_chunk) for _ in range(4)]
+                total = sum(f.result() for f in concurrent.futures.as_completed(futures))
+            return total, time.time() - start
+
+        total_bytes, elapsed = await asyncio.wait_for(
+            loop.run_in_executor(None, _ul_parallel), timeout=40
+        )
+        results["upload_mbps"] = round((total_bytes * 8) / elapsed / 1_000_000, 1)
     except Exception:
         pass
 

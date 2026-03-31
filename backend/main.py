@@ -481,7 +481,7 @@ async def api_export_csv(scan_id: int = Query(...)):
                                 h.get("hostname",""), ports,
                                 h.get("os_guess",""), str(h.get("rtt_ms",""))]))
     return Response(content="\n".join(lines), media_type="text/csv",
-                    headers={"Content-Disposition": f"attachment; filename=pulsar_{scan_id}.csv"})
+                    headers={"Content-Disposition": f"attachment; filename=cernis_scan_{scan_id}.csv"})
 
 
 
@@ -668,7 +668,7 @@ async def api_export_pdf(scan_id: int = Query(...)):
     pdf_bytes = await loop.run_in_executor(
         None, lambda: generate_report(scan, fritz_status)
     )
-    filename = f"pulsar_scan_{scan_id}_{scan.get('scanned_at','')[:10]}.pdf"
+    filename = f"cernis_scan_{scan_id}_{scan.get('scanned_at','')[:10]}.pdf"
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
@@ -986,13 +986,28 @@ async def api_set_smtp(payload: dict = Body(...)):
 
 @app.post("/api/alerts/test")
 async def api_test_alert():
-    """Send a test notification."""
+    """Send a test notification — directly tests SMTP without requiring alert rules."""
     smtp_config = get_setting("smtp_config", {}) or {}
     from modules.crypto import decrypt
     if smtp_config.get("password"):
         smtp_config["password"] = decrypt(smtp_config["password"])
-    fire_alert("host_down", "test", "This is a CERNIS PRO test alert", smtp_config)
-    return {"ok": True}
+
+    if not smtp_config.get("host") or not smtp_config.get("to"):
+        return JSONResponse(status_code=400, content={
+            "error": "SMTP not configured — set host and recipient address first"
+        })
+
+    # Test SMTP directly instead of going through fire_alert (which requires rules)
+    from modules.alerting import notify_email
+    body = (f"Test alert from CERNIS PRO\n"
+            f"Time: {__import__('time').strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"This confirms your SMTP configuration is working.")
+    success = notify_email("Test Alert", body, smtp_config)
+    if success:
+        return {"ok": True, "message": "Test email sent successfully"}
+    return JSONResponse(status_code=503, content={
+        "error": "SMTP connection failed — check host, port, username and password"
+    })
 
 
 

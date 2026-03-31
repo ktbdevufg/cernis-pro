@@ -289,7 +289,7 @@ export default function InfraView({ selectedIface }) {
                   <div style={{ fontSize:11, color:'var(--text-secondary)', marginBottom:8 }}>Copy the agent script to your remote server (e.g. Netcup VPS):</div>
                   {[
                     'pip install fastapi uvicorn',
-                    'python pulsar/backend/modules/agent.py --host 0.0.0.0 --port 8766 --token YOUR_TOKEN',
+                    'python cernis-pro/backend/modules/agent.py --host 0.0.0.0 --port 8766 --token YOUR_TOKEN',
                   ].map((cmd, i) => (
                     <div key={i} className="metrics-url">
                       <span style={{ flex:1 }}>{cmd}</span>
@@ -297,7 +297,7 @@ export default function InfraView({ selectedIface }) {
                     </div>
                   ))}
                   <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:6 }}>
-                    The agent file is at: <code style={{ color:'var(--accent)' }}>pulsar/backend/modules/agent.py</code>
+                    The agent file is at: <code style={{ color:'var(--accent)' }}>cernis-pro/backend/modules/agent.py</code>
                   </div>
                 </div>
               </div>
@@ -334,14 +334,14 @@ export default function InfraView({ selectedIface }) {
                 <div className="i-card-title"><Activity size={11}/> Available Metrics</div>
                 <div className="i-card-body">
                   {[
-                    ['pulsar_devices_total', 'Total devices in database'],
-                    ['pulsar_devices_active_24h', 'Devices seen in last 24h'],
-                    ['pulsar_monitor_rtt_ms{target}', 'RTT per monitor target'],
-                    ['pulsar_monitor_up{target}', 'Up/down status per target'],
-                    ['pulsar_sla_uptime_pct{target}', 'Uptime % last 24h'],
-                    ['pulsar_sla_avg_rtt_ms{target}', 'Average RTT last 24h'],
-                    ['pulsar_alerts_24h', 'Alerts fired last 24h'],
-                    ['pulsar_scans_last_7d', 'Scan count last 7 days'],
+                    ['cernis_devices_total', 'Total devices in database'],
+                    ['cernis_devices_active_24h', 'Devices seen in last 24h'],
+                    ['cernis_monitor_rtt_ms{target}', 'RTT per monitor target'],
+                    ['cernis_monitor_up{target}', 'Up/down status per target'],
+                    ['cernis_sla_uptime_pct{target}', 'Uptime % last 24h'],
+                    ['cernis_sla_avg_rtt_ms{target}', 'Average RTT last 24h'],
+                    ['cernis_alerts_24h', 'Alerts fired last 24h'],
+                    ['cernis_scans_last_7d', 'Scan count last 7 days'],
                   ].map(([m, d]) => (
                     <div key={m} style={{ display:'flex', gap:12, marginBottom:5, fontSize:11 }}>
                       <code style={{ color:'var(--accent)', fontFamily:'var(--font-mono)', width:260, flexShrink:0 }}>{m}</code>

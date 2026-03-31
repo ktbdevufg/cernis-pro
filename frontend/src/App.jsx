@@ -93,7 +93,7 @@ export default function App() {
   const [fritzConnected, setFritzConnected]   = useState(false)
   const [fritzStatus, setFritzStatus]         = useState(null)
   const [scanProfile, setScanProfile]         = useState('standard')
-  const [isDark, setIsDark]               = useState(() => localStorage.getItem('pulsar_theme') !== 'light')
+  const [isDark, setIsDark]               = useState(() => localStorage.getItem('cernis_theme') !== 'light')
 
   const { scanState, hosts, progress, error, startScan, stopScan } = useScan()
   const scanning = scanState === SCAN_STATE.RUNNING
@@ -145,13 +145,11 @@ export default function App() {
     }
   }, [interfaces])
 
-  // Track last scan id
+  // Load last scan id on startup + after each scan
   useEffect(() => {
-    if (done) {
-      fetch('/api/history?limit=1').then(r=>r.json()).then(data => {
-        if (data.length > 0) setLastScanId(data[0].id)
-      }).catch(() => {})
-    }
+    fetch('/api/history?limit=1').then(r=>r.json()).then(data => {
+      if (data.length > 0) setLastScanId(data[0].id)
+    }).catch(() => {})
   }, [done])
 
   // Auto-rescan countdown
@@ -179,7 +177,7 @@ export default function App() {
     const next = !isDark
     setIsDark(next)
     document.body.classList.toggle('light', !next)
-    localStorage.setItem('pulsar_theme', next ? 'dark' : 'light')
+    localStorage.setItem('cernis_theme', next ? 'dark' : 'light')
   }
 
   // Apply theme on mount

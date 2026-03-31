@@ -14,7 +14,7 @@ except ImportError:
     HAS_CRYPTO = False
 
 # Key stored in user's home directory, not in project folder
-KEY_DIR  = Path.home() / ".pulsar"
+KEY_DIR  = Path.home() / ".cernis-pro"
 KEY_FILE = KEY_DIR / "keyring"
 
 

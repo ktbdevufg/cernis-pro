@@ -21,6 +21,34 @@ echo " CERNIS PRO Linux Build"
 echo " Arbeitsverzeichnis: $SCRIPT_DIR"
 echo "============================================"
 
+# ── Schritt 0: System-Abhängigkeiten prüfen ──────────────────
+echo ""
+echo "[0/5] System-Abhängigkeiten prüfen..."
+
+# apt-Pakete
+APT_MISSING=()
+for pkg in nmap libpcap-dev net-tools traceroute; do
+    if dpkg -s "$pkg" &>/dev/null; then
+        echo "      $pkg: OK"
+    else
+        APT_MISSING+=("$pkg")
+    fi
+done
+if [ ${#APT_MISSING[@]} -gt 0 ]; then
+    echo "      Installiere fehlende apt-Pakete: ${APT_MISSING[*]}"
+    sudo apt-get update -qq && sudo apt-get install -y "${APT_MISSING[@]}"
+fi
+
+# pip3-Pakete
+for pymod in scapy pysnmp reportlab dnspython; do
+    if python3 -c "import $pymod" &>/dev/null; then
+        echo "      $pymod: OK"
+    else
+        echo "      $pymod nicht gefunden — installiere via pip3..."
+        pip3 install "$pymod" --break-system-packages --quiet
+    fi
+done
+
 # ── Schritt 1: Python-Abhängigkeiten installieren ────────────
 echo ""
 echo "[1/5] Python-Abhängigkeiten installieren..."

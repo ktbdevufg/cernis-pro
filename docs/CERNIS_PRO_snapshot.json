@@ -120,8 +120,57 @@
       "issue": "Prometheus /metrics gibt 'not enough values to unpack' — samples als [dict, val] statt [(dict, val)]",
       "fix": "Alle metric() Aufrufe korrigiert: samples als Liste von Tupeln [(labels, value)]",
       "fixed_date": "2026-03-31"
+    },
+    {
+      "id": 10,
+      "file": "src-tauri/tauri.conf.json",
+      "issue": "Fenster zu klein (1400x800) — Buttons rechts außerhalb sichtbar",
+      "fix": "width=1600, height=900, minWidth=1200, minHeight=700",
+      "fixed_date": "2026-03-31"
+    },
+    {
+      "id": 11,
+      "file": "diverse (frontend/src, backend/modules)",
+      "issue": "Alter Projektname PULSAR in UI, Metrics, Export-Dateien, Crypto-Pfad",
+      "fix": "Alle Vorkommen von pulsar durch cernis/cernis-pro ersetzt (Metrics, Exports, localStorage, Agent-Doku, SMTP, Crypto-Keydir)",
+      "fixed_date": "2026-03-31"
+    },
+    {
+      "id": 12,
+      "file": "frontend/src/index.css",
+      "issue": "Select/Dropdown-Felder haben hellgraue Schrift auf weißem Browser-Default-Hintergrund",
+      "fix": "Explizite background/color für select und option Elemente im Dark Theme",
+      "fixed_date": "2026-03-31"
+    },
+    {
+      "id": 13,
+      "file": "frontend/src/App.jsx",
+      "issue": "Export CSV/JSON/PDF Buttons funktionieren nicht nach App-Start (lastScanId=null)",
+      "fix": "lastScanId wird jetzt beim App-Start aus /api/history geladen, nicht nur nach Scan",
+      "fixed_date": "2026-03-31"
+    },
+    {
+      "id": 14,
+      "file": "backend/modules/internet.py",
+      "issue": "Speedtest zeigt nur ~280 Mbit/s statt Gigabit — zu wenig Testvolumen (10MB single-thread)",
+      "fix": "4 parallele Streams à 25MB Download (100MB total) und 4x 2.5MB Upload (10MB total)",
+      "fixed_date": "2026-03-31"
+    },
+    {
+      "id": 15,
+      "file": "backend/main.py",
+      "issue": "SMTP Alert-Test gibt immer ok:true zurück, braucht Alert-Regel um zu funktionieren",
+      "fix": "Test-Endpoint sendet direkt via SMTP ohne Alert-Regeln, gibt klare Fehlermeldung bei SMTP-Fehler",
+      "fixed_date": "2026-03-31"
     }
   ],
+  "not_tested": {
+    "snmp": "Kein SNMP-fähiges Gerät im Testnetzwerk",
+    "rogue_dhcp": "Kein zweiter DHCP-Server zum Testen",
+    "remote_agents": "Benötigt zweite CERNIS PRO Instanz",
+    "grafana_integration": "/metrics Endpoint OK — Grafana-Anbindung separat testen",
+    "pcap_capture": "Code OK, scapy+libpcap installiert, benötigt CAP_NET_RAW: sudo setcap cap_net_raw+eip $(which python3)"
+  },
   "build_lessons_linux": {
     "tauri_window_url": "Window URL muss direkt auf http://127.0.0.1:8765 gesetzt sein - about:blank mit JS-Navigation schlägt unter WebKit2GTK fehl",
     "icons": "Icons müssen RGBA PNG Format sein für Linux",

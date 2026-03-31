@@ -52,15 +52,15 @@ def generate_prometheus_metrics() -> str:
         """).fetchone()
 
         if stats_row:
-            metric("pulsar_devices_total", "Total devices in database", "gauge",
+            metric("cernis_devices_total", "Total devices in database", "gauge",
                    [({}, stats_row["total"] or 0)])
-            metric("pulsar_devices_known", "Known devices", "gauge",
+            metric("cernis_devices_known", "Known devices", "gauge",
                    [({}, stats_row["known"] or 0)])
-            metric("pulsar_devices_unknown", "Unknown/new devices", "gauge",
+            metric("cernis_devices_unknown", "Unknown/new devices", "gauge",
                    [({}, stats_row["unknown"] or 0)])
-            metric("pulsar_devices_active_1h", "Devices active in last hour", "gauge",
+            metric("cernis_devices_active_1h", "Devices active in last hour", "gauge",
                    [({}, stats_row["active_1h"] or 0)])
-            metric("pulsar_devices_active_24h", "Devices active in last 24h", "gauge",
+            metric("cernis_devices_active_24h", "Devices active in last 24h", "gauge",
                    [({}, stats_row["active_24h"] or 0)])
 
         # ── Monitor/SLA metrics ───────────────────────────────
@@ -78,9 +78,9 @@ def generate_prometheus_metrics() -> str:
                 if tid in seen_targets:
                     continue
                 seen_targets.add(tid)
-                metric("pulsar_monitor_rtt_ms", "Latest RTT in milliseconds", "gauge",
+                metric("cernis_monitor_rtt_ms", "Latest RTT in milliseconds", "gauge",
                        [({"target": tid}, row["rtt_ms"] if row["rtt_ms"] > 0 else 0)])
-                metric("pulsar_monitor_up", "Monitor target up (1) or down (0)", "gauge",
+                metric("cernis_monitor_up", "Monitor target up (1) or down (0)", "gauge",
                        [({"target": tid}, row["alive"])])
         except Exception:
             pass
@@ -100,10 +100,10 @@ def generate_prometheus_metrics() -> str:
 
             for row in sla_rows:
                 uptime = round((row["alive_count"] / row["total"]) * 100, 3) if row["total"] else 0
-                metric("pulsar_sla_uptime_pct", "Uptime percentage last 24h", "gauge",
+                metric("cernis_sla_uptime_pct", "Uptime percentage last 24h", "gauge",
                        [({"target": row["target_id"]}, uptime)])
                 if row["avg_rtt"]:
-                    metric("pulsar_sla_avg_rtt_ms", "Average RTT last 24h", "gauge",
+                    metric("cernis_sla_avg_rtt_ms", "Average RTT last 24h", "gauge",
                            [({"target": row["target_id"]}, round(row["avg_rtt"], 2))])
         except Exception:
             pass
@@ -118,9 +118,9 @@ def generate_prometheus_metrics() -> str:
                 WHERE scanned_at > datetime('now', '-7 days')
             """).fetchone()
             if scan_row:
-                metric("pulsar_scans_last_7d", "Number of scans in last 7 days", "counter",
+                metric("cernis_scans_last_7d", "Number of scans in last 7 days", "counter",
                        [({}, scan_row["total"] or 0)])
-                metric("pulsar_scan_hosts_max", "Maximum hosts found in a scan (7d)", "gauge",
+                metric("cernis_scan_hosts_max", "Maximum hosts found in a scan (7d)", "gauge",
                        [({}, scan_row["max_hosts"] or 0)])
         except Exception:
             pass
@@ -131,7 +131,7 @@ def generate_prometheus_metrics() -> str:
                 SELECT COUNT(*) as total FROM alert_history
                 WHERE ts > ?
             """, (time.time() - 86400,)).fetchone()
-            metric("pulsar_alerts_24h", "Alerts fired in last 24h", "counter",
+            metric("cernis_alerts_24h", "Alerts fired in last 24h", "counter",
                    [({}, alert_row["total"] or 0)])
         except Exception:
             pass
@@ -147,10 +147,10 @@ def generate_prometheus_metrics() -> str:
 
 # ── InfluxDB Line Protocol ────────────────────────────────────
 
-def generate_influxdb_lines(measurement: str = "pulsar") -> str:
+def generate_influxdb_lines(measurement: str = "cernis") -> str:
     """
     Generate InfluxDB line protocol for write API.
-    POST to http://influxdb:8086/write?db=pulsar
+    POST to http://influxdb:8086/write?db=cernis
     """
     lines = []
     now_ns = int(time.time() * 1e9)

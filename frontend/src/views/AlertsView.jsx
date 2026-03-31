@@ -238,7 +238,7 @@ export default function AlertsView() {
                   ['port','Port','587'],
                   ['user','Username','alerts@example.com'],
                   ['password','Password',''],
-                  ['from','From Address','pulsar@example.com'],
+                  ['from','From Address','cernis@example.com'],
                   ['to','To Address','admin@example.com'],
                 ].map(([k,l,p]) => (
                   <div key={k}>
