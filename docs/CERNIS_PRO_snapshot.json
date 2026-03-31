@@ -75,8 +75,9 @@
       "id": 3,
       "file": "src-tauri/tauri.conf.json",
       "issue": "installMode: both fehlt im bundle-Abschnitt",
-      "fix": "\"installMode\": \"both\" unter bundle ergänzen",
-      "fixed_date": "2026-03-31"
+      "fix": "REVERTIERT — installMode ist in Tauri v2 kein gültiges Feld unter bundle. Gehört unter bundle.windows.nsis.installMode und wird erst bei Windows-Target gesetzt.",
+      "fixed_date": "2026-03-31",
+      "status": "reverted"
     }
   ],
   "build_lessons_linux": {
@@ -91,7 +92,7 @@
   "build_lessons_cross_platform": {
     "tauri_target": "CARGO_BUILD_TARGET wird vom Tauri-Bundler NICHT gelesen - --target Flag im tauri build Befehl verwenden",
     "frontend_serving": "FastAPI serviert Frontend als StaticFiles - Pfad muss im backend/main.py korrekt auf frontend/dist zeigen",
-    "install_mode": "installMode: both in tauri.conf.json bundle-Abschnitt - gilt für alle Plattformen"
+    "install_mode": "Tauri v2: installMode gehört NICHT unter bundle direkt. Korrekt: bundle.windows.nsis.installMode — nur bei Windows-Target setzen"
   },
   "session_workflow": [
     "Snapshot lesen bevor irgendetwas gemacht wird",
