@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Settings, Save, RotateCcw, Plus, Trash2, Play, Clock, Wifi, Database } from 'lucide-react'
+import { Settings, Save, RotateCcw, Plus, Trash2, Play, Clock, Wifi, Database, Radar } from 'lucide-react'
 
 const css = `
 .settings-view { position: absolute; inset: 0; display: flex; flex-direction: column; }
@@ -153,7 +153,86 @@ function ShodanKeyRow() {
   )
 }
 
-export default function SettingsView({ interfaces, cidr }) {
+function ScanConfigCard({ config, onChange }) {
+  const set = (k, v) => onChange({ ...config, [k]: v })
+  const Toggle = ({ k }) => (
+    <label className="toggle">
+      <input type="checkbox" checked={!!config[k]} onChange={e => set(k, e.target.checked)} />
+      <span className="toggle-slider" />
+    </label>
+  )
+  return (
+    <div className="sv-card">
+      <div className="sv-card-title"><Radar size={11} /> Scan Configuration</div>
+      <div className="sv-card-body">
+        {/* Discovery */}
+        <div style={{ fontSize:9, fontWeight:700, letterSpacing:'0.1em', textTransform:'uppercase', color:'var(--text-muted)', marginBottom:4 }}>Host Discovery</div>
+        <div className="sv-row">
+          <div className="sv-label">Ping Timeout (s)<small>Lower = faster, less reliable</small></div>
+          <input className="sv-input narrow" type="number" min={0.2} max={5} step={0.1}
+            value={config.ping_timeout || 1} onChange={e => set('ping_timeout', parseFloat(e.target.value))} />
+        </div>
+        <div className="sv-row">
+          <div className="sv-label">Concurrent Pings<small>Max parallel pings</small></div>
+          <input className="sv-input narrow" type="number" min={8} max={254} step={8}
+            value={config.max_concurrent_ping || 64} onChange={e => set('max_concurrent_ping', parseInt(e.target.value))} />
+        </div>
+        <div className="sv-row">
+          <div className="sv-label">Hostname Resolution<small>Reverse DNS per host</small></div>
+          <Toggle k="resolve_hostnames" />
+        </div>
+        <div className="sv-row">
+          <div className="sv-label">NetBIOS / SMB Names<small>Requires nmblookup — slower</small></div>
+          <Toggle k="smb_scan" />
+        </div>
+
+        {/* Port Scan */}
+        <div style={{ fontSize:9, fontWeight:700, letterSpacing:'0.1em', textTransform:'uppercase', color:'var(--text-muted)', marginTop:16, marginBottom:4 }}>Port Scanning</div>
+        <div className="sv-row">
+          <div className="sv-label">Port Scan Enabled</div>
+          <Toggle k="port_scan" />
+        </div>
+        <div className="sv-row">
+          <div className="sv-label">Scan Mode<small>socket = fast async · nmap = deep + OS</small></div>
+          <div style={{ display:'flex', gap:6 }}>
+            {['socket','nmap'].map(m => (
+              <button key={m} onClick={() => set('port_mode', m)}
+                style={{
+                  padding:'4px 10px', borderRadius:4, fontSize:11, cursor:'pointer', fontFamily:'var(--font-mono)',
+                  border: `1px solid ${config.port_mode === m ? 'var(--accent-dim)' : 'var(--border)'}`,
+                  background: config.port_mode === m ? 'rgba(0,212,255,0.08)' : 'var(--bg-3)',
+                  color: config.port_mode === m ? 'var(--accent)' : 'var(--text-secondary)',
+                }}>{m}</button>
+            ))}
+          </div>
+        </div>
+        <div className="sv-row">
+          <div className="sv-label">Concurrent Port Checks</div>
+          <input className="sv-input narrow" type="number" min={20} max={500} step={20}
+            value={config.max_concurrent_ports || 100} onChange={e => set('max_concurrent_ports', parseInt(e.target.value))} />
+        </div>
+
+        {/* Service Discovery */}
+        <div style={{ fontSize:9, fontWeight:700, letterSpacing:'0.1em', textTransform:'uppercase', color:'var(--text-muted)', marginTop:16, marginBottom:4 }}>Service Discovery</div>
+        <div className="sv-row">
+          <div className="sv-label">mDNS / Bonjour / NDI<small>Discovers AirPlay, NDI, printers…</small></div>
+          <Toggle k="mdns_scan" />
+        </div>
+        <div className="sv-row">
+          <div className="sv-label">mDNS Duration (s)<small>Listen time for responses</small></div>
+          <input className="sv-input narrow" type="number" min={2} max={30} step={1}
+            value={config.mdns_duration || 5} onChange={e => set('mdns_duration', parseFloat(e.target.value))} />
+        </div>
+        <div className="sv-row">
+          <div className="sv-label">UPnP / SSDP<small>Smart TVs, routers, NAS devices</small></div>
+          <Toggle k="ssdp_scan" />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export default function SettingsView({ interfaces, cidr, scanConfig, onScanConfigChange }) {
   const [profiles, setProfiles] = useState({ defaults: [], custom: [] })
   const [schedules, setSchedules] = useState([])
   // New schedule form
@@ -254,6 +333,11 @@ export default function SettingsView({ interfaces, cidr }) {
               </div>
             </div>
           </div>
+
+          {/* Scan Configuration */}
+          {scanConfig && onScanConfigChange && (
+            <ScanConfigCard config={scanConfig} onChange={onScanConfigChange} />
+          )}
 
           {/* Scan Profiles */}
           <div className="sv-card">

@@ -4,7 +4,7 @@ import Toolbar from './components/Toolbar.jsx'
 import ProgressBar from './components/ProgressBar.jsx'
 import HostTable from './components/HostTable.jsx'
 import HostDetail from './components/HostDetail.jsx'
-import ScanSettings from './components/ScanSettings.jsx'
+// ScanSettings moved into SettingsView
 import ColumnManager from './components/ColumnManager.jsx'
 import TopologyView from './components/TopologyView.jsx'
 import PortDiff from './components/PortDiff.jsx'
@@ -286,7 +286,6 @@ export default function App() {
                     visible={columnVisible || DEFAULT_VISIBLE}
                     onChange={(o,v) => { setColumnOrder(o); setColumnVisible(v) }}
                   />
-                  <ScanSettings config={scanConfig || DEFAULT_CONFIG} onChange={setScanConfig} />
                 </div>
               </div>
               <ProgressBar progress={progress} scanning={scanning} done={done} />
@@ -320,7 +319,7 @@ export default function App() {
               {activeView === 'sla'      && <SLAView />}
               {activeView === 'alerts'   && <AlertsView />}
               {activeView === 'infra'    && <InfraView selectedIface={selectedIface} />}
-              {activeView === 'settings' && <SettingsView interfaces={interfaces} cidr={cidr} />}
+              {activeView === 'settings' && <SettingsView interfaces={interfaces} cidr={cidr} scanConfig={scanConfig || DEFAULT_CONFIG} onScanConfigChange={setScanConfig} />}
             </div>
           )}
 
