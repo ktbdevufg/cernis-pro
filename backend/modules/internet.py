@@ -27,7 +27,7 @@ async def get_external_ip() -> dict:
     for url, key in sources:
         try:
             def _fetch(u=url):
-                req = urllib.request.Request(u, headers={"User-Agent": "CERNIS PRO/1.0b"})
+                req = urllib.request.Request(u, headers={"User-Agent": "CERNIS PRO/1.0.0"})
                 with urllib.request.urlopen(req, timeout=5) as r:
                     return json.loads(r.read())
             data = await asyncio.wait_for(loop.run_in_executor(None, _fetch), timeout=6)
@@ -66,7 +66,7 @@ async def check_port_external(port: int, protocol: str = "tcp") -> dict:
                     f"https://portchecker.co/api/v1/query",
                     data=json.dumps({"host": ext_ip, "ports": [port]}).encode(),
                     headers={"Content-Type": "application/json",
-                             "User-Agent": "CERNIS PRO/1.0b"},
+                             "User-Agent": "CERNIS PRO/1.0.0"},
                     method="POST"
                 )
                 with urllib.request.urlopen(req, timeout=10) as r:
@@ -135,7 +135,7 @@ async def run_speedtest() -> dict:
 
         def _dl_chunk(chunk_bytes=25_000_000):
             url = f"https://speed.cloudflare.com/__down?bytes={chunk_bytes}"
-            req = urllib.request.Request(url, headers={"User-Agent": "CERNIS PRO/1.0b"})
+            req = urllib.request.Request(url, headers={"User-Agent": "CERNIS PRO/1.0.0"})
             with urllib.request.urlopen(req, timeout=30) as r:
                 data = r.read()
             return len(data)
@@ -164,7 +164,7 @@ async def run_speedtest() -> dict:
                 "https://speed.cloudflare.com/__up",
                 data=data,
                 headers={"Content-Type": "application/octet-stream",
-                         "User-Agent": "CERNIS PRO/1.0b"},
+                         "User-Agent": "CERNIS PRO/1.0.0"},
                 method="POST"
             )
             with urllib.request.urlopen(req, timeout=30) as r:
@@ -203,7 +203,7 @@ async def shodan_lookup(ip: str, api_key: str = "") -> dict:
         try:
             req = urllib.request.Request(
                 f"https://internetdb.shodan.io/{ip_addr}",
-                headers={"User-Agent": "CERNIS PRO/1.0b"}
+                headers={"User-Agent": "CERNIS PRO/1.0.0"}
             )
             with urllib.request.urlopen(req, timeout=8) as r:
                 return json.loads(r.read())
@@ -225,7 +225,7 @@ async def shodan_lookup(ip: str, api_key: str = "") -> dict:
         try:
             req = urllib.request.Request(
                 f"https://api.shodan.io/shodan/host/{ip_addr}?key={key}",
-                headers={"User-Agent": "CERNIS PRO/1.0b"}
+                headers={"User-Agent": "CERNIS PRO/1.0.0"}
             )
             with urllib.request.urlopen(req, timeout=10) as r:
                 data = json.loads(r.read())

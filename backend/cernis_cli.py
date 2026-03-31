@@ -58,7 +58,7 @@ def header(title):
 # ── Commands ──────────────────────────────────────────────────
 
 def cmd_version(args):
-    print(f"{c('CERNIS PRO', 'cyan')} v1.0b · Professional Network Scanner & Monitor")
+    print(f"{c('CERNIS PRO', 'cyan')} v1.0.0 · Professional Network Scanner & Monitor")
     print(f"Backend: {BASE}")
 
 
@@ -250,7 +250,7 @@ def cmd_history(args):
 def main():
     parser = argparse.ArgumentParser(
         prog="cernis",
-        description="CERNIS PRO v1.0b — Professional Network Scanner & Monitor CLI",
+        description="CERNIS PRO v1.0.0 — Professional Network Scanner & Monitor CLI",
     )
     sub = parser.add_subparsers(dest="command")
 

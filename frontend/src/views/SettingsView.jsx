@@ -225,7 +225,7 @@ export default function SettingsView({ interfaces, cidr }) {
           <Settings size={14} color="var(--accent)" />
           <span className="sv-title">Settings</span>
           <div className="version-badge" style={{ marginLeft: 'auto' }}>
-            CERNIS PRO v{sysInfo.version || '1.0b'}
+            CERNIS PRO v{sysInfo.version || '1.0.0'}
           </div>
         </div>
 

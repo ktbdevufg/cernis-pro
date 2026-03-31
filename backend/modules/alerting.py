@@ -176,7 +176,7 @@ def notify_email(subject: str, body: str, smtp_config: dict) -> bool:
         <div style="font-family:monospace;background:#0a0c0f;color:#e8ecf4;padding:20px;border-radius:8px;">
           <h2 style="color:#00d4ff;margin:0 0 12px">⬡ CERNIS PRO Alert</h2>
           <pre style="background:#141820;padding:12px;border-radius:4px;color:#e8ecf4">{body}</pre>
-          <p style="color:#4a5a78;font-size:12px;margin-top:12px">CERNIS PRO v1.0b · Professional Network Scanner & Monitor</p>
+          <p style="color:#4a5a78;font-size:12px;margin-top:12px">CERNIS PRO v1.0.0 · Professional Network Scanner & Monitor</p>
         </div>
         """
         msg.attach(MIMEText(html_body, "html"))

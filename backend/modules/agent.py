@@ -184,7 +184,7 @@ def create_agent_app(token: str) -> "FastAPI":
     if not HAS_FASTAPI:
         raise RuntimeError("fastapi not installed")
 
-    app = FastAPI(title="CERNIS PRO Remote Agent", version="1.0b")
+    app = FastAPI(title="CERNIS PRO Remote Agent", version="1.0.0")
     app.add_middleware(CORSMiddleware, allow_origins=["*"],
                        allow_methods=["*"], allow_headers=["*"])
 
@@ -197,7 +197,7 @@ def create_agent_app(token: str) -> "FastAPI":
         check_token(x_agent_token)
         return {
             "reachable": True,
-            "version": "1.0b",
+            "version": "1.0.0",
             "platform": platform.platform(),
             "hostname": platform.node(),
         }
@@ -261,7 +261,7 @@ if __name__ == "__main__":
     parser.add_argument("--token", default=os.environ.get("CERNIS PRO_TOKEN", "changeme"))
     args = parser.parse_args()
 
-    print(f"CERNIS PRO Remote Agent v1.0b")
+    print(f"CERNIS PRO Remote Agent v1.0.0")
     print(f"Listening on {args.host}:{args.port}")
     print(f"Token: {args.token[:4]}{'*' * (len(args.token)-4)}")
 

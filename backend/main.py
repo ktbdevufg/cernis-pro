@@ -1,4 +1,4 @@
-"""CERNIS PRO v1.0b — Network Scanner & Monitor · FastAPI Backend"""
+"""CERNIS PRO v1.0.0 — Network Scanner & Monitor · FastAPI Backend"""
 import sys as _sys
 import os as _os
 
@@ -12,7 +12,7 @@ else:
     # Running as script — add parent dir for module imports
     _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
 
-VERSION = "1.0b"
+VERSION = "1.0.0"
 import asyncio
 import json
 import ipaddress
@@ -1133,7 +1133,7 @@ async def api_system_info():
         "reportlab":   has("reportlab"),
         "cryptography":has("cryptography"),
         "websockets":  has("websockets"),
-        "version":     "1.0b",
+        "version":     VERSION,
     }
 
 
