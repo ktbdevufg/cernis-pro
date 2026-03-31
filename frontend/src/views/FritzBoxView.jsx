@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Router, Wifi, Globe, Activity, FileText, RefreshCw, LogIn, LogOut, Signal } from 'lucide-react'
+import { Router, Wifi, Globe, Activity, FileText, RefreshCw, LogIn, LogOut, Signal, Edit3, Trash2 } from 'lucide-react'
 
 const css = `
 .fritz-view { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
@@ -166,6 +166,23 @@ export default function FritzBoxView({ connected: connectedProp, onConnect, stat
   const [loading, setLoading]     = useState(false)
   const [error, setError]         = useState(null)
   const [detecting, setDetecting] = useState(false)
+  const [editing, setEditing]     = useState(false)
+
+  // On mount: check if saved credentials exist → auto-reconnect
+  React.useEffect(() => {
+    if (connected) return
+    fetch('/api/fritz/status').then(r => r.json()).then(data => {
+      if (data.reachable && !data.auth_error && data.model) {
+        setStatus(data)
+        setHost(data.host || 'fritz.box')
+        setConnected(true)
+        onConnect && onConnect(data)
+        loadAll()
+      } else if (data.host) {
+        setHost(data.host)
+      }
+    }).catch(() => {})
+  }, [])
 
   // Sync with parent state when switching back to this view
   React.useEffect(() => {
@@ -210,6 +227,7 @@ export default function FritzBoxView({ connected: connectedProp, onConnect, stat
       if (!res.ok) { setError(data.error || 'Connection failed'); setLoading(false); return }
       setStatus(data.status)
       setConnected(true)
+      setEditing(false)
       onConnect && onConnect(data.status)
       loadAll()
     } catch (e) {
@@ -218,11 +236,20 @@ export default function FritzBoxView({ connected: connectedProp, onConnect, stat
     setLoading(false)
   }
 
-  const handleDisconnect = async () => {
+  const handleEdit = () => {
+    // Switch to login form but keep host/user pre-filled
+    setEditing(true)
+    setConnected(false)
+    setPassword('')
+    setError(null)
+  }
+
+  const handleDeleteCredentials = async () => {
     try {
       await fetch('/api/fritz/disconnect', { method: 'POST' })
     } catch (_) { /* ignore */ }
     setConnected(false)
+    setEditing(false)
     setStatus(null)
     setClients([])
     setLog([])
@@ -320,8 +347,11 @@ export default function FritzBoxView({ connected: connectedProp, onConnect, stat
           <button onClick={refresh} disabled={loading} style={{ marginLeft:'auto', background:'none', border:'none', color:'var(--text-muted)', cursor:'pointer' }}>
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
           </button>
-          <button className="fritz-logout-btn" onClick={handleDisconnect}>
-            <LogOut size={12} /> Disconnect
+          <button className="fritz-logout-btn" onClick={handleEdit} title="Edit credentials">
+            <Edit3 size={12} /> Edit
+          </button>
+          <button className="fritz-logout-btn" onClick={handleDeleteCredentials} title="Delete credentials and disconnect">
+            <Trash2 size={12} /> Delete
           </button>
         </div>
 
