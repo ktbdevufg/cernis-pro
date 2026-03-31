@@ -272,6 +272,7 @@ name = "cernis-pro"
 version = "1.0.0"
 dependencies = [
  "dirs 5.0.1",
+ "libc",
  "tauri",
  "tauri-build",
  "ureq",
