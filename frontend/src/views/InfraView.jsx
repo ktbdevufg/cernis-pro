@@ -145,6 +145,7 @@ export default function InfraView({ selectedIface }) {
   const [pcapStats, setPcapStats]     = useState(null)
   const [packets, setPackets]         = useState([])
   const [pcapFilter, setPcapFilter]   = useState('')
+  const [pcapError, setPcapError]     = useState('')
   const [pcapSaveMsg, setPcapSaveMsg] = useState('')
   const pcapTimer = useRef(null)
 
@@ -204,8 +205,11 @@ export default function InfraView({ selectedIface }) {
   }
 
   const startPcap = async () => {
-    await fetch('/api/pcap/start', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ filter: pcapFilter, interface: selectedIface?.name || '' }) })
-    setPcapRunning(true)
+    setPcapError('')
+    const res = await fetch('/api/pcap/start', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ filter: pcapFilter, interface: selectedIface?.name || '' }) })
+    const data = await res.json()
+    if (data.ok) { setPcapRunning(true) }
+    else { setPcapError(data.error || 'Failed to start capture') }
   }
 
   const stopPcap = async () => {
@@ -507,10 +511,14 @@ export default function InfraView({ selectedIface }) {
                 </div>
               )}
 
-              {packets.length === 0 && !pcapRunning && (
+              {pcapError && (
+                <div style={{ color:'#ef4444', fontSize:12, padding:12, textAlign:'center', background:'rgba(239,68,68,0.08)', borderRadius:6, margin:'8px 0' }}>
+                  {pcapError}
+                </div>
+              )}
+              {packets.length === 0 && !pcapRunning && !pcapError && (
                 <div style={{ color:'var(--text-muted)', fontSize:12, padding:20, textAlign:'center' }}>
-                  Click "Start Capture" to begin packet capture.<br/>
-                  <span style={{ fontSize:10 }}>Requires scapy: pip install scapy</span>
+                  Click "Start Capture" to begin packet capture.
                 </div>
               )}
             </>

@@ -1,9 +1,8 @@
 #!/bin/bash
 # ============================================================
 #  CERNIS PRO – Linux Build Script
-#  Plattform: Ubuntu 24.04 LTS x64
-#  Ergebnis:  cernis-pro_1.0.0_amd64.deb
-#             cernis-pro_1.0.0_amd64.AppImage
+#  Plattform: Fedora 43 x64
+#  Ergebnis:  cernis-pro_1.0.0_amd64.rpm
 #
 #  Aufruf: bash build.sh
 # ============================================================
@@ -25,18 +24,18 @@ echo "============================================"
 echo ""
 echo "[0/5] System-Abhängigkeiten prüfen..."
 
-# apt-Pakete
-APT_MISSING=()
-for pkg in nmap libpcap-dev net-tools traceroute; do
-    if dpkg -s "$pkg" &>/dev/null; then
+# dnf-Pakete
+DNF_MISSING=()
+for pkg in nmap libpcap-devel net-tools traceroute; do
+    if rpm -q "$pkg" &>/dev/null; then
         echo "      $pkg: OK"
     else
-        APT_MISSING+=("$pkg")
+        DNF_MISSING+=("$pkg")
     fi
 done
-if [ ${#APT_MISSING[@]} -gt 0 ]; then
-    echo "      Installiere fehlende apt-Pakete: ${APT_MISSING[*]}"
-    sudo apt-get update -qq && sudo apt-get install -y "${APT_MISSING[@]}"
+if [ ${#DNF_MISSING[@]} -gt 0 ]; then
+    echo "      Installiere fehlende dnf-Pakete: ${DNF_MISSING[*]}"
+    sudo dnf install -y "${DNF_MISSING[@]}"
 fi
 
 # pip3-Pakete
@@ -45,7 +44,7 @@ for pymod in scapy pysnmp reportlab dnspython; do
         echo "      $pymod: OK"
     else
         echo "      $pymod nicht gefunden — installiere via pip3..."
-        pip3 install "$pymod" --break-system-packages --quiet
+        pip3 install "$pymod" --user --quiet
     fi
 done
 
@@ -53,7 +52,7 @@ done
 echo ""
 echo "[1/5] Python-Abhängigkeiten installieren..."
 cd "$BACKEND_DIR"
-pip3 install -r requirements.txt --break-system-packages --quiet
+pip3 install -r requirements.txt --user --quiet
 echo "      OK"
 
 # ── Schritt 2: Frontend bauen ─────────────────────────────────
@@ -100,7 +99,7 @@ echo "      OK"
 
 # ── Schritt 5: Tauri bauen ────────────────────────────────────
 echo ""
-echo "[5/5] Tauri Build (.deb + .AppImage)..."
+echo "[5/5] Tauri Build (.rpm)..."
 cd "$TAURI_DIR"
 npm install --silent
 npm run build-tauri
@@ -113,17 +112,11 @@ VERSION=$(python3 -c "import json; print(json.load(open('$TAURI_SRC/tauri.conf.j
 DEST="/home/kbach"
 mkdir -p "$DEST"
 
-DEB=$(find "$TAURI_DIR/src-tauri/target" -name "*.deb" -print -quit 2>/dev/null)
-APPIMAGE=$(find "$TAURI_DIR/src-tauri/target" -name "*.AppImage" -print -quit 2>/dev/null)
+RPM=$(find "$TAURI_DIR/src-tauri/target" -name "*.rpm" -print -quit 2>/dev/null)
 
-if [ -n "$DEB" ]; then
-    cp "$DEB" "$DEST/cernis-pro_${VERSION}_amd64.deb"
-    echo "      → $DEST/cernis-pro_${VERSION}_amd64.deb"
-fi
-if [ -n "$APPIMAGE" ]; then
-    cp "$APPIMAGE" "$DEST/cernis-pro_${VERSION}_amd64.AppImage"
-    chmod +x "$DEST/cernis-pro_${VERSION}_amd64.AppImage"
-    echo "      → $DEST/cernis-pro_${VERSION}_amd64.AppImage"
+if [ -n "$RPM" ]; then
+    cp "$RPM" "$DEST/cernis-pro_${VERSION}_amd64.rpm"
+    echo "      → $DEST/cernis-pro_${VERSION}_amd64.rpm"
 fi
 
 echo ""
@@ -132,6 +125,5 @@ echo " BUILD ERFOLGREICH"
 echo "============================================"
 echo ""
 echo "Pakete:"
-[ -n "$DEB" ]      && echo "  $DEST/cernis-pro_${VERSION}_amd64.deb"
-[ -n "$APPIMAGE" ] && echo "  $DEST/cernis-pro_${VERSION}_amd64.AppImage"
+[ -n "$RPM" ] && echo "  $DEST/cernis-pro_${VERSION}_amd64.rpm"
 echo ""
