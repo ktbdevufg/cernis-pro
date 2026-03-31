@@ -78,6 +78,48 @@
       "fix": "REVERTIERT — installMode ist in Tauri v2 kein gültiges Feld unter bundle. Gehört unter bundle.windows.nsis.installMode und wird erst bei Windows-Target gesetzt.",
       "fixed_date": "2026-03-31",
       "status": "reverted"
+    },
+    {
+      "id": 4,
+      "file": "backend/modules/fritzbox.py",
+      "issue": "_safe_call verschluckt 401 Auth-Fehler stillschweigend → alle FritzBox-Felder leer",
+      "fix": "FritzAuthorizationError wird re-raised; neues auth_error Feld in FritzStatus; get_status() erkennt Auth-Fehler früh",
+      "fixed_date": "2026-03-31"
+    },
+    {
+      "id": 5,
+      "file": "backend/modules/fritzbox.py",
+      "issue": "detect_fritzbox gibt auf Debian _gateway statt FQDN zurück",
+      "fix": "_gateway, localhost und _-prefixed Hostnamen aus Reverse-DNS gefiltert; TR-064 Verifizierung via FritzConnection",
+      "fixed_date": "2026-03-31"
+    },
+    {
+      "id": 6,
+      "file": "backend/main.py",
+      "issue": "/api/fritz/connect speichert Credentials ohne Auth-Validierung",
+      "fix": "Prüft status.auth_error vor Speicherung, gibt 401 mit klarer Fehlermeldung zurück",
+      "fixed_date": "2026-03-31"
+    },
+    {
+      "id": 7,
+      "file": "backend/main.py + frontend/src/views/FritzBoxView.jsx",
+      "issue": "Kein Logout/Disconnect für FritzBox möglich",
+      "fix": "Neuer POST /api/fritz/disconnect Endpoint + Disconnect-Button im Frontend-Header",
+      "fixed_date": "2026-03-31"
+    },
+    {
+      "id": 8,
+      "file": "backend/main.py",
+      "issue": "/api/tools/banner crasht mit 'int object is not subscriptable' wenn Ports als [80,443] statt [{'port':80}] übergeben werden",
+      "fix": "Port-Liste normalisiert: akzeptiert sowohl int als auch dict Format",
+      "fixed_date": "2026-03-31"
+    },
+    {
+      "id": 9,
+      "file": "backend/modules/metrics.py",
+      "issue": "Prometheus /metrics gibt 'not enough values to unpack' — samples als [dict, val] statt [(dict, val)]",
+      "fix": "Alle metric() Aufrufe korrigiert: samples als Liste von Tupeln [(labels, value)]",
+      "fixed_date": "2026-03-31"
     }
   ],
   "build_lessons_linux": {

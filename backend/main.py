@@ -525,7 +525,7 @@ async def api_fritz_detect():
 
 @app.post("/api/fritz/connect")
 async def api_fritz_connect(payload: dict = Body(...)):
-    """Connect to FritzBox with credentials."""
+    """Connect to FritzBox with credentials. Validates auth before saving."""
     host     = payload.get("host", "fritz.box")
     user     = payload.get("user", "")
     password = payload.get("password", "")
@@ -535,6 +535,11 @@ async def api_fritz_connect(payload: dict = Body(...)):
         status = await asyncio.wait_for(
             loop.run_in_executor(None, fritz.get_status), timeout=20.0
         )
+        if status.auth_error:
+            return JSONResponse(status_code=401, content={
+                "error": "Authentication failed — check username and password. "
+                         "Ensure TR-064 is enabled in FritzBox settings."
+            })
         _fritz_cache[host] = fritz
         set_setting("fritz_host", host)
         set_setting("fritz_user", user)
@@ -544,6 +549,18 @@ async def api_fritz_connect(payload: dict = Body(...)):
         return JSONResponse(status_code=503, content={"error": "Connection timeout — check host address"})
     except Exception as e:
         return JSONResponse(status_code=503, content={"error": str(e)})
+
+
+@app.post("/api/fritz/disconnect")
+async def api_fritz_disconnect():
+    """Disconnect from FritzBox — clear cached connection and saved credentials."""
+    host = get_setting("fritz_host", None)
+    if host and host in _fritz_cache:
+        del _fritz_cache[host]
+    set_setting("fritz_host", "")
+    set_setting("fritz_user", "")
+    set_setting("fritz_password", "")
+    return {"ok": True}
 
 @app.get("/api/fritz/status")
 async def api_fritz_status():
@@ -1010,9 +1027,16 @@ async def api_banner(payload: dict = Body(...)):
     ports = payload.get("ports", [])
     if not host:
         return JSONResponse(status_code=400, content={"error": "host required"})
+    # Normalize ports: accept both [80, 443] and [{"port":80}, ...]
+    normalized = []
+    for p in ports:
+        if isinstance(p, int):
+            normalized.append({"port": p})
+        elif isinstance(p, dict):
+            normalized.append(p)
     try:
         results = await asyncio.wait_for(
-            grab_banners_for_host(host, ports),
+            grab_banners_for_host(host, normalized),
             timeout=20.0
         )
         return results

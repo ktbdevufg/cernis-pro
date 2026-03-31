@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Router, Wifi, Globe, Activity, FileText, RefreshCw, LogIn, Signal } from 'lucide-react'
+import { Router, Wifi, Globe, Activity, FileText, RefreshCw, LogIn, LogOut, Signal } from 'lucide-react'
 
 const css = `
 .fritz-view { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
@@ -103,6 +103,13 @@ const css = `
 .fritz-tab.active { background: rgba(0,212,255,0.1); border-color: var(--accent-dim); color: var(--accent); }
 
 .fritz-error { color: var(--red); font-size: 12px; font-family: var(--font-mono); text-align: center; }
+.fritz-logout-btn {
+  display: flex; align-items: center; gap: 4px;
+  background: none; border: 1px solid var(--border); color: var(--text-muted);
+  padding: 4px 10px; border-radius: 4px; font-size: 11px; font-weight: 600;
+  cursor: pointer; transition: all 0.12s;
+}
+.fritz-logout-btn:hover { border-color: var(--red); color: var(--red); }
 `
 
 function SignalBars({ dbm }) {
@@ -211,6 +218,21 @@ export default function FritzBoxView({ connected: connectedProp, onConnect, stat
     setLoading(false)
   }
 
+  const handleDisconnect = async () => {
+    try {
+      await fetch('/api/fritz/disconnect', { method: 'POST' })
+    } catch (_) { /* ignore */ }
+    setConnected(false)
+    setStatus(null)
+    setClients([])
+    setLog([])
+    setPortForwards([])
+    setHost('fritz.box')
+    setUser('')
+    setPassword('')
+    setError(null)
+  }
+
   const loadAll = async () => {
     const [cl, lg, pf] = await Promise.all([
       fetch('/api/fritz/wlan-clients').then(r => r.json()).catch(() => []),
@@ -297,6 +319,9 @@ export default function FritzBoxView({ connected: connectedProp, onConnect, stat
           </span>
           <button onClick={refresh} disabled={loading} style={{ marginLeft:'auto', background:'none', border:'none', color:'var(--text-muted)', cursor:'pointer' }}>
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+          </button>
+          <button className="fritz-logout-btn" onClick={handleDisconnect}>
+            <LogOut size={12} /> Disconnect
           </button>
         </div>
 

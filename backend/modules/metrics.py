@@ -53,15 +53,15 @@ def generate_prometheus_metrics() -> str:
 
         if stats_row:
             metric("pulsar_devices_total", "Total devices in database", "gauge",
-                   [{}, stats_row["total"] or 0])
+                   [({}, stats_row["total"] or 0)])
             metric("pulsar_devices_known", "Known devices", "gauge",
-                   [{}, stats_row["known"] or 0])
+                   [({}, stats_row["known"] or 0)])
             metric("pulsar_devices_unknown", "Unknown/new devices", "gauge",
-                   [{}, stats_row["unknown"] or 0])
+                   [({}, stats_row["unknown"] or 0)])
             metric("pulsar_devices_active_1h", "Devices active in last hour", "gauge",
-                   [{}, stats_row["active_1h"] or 0])
+                   [({}, stats_row["active_1h"] or 0)])
             metric("pulsar_devices_active_24h", "Devices active in last 24h", "gauge",
-                   [{}, stats_row["active_24h"] or 0])
+                   [({}, stats_row["active_24h"] or 0)])
 
         # ── Monitor/SLA metrics ───────────────────────────────
         try:
@@ -79,9 +79,9 @@ def generate_prometheus_metrics() -> str:
                     continue
                 seen_targets.add(tid)
                 metric("pulsar_monitor_rtt_ms", "Latest RTT in milliseconds", "gauge",
-                       [{"target": tid}, row["rtt_ms"] if row["rtt_ms"] > 0 else 0])
+                       [({"target": tid}, row["rtt_ms"] if row["rtt_ms"] > 0 else 0)])
                 metric("pulsar_monitor_up", "Monitor target up (1) or down (0)", "gauge",
-                       [{"target": tid}, row["alive"]])
+                       [({"target": tid}, row["alive"])])
         except Exception:
             pass
 
@@ -101,10 +101,10 @@ def generate_prometheus_metrics() -> str:
             for row in sla_rows:
                 uptime = round((row["alive_count"] / row["total"]) * 100, 3) if row["total"] else 0
                 metric("pulsar_sla_uptime_pct", "Uptime percentage last 24h", "gauge",
-                       [{"target": row["target_id"]}, uptime])
+                       [({"target": row["target_id"]}, uptime)])
                 if row["avg_rtt"]:
                     metric("pulsar_sla_avg_rtt_ms", "Average RTT last 24h", "gauge",
-                           [{"target": row["target_id"]}, round(row["avg_rtt"], 2)])
+                           [({"target": row["target_id"]}, round(row["avg_rtt"], 2))])
         except Exception:
             pass
 
@@ -119,9 +119,9 @@ def generate_prometheus_metrics() -> str:
             """).fetchone()
             if scan_row:
                 metric("pulsar_scans_last_7d", "Number of scans in last 7 days", "counter",
-                       [{}, scan_row["total"] or 0])
+                       [({}, scan_row["total"] or 0)])
                 metric("pulsar_scan_hosts_max", "Maximum hosts found in a scan (7d)", "gauge",
-                       [{}, scan_row["max_hosts"] or 0])
+                       [({}, scan_row["max_hosts"] or 0)])
         except Exception:
             pass
 
@@ -132,7 +132,7 @@ def generate_prometheus_metrics() -> str:
                 WHERE ts > ?
             """, (time.time() - 86400,)).fetchone()
             metric("pulsar_alerts_24h", "Alerts fired in last 24h", "counter",
-                   [{}, alert_row["total"] or 0])
+                   [({}, alert_row["total"] or 0)])
         except Exception:
             pass
 

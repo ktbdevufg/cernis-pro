@@ -56,6 +56,8 @@ class FritzStatus:
     wlan_5_clients: int    = 0
     # Hosts
     total_hosts: int       = 0
+    # Auth
+    auth_error: bool       = False
 
     def to_dict(self):
         return asdict(self)
@@ -81,9 +83,13 @@ class FritzLogEntry:
 # ── Helpers ───────────────────────────────────────────────────
 
 def _safe_call(fc: "FritzConnection", service: str, action: str, **kwargs) -> dict:
-    """Call a FritzBox action, return {} on any error."""
+    """Call a FritzBox action, return {} on any error.
+    Re-raises FritzAuthorizationError so callers can detect missing credentials.
+    """
     try:
         return fc.call_action(service, action, **kwargs) or {}
+    except FritzAuthorizationError:
+        raise  # let callers handle auth failures explicitly
     except Exception:
         return {}
 
@@ -125,7 +131,11 @@ def detect_fritzbox(hosts_in_network: list[dict] = None) -> Optional[str]:
             # Try reverse DNS on gateway IP → might give FQDN like fritzbox.mysticplace.de
             try:
                 fqdn = socket.gethostbyaddr(gw)[0]
-                if fqdn and fqdn not in candidates:
+                # Skip useless names that systemd-resolved/Debian return
+                # (e.g. "_gateway", "localhost", single-label names without dots)
+                if (fqdn and fqdn not in candidates
+                        and fqdn not in ("_gateway", "localhost")
+                        and not fqdn.startswith("_")):
                     candidates.append(fqdn)  # prefer FQDN over raw IP
             except Exception:
                 pass
@@ -165,7 +175,20 @@ def detect_fritzbox(hosts_in_network: list[dict] = None) -> Optional[str]:
             result = sock.connect_ex((addr, 49000))
             sock.close()
             if result == 0:
-                return host  # Return original hostname, not IP
+                # Verify it's actually a FritzBox via TR-064 and get best hostname
+                if HAS_FRITZ:
+                    try:
+                        fc = FritzConnection(address=addr, port=49000, timeout=5.0)
+                        model = (fc.modelname or "").lower()
+                        if "fritz" not in model:
+                            continue  # TR-064 answered but not a FritzBox
+                        # If we connected via raw IP, check if FritzConnection
+                        # knows a better hostname (e.g. fritz.box)
+                        return host
+                    except Exception:
+                        pass  # TR-064 handshake failed, skip
+                else:
+                    return host
         except Exception:
             pass
     return None
@@ -204,7 +227,11 @@ class FritzBox:
         s.reachable = True
 
         # ── Device Info ───────────────────────────────────────
-        r = _safe_call(fc, "DeviceInfo1", "GetInfo")
+        try:
+            r = _safe_call(fc, "DeviceInfo1", "GetInfo")
+        except FritzAuthorizationError:
+            s.auth_error = True
+            return s
         s.model    = r.get("NewModelName", "")
         s.firmware = r.get("NewSoftwareVersion", "")
         s.is_fiber = _is_fiber_model(s.model)
