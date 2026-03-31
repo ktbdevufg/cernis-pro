@@ -236,10 +236,121 @@ fn wait_for_backend(child: &mut Option<Child>) -> bool {
     false
 }
 
+fn detect_vm() -> Option<&'static str> {
+    // 1. systemd-detect-virt (most reliable on Linux)
+    if let Ok(out) = Command::new("systemd-detect-virt").output() {
+        if out.status.success() {
+            let virt = String::from_utf8_lossy(&out.stdout).trim().to_lowercase();
+            if virt != "none" && !virt.is_empty() {
+                // Map to known hypervisors
+                return match virt.as_str() {
+                    "vmware" => Some("vmware"),
+                    "oracle" | "virtualbox" => Some("virtualbox"),
+                    "kvm" | "qemu" => Some("kvm"),
+                    "microsoft" | "hyperv" => Some("hyperv"),
+                    "xen" => Some("xen"),
+                    _ => Some("unknown-vm"),
+                };
+            }
+        }
+    }
+
+    // 2. Fallback: check DMI product name
+    if let Ok(product) = std::fs::read_to_string("/sys/class/dmi/id/product_name") {
+        let p = product.trim().to_lowercase();
+        if p.contains("vmware") { return Some("vmware"); }
+        if p.contains("virtualbox") { return Some("virtualbox"); }
+        if p.contains("kvm") || p.contains("qemu") { return Some("kvm"); }
+        if p.contains("hyper-v") { return Some("hyperv"); }
+    }
+
+    None
+}
+
+fn get_webkit_version() -> (u32, u32) {
+    // Try to read WebKit2GTK version from pkg-config or library
+    if let Ok(out) = Command::new("pkg-config")
+        .args(["--modversion", "webkit2gtk-4.1"])
+        .output()
+    {
+        if out.status.success() {
+            let ver = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            let parts: Vec<&str> = ver.split('.').collect();
+            if parts.len() >= 2 {
+                let major = parts[0].parse().unwrap_or(0);
+                let minor = parts[1].parse().unwrap_or(0);
+                return (major, minor);
+            }
+        }
+    }
+    (0, 0)
+}
+
+fn get_distro() -> String {
+    // Read /etc/os-release for distro identification
+    if let Ok(content) = std::fs::read_to_string("/etc/os-release") {
+        for line in content.lines() {
+            if let Some(id) = line.strip_prefix("ID=") {
+                return id.trim_matches('"').to_lowercase();
+            }
+        }
+    }
+    "unknown".to_string()
+}
+
+fn configure_rendering() {
+    let vm = detect_vm();
+    let (wk_major, wk_minor) = get_webkit_version();
+    let distro = get_distro();
+
+    log(&format!(
+        "Environment: distro={}, vm={}, webkit={}.{}",
+        distro,
+        vm.unwrap_or("bare-metal"),
+        wk_major, wk_minor
+    ));
+
+    // Decision matrix:
+    // - Ubuntu + VM + WebKit >= 2.44: black screen confirmed → disable compositing
+    // - Ubuntu + bare-metal: usually fine, but DMABUF can fail on some GPUs
+    // - Debian + VM: works fine (older WebKit, different compositor defaults)
+    // - Debian + bare-metal: works fine
+    let need_sw_rendering = match (vm, distro.as_str()) {
+        // Ubuntu in a VM with newer WebKit → always disable
+        (Some(_), "ubuntu" | "pop" | "linuxmint") if wk_major >= 2 && wk_minor >= 44 => {
+            log("→ Ubuntu VM with WebKit >= 2.44: disabling GPU compositing");
+            true
+        }
+        // Any distro with very new WebKit in a VM → cautiously disable
+        (Some(_), _) if wk_major >= 2 && wk_minor >= 46 => {
+            log("→ VM with WebKit >= 2.46: disabling GPU compositing as precaution");
+            true
+        }
+        // Bare metal but user explicitly requested software rendering
+        _ if std::env::var("CERNIS_SOFTWARE_RENDER").is_ok() => {
+            log("→ CERNIS_SOFTWARE_RENDER set: forcing software rendering");
+            true
+        }
+        _ => {
+            log("→ Hardware rendering (default)");
+            false
+        }
+    };
+
+    if need_sw_rendering {
+        std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        log("  Set WEBKIT_DISABLE_COMPOSITING_MODE=1");
+        log("  Set WEBKIT_DISABLE_DMABUF_RENDERER=1");
+    }
+}
+
 fn main() {
     // Clear previous log
     let _ = std::fs::write(LOG_FILE, "");
     log("=== CERNIS PRO starting ===");
+
+    configure_rendering();
 
     let mut child = start_backend();
     let backend_ok = wait_for_backend(&mut child);
