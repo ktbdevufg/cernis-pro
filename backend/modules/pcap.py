@@ -229,7 +229,15 @@ async def start_capture(interface: str = None, bpf_filter: str = "",
             else:
                 _capture_error = f"Permission denied: {e}. Run: sudo setcap cap_net_raw+eip /usr/bin/cernis-backend"
         except Exception as e:
-            _capture_error = f"Capture error: {e}"
+            emsg = str(e)
+            if "ermission" in emsg or "bpf" in emsg.lower():
+                import platform as _pf2
+                if _pf2.system() == "Darwin":
+                    _capture_error = f"Permission denied: {emsg}. Packet capture requires root on macOS."
+                else:
+                    _capture_error = f"Permission denied: {emsg}. Run: sudo setcap cap_net_raw+eip /usr/bin/cernis-backend"
+            else:
+                _capture_error = f"Capture error: {emsg}"
         finally:
             global _capture_running
             _capture_running = False
