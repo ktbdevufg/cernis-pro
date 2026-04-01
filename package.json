@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "build-tauri": "tauri build --target x86_64-unknown-linux-gnu"
+    "build-tauri": "tauri build --target aarch64-apple-darwin"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"

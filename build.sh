@@ -1,8 +1,8 @@
 #!/bin/bash
 # ============================================================
-#  CERNIS PRO – Linux Build Script
-#  Plattform: Fedora 43 x64
-#  Ergebnis:  cernis-pro_1.0.0_amd64.rpm
+#  CERNIS PRO – macOS Build Script
+#  Plattform: macOS ARM64 (Apple Silicon)
+#  Ergebnis:  cernis-pro_1.0.0_aarch64.dmg
 #
 #  Aufruf: bash build.sh
 # ============================================================
@@ -16,7 +16,7 @@ TAURI_DIR="$SCRIPT_DIR"
 TAURI_SRC="$SCRIPT_DIR/src-tauri"
 
 echo "============================================"
-echo " CERNIS PRO Linux Build"
+echo " CERNIS PRO macOS ARM64 Build"
 echo " Arbeitsverzeichnis: $SCRIPT_DIR"
 echo "============================================"
 
@@ -24,27 +24,42 @@ echo "============================================"
 echo ""
 echo "[0/5] System-Abhängigkeiten prüfen..."
 
-# dnf-Pakete
-DNF_MISSING=()
-for pkg in nmap libpcap-devel net-tools traceroute; do
-    if rpm -q "$pkg" &>/dev/null; then
+# brew-Pakete
+BREW_MISSING=()
+for pkg in nmap libpcap; do
+    if brew list "$pkg" &>/dev/null; then
         echo "      $pkg: OK"
     else
-        DNF_MISSING+=("$pkg")
+        BREW_MISSING+=("$pkg")
     fi
 done
-if [ ${#DNF_MISSING[@]} -gt 0 ]; then
-    echo "      Installiere fehlende dnf-Pakete: ${DNF_MISSING[*]}"
-    sudo dnf install -y "${DNF_MISSING[@]}"
+if [ ${#BREW_MISSING[@]} -gt 0 ]; then
+    echo "      Installiere fehlende brew-Pakete: ${BREW_MISSING[*]}"
+    brew install "${BREW_MISSING[@]}"
 fi
 
-# pip3-Pakete
+# ── Python venv erstellen/aktivieren ─────────────────────────
+VENV_DIR="$SCRIPT_DIR/.venv"
+if [ ! -d "$VENV_DIR" ]; then
+    echo "      Python venv erstellen..."
+    python3 -m venv "$VENV_DIR"
+fi
+source "$VENV_DIR/bin/activate"
+echo "      Python venv: $VENV_DIR ($(python3 --version))"
+
+# PyInstaller installieren
+if ! command -v pyinstaller &>/dev/null; then
+    echo "      PyInstaller installieren..."
+    pip3 install pyinstaller --quiet
+fi
+
+# pip3-Pakete (innerhalb venv)
 for pymod in scapy pysnmp reportlab dnspython; do
     if python3 -c "import $pymod" &>/dev/null; then
         echo "      $pymod: OK"
     else
         echo "      $pymod nicht gefunden — installiere via pip3..."
-        pip3 install "$pymod" --user --quiet
+        pip3 install "$pymod" --quiet
     fi
 done
 
@@ -52,7 +67,7 @@ done
 echo ""
 echo "[1/5] Python-Abhängigkeiten installieren..."
 cd "$BACKEND_DIR"
-pip3 install -r requirements.txt --user --quiet
+pip3 install -r requirements.txt --quiet
 echo "      OK"
 
 # ── Schritt 2: Frontend bauen ─────────────────────────────────
@@ -71,7 +86,7 @@ cd "$BACKEND_DIR"
 # Altes Build-Verzeichnis aufräumen
 rm -rf dist/ build/
 
-pyinstaller cernis_linux.spec --noconfirm
+pyinstaller cernis_macos.spec --noconfirm
 
 BACKEND_BIN="$BACKEND_DIR/dist/cernis-backend"
 if [ ! -f "$BACKEND_BIN" ]; then
@@ -84,13 +99,13 @@ echo "      OK — $BACKEND_BIN"
 echo ""
 echo "[4/5] Backend Binary für Tauri bereitstellen..."
 
-# Tauri externalBin erwartet: cernis-backend-x86_64-unknown-linux-gnu
-TAURI_BIN_NAME="cernis-backend-x86_64-unknown-linux-gnu"
+# Tauri externalBin erwartet: cernis-backend-aarch64-apple-darwin
+TAURI_BIN_NAME="cernis-backend-aarch64-apple-darwin"
 cp "$BACKEND_BIN" "$TAURI_SRC/$TAURI_BIN_NAME"
 chmod +x "$TAURI_SRC/$TAURI_BIN_NAME"
 
-# Auch in target/x86_64-unknown-linux-gnu/release/ ablegen
-TAURI_RELEASE="$TAURI_DIR/src-tauri/target/x86_64-unknown-linux-gnu/release"
+# Auch in target/aarch64-apple-darwin/release/ ablegen
+TAURI_RELEASE="$TAURI_DIR/src-tauri/target/aarch64-apple-darwin/release"
 mkdir -p "$TAURI_RELEASE"
 cp "$BACKEND_BIN" "$TAURI_RELEASE/cernis-backend"
 chmod +x "$TAURI_RELEASE/cernis-backend"
@@ -99,24 +114,24 @@ echo "      OK"
 
 # ── Schritt 5: Tauri bauen ────────────────────────────────────
 echo ""
-echo "[5/5] Tauri Build (.rpm)..."
+echo "[5/5] Tauri Build (.dmg)..."
 cd "$TAURI_DIR"
 npm install --silent
 npm run build-tauri
 
-# ── Schritt 6: Pakete nach /home/kbach/ kopieren ─────────────
+# ── Schritt 6: Pakete nach Desktop kopieren ──────────────────
 echo ""
 echo "[6] Pakete kopieren..."
 
 VERSION=$(python3 -c "import json; print(json.load(open('$TAURI_SRC/tauri.conf.json'))['version'])")
-DEST="/home/kbach"
+DEST="$HOME/Desktop"
 mkdir -p "$DEST"
 
-RPM=$(find "$TAURI_DIR/src-tauri/target" -name "*.rpm" -print -quit 2>/dev/null)
+DMG=$(find "$TAURI_DIR/src-tauri/target" -name "*.dmg" -print -quit 2>/dev/null)
 
-if [ -n "$RPM" ]; then
-    cp "$RPM" "$DEST/cernis-pro_${VERSION}_amd64.rpm"
-    echo "      → $DEST/cernis-pro_${VERSION}_amd64.rpm"
+if [ -n "$DMG" ]; then
+    cp "$DMG" "$DEST/cernis-pro_${VERSION}_aarch64.dmg"
+    echo "      → $DEST/cernis-pro_${VERSION}_aarch64.dmg"
 fi
 
 echo ""
@@ -125,5 +140,5 @@ echo " BUILD ERFOLGREICH"
 echo "============================================"
 echo ""
 echo "Pakete:"
-[ -n "$RPM" ] && echo "  $DEST/cernis-pro_${VERSION}_amd64.rpm"
+[ -n "$DMG" ] && echo "  $DEST/cernis-pro_${VERSION}_aarch64.dmg"
 echo ""

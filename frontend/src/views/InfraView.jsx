@@ -170,6 +170,7 @@ export default function InfraView({ selectedIface }) {
       const poll = () => {
         fetch('/api/pcap/status').then(r=>r.json()).then(d => {
           setPcapRunning(d.running); setPcapStats(d.stats)
+          if (d.error) setPcapError(d.error)
         }).catch(()=>{})
         if (pcapRunning) {
           fetch('/api/pcap/packets?limit=50').then(r=>r.json()).then(setPackets).catch(()=>{})

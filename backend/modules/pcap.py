@@ -183,14 +183,28 @@ async def start_capture(interface: str = None, bpf_filter: str = "",
         return {"ok": True, "error": ""}
 
     # Quick permission check before starting the thread
+    import platform
+    _sys = platform.system()
     try:
-        import socket
-        s = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(3))
-        s.close()
+        if _sys == "Linux":
+            import socket as _sock
+            s = _sock.socket(_sock.AF_PACKET, _sock.SOCK_RAW, _sock.ntohs(3))
+            s.close()
+        elif _sys == "Darwin":
+            # macOS uses BPF devices for packet capture
+            import glob as _glob
+            bpf_devs = _glob.glob("/dev/bpf*")
+            if not bpf_devs:
+                return {"ok": False, "error": "No BPF devices found — packet capture unavailable"}
+            with open(bpf_devs[0], "rb") as _f:
+                pass  # readable = permission OK
     except PermissionError:
-        return {"ok": False, "error": "Permission denied — packet capture requires root or CAP_NET_RAW. Run: sudo setcap cap_net_raw+eip /usr/bin/cernis-backend"}
+        if _sys == "Darwin":
+            return {"ok": False, "error": "Permission denied — packet capture requires root on macOS. Run CernisPro with: sudo /Applications/CernisPro.app/Contents/MacOS/CernisPro"}
+        else:
+            return {"ok": False, "error": "Permission denied — packet capture requires root or CAP_NET_RAW. Run: sudo setcap cap_net_raw+eip /usr/bin/cernis-backend"}
     except Exception:
-        pass  # AF_PACKET might not exist on all platforms
+        pass  # permission check inconclusive, let scapy try
 
     _capture_running = True
     _capture_error = ""
@@ -209,7 +223,11 @@ async def start_capture(interface: str = None, bpf_filter: str = "",
         try:
             sniff(**kwargs)
         except PermissionError as e:
-            _capture_error = f"Permission denied: {e}. Run: sudo setcap cap_net_raw+eip /usr/bin/cernis-backend"
+            import platform as _pf
+            if _pf.system() == "Darwin":
+                _capture_error = f"Permission denied: {e}. Packet capture requires root on macOS."
+            else:
+                _capture_error = f"Permission denied: {e}. Run: sudo setcap cap_net_raw+eip /usr/bin/cernis-backend"
         except Exception as e:
             _capture_error = f"Capture error: {e}"
         finally:

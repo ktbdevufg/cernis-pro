@@ -1,7 +1,7 @@
 {
   "meta": {
     "project": "CERNIS_PRO",
-    "snapshot_date": "2026-03-31",
+    "snapshot_date": "2026-04-01",
     "purpose": "claude_session_handoff",
     "instruction": "READ THIS FIRST. Apply all entries in 'rules' unconditionally. Treat 'state' as ground truth. Do not re-derive what is already decided. Other platforms (Windows, macOS) are added when work begins on them."
   },
@@ -44,18 +44,42 @@
     "frontend": "frontend/",
     "tauri": "src-tauri/",
     "build_script": "build.sh",
-    "pyinstaller_spec": "backend/cernis_linux.spec",
+    "pyinstaller_spec_linux": "backend/cernis_linux.spec",
+    "pyinstaller_spec_macos": "backend/cernis_macos.spec",
     "tauri_config": "src-tauri/tauri.conf.json",
     "package_json": "package.json"
   },
   "current_platform": {
-    "os": "Ubuntu_24.04_x64",
-    "user": "kbach",
-    "hostname": "ubultsvm",
-    "target_triple": "x86_64-unknown-linux-gnu",
-    "build_targets": ["deb", "appimage"]
+    "os": "macOS_26.4_ARM64",
+    "user": "karlbach",
+    "hostname": "parallels_vm",
+    "target_triple": "aarch64-apple-darwin",
+    "build_targets": ["dmg"]
   },
   "open_fixes": [],
+  "completed_fixes_macos": [
+    {
+      "id": 18,
+      "file": "backend/main.py",
+      "issue": "fritz_hostname_map nie befüllt — FritzBox-Hostnamen fehlen als DNS-Fallback für alle Hosts",
+      "fix": "fritz_hostname_map wird vor der Merge-Schleife für ALLE FritzBox-Hosts befüllt (ip→hostname), nicht nur für synthetisch hinzugefügte",
+      "fixed_date": "2026-04-01"
+    },
+    {
+      "id": 19,
+      "file": "backend/modules/pcap.py",
+      "issue": "Permission-Check nutzt AF_PACKET (Linux-only) — auf macOS AttributeError, Capture startet scheinbar aber Thread stirbt sofort",
+      "fix": "Plattformweiche: Linux AF_PACKET-Check, macOS BPF-Device-Check (/dev/bpf*). Fehlermeldungen OS-spezifisch (sudo statt setcap auf macOS)",
+      "fixed_date": "2026-04-01"
+    },
+    {
+      "id": 20,
+      "file": "frontend/src/views/InfraView.jsx",
+      "issue": "Pcap Status-Poll ignoriert error-Feld — Capture-Fehler unsichtbar für User",
+      "fix": "d.error aus /api/pcap/status wird in pcapError-State übertragen und im UI angezeigt",
+      "fixed_date": "2026-04-01"
+    }
+  ],
   "completed_fixes_linux": [
     {
       "id": 1,
@@ -183,7 +207,7 @@
     "rogue_dhcp": "Kein zweiter DHCP-Server zum Testen",
     "remote_agents": "Benötigt zweite CERNIS PRO Instanz",
     "grafana_integration": "/metrics Endpoint OK — Grafana-Anbindung separat testen",
-    "pcap_capture": "Code OK, scapy+libpcap installiert, benötigt CAP_NET_RAW: sudo setcap cap_net_raw+eip $(which python3)"
+    "pcap_capture": "Code OK, plattformweiche Permission-Checks. Linux: CAP_NET_RAW oder sudo. macOS: sudo oder BPF-Zugriff. Finaler Test auf physischem MacBook M4 nötig (Parallels hat kein BPF)"
   },
   "build_lessons_linux": {
     "tauri_window_url": "Window URL muss direkt auf http://127.0.0.1:8765 gesetzt sein - about:blank mit JS-Navigation schlägt unter WebKit2GTK fehl",
@@ -193,6 +217,16 @@
     "pip_install": "Auf älteren Systemen --user statt --break-system-packages verwenden (pip 21 / Python 3.9 kennt --break-system-packages nicht)",
     "externalBin_naming": "Binary muss cernis-backend-x86_64-unknown-linux-gnu heissen in src-tauri/",
     "scapy_permission": "SCAPY_CACHE_DIR=tempdir vor Import setzen; except Exception statt ImportError verwenden"
+  },
+  "build_lessons_macos": {
+    "venv_required": "macOS Homebrew Python enforces PEP 668 — pip3 install outside venv fails. build.sh creates .venv automatically",
+    "upx_disabled": "UPX does not work reliably on macOS ARM64 — disabled in cernis_macos.spec",
+    "objc_not_excluded": "Do NOT exclude objc/AppKit/Foundation on macOS — psutil and system libs need them",
+    "target_arch": "target_arch='arm64' in PyInstaller spec for Apple Silicon",
+    "icon_icns": "icon.icns already present in src-tauri/icons/ — used automatically for .app/.dmg",
+    "pyinstaller_in_venv": "PyInstaller must be explicitly installed in the venv (not in requirements.txt)",
+    "binary_name": "cernis-backend-aarch64-apple-darwin in src-tauri/",
+    "dmg_output": "Tauri produces CernisPro_1.0.0_aarch64.dmg in target/aarch64-apple-darwin/release/bundle/dmg/"
   },
   "build_lessons_cross_platform": {
     "tauri_target": "CARGO_BUILD_TARGET wird vom Tauri-Bundler NICHT gelesen - --target Flag im tauri build Befehl verwenden",

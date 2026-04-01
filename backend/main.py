@@ -1725,6 +1725,13 @@ async def ws_scan(websocket: WebSocket):
             fritz_hosts = await asyncio.wait_for(
                 loop.run_in_executor(None, fritz_tmp.get_hosts), timeout=10.0
             )
+            # Build hostname map for ALL FritzBox hosts (used as DNS fallback)
+            for fh in fritz_hosts:
+                fip = fh.get("ip", "")
+                fhn = fh.get("hostname", "")
+                if fip and fhn:
+                    fritz_hostname_map[fip] = fhn
+
             added_fritz = 0
             for fh in fritz_hosts:
                 fip = fh.get("ip", "")
