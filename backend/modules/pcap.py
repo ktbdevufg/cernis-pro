@@ -175,6 +175,39 @@ def unsubscribe(cb: Callable):
 
 # ── Permission check ─────────────────────────────────────────
 
+def _resolve_windows_iface(name: str) -> Optional[str]:
+    """Map a Windows adapter name (from ipconfig) to a Scapy interface name.
+    ipconfig returns e.g. 'Ethernet-Adapter Ethernet0', Scapy wants 'Ethernet0'."""
+    if platform.system() != "Windows" or not HAS_SCAPY:
+        return name
+    try:
+        from scapy.arch.windows import get_windows_if_list
+        scapy_ifaces = get_windows_if_list()
+        # Direct match first
+        for iface in scapy_ifaces:
+            if iface.get("name", "") == name:
+                return name
+        # Strip German/English adapter prefix: "Ethernet-Adapter X" -> "X", "Wireless LAN adapter X" -> "X"
+        stripped = name
+        for prefix in ["Ethernet-Adapter ", "Ethernet adapter ",
+                       "Drahtlos-LAN-Adapter ", "Wireless LAN adapter ",
+                       "WLAN-Adapter ", "Wi-Fi adapter "]:
+            if name.startswith(prefix):
+                stripped = name[len(prefix):]
+                break
+        for iface in scapy_ifaces:
+            if iface.get("name", "") == stripped:
+                return stripped
+        # Substring match: Scapy name contained in adapter name
+        for iface in scapy_ifaces:
+            sname = iface.get("name", "")
+            if sname and sname in name:
+                return sname
+    except Exception:
+        pass
+    return name
+
+
 def _check_capture_permission() -> Optional[str]:
     """Return error message if capture is not possible, None if OK."""
     _sys = platform.system()
@@ -234,6 +267,10 @@ async def start_capture(interface: str = None, bpf_filter: str = "",
         return {"ok": False, "error": "scapy not installed"}
     if _capture_running:
         return {"ok": True, "error": ""}
+
+    # Resolve Windows adapter name to Scapy interface name
+    if interface and platform.system() == "Windows":
+        interface = _resolve_windows_iface(interface)
 
     # Permission check
     perm_err = _check_capture_permission()

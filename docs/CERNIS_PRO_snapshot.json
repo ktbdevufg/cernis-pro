@@ -246,6 +246,13 @@
       "issue": "Scapy not bundled — collect_all('scapy') silently fails on Windows ('not a package'), scapy also missing from requirements.txt",
       "fix": "Added scapy to requirements.txt. In spec: replaced collect_all with collect_submodules + collect_data_files, added explicit hiddenimports for scapy core modules (scapy.all, scapy.layers.*, scapy.arch.windows)",
       "fixed_date": "2026-04-01"
+    },
+    {
+      "id": 27,
+      "file": "backend/modules/pcap.py",
+      "issue": "Pcap 'Interface not found' — ipconfig returns 'Ethernet-Adapter Ethernet0' but Scapy expects 'Ethernet0'",
+      "fix": "Added _resolve_windows_iface() that strips German/English adapter prefixes and matches against Scapy's get_windows_if_list(). Called in start_capture() before passing to AsyncSniffer",
+      "fixed_date": "2026-04-01"
     }
   ],
   "not_tested": {
@@ -283,7 +290,9 @@
     "upx_disabled": "UPX disabled in cernis_windows.spec for stability",
     "vs_build_tools": "vcvarsall.bat x64 must be sourced before Tauri build",
     "scapy_bundling": "collect_all('scapy') FAILS silently on Windows — use collect_submodules('scapy') + explicit hiddenimports instead. Scapy must be in requirements.txt. Needs Npcap at runtime",
-    "creation_flags": "CREATE_NO_WINDOW (0x08000000) flag already set in main.rs for backend subprocess"
+    "creation_flags": "CREATE_NO_WINDOW (0x08000000) flag already set in main.rs for backend subprocess",
+    "interface_names": "ipconfig returns 'Ethernet-Adapter X' / 'Drahtlos-LAN-Adapter X' but Scapy wants just 'X' — _resolve_windows_iface() strips prefix",
+    "npcap_required": "Scapy needs Npcap installed at runtime for packet capture — without it: 'No libpcap provider available'"
   },
   "build_lessons_cross_platform": {
     "tauri_target": "CARGO_BUILD_TARGET wird vom Tauri-Bundler NICHT gelesen - --target Flag im tauri build Befehl verwenden",
