@@ -239,6 +239,13 @@
       "issue": "No Windows build script",
       "fix": "Created build.ps1: VS Build Tools init, pip install, npm build, PyInstaller, Tauri NSIS build, installer copy to C:\\Users\\Claude\\",
       "fixed_date": "2026-04-01"
+    },
+    {
+      "id": 26,
+      "file": "backend/cernis_windows.spec + backend/requirements.txt",
+      "issue": "Scapy not bundled — collect_all('scapy') silently fails on Windows ('not a package'), scapy also missing from requirements.txt",
+      "fix": "Added scapy to requirements.txt. In spec: replaced collect_all with collect_submodules + collect_data_files, added explicit hiddenimports for scapy core modules (scapy.all, scapy.layers.*, scapy.arch.windows)",
+      "fixed_date": "2026-04-01"
     }
   ],
   "not_tested": {
@@ -275,7 +282,7 @@
     "uac_admin": "uac_admin=False in cernis_windows.spec — no elevation required",
     "upx_disabled": "UPX disabled in cernis_windows.spec for stability",
     "vs_build_tools": "vcvarsall.bat x64 must be sourced before Tauri build",
-    "scapy_warning": "Scapy collect_all warns 'not a package' but build succeeds — Scapy needs Npcap at runtime",
+    "scapy_bundling": "collect_all('scapy') FAILS silently on Windows — use collect_submodules('scapy') + explicit hiddenimports instead. Scapy must be in requirements.txt. Needs Npcap at runtime",
     "creation_flags": "CREATE_NO_WINDOW (0x08000000) flag already set in main.rs for backend subprocess"
   },
   "build_lessons_cross_platform": {

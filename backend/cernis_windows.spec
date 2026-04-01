@@ -43,10 +43,13 @@ datas += d; binaries += b; hiddenimports += h
 d, b, h = collect_all('reportlab')
 datas += d; binaries += b; hiddenimports += h
 
-# ── Scapy (optional – needs Npcap at runtime on Windows) ─────
+# ── Scapy (needs Npcap at runtime on Windows) ────────────────
+# collect_all('scapy') fails on Windows ("not a package" warning),
+# so we collect submodules explicitly + add hiddenimports
 try:
-    d, b, h = collect_all('scapy')
-    datas += d; binaries += b; hiddenimports += h
+    hiddenimports += collect_submodules('scapy')
+    d = collect_data_files('scapy')
+    datas += d
 except Exception:
     pass
 
@@ -93,6 +96,10 @@ hiddenimports += [
     # Windows-specific
     'winreg',
     'ctypes.wintypes',
+    # Scapy — explicit imports (collect_all fails on Windows)
+    'scapy', 'scapy.all', 'scapy.layers.all', 'scapy.layers.inet',
+    'scapy.layers.inet6', 'scapy.layers.l2', 'scapy.sendrecv',
+    'scapy.arch', 'scapy.arch.windows',
 ]
 
 # ── Analysis ──────────────────────────────────────────────────
