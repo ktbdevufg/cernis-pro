@@ -71,6 +71,9 @@
     },
     "externalBin": [
       "cernis-backend"
+    ],
+    "resources": [
+      "../scripts/install-bpf-permissions.sh"
     ]
   }
 }

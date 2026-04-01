@@ -69,6 +69,7 @@ from modules.pcap import (
     start_capture as pcap_start, stop_capture as pcap_stop,
     get_capture_status, get_recent_packets, get_pcap_path, check_available as pcap_available,
     subscribe as pcap_subscribe, unsubscribe as pcap_unsubscribe,
+    _check_capture_permission as pcap_check_permission,
 )
 from modules.sla import get_all_sla_stats, get_sla_stats, record_sample, init_sla_db
 from modules.alerting import (
@@ -1418,7 +1419,8 @@ async def api_lldp_topology():
 
 @app.get("/api/pcap/available")
 async def api_pcap_available():
-    return {"available": pcap_available()}
+    perm_err = pcap_check_permission() if pcap_available() else None
+    return {"available": pcap_available(), "permission_error": perm_err or ""}
 
 @app.post("/api/pcap/start")
 async def api_pcap_start(payload: dict = Body(default={})):
