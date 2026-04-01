@@ -4,7 +4,7 @@
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::process::{Child, Command, Stdio};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 use tauri::{Manager, WindowEvent};
@@ -12,13 +12,22 @@ use tauri::{Manager, WindowEvent};
 const BACKEND_PORT: u16 = 8765;
 const BACKEND_URL: &str = "http://127.0.0.1:8765";
 const STARTUP_TIMEOUT_SECS: u64 = 45;
-const LOG_FILE: &str = "/tmp/cernis-backend.log";
+
+fn log_path() -> &'static str {
+    static LOG_PATH: OnceLock<String> = OnceLock::new();
+    LOG_PATH.get_or_init(|| {
+        std::env::temp_dir()
+            .join("cernis-backend.log")
+            .to_string_lossy()
+            .into_owned()
+    })
+}
 
 fn log(msg: &str) {
     let timestamp = chrono_lite();
     let line = format!("[{}] {}\n", timestamp, msg);
     eprint!("{}", line);
-    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(LOG_FILE) {
+    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(log_path()) {
         let _ = f.write_all(line.as_bytes());
     }
 }
@@ -114,12 +123,12 @@ fn start_backend() -> Option<Child> {
     let stdout_file = OpenOptions::new()
         .create(true)
         .append(true)
-        .open(LOG_FILE)
+        .open(log_path())
         .ok();
     let stderr_file = OpenOptions::new()
         .create(true)
         .append(true)
-        .open(LOG_FILE)
+        .open(log_path())
         .ok();
 
     let mut cmd = Command::new(&backend);
@@ -181,7 +190,7 @@ fn wait_for_backend(child: &mut Option<Child>) -> bool {
                         "ERROR: Backend process exited prematurely with status: {}",
                         status
                     ));
-                    log(&format!("Check {} for details", LOG_FILE));
+                    log(&format!("Check {} for details", log_path()));
                     return false;
                 }
                 Ok(None) => {} // still running, good
@@ -239,7 +248,7 @@ fn wait_for_backend(child: &mut Option<Child>) -> bool {
         "ERROR: Backend did not respond within {}s ({} attempts). Giving up.",
         STARTUP_TIMEOUT_SECS, attempts
     ));
-    log(&format!("Check {} for backend errors", LOG_FILE));
+    log(&format!("Check {} for backend errors", log_path()));
     false
 }
 
@@ -354,7 +363,7 @@ fn configure_rendering() {
 
 fn main() {
     // Clear previous log
-    let _ = std::fs::write(LOG_FILE, "");
+    let _ = std::fs::write(log_path(), "");
     log("=== CERNIS PRO starting ===");
 
     configure_rendering();

@@ -46,15 +46,17 @@
     "build_script": "build.sh",
     "pyinstaller_spec_linux": "backend/cernis_linux.spec",
     "pyinstaller_spec_macos": "backend/cernis_macos.spec",
+    "pyinstaller_spec_windows": "backend/cernis_windows.spec",
     "tauri_config": "src-tauri/tauri.conf.json",
-    "package_json": "package.json"
+    "package_json": "package.json",
+    "build_script_windows": "build.ps1"
   },
   "current_platform": {
-    "os": "macOS_26.4_ARM64",
-    "user": "karlbach",
-    "hostname": "parallels_vm",
-    "target_triple": "aarch64-apple-darwin",
-    "build_targets": ["dmg"]
+    "os": "Windows_11_x64",
+    "user": "Claude",
+    "hostname": "windows_vm",
+    "target_triple": "x86_64-pc-windows-msvc",
+    "build_targets": ["nsis"]
   },
   "open_fixes": [],
   "completed_fixes_macos": [
@@ -202,6 +204,43 @@
       "fixed_date": "2026-03-31"
     }
   ],
+  "completed_fixes_windows": [
+    {
+      "id": 21,
+      "file": "src-tauri/src/main.rs",
+      "issue": "LOG_FILE hardcoded to /tmp/cernis-backend.log — path does not exist on Windows, no logging possible",
+      "fix": "Replaced const LOG_FILE with log_path() function using OnceLock + std::env::temp_dir() — works cross-platform",
+      "fixed_date": "2026-04-01"
+    },
+    {
+      "id": 22,
+      "file": "src-tauri/tauri.conf.json",
+      "issue": "bundle.targets set to [dmg] (macOS), no windows.nsis config",
+      "fix": "targets set to [nsis], added bundle.windows.nsis.installMode = both",
+      "fixed_date": "2026-04-01"
+    },
+    {
+      "id": 23,
+      "file": "package.json",
+      "issue": "build-tauri target was aarch64-apple-darwin",
+      "fix": "Changed to x86_64-pc-windows-msvc",
+      "fixed_date": "2026-04-01"
+    },
+    {
+      "id": 24,
+      "file": "backend/cernis_windows.spec",
+      "issue": "No PyInstaller spec for Windows",
+      "fix": "Created cernis_windows.spec with uac_admin=False, upx=False, Windows hiddenimports (winreg, ctypes.wintypes), macOS excludes",
+      "fixed_date": "2026-04-01"
+    },
+    {
+      "id": 25,
+      "file": "build.ps1",
+      "issue": "No Windows build script",
+      "fix": "Created build.ps1: VS Build Tools init, pip install, npm build, PyInstaller, Tauri NSIS build, installer copy to C:\\Users\\Claude\\",
+      "fixed_date": "2026-04-01"
+    }
+  ],
   "not_tested": {
     "snmp": "Kein SNMP-fähiges Gerät im Testnetzwerk",
     "rogue_dhcp": "Kein zweiter DHCP-Server zum Testen",
@@ -227,6 +266,17 @@
     "pyinstaller_in_venv": "PyInstaller must be explicitly installed in the venv (not in requirements.txt)",
     "binary_name": "cernis-backend-aarch64-apple-darwin in src-tauri/",
     "dmg_output": "Tauri produces CernisPro_1.0.0_aarch64.dmg in target/aarch64-apple-darwin/release/bundle/dmg/"
+  },
+  "build_lessons_windows": {
+    "log_path": "main.rs LOG_FILE was /tmp/ (Unix-only) — replaced with std::env::temp_dir() via OnceLock for cross-platform",
+    "binary_name": "cernis-backend-x86_64-pc-windows-msvc.exe in src-tauri/",
+    "nsis_installer": "Tauri produces CernisPro_1.0.0_x64-setup.exe in target/x86_64-pc-windows-msvc/release/bundle/nsis/",
+    "install_mode": "bundle.windows.nsis.installMode = 'both' in tauri.conf.json",
+    "uac_admin": "uac_admin=False in cernis_windows.spec — no elevation required",
+    "upx_disabled": "UPX disabled in cernis_windows.spec for stability",
+    "vs_build_tools": "vcvarsall.bat x64 must be sourced before Tauri build",
+    "scapy_warning": "Scapy collect_all warns 'not a package' but build succeeds — Scapy needs Npcap at runtime",
+    "creation_flags": "CREATE_NO_WINDOW (0x08000000) flag already set in main.rs for backend subprocess"
   },
   "build_lessons_cross_platform": {
     "tauri_target": "CARGO_BUILD_TARGET wird vom Tauri-Bundler NICHT gelesen - --target Flag im tauri build Befehl verwenden",
