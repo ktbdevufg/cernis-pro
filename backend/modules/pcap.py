@@ -184,24 +184,25 @@ def _check_capture_permission() -> Optional[str]:
         bpf_devs = sorted(_glob.glob("/dev/bpf*"))
         if not bpf_devs:
             return "No BPF devices found — packet capture unavailable on this system."
-        # Try to actually open a BPF device for reading (requires O_RDONLY at minimum)
+        # Scapy needs read-write access to BPF devices
         last_err = None
         for dev in bpf_devs:
             try:
-                fd = os.open(dev, os.O_RDONLY)
+                fd = os.open(dev, os.O_RDWR)
                 os.close(fd)
-                return None  # success — at least one BPF device is readable
+                return None  # success — at least one BPF device is writable
             except PermissionError as e:
                 last_err = e
             except OSError as e:
                 # EBUSY (device in use) is not a permission problem — try next
-                import errno
-                if e.errno == errno.EBUSY:
+                import errno as _errno
+                if e.errno == _errno.EBUSY:
                     continue
                 last_err = e
         return (
-            f"Permission denied ({last_err}). Packet capture requires root on macOS.\n"
-            "Fix: sudo chmod o+r /dev/bpf*   (or install Wireshark which sets BPF permissions)"
+            f"Permission denied ({last_err}). Packet capture requires BPF access on macOS.\n"
+            "Fix (resets on reboot): sudo chmod o+rw /dev/bpf*\n"
+            "Permanent fix: install Wireshark (sets BPF permissions via ChmodBPF LaunchDaemon)"
         )
 
     elif _sys == "Linux":
@@ -258,25 +259,32 @@ async def start_capture(interface: str = None, bpf_filter: str = "",
         _sniffer = AsyncSniffer(**kwargs)
         _sniffer.start()
         # Give the sniffer thread a moment to fail (permission errors happen instantly)
-        time.sleep(0.5)
-        if not _sniffer.running:
-            # Sniffer thread died immediately
+        time.sleep(0.8)
+        # Check if thread is actually alive (.running is unreliable — stays True after crash)
+        thread_alive = (hasattr(_sniffer, 'thread') and _sniffer.thread
+                        and _sniffer.thread.is_alive())
+        if not thread_alive:
+            # Sniffer thread died immediately — extract error from thread result
             err = ""
-            if hasattr(_sniffer, 'exception') and _sniffer.exception:
-                err = str(_sniffer.exception)
-            if not err:
-                err = "Capture failed to start (check permissions)"
+            try:
+                # AsyncSniffer stores exception in .exception on some versions
+                if hasattr(_sniffer, 'exception') and _sniffer.exception:
+                    err = str(_sniffer.exception)
+            except Exception:
+                pass
             _sniffer = None
+            if not err:
+                if platform.system() == "Darwin":
+                    err = ("Capture failed — BPF device not accessible.\n"
+                           "Fix (resets on reboot): sudo chmod o+rw /dev/bpf*\n"
+                           "Permanent fix: install Wireshark (ChmodBPF LaunchDaemon)")
+                else:
+                    err = ("Capture failed — raw socket not accessible.\n"
+                           "Fix: sudo setcap cap_net_raw+eip /usr/bin/cernis-backend")
             return {"ok": False, "error": err}
     except Exception as e:
         _sniffer = None
-        emsg = str(e)
-        if "ermission" in emsg or "bpf" in emsg.lower() or "root" in emsg.lower():
-            if platform.system() == "Darwin":
-                return {"ok": False, "error": f"{emsg}\nFix: sudo chmod o+r /dev/bpf*"}
-            else:
-                return {"ok": False, "error": f"{emsg}\nFix: sudo setcap cap_net_raw+eip /usr/bin/cernis-backend"}
-        return {"ok": False, "error": f"Capture failed: {emsg}"}
+        return {"ok": False, "error": f"Capture failed: {e}"}
 
     _capture_running = True
     return {"ok": True, "error": ""}
@@ -308,10 +316,13 @@ def _save_pcap():
 
 def get_capture_status() -> dict:
     global _capture_running, _sniffer
-    # Sync _capture_running with actual sniffer state
-    if _capture_running and _sniffer and not _sniffer.running:
-        _capture_running = False
-        _save_pcap()
+    # Sync _capture_running with actual sniffer thread state
+    if _capture_running and _sniffer:
+        thread_alive = (hasattr(_sniffer, 'thread') and _sniffer.thread
+                        and _sniffer.thread.is_alive())
+        if not thread_alive:
+            _capture_running = False
+            _save_pcap()
     return {
         "running": _capture_running,
         "packets": len(_capture_packets),
