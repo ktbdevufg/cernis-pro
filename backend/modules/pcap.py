@@ -1,15 +1,13 @@
 """
 CERNIS PRO Packet Capture
 Live packet capture with filtering, statistics, and pcap export.
-Requires scapy (pip install scapy) or tcpdump fallback.
+Requires scapy (pip install scapy).
 """
-import asyncio
-import threading
 import time
 import os
+import platform
 import tempfile
 from dataclasses import dataclass, field, asdict
-from collections import defaultdict
 from typing import Optional, Callable
 
 try:
@@ -17,7 +15,9 @@ try:
     import os as _os, tempfile as _tmp
     if not _os.environ.get('SCAPY_CACHE_DIR'):
         _os.environ['SCAPY_CACHE_DIR'] = _tmp.gettempdir()
-    from scapy.all import sniff, wrpcap, rdpcap, Ether, IP, IPv6, TCP, UDP, ICMP, DNS
+    from scapy.all import (
+        sniff, wrpcap, Ether, IP, IPv6, TCP, UDP, ICMP, DNS, AsyncSniffer,
+    )
     HAS_SCAPY = True
 except Exception:
     HAS_SCAPY = False
@@ -71,6 +71,8 @@ _capture_stats = CaptureStats()
 _subscribers: list[Callable] = []
 _pcap_file: Optional[str] = None
 _raw_packets = []
+_capture_error = ""
+_sniffer: Optional["AsyncSniffer"] = None
 
 
 def _parse_packet(pkt) -> Optional[PacketSummary]:
@@ -171,95 +173,132 @@ def unsubscribe(cb: Callable):
         _subscribers.remove(cb)
 
 
-_capture_error = ""
+# ── Permission check ─────────────────────────────────────────
+
+def _check_capture_permission() -> Optional[str]:
+    """Return error message if capture is not possible, None if OK."""
+    _sys = platform.system()
+
+    if _sys == "Darwin":
+        import glob as _glob
+        bpf_devs = sorted(_glob.glob("/dev/bpf*"))
+        if not bpf_devs:
+            return "No BPF devices found — packet capture unavailable on this system."
+        # Try to actually open a BPF device for reading (requires O_RDONLY at minimum)
+        last_err = None
+        for dev in bpf_devs:
+            try:
+                fd = os.open(dev, os.O_RDONLY)
+                os.close(fd)
+                return None  # success — at least one BPF device is readable
+            except PermissionError as e:
+                last_err = e
+            except OSError as e:
+                # EBUSY (device in use) is not a permission problem — try next
+                import errno
+                if e.errno == errno.EBUSY:
+                    continue
+                last_err = e
+        return (
+            f"Permission denied ({last_err}). Packet capture requires root on macOS.\n"
+            "Fix: sudo chmod o+r /dev/bpf*   (or install Wireshark which sets BPF permissions)"
+        )
+
+    elif _sys == "Linux":
+        try:
+            import socket as _sock
+            s = _sock.socket(_sock.AF_PACKET, _sock.SOCK_RAW, _sock.ntohs(3))
+            s.close()
+            return None
+        except PermissionError:
+            return (
+                "Permission denied — packet capture requires root or CAP_NET_RAW.\n"
+                "Fix: sudo setcap cap_net_raw+eip /usr/bin/cernis-backend"
+            )
+        except Exception:
+            return None  # inconclusive, let scapy try
+
+    return None  # unknown OS, let scapy try
+
+
+# ── Start / Stop ─────────────────────────────────────────────
 
 async def start_capture(interface: str = None, bpf_filter: str = "",
                          max_packets: int = 10000) -> dict:
-    """Start background packet capture. Returns {ok, error}."""
-    global _capture_running, _capture_packets, _capture_stats, _raw_packets, _pcap_file, _capture_error
+    """Start background packet capture using AsyncSniffer. Returns {ok, error}."""
+    global _capture_running, _capture_packets, _capture_stats
+    global _raw_packets, _pcap_file, _capture_error, _sniffer
+
     if not HAS_SCAPY:
         return {"ok": False, "error": "scapy not installed"}
     if _capture_running:
         return {"ok": True, "error": ""}
 
-    # Quick permission check before starting the thread
-    import platform
-    _sys = platform.system()
-    try:
-        if _sys == "Linux":
-            import socket as _sock
-            s = _sock.socket(_sock.AF_PACKET, _sock.SOCK_RAW, _sock.ntohs(3))
-            s.close()
-        elif _sys == "Darwin":
-            # macOS uses BPF devices for packet capture
-            import glob as _glob
-            bpf_devs = _glob.glob("/dev/bpf*")
-            if not bpf_devs:
-                return {"ok": False, "error": "No BPF devices found — packet capture unavailable"}
-            with open(bpf_devs[0], "rb") as _f:
-                pass  # readable = permission OK
-    except PermissionError:
-        if _sys == "Darwin":
-            return {"ok": False, "error": "Permission denied — packet capture requires root on macOS. Run CernisPro with: sudo /Applications/CernisPro.app/Contents/MacOS/CernisPro"}
-        else:
-            return {"ok": False, "error": "Permission denied — packet capture requires root or CAP_NET_RAW. Run: sudo setcap cap_net_raw+eip /usr/bin/cernis-backend"}
-    except Exception:
-        pass  # permission check inconclusive, let scapy try
+    # Permission check
+    perm_err = _check_capture_permission()
+    if perm_err:
+        return {"ok": False, "error": perm_err}
 
-    _capture_running = True
+    # Reset state
     _capture_error = ""
     _capture_packets = []
     _raw_packets = []
     _capture_stats = CaptureStats()
     _pcap_file = os.path.join(tempfile.gettempdir(), f"cernis_capture_{int(time.time())}.pcap")
 
-    def _run():
-        global _capture_error
-        kwargs = {"prn": _handle_packet, "store": 0, "count": max_packets}
-        if interface:
-            kwargs["iface"] = interface
-        if bpf_filter:
-            kwargs["filter"] = bpf_filter
-        try:
-            sniff(**kwargs)
-        except PermissionError as e:
-            import platform as _pf
-            if _pf.system() == "Darwin":
-                _capture_error = f"Permission denied: {e}. Packet capture requires root on macOS."
-            else:
-                _capture_error = f"Permission denied: {e}. Run: sudo setcap cap_net_raw+eip /usr/bin/cernis-backend"
-        except Exception as e:
-            emsg = str(e)
-            if "ermission" in emsg or "bpf" in emsg.lower():
-                import platform as _pf2
-                if _pf2.system() == "Darwin":
-                    _capture_error = f"Permission denied: {emsg}. Packet capture requires root on macOS."
-                else:
-                    _capture_error = f"Permission denied: {emsg}. Run: sudo setcap cap_net_raw+eip /usr/bin/cernis-backend"
-            else:
-                _capture_error = f"Capture error: {emsg}"
-        finally:
-            global _capture_running
-            _capture_running = False
-            _save_pcap()
+    # Build sniff kwargs
+    kwargs = {"prn": _handle_packet, "store": 0, "count": max_packets}
+    if interface:
+        kwargs["iface"] = interface
+    if bpf_filter:
+        kwargs["filter"] = bpf_filter
 
-    def _save_pcap():
-        """Write captured packets to pcap file."""
-        if _raw_packets and _pcap_file:
-            try:
-                wrpcap(_pcap_file, _raw_packets)
-            except Exception:
-                pass
+    # Use AsyncSniffer — gives us .stop() and synchronous error on .start()
+    try:
+        _sniffer = AsyncSniffer(**kwargs)
+        _sniffer.start()
+        # Give the sniffer thread a moment to fail (permission errors happen instantly)
+        time.sleep(0.5)
+        if not _sniffer.running:
+            # Sniffer thread died immediately
+            err = ""
+            if hasattr(_sniffer, 'exception') and _sniffer.exception:
+                err = str(_sniffer.exception)
+            if not err:
+                err = "Capture failed to start (check permissions)"
+            _sniffer = None
+            return {"ok": False, "error": err}
+    except Exception as e:
+        _sniffer = None
+        emsg = str(e)
+        if "ermission" in emsg or "bpf" in emsg.lower() or "root" in emsg.lower():
+            if platform.system() == "Darwin":
+                return {"ok": False, "error": f"{emsg}\nFix: sudo chmod o+r /dev/bpf*"}
+            else:
+                return {"ok": False, "error": f"{emsg}\nFix: sudo setcap cap_net_raw+eip /usr/bin/cernis-backend"}
+        return {"ok": False, "error": f"Capture failed: {emsg}"}
 
-    loop = asyncio.get_event_loop()
-    loop.run_in_executor(None, _run)
+    _capture_running = True
     return {"ok": True, "error": ""}
 
 
 def stop_capture():
-    global _capture_running
+    global _capture_running, _sniffer
     _capture_running = False
-    # Write pcap file immediately so download is available right after stop
+
+    if _sniffer:
+        try:
+            _sniffer.stop(join=True)
+        except Exception:
+            pass
+        _sniffer = None
+
+    # Write pcap file so download is available right after stop
+    _save_pcap()
+
+
+def _save_pcap():
+    """Write captured packets to pcap file."""
     if _raw_packets and _pcap_file:
         try:
             wrpcap(_pcap_file, _raw_packets)
@@ -268,6 +307,11 @@ def stop_capture():
 
 
 def get_capture_status() -> dict:
+    global _capture_running, _sniffer
+    # Sync _capture_running with actual sniffer state
+    if _capture_running and _sniffer and not _sniffer.running:
+        _capture_running = False
+        _save_pcap()
     return {
         "running": _capture_running,
         "packets": len(_capture_packets),
