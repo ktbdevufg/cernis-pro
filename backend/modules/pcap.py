@@ -252,6 +252,45 @@ def _check_capture_permission() -> Optional[str]:
         except Exception:
             return None  # inconclusive, let scapy try
 
+    elif _sys == "Windows":
+        # Scapy needs Npcap (or legacy WinPcap) for layer-2 capture
+        npcap_installed = False
+        try:
+            import winreg
+            # Npcap stores its install path in the registry
+            for key_path in [
+                r"SOFTWARE\WOW6432Node\Npcap",
+                r"SOFTWARE\Npcap",
+            ]:
+                try:
+                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path):
+                        npcap_installed = True
+                        break
+                except FileNotFoundError:
+                    continue
+            if not npcap_installed:
+                # Check legacy WinPcap
+                for key_path in [
+                    r"SOFTWARE\WOW6432Node\WinPcap",
+                    r"SOFTWARE\WinPcap",
+                ]:
+                    try:
+                        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path):
+                            npcap_installed = True
+                            break
+                    except FileNotFoundError:
+                        continue
+        except Exception:
+            return None  # can't check, let scapy try
+        if not npcap_installed:
+            return (
+                "Npcap is not installed. Packet capture on Windows requires Npcap.\n"
+                "Download and install Npcap from: https://npcap.com/#download\n"
+                "During installation, check 'Install Npcap in WinPcap API-compatible Mode'.\n"
+                "Restart CERNIS PRO after installing Npcap."
+            )
+        return None
+
     return None  # unknown OS, let scapy try
 
 
@@ -311,10 +350,16 @@ async def start_capture(interface: str = None, bpf_filter: str = "",
                 pass
             _sniffer = None
             if not err:
-                if platform.system() == "Darwin":
+                _sys = platform.system()
+                if _sys == "Darwin":
                     err = ("Capture failed — BPF device not accessible.\n"
                            "Fix (resets on reboot): sudo chmod o+rw /dev/bpf*\n"
                            "Permanent fix: install Wireshark (ChmodBPF LaunchDaemon)")
+                elif _sys == "Windows":
+                    err = ("Capture failed — Npcap may not be installed or not working.\n"
+                           "Download and install Npcap from: https://npcap.com/#download\n"
+                           "Enable 'WinPcap API-compatible Mode' during installation.\n"
+                           "Restart CERNIS PRO after installing Npcap.")
                 else:
                     err = ("Capture failed — raw socket not accessible.\n"
                            "Fix: sudo setcap cap_net_raw+eip /usr/bin/cernis-backend")

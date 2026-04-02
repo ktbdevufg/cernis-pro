@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Server, Activity, Network, Globe, Radio, Wifi, Plus, Trash2, RefreshCw, Play, Square, Download, Copy, Check } from 'lucide-react'
+import { Server, Activity, Network, Globe, Radio, Wifi, Plus, Trash2, RefreshCw, Play, Square, Download, Copy, Check, ExternalLink } from 'lucide-react'
 
 const css = `
 .infra-view { position: absolute; inset: 0; display: flex; flex-direction: column; }
@@ -463,23 +463,48 @@ export default function InfraView({ selectedIface }) {
             <>
               {pcapPermErr && !pcapRunning && (
                 <div style={{ background:'rgba(251,191,36,0.08)', border:'1px solid rgba(251,191,36,0.3)', borderRadius:8, padding:16, marginBottom:4 }}>
-                  <div style={{ color:'#fbbf24', fontSize:13, fontWeight:600, marginBottom:6 }}>Packet Capture requires additional permissions</div>
-                  <div style={{ color:'var(--text-secondary)', fontSize:12, lineHeight:1.6, marginBottom:12 }}>
-                    Run this command in Terminal to enable packet capture (requires admin password):
+                  <div style={{ color:'#fbbf24', fontSize:13, fontWeight:600, marginBottom:6 }}>
+                    {pcapPermErr.toLowerCase().includes('npcap') ? 'Npcap required for Packet Capture' : 'Packet Capture requires additional permissions'}
                   </div>
-                  <div style={{ background:'var(--bg-3)', border:'1px solid var(--border)', borderRadius:6, padding:'10px 14px', display:'flex', alignItems:'center', justifyContent:'space-between', gap:12 }}>
-                    <code style={{ fontSize:13, color:'var(--accent)', fontFamily:'var(--font-mono)' }}>
-                      sudo chmod o+rw /dev/bpf*
-                    </code>
-                    <button className="i-btn secondary" style={{ padding:'4px 12px', fontSize:10, flexShrink:0 }}
-                      onClick={() => { navigator.clipboard.writeText('sudo chmod o+rw /dev/bpf*'); setCmdCopied(true); setTimeout(()=>setCmdCopied(false), 2000) }}>
-                      {cmdCopied ? <><Check size={10}/> Copied</> : <><Copy size={10}/> Copy</>}
-                    </button>
+                  <div style={{ color:'var(--text-secondary)', fontSize:12, lineHeight:1.6, whiteSpace:'pre-line', marginBottom:12 }}>
+                    {pcapPermErr}
                   </div>
-                  <div style={{ color:'var(--text-muted)', fontSize:10, marginTop:8, lineHeight:1.5 }}>
-                    Note: macOS resets BPF permissions on reboot. For a permanent fix, run:<br/>
-                    <code style={{ color:'var(--text-secondary)' }}>sudo bash scripts/install-bpf-permissions.sh</code> (included in CERNIS PRO)
-                  </div>
+                  {pcapPermErr.toLowerCase().includes('npcap') && (
+                    <>
+                      <div style={{ background:'var(--bg-3)', border:'1px solid var(--border)', borderRadius:6, padding:'10px 14px', display:'flex', alignItems:'center', justifyContent:'space-between', gap:12 }}>
+                        <span style={{ fontSize:13, color:'var(--text-secondary)' }}>
+                          Download Npcap from <code style={{ color:'var(--accent)', fontFamily:'var(--font-mono)' }}>npcap.com</code>
+                        </span>
+                        <button className="i-btn primary" style={{ padding:'4px 12px', fontSize:10, flexShrink:0 }}
+                          onClick={() => { fetch('/api/open-url', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({url:'https://npcap.com/#download'}) }).catch(()=>{}) }}>
+                          <ExternalLink size={10}/> Download Npcap
+                        </button>
+                      </div>
+                      <div style={{ color:'#fbbf24', fontSize:11, fontWeight:600, marginTop:8 }}>
+                        After installing Npcap, restart CERNIS PRO for changes to take effect.
+                      </div>
+                    </>
+                  )}
+                  {pcapPermErr.toLowerCase().includes('chmod') && (
+                    <>
+                      <div style={{ color:'var(--text-secondary)', fontSize:12, lineHeight:1.6, marginBottom:8 }}>
+                        Run this command in Terminal to enable packet capture (requires admin password):
+                      </div>
+                      <div style={{ background:'var(--bg-3)', border:'1px solid var(--border)', borderRadius:6, padding:'10px 14px', display:'flex', alignItems:'center', justifyContent:'space-between', gap:12 }}>
+                        <code style={{ fontSize:13, color:'var(--accent)', fontFamily:'var(--font-mono)' }}>
+                          sudo chmod o+rw /dev/bpf*
+                        </code>
+                        <button className="i-btn secondary" style={{ padding:'4px 12px', fontSize:10, flexShrink:0 }}
+                          onClick={() => { navigator.clipboard.writeText('sudo chmod o+rw /dev/bpf*'); setCmdCopied(true); setTimeout(()=>setCmdCopied(false), 2000) }}>
+                          {cmdCopied ? <><Check size={10}/> Copied</> : <><Copy size={10}/> Copy</>}
+                        </button>
+                      </div>
+                      <div style={{ color:'var(--text-muted)', fontSize:10, marginTop:8, lineHeight:1.5 }}>
+                        Note: macOS resets BPF permissions on reboot. For a permanent fix, run:<br/>
+                        <code style={{ color:'var(--text-secondary)' }}>sudo bash scripts/install-bpf-permissions.sh</code> (included in CERNIS PRO)
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
               <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
@@ -571,6 +596,22 @@ export default function InfraView({ selectedIface }) {
                         onClick={() => { navigator.clipboard.writeText('sudo setcap cap_net_raw+eip /usr/bin/cernis-backend') }}>
                         <Copy size={10}/> Copy
                       </button>
+                    </div>
+                  )}
+                  {pcapError.toLowerCase().includes('npcap') && (
+                    <div style={{ marginTop:12 }}>
+                      <div style={{ background:'var(--bg-3)', border:'1px solid var(--border)', borderRadius:6, padding:'10px 14px', display:'flex', alignItems:'center', justifyContent:'space-between', gap:12 }}>
+                        <span style={{ fontSize:12, color:'var(--text-secondary)' }}>
+                          Download Npcap from <code style={{ color:'var(--accent)', fontFamily:'var(--font-mono)' }}>npcap.com/#download</code>
+                        </span>
+                        <button className="i-btn secondary" style={{ padding:'4px 10px', fontSize:10, flexShrink:0 }}
+                          onClick={() => { fetch('/api/open-url', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({url:'https://npcap.com/#download'}) }).catch(()=>{}) }}>
+                          <ExternalLink size={10}/> Open
+                        </button>
+                      </div>
+                      <div style={{ color:'var(--text-muted)', fontSize:10, marginTop:6, lineHeight:1.5 }}>
+                        Enable "WinPcap API-compatible Mode" during installation. Restart CERNIS PRO afterwards.
+                      </div>
                     </div>
                   )}
                 </div>

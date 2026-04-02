@@ -18,7 +18,7 @@ import json
 import ipaddress
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, Query, Body, HTTPException
+from fastapi import FastAPI, WebSocket, Query, Body, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -197,6 +197,19 @@ app.add_middleware(
 @app.get("/api/status")
 async def api_status():
     return {"status": "ok", "version": VERSION}
+
+
+@app.post("/api/open-url")
+async def api_open_url(request: Request):
+    """Open a URL in the system's default browser."""
+    body = await request.json()
+    url = body.get("url", "")
+    # Only allow http/https URLs to prevent command injection
+    if not url.startswith(("https://", "http://")):
+        return {"ok": False, "error": "Invalid URL"}
+    import webbrowser
+    webbrowser.open(url)
+    return {"ok": True}
 
 
 # ═══════════════════════════════════════════════════════════════

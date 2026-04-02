@@ -95,6 +95,32 @@ fn kill_stale_backend() {
                     .output();
                 thread::sleep(Duration::from_millis(500));
             }
+            #[cfg(target_os = "windows")]
+            {
+                use std::os::windows::process::CommandExt;
+                // Find PID holding the port via netstat, then taskkill the tree
+                if let Ok(out) = Command::new("netstat")
+                    .args(["-ano", "-p", "TCP"])
+                    .creation_flags(0x08000000)
+                    .output()
+                {
+                    let text = String::from_utf8_lossy(&out.stdout);
+                    for line in text.lines() {
+                        if line.contains(&format!(":{}", BACKEND_PORT))
+                            && line.contains("LISTENING")
+                        {
+                            if let Some(pid_str) = line.split_whitespace().last() {
+                                log(&format!("  Killing stale PID {}", pid_str));
+                                let _ = Command::new("taskkill")
+                                    .args(["/F", "/T", "/PID", pid_str])
+                                    .creation_flags(0x08000000)
+                                    .output();
+                            }
+                        }
+                    }
+                }
+                thread::sleep(Duration::from_millis(500));
+            }
         }
         Err(_) => {
             log(&format!("Port {} is free", BACKEND_PORT));
@@ -413,7 +439,17 @@ fn kill_backend_tree(process: &Arc<Mutex<Option<Child>>>) {
                 }
             }
 
-            #[cfg(not(unix))]
+            #[cfg(target_os = "windows")]
+            {
+                use std::os::windows::process::CommandExt;
+                // taskkill /T kills entire process tree (PyInstaller wrapper + uvicorn workers)
+                let _ = Command::new("taskkill")
+                    .args(["/F", "/T", "/PID", &pid.to_string()])
+                    .creation_flags(0x08000000) // CREATE_NO_WINDOW
+                    .output();
+            }
+
+            #[cfg(not(any(unix, target_os = "windows")))]
             {
                 let _ = child.kill();
             }

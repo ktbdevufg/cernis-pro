@@ -1,7 +1,7 @@
 {
   "meta": {
     "project": "CERNIS_PRO",
-    "snapshot_date": "2026-04-01",
+    "snapshot_date": "2026-04-02",
     "purpose": "claude_session_handoff",
     "instruction": "READ THIS FIRST. Apply all entries in 'rules' unconditionally. Treat 'state' as ground truth. Do not re-derive what is already decided. Other platforms (Windows, macOS) are added when work begins on them."
   },
@@ -292,7 +292,12 @@
     "scapy_bundling": "collect_all('scapy') FAILS silently on Windows — use collect_submodules('scapy') + explicit hiddenimports instead. Scapy must be in requirements.txt. Needs Npcap at runtime",
     "creation_flags": "CREATE_NO_WINDOW (0x08000000) flag already set in main.rs for backend subprocess",
     "interface_names": "ipconfig returns 'Ethernet-Adapter X' / 'Drahtlos-LAN-Adapter X' but Scapy wants just 'X' — _resolve_windows_iface() strips prefix",
-    "npcap_required": "Scapy needs Npcap installed at runtime for packet capture — without it: 'No libpcap provider available'"
+    "npcap_required": "Scapy needs Npcap installed at runtime for packet capture — without it: 'No libpcap provider available'",
+    "npcap_detection": "_check_capture_permission() checks Windows registry for Npcap/WinPcap — shows download button + restart hint if missing",
+    "backend_shutdown": "taskkill /F /T /PID kills entire process tree (PyInstaller wrapper + uvicorn). child.kill() only kills parent on Windows",
+    "stale_backend_kill": "kill_stale_backend() uses netstat -ano to find PID on port 8765, then taskkill /T to kill tree",
+    "nsis_hooks": "nsis-hooks.nsi: NSIS_HOOK_PREUNINSTALL + NSIS_HOOK_PREINSTALL kill cernis-backend.exe and cernis-pro.exe before un/install",
+    "open_url_endpoint": "window.open() blocked in Tauri WebView — use /api/open-url endpoint with webbrowser.open() instead"
   },
   "build_lessons_cross_platform": {
     "tauri_target": "CARGO_BUILD_TARGET wird vom Tauri-Bundler NICHT gelesen - --target Flag im tauri build Befehl verwenden",
