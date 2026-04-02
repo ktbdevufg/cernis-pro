@@ -260,7 +260,44 @@
     "rogue_dhcp": "Kein zweiter DHCP-Server zum Testen",
     "remote_agents": "Benötigt zweite CERNIS PRO Instanz",
     "grafana_integration": "/metrics Endpoint OK — Grafana-Anbindung separat testen",
-    "pcap_capture": "Code OK, plattformweiche Permission-Checks. Linux: CAP_NET_RAW oder sudo. macOS: sudo oder BPF-Zugriff. Finaler Test auf physischem MacBook M4 nötig (Parallels hat kein BPF)"
+    "pcap_capture_linux": "Code OK, plattformweiche Permission-Checks. Linux: CAP_NET_RAW oder sudo. Finaler Test auf physischer Linux-Hardware ausstehend"
+  },
+  "platform_status": {
+    "macos_arm64": {
+      "status": "fertig",
+      "build": "DMG via build.sh + PyInstaller + Tauri",
+      "tested_on": "MacBook M4 (physische Hardware)",
+      "test_date": "2026-04-01",
+      "notes": "Alle Features inkl. pcap/BPF erfolgreich getestet"
+    },
+    "linux_deb_x64": {
+      "status": "fertig",
+      "build": "DEB via Tauri auf Ubuntu",
+      "tested_on": "Ubuntu x64",
+      "notes": "WebKit2GTK-Fixes, Pre/Post-Install-Scripts"
+    },
+    "linux_rpm_x64": {
+      "status": "fertig",
+      "build": "RPM via Tauri auf Fedora 43",
+      "tested_on": "Fedora 43 x64",
+      "notes": "RPM-Dependencies und Install-Scripts konfiguriert"
+    },
+    "linux_appimage_x64": {
+      "status": "offen",
+      "notes": "Nicht konfiguriert"
+    },
+    "linux_arm64": {
+      "status": "offen",
+      "notes": "Kein Cross-Compile-Setup, kein PyInstaller-Spec"
+    },
+    "windows_x64": {
+      "status": "offen",
+      "notes": "Nur Placeholder-Ordner"
+    },
+    "windows_arm64": {
+      "status": "offen",
+      "notes": "Nur Placeholder-Ordner"
+    }
   },
   "build_lessons_linux": {
     "tauri_window_url": "Window URL muss direkt auf http://127.0.0.1:8765 gesetzt sein - about:blank mit JS-Navigation schlägt unter WebKit2GTK fehl",
