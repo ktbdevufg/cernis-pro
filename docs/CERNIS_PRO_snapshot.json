@@ -1,7 +1,7 @@
 {
   "meta": {
     "project": "CERNIS_PRO",
-    "snapshot_date": "2026-04-02",
+    "snapshot_date": "2026-04-03",
     "purpose": "claude_session_handoff",
     "instruction": "READ THIS FIRST. Apply all entries in 'rules' unconditionally. Treat 'state' as ground truth. Do not re-derive what is already decided. Other platforms (Windows, macOS) are added when work begins on them."
   },
@@ -52,10 +52,10 @@
     "build_script_windows": "build.ps1"
   },
   "current_platform": {
-    "os": "Windows_11_x64",
-    "user": "Claude",
-    "hostname": "windows_vm",
-    "target_triple": "x86_64-pc-windows-msvc",
+    "os": "Windows_11_ARM64",
+    "user": "karlbach",
+    "hostname": "windows_arm64",
+    "target_triple": "aarch64-pc-windows-msvc",
     "build_targets": ["nsis"]
   },
   "open_fixes": [],
@@ -253,6 +253,13 @@
       "issue": "Pcap 'Interface not found' — ipconfig returns 'Ethernet-Adapter Ethernet0' but Scapy expects 'Ethernet0'",
       "fix": "Added _resolve_windows_iface() that strips German/English adapter prefixes and matches against Scapy's get_windows_if_list(). Called in start_capture() before passing to AsyncSniffer",
       "fixed_date": "2026-04-01"
+    },
+    {
+      "id": 28,
+      "file": "package.json + build.ps1",
+      "issue": "Build configured for x86_64-pc-windows-msvc — cannot produce ARM64 installer",
+      "fix": "package.json target → aarch64-pc-windows-msvc. build.ps1: vcvarsall arm64, VS18 path, binary/installer paths to aarch64-pc-windows-msvc, dest C:\\Users\\karlbach. python -m PyInstaller/pip to survive vcvarsall PATH clobber",
+      "fixed_date": "2026-04-03"
     }
   ],
   "not_tested": {
@@ -291,12 +298,18 @@
       "notes": "Kein Cross-Compile-Setup, kein PyInstaller-Spec"
     },
     "windows_x64": {
-      "status": "offen",
-      "notes": "Nur Placeholder-Ordner"
+      "status": "fertig",
+      "build": "NSIS via build.ps1 + PyInstaller + Tauri",
+      "tested_on": "Windows 11 x64 VM",
+      "test_date": "2026-04-01",
+      "notes": "Fixes 21-27: log_path, NSIS config, Scapy bundling, interface names, Npcap detection, backend shutdown, NSIS hooks"
     },
     "windows_arm64": {
-      "status": "offen",
-      "notes": "Nur Placeholder-Ordner"
+      "status": "fertig",
+      "build": "NSIS via build.ps1 + PyInstaller + Tauri",
+      "tested_on": "Windows 11 ARM64 (physische Hardware)",
+      "test_date": "2026-04-03",
+      "notes": "ARM64-Anpassungen: vcvarsall arm64, aarch64-pc-windows-msvc target. Runtime: Npcap + Nmap müssen separat installiert sein"
     }
   },
   "build_lessons_linux": {
@@ -320,12 +333,15 @@
   },
   "build_lessons_windows": {
     "log_path": "main.rs LOG_FILE was /tmp/ (Unix-only) — replaced with std::env::temp_dir() via OnceLock for cross-platform",
-    "binary_name": "cernis-backend-x86_64-pc-windows-msvc.exe in src-tauri/",
-    "nsis_installer": "Tauri produces CernisPro_1.0.0_x64-setup.exe in target/x86_64-pc-windows-msvc/release/bundle/nsis/",
+    "binary_name_x64": "cernis-backend-x86_64-pc-windows-msvc.exe in src-tauri/",
+    "binary_name_arm64": "cernis-backend-aarch64-pc-windows-msvc.exe in src-tauri/",
+    "nsis_installer_x64": "Tauri produces CernisPro_1.0.0_x64-setup.exe in target/x86_64-pc-windows-msvc/release/bundle/nsis/",
+    "nsis_installer_arm64": "Tauri produces CernisPro_1.0.0_arm64-setup.exe in target/aarch64-pc-windows-msvc/release/bundle/nsis/",
     "install_mode": "bundle.windows.nsis.installMode = 'both' in tauri.conf.json",
     "uac_admin": "uac_admin=False in cernis_windows.spec — no elevation required",
     "upx_disabled": "UPX disabled in cernis_windows.spec for stability",
-    "vs_build_tools": "vcvarsall.bat x64 must be sourced before Tauri build",
+    "vs_build_tools": "vcvarsall.bat {x64|arm64} must be sourced before Tauri build. On ARM64: vcvarsall.bat arm64",
+    "vcvarsall_path_clobber": "vcvarsall.bat overwrites PATH — use 'python -m PyInstaller' and 'python -m pip' instead of bare commands",
     "scapy_bundling": "collect_all('scapy') FAILS silently on Windows — use collect_submodules('scapy') + explicit hiddenimports instead. Scapy must be in requirements.txt. Needs Npcap at runtime",
     "creation_flags": "CREATE_NO_WINDOW (0x08000000) flag already set in main.rs for backend subprocess",
     "interface_names": "ipconfig returns 'Ethernet-Adapter X' / 'Drahtlos-LAN-Adapter X' but Scapy wants just 'X' — _resolve_windows_iface() strips prefix",
