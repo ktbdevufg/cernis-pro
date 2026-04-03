@@ -1189,11 +1189,11 @@ async def api_install_package(payload: dict = Body(...)):
 
 def _check_nmap_binary() -> bool:
     """Check if nmap binary is installed (not Python module)."""
-    import shutil, subprocess
-    if shutil.which("nmap"):
-        return True
+    from modules.portscan import _find_nmap
+    import subprocess
+    nmap = _find_nmap()
     try:
-        subprocess.run(["nmap", "--version"], capture_output=True, timeout=3)
+        subprocess.run([nmap, "--version"], capture_output=True, timeout=3)
         return True
     except Exception:
         return False

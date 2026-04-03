@@ -441,7 +441,7 @@ export default function SettingsView({ interfaces, cidr, scanConfig, onScanConfi
                 ['cryptography',   'Credential Encryption (AES-128)',   'pip install cryptography',    false],
                 ['apscheduler',    'Scheduled Scans',                   'pip install apscheduler',     false],
                 ['websockets',     'Remote Agent WebSocket',            'pip install websockets',      false],
-                ['nmap',           'Deep Port Scan (optional)',          'brew install nmap',           true],
+                ['nmap',           'Deep Port Scan (optional)',          navigator.platform?.includes('Win') ? 'winget install Insecure.Nmap' : 'brew install nmap', true],
               ].map(([pkg, desc, cmd, isOptional]) => (
                 <div key={pkg} className="sv-row" style={{ flexWrap:'wrap', gap:6 }}>
                   <div className="sv-label" style={{ minWidth:160 }}>
@@ -468,7 +468,9 @@ export default function SettingsView({ interfaces, cidr, scanConfig, onScanConfi
                 </div>
               ))}
               <div style={{ marginTop:8, padding:'8px 12px', background:'var(--bg-3)', borderRadius:4, fontSize:11, color:'var(--text-muted)', fontFamily:'var(--font-mono)' }}>
-                💡 Run <span style={{ color:'var(--accent)' }}>./start.sh</span> to auto-install all available packages
+                💡 {navigator.platform?.includes('Win')
+                  ? <>On Windows, install <span style={{ color:'var(--accent)' }}>Npcap</span> (npcap.com) and <span style={{ color:'var(--accent)' }}>Nmap</span> (nmap.org) separately</>
+                  : <>Run <span style={{ color:'var(--accent)' }}>./start.sh</span> to auto-install all available packages</>}
               </div>
             </div>
           </div>

@@ -3,7 +3,26 @@ import asyncio
 import subprocess
 import re
 import json
+import shutil
+import platform
+import os
 from dataclasses import dataclass, field
+
+
+def _find_nmap() -> str:
+    """Return path to nmap binary, searching common Windows install dirs."""
+    found = shutil.which("nmap")
+    if found:
+        return found
+    if platform.system() == "Windows":
+        for d in [
+            os.path.join(os.environ.get("ProgramFiles(x86)", ""), "Nmap"),
+            os.path.join(os.environ.get("ProgramFiles", ""), "Nmap"),
+        ]:
+            exe = os.path.join(d, "nmap.exe")
+            if os.path.isfile(exe):
+                return exe
+    return "nmap"
 
 
 # Common ports with service names
@@ -96,7 +115,7 @@ def scan_with_nmap(ip: str, port_spec: str = "T:1-1024,5353,5900,32400") -> Host
 
     try:
         cmd = [
-            "nmap", "-sV", "-O", "--osscan-guess",
+            _find_nmap(), "-sV", "-O", "--osscan-guess",
             "-p", port_spec,
             "--open",
             "-T4",

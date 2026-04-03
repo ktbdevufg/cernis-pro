@@ -260,6 +260,20 @@
       "issue": "Build configured for x86_64-pc-windows-msvc — cannot produce ARM64 installer",
       "fix": "package.json target → aarch64-pc-windows-msvc. build.ps1: vcvarsall arm64, VS18 path, binary/installer paths to aarch64-pc-windows-msvc, dest C:\\Users\\karlbach. python -m PyInstaller/pip to survive vcvarsall PATH clobber",
       "fixed_date": "2026-04-03"
+    },
+    {
+      "id": 29,
+      "file": "backend/modules/portscan.py + backend/main.py",
+      "issue": "nmap not found on Windows — installed in C:\\Program Files (x86)\\Nmap but not in PATH after vcvarsall clobbers PATH",
+      "fix": "Added _find_nmap() helper that searches Windows install dirs (Program Files, Program Files (x86)). Used in scan_with_nmap() and _check_nmap_binary()",
+      "fixed_date": "2026-04-03"
+    },
+    {
+      "id": 30,
+      "file": "frontend/src/views/SettingsView.jsx",
+      "issue": "Settings page shows macOS-only install hints (brew install nmap, ./start.sh) on Windows",
+      "fix": "Platform detection: Windows shows 'winget install Insecure.Nmap' and Npcap/Nmap install hint instead of brew/start.sh",
+      "fixed_date": "2026-04-03"
     }
   ],
   "not_tested": {
@@ -342,6 +356,8 @@
     "upx_disabled": "UPX disabled in cernis_windows.spec for stability",
     "vs_build_tools": "vcvarsall.bat {x64|arm64} must be sourced before Tauri build. On ARM64: vcvarsall.bat arm64",
     "vcvarsall_path_clobber": "vcvarsall.bat overwrites PATH — use 'python -m PyInstaller' and 'python -m pip' instead of bare commands",
+    "nmap_path_resolution": "_find_nmap() in portscan.py searches shutil.which() then C:\\Program Files (x86)\\Nmap and C:\\Program Files\\Nmap",
+    "npcap_arm64": "Npcap 0.9982 is x64-only (kernel driver won't load on ARM64). Need Npcap 1.80+ which includes ARM64 native npcap.sys. Install with WinPcap compat mode",
     "scapy_bundling": "collect_all('scapy') FAILS silently on Windows — use collect_submodules('scapy') + explicit hiddenimports instead. Scapy must be in requirements.txt. Needs Npcap at runtime",
     "creation_flags": "CREATE_NO_WINDOW (0x08000000) flag already set in main.rs for backend subprocess",
     "interface_names": "ipconfig returns 'Ethernet-Adapter X' / 'Drahtlos-LAN-Adapter X' but Scapy wants just 'X' — _resolve_windows_iface() strips prefix",
