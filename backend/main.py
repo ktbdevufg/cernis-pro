@@ -1538,10 +1538,12 @@ def _classify_host(ports: list, vendor: str, mac: str, mdns_services: list,
         return "NAS (Linux)", "nas"
 
     # ── Printer ───────────────────────────────────────────────
-    if port_nums & {9100, 515, 631} or "_ipp" in mdns_types or "_pdl-datastream" in mdns_types:
+    _printer_ports = port_nums & {9100, 515, 631}
+    _printer_vendor = any(x in vendor_l for x in ["hewlett", "hp ", "epson", "canon", "brother",
+                                                    "lexmark", "xerox", "kyocera", "ricoh"])
+    if _printer_ports or "_ipp" in mdns_types or "_pdl-datastream" in mdns_types:
         return "Printer", "printer"
-    if any(x in vendor_l for x in ["hewlett", "hp ", "epson", "canon", "brother",
-                                     "lexmark", "xerox", "kyocera", "ricoh"]):
+    if _printer_vendor and not (port_nums & {22, 80, 443, 445, 3389, 8080}):
         return "Printer", "printer"
 
     # ── Smart TV / Streaming ─────────────────────────────────

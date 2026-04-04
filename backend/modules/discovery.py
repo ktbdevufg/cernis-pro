@@ -38,7 +38,7 @@ async def ping_host(ip: str, timeout: float = 1.0) -> DiscoveredHost:
         alive = proc.returncode == 0
 
         rtt = -1.0
-        m = re.search(r"(?:time[=<]([\d.]+)\s*ms|Average\s*=\s*([\d.]+)ms)", output, re.IGNORECASE)
+        m = re.search(r"(?:(?:time|Zeit)[=<]([\d.]+)\s*ms|(?:Average|Mittelwert)\s*=\s*([\d.]+)\s*ms)", output, re.IGNORECASE)
         if m:
             rtt = float(m.group(1) or m.group(2))
 

@@ -136,9 +136,17 @@ def clear_baseline():
     conn.close()
 
 
+def _clear_alerts():
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.execute("DELETE FROM arp_alerts")
+    conn.commit()
+    conn.close()
+
+
 def _scan_arp_sync() -> list[ArpAlert]:
     """Synchronous ARP scan logic — run via asyncio.to_thread()."""
     _init_arp_db()
+    _clear_alerts()
     baseline = _load_baseline()
     current = get_arp_table()  # {ip: mac}
     alerts = []
