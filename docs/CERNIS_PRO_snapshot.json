@@ -1,12 +1,12 @@
 {
   "meta": {
     "project": "CERNIS_PRO",
-    "snapshot_date": "2026-04-03",
+    "snapshot_date": "2026-04-04",
     "purpose": "claude_session_handoff",
-    "instruction": "READ THIS FIRST. Apply all entries in 'rules' unconditionally. Treat 'state' as ground truth. Do not re-derive what is already decided. Other platforms (Windows, macOS) are added when work begins on them."
+    "instruction": "READ THIS FIRST. Apply all entries in 'rules' unconditionally. Treat 'state' as ground truth. Do not re-derive what is already decided."
   },
   "rules": {
-    "editor": "vim",
+    "editor": "vim (Linux/macOS), direct file editing via Claude Code (Windows)",
     "paths": "always_absolute",
     "shell_commands": "always_specify_shell_type_and_privilege",
     "changes": "one_at_a_time_in_defined_order",
@@ -36,52 +36,76 @@
     "repo": "git@github.com:ktbdevufg/cernis-pro.git",
     "branches": ["main", "dev"],
     "active_branch": "dev",
-    "linux_x64_clone": "/home/kbach/Dokumente/Github-Repos/Cernis-Pro"
+    "clones": {
+      "linux_x64": "/home/kbach/Dokumente/Github-Repos/Cernis-Pro",
+      "macos_arm64": "/Volumes/KINGDATA/Github-Repos/Cernis-Pro",
+      "windows_x64": "C:\\Users\\Claude\\Github-Repos\\Cernis-Pro",
+      "windows_arm64": "C:\\Users\\karlbach\\Github-Repos\\Cernis-Pro",
+      "fedora": "/home/kbach/Dokumente/Github-Repos/Cernis-Pro"
+    }
   },
   "project_structure": {
-    "root": "/home/kbach/Dokumente/Github-Repos/Cernis-Pro",
+    "note": "Paths are relative to repo root — identical on all platforms",
     "backend": "backend/",
     "frontend": "frontend/",
     "tauri": "src-tauri/",
-    "build_script": "build.sh",
+    "build_script_linux_macos": "build.sh",
+    "build_script_windows": "build.ps1",
     "pyinstaller_spec_linux": "backend/cernis_linux.spec",
     "pyinstaller_spec_macos": "backend/cernis_macos.spec",
     "pyinstaller_spec_windows": "backend/cernis_windows.spec",
     "tauri_config": "src-tauri/tauri.conf.json",
-    "package_json": "package.json",
-    "build_script_windows": "build.ps1"
+    "package_json": "package.json"
   },
-  "current_platform": {
-    "os": "Windows_11_ARM64",
-    "user": "karlbach",
-    "hostname": "windows_arm64",
-    "target_triple": "aarch64-pc-windows-msvc",
-    "build_targets": ["nsis"]
+  "platform_status": {
+    "linux_deb_x64": {
+      "status": "fertig",
+      "build": "DEB + AppImage via build.sh + PyInstaller + Tauri",
+      "tested_on": "Ubuntu x64",
+      "test_date": "2026-03-31",
+      "notes": "WebKit2GTK-Fixes, Pre/Post-Install-Scripts, Traceroute verifiziert"
+    },
+    "linux_appimage_x64": {
+      "status": "fertig",
+      "build": "AppImage wird zusammen mit DEB gebaut (gleicher build.sh Lauf)",
+      "tested_on": "Ubuntu x64",
+      "test_date": "2026-03-31",
+      "notes": "Kein separater Build-Schritt nötig"
+    },
+    "linux_rpm_x64": {
+      "status": "fertig",
+      "build": "RPM via build.sh + PyInstaller + Tauri auf Fedora 43",
+      "tested_on": "Fedora 43 x64",
+      "test_date": "2026-04-01",
+      "notes": "RPM-Dependencies und Install-Scripts konfiguriert"
+    },
+    "linux_arm64": {
+      "status": "nicht geplant",
+      "notes": "Kein Cross-Compile-Setup, kein PyInstaller-Spec — bewusst ausgelassen"
+    },
+    "macos_arm64": {
+      "status": "fertig",
+      "build": "DMG via build.sh + PyInstaller + Tauri",
+      "tested_on": "MacBook M4 (physische Hardware)",
+      "test_date": "2026-04-01",
+      "notes": "Alle Features inkl. pcap/BPF erfolgreich getestet. Parallels VM fuer Claude Code Builds, physisches MacBook M4 fuer Xcode-Signierung"
+    },
+    "windows_x64": {
+      "status": "fertig",
+      "build": "NSIS via build.ps1 + PyInstaller + Tauri",
+      "tested_on": "Windows 11 x64 VM (User: Claude)",
+      "test_date": "2026-04-01",
+      "notes": "Fixes 21-27: log_path, NSIS config, Scapy bundling, interface names, Npcap detection, backend shutdown, NSIS hooks"
+    },
+    "windows_arm64": {
+      "status": "fertig",
+      "build": "NSIS via build.ps1 + PyInstaller + Tauri",
+      "tested_on": "Windows 11 ARM64 (physische Hardware, User: karlbach)",
+      "test_date": "2026-04-03",
+      "notes": "Fixes 28-30: ARM64 target, nmap PATH, Windows install hints. Runtime: Npcap 1.80+ (ARM64-native) + Nmap muessen separat installiert sein"
+    }
   },
   "open_fixes": [],
-  "completed_fixes_macos": [
-    {
-      "id": 18,
-      "file": "backend/main.py",
-      "issue": "fritz_hostname_map nie befüllt — FritzBox-Hostnamen fehlen als DNS-Fallback für alle Hosts",
-      "fix": "fritz_hostname_map wird vor der Merge-Schleife für ALLE FritzBox-Hosts befüllt (ip→hostname), nicht nur für synthetisch hinzugefügte",
-      "fixed_date": "2026-04-01"
-    },
-    {
-      "id": 19,
-      "file": "backend/modules/pcap.py",
-      "issue": "Permission-Check nutzt AF_PACKET (Linux-only) — auf macOS AttributeError, Capture startet scheinbar aber Thread stirbt sofort",
-      "fix": "Plattformweiche: Linux AF_PACKET-Check, macOS BPF-Device-Check (/dev/bpf*). Fehlermeldungen OS-spezifisch (sudo statt setcap auf macOS)",
-      "fixed_date": "2026-04-01"
-    },
-    {
-      "id": 20,
-      "file": "frontend/src/views/InfraView.jsx",
-      "issue": "Pcap Status-Poll ignoriert error-Feld — Capture-Fehler unsichtbar für User",
-      "fix": "d.error aus /api/pcap/status wird in pcapError-State übertragen und im UI angezeigt",
-      "fixed_date": "2026-04-01"
-    }
-  ],
   "completed_fixes_linux": [
     {
       "id": 1,
@@ -101,21 +125,21 @@
       "id": 3,
       "file": "src-tauri/tauri.conf.json",
       "issue": "installMode: both fehlt im bundle-Abschnitt",
-      "fix": "REVERTIERT — installMode ist in Tauri v2 kein gültiges Feld unter bundle. Gehört unter bundle.windows.nsis.installMode und wird erst bei Windows-Target gesetzt.",
+      "fix": "REVERTIERT — installMode ist in Tauri v2 kein gueltiges Feld unter bundle. Gehoert unter bundle.windows.nsis.installMode und wird erst bei Windows-Target gesetzt.",
       "fixed_date": "2026-03-31",
       "status": "reverted"
     },
     {
       "id": 4,
       "file": "backend/modules/fritzbox.py",
-      "issue": "_safe_call verschluckt 401 Auth-Fehler stillschweigend → alle FritzBox-Felder leer",
-      "fix": "FritzAuthorizationError wird re-raised; neues auth_error Feld in FritzStatus; get_status() erkennt Auth-Fehler früh",
+      "issue": "_safe_call verschluckt 401 Auth-Fehler stillschweigend — alle FritzBox-Felder leer",
+      "fix": "FritzAuthorizationError wird re-raised; neues auth_error Feld in FritzStatus; get_status() erkennt Auth-Fehler frueh",
       "fixed_date": "2026-03-31"
     },
     {
       "id": 5,
       "file": "backend/modules/fritzbox.py",
-      "issue": "detect_fritzbox gibt auf Debian _gateway statt FQDN zurück",
+      "issue": "detect_fritzbox gibt auf Debian _gateway statt FQDN zurueck",
       "fix": "_gateway, localhost und _-prefixed Hostnamen aus Reverse-DNS gefiltert; TR-064 Verifizierung via FritzConnection",
       "fixed_date": "2026-03-31"
     },
@@ -123,20 +147,20 @@
       "id": 6,
       "file": "backend/main.py",
       "issue": "/api/fritz/connect speichert Credentials ohne Auth-Validierung",
-      "fix": "Prüft status.auth_error vor Speicherung, gibt 401 mit klarer Fehlermeldung zurück",
+      "fix": "Prueft status.auth_error vor Speicherung, gibt 401 mit klarer Fehlermeldung zurueck",
       "fixed_date": "2026-03-31"
     },
     {
       "id": 7,
       "file": "backend/main.py + frontend/src/views/FritzBoxView.jsx",
-      "issue": "Kein Logout/Disconnect für FritzBox möglich",
+      "issue": "Kein Logout/Disconnect fuer FritzBox moeglich",
       "fix": "Neuer POST /api/fritz/disconnect Endpoint + Disconnect-Button im Frontend-Header",
       "fixed_date": "2026-03-31"
     },
     {
       "id": 8,
       "file": "backend/main.py",
-      "issue": "/api/tools/banner crasht mit 'int object is not subscriptable' wenn Ports als [80,443] statt [{'port':80}] übergeben werden",
+      "issue": "/api/tools/banner crasht mit 'int object is not subscriptable' wenn Ports als [80,443] statt [{'port':80}] uebergeben werden",
       "fix": "Port-Liste normalisiert: akzeptiert sowohl int als auch dict Format",
       "fixed_date": "2026-03-31"
     },
@@ -150,7 +174,7 @@
     {
       "id": 10,
       "file": "src-tauri/tauri.conf.json",
-      "issue": "Fenster zu klein (1400x800) — Buttons rechts außerhalb sichtbar",
+      "issue": "Fenster zu klein (1400x800) — Buttons rechts ausserhalb sichtbar",
       "fix": "width=1600, height=900, minWidth=1200, minHeight=700",
       "fixed_date": "2026-03-31"
     },
@@ -164,8 +188,8 @@
     {
       "id": 12,
       "file": "frontend/src/index.css",
-      "issue": "Select/Dropdown-Felder haben hellgraue Schrift auf weißem Browser-Default-Hintergrund",
-      "fix": "Explizite background/color für select und option Elemente im Dark Theme",
+      "issue": "Select/Dropdown-Felder haben hellgraue Schrift auf weissem Browser-Default-Hintergrund",
+      "fix": "Explizite background/color fuer select und option Elemente im Dark Theme",
       "fixed_date": "2026-03-31"
     },
     {
@@ -179,13 +203,13 @@
       "id": 14,
       "file": "backend/modules/internet.py",
       "issue": "Speedtest zeigt nur ~280 Mbit/s statt Gigabit — zu wenig Testvolumen (10MB single-thread)",
-      "fix": "4 parallele Streams à 25MB Download (100MB total) und 4x 2.5MB Upload (10MB total)",
+      "fix": "4 parallele Streams a 25MB Download (100MB total) und 4x 2.5MB Upload (10MB total)",
       "fixed_date": "2026-03-31"
     },
     {
       "id": 15,
       "file": "backend/main.py",
-      "issue": "SMTP Alert-Test gibt immer ok:true zurück, braucht Alert-Regel um zu funktionieren",
+      "issue": "SMTP Alert-Test gibt immer ok:true zurueck, braucht Alert-Regel um zu funktionieren",
       "fix": "Test-Endpoint sendet direkt via SMTP ohne Alert-Regeln, gibt klare Fehlermeldung bei SMTP-Fehler",
       "fixed_date": "2026-03-31"
     },
@@ -193,15 +217,38 @@
       "id": 16,
       "file": "backend/main.py",
       "issue": "Bei Neuinstallation/Upgrade bleibt alte DB mit inkompatiblen Daten bestehen",
-      "fix": "Version-Check beim Start: .version Datei in DATA_DIR, bei Versionsänderung wird cernis.db gelöscht für sauberen Neustart",
+      "fix": "Version-Check beim Start: .version Datei in DATA_DIR, bei Versionsaenderung wird cernis.db geloescht fuer sauberen Neustart",
       "fixed_date": "2026-03-31"
     },
     {
       "id": 17,
       "file": "build.sh",
-      "issue": "Fehlende System-Abhängigkeiten (nmap, libpcap-dev, net-tools, traceroute, scapy, pysnmp, reportlab, dnspython)",
-      "fix": "build.sh prüft und installiert fehlende apt- und pip3-Pakete automatisch in Schritt 0",
+      "issue": "Fehlende System-Abhaengigkeiten (nmap, libpcap-dev, net-tools, traceroute, scapy, pysnmp, reportlab, dnspython)",
+      "fix": "build.sh prueft und installiert fehlende apt- und pip3-Pakete automatisch in Schritt 0",
       "fixed_date": "2026-03-31"
+    }
+  ],
+  "completed_fixes_macos": [
+    {
+      "id": 18,
+      "file": "backend/main.py",
+      "issue": "fritz_hostname_map nie befuellt — FritzBox-Hostnamen fehlen als DNS-Fallback fuer alle Hosts",
+      "fix": "fritz_hostname_map wird vor der Merge-Schleife fuer ALLE FritzBox-Hosts befuellt (ip->hostname), nicht nur fuer synthetisch hinzugefuegte",
+      "fixed_date": "2026-04-01"
+    },
+    {
+      "id": 19,
+      "file": "backend/modules/pcap.py",
+      "issue": "Permission-Check nutzt AF_PACKET (Linux-only) — auf macOS AttributeError, Capture startet scheinbar aber Thread stirbt sofort",
+      "fix": "Plattformweiche: Linux AF_PACKET-Check, macOS BPF-Device-Check (/dev/bpf*). Fehlermeldungen OS-spezifisch (sudo statt setcap auf macOS)",
+      "fixed_date": "2026-04-01"
+    },
+    {
+      "id": 20,
+      "file": "frontend/src/views/InfraView.jsx",
+      "issue": "Pcap Status-Poll ignoriert error-Feld — Capture-Fehler unsichtbar fuer User",
+      "fix": "d.error aus /api/pcap/status wird in pcapError-State uebertragen und im UI angezeigt",
+      "fixed_date": "2026-04-01"
     }
   ],
   "completed_fixes_windows": [
@@ -237,7 +284,7 @@
       "id": 25,
       "file": "build.ps1",
       "issue": "No Windows build script",
-      "fix": "Created build.ps1: VS Build Tools init, pip install, npm build, PyInstaller, Tauri NSIS build, installer copy to C:\\Users\\Claude\\",
+      "fix": "Created build.ps1: VS Build Tools init, pip install, npm build, PyInstaller, Tauri NSIS build, installer copy to user home",
       "fixed_date": "2026-04-01"
     },
     {
@@ -258,7 +305,7 @@
       "id": 28,
       "file": "package.json + build.ps1",
       "issue": "Build configured for x86_64-pc-windows-msvc — cannot produce ARM64 installer",
-      "fix": "package.json target → aarch64-pc-windows-msvc. build.ps1: vcvarsall arm64, VS18 path, binary/installer paths to aarch64-pc-windows-msvc, dest C:\\Users\\karlbach. python -m PyInstaller/pip to survive vcvarsall PATH clobber",
+      "fix": "package.json target -> aarch64-pc-windows-msvc. build.ps1: vcvarsall arm64, VS18 path, binary/installer paths to aarch64-pc-windows-msvc, dest C:\\Users\\karlbach. python -m PyInstaller/pip to survive vcvarsall PATH clobber",
       "fixed_date": "2026-04-03"
     },
     {
@@ -277,61 +324,18 @@
     }
   ],
   "not_tested": {
-    "snmp": "Kein SNMP-fähiges Gerät im Testnetzwerk",
+    "snmp": "Kein SNMP-faehiges Geraet im Testnetzwerk",
     "rogue_dhcp": "Kein zweiter DHCP-Server zum Testen",
-    "remote_agents": "Benötigt zweite CERNIS PRO Instanz",
+    "remote_agents": "Benoetigt zweite CERNIS PRO Instanz",
     "grafana_integration": "/metrics Endpoint OK — Grafana-Anbindung separat testen",
-    "pcap_capture_linux": "Code OK, plattformweiche Permission-Checks. Linux: CAP_NET_RAW oder sudo. Finaler Test auf physischer Linux-Hardware ausstehend"
-  },
-  "platform_status": {
-    "macos_arm64": {
-      "status": "fertig",
-      "build": "DMG via build.sh + PyInstaller + Tauri",
-      "tested_on": "MacBook M4 (physische Hardware)",
-      "test_date": "2026-04-01",
-      "notes": "Alle Features inkl. pcap/BPF erfolgreich getestet"
-    },
-    "linux_deb_x64": {
-      "status": "fertig",
-      "build": "DEB via Tauri auf Ubuntu",
-      "tested_on": "Ubuntu x64",
-      "notes": "WebKit2GTK-Fixes, Pre/Post-Install-Scripts"
-    },
-    "linux_rpm_x64": {
-      "status": "fertig",
-      "build": "RPM via Tauri auf Fedora 43",
-      "tested_on": "Fedora 43 x64",
-      "notes": "RPM-Dependencies und Install-Scripts konfiguriert"
-    },
-    "linux_appimage_x64": {
-      "status": "offen",
-      "notes": "Nicht konfiguriert"
-    },
-    "linux_arm64": {
-      "status": "offen",
-      "notes": "Kein Cross-Compile-Setup, kein PyInstaller-Spec"
-    },
-    "windows_x64": {
-      "status": "fertig",
-      "build": "NSIS via build.ps1 + PyInstaller + Tauri",
-      "tested_on": "Windows 11 x64 VM",
-      "test_date": "2026-04-01",
-      "notes": "Fixes 21-27: log_path, NSIS config, Scapy bundling, interface names, Npcap detection, backend shutdown, NSIS hooks"
-    },
-    "windows_arm64": {
-      "status": "fertig",
-      "build": "NSIS via build.ps1 + PyInstaller + Tauri",
-      "tested_on": "Windows 11 ARM64 (physische Hardware)",
-      "test_date": "2026-04-03",
-      "notes": "ARM64-Anpassungen: vcvarsall arm64, aarch64-pc-windows-msvc target. Runtime: Npcap + Nmap müssen separat installiert sein"
-    }
+    "pcap_capture_linux": "Code OK, CAP_NET_RAW oder sudo. Finaler Test auf physischer Linux-Hardware ausstehend"
   },
   "build_lessons_linux": {
-    "tauri_window_url": "Window URL muss direkt auf http://127.0.0.1:8765 gesetzt sein - about:blank mit JS-Navigation schlägt unter WebKit2GTK fehl",
-    "icons": "Icons müssen RGBA PNG Format sein für Linux",
+    "tauri_window_url": "Window URL muss direkt auf http://127.0.0.1:8765 gesetzt sein - about:blank mit JS-Navigation schlaegt unter WebKit2GTK fehl",
+    "icons": "Icons muessen RGBA PNG Format sein fuer Linux",
     "pyinstaller_spec_location": "Spec-Datei muss im selben Verzeichnis wie main.py liegen",
-    "traceroute": "Flag -n verwenden (nicht --no-resolve); Binary-Pfad mit shutil.which() auflösen da PyInstaller-Prozesse keinen vollen PATH erben",
-    "pip_install": "Auf älteren Systemen --user statt --break-system-packages verwenden (pip 21 / Python 3.9 kennt --break-system-packages nicht)",
+    "traceroute": "Flag -n verwenden (nicht --no-resolve); Binary-Pfad mit shutil.which() aufloesen da PyInstaller-Prozesse keinen vollen PATH erben",
+    "pip_install": "Auf aelteren Systemen --user statt --break-system-packages verwenden (pip 21 / Python 3.9 kennt --break-system-packages nicht)",
     "externalBin_naming": "Binary muss cernis-backend-x86_64-unknown-linux-gnu heissen in src-tauri/",
     "scapy_permission": "SCAPY_CACHE_DIR=tempdir vor Import setzen; except Exception statt ImportError verwenden"
   },
@@ -343,7 +347,8 @@
     "icon_icns": "icon.icns already present in src-tauri/icons/ — used automatically for .app/.dmg",
     "pyinstaller_in_venv": "PyInstaller must be explicitly installed in the venv (not in requirements.txt)",
     "binary_name": "cernis-backend-aarch64-apple-darwin in src-tauri/",
-    "dmg_output": "Tauri produces CernisPro_1.0.0_aarch64.dmg in target/aarch64-apple-darwin/release/bundle/dmg/"
+    "dmg_output": "Tauri produces CernisPro_1.0.0_aarch64.dmg in target/aarch64-apple-darwin/release/bundle/dmg/",
+    "parallels_dns": "npm install schlaegt fehl wenn Pi-hole als DNS gesetzt ist. Fix: sudo networksetup -setdnsservers Ethernet 9.9.9.9"
   },
   "build_lessons_windows": {
     "log_path": "main.rs LOG_FILE was /tmp/ (Unix-only) — replaced with std::env::temp_dir() via OnceLock for cross-platform",
@@ -357,7 +362,7 @@
     "vs_build_tools": "vcvarsall.bat {x64|arm64} must be sourced before Tauri build. On ARM64: vcvarsall.bat arm64",
     "vcvarsall_path_clobber": "vcvarsall.bat overwrites PATH — use 'python -m PyInstaller' and 'python -m pip' instead of bare commands",
     "nmap_path_resolution": "_find_nmap() in portscan.py searches shutil.which() then C:\\Program Files (x86)\\Nmap and C:\\Program Files\\Nmap",
-    "npcap_arm64": "Npcap 0.9982 is x64-only (kernel driver won't load on ARM64). Need Npcap 1.80+ which includes ARM64 native npcap.sys. Install with WinPcap compat mode",
+    "npcap_arm64": "Npcap 0.9982 is x64-only — need Npcap 1.80+ which includes ARM64 native npcap.sys. Install with WinPcap compat mode",
     "scapy_bundling": "collect_all('scapy') FAILS silently on Windows — use collect_submodules('scapy') + explicit hiddenimports instead. Scapy must be in requirements.txt. Needs Npcap at runtime",
     "creation_flags": "CREATE_NO_WINDOW (0x08000000) flag already set in main.rs for backend subprocess",
     "interface_names": "ipconfig returns 'Ethernet-Adapter X' / 'Drahtlos-LAN-Adapter X' but Scapy wants just 'X' — _resolve_windows_iface() strips prefix",
@@ -366,19 +371,21 @@
     "backend_shutdown": "taskkill /F /T /PID kills entire process tree (PyInstaller wrapper + uvicorn). child.kill() only kills parent on Windows",
     "stale_backend_kill": "kill_stale_backend() uses netstat -ano to find PID on port 8765, then taskkill /T to kill tree",
     "nsis_hooks": "nsis-hooks.nsi: NSIS_HOOK_PREUNINSTALL + NSIS_HOOK_PREINSTALL kill cernis-backend.exe and cernis-pro.exe before un/install",
-    "open_url_endpoint": "window.open() blocked in Tauri WebView — use /api/open-url endpoint with webbrowser.open() instead"
+    "open_url_endpoint": "window.open() blocked in Tauri WebView — use /api/open-url endpoint with webbrowser.open() instead",
+    "git_ssh": "git config --global core.sshCommand 'C:/Windows/System32/OpenSSH/ssh.exe' — muss sofort nach Git-Install gesetzt werden"
   },
   "build_lessons_cross_platform": {
     "tauri_target": "CARGO_BUILD_TARGET wird vom Tauri-Bundler NICHT gelesen - --target Flag im tauri build Befehl verwenden",
     "frontend_serving": "FastAPI serviert Frontend als StaticFiles - Pfad muss im backend/main.py korrekt auf frontend/dist zeigen",
-    "install_mode": "Tauri v2: installMode gehört NICHT unter bundle direkt. Korrekt: bundle.windows.nsis.installMode — nur bei Windows-Target setzen"
+    "install_mode": "Tauri v2: installMode gehoert NICHT unter bundle direkt. Korrekt: bundle.windows.nsis.installMode — nur bei Windows-Target setzen"
   },
   "session_workflow": [
     "Snapshot lesen bevor irgendetwas gemacht wird",
-    "Relevante Dateien ansehen bevor Änderungen gemacht werden",
+    "Relevante Dateien ansehen bevor Aenderungen gemacht werden",
     "Fixes in der Reihenfolge aus open_fixes abarbeiten",
-    "Erst alle Code-Änderungen, dann Build",
-    "Erfolgreiche Fixes in completed_fixes_linux dokumentieren",
-    "Snapshot nach erfolgreichen Fixes aktualisieren und committen"
+    "Erst alle Code-Aenderungen, dann Build",
+    "Erfolgreiche Fixes in completed_fixes_* dokumentieren",
+    "Snapshot nach erfolgreichen Fixes aktualisieren und committen",
+    "Nach Claude Code Session: git log --oneline origin/dev..HEAD pruefen — Claude Code vergisst push"
   ]
 }
