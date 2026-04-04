@@ -89,7 +89,8 @@ function Cell({ col, host }) {
       const r = host.rtt_ms
       if (!r || r <= 0) return muted
       const cls = r < 5 ? 'fast' : r < 50 ? 'med' : 'slow'
-      return <span className={`cell-rtt ${cls}`}>{r.toFixed(1)}</span>
+      const label = r < 1 ? '<1' : r.toFixed(1)
+      return <span className={`cell-rtt ${cls}`}>{label}</span>
     }
     case 'ports': {
       const p = host.ports

@@ -38,9 +38,16 @@ async def ping_host(ip: str, timeout: float = 1.0) -> DiscoveredHost:
         alive = proc.returncode == 0
 
         rtt = -1.0
-        m = re.search(r"(?:(?:time|Zeit)[=<]([\d.]+)\s*ms|(?:Average|Mittelwert)\s*=\s*([\d.]+)\s*ms)", output, re.IGNORECASE)
+        m = re.search(r"(?:(?:time|Zeit)([=<])([\d.]+)\s*ms|(?:Average|Mittelwert)\s*=\s*([\d.]+)\s*ms)", output, re.IGNORECASE)
         if m:
-            rtt = float(m.group(1) or m.group(2))
+            if m.group(3):
+                # Average/Mittelwert line
+                rtt = float(m.group(3))
+            elif m.group(1) == "<":
+                # "Zeit<1ms" means sub-millisecond
+                rtt = float(m.group(2)) * 0.5
+            else:
+                rtt = float(m.group(2))
 
         return DiscoveredHost(ip=ip, is_alive=alive, rtt_ms=rtt)
     except (asyncio.TimeoutError, Exception):

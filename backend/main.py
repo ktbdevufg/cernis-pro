@@ -1750,6 +1750,7 @@ async def ws_scan(websocket: WebSocket):
                     fritz_hostname_map[fip] = fhn
 
             added_fritz = 0
+            from modules.discovery import DiscoveredHost, ping_host
             for fh in fritz_hosts:
                 fip = fh.get("ip", "")
                 if not fip or fip in discovered_ips:
@@ -1757,9 +1758,10 @@ async def ws_scan(websocket: WebSocket):
                 # Only add if in our scan subnet
                 if not _in_any_net(fip):
                     continue
-                # Create a synthetic host entry
-                from modules.discovery import DiscoveredHost
-                synth = DiscoveredHost(ip=fip, mac=fh.get("mac",""), rtt_ms=-1, is_alive=True)
+                # Ping to get actual RTT
+                ping_result = await ping_host(fip, timeout=1.0)
+                synth = DiscoveredHost(ip=fip, mac=fh.get("mac",""),
+                                       rtt_ms=ping_result.rtt_ms, is_alive=True)
                 synth.from_fritz = True
                 discovered.append(synth)
                 discovered_ips.add(fip)
@@ -1767,7 +1769,7 @@ async def ws_scan(websocket: WebSocket):
                 await websocket.send_json({
                     "type": "host_found", "ip": fip, "mac": fh.get("mac",""),
                     "vendor": lookup_vendor(fh.get("mac","")) if fh.get("mac") else "",
-                    "rtt_ms": -1, "source": "fritzbox"
+                    "rtt_ms": ping_result.rtt_ms, "source": "fritzbox"
                 })
             if added_fritz:
                 await websocket.send_json({
@@ -1778,22 +1780,21 @@ async def ws_scan(websocket: WebSocket):
 
     # ── Merge ARP table (catches hosts that don't respond to ping) ──
     try:
-        import subprocess as _sp
-        import re as _re
-        arp_out = _sp.run(["arp", "-a"], capture_output=True, text=True, timeout=3).stdout
-        for line in arp_out.splitlines():
-            m = _re.search(r'[\(](\d+\.\d+\.\d+\.\d+)[\)].*?([\da-f]{1,2}(?::[\da-f]{1,2}){5})', line, _re.IGNORECASE)
-            if not m: continue
-            aip, amac = m.group(1), m.group(2).lower()
+        from modules.discovery import DiscoveredHost, ping_host, get_arp_table
+        arp_hosts = get_arp_table()
+        for aip, amac in arp_hosts.items():
             if aip in discovered_ips: continue
             if not _in_any_net(aip): continue
-            from modules.discovery import DiscoveredHost
-            synth = DiscoveredHost(ip=aip, mac=amac, rtt_ms=-1, is_alive=True)
+            # Ping to get actual RTT
+            ping_result = await ping_host(aip, timeout=1.0)
+            synth = DiscoveredHost(ip=aip, mac=amac,
+                                   rtt_ms=ping_result.rtt_ms, is_alive=True)
             discovered.append(synth)
             discovered_ips.add(aip)
             await websocket.send_json({
                 "type": "host_found", "ip": aip, "mac": amac,
-                "vendor": lookup_vendor(amac), "rtt_ms": -1, "source": "arp"
+                "vendor": lookup_vendor(amac), "rtt_ms": ping_result.rtt_ms,
+                "source": "arp"
             })
     except Exception:
         pass
