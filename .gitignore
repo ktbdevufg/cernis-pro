@@ -43,3 +43,13 @@ desktop.ini
 npm-debug.log*
 src-tauri/gen/
 src-tauri/cernis-backend-*
+
+# Claude Code
+.claude/
+
+# Sensitive file types
+*.p12
+*.pfx
+*.sqlite
+*.bak
+*.backup
