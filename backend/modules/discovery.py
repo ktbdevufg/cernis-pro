@@ -41,8 +41,6 @@ async def ping_host(ip: str, timeout: float = 1.0) -> DiscoveredHost:
         m = re.search(r"(?:time[=<]([\d.]+)\s*ms|Average\s*=\s*([\d.]+)ms)", output, re.IGNORECASE)
         if m:
             rtt = float(m.group(1) or m.group(2))
-        if m:
-            rtt = float(m.group(1))
 
         return DiscoveredHost(ip=ip, is_alive=alive, rtt_ms=rtt)
     except (asyncio.TimeoutError, Exception):

@@ -83,7 +83,7 @@ def _save_baseline(ip: str, mac: str, vendor: str):
     now = time.time()
     conn = sqlite3.connect(str(DB_PATH))
     existing = conn.execute("SELECT first_seen FROM arp_baseline WHERE ip=?", (ip,)).fetchone()
-    first = existing["first_seen"] if existing else now
+    first = existing[0] if existing else now
     conn.execute("""
         INSERT OR REPLACE INTO arp_baseline (ip, mac, vendor, first_seen, last_seen)
         VALUES (?,?,?,?,?)
@@ -136,8 +136,8 @@ def clear_baseline():
     conn.close()
 
 
-async def scan_arp_once() -> list[ArpAlert]:
-    """Scan current ARP table, compare with baseline, return alerts."""
+def _scan_arp_sync() -> list[ArpAlert]:
+    """Synchronous ARP scan logic — run via asyncio.to_thread()."""
     _init_arp_db()
     baseline = _load_baseline()
     current = get_arp_table()  # {ip: mac}
@@ -195,3 +195,8 @@ async def scan_arp_once() -> list[ArpAlert]:
             _save_baseline(ip, mac_upper, vendor)
 
     return alerts
+
+
+async def scan_arp_once() -> list[ArpAlert]:
+    """Scan current ARP table, compare with baseline, return alerts."""
+    return await asyncio.to_thread(_scan_arp_sync)
