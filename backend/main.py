@@ -1432,8 +1432,31 @@ async def api_lldp_topology():
 
 @app.get("/api/pcap/available")
 async def api_pcap_available():
-    perm_err = pcap_check_permission() if pcap_available() else None
-    return {"available": pcap_available(), "permission_error": perm_err or ""}
+    if not pcap_available():
+        import platform as _pf
+        if _pf.system() == "Windows":
+            msg = (
+                "Scapy is not available — Packet Capture requires Npcap.\n"
+                "Download and install Npcap from: https://npcap.com/#download\n"
+                "During installation, check 'Install Npcap in WinPcap API-compatible Mode'.\n"
+                "Restart CERNIS PRO after installing Npcap."
+            )
+        elif _pf.system() == "Darwin":
+            msg = (
+                "Scapy is not available — Packet Capture requires libpcap.\n"
+                "Install via: brew install libpcap\n"
+                "Then restart CERNIS PRO."
+            )
+        else:
+            msg = (
+                "Scapy is not available — Packet Capture requires libpcap.\n"
+                "Install via: sudo apt install libpcap-dev (Debian/Ubuntu) "
+                "or sudo dnf install libpcap-devel (Fedora).\n"
+                "Then restart CERNIS PRO."
+            )
+        return {"available": False, "permission_error": msg}
+    perm_err = pcap_check_permission()
+    return {"available": True, "permission_error": perm_err or ""}
 
 @app.post("/api/pcap/start")
 async def api_pcap_start(payload: dict = Body(default={})):

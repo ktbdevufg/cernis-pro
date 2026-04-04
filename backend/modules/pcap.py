@@ -303,7 +303,14 @@ async def start_capture(interface: str = None, bpf_filter: str = "",
     global _raw_packets, _pcap_file, _capture_error, _sniffer
 
     if not HAS_SCAPY:
-        return {"ok": False, "error": "scapy not installed"}
+        if platform.system() == "Windows":
+            return {"ok": False, "error": (
+                "Packet Capture requires Npcap.\n"
+                "Download and install Npcap from: https://npcap.com/#download\n"
+                "Enable 'WinPcap API-compatible Mode' during installation.\n"
+                "Restart CERNIS PRO after installing Npcap."
+            )}
+        return {"ok": False, "error": "Packet Capture requires libpcap. Install it and restart CERNIS PRO."}
     if _capture_running:
         return {"ok": True, "error": ""}
 
