@@ -114,8 +114,10 @@ addopts = "-q"
 # Lauf: `PYTHONPATH=backend uv run lint-imports` (backend/ ist die Import-Wurzel).
 [tool.importlinter]
 root_packages = ["domain", "ports", "application", "infrastructure", "api"]
-# Noetig, damit Contracts gegen externe Pakete (pydantic/fastapi/structlog im
-# domain-Verbot, ADR 0002) greifen.
+# Merke fuer kuenftige Contracts: Sobald ein Contract externe Pakete als
+# forbidden_modules nennt (hier pydantic/fastapi/structlog im domain-Verbot,
+# ADR 0002), MUSS include_external_packages = true gesetzt sein -- sonst bricht
+# lint-imports ab ("must have include_external_packages=True ...").
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
