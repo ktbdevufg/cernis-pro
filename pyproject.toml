@@ -73,13 +73,21 @@ extend-exclude = [
 select = ["E", "F", "I", "UP", "B", "C4", "SIM", "RUF"]
 
 # ── mypy (strict) ─────────────────────────────────────────────────────────
-# Nur der neue Architektur-Code wird strikt geprueft. Die zu pruefenden Pfade
-# (files) wachsen mit dem Code und werden ab Schritt 2 (Skelett) eingefuehrt.
+# Nur der neue Architektur-Code wird strikt geprueft. Die files-Liste waechst
+# mit dem Code: hier das Skelett (Schritt 2); backend/tests folgt mit den Tests.
 [tool.mypy]
 python_version = "3.12"
 strict = true
 warn_unused_configs = true
 mypy_path = "backend"
+files = [
+    "backend/domain",
+    "backend/ports",
+    "backend/application",
+    "backend/infrastructure",
+    "backend/api",
+    "backend/app.py",
+]
 
 # ── pytest ────────────────────────────────────────────────────────────────
 # backend/ ist die Import-Wurzel (wie der Altbestand: `import modules.x`).
@@ -87,3 +95,34 @@ mypy_path = "backend"
 pythonpath = ["backend"]
 testpaths = ["backend/tests"]
 addopts = "-q"
+
+# ── import-linter (maschinell erzwungene Architektur-Regeln) ──────────────
+# Bildet die fuenf Importregeln aus CLAUDE.md/Zielarchitektur ab. app.py ist
+# bewusst NICHT Teil der root_packages (Composition-Root-Ausnahme, Regel 5).
+# Lauf: `PYTHONPATH=backend uv run lint-imports` (backend/ ist die Import-Wurzel).
+[tool.importlinter]
+root_packages = ["domain", "ports", "application", "infrastructure", "api"]
+
+[[tool.importlinter.contracts]]
+name = "domain bleibt rein (nur domain + stdlib)"
+type = "forbidden"
+source_modules = ["domain"]
+forbidden_modules = ["ports", "application", "infrastructure", "api"]
+
+[[tool.importlinter.contracts]]
+name = "ports kennen hoechstens domain"
+type = "forbidden"
+source_modules = ["ports"]
+forbidden_modules = ["application", "infrastructure", "api"]
+
+[[tool.importlinter.contracts]]
+name = "application kennt nicht infrastructure/api"
+type = "forbidden"
+source_modules = ["application"]
+forbidden_modules = ["infrastructure", "api"]
+
+[[tool.importlinter.contracts]]
+name = "api ruft nur application (nicht domain/ports/infrastructure direkt)"
+type = "forbidden"
+source_modules = ["api"]
+forbidden_modules = ["domain", "ports", "infrastructure"]
