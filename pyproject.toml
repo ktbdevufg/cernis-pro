@@ -93,6 +93,14 @@ files = [
     "backend/tests",
 ]
 
+# Altbestand (modules/) ist bewusst nicht typisiert und nicht Teil der strikten
+# Pruefung -- analog zum ruff-Ausschluss. Characterization-Tests duerfen ihn
+# importieren, ohne dass mypy in den Legacy-Code hineinlaeuft.
+[[tool.mypy.overrides]]
+module = ["modules", "modules.*"]
+follow_imports = "skip"
+ignore_missing_imports = true
+
 # ── pytest ────────────────────────────────────────────────────────────────
 # backend/ ist die Import-Wurzel (wie der Altbestand: `import modules.x`).
 [tool.pytest.ini_options]
