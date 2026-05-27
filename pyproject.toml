@@ -114,6 +114,9 @@ addopts = "-q"
 # Lauf: `PYTHONPATH=backend uv run lint-imports` (backend/ ist die Import-Wurzel).
 [tool.importlinter]
 root_packages = ["domain", "ports", "application", "infrastructure", "api"]
+# Noetig, damit Contracts gegen externe Pakete (pydantic/fastapi/structlog im
+# domain-Verbot, ADR 0002) greifen.
+include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "domain bleibt rein (nur domain + stdlib)"
@@ -144,3 +147,12 @@ name = "infrastructure kennt nicht application/api"
 type = "forbidden"
 source_modules = ["infrastructure"]
 forbidden_modules = ["application", "api"]
+
+# domain bleibt framework-frei (ADR 0002): keine Bindung an pydantic/fastapi/
+# structlog. Macht die "nur stdlib"-Regel fuer die realistischen Versuchungen
+# maschinell pruefbar.
+[[tool.importlinter.contracts]]
+name = "domain bleibt framework-frei (kein pydantic/fastapi/structlog)"
+type = "forbidden"
+source_modules = ["domain"]
+forbidden_modules = ["pydantic", "fastapi", "structlog"]
