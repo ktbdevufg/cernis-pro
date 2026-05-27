@@ -70,6 +70,7 @@ backend/
 - `pyproject.toml` als alleinige Config (kein verstreutes setup.cfg etc.).
 - Lock-Datei statt loser `requirements.txt` (uv oder pip-tools).
 - **Keine stillen Fallbacks.** Ein Fehlschlag ist ein Fehler, nicht ein leiser Rückfall auf unsicheres Verhalten (siehe Finding S3).
+- **Pre-commit-Hooks werden nicht automatisch in `.git/hooks/` installiert** — Aktivierung durch Entwickler mit `uv run pre-commit install`. Begründung: vorhersehbarer Commit-Flow für Coding-Agents. Die CI (`.github/workflows/ci.yml`) erzwingt dieselben Gates ohnehin verbindlich.
 
 ---
 
