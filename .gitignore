@@ -2,6 +2,11 @@ __pycache__/
 *.py[cod]
 *.pyd
 *.pyo
+
+# Python-Tool-Caches (uv, ruff, mypy, pytest)
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
 dist/
 build/
 *.spec.bak

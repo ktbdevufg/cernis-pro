@@ -1,0 +1,89 @@
+# CERNIS PRO 2.0 — alleinige Projekt-Konfiguration (Backend-Rewrite)
+# Ersetzt verstreute Konfig (kein setup.cfg etc.). Abhaengigkeiten werden ueber
+# uv.lock reproduzierbar fixiert. backend/requirements.txt bleibt vorerst
+# bestehen, weil build.sh/build.ps1 noch darauf bauen (Retirement = Build-Thema).
+
+[project]
+name = "cernis-pro"
+version = "2.0.0.dev0"
+description = "CERNIS PRO — lokaler Netzwerk- und System-Scanner (Backend-Rewrite v2)"
+requires-python = ">=3.12"
+
+# Laufzeit-Abhaengigkeiten. Pins gespiegelt aus backend/requirements.txt
+# (Altbestand laeuft weiter) plus die drei neuen Bausteine der v2-Architektur:
+# pydantic-settings (Konfiguration), structlog (Logging), pydantic (Modelle,
+# bisher nur transitiv ueber fastapi — jetzt explizit).
+dependencies = [
+    "fastapi>=0.111.0",
+    "uvicorn[standard]>=0.29.0",
+    "pydantic>=2.7.0",
+    "pydantic-settings>=2.2.0",
+    "structlog>=24.1.0",
+    "cryptography>=41.0.0",
+    "zeroconf>=0.132.0",
+    "reportlab>=4.0.0",
+    "fritzconnection>=1.13.0",
+    "psutil>=5.9.0",
+    "pysnmp>=6.1.0",
+    "dnspython>=2.4.0",
+    "apscheduler>=3.10.0",
+    "websocket-client>=1.7.0",
+    "websockets>=12.0",
+    "scapy>=2.5.0",
+]
+
+# Entwickler-/CI-Werkzeuge (PEP 735 dependency-group; von `uv sync` per Default
+# mitinstalliert). httpx wird von fastapi.testclient.TestClient benoetigt.
+[dependency-groups]
+dev = [
+    "ruff>=0.6.0",
+    "mypy>=1.11.0",
+    "pytest>=8.0.0",
+    "httpx>=0.27.0",
+    "import-linter>=2.0",
+    "pre-commit>=3.7.0",
+]
+
+[tool.uv]
+# Anwendung, kein verteilbares Wheel — uv soll nur Abhaengigkeiten verwalten,
+# nicht das Projekt selbst bauen.
+package = false
+
+# ── Ruff (Lint + Format) ──────────────────────────────────────────────────
+# Greift waehrend der Migration nur auf den NEUEN Code unter backend/. Der
+# Altbestand (modules/, main.py, ...) ist ausgeschlossen und wird Stueck fuer
+# Stueck einbezogen, sobald er migriert ist (Strangler Fig).
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = [
+    "backend/modules",
+    "backend/main.py",
+    "backend/cernis_cli.py",
+    "backend/runtime_hook.py",
+    "backend/data",
+    "backend/build",
+    "backend/dist",
+    "frontend",
+    "node_modules",
+    "src-tauri",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "C4", "SIM", "RUF"]
+
+# ── mypy (strict) ─────────────────────────────────────────────────────────
+# Nur der neue Architektur-Code wird strikt geprueft. Die zu pruefenden Pfade
+# (files) wachsen mit dem Code und werden ab Schritt 2 (Skelett) eingefuehrt.
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_configs = true
+mypy_path = "backend"
+
+# ── pytest ────────────────────────────────────────────────────────────────
+# backend/ ist die Import-Wurzel (wie der Altbestand: `import modules.x`).
+[tool.pytest.ini_options]
+pythonpath = ["backend"]
+testpaths = ["backend/tests"]
+addopts = "-q"
