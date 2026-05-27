@@ -1,0 +1,46 @@
+# Pre-commit-Hooks fuer CERNIS PRO 2.0.
+# Alle Hooks laufen ueber `uv run`, also gegen die in uv.lock fixierten
+# Werkzeug-Versionen -- identisch zu CI, keine Versions-Drift. Voraussetzung:
+# uv ist installiert (https://docs.astral.sh/uv/). Installation der Hooks:
+#   uv run pre-commit install
+# Dieselben vier Gates bilden auch das CI-Quality-Gate (.github/workflows/ci.yml).
+
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff (lint)
+        entry: uv run ruff check
+        language: system
+        types: [python]
+        pass_filenames: false
+        args: ["backend"]
+
+      - id: ruff-format
+        name: ruff (format-check)
+        entry: uv run ruff format --check
+        language: system
+        types: [python]
+        pass_filenames: false
+        args: ["backend"]
+
+      - id: mypy
+        name: mypy (strict)
+        entry: uv run mypy
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      - id: import-linter
+        name: import-linter (Architektur-Regeln)
+        entry: bash -c 'PYTHONPATH=backend uv run lint-imports'
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      - id: pytest
+        name: pytest
+        entry: uv run pytest
+        language: system
+        types: [python]
+        pass_filenames: false

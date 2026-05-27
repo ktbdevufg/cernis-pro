@@ -130,3 +130,9 @@ name = "api ruft nur application (nicht domain/ports/infrastructure direkt)"
 type = "forbidden"
 source_modules = ["api"]
 forbidden_modules = ["domain", "ports", "infrastructure"]
+
+[[tool.importlinter.contracts]]
+name = "infrastructure kennt nicht application/api"
+type = "forbidden"
+source_modules = ["infrastructure"]
+forbidden_modules = ["application", "api"]
