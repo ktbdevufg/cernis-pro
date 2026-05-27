@@ -56,6 +56,9 @@ package = false
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# backend/ ist die Import-Wurzel -> Pakete darunter gelten als First-Party
+# (korrekte isort-Gruppierung: stdlib / third-party / first-party).
+src = ["backend"]
 extend-exclude = [
     "backend/modules",
     "backend/main.py",
@@ -87,6 +90,7 @@ files = [
     "backend/infrastructure",
     "backend/api",
     "backend/app.py",
+    "backend/tests",
 ]
 
 # ── pytest ────────────────────────────────────────────────────────────────
