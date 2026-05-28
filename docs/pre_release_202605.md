@@ -118,7 +118,15 @@ backend/
 ### Phase 2 — Strangler-Fig-Migration
 **Vorgehen pro Feature:** (1) Characterization-Tests gegen aktuelles Verhalten; (2) Tests gegen alten Code grün; (3) Feature in neue Struktur migrieren (Use-Case + Ports + Adapter); (4) Tests gegen neuen Code grün; (5) alter Code gelöscht; (6) Commit, CI grün, weiter.
 
-**Altcode-Löschung & Einstiegspunkt-Wechsel (Klarstellung):** Das Löschen des Altcodes (Schritt 5 oben; früher informell „6g" genannt) gehört **nicht** ans Ende von Phase 1, sondern in Phase 2. Es setzt den Wechsel des produktiven Einstiegspunkts voraus: Solange `main.py` produktiv ist (PyInstaller bündelt `main.py` → `cernis-backend`, Tauri-Sidecar auf `:8765`) und die alten `settings`-Endpunkte bedient, **bleibt der Altcode bestehen** — `app.py` ist nach Phase 1 fertig, aber noch nicht produktiv. **Phase 2 beginnt deshalb mit dem Einstiegspunkt-Wechsel `main.py` → `app.py`** als eigenem, risiko-budgetiertem Meilenstein; erst danach kann der settings-Altcode (`storage.py`-Settings, `crypto.py`, alte Endpunkte) gelöscht werden.
+**Strategie (siehe ADR 0004):** Phase 2 migriert **Domäne für Domäne** (settings ✓ → `scanning` → `monitoring` → `alerting` → `capture` → `agent` → Hilfsmodule), jeweils im bei `settings` etablierten Muster (Characterization → `domain` → `ports` → `infrastructure` → `application` → `api` → Verdrahtung in `app.py`). Mit **jeder** migrierten Domäne **schrumpft der Altcode** in `main.py`.
+
+**Einstiegspunkt-Wechsel `main.py` → `app.py` kommt ans ENDE von Phase 2** (wenn genug/alle Domänen migriert sind), **nicht** an den Anfang. Dann ist er ein kleiner Schritt (Spec/Tauri auf einen `app:app`-Runner umstellen, `CERNIS_BOOTSTRAP_ON_STARTUP=true`), kein Monolith-Mount.
+
+**Ausdrücklich verworfen — Monolith-Mount (früher als „Weg 1"/„P2.2" erwogen):** `main.py` als **einen** `APIRouter` nach `app.py` zu mounten, um `app.py` früh produktiv zu machen. Begründung der Ablehnung: zieht den gesamten Altcode-Blob inkl. `modules/` in den Composition Root, hält den Monolithen am Stück am Leben (statt ihn pro Domäne zu verkleinern) und birgt konkrete Risiken (Wiedereinführung des S6-Traversal-Catch-alls, Settings-Routen-Kollision mit dem v2-Router). Das widerspricht dem Strangler-Prinzip und dem Vorzeige-Anspruch.
+
+**Klarstellung zu P2.1 (erledigt, bleibt gültig):** Die in P2.1 gebaute Vorbereitung — `app.py` als Lifespan-Owner (`bootstrap_on_startup`-Flag, Commit `a7a3063`) und als traversal-sicherer Frontend-Serving-Owner (Commit `e6211e1`, ADR 0005) — war **richtig** und nötig: sie ist die Voraussetzung dafür, dass `app.py` beim späteren Einstiegspunkt-Wechsel übernehmen kann. Nur die ursprüngliche Schlussfolgerung „also jetzt umschalten" war falsch und ist hiermit korrigiert.
+
+**Nächster konkreter Schritt:** Migration der Domäne `scanning`.
 
 **Reihenfolge (vorläufig, in Phase 0 finalisiert):** `settings` (in Phase 1) → `scanning` → `monitoring` → `alerting` → `capture` → `agent` → Hilfsmodule (resolver, fritzbox, mdns, ssdp, snmp, …). Neue Domänen (`traffic`, `process`, `analysis`) werden nach Stabilisierung des Bestands eingeplant.
 
@@ -126,7 +134,7 @@ backend/
 **Deliverables:** `README.md`; `docs/ARCHITECTURE.md`; `docs/CODING_STANDARDS.md`; `docs/CONTRIBUTING.md`; `docs/adr/` (ein ADR pro größerer Entscheidung); OpenAPI via FastAPI; Setup-Guide; Build-Guide pro Plattform (Stand v1.0.0 mitnehmen). **Hinweis:** Doku entsteht parallel mit jedem Modul, nicht erst hier — Phase 3 ist Finalisierung, nicht Beginn.
 
 ### Phase 4 — Security-Audit
-**Deliverables:** Audit-Bericht (alle Findings mit Severity, Reproduktion, Empfehlung); Masterplan (Reihenfolge, Aufwand, Abhängigkeiten); Status der bekannten Findings S1–S5 (gelöst/offen/verschoben); Threat-Model; Defense-in-Depth (Logging, Rate-Limiting, Input-Validation). **Anschließend:** Fixes nach Masterplan mit Test-Abdeckung. Audit läuft gegen **stabilen** Code, nicht gegen ein bewegliches Ziel. Zusätzlicher Audit-Punkt: Privacy der `analysis`-Links (siehe `vision_features_202605.md`, 4.4).
+**Deliverables:** Audit-Bericht (alle Findings mit Severity, Reproduktion, Empfehlung); Masterplan (Reihenfolge, Aufwand, Abhängigkeiten); Status der bekannten Findings S1–S6 (gelöst/offen/verschoben); Threat-Model; Defense-in-Depth (Logging, Rate-Limiting, Input-Validation). **Anschließend:** Fixes nach Masterplan mit Test-Abdeckung. Audit läuft gegen **stabilen** Code, nicht gegen ein bewegliches Ziel. Zusätzlicher Audit-Punkt: Privacy der `analysis`-Links (siehe `vision_features_202605.md`, 4.4).
 
 ### Phase 5 — Frontend-Refactoring (optional, später)
 **Trigger:** wenn Backend-Rewrite stabil ist und Frontend-Pflege spürbar wehtut. Knüpft an das UI-Designprinzip an (`vision_features_202605.md`, Abschnitt 3).
