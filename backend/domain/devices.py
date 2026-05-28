@@ -100,6 +100,21 @@ class IpHistoryEntry:
         object.__setattr__(self, "mac", normalize_mac(self.mac))
 
 
+@dataclass(frozen=True)
+class DeviceStats:
+    """Aggregierte Zaehler ueber den Geraetebestand (reines Ergebnis-Wertobjekt).
+
+    ``active`` zaehlt Geraete, deren ``last_seen`` innerhalb eines vom Aufrufer
+    bestimmten Fensters liegt -- die Zeitgrenze kommt vom Use-Case (z. B.
+    ``now - 24h``), nicht aus der Persistenz.
+    """
+
+    total: int
+    known: int
+    unknown: int
+    active: int
+
+
 def _scan_or_keep(scanned: str, existing: str) -> str:
     """``CASE WHEN scanned!='' THEN scanned ELSE existing`` aus dem Altcode.
 
