@@ -40,9 +40,7 @@ class CorruptSettingError(Exception):
     def __init__(self, key: str, raw_value: str) -> None:
         self.key = key
         self.raw_value = raw_value
-        super().__init__(
-            f"Setting {key!r} enthaelt kein gueltiges JSON: {raw_value!r}"
-        )
+        super().__init__(f"Setting {key!r} enthaelt kein gueltiges JSON: {raw_value!r}")
 
 
 def _decode(key: str, raw_value: str) -> SettingValue:
@@ -91,9 +89,7 @@ class SqliteSettingsRepository:
 
     def get(self, key: str) -> Setting | None:
         with self._connect() as conn:
-            row = conn.execute(
-                "SELECT key, value FROM settings WHERE key = ?", (key,)
-            ).fetchone()
+            row = conn.execute("SELECT key, value FROM settings WHERE key = ?", (key,)).fetchone()
         if row is None:
             return None
         return Setting(key=row["key"], value=_decode(row["key"], row["value"]))

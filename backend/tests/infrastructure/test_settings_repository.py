@@ -29,9 +29,7 @@ def _insert_raw(db_path: Path, key: str, raw_value: str) -> None:
     """Schiebt einen Roh-/Nicht-JSON-Wert direkt in die Tabelle (Legacy-Simulation)."""
     conn = sqlite3.connect(db_path)
     try:
-        conn.execute(
-            "INSERT INTO settings (key, value) VALUES (?, ?)", (key, raw_value)
-        )
+        conn.execute("INSERT INTO settings (key, value) VALUES (?, ?)", (key, raw_value))
         conn.commit()
     finally:
         conn.close()
@@ -112,9 +110,7 @@ def test_delete_missing_key_is_idempotent(
         {"nested": {"a": [1, 2, 3]}},
     ],
 )
-def test_json_types_roundtrip(
-    repo: SqliteSettingsRepository, value: SettingValue
-) -> None:
+def test_json_types_roundtrip(repo: SqliteSettingsRepository, value: SettingValue) -> None:
     repo.set(Setting(key="k", value=value))
     assert repo.get("k") == Setting(key="k", value=value)
 
