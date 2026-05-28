@@ -121,3 +121,32 @@ class EnrichedHost:
     label: str = ""
     tags: tuple[str, ...] = ()
     notes: str = ""
+
+
+@dataclass(frozen=True)
+class ScanSummary:
+    """Listen-View eines gespeicherten Scans -- OHNE den Host-Blob.
+
+    Was ``ScanHistoryRepository.list()`` liefert (Charakterisierung S.1:
+    ``get_scan_history`` ohne ``result_json``). ``host_count`` ist die im Scan
+    gefundene Host-Anzahl; der eigentliche Inhalt kommt erst per ``get(scan_id)``.
+    """
+
+    scan_id: int
+    cidr: str
+    host_count: int
+
+
+@dataclass(frozen=True)
+class ScanRecord:
+    """Detail eines gespeicherten Scans -- die vollen Hosts (host_detail/scan_history).
+
+    Was ``ScanHistoryRepository.get(scan_id)`` liefert (Charakterisierung S.1:
+    ``get_scan_by_id`` mit ``hosts``-Round-trip). Die Hosts sind die reichen
+    Domaenen-Objekte ``EnrichedHost``; die JSON-(De-)Serialisierung ist Sache des
+    Adapters (S.4), nicht der Domaene.
+    """
+
+    scan_id: int
+    cidr: str
+    hosts: tuple[EnrichedHost, ...]

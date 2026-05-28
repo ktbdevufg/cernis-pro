@@ -180,8 +180,30 @@ forbidden_modules = ["pydantic", "fastapi", "structlog"]
 # bleibt strikt auf app.py beschraenkt (Composition Root, nicht analysiert) -- z. B.
 # die Uebergangs-Kruecke des Bootstrap-Inits (P2.1b). So kann der Altcode nicht in
 # die sauberen Ringe lecken; jeder Versuch bricht CI.
+#
+# EINE eng eingezaeunte Ausnahme (ADR 0007): die scanning-Infrastructure-Adapter
+# DUERFEN modules/ importieren -- eine Reimplementierung der systemnahen Schicht
+# (Ping/Portscan/mDNS/SSDP/IPv6/Fritz) waere Wegwerf-Arbeit vor dem in Vision 5.2
+# vorgesehenen moeglichen Sprachwechsel. Die Ausnahme ist SUBTRAKTIV ueber
+# ignore_imports umgesetzt, NICHT als zweiter (additiver) Contract: ein forbidden-
+# Contract kann nur verbieten, nie erlauben -- die Lockerung MUSS daher am
+# bestehenden Contract haengen. source_modules/forbidden_modules bleiben
+# unveraendert; ignore_imports schneidet ausschliesslich
+# `infrastructure.scanning(.*) -> modules(.*)` aus der Pruefung. JEDER andere Ring
+# (domain, ports, application, api) und JEDER andere infrastructure-Adapter bleibt
+# vom selben Contract weiter CI-hart gegen modules/ geblockt.
+#
+# unmatched_ignore_imports_alerting = "none": die ignorierten Importe existieren in
+# S.3 (nur Ports) noch nicht -- der scanning-Adapter kommt erst in S.4. Ohne dies
+# wuerde lint-imports ueber die (noch) nicht im Graphen gefundene ignore-Expression
+# abbrechen. Faellt mit ADR 0007 weg, sobald die systemnahe Schicht ersetzt ist.
 [[tool.importlinter.contracts]]
 name = "neue Ringe importieren NICHT den Altcode (modules/)"
 type = "forbidden"
 source_modules = ["domain", "ports", "application", "infrastructure", "api"]
 forbidden_modules = ["modules"]
+ignore_imports = [
+    "infrastructure.scanning -> modules",
+    "infrastructure.scanning.* -> modules.*",
+]
+unmatched_ignore_imports_alerting = "none"

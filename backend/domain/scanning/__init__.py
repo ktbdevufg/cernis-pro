@@ -1,6 +1,11 @@
 """Modelle, Fingerprinting und Ereignis-Vokabular der scanning-Domaene."""
 
 from domain.scanning.classification import classify_host
+from domain.scanning.discovery_events import (
+    DiscoveryEvent,
+    DiscoveryHostFound,
+    DiscoveryTick,
+)
 from domain.scanning.events import (
     HostEnriched,
     HostFound,
@@ -19,11 +24,16 @@ from domain.scanning.models import (
     MdnsService,
     PortInfo,
     ScanConfig,
+    ScanRecord,
+    ScanSummary,
     SsdpService,
 )
 
 __all__ = [
     "DiscoveredHost",
+    "DiscoveryEvent",
+    "DiscoveryHostFound",
+    "DiscoveryTick",
     "EnrichedHost",
     "HostClassification",
     "HostEnriched",
@@ -37,7 +47,9 @@ __all__ = [
     "ScanConfig",
     "ScanError",
     "ScanEvent",
+    "ScanRecord",
     "ScanStarted",
+    "ScanSummary",
     "SsdpService",
     "classify_host",
 ]
