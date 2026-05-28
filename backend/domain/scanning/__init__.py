@@ -1,5 +1,6 @@
-"""Modelle und Ereignis-Vokabular der scanning-Domaene."""
+"""Modelle, Fingerprinting und Ereignis-Vokabular der scanning-Domaene."""
 
+from domain.scanning.classification import classify_host
 from domain.scanning.events import (
     HostEnriched,
     HostFound,
@@ -38,4 +39,5 @@ __all__ = [
     "ScanEvent",
     "ScanStarted",
     "SsdpService",
+    "classify_host",
 ]
