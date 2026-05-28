@@ -115,6 +115,18 @@ class DeviceStats:
     active: int
 
 
+@dataclass(frozen=True)
+class DeviceWithHistory:
+    """Ein Geraet samt seiner IP-Historie (reines Ergebnis-Wertobjekt).
+
+    Bringt die getrennt gefuehrten Teile (Stammdaten + History-Sequenz) fuer die
+    Detail-Ansicht zusammen, ohne sie im ``Device``-Aggregat zu vermischen.
+    """
+
+    device: Device
+    ip_history: tuple[IpHistoryEntry, ...] = ()
+
+
 def _scan_or_keep(scanned: str, existing: str) -> str:
     """``CASE WHEN scanned!='' THEN scanned ELSE existing`` aus dem Altcode.
 
