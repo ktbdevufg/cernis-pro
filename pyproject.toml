@@ -188,22 +188,28 @@ forbidden_modules = ["pydantic", "fastapi", "structlog"]
 # ignore_imports umgesetzt, NICHT als zweiter (additiver) Contract: ein forbidden-
 # Contract kann nur verbieten, nie erlauben -- die Lockerung MUSS daher am
 # bestehenden Contract haengen. source_modules/forbidden_modules bleiben
-# unveraendert; ignore_imports schneidet ausschliesslich
-# `infrastructure.scanning(.*) -> modules(.*)` aus der Pruefung. JEDER andere Ring
-# (domain, ports, application, api) und JEDER andere infrastructure-Adapter bleibt
-# vom selben Contract weiter CI-hart gegen modules/ geblockt.
+# unveraendert; ignore_imports schneidet ausschliesslich Importe AUS dem Paket
+# `infrastructure.scanning` (beliebige Tiefe via `**`) in den Altcode heraus.
 #
-# unmatched_ignore_imports_alerting = "none": die ignorierten Importe existieren in
-# S.3 (nur Ports) noch nicht -- der scanning-Adapter kommt erst in S.4. Ohne dies
-# wuerde lint-imports ueber die (noch) nicht im Graphen gefundene ignore-Expression
-# abbrechen. Faellt mit ADR 0007 weg, sobald die systemnahe Schicht ersetzt ist.
+# WICHTIG zur Pattern-Form (in S.4a empirisch korrigiert): Die Zielseite ist
+# `modules` OHNE Suffix -- der forbidden-Contract loest die Kanten gegen das
+# verbotene PAKET `modules` auf (nicht gegen `modules.resolver` o.ae.), also matcht
+# nur `... -> modules`. Eine Form `... -> modules.**` matcht im Contract-Kontext
+# NICHTS (verifiziert: "No matches for ignored import"). Das `**` auf der QUELLseite
+# deckt jeden kuenftigen scanning-Adapter (discovery/portscan/mdns/ssdp/ipv6/fritz,
+# S.4b) automatisch mit ab. JEDER andere Ring (domain, ports, application, api) und
+# JEDER andere infrastructure-Adapter bleibt vom selben Contract weiter CI-hart
+# gegen modules/ geblockt (Probe: Import ausserhalb scanning -> BROKEN).
+#
+# KEIN unmatched_ignore_imports_alerting mehr: der scanning-Adapter existiert seit
+# S.4a, die Expression matcht real -- ein "none"-Schalter wuerde nur kuenftige
+# Pattern-Fehler maskieren (genau das hatte er in S.3 getan). Faellt mit ADR 0007
+# ganz weg, sobald die systemnahe Schicht ersetzt ist.
 [[tool.importlinter.contracts]]
 name = "neue Ringe importieren NICHT den Altcode (modules/)"
 type = "forbidden"
 source_modules = ["domain", "ports", "application", "infrastructure", "api"]
 forbidden_modules = ["modules"]
 ignore_imports = [
-    "infrastructure.scanning -> modules",
-    "infrastructure.scanning.* -> modules.*",
+    "infrastructure.scanning.** -> modules",
 ]
-unmatched_ignore_imports_alerting = "none"
