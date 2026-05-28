@@ -139,11 +139,18 @@ type = "forbidden"
 source_modules = ["application"]
 forbidden_modules = ["infrastructure", "api"]
 
+# api soll domain/ports/infrastructure nicht DIREKT importieren -- der Weg geht
+# ueber application/. Indirekte Importe sind hier legitim und gewollt: api ruft
+# application, und application kennt domain/ports (genau die Schichtung). Darum
+# allow_indirect_imports -- das Verbot direkter api->infrastructure-Importe
+# bleibt scharf, und indirekt ueber application ist unmoeglich, weil application
+# selbst infrastructure nicht importieren darf (eigener Contract oben).
 [[tool.importlinter.contracts]]
 name = "api ruft nur application (nicht domain/ports/infrastructure direkt)"
 type = "forbidden"
 source_modules = ["api"]
 forbidden_modules = ["domain", "ports", "infrastructure"]
+allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
 name = "infrastructure kennt nicht application/api"
