@@ -42,3 +42,8 @@ class AppConfig(BaseSettings):
     # Doppelstart gegen die reale DB. Der Einstiegspunkt-Wechsel (P2.3) setzt
     # CERNIS_BOOTSTRAP_ON_STARTUP=true und dokumentiert so den Uebergang.
     bootstrap_on_startup: bool = False
+
+    # Verzeichnis des gebauten React-Frontends (frontend-dist). Hat Vorrang vor
+    # der automatischen Suche (siehe app._resolve_frontend_dir). None -> Suche;
+    # findet sich keins, laeuft die App API-only ohne Frontend-Serving.
+    frontend_dir: str | None = None

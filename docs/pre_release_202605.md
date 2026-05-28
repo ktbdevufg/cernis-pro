@@ -45,8 +45,9 @@ Die Entscheidung lautet: **kein Patchen, sondern strukturierter Rewrite des Back
 | S3 | **High** | Settings/Secrets | `GET /api/settings` liefert Klartext-Secrets (Shodan API Key); Crypto-Helper fällt still auf Base64 oder Plaintext zurück (`crypto.py:41`, `:65`) |
 | S4 | Medium | Remote-Agent | Default `0.0.0.0` + Shared-Secret `changeme` + permissives CORS (`agent.py:258–261`, `:187`) |
 | S5 | Medium | Pcap-Anleitung | Empfiehlt `/dev/bpf*` world-accessible (macOS) und `cap_net_raw` auf gesamte Backend-Binary (Linux) — schwächt Host-Sicherheit |
+| S6 | **High** | Frontend/Static | Path-Traversal im SPA-Catch-all: `main.py:1991–1999` baut den Dateipfad aus user-kontrolliertem `full_path` zusammen (`os.path.join(_FRONTEND_DIR, full_path)` + `isfile` + `FileResponse`) ohne Containment-Prüfung. Mit (URL-kodiertem) `../` ausbruchbar; in Kombination mit S1 (Wildcard-CORS, keine Auth) von jeder Webseite/`curl` exfiltrierbar → effektiv **High**. Im Rewrite (P2.1c) gefunden. **In v2 gelöst** (app.py: `StaticFiles`, kein manuelles Pfad-Join — ADR 0005); im sterbenden `main.py` bewusst **nicht** gepatcht (stirbt mit Einstiegspunkt-Wechsel P2.3) |
 
-> **Hinweis:** Es existieren weitere Security-Findings (Teile 2+), die im Audit der Phase 4 systematisch erhoben werden. S1–S5 sind die bisher genannten.
+> **Hinweis:** S1–S5 stammen aus dem externen Security-Review (Teil 1); S6 wurde im Rewrite (P2.1c) gefunden. Weitere Findings (Teile 2+) werden im Audit der Phase 4 systematisch erhoben.
 
 Die vollständige Adressierung jedes Findings (was die neue Architektur konkret dagegen tut) ist in `vision_features_202605.md`, Abschnitt 1, tabellarisch dokumentiert.
 

@@ -10,6 +10,7 @@ fastapi/starlette).
 """
 
 import asyncio
+import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from functools import lru_cache
@@ -20,6 +21,10 @@ import structlog
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.responses import Response
+from starlette.types import Scope
 
 from api.settings import (
     provide_get_settings,
@@ -128,6 +133,64 @@ async def _scheduled_scan(cidr: str, profile_id: str, schedule_id: int) -> None:
     save_scan(cidr, [{"ip": h.ip, "mac": h.mac, "rtt_ms": h.rtt_ms} for h in discovered])
 
 
+# ── Frontend-Serving (traversal-sicher) ───────────────────────────────────────
+
+
+def _resolve_frontend_dir(configured: str | None) -> Path | None:
+    """Loest das frontend-dist-Verzeichnis auf.
+
+    ``configured`` (CERNIS_FRONTEND_DIR / AppConfig.frontend_dir) hat Vorrang;
+    fehlt es, dieselbe Suchreihenfolge wie main.py._find_frontend(). Erstes
+    existierendes ``realpath`` gewinnt, sonst None (-> kein Frontend-Serving).
+    """
+    candidates: list[Path] = []
+    if configured:
+        candidates.append(Path(configured))
+    if hasattr(sys, "_MEIPASS"):  # PyInstaller-Bundle
+        meipass = Path(sys._MEIPASS)
+        exe_dir = Path(sys.executable).parent
+        candidates += [
+            meipass / "frontend-dist",
+            exe_dir / "frontend-dist",
+            exe_dir / ".." / "frontend-dist",
+            meipass / ".." / "frontend-dist",
+        ]
+    here = Path(__file__).parent
+    candidates += [
+        here / ".." / "frontend-dist",
+        here / "frontend-dist",
+        here / ".." / "frontend" / "dist",
+    ]
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved.is_dir():
+            return resolved
+    return None
+
+
+class _SpaStaticFiles(StaticFiles):
+    """Traversal-sicheres SPA-Serving.
+
+    Existierende Dateien liefert ``StaticFiles`` aus (containt von Haus aus gegen
+    Path-Traversal); unbekannte Nicht-``api/``-/``ws/``-Pfade fallen auf
+    ``index.html`` zurueck (fixer Pfad). KEINE Zeile konkateniert user-Input in
+    einen Dateipfad -- genau das war die Altcode-Luecke (Finding S6).
+    """
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        # API/WS nicht auf index.html zurueckfallen lassen -> 404 (Sekundaer-
+        # Absicherung; echte API-Routen matchen ohnehin vor diesem "/"-Mount).
+        if path.lstrip("/").startswith(("api/", "ws/")):
+            raise StarletteHTTPException(status_code=404)
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code == 404:
+                # SPA-Client-Route: index.html (fixer Pfad, sicherer StaticFiles-Lookup).
+                return await super().get_response("index.html", scope)
+            raise
+
+
 def create_app(config: AppConfig | None = None) -> FastAPI:
     """Baut die FastAPI-App. ``config=None`` liest die Konfiguration aus der Umgebung."""
     cfg = config or AppConfig()
@@ -207,6 +270,19 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             status_code=503,
             content={"detail": "Secret-Speicher (OS-Keystore) ist nicht verfuegbar."},
         )
+
+    # ── Frontend-Serving ── MUSS als LETZTES registriert werden ──────────────────
+    # Der "/"-Mount faengt alle zuvor NICHT gematchten Pfade. Deshalb hier ganz am
+    # Ende von create_app -- nach /health, settings_router und allen kuenftigen
+    # Routern -, sonst verschluckt er deren Routen. Serving ist nebeneffektfrei und
+    # daher NICHT an bootstrap_on_startup gekoppelt; fehlt das Frontend, laeuft die
+    # App API-only.
+    frontend_dir = _resolve_frontend_dir(cfg.frontend_dir)
+    if frontend_dir is not None:
+        app.mount("/", _SpaStaticFiles(directory=frontend_dir, html=True), name="frontend")
+        logger.info("frontend_serving_enabled", directory=str(frontend_dir))
+    else:
+        logger.info("frontend_serving_disabled")
 
     return app
 
