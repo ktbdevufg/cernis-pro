@@ -88,7 +88,7 @@ backend/
 5. Verdrahtung zwischen `ports/` und `infrastructure/` passiert **ausschließlich** in `app.py`
 
 **Geplante Domänen (inkl. neuer Features aus dem Brainstorming):**
-`scanning`, `monitoring`, `alerting`, `capture`, `agent`, `settings` (Bestand) + `traffic`, `process`, `analysis` (neu — siehe `vision_features_202605.md`, Abschnitt 6).
+`scanning`, `devices`, `monitoring`, `alerting`, `security`, `capture`, `agent`, `settings` (Bestand) + `traffic`, `process`, `analysis` (neu — siehe `vision_features_202605.md`, Abschnitt 6).
 
 ---
 
@@ -128,7 +128,7 @@ backend/
 
 **Nächster konkreter Schritt:** Migration der Domäne `devices` (scanning folgt als zweite — siehe ADR 0006).
 
-**Reihenfolge (vorläufig, in Phase 0 finalisiert):** `settings` (in Phase 1) → `devices` → `scanning` → `monitoring` → `alerting` → `capture` → `agent` → Hilfsmodule (resolver, fritzbox, mdns, ssdp, snmp, …) (devices vor scanning, weil scanning in die devices-Domäne schreibt — `update_device_from_scan` — und liest — `get_known_devices`; Migration in Abhängigkeitsrichtung vermeidet eine Wegwerf-Übergangskopplung auf devices-Altcode, siehe ADR 0006). Neue Domänen (`traffic`, `process`, `analysis`) werden nach Stabilisierung des Bestands eingeplant.
+**Reihenfolge (vorläufig, in Phase 0 finalisiert):** `settings` (in Phase 1) → `devices` → `scanning` → `monitoring` → `alerting` → `security` → `capture` → `agent` → Hilfsmodule (resolver, fritzbox, mdns, ssdp, snmp, …) (devices vor scanning, weil scanning in die devices-Domäne schreibt — `update_device_from_scan` — und liest — `get_known_devices`; Migration in Abhängigkeitsrichtung vermeidet eine Wegwerf-Übergangskopplung auf devices-Altcode, siehe ADR 0006). Neue Domänen (`traffic`, `process`, `analysis`) werden nach Stabilisierung des Bestands eingeplant.
 
 ### Phase 3 — Doku-Finalisierung
 **Deliverables:** `README.md`; `docs/ARCHITECTURE.md`; `docs/CODING_STANDARDS.md`; `docs/CONTRIBUTING.md`; `docs/adr/` (ein ADR pro größerer Entscheidung); OpenAPI via FastAPI; Setup-Guide; Build-Guide pro Plattform (Stand v1.0.0 mitnehmen). **Hinweis:** Doku entsteht parallel mit jedem Modul, nicht erst hier — Phase 3 ist Finalisierung, nicht Beginn.

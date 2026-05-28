@@ -83,8 +83,8 @@ backend/
 5. Alten Code löschen.
 6. Commit, CI grün, weiter.
 
-**Reihenfolge** (aus `phase0_ist_analyse.md`, Abschnitt 7):
-`settings` → `scanning` → `devices` → `monitoring` → `alerting` → `security` → `capture` → `agent` → Hilfsmodule.
+**Reihenfolge** (aus `phase0_ist_analyse.md`, Abschnitt 7, devices↔scanning gemäß ADR 0006):
+`settings` (✓) → `devices` → `scanning` → `monitoring` → `alerting` → `security` → `capture` → `agent` → Hilfsmodule.
 Neue Domänen (`traffic`, `process`, `analysis`) erst nach Stabilisierung des Bestands.
 
 ---

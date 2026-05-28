@@ -136,9 +136,11 @@ remote_agents      (id PK, name, url, token, enabled, last_seen,
 
 Begründet aus Isolierbarkeit (Helfer-Module = einfach) und Kopplung (Persistenz = schwerer).
 
+> **Aktualisiert durch ADR 0006:** `devices` wird **vor** `scanning` migriert (scanning schreibt via `update_device_from_scan` in `devices` und liest `get_known_devices`). Die ursprüngliche Analyse-Reihenfolge ist als historischer Ist-Stand erhalten; unten sind nur die Positionen `devices`↔`scanning` getauscht, die Befunde bleiben unverändert.
+
 1. **`settings`** (Phase 1, Referenz) — kleinste Persistenz-Domäne, 1 Tabelle, klar isoliert. Etabliert das Repository-Port-Muster.
-2. **`scanning`** — Kernfeature; Helfer-Module (discovery, portscan, nettools, resolver, vendor) sind state- und DB-frei, also leicht hinter Ports zu ziehen. `scan_history` als erste echte Repository-Nutzung.
-3. **`devices`** — hier die `devices`/`known_devices`-Zusammenführung. Mittel-komplex wegen Datenmigration.
+2. **`devices`** — hier die `devices`/`known_devices`-Zusammenführung. Mittel-komplex wegen Datenmigration.
+3. **`scanning`** — Kernfeature; Helfer-Module (discovery, portscan, nettools, resolver, vendor) sind state- und DB-frei, also leicht hinter Ports zu ziehen. `scan_history` als erste echte Repository-Nutzung.
 4. **`monitoring`** (monitor + sla) — 4 Tabellen, Background-Task (State!), WebSocket. Anspruchsvoll.
 5. **`alerting`** — hängt an monitoring; S2 (osascript) hier mit sicherem Notification-Port lösen.
 6. **`security`** (arp_guard, cve, tls, default_creds) — arp_guard hat Modul-Kopplung, daher nach scanning/devices.
