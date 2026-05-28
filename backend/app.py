@@ -26,14 +26,33 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 from starlette.types import Scope
 
+from api.devices import (
+    provide_delete_device,
+    provide_get_device,
+    provide_get_device_stats,
+    provide_get_devices,
+    provide_record_scanned_host,
+    provide_update_device_meta,
+)
+from api.devices import router as devices_router
 from api.settings import (
     provide_get_settings,
     provide_update_secret,
     provide_update_setting,
 )
 from api.settings import router as settings_router
+from application.devices import (
+    DeleteDevice,
+    GetDevice,
+    GetDevices,
+    GetDeviceStats,
+    RecordScannedHost,
+    UpdateDeviceMeta,
+)
 from application.settings import GetSettings, UpdateSecret, UpdateSetting
+from infrastructure.clock import SystemClock
 from infrastructure.config import APP_NAME, APP_VERSION, AppConfig
+from infrastructure.device_repository import SqliteDeviceRepository
 from infrastructure.logging import configure_logging
 from infrastructure.secret_store import KeyringSecretStore, SecretStoreUnavailableError
 from infrastructure.settings_repository import SqliteSettingsRepository
@@ -259,6 +278,35 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     )
     app.dependency_overrides[provide_update_setting] = lambda: UpdateSetting(repository())
     app.dependency_overrides[provide_update_secret] = lambda: UpdateSecret(secret_store())
+
+    # ── devices-Domaene v2 verdrahten (Regel 5: ports<->infrastructure nur hier) ──
+    # Lazy memoisiert wie das settings-Repository: die Adapter-/DB-Konstruktion
+    # passiert erst beim ersten devices-Request, nicht beim App-Bau (Tests
+    # ueberschreiben die Provider). Das v2-Repository nutzt NUR devices +
+    # device_ip_history; known_devices bleibt unberuehrt (stirbt mit dem Altcode).
+    @lru_cache(maxsize=1)
+    def device_repository() -> SqliteDeviceRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteDeviceRepository(get_db_path())
+
+    device_clock = SystemClock()
+
+    app.include_router(devices_router)
+    app.dependency_overrides[provide_get_device_stats] = lambda: GetDeviceStats(
+        device_repository(), device_clock
+    )
+    app.dependency_overrides[provide_get_devices] = lambda: GetDevices(device_repository())
+    app.dependency_overrides[provide_get_device] = lambda: GetDevice(device_repository())
+    app.dependency_overrides[provide_update_device_meta] = lambda: UpdateDeviceMeta(
+        device_repository()
+    )
+    app.dependency_overrides[provide_delete_device] = lambda: DeleteDevice(device_repository())
+    # RecordScannedHost hat (noch) keinen Endpunkt -- hier verdrahtet und bereit-
+    # gestellt, damit die spaeter migrierte scanning-Domaene ihn konsumiert.
+    app.dependency_overrides[provide_record_scanned_host] = lambda: RecordScannedHost(
+        device_repository(), device_clock
+    )
 
     @app.exception_handler(SecretStoreUnavailableError)
     async def _on_secret_store_unavailable(
