@@ -118,7 +118,7 @@ backend/
 ### Phase 2 — Strangler-Fig-Migration
 **Vorgehen pro Feature:** (1) Characterization-Tests gegen aktuelles Verhalten; (2) Tests gegen alten Code grün; (3) Feature in neue Struktur migrieren (Use-Case + Ports + Adapter); (4) Tests gegen neuen Code grün; (5) alter Code gelöscht; (6) Commit, CI grün, weiter.
 
-**Strategie (siehe ADR 0004):** Phase 2 migriert **Domäne für Domäne** (settings ✓ → `scanning` → `monitoring` → `alerting` → `capture` → `agent` → Hilfsmodule), jeweils im bei `settings` etablierten Muster (Characterization → `domain` → `ports` → `infrastructure` → `application` → `api` → Verdrahtung in `app.py`). Mit **jeder** migrierten Domäne **schrumpft der Altcode** in `main.py`.
+**Strategie (siehe ADR 0004):** Phase 2 migriert **Domäne für Domäne** (settings ✓ → `devices` → `scanning` → `monitoring` → `alerting` → `capture` → `agent` → Hilfsmodule), jeweils im bei `settings` etablierten Muster (Characterization → `domain` → `ports` → `infrastructure` → `application` → `api` → Verdrahtung in `app.py`). Mit **jeder** migrierten Domäne **schrumpft der Altcode** in `main.py`.
 
 **Einstiegspunkt-Wechsel `main.py` → `app.py` kommt ans ENDE von Phase 2** (wenn genug/alle Domänen migriert sind), **nicht** an den Anfang. Dann ist er ein kleiner Schritt (Spec/Tauri auf einen `app:app`-Runner umstellen, `CERNIS_BOOTSTRAP_ON_STARTUP=true`), kein Monolith-Mount.
 
@@ -126,9 +126,9 @@ backend/
 
 **Klarstellung zu P2.1 (erledigt, bleibt gültig):** Die in P2.1 gebaute Vorbereitung — `app.py` als Lifespan-Owner (`bootstrap_on_startup`-Flag, Commit `a7a3063`) und als traversal-sicherer Frontend-Serving-Owner (Commit `e6211e1`, ADR 0005) — war **richtig** und nötig: sie ist die Voraussetzung dafür, dass `app.py` beim späteren Einstiegspunkt-Wechsel übernehmen kann. Nur die ursprüngliche Schlussfolgerung „also jetzt umschalten" war falsch und ist hiermit korrigiert.
 
-**Nächster konkreter Schritt:** Migration der Domäne `scanning`.
+**Nächster konkreter Schritt:** Migration der Domäne `devices` (scanning folgt als zweite — siehe ADR 0006).
 
-**Reihenfolge (vorläufig, in Phase 0 finalisiert):** `settings` (in Phase 1) → `scanning` → `monitoring` → `alerting` → `capture` → `agent` → Hilfsmodule (resolver, fritzbox, mdns, ssdp, snmp, …). Neue Domänen (`traffic`, `process`, `analysis`) werden nach Stabilisierung des Bestands eingeplant.
+**Reihenfolge (vorläufig, in Phase 0 finalisiert):** `settings` (in Phase 1) → `devices` → `scanning` → `monitoring` → `alerting` → `capture` → `agent` → Hilfsmodule (resolver, fritzbox, mdns, ssdp, snmp, …) (devices vor scanning, weil scanning in die devices-Domäne schreibt — `update_device_from_scan` — und liest — `get_known_devices`; Migration in Abhängigkeitsrichtung vermeidet eine Wegwerf-Übergangskopplung auf devices-Altcode, siehe ADR 0006). Neue Domänen (`traffic`, `process`, `analysis`) werden nach Stabilisierung des Bestands eingeplant.
 
 ### Phase 3 — Doku-Finalisierung
 **Deliverables:** `README.md`; `docs/ARCHITECTURE.md`; `docs/CODING_STANDARDS.md`; `docs/CONTRIBUTING.md`; `docs/adr/` (ein ADR pro größerer Entscheidung); OpenAPI via FastAPI; Setup-Guide; Build-Guide pro Plattform (Stand v1.0.0 mitnehmen). **Hinweis:** Doku entsteht parallel mit jedem Modul, nicht erst hier — Phase 3 ist Finalisierung, nicht Beginn.
