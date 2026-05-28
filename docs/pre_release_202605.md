@@ -99,12 +99,26 @@ backend/
 **Inputs vorhanden:** `backend/` (~700 KB echter Code in `main.py` + `modules/`).
 **Inputs ausstehend:** Schema der `data/`-SQLite-DB (auf Freigabe wartend); `frontend/` + `src-tauri/` (später bei Bedarf).
 
-### Phase 1 — Skelett
+### Phase 1 — Skelett (abgeschlossen)
 **Ziel:** Neue Architektur steht, ein Use-Case durchgezogen, CI grün.
 **Deliverables:** Verzeichnisstruktur (Abschnitt 4); `app.py` mit DI-Container + Middleware; Pre-commit (Ruff, mypy, pytest); `import-linter`-Regeln aktiv; GitHub Actions (Linter + Tests + Build); ein vollständig migriertes Referenz-Feature: **`settings`** (klein, gut isolierbar); `pyproject.toml` als alleinige Config; `requirements.txt` → Lock-Datei (uv oder pip-tools).
 
+**Status:** Abgeschlossen. Die `settings`-Domäne ist vollständig durch alle Ringe migriert (`domain` → `ports` → `infrastructure` → `application` → `api`, verdrahtet in `app.py`, per TestClient end-to-end grün) und dient als **Referenz-Implementierung des Strangler-Musters** für alle weiteren Domänen-Migrationen.
+
+**Tatsächlich gefahrene Sub-Schritte** (Granularität von Schritt 6 — bislang nur in Chat/Memory festgehalten, hier dauerhaft dokumentiert):
+- **6a** — ADR-Setup (0001 Secret-Handling, 0002 domain framework-frei)
+- **6b** — Domain: `settings` als reine dataclasses + Redaction-Policy
+- **6c** — Ports: `SettingsRepository` + `SecretStore` als `typing.Protocol`
+- **6d.1** — Infrastructure: `SqliteSettingsRepository` (SQLite-Adapter)
+- **6d.2** — Infrastructure: `KeyringSecretStore` (OS-Keystore via `keyring`/libsecret)
+- **6e** — Application: Use-Cases `GetSettings` / `UpdateSetting` / `UpdateSecret`
+- **6f** — API-Router + Verdrahtung in `app.py` (Composition Root)
+
 ### Phase 2 — Strangler-Fig-Migration
 **Vorgehen pro Feature:** (1) Characterization-Tests gegen aktuelles Verhalten; (2) Tests gegen alten Code grün; (3) Feature in neue Struktur migrieren (Use-Case + Ports + Adapter); (4) Tests gegen neuen Code grün; (5) alter Code gelöscht; (6) Commit, CI grün, weiter.
+
+**Altcode-Löschung & Einstiegspunkt-Wechsel (Klarstellung):** Das Löschen des Altcodes (Schritt 5 oben; früher informell „6g" genannt) gehört **nicht** ans Ende von Phase 1, sondern in Phase 2. Es setzt den Wechsel des produktiven Einstiegspunkts voraus: Solange `main.py` produktiv ist (PyInstaller bündelt `main.py` → `cernis-backend`, Tauri-Sidecar auf `:8765`) und die alten `settings`-Endpunkte bedient, **bleibt der Altcode bestehen** — `app.py` ist nach Phase 1 fertig, aber noch nicht produktiv. **Phase 2 beginnt deshalb mit dem Einstiegspunkt-Wechsel `main.py` → `app.py`** als eigenem, risiko-budgetiertem Meilenstein; erst danach kann der settings-Altcode (`storage.py`-Settings, `crypto.py`, alte Endpunkte) gelöscht werden.
+
 **Reihenfolge (vorläufig, in Phase 0 finalisiert):** `settings` (in Phase 1) → `scanning` → `monitoring` → `alerting` → `capture` → `agent` → Hilfsmodule (resolver, fritzbox, mdns, ssdp, snmp, …). Neue Domänen (`traffic`, `process`, `analysis`) werden nach Stabilisierung des Bestands eingeplant.
 
 ### Phase 3 — Doku-Finalisierung
@@ -141,18 +155,43 @@ backend/
 
 ---
 
-## 7. Working Rules (gelten für die gesamte Arbeit)
+## 7. Working Rules
 
-- Vollständige absolute Pfade in allen Befehlen
-- Shell-Typ und Rechtelevel bei jedem Befehl angeben (z. B. *bash (User)*, *bash (root)*, *PowerShell (Admin)*)
-- Änderungen einzeln, in definierter Reihenfolge — kein Trial-and-Error
-- Vollständige Dateien als Download bereitstellen, keine manuellen Zeileneditierungen
-- Snapshots als Downloads, wenn das Kontextlimit erreicht wird
-- Situation vollständig verstehen, bevor Änderungen vorgenommen werden
+Die Regeln gelten je nach Werkzeug unterschiedlich. Diese Aufteilung ist verbindlich —
+fruehere Fassungen fuehrten die Regeln pauschal als "fuer die gesamte Arbeit" und verleiteten
+dazu, Chat-spezifische Mechanik (vim, Datei-Downloads) faelschlich auf Claude Code anzuwenden.
+
+### 7.1 Gelten nur fuer Claude Chat (Planung/Analyse)
+Begruendung: Claude Chat hat keinen direkten Dateizugriff auf die Maschine; er liefert fertige
+Artefakte zum Selbst-Einsetzen.
 - Editor: vim
+- Vollstaendige Dateien als Download bereitstellen — keine manuellen Zeilen-Edits anweisen
+- Snapshots als Download, wenn das Kontextlimit erreicht wird
+
+### 7.2 Gelten ueberall (Chat und Claude Code)
 - Sprache: Deutsch
-- **Neu für v2:** keine Änderung ohne grünen Test-Lauf in CI
-- Planung/Analyse in Claude Chat, Ausführung in Claude Code — strikt getrennt
+- Vollstaendige absolute Pfade in allen Befehlen
+- Shell-Typ und Rechtelevel bei jedem Befehl angeben (z. B. *bash (User)*, *bash (root)*, *PowerShell (Admin)*)
+- Aenderungen einzeln, in definierter Reihenfolge — kein Trial-and-Error
+- Situation vollstaendig verstehen, bevor Aenderungen vorgenommen werden
+- Keine Aenderung ohne gruenen Test-Lauf in CI (neu fuer v2)
+- Vollstaendige lokale Gate-Kette vor jedem Commit fahren: ruff format --check, ruff check, lint-imports, mypy (ohne Pfad-Argument), pytest
+- Push erst nach Karls Abnahme jedes Sub-Schritts, dann sofort
+- Veroeffentlichte Commits nicht per amend/force umschreiben — separater Fix-Commit
+
+### 7.3 Gelten fuer Claude Code (Ausfuehrung)
+Begruendung: Claude Code editiert direkt im Repo, zeigt Diffs, Karl nimmt ab.
+- Claude Chat liefert eine Spezifikation (was, welche Signaturen, welche Architektur-
+  Entscheidung dahinter) — keine Editor-Mechanik wie "mit vim anlegen"
+- Claude Code schreibt die Datei selbst und zeigt das Diff
+- Nach jedem Sub-Schritt: STOP mit Commit-Hash, geaenderten Dateien und Gate-Ergebnissen,
+  warten auf Karls Abnahme
+
+### 7.4 Strikte Werkzeug-Trennung
+- Planung/Analyse -> Claude Chat. Ausfuehrung -> Claude Code. Strikt getrennt.
+- Beide sind getrennte Instanzen ohne automatischen Austausch. Claude Code kennt nur, was in
+  CLAUDE.md steht oder ihm direkt gesagt wird. Nach einer CC-Session bringt Karl den Stand
+  (git log/diff) zurueck in den Chat.
 
 ---
 
