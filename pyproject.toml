@@ -175,3 +175,13 @@ name = "domain bleibt framework-frei (kein pydantic/fastapi/structlog)"
 type = "forbidden"
 source_modules = ["domain"]
 forbidden_modules = ["pydantic", "fastapi", "structlog"]
+
+# Die neuen Ringe duerfen den Altcode (modules/) NIE importieren. Der Legacy-Bezug
+# bleibt strikt auf app.py beschraenkt (Composition Root, nicht analysiert) -- z. B.
+# die Uebergangs-Kruecke des Bootstrap-Inits (P2.1b). So kann der Altcode nicht in
+# die sauberen Ringe lecken; jeder Versuch bricht CI.
+[[tool.importlinter.contracts]]
+name = "neue Ringe importieren NICHT den Altcode (modules/)"
+type = "forbidden"
+source_modules = ["domain", "ports", "application", "infrastructure", "api"]
+forbidden_modules = ["modules"]

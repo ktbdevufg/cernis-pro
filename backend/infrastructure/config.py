@@ -34,3 +34,11 @@ class AppConfig(BaseSettings):
 
     log_level: str = "INFO"
     log_json: bool = False
+
+    # Ob beim App-Start der (uebergangsweise aus modules/ stammende) Bootstrap-
+    # Init laeuft: DB-/Monitor-/Scheduler-Setup. Default False -> app.py ist NOCH
+    # NICHT der produktive Einstiegspunkt (main.py bleibt es bis P2.3) und faehrt
+    # keine echten Background-Tasks/DB-Writes hoch; das schuetzt zugleich vor
+    # Doppelstart gegen die reale DB. Der Einstiegspunkt-Wechsel (P2.3) setzt
+    # CERNIS_BOOTSTRAP_ON_STARTUP=true und dokumentiert so den Uebergang.
+    bootstrap_on_startup: bool = False

@@ -9,9 +9,12 @@ Lifespan-Kontext statt ``@app.on_event`` (siehe docs/migration_notes.md,
 fastapi/starlette).
 """
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from functools import lru_cache
+from pathlib import Path
+from typing import Any
 
 import structlog
 from fastapi import FastAPI, Request
@@ -30,7 +33,99 @@ from infrastructure.logging import configure_logging
 from infrastructure.secret_store import KeyringSecretStore, SecretStoreUnavailableError
 from infrastructure.settings_repository import SqliteSettingsRepository
 
+# ── ÜBERGANGS-KRÜCKE P2.1b: Bootstrap-Init aus dem Altcode (modules/) ──────────
+# app.py ist Bootstrap-Owner und ruft die Init-/Teardown-Funktionen der noch
+# nicht migrierten Domaenen (monitoring, scheduler, sla, alerting, agent,
+# devices) UEBERGANGSWEISE direkt aus modules/ auf. Diese Importe sind bewusst
+# nur hier erlaubt (Composition Root, nicht vom import-linter analysiert); ein
+# Guardrail-Contract verbietet den Ringen jeden modules/-Import. Jede Gruppe
+# faellt weg, sobald die jeweilige Domaene migriert ist.
+from modules.agent import init_agents_db
+from modules.alerting import init_alerts_db
+from modules.devices_db import init_devices_db
+from modules.interfaces import get_interfaces
+from modules.monitor import (
+    MonitorTarget,
+    run_monitor,
+    stop_monitor,
+)
+from modules.monitor import (
+    configure as configure_monitor,
+)
+from modules.scheduler import init_schedule_db, start_scheduler, stop_scheduler
+from modules.sla import init_sla_db
+from modules.storage import get_setting, init_db
+
 logger = structlog.get_logger()
+
+
+# ── Lokale Bootstrap-Helfer (aus main.py hochgezogen, NICHT aus main importiert) ──
+
+
+def _check_version_upgrade() -> None:
+    """Schreibt die Version-Markierung; Settings bleiben ueber Upgrades erhalten (wie main.py)."""
+    from modules.db_path import DATA_DIR
+
+    version_file = Path(DATA_DIR) / ".version"
+    try:
+        old_version = version_file.read_text().strip() if version_file.exists() else ""
+    except OSError:
+        old_version = ""
+    if old_version != APP_VERSION:
+        if old_version:
+            logger.info("version_upgrade", old=old_version, new=APP_VERSION)
+        version_file.write_text(APP_VERSION)
+
+
+def _build_monitor_targets() -> list[Any]:
+    """Monitor-Targets aus Interfaces + Settings (wie main.py, ohne toten wlan/lan-Code)."""
+    targets: list[Any] = []
+    for iface in get_interfaces():
+        if iface.gateway and iface.ipv4:
+            targets.append(
+                MonitorTarget(
+                    id=f"gw_{iface.name}",
+                    label=f"Gateway ({iface.name})",
+                    host=iface.gateway,
+                    interface=iface.name,
+                    enabled=True,
+                )
+            )
+    targets.append(
+        MonitorTarget(
+            id="internet_primary",
+            label="Internet (Google DNS)",
+            host="8.8.8.8",
+            interface="",
+            enabled=True,
+        )
+    )
+    targets.append(
+        MonitorTarget(
+            id="internet_secondary",
+            label="Internet (Cloudflare)",
+            host="1.1.1.1",
+            interface="",
+            enabled=True,
+        )
+    )
+    custom = get_setting("monitor_custom_targets", [])
+    for t in custom or []:
+        targets.append(MonitorTarget(**t))
+    return targets
+
+
+async def _scheduled_scan(cidr: str, profile_id: str, schedule_id: int) -> None:
+    # Bewusste Abweichung von main.py: die dortige Profil-/`config`-Maschinerie war
+    # toter Code (das berechnete `config` wurde nie genutzt -- discover_subnet nimmt
+    # nur `cidr`) und barg einen latenten KeyError bei fehlendem "standard"-Profil.
+    # Hier nur das beobachtbare Verhalten: Subnetz scannen, Ergebnis speichern.
+    from modules.discovery import discover_subnet
+    from modules.storage import save_scan
+
+    logger.info("scheduled_scan", cidr=cidr, profile=profile_id)
+    discovered = await discover_subnet(cidr, max_concurrent=64, timeout=1.0)
+    save_scan(cidr, [{"ip": h.ip, "mac": h.mac, "rtt_ms": h.rtt_ms} for h in discovered])
 
 
 def create_app(config: AppConfig | None = None) -> FastAPI:
@@ -40,10 +135,26 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        # Hier werden ab Schritt 6 Adapter/Use-Cases verdrahtet und ueber
-        # app.state bereitgestellt; in einem finally analog wieder freigegeben.
         logger.info("startup", service=APP_NAME, version=APP_VERSION)
+        # Bootstrap nur, wenn app.py der produktive Owner ist (P2.3). Default aus
+        # -> kein echter DB-/Monitor-/Scheduler-Start in Tests oder bei
+        # versehentlichem Doppelstart. Sequenz exakt wie main.py (P2.1a-Contract).
+        if cfg.bootstrap_on_startup:
+            _check_version_upgrade()
+            init_db()
+            init_devices_db()
+            configure_monitor(_build_monitor_targets(), interval=5)
+            # Referenz auf app.state halten (verhindert vorzeitige GC des Tasks).
+            _app.state.monitor_task = asyncio.create_task(run_monitor())
+            init_schedule_db()
+            init_sla_db()
+            init_alerts_db()
+            init_agents_db()
+            start_scheduler(_scheduled_scan)
         yield
+        if cfg.bootstrap_on_startup:
+            stop_monitor()
+            stop_scheduler()
         logger.info("shutdown", service=APP_NAME)
 
     app = FastAPI(title="CERNIS PRO", version=APP_VERSION, lifespan=lifespan)
