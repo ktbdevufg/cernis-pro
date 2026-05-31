@@ -47,6 +47,8 @@ def test_save_then_list_summarizes_without_blob(repo: SqliteScanHistoryRepositor
     assert summaries[0].cidr == "192.168.1.0/24"
     assert summaries[0].host_count == 2  # == len(hosts)
     assert summaries[0].scan_id > 0
+    # scanned_at: ISO-Zeitstempel aus der DB-Spalte (DEFAULT datetime('now')), nicht leer.
+    assert summaries[0].scanned_at != ""
 
 
 def test_get_roundtrips_rich_host_lossless(repo: SqliteScanHistoryRepository) -> None:
@@ -104,6 +106,9 @@ def test_get_roundtrips_rich_host_lossless(repo: SqliteScanHistoryRepository) ->
     # ip der verschachtelten Services round-trippt (S.5-Vorbau):
     assert got.mdns_services[0].ip == "10.0.0.5"
     assert got.ssdp_services[0].ip == "10.0.0.5"
+    # host_count + scanned_at am Record (S.6-Vorbau, REST-Contract):
+    assert record.host_count == 1
+    assert record.scanned_at != ""
 
 
 def test_save_empty_hosts_roundtrips(repo: SqliteScanHistoryRepository) -> None:

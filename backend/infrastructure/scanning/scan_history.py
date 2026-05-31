@@ -92,18 +92,27 @@ class SqliteScanHistoryRepository:
     def list(self, limit: int) -> list[ScanSummary]:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT id, cidr, host_count FROM scan_history ORDER BY id DESC LIMIT ?",
+                "SELECT id, cidr, host_count, scanned_at FROM scan_history "
+                "ORDER BY id DESC LIMIT ?",
                 (limit,),
             ).fetchall()
         return [
-            ScanSummary(scan_id=row["id"], cidr=row["cidr"], host_count=row["host_count"])
+            ScanSummary(
+                scan_id=row["id"],
+                cidr=row["cidr"],
+                host_count=row["host_count"],
+                # ``scanned_at`` ist die ISO-TEXT-Spalte (DEFAULT datetime('now'));
+                # ``or ""`` faengt ein theoretisches NULL ab (Domaenen-Default leer).
+                scanned_at=row["scanned_at"] or "",
+            )
             for row in rows
         ]
 
     def get(self, scan_id: int) -> ScanRecord | None:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT id, cidr, result_json FROM scan_history WHERE id = ?",
+                "SELECT id, cidr, host_count, scanned_at, result_json "
+                "FROM scan_history WHERE id = ?",
                 (scan_id,),
             ).fetchone()
         if row is None:
@@ -116,4 +125,10 @@ class SqliteScanHistoryRepository:
         if not isinstance(decoded, list):
             raise CorruptScanError(scan_id, raw)
         hosts = tuple(dict_to_host(scan_id, item) for item in decoded)
-        return ScanRecord(scan_id=row["id"], cidr=row["cidr"], hosts=hosts)
+        return ScanRecord(
+            scan_id=row["id"],
+            cidr=row["cidr"],
+            hosts=hosts,
+            host_count=row["host_count"],
+            scanned_at=row["scanned_at"] or "",
+        )

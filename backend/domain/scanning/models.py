@@ -134,11 +134,13 @@ class ScanSummary:
     Was ``ScanHistoryRepository.list()`` liefert (Charakterisierung S.1:
     ``get_scan_history`` ohne ``result_json``). ``host_count`` ist die im Scan
     gefundene Host-Anzahl; der eigentliche Inhalt kommt erst per ``get(scan_id)``.
+    ``scanned_at`` ist der ISO-Zeitstempel der DB-Spalte (S.1-REST-Contract).
     """
 
     scan_id: int
     cidr: str
     host_count: int
+    scanned_at: str = ""
 
 
 @dataclass(frozen=True)
@@ -148,9 +150,12 @@ class ScanRecord:
     Was ``ScanHistoryRepository.get(scan_id)`` liefert (Charakterisierung S.1:
     ``get_scan_by_id`` mit ``hosts``-Round-trip). Die Hosts sind die reichen
     Domaenen-Objekte ``EnrichedHost``; die JSON-(De-)Serialisierung ist Sache des
-    Adapters (S.4), nicht der Domaene.
+    Adapters (S.4), nicht der Domaene. ``host_count``/``scanned_at`` spiegeln die
+    DB-Spalten (S.1-REST-Contract: ``get_scan_by_id`` liefert beide mit).
     """
 
     scan_id: int
     cidr: str
     hosts: tuple[EnrichedHost, ...]
+    host_count: int = 0
+    scanned_at: str = ""
