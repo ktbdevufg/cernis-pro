@@ -35,6 +35,12 @@ from api.devices import (
     provide_update_device_meta,
 )
 from api.devices import router as devices_router
+from api.scanning import (
+    provide_get_scan_detail,
+    provide_get_scan_history,
+    provide_lookup_vendor,
+)
+from api.scanning import router as scanning_router
 from api.settings import (
     provide_get_settings,
     provide_update_secret,
@@ -49,11 +55,25 @@ from application.devices import (
     RecordScannedHost,
     UpdateDeviceMeta,
 )
+from application.scanning import (
+    GetScanDetail,
+    GetScanHistory,
+    LookupVendor,
+    RunNetworkScan,
+)
 from application.settings import GetSettings, UpdateSecret, UpdateSetting
 from infrastructure.clock import SystemClock
 from infrastructure.config import APP_NAME, APP_VERSION, AppConfig
 from infrastructure.device_repository import SqliteDeviceRepository
 from infrastructure.logging import configure_logging
+from infrastructure.scanning.host_discovery import HostDiscoveryAdapter
+from infrastructure.scanning.hostname_resolver import HostnameResolverAdapter
+from infrastructure.scanning.ipv6_enrichment import Ipv6EnrichmentAdapter
+from infrastructure.scanning.mdns import MdnsAdapter
+from infrastructure.scanning.port_scanner import PortScannerAdapter
+from infrastructure.scanning.scan_history import SqliteScanHistoryRepository
+from infrastructure.scanning.ssdp import SsdpAdapter
+from infrastructure.scanning.vendor_lookup import VendorLookupAdapter
 from infrastructure.secret_store import KeyringSecretStore, SecretStoreUnavailableError
 from infrastructure.settings_repository import SqliteSettingsRepository
 
@@ -79,6 +99,7 @@ from modules.monitor import (
 from modules.scheduler import init_schedule_db, start_scheduler, stop_scheduler
 from modules.sla import init_sla_db
 from modules.storage import get_setting, init_db
+from ws_scan import make_ws_scan
 
 logger = structlog.get_logger()
 
@@ -307,6 +328,45 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.dependency_overrides[provide_record_scanned_host] = lambda: RecordScannedHost(
         device_repository(), device_clock
     )
+
+    # ── scanning-Domaene v2 verdrahten (Regel 5: ports<->infrastructure nur hier) ──
+    # REST (history/vendor) ueber duenne Use-Cases im api-Ring; der WS-Handler
+    # /ws/scan lebt im Composition Root (ws_scan.py), weil er domain-Event-Typen
+    # + Adapter-Exceptions kennt (im api-Ring verboten). Das ScanHistory-Repository
+    # teilt die DB mit settings/devices; die uebrigen Adapter sind zustandslos.
+    @lru_cache(maxsize=1)
+    def scan_history_repository() -> SqliteScanHistoryRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteScanHistoryRepository(get_db_path())
+
+    vendor_lookup = VendorLookupAdapter()
+
+    app.include_router(scanning_router)
+    app.dependency_overrides[provide_get_scan_history] = lambda: GetScanHistory(
+        scan_history_repository()
+    )
+    app.dependency_overrides[provide_get_scan_detail] = lambda: GetScanDetail(
+        scan_history_repository()
+    )
+    app.dependency_overrides[provide_lookup_vendor] = lambda: LookupVendor(vendor_lookup)
+
+    # WS-Handler: pro Verbindung einen frischen RunNetworkScan mit den konkreten
+    # Adaptern. FritzHostsPort ist NICHT dabei (Merge -> S.7); die uebrigen
+    # Adapter sind zustandslos, das ScanHistory-Repository wird memoisiert geteilt.
+    def _build_run_network_scan() -> RunNetworkScan:
+        return RunNetworkScan(
+            discovery=HostDiscoveryAdapter(),
+            port_scanner=PortScannerAdapter(),
+            vendor_lookup=vendor_lookup,
+            resolver=HostnameResolverAdapter(),
+            mdns=MdnsAdapter(),
+            ssdp=SsdpAdapter(),
+            ipv6=Ipv6EnrichmentAdapter(),
+            scan_history=scan_history_repository(),
+        )
+
+    app.add_api_websocket_route("/ws/scan", make_ws_scan(_build_run_network_scan))
 
     @app.exception_handler(SecretStoreUnavailableError)
     async def _on_secret_store_unavailable(

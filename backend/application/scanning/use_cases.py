@@ -81,7 +81,9 @@ from domain.scanning import (
     ScanCompleted,
     ScanConfig,
     ScanEvent,
+    ScanRecord,
     ScanStarted,
+    ScanSummary,
     SsdpService,
     classify_host,
 )
@@ -354,3 +356,44 @@ class RunNetworkScan:
             is_unknown=bool(host.mac),
             category=classification.category,
         )
+
+
+# ── Duenne REST-Use-Cases (Lese-Pfade fuer die scanning-api, S.6) ───────────
+# Trivial (ein Port-Aufruf), aber die EINZIGE Schicht, die der api-Ring ansprechen
+# darf (api -> nur application). Muster wie GetDevices/GetDevice (devices D.6):
+# Constructor-Injection des Ports, kein State, kein Framework.
+
+
+class GetScanHistory:
+    """Liste der letzten Scans (ohne Host-Blob), neueste zuerst."""
+
+    def __init__(self, scan_history: ScanHistoryRepository) -> None:
+        self._scan_history = scan_history
+
+    def __call__(self, limit: int) -> list[ScanSummary]:
+        return self._scan_history.list(limit)
+
+
+class GetScanDetail:
+    """Ein Scan mit seinen vollen Hosts, oder ``None`` wenn die ID unbekannt ist.
+
+    Gibt ``None`` unveraendert weiter -- das 404-Mapping macht der Router (api),
+    nicht der Use-Case (analog ``DeviceNotFoundError`` bleibt das HTTP-Detail in
+    der api-Schicht).
+    """
+
+    def __init__(self, scan_history: ScanHistoryRepository) -> None:
+        self._scan_history = scan_history
+
+    def __call__(self, scan_id: int) -> ScanRecord | None:
+        return self._scan_history.get(scan_id)
+
+
+class LookupVendor:
+    """Hersteller zur OUI einer MAC, oder ``""`` wenn nicht gefunden (synchroner Lookup)."""
+
+    def __init__(self, vendor_lookup: VendorLookupPort) -> None:
+        self._vendor_lookup = vendor_lookup
+
+    def __call__(self, mac: str) -> str:
+        return self._vendor_lookup.lookup(mac)
