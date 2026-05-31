@@ -1,0 +1,356 @@
+"""Use-Cases der scanning-Domaene -- der Orchestrator ``RunNetworkScan``.
+
+Orchestriert die scanning-Ports (Discovery, PortScanner, Vendor, Resolver, Mdns,
+Ssdp, Ipv6, ScanHistory) + die reine Domaenenlogik ``classify_host``. Kennt
+``domain/`` und ``ports/``, NIEMALS ``infrastructure/`` oder ``modules/``
+(maschinell per import-linter erzwungen). Alle Ports kommen per
+Constructor-Injection als Protocol-Typ herein -- nie ein konkreter Adapter.
+Kein Framework-Import (kein FastAPI/Starlette): ``run`` ist ein nativer
+async-Generator typisierter Domaenen-Events (``ScanEvent``); die Uebersetzung in
+WS-Frames bleibt der api-Schicht (S.6) vorbehalten.
+
+Fluss (am S.1-Characterization-Contract des ``/ws/scan`` ausgerichtet):
+
+1. ``ScanStarted`` (cidr-Anzeige + Gesamt-Hostzahl).
+2. mDNS/SSDP als Hintergrund-Tasks STARTEN (``create_task``) -- sie laufen
+   parallel zur Discovery, wie im Altcode. Eingesammelt werden sie erst nach der
+   Discovery-Phase (so ueberlappt die Lauschzeit mit dem Ping-Sweep).
+3. ``PhaseChanged(discovery, running)``.
+4. Discovery-Generator je CIDR durchlaufen: ``DiscoveryTick`` -> ``Progress``,
+   ``DiscoveryHostFound`` -> ``HostFound``.
+5. ``PhaseChanged(discovery, done, alive_count)``.
+6. mDNS/SSDP einsammeln (per IP gruppiert).
+7. ``PhaseChanged(enrich, running, total)``.
+8. Pro lebendem Host: Hostname/SMB-Aufloesung, PortScan, mDNS/SSDP zuordnen,
+   ``classify_host`` -> ``HostEnriched`` + ``Progress``.
+9. IPv6-Anreicherung EINMAL ueber ALLE Hosts am Ende (Altcode-treu, der
+   ``Ipv6EnrichmentPort`` arbeitet batch-weise).
+10. ``ScanHistory.save`` -> ``ScanCompleted``.
+
+BEWUSST AUFGESCHOBENE LUECKEN (KEINE vergessenen Schritte -- siehe S.6-Merkposten):
+
+* FritzHosts-Merge: Der Altcode merged zusaetzliche Hosts aus der FRITZ!Box-
+  DHCP-Tabelle (``FritzHostsPort.get_hosts``) in die Discovery-Liste -- faengt
+  ping-blockierende Geraete (iPads o.ae.). Das ist hier NICHT enthalten: der
+  ``FritzHostsPort`` ist daher (noch) NICHT injiziert -- ein ungenutzter Port
+  saehe wie ein Bug aus. Kommt mit der S.6-Verdrahtung, wenn das Merge-Verhalten
+  (Fritz-Hosts ausserhalb des gescannten Subnetzes? Reihenfolge der
+  ``HostFound``-Events?) entschieden ist.
+* ARP-Merge: analog, nutzt im Altcode ``modules.get_arp_table`` DIREKT (kein
+  Port) -- braeuchte erst einen ``ArpTablePort`` + Adapter. Ebenfalls aufgeschoben.
+* devices-Persistenz: Der Altcode ruft pro Host ``update_device_from_scan``
+  (v2: ``RecordScannedHost``). Das ist ein Seiteneffekt, KEIN Teil der
+  Event-Sequenz, und eine scanning->devices-Domaenenkopplung. Bleibt aus dem
+  Use-Case heraus; die ``EnrichedHost`` -> ``ScannedHost``-Projektion +
+  ``RecordScannedHost``-Aufruf gehoeren in die S.6-Verdrahtung.
+
+HostFound-Timing: Der ``HostDiscoveryPort``-Adapter (Variante A, S.4b) buendelt
+alle ``DiscoveryHostFound`` NACH den ``DiscoveryTick``s (entkoppelt vom
+Fortschritt). Der Use-Case gibt diese Reihenfolge UNVERAENDERT weiter (kein
+Umsortieren) -- ob die api-Schicht die v1-interleaved-Reihenfolge wiederherstellt,
+ist eine S.6-Entscheidung (siehe Merkposten).
+
+Fehlerpfad (Entscheidung S.5): ``NmapScanError`` / ``FritzAuthError`` (Adapter-
+Exceptions aus ``infrastructure``) werden hier NICHT gefangen -- sie propagieren
+durch den Generator hindurch; S.6 (api) faengt sie und baut den sauberen
+``error``-Frame. So bleibt der Use-Case import-sauber (kennt nur Ports), und die
+Fehler-Uebersetzung sitzt an EINER Stelle.
+
+Invalid-CIDR: ``ScanConfig.__post_init__`` (domain) wirft beim Konstruieren der
+Config -- der Use-Case sieht nie ein invalides CIDR. Die ``error``-Frame-
+Uebersetzung des ``ValueError`` ist S.6-Sache (die api baut die Config aus dem
+WS-JSON).
+"""
+
+import asyncio
+from collections.abc import AsyncIterator
+from ipaddress import ip_network
+from typing import assert_never
+
+from domain.scanning import (
+    DiscoveredHost,
+    DiscoveryHostFound,
+    DiscoveryTick,
+    EnrichedHost,
+    HostEnriched,
+    HostFound,
+    MdnsService,
+    PhaseChanged,
+    PortInfo,
+    Progress,
+    ScanCompleted,
+    ScanConfig,
+    ScanEvent,
+    ScanStarted,
+    SsdpService,
+    classify_host,
+)
+from ports.scanning import (
+    HostDiscoveryPort,
+    HostnameResolverPort,
+    Ipv6EnrichmentPort,
+    MdnsPort,
+    PortScannerPort,
+    ScanHistoryRepository,
+    SsdpPort,
+    VendorLookupPort,
+)
+
+# Port-Timeout je Verbindungsversuch im socket-Modus. ``ScanConfig`` kennt keinen
+# eigenen Wert; der Altcode nutzte den ``scan_ports_socket``-Default (0.5 s).
+_PORT_TIMEOUT = 0.5
+# Resolver-Timeout (Altcode: 1.5 s je Host, ``main.ws_scan``).
+_RESOLVE_TIMEOUT = 1.5
+# SSDP-Sammelfenster (Altcode: 4.0 s, ``main.ws_scan``).
+_SSDP_TIMEOUT = 4.0
+# Top-100-Ports als Default, wenn die Config keine eigenen Ports vorgibt. Bewusst
+# als Konstante im Use-Case (domain-nah), nicht aus ``modules`` importiert.
+_TOP_100_PORTS: tuple[int, ...] = (
+    21,
+    22,
+    23,
+    25,
+    53,
+    80,
+    110,
+    111,
+    119,
+    123,
+    135,
+    139,
+    143,
+    161,
+    194,
+    389,
+    443,
+    445,
+    465,
+    500,
+    514,
+    515,
+    548,
+    554,
+    587,
+    631,
+    636,
+    993,
+    995,
+    1080,
+    1194,
+    1433,
+    1723,
+    2049,
+    2082,
+    2083,
+    3000,
+    3306,
+    3389,
+    3478,
+    4000,
+    5000,
+    5001,
+    5060,
+    5353,
+    5432,
+    5900,
+    6379,
+    7000,
+    8080,
+    8081,
+    8443,
+    8888,
+    9000,
+    9100,
+    9200,
+    10000,
+    27017,
+    32400,
+    5960,
+    5961,
+    5962,
+    5963,
+    7788,
+)
+
+
+def _group_by_ip[T: (MdnsService, SsdpService)](services: list[T]) -> dict[str, tuple[T, ...]]:
+    """Gruppiert Dienste nach ihrer ``ip`` (group_by_ip-Aequivalent des Altcodes).
+
+    Dienste ohne ``ip`` (leeres Feld) fallen heraus -- sie koennen keinem Host
+    zugeordnet werden. Reihenfolge je IP bleibt die Fundreihenfolge.
+    """
+    grouped: dict[str, list[T]] = {}
+    for service in services:
+        if service.ip:
+            grouped.setdefault(service.ip, []).append(service)
+    return {ip: tuple(items) for ip, items in grouped.items()}
+
+
+class RunNetworkScan:
+    """Orchestriert einen Netzwerk-Scan und yieldet typisierte ``ScanEvent``."""
+
+    def __init__(
+        self,
+        discovery: HostDiscoveryPort,
+        port_scanner: PortScannerPort,
+        vendor_lookup: VendorLookupPort,
+        resolver: HostnameResolverPort,
+        mdns: MdnsPort,
+        ssdp: SsdpPort,
+        ipv6: Ipv6EnrichmentPort,
+        scan_history: ScanHistoryRepository,
+    ) -> None:
+        self._discovery = discovery
+        self._port_scanner = port_scanner
+        self._vendor_lookup = vendor_lookup
+        self._resolver = resolver
+        self._mdns = mdns
+        self._ssdp = ssdp
+        self._ipv6 = ipv6
+        self._scan_history = scan_history
+
+    async def run(self, config: ScanConfig) -> AsyncIterator[ScanEvent]:
+        """Fuehrt den Scan aus und yieldet die Ereignisse in S.1-Contract-Reihenfolge."""
+        total_hosts = sum(
+            # num_addresses - 2 (Netz-/Broadcast-Adresse), altcode-treu; nie negativ.
+            max(ip_network(c, strict=False).num_addresses - 2, 0)
+            for c in config.cidrs
+        )
+        cidr_display = ",".join(config.cidrs)
+        yield ScanStarted(cidr=cidr_display, total_hosts=total_hosts)
+
+        # mDNS/SSDP parallel zur Discovery starten (eingesammelt wird nach Discovery).
+        mdns_task = (
+            asyncio.create_task(self._mdns.discover(config.mdns_duration))
+            if config.mdns_scan
+            else None
+        )
+        ssdp_task = (
+            asyncio.create_task(self._ssdp.discover(_SSDP_TIMEOUT)) if config.ssdp_scan else None
+        )
+
+        yield PhaseChanged(phase="discovery", status="running", total=total_hosts)
+
+        # ── Discovery ueber alle CIDRs ────────────────────────────────────────
+        discovered: list[DiscoveredHost] = []
+        for cidr in config.cidrs:
+            async for event in self._discovery.discover(
+                cidr, config.ping_timeout, config.max_concurrent_ping
+            ):
+                match event:
+                    case DiscoveryTick(completed=tick_completed, total=tick_total):
+                        # Fortschritt ueber den jeweiligen CIDR (Adapter zaehlt je CIDR).
+                        pct = round(tick_completed / tick_total * 100) if tick_total else 100
+                        yield Progress(
+                            phase="discovery",
+                            completed=tick_completed,
+                            total=tick_total,
+                            pct=pct,
+                        )
+                    case DiscoveryHostFound(host=host):
+                        discovered.append(host)
+                        vendor = self._vendor_lookup.lookup(host.mac) if host.mac else ""
+                        yield HostFound(
+                            ip=host.ip,
+                            mac=host.mac,
+                            vendor=vendor,
+                            rtt_ms=host.rtt_ms,
+                            is_unknown=bool(host.mac),
+                            source=host.source,
+                        )
+                    case _:
+                        # Exhaustiveness: mypy prueft, dass DiscoveryEvent vollstaendig
+                        # behandelt ist -- ein neuer Event-Typ ohne case bricht hier.
+                        assert_never(event)
+
+        yield PhaseChanged(phase="discovery", status="done", alive_count=len(discovered))
+
+        # ── mDNS/SSDP einsammeln + per IP gruppieren (group_by_ip-Aequivalent) ──
+        # Die parallelen Tasks werden hier awaited; die Dienste tragen seit dem
+        # S.5-Vorbau ihre ``ip`` und werden im Enrich dem passenden Host zugeordnet.
+        mdns_by_ip = _group_by_ip(await mdns_task) if mdns_task is not None else {}
+        ssdp_by_ip = _group_by_ip(await ssdp_task) if ssdp_task is not None else {}
+
+        # ── Enrich ────────────────────────────────────────────────────────────
+        yield PhaseChanged(phase="enrich", status="running", total=len(discovered))
+        enriched_hosts: list[EnrichedHost] = []
+        total = len(discovered)
+        for index, host in enumerate(discovered, start=1):
+            enriched = await self._enrich_host(
+                host,
+                config,
+                mdns_by_ip.get(host.ip, ()),
+                ssdp_by_ip.get(host.ip, ()),
+            )
+            enriched_hosts.append(enriched)
+            yield HostEnriched(host=enriched)
+            pct = round(index / total * 100) if total else 100
+            yield Progress(phase="enrich", completed=index, total=total, pct=pct)
+
+        # ── IPv6 einmal ueber ALLE Hosts (Altcode-treu, batch) ───────────────
+        enriched_hosts = await self._ipv6.enrich(enriched_hosts)
+
+        # ── Persistenz + Abschluss ───────────────────────────────────────────
+        self._scan_history.save(cidr_display, enriched_hosts)
+        yield ScanCompleted(total_found=len(discovered))
+
+    async def _enrich_host(
+        self,
+        host: DiscoveredHost,
+        config: ScanConfig,
+        mdns_services: tuple[MdnsService, ...],
+        ssdp_services: tuple[SsdpService, ...],
+    ) -> EnrichedHost:
+        """Reichert einen einzelnen Host an (Hostname/SMB/Ports/Dienste/Klassifikation).
+
+        ``mdns_services``/``ssdp_services`` sind die dem Host (per IP) zugeordneten
+        Dienste -- leer, wenn keine fuer diese IP gefunden wurden.
+        """
+        vendor = self._vendor_lookup.lookup(host.mac) if host.mac else ""
+
+        hostname = ""
+        if config.resolve_hostnames:
+            hostname = await self._resolver.resolve(host.ip, _RESOLVE_TIMEOUT)
+
+        smb_name, smb_domain = "", ""
+        if config.smb_scan:
+            smb_name, smb_domain = await self._resolver.smb_info(host.ip)
+
+        ports: tuple[PortInfo, ...] = ()
+        if config.port_scan:
+            scanned = await self._port_scanner.scan(
+                host.ip,
+                config.custom_ports or _TOP_100_PORTS,
+                config.port_mode,
+                _PORT_TIMEOUT,
+                config.max_concurrent_ports,
+            )
+            ports = tuple(scanned)
+
+        # Fingerprinting bekommt die mDNS-Dienste (altcode-treu: _ipp/_googlecast etc.
+        # fliessen in die Klassifikation ein). ``is_ndi`` aus den mDNS-Diensten.
+        classification = classify_host(
+            ports=ports,
+            vendor=vendor,
+            mdns_services=mdns_services,
+            hostname=hostname,
+        )
+        is_ndi = any(s.is_ndi for s in mdns_services)
+
+        return EnrichedHost(
+            ip=host.ip,
+            mac=host.mac,
+            vendor=vendor,
+            rtt_ms=host.rtt_ms,
+            hostname=hostname,
+            smb_name=smb_name,
+            smb_domain=smb_domain,
+            os_guess=classification.os_guess,
+            scan_method=config.port_mode if config.port_scan else "socket",
+            ports=ports,
+            mdns_services=mdns_services,
+            ssdp_services=ssdp_services,
+            is_ndi=is_ndi,
+            is_unknown=bool(host.mac),
+            category=classification.category,
+        )
