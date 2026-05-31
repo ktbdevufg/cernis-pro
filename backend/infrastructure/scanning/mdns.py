@@ -9,9 +9,11 @@ selbst im Executor) -- direkt awaiten, KEIN eigenes ``run_in_executor``.
 * ``properties`` (im Altcode bereits zu ``dict[str, str]`` dekodiert) ->
   ``tuple[tuple[str, str], ...]`` in dict-Reihenfolge (frozen-tauglich; Muster
   wie ``_str_pairs`` im ScanHistory-Adapter, ohne Umsortieren -- verlustfrei).
-* ``ip`` (modules-Feld) gibt es im Domaenenmodell NICHT und wird bewusst
-  verworfen (wie ``banner`` beim PortScanner) -- die IP-Zuordnung passiert spaeter
-  im Use-Case (S.5), nicht hier.
+* ``ip`` wird uebernommen -- der Use-Case (S.5) ordnet die Dienste ueber die IP
+  dem passenden Host zu (Aequivalent zum Altcode-``group_by_ip``). Das
+  Domaenenmodell ``MdnsService`` traegt dafuer ein ``ip``-Feld (S.5-Vorbau,
+  analog zum ``ipv6``-Vorbau in S.4e -- ein verworfenes Feld waere ein
+  v1-Funktionsverlust).
 
 Sicherheits-/Altmuster-Befund (geprueft, hier akzeptabel):
 
@@ -48,6 +50,7 @@ def _to_domain(raw: Any) -> MdnsService:
         hostname=str(raw.hostname),
         is_ndi=bool(raw.is_ndi),
         properties=properties,
+        ip=str(raw.ip),
     )
 
 

@@ -79,6 +79,7 @@ class MdnsService:
     hostname: str = ""
     is_ndi: bool = False
     properties: tuple[tuple[str, str], ...] = ()
+    ip: str = ""
 
 
 @dataclass(frozen=True)
@@ -88,6 +89,7 @@ class SsdpService:
     server: str = ""
     st: str = ""
     location: str = ""
+    ip: str = ""
 
 
 @dataclass(frozen=True)

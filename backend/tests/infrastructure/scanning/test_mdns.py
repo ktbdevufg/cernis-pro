@@ -80,6 +80,7 @@ def test_maps_all_fields(monkeypatch: pytest.MonkeyPatch) -> None:
             hostname="drucker.local.",
             is_ndi=False,
             properties=(("rp", "ipp/print"), ("ty", "HP LaserJet")),  # dict-Reihenfolge
+            ip="10.0.0.5",  # ip uebernommen (S.5-Vorbau, fuer Host-Zuordnung)
         )
     ]
 

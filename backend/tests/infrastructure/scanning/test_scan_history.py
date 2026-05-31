@@ -72,9 +72,12 @@ def test_get_roundtrips_rich_host_lossless(repo: SqliteScanHistoryRepository) ->
                 hostname="nas.local",
                 is_ndi=False,
                 properties=(("model", "NAS"), ("vendor", "Acme")),
+                ip="10.0.0.5",
             ),
         ),
-        ssdp_services=(SsdpService(server="Linux/1.0 UPnP/1.0", st="upnp:rootdevice"),),
+        ssdp_services=(
+            SsdpService(server="Linux/1.0 UPnP/1.0", st="upnp:rootdevice", ip="10.0.0.5"),
+        ),
         is_ndi=False,
         is_unknown=True,
         category="nas",
@@ -98,6 +101,9 @@ def test_get_roundtrips_rich_host_lossless(repo: SqliteScanHistoryRepository) ->
     assert got.ipv6 == "2001:db8::5"
     assert isinstance(got.mdns_services[0].properties, tuple)
     assert isinstance(got.mdns_services[0].properties[0], tuple)
+    # ip der verschachtelten Services round-trippt (S.5-Vorbau):
+    assert got.mdns_services[0].ip == "10.0.0.5"
+    assert got.ssdp_services[0].ip == "10.0.0.5"
 
 
 def test_save_empty_hosts_roundtrips(repo: SqliteScanHistoryRepository) -> None:

@@ -64,6 +64,7 @@ def dict_to_host(scan_id: int, data: Any) -> EnrichedHost:
             hostname=m.get("hostname", ""),
             is_ndi=m.get("is_ndi", False),
             properties=_str_pairs(m.get("properties", ())),
+            ip=m.get("ip", ""),
         )
         for m in data.get("mdns_services", ())
     )

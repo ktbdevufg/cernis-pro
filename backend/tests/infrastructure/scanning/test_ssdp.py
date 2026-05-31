@@ -6,9 +6,10 @@ Shape), der Test prueft das verlustfreie Mapping auf ``domain.SsdpService``.
 
 Schwerpunkte:
 * Port-Konformitaet.
-* Feld-Mapping: ``server``/``st``/``location`` uebernommen.
-* ``ip``/``usn``/``friendly_name`` (modules-Felder) werden verworfen --
-  existieren nicht in der Domaene.
+* Feld-Mapping: ``server``/``st``/``location``/``ip`` uebernommen (``ip`` als
+  S.5-Vorbau fuer die Host-Zuordnung, analog ``ipv6`` in S.4e).
+* ``usn``/``friendly_name`` (modules-Felder) werden verworfen -- existieren
+  nicht in der Domaene.
 * Edge: leeres Ergebnis -> leere Liste.
 
 Async-Smokes via ``asyncio.run`` (kein ``pytest-asyncio``, wie S.4a-c).
@@ -26,8 +27,9 @@ from infrastructure.scanning.ssdp import SsdpAdapter
 from ports.scanning import SsdpPort
 
 
-# Fake der ``modules.SSDPDevice`` -- inkl. der vom Adapter VERWORFENEN Felder,
-# damit der Test beweist, dass sie nicht in die Domaene durchsickern.
+# Fake der ``modules.SSDPDevice`` -- inkl. der VERWORFENEN Felder (usn/
+# friendly_name), damit der Test beweist, dass sie nicht in die Domaene
+# durchsickern. ``ip`` wird hingegen jetzt uebernommen (S.5-Vorbau).
 @dataclass
 class FakeSSDPDevice:
     ip: str
@@ -71,12 +73,14 @@ def test_maps_kept_fields_and_drops_others(monkeypatch: pytest.MonkeyPatch) -> N
     )
     result = asyncio.run(SsdpAdapter().discover(4.0))
 
-    # Nur server/st/location wandern in die Domaene; ip/usn/friendly_name nicht.
+    # server/st/location/ip wandern in die Domaene; usn/friendly_name nicht.
+    # ip ist S.5-Vorbau (Host-Zuordnung), nicht mehr verworfen.
     assert result == [
         SsdpService(
             server="Linux/4.0 UPnP/1.0",
             st="upnp:rootdevice",
             location="http://10.0.0.7:1900/desc.xml",
+            ip="10.0.0.7",
         )
     ]
 

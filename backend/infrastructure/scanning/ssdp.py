@@ -5,10 +5,13 @@ Sammeln selbst im Executor) -- direkt awaiten, KEIN eigenes ``run_in_executor``.
 
 ``modules.SSDPDevice`` -> ``domain.SsdpService`` (verlustfrei, domaenenrein):
 
-* uebernommen: ``server``, ``st``, ``location``.
-* ``ip``, ``usn``, ``friendly_name`` (modules-Felder) gibt es im Domaenenmodell
-  NICHT und werden bewusst verworfen (wie ``banner`` beim PortScanner) -- die
-  IP-Zuordnung passiert spaeter im Use-Case (S.5), nicht hier.
+* uebernommen: ``server``, ``st``, ``location``, ``ip``.
+* ``ip`` wird uebernommen -- der Use-Case (S.5) ordnet die Dienste ueber die IP
+  dem passenden Host zu (Aequivalent zum Altcode ``d.ip``). Das Domaenenmodell
+  ``SsdpService`` traegt dafuer ein ``ip``-Feld (S.5-Vorbau, analog ``ipv6`` in
+  S.4e -- ein verworfenes Feld waere ein v1-Funktionsverlust).
+* ``usn``, ``friendly_name`` (modules-Felder) gibt es im Domaenenmodell NICHT
+  und werden bewusst verworfen (wie ``banner`` beim PortScanner).
 
 Sicherheits-/Altmuster-Befund (geprueft, hier akzeptabel):
 
@@ -40,6 +43,7 @@ def _to_domain(raw: Any) -> SsdpService:
         server=str(raw.server),
         st=str(raw.st),
         location=str(raw.location),
+        ip=str(raw.ip),
     )
 
 
