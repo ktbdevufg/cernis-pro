@@ -17,11 +17,11 @@ Stil von ``SqliteDeviceRepository``:
   als ``JSONDecodeError`` durchschlagen. Hier wird daraus ein ``CorruptScanError``
   MIT ``scan_id``-Bezug (statt eines diffusen Tracebacks), und die Form wird
   validiert (Liste von Objekten) -- kein leiser Rueckfall auf ``[]``.
-* Die ``EnrichedHost`` <-> JSON-(De-)Serialisierung liegt im Adapter (nicht in der
-  Domaene) und ist VERLUSTFREI, inkl. der verschachtelten ``PortInfo`` /
-  ``MdnsService`` / ``SsdpService`` und der ``tuple``-Felder (JSON-Listen werden
-  beim Lesen wieder zu ``tuple`` normalisiert -- ``MdnsService.properties`` sogar
-  als ``tuple[tuple[str, str], ...]``).
+* Die ``EnrichedHost`` <-> JSON-(De-)Serialisierung liegt in der Infrastruktur
+  (nicht in der Domaene) und ist VERLUSTFREI. Die Helfer (``host_to_dict`` /
+  ``dict_to_host`` / ``CorruptScanError``) sind nach ``_serialization`` gezogen,
+  weil mehrere scanning-Adapter sie teilen (``ipv6_enrichment`` braucht denselben
+  Rekonstruktor) -- so greift kein Adapter in den privaten Teil eines anderen.
 
 Der DB-Pfad wird injiziert; die Pfad-Aufloesung passiert im Composition Root
 (``app.py``, S.6-Verdrahtung), nicht im Adapter. Dieser Adapter importiert KEIN
@@ -32,85 +32,18 @@ import json
 import sqlite3
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
-from dataclasses import asdict
 from pathlib import Path
-from typing import Any
 
-from domain.scanning import (
-    EnrichedHost,
-    MdnsService,
-    PortInfo,
-    ScanRecord,
-    ScanSummary,
-    SsdpService,
+from domain.scanning import EnrichedHost, ScanRecord, ScanSummary
+from infrastructure.scanning._serialization import (
+    CorruptScanError,
+    dict_to_host,
+    host_to_dict,
 )
 
-
-class CorruptScanError(Exception):
-    """Das gespeicherte ``result_json`` eines Scans ist kein gueltiges JSON-Array.
-
-    Ersetzt den stillen ``or "[]"``-Rueckfall des Altcodes: ein kaputter Blob ist
-    ein Fehler MIT ``scan_id``-Bezug (Muster wie ``CorruptDeviceError``).
-    """
-
-    def __init__(self, scan_id: int, raw_value: str) -> None:
-        self.scan_id = scan_id
-        self.raw_value = raw_value
-        super().__init__(
-            f"Scan {scan_id}: result_json ist kein gueltiges JSON-Array: {raw_value!r}"
-        )
-
-
-def _host_to_dict(host: EnrichedHost) -> dict[str, Any]:
-    """EnrichedHost -> JSON-taugliches dict (tuples werden zu Listen)."""
-    return asdict(host)
-
-
-def _str_pairs(raw: Any) -> tuple[tuple[str, str], ...]:
-    """JSON-Liste von [key, value]-Paaren -> tuple[tuple[str, str], ...]."""
-    return tuple((str(k), str(v)) for k, v in raw)
-
-
-def _dict_to_host(scan_id: int, data: Any) -> EnrichedHost:
-    """JSON-dict -> EnrichedHost, verschachtelte Typen + tuples rekonstruiert."""
-    if not isinstance(data, dict):
-        raise CorruptScanError(scan_id, json.dumps(data))
-    ports = tuple(PortInfo(**p) for p in data.get("ports", ()))
-    mdns = tuple(
-        MdnsService(
-            name=m.get("name", ""),
-            type=m.get("type", ""),
-            port=m.get("port", 0),
-            hostname=m.get("hostname", ""),
-            is_ndi=m.get("is_ndi", False),
-            properties=_str_pairs(m.get("properties", ())),
-        )
-        for m in data.get("mdns_services", ())
-    )
-    ssdp = tuple(SsdpService(**s) for s in data.get("ssdp_services", ()))
-    return EnrichedHost(
-        ip=data["ip"],
-        mac=data["mac"],
-        vendor=data.get("vendor", ""),
-        rtt_ms=data.get("rtt_ms"),
-        hostname=data.get("hostname", ""),
-        smb_name=data.get("smb_name", ""),
-        smb_domain=data.get("smb_domain", ""),
-        ipv6=data.get("ipv6", ""),
-        ipv6_all=tuple(data.get("ipv6_all", ())),
-        os_guess=data.get("os_guess", ""),
-        os_accuracy=data.get("os_accuracy", 0),
-        scan_method=data.get("scan_method", "socket"),
-        ports=ports,
-        mdns_services=mdns,
-        ssdp_services=ssdp,
-        is_ndi=data.get("is_ndi", False),
-        is_unknown=data.get("is_unknown", False),
-        category=data.get("category", ""),
-        label=data.get("label", ""),
-        tags=tuple(data.get("tags", ())),
-        notes=data.get("notes", ""),
-    )
+# ``CorruptScanError`` wird aus ``_serialization`` re-exportiert (bestehende
+# Importe ``from ...scan_history import CorruptScanError`` bleiben gueltig).
+__all__ = ["CorruptScanError", "SqliteScanHistoryRepository"]
 
 
 class SqliteScanHistoryRepository:
@@ -149,7 +82,7 @@ class SqliteScanHistoryRepository:
             )
 
     def save(self, cidr: str, hosts: Sequence[EnrichedHost]) -> None:
-        payload = json.dumps([_host_to_dict(h) for h in hosts])
+        payload = json.dumps([host_to_dict(h) for h in hosts])
         with self._connect() as conn:
             conn.execute(
                 "INSERT INTO scan_history (cidr, host_count, result_json) VALUES (?, ?, ?)",
@@ -182,5 +115,5 @@ class SqliteScanHistoryRepository:
             raise CorruptScanError(scan_id, raw) from exc
         if not isinstance(decoded, list):
             raise CorruptScanError(scan_id, raw)
-        hosts = tuple(_dict_to_host(scan_id, item) for item in decoded)
+        hosts = tuple(dict_to_host(scan_id, item) for item in decoded)
         return ScanRecord(scan_id=row["id"], cidr=row["cidr"], hosts=hosts)
