@@ -58,6 +58,8 @@ def test_get_roundtrips_rich_host_lossless(repo: SqliteScanHistoryRepository) ->
         hostname="nas.local",
         smb_name="NAS",
         smb_domain="WORKGROUP",
+        ipv6="2001:db8::5",
+        ipv6_all=("2001:db8::5", "fe80::1", "fd00::5"),
         os_guess="Linux",
         os_accuracy=92,
         scan_method="nmap",
@@ -92,6 +94,8 @@ def test_get_roundtrips_rich_host_lossless(repo: SqliteScanHistoryRepository) ->
     # tuples bleiben tuples (nicht zu Listen degeneriert):
     assert isinstance(got.ports, tuple)
     assert isinstance(got.tags, tuple)
+    assert isinstance(got.ipv6_all, tuple)  # JSON-Liste -> tuple, nicht degeneriert
+    assert got.ipv6 == "2001:db8::5"
     assert isinstance(got.mdns_services[0].properties, tuple)
     assert isinstance(got.mdns_services[0].properties[0], tuple)
 

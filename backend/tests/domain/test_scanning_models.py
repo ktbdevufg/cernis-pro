@@ -70,6 +70,10 @@ def test_enriched_host_tuples_stay_tuples() -> None:
     assert host.ports[0].port == 22
     assert host.os_accuracy == 0
     assert host.scan_method == "socket"
+    # IPv6-Anreicherungsfelder (S.4e-Vorbau): Defaults leer, ipv6_all ist tuple.
+    assert host.ipv6 == ""
+    assert host.ipv6_all == ()
+    assert isinstance(host.ipv6_all, tuple)
 
 
 def test_host_classification_fields() -> None:

@@ -109,6 +109,8 @@ class EnrichedHost:
     hostname: str = ""
     smb_name: str = ""
     smb_domain: str = ""
+    ipv6: str = ""
+    ipv6_all: tuple[str, ...] = ()
     os_guess: str = ""
     os_accuracy: int = 0
     scan_method: str = "socket"

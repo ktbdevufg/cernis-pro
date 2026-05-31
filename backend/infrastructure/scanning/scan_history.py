@@ -96,6 +96,8 @@ def _dict_to_host(scan_id: int, data: Any) -> EnrichedHost:
         hostname=data.get("hostname", ""),
         smb_name=data.get("smb_name", ""),
         smb_domain=data.get("smb_domain", ""),
+        ipv6=data.get("ipv6", ""),
+        ipv6_all=tuple(data.get("ipv6_all", ())),
         os_guess=data.get("os_guess", ""),
         os_accuracy=data.get("os_accuracy", 0),
         scan_method=data.get("scan_method", "socket"),
