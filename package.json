@@ -1,0 +1,14 @@
+{
+  "name": "cernis-pro-app",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build-tauri": "tauri build --target aarch64-pc-windows-msvc"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2"
+  }
+}

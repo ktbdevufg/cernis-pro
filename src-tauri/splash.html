@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>CERNIS PRO</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0d1117;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      font-family: -apple-system, 'Segoe UI', sans-serif;
+      color: #00e5ff;
+      overflow: hidden;
+    }
+    .logo {
+      font-size: 48px;
+      font-weight: 700;
+      letter-spacing: 4px;
+      margin-bottom: 8px;
+    }
+    .subtitle {
+      font-size: 13px;
+      color: #4a5568;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      margin-bottom: 48px;
+    }
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 3px solid #1a2332;
+      border-top-color: #00e5ff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-bottom: 16px;
+    }
+    .status {
+      font-size: 12px;
+      color: #4a5568;
+      letter-spacing: 1px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="logo">CERNIS PRO</div>
+  <div class="subtitle">LAN Scanner &amp; Monitor</div>
+  <div class="spinner"></div>
+  <div class="status" id="status">Starte Backend...</div>
+  <script>
+    // Versuche alle 500ms ob Backend bereit ist
+    let attempts = 0;
+    const check = setInterval(async () => {
+      attempts++;
+      try {
+        const r = await fetch('http://127.0.0.1:8765/api/status');
+        if (r.ok) {
+          clearInterval(check);
+          window.location.href = 'http://127.0.0.1:8765';
+        }
+      } catch(e) {}
+      if (attempts > 60) {
+        clearInterval(check);
+        document.getElementById('status').style.color = '#ff6b6b';
+        document.getElementById('status').textContent =
+          'Backend konnte nicht gestartet werden. Bitte als Administrator ausführen.';
+      }
+      const dots = '.'.repeat((attempts % 3) + 1);
+      if (attempts <= 60)
+        document.getElementById('status').textContent = 'Starte Backend' + dots;
+    }, 500);
+  </script>
+</body>
+</html>

@@ -2,6 +2,11 @@ __pycache__/
 *.py[cod]
 *.pyd
 *.pyo
+
+# Python-Tool-Caches (uv, ruff, mypy, pytest)
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
 dist/
 build/
 *.spec.bak
@@ -41,3 +46,15 @@ Thumbs.db
 desktop.ini
 *.log
 npm-debug.log*
+src-tauri/gen/
+src-tauri/cernis-backend-*
+
+# Claude Code
+.claude/
+
+# Sensitive file types
+*.p12
+*.pfx
+*.sqlite
+*.bak
+*.backup

@@ -1,0 +1,215 @@
+# CERNIS PRO 2.0 — alleinige Projekt-Konfiguration (Backend-Rewrite)
+# Ersetzt verstreute Konfig (kein setup.cfg etc.). Abhaengigkeiten werden ueber
+# uv.lock reproduzierbar fixiert. backend/requirements.txt bleibt vorerst
+# bestehen, weil build.sh/build.ps1 noch darauf bauen (Retirement = Build-Thema).
+
+[project]
+name = "cernis-pro"
+version = "2.0.0.dev0"
+description = "CERNIS PRO — lokaler Netzwerk- und System-Scanner (Backend-Rewrite v2)"
+requires-python = ">=3.12"
+
+# Laufzeit-Abhaengigkeiten. Pins gespiegelt aus backend/requirements.txt
+# (Altbestand laeuft weiter) plus die drei neuen Bausteine der v2-Architektur:
+# pydantic-settings (Konfiguration), structlog (Logging), pydantic (Modelle,
+# bisher nur transitiv ueber fastapi — jetzt explizit).
+dependencies = [
+    "fastapi>=0.111.0",
+    "uvicorn[standard]>=0.29.0",
+    "pydantic>=2.7.0",
+    "pydantic-settings>=2.2.0",
+    "structlog>=24.1.0",
+    "cryptography>=41.0.0",
+    "zeroconf>=0.132.0",
+    "reportlab>=4.0.0",
+    "fritzconnection>=1.13.0",
+    "psutil>=5.9.0",
+    "pysnmp>=6.1.0",
+    "dnspython>=2.4.0",
+    "apscheduler>=3.10.0",
+    "websocket-client>=1.7.0",
+    "websockets>=12.0",
+    "scapy>=2.5.0",
+    "keyring>=25.7.0",
+]
+
+# Entwickler-/CI-Werkzeuge (PEP 735 dependency-group; von `uv sync` per Default
+# mitinstalliert). httpx wird von fastapi.testclient.TestClient benoetigt.
+[dependency-groups]
+dev = [
+    "ruff>=0.6.0",
+    "mypy>=1.11.0",
+    "pytest>=8.0.0",
+    "httpx>=0.27.0",
+    "import-linter>=2.0",
+    "pre-commit>=3.7.0",
+]
+
+[tool.uv]
+# Anwendung, kein verteilbares Wheel — uv soll nur Abhaengigkeiten verwalten,
+# nicht das Projekt selbst bauen.
+package = false
+
+# ── Ruff (Lint + Format) ──────────────────────────────────────────────────
+# Greift waehrend der Migration nur auf den NEUEN Code unter backend/. Der
+# Altbestand (modules/, main.py, ...) ist ausgeschlossen und wird Stueck fuer
+# Stueck einbezogen, sobald er migriert ist (Strangler Fig).
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+# backend/ ist die Import-Wurzel -> Pakete darunter gelten als First-Party
+# (korrekte isort-Gruppierung: stdlib / third-party / first-party).
+src = ["backend"]
+extend-exclude = [
+    "backend/modules",
+    "backend/main.py",
+    "backend/cernis_cli.py",
+    "backend/runtime_hook.py",
+    "backend/data",
+    "backend/build",
+    "backend/dist",
+    "frontend",
+    "node_modules",
+    "src-tauri",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "C4", "SIM", "RUF"]
+
+# ── mypy (strict) ─────────────────────────────────────────────────────────
+# Nur der neue Architektur-Code wird strikt geprueft. Die files-Liste waechst
+# mit dem Code: hier das Skelett (Schritt 2); backend/tests folgt mit den Tests.
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_configs = true
+mypy_path = "backend"
+files = [
+    "backend/domain",
+    "backend/ports",
+    "backend/application",
+    "backend/infrastructure",
+    "backend/api",
+    "backend/app.py",
+    "backend/tests",
+]
+
+# Altbestand (modules/) ist bewusst nicht typisiert und nicht Teil der strikten
+# Pruefung -- analog zum ruff-Ausschluss. Characterization-Tests duerfen ihn
+# importieren, ohne dass mypy in den Legacy-Code hineinlaeuft.
+[[tool.mypy.overrides]]
+module = ["modules", "modules.*"]
+follow_imports = "skip"
+ignore_missing_imports = true
+
+# Der Legacy-Einstiegspunkt main.py ist ebenfalls untypisiert und nicht Teil der
+# strikten Pruefung. Characterization-Tests (z. B. der Bootstrap-Lifespan-Contract)
+# duerfen `import main`, ohne dass mypy in den Legacy-Code hineinlaeuft -- gleiches
+# Muster wie modules/. Faellt weg, sobald der Einstiegspunkt auf app.py gewechselt ist.
+[[tool.mypy.overrides]]
+module = ["main"]
+follow_imports = "skip"
+ignore_missing_imports = true
+
+# ── pytest ────────────────────────────────────────────────────────────────
+# backend/ ist die Import-Wurzel (wie der Altbestand: `import modules.x`).
+[tool.pytest.ini_options]
+pythonpath = ["backend"]
+testpaths = ["backend/tests"]
+addopts = "-q"
+
+# ── import-linter (maschinell erzwungene Architektur-Regeln) ──────────────
+# Bildet die fuenf Importregeln aus CLAUDE.md/Zielarchitektur ab. app.py ist
+# bewusst NICHT Teil der root_packages (Composition-Root-Ausnahme, Regel 5).
+# Lauf: `PYTHONPATH=backend uv run lint-imports` (backend/ ist die Import-Wurzel).
+[tool.importlinter]
+root_packages = ["domain", "ports", "application", "infrastructure", "api"]
+# Merke fuer kuenftige Contracts: Sobald ein Contract externe Pakete als
+# forbidden_modules nennt (hier pydantic/fastapi/structlog im domain-Verbot,
+# ADR 0002), MUSS include_external_packages = true gesetzt sein -- sonst bricht
+# lint-imports ab ("must have include_external_packages=True ...").
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "domain bleibt rein (nur domain + stdlib)"
+type = "forbidden"
+source_modules = ["domain"]
+forbidden_modules = ["ports", "application", "infrastructure", "api"]
+
+[[tool.importlinter.contracts]]
+name = "ports kennen hoechstens domain"
+type = "forbidden"
+source_modules = ["ports"]
+forbidden_modules = ["application", "infrastructure", "api"]
+
+[[tool.importlinter.contracts]]
+name = "application kennt nicht infrastructure/api"
+type = "forbidden"
+source_modules = ["application"]
+forbidden_modules = ["infrastructure", "api"]
+
+# api soll domain/ports/infrastructure nicht DIREKT importieren -- der Weg geht
+# ueber application/. Indirekte Importe sind hier legitim und gewollt: api ruft
+# application, und application kennt domain/ports (genau die Schichtung). Darum
+# allow_indirect_imports -- das Verbot direkter api->infrastructure-Importe
+# bleibt scharf, und indirekt ueber application ist unmoeglich, weil application
+# selbst infrastructure nicht importieren darf (eigener Contract oben).
+[[tool.importlinter.contracts]]
+name = "api ruft nur application (nicht domain/ports/infrastructure direkt)"
+type = "forbidden"
+source_modules = ["api"]
+forbidden_modules = ["domain", "ports", "infrastructure"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "infrastructure kennt nicht application/api"
+type = "forbidden"
+source_modules = ["infrastructure"]
+forbidden_modules = ["application", "api"]
+
+# domain bleibt framework-frei (ADR 0002): keine Bindung an pydantic/fastapi/
+# structlog. Macht die "nur stdlib"-Regel fuer die realistischen Versuchungen
+# maschinell pruefbar.
+[[tool.importlinter.contracts]]
+name = "domain bleibt framework-frei (kein pydantic/fastapi/structlog)"
+type = "forbidden"
+source_modules = ["domain"]
+forbidden_modules = ["pydantic", "fastapi", "structlog"]
+
+# Die neuen Ringe duerfen den Altcode (modules/) NIE importieren. Der Legacy-Bezug
+# bleibt strikt auf app.py beschraenkt (Composition Root, nicht analysiert) -- z. B.
+# die Uebergangs-Kruecke des Bootstrap-Inits (P2.1b). So kann der Altcode nicht in
+# die sauberen Ringe lecken; jeder Versuch bricht CI.
+#
+# EINE eng eingezaeunte Ausnahme (ADR 0007): die scanning-Infrastructure-Adapter
+# DUERFEN modules/ importieren -- eine Reimplementierung der systemnahen Schicht
+# (Ping/Portscan/mDNS/SSDP/IPv6/Fritz) waere Wegwerf-Arbeit vor dem in Vision 5.2
+# vorgesehenen moeglichen Sprachwechsel. Die Ausnahme ist SUBTRAKTIV ueber
+# ignore_imports umgesetzt, NICHT als zweiter (additiver) Contract: ein forbidden-
+# Contract kann nur verbieten, nie erlauben -- die Lockerung MUSS daher am
+# bestehenden Contract haengen. source_modules/forbidden_modules bleiben
+# unveraendert; ignore_imports schneidet ausschliesslich Importe AUS dem Paket
+# `infrastructure.scanning` (beliebige Tiefe via `**`) in den Altcode heraus.
+#
+# WICHTIG zur Pattern-Form (in S.4a empirisch korrigiert): Die Zielseite ist
+# `modules` OHNE Suffix -- der forbidden-Contract loest die Kanten gegen das
+# verbotene PAKET `modules` auf (nicht gegen `modules.resolver` o.ae.), also matcht
+# nur `... -> modules`. Eine Form `... -> modules.**` matcht im Contract-Kontext
+# NICHTS (verifiziert: "No matches for ignored import"). Das `**` auf der QUELLseite
+# deckt jeden kuenftigen scanning-Adapter (discovery/portscan/mdns/ssdp/ipv6/fritz,
+# S.4b) automatisch mit ab. JEDER andere Ring (domain, ports, application, api) und
+# JEDER andere infrastructure-Adapter bleibt vom selben Contract weiter CI-hart
+# gegen modules/ geblockt (Probe: Import ausserhalb scanning -> BROKEN).
+#
+# KEIN unmatched_ignore_imports_alerting mehr: der scanning-Adapter existiert seit
+# S.4a, die Expression matcht real -- ein "none"-Schalter wuerde nur kuenftige
+# Pattern-Fehler maskieren (genau das hatte er in S.3 getan). Faellt mit ADR 0007
+# ganz weg, sobald die systemnahe Schicht ersetzt ist.
+[[tool.importlinter.contracts]]
+name = "neue Ringe importieren NICHT den Altcode (modules/)"
+type = "forbidden"
+source_modules = ["domain", "ports", "application", "infrastructure", "api"]
+forbidden_modules = ["modules"]
+ignore_imports = [
+    "infrastructure.scanning.** -> modules",
+]

@@ -1,0 +1,49 @@
+name: CI
+
+# Quality-Gate fuer den Backend-Rewrite (v2). Bewusst auf frischem Checkout:
+# `uv sync --locked` schlaegt fehl, sobald uv.lock und pyproject.toml
+# auseinanderlaufen -- so faellt Lock-/Config-Drift auf, statt unbemerkt zu
+# bleiben. Der uv-Cache ist reine Download-Beschleunigung (auf uv.lock gekeyt)
+# und beruehrt diesen Frische-Test nicht: das venv wird pro Lauf neu gebaut.
+
+on:
+  push:
+    branches: [main, dev, "rewrite/v2"]
+  pull_request:
+    branches: [main, dev]
+
+# Laufende Laeufe pro Branch abbrechen, wenn neue Commits kommen.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: uv installieren (+ Download-Cache, gekeyt auf uv.lock)
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Frische-Test + Install (Lock muss zu pyproject passen)
+        run: uv sync --locked
+
+      - name: Ruff (Lint)
+        run: uv run ruff check backend
+
+      - name: Ruff (Format-Check)
+        run: uv run ruff format --check backend
+
+      - name: mypy (strict)
+        run: uv run mypy
+
+      - name: import-linter (Architektur-Regeln)
+        run: PYTHONPATH=backend uv run lint-imports
+
+      - name: pytest
+        run: uv run pytest
