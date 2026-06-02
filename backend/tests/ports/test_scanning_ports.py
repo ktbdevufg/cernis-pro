@@ -39,6 +39,7 @@ from domain.scanning import (
     SsdpService,
 )
 from ports.scanning import (
+    ArpTablePort,
     FritzHostsPort,
     HostDiscoveryPort,
     HostnameResolverPort,
@@ -106,6 +107,11 @@ class _FakeFritz:
         return []  # keine Fritz konfiguriert -> Leer-Zustand, kein Fehler
 
 
+class _FakeArpTable:
+    async def get_arp_table(self) -> dict[str, str]:
+        return {"10.0.0.2": "AA:BB:CC:00:00:00"}
+
+
 class _FakeScanHistory:
     def save(self, cidr: str, hosts: Sequence[EnrichedHost]) -> None:
         return None
@@ -130,6 +136,7 @@ def _assert_mdns(_: MdnsPort) -> None: ...
 def _assert_ssdp(_: SsdpPort) -> None: ...
 def _assert_ipv6(_: Ipv6EnrichmentPort) -> None: ...
 def _assert_fritz(_: FritzHostsPort) -> None: ...
+def _assert_arp(_: ArpTablePort) -> None: ...
 def _assert_history(_: ScanHistoryRepository) -> None: ...
 
 
@@ -143,6 +150,7 @@ def test_fakes_satisfy_ports_statically() -> None:
     _assert_ssdp(_FakeSsdp())
     _assert_ipv6(_FakeIpv6())
     _assert_fritz(_FakeFritz())
+    _assert_arp(_FakeArpTable())
     _assert_history(_FakeScanHistory())
 
 
@@ -181,6 +189,11 @@ def test_enrichment_ports_return_domain_types() -> None:
 def test_vendor_lookup_is_sync() -> None:
     vendor: VendorLookupPort = _FakeVendor()
     assert vendor.lookup("AA:BB:CC:00:00:00") == "ACME Corp"
+
+
+def test_arp_table_returns_ip_mac_map() -> None:
+    arp: ArpTablePort = _FakeArpTable()
+    assert asyncio.run(arp.get_arp_table()) == {"10.0.0.2": "AA:BB:CC:00:00:00"}
 
 
 def test_ipv6_enrich_preserves_hosts() -> None:

@@ -88,6 +88,7 @@ from domain.scanning import (
     classify_host,
 )
 from ports.scanning import (
+    ArpTablePort,
     HostDiscoveryPort,
     HostnameResolverPort,
     Ipv6EnrichmentPort,
@@ -397,3 +398,17 @@ class LookupVendor:
 
     def __call__(self, mac: str) -> str:
         return self._vendor_lookup.lookup(mac)
+
+
+class GetArpTable:
+    """System-ARP-/Neighbor-Cache als ``{ip: mac}`` (Lese-Pfad fuer ``/api/arp``).
+
+    Asynchron, weil der Port die blockierende ``ip neigh``-Abfrage ueber
+    ``run_in_executor`` kapselt. Leerer Cache -> ``{}`` (kein Sonderfall).
+    """
+
+    def __init__(self, arp_table: ArpTablePort) -> None:
+        self._arp_table = arp_table
+
+    async def __call__(self) -> dict[str, str]:
+        return await self._arp_table.get_arp_table()

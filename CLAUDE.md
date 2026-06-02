@@ -84,7 +84,7 @@ backend/
 6. Commit, CI grün, weiter.
 
 **Reihenfolge** (aus `phase0_ist_analyse.md`, Abschnitt 7, devices↔scanning gemäß ADR 0006):
-`settings` (✓) → `devices` → `scanning` → `monitoring` → `alerting` → `security` → `capture` → `agent` → Hilfsmodule.
+`settings` (✓) → `devices` (✓) → `scanning` (✓) → `monitoring` → `alerting` → `security` → `capture` → `agent` → Hilfsmodule.
 Neue Domänen (`traffic`, `process`, `analysis`) erst nach Stabilisierung des Bestands.
 
 ---

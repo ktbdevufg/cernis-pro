@@ -5,8 +5,8 @@ Echte Adapter auf Test-Backends via ``dependency_overrides``:
 Kein echtes cernis.db. Belegt die REST-Shapes am S.1-Characterization-Contract
 (``/api/history``, ``/api/history/{id}`` inkl. 404, ``/api/vendor/{mac}``).
 
-``/api/arp`` ist bewusst NICHT dabei (S.7, braucht ArpTablePort) -- ein Test
-darauf wuerde fehlschlagen, weil die Route absichtlich fehlt.
+``/api/arp`` (S.7a) wird ueber einen Fake-``ArpTablePort`` verdrahtet -- kein
+echter ``ip neigh``-Aufruf -- und liefert die rohe ``{ip: mac}``-Tabelle.
 """
 
 from collections.abc import Iterator
@@ -17,16 +17,30 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from api.scanning import (
+    provide_get_arp_table,
     provide_get_scan_detail,
     provide_get_scan_history,
     provide_lookup_vendor,
 )
 from app import create_app
-from application.scanning import GetScanDetail, GetScanHistory, LookupVendor
+from application.scanning import GetArpTable, GetScanDetail, GetScanHistory, LookupVendor
 from domain.scanning import EnrichedHost, PortInfo
 from infrastructure.config import AppConfig
 from infrastructure.scanning.scan_history import SqliteScanHistoryRepository
 from infrastructure.scanning.vendor_lookup import VendorLookupAdapter
+
+
+class _FakeArpTable:
+    """Fake-``ArpTablePort`` mit fester Tabelle -- kein echter ``ip neigh``-Aufruf."""
+
+    def __init__(self, table: dict[str, str]) -> None:
+        self._table = table
+
+    async def get_arp_table(self) -> dict[str, str]:
+        return self._table
+
+
+_ARP_TABLE = {"192.168.1.2": "AA:BB:CC:DD:EE:01", "192.168.1.3": "AA:BB:CC:DD:EE:02"}
 
 
 @pytest.fixture
@@ -40,6 +54,7 @@ def _wired_app(repo: SqliteScanHistoryRepository) -> FastAPI:
     app.dependency_overrides[provide_get_scan_history] = lambda: GetScanHistory(repo)
     app.dependency_overrides[provide_get_scan_detail] = lambda: GetScanDetail(repo)
     app.dependency_overrides[provide_lookup_vendor] = lambda: LookupVendor(vendor)
+    app.dependency_overrides[provide_get_arp_table] = lambda: GetArpTable(_FakeArpTable(_ARP_TABLE))
     return app
 
 
@@ -113,9 +128,21 @@ def test_vendor_returns_mac_and_vendor(client: TestClient) -> None:
     assert "vendor" in body  # leer oder gefunden -- beides gueltig (OUI-DB-abhaengig)
 
 
-# ── /api/arp bewusst NICHT vorhanden (S.7) ──────────────────────────────────
+# ── /api/arp (S.7a, roher ARP-Cache als {ip: mac}) ──────────────────────────
 
 
-def test_arp_route_absent_until_s7(client: TestClient) -> None:
-    # Kein ArpTablePort in S.6 -> die Route existiert nicht (404 vom Router/Mount).
-    assert client.get("/api/arp").status_code == 404
+def test_arp_returns_raw_ip_mac_map(client: TestClient) -> None:
+    # Shape am S.1-Characterization-Contract: das rohe {ip: mac}-dict, KEINE Liste.
+    resp = client.get("/api/arp")
+    assert resp.status_code == 200
+    assert resp.json() == _ARP_TABLE
+
+
+def test_arp_empty_returns_empty_object(repo: SqliteScanHistoryRepository) -> None:
+    # Leerer ARP-Cache -> {} (vertraglicher Leer-Zustand, kein Fehler).
+    app = _wired_app(repo)
+    app.dependency_overrides[provide_get_arp_table] = lambda: GetArpTable(_FakeArpTable({}))
+    with TestClient(app) as test_client:
+        resp = test_client.get("/api/arp")
+        assert resp.status_code == 200
+        assert resp.json() == {}

@@ -12,12 +12,13 @@ Endpunkte (Shapes am S.1-Characterization-Contract):
 * ``GET /api/history``       -> Liste der Scans (id/scanned_at/cidr/host_count).
 * ``GET /api/history/{id}``  -> ein Scan mit vollen Hosts; unbekannte ID -> 404.
 * ``GET /api/vendor/{mac}``  -> ``{"mac": ..., "vendor": ...}``.
+* ``GET /api/arp``           -> roher ARP-Cache als ``{ip: mac}`` (S.7a).
 
-BEWUSST NICHT hier (S.7): ``GET /api/arp``. Es braucht einen ``ArpTablePort`` +
-Adapter (im Altcode ``modules.get_arp_table`` direkt), der zum ARP-Merge-Block
-gehoert -- dieser ist zusammen mit FritzHosts-Merge + devices-Projektion nach S.7
-verschoben. ``/api/arp`` kommt mit dem ARP-Port in S.7 (NICHT als Luecke
-uebersehen).
+``GET /api/arp`` (S.7a) liefert die rohe ARP-/Neighbor-Tabelle ueber den
+``ArpTablePort`` -- Form exakt am S.1-Characterization-Contract (``{ip: mac}``,
+KEINE Liste). Der ARP-MERGE in den Scan-Flow (synthetische Hosts, die der
+Ping-Sweep nicht fand) ist NICHT Teil von S.7a -- der gehoert mit
+FritzHosts-Merge + devices-Projektion nach S.7b und beruehrt ``RunNetworkScan``.
 
 Der WS-Endpunkt ``/ws/scan`` liegt NICHT hier, sondern im Composition Root
 (``backend/ws_scan.py``): seine Event->Frame-Uebersetzung braucht die
@@ -30,7 +31,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from application.scanning import GetScanDetail, GetScanHistory, LookupVendor
+from application.scanning import GetArpTable, GetScanDetail, GetScanHistory, LookupVendor
 
 router = APIRouter(prefix="/api", tags=["scanning"])
 
@@ -47,6 +48,10 @@ def provide_get_scan_detail() -> GetScanDetail:
 
 def provide_lookup_vendor() -> LookupVendor:
     raise NotImplementedError("LookupVendor wird in app.py verdrahtet")
+
+
+def provide_get_arp_table() -> GetArpTable:
+    raise NotImplementedError("GetArpTable wird in app.py verdrahtet")
 
 
 def _summary_to_dict(summary: Any) -> dict[str, Any]:
@@ -142,3 +147,11 @@ def get_vendor(
 ) -> dict[str, str]:
     """Hersteller zur OUI einer MAC; ``""`` wenn nicht gefunden."""
     return {"mac": mac, "vendor": lookup_vendor(mac)}
+
+
+@router.get("/arp")
+async def get_arp(
+    get_arp_table: Annotated[GetArpTable, Depends(provide_get_arp_table)],
+) -> dict[str, str]:
+    """Roher System-ARP-/Neighbor-Cache als ``{ip: mac}``; leer -> ``{}``."""
+    return await get_arp_table()

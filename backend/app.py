@@ -36,6 +36,7 @@ from api.devices import (
 )
 from api.devices import router as devices_router
 from api.scanning import (
+    provide_get_arp_table,
     provide_get_scan_detail,
     provide_get_scan_history,
     provide_lookup_vendor,
@@ -56,6 +57,7 @@ from application.devices import (
     UpdateDeviceMeta,
 )
 from application.scanning import (
+    GetArpTable,
     GetScanDetail,
     GetScanHistory,
     LookupVendor,
@@ -66,6 +68,7 @@ from infrastructure.clock import SystemClock
 from infrastructure.config import APP_NAME, APP_VERSION, AppConfig
 from infrastructure.device_repository import SqliteDeviceRepository
 from infrastructure.logging import configure_logging
+from infrastructure.scanning.arp_table import ArpTableAdapter
 from infrastructure.scanning.host_discovery import HostDiscoveryAdapter
 from infrastructure.scanning.hostname_resolver import HostnameResolverAdapter
 from infrastructure.scanning.ipv6_enrichment import Ipv6EnrichmentAdapter
@@ -341,6 +344,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         return SqliteScanHistoryRepository(get_db_path())
 
     vendor_lookup = VendorLookupAdapter()
+    arp_table = ArpTableAdapter()
 
     app.include_router(scanning_router)
     app.dependency_overrides[provide_get_scan_history] = lambda: GetScanHistory(
@@ -350,6 +354,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         scan_history_repository()
     )
     app.dependency_overrides[provide_lookup_vendor] = lambda: LookupVendor(vendor_lookup)
+    app.dependency_overrides[provide_get_arp_table] = lambda: GetArpTable(arp_table)
 
     # WS-Handler: pro Verbindung einen frischen RunNetworkScan mit den konkreten
     # Adaptern. FritzHostsPort ist NICHT dabei (Merge -> S.7); die uebrigen
