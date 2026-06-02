@@ -12,9 +12,13 @@ Der Handler bekommt die ``RunNetworkScan``-Factory injiziert (gebaut in
 ``app.py`` mit den konkreten Adaptern) -- er konstruiert den Use-Case NICHT selbst,
 haelt aber keinen api-Ring-Reinheitsanspruch (er IST Composition Root).
 
-Frame-Protokoll: exakt der S.1-Characterization-Contract (``test_ws_scan_contract``).
-Die ``ScanEvent``-Union wird per ``match`` + ``assert_never`` erschoepfend in
-JSON-Frames uebersetzt -- ein neuer Event-Typ ohne ``case`` bricht in mypy.
+Frame-Protokoll: am S.1-Characterization-Contract (``test_ws_scan_contract``), mit
+EINER bewussten v2-Erweiterung (S.7f): ``host_found`` UND ``host_detail`` tragen ein
+``source``-Feld (ping/arp/fritzbox) -- der v1-Altcode trug das nur inkonsistent (nur
+bei Fritz/ARP, dort ohne ``is_unknown``). Der Characterization-Test bleibt unberuehrt
+(er friert v1 ein, mockt ``main.ws_scan``); die v2-Frame-Form lebt im v2-eigenen
+``test_ws_scan_handler``. Die ``ScanEvent``-Union wird per ``match`` + ``assert_never``
+erschoepfend in JSON-Frames uebersetzt -- ein neuer Event-Typ ohne ``case`` bricht in mypy.
 
 Fehlerpfad (S.5-Entscheidung 3 / S.6-Merkposten 2): ``NmapScanError`` /
 ``FritzAuthError`` propagieren aus ``RunNetworkScan.run`` (der Use-Case faengt sie
@@ -111,9 +115,14 @@ def _event_to_frame(event: ScanEvent) -> dict[str, Any]:
             # Defensiv: jeder andere phase-Status -> minimaler Frame (kein S.1-Fall,
             # aber vollstaendig statt KeyError).
             return {"type": "phase", "phase": phase, "status": other_status}
-        case HostFound(ip=ip, mac=mac, vendor=vendor, rtt_ms=rtt_ms, is_unknown=is_unknown):
-            # Shape exakt wie S.1: KEIN source-Feld (das trugen v1 nur Fritz/ARP-
-            # Hosts, die in S.6 noch nicht gemerged werden -> S.7).
+        case HostFound(
+            ip=ip, mac=mac, vendor=vendor, rtt_ms=rtt_ms, is_unknown=is_unknown, source=source
+        ):
+            # ``source`` (ping/arp/fritzbox) EINHEITLICH in jedem Frame (S.7f, 1A):
+            # macht die S.7-Merge-Arbeit nach aussen sichtbar. Bewusste Abweichung
+            # vom v1-Murks (v1 trug source NUR bei Fritz/ARP, dort dafuer kein
+            # is_unknown -- drei Shapes). v2: ein einheitlicher Shape, der Client
+            # kann sich aufs Feld verlassen.
             return {
                 "type": "host_found",
                 "ip": ip,
@@ -121,6 +130,7 @@ def _event_to_frame(event: ScanEvent) -> dict[str, Any]:
                 "mac": mac,
                 "vendor": vendor,
                 "is_unknown": is_unknown,
+                "source": source,
             }
         case Progress(phase=phase, completed=completed, total=total, pct=pct):
             return {
@@ -181,6 +191,10 @@ def _host_detail_frame(host: Any) -> dict[str, Any]:
         "label": host.label,
         "tags": list(host.tags),
         "notes": host.notes,
+        # source (ping/arp/fritzbox) auch am persistenten Host (S.7f): die Quelle
+        # haengt jetzt durchgaengig am gespeicherten Host, nicht nur am fluechtigen
+        # host_found-Frame. host_detail hat damit 21 Keys (vorher 20).
+        "source": host.source,
     }
 
 

@@ -451,6 +451,10 @@ class RunNetworkScan:
             is_ndi=is_ndi,
             is_unknown=bool(host.mac),
             category=classification.category,
+            # Herkunft (ping/arp/fritzbox) ueberlebt die Enrich-Phase (S.7f): aus
+            # dem DiscoveredHost durchgereicht, damit sie in host_detail +
+            # ScanHistory landet, nicht nur im fluechtigen host_found-Frame.
+            source=host.source,
         )
 
 

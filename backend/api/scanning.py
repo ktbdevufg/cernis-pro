@@ -110,6 +110,9 @@ def _host_to_dict(host: Any) -> dict[str, Any]:
         "label": host.label,
         "tags": list(host.tags),
         "notes": host.notes,
+        # source (ping/arp/fritzbox) auch ueber die REST-History (S.7f): die Quelle
+        # ist ueber JEDEN Lese-Pfad konsistent sichtbar (WS-host_detail + hier).
+        "source": host.source,
     }
 
 

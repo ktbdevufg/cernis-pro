@@ -96,6 +96,7 @@ def test_history_detail_roundtrips_hosts(
         vendor="Acme",
         ports=(PortInfo(port=22, state="open", service="ssh"),),
         category="server",
+        source="arp",  # nicht-Default -> beweist source-Durchstich ueber REST (S.7f)
     )
     repo.save("10.0.0.0/24", (host,))
     scan_id = repo.list(20)[0].scan_id
@@ -110,6 +111,7 @@ def test_history_detail_roundtrips_hosts(
     assert got["vendor"] == "Acme"
     assert got["ports"] == [{"port": 22, "state": "open", "service": "ssh"}]
     assert got["category"] == "server"
+    assert got["source"] == "arp"  # Quelle auch ueber die REST-History sichtbar (S.7f)
     # tuples als JSON-Listen serialisiert:
     assert isinstance(got["tags"], list)
     assert isinstance(got["ipv6_all"], list)
