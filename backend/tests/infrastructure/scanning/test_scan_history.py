@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from domain.scanning import EnrichedHost, MdnsService, PortInfo, SsdpService
+from infrastructure.scanning._serialization import dict_to_host
 from infrastructure.scanning.scan_history import (
     CorruptScanError,
     SqliteScanHistoryRepository,
@@ -86,6 +87,7 @@ def test_get_roundtrips_rich_host_lossless(repo: SqliteScanHistoryRepository) ->
         label="Lager-NAS",
         tags=("prod", "storage"),
         notes="Rack 3",
+        source="arp",  # nicht-Default -> beweist source-Round-trip eines gemergten Hosts
     )
     repo.save("10.0.0.0/24", (host,))
     scan_id = repo.list(20)[0].scan_id
@@ -96,6 +98,7 @@ def test_get_roundtrips_rich_host_lossless(repo: SqliteScanHistoryRepository) ->
     assert len(record.hosts) == 1
     got = record.hosts[0]
     assert got == host  # vollstaendige, verlustfreie Feldgleichheit
+    assert got.source == "arp"  # source round-trippt (S.7f-Vorbau)
     # tuples bleiben tuples (nicht zu Listen degeneriert):
     assert isinstance(got.ports, tuple)
     assert isinstance(got.tags, tuple)
@@ -109,6 +112,16 @@ def test_get_roundtrips_rich_host_lossless(repo: SqliteScanHistoryRepository) ->
     # host_count + scanned_at am Record (S.6-Vorbau, REST-Contract):
     assert record.host_count == 1
     assert record.scanned_at != ""
+
+
+def test_legacy_blob_without_source_defaults_to_ping() -> None:
+    """Alter DB-Blob (vor S.7f) ohne source-Feld -> EnrichedHost.source == "ping".
+
+    Rueckwaertskompatibilitaet: ein damals gespeicherter Host war ein Ping-Host.
+    """
+    legacy = {"ip": "10.0.0.9", "mac": "AA:BB:CC:DD:EE:09"}  # kein "source"-Schluessel
+    host = dict_to_host(scan_id=1, data=legacy)
+    assert host.source == "ping"
 
 
 def test_save_empty_hosts_roundtrips(repo: SqliteScanHistoryRepository) -> None:

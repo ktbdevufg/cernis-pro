@@ -91,4 +91,8 @@ def dict_to_host(scan_id: int, data: Any) -> EnrichedHost:
         label=data.get("label", ""),
         tags=tuple(data.get("tags", ())),
         notes=data.get("notes", ""),
+        # Default "ping": alte DB-Blobs (vor S.7f) haben kein source-Feld -- ein
+        # damals gespeicherter Host war ein Ping-Host. host_to_dict nimmt source
+        # ueber asdict automatisch mit; hier der explizite Pull beim Lesen.
+        source=data.get("source", "ping"),
     )

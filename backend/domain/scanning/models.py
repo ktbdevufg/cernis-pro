@@ -125,6 +125,12 @@ class EnrichedHost:
     label: str = ""
     tags: tuple[str, ...] = ()
     notes: str = ""
+    # Herkunft des Hosts in der Discovery-Phase: "ping" (Sweep), "arp"
+    # (OS-Neighbor-Cache, S.7b) oder "fritzbox" (FRITZ!Box-DHCP, S.7c). Default
+    # "ping" -- ein nicht-gemergter Host IST ein Ping-Host, und kein Aufrufer
+    # bricht. Wird seit S.7f aus ``DiscoveredHost.source`` durchgereicht, sodass
+    # die Quelle die Enrich-Phase ueberlebt und in ScanHistory/host_detail landet.
+    source: str = "ping"
 
 
 @dataclass(frozen=True)
