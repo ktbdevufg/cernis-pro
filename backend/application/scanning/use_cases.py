@@ -18,7 +18,10 @@ Fluss (am S.1-Characterization-Contract des ``/ws/scan`` ausgerichtet):
 3. ``PhaseChanged(discovery, running)``.
 4. Discovery-Generator je CIDR durchlaufen: ``DiscoveryTick`` -> ``Progress``,
    ``DiscoveryHostFound`` -> ``HostFound``.
-5. ``PhaseChanged(discovery, done, alive_count)``.
+4b. ARP-Merge (S.7b): ARP-only-Hosts (im OS-Neighbor-Cache, aber ping-still) als
+   synthetische ``DiscoveredHost(source="arp")`` anhaengen + ``HostFound`` yielden
+   -- noch in der Discovery-Phase, vor ``done``.
+5. ``PhaseChanged(discovery, done, alive_count)`` -- ``alive_count`` inkl. ARP-Hosts.
 6. mDNS/SSDP einsammeln (per IP gruppiert).
 7. ``PhaseChanged(enrich, running, total)``.
 8. Pro lebendem Host: Hostname/SMB-Aufloesung, PortScan, mDNS/SSDP zuordnen,
@@ -36,8 +39,6 @@ BEWUSST AUFGESCHOBENE LUECKEN (KEINE vergessenen Schritte -- siehe S.6-Merkposte
   saehe wie ein Bug aus. Kommt mit der S.6-Verdrahtung, wenn das Merge-Verhalten
   (Fritz-Hosts ausserhalb des gescannten Subnetzes? Reihenfolge der
   ``HostFound``-Events?) entschieden ist.
-* ARP-Merge: analog, nutzt im Altcode ``modules.get_arp_table`` DIREKT (kein
-  Port) -- braeuchte erst einen ``ArpTablePort`` + Adapter. Ebenfalls aufgeschoben.
 * devices-Persistenz: Der Altcode ruft pro Host ``update_device_from_scan``
   (v2: ``RecordScannedHost``). Das ist ein Seiteneffekt, KEIN Teil der
   Event-Sequenz, und eine scanning->devices-Domaenenkopplung. Bleibt aus dem
@@ -64,7 +65,7 @@ WS-JSON).
 
 import asyncio
 from collections.abc import AsyncIterator
-from ipaddress import ip_network
+from ipaddress import ip_address, ip_network
 from typing import assert_never
 
 from domain.scanning import (
@@ -176,6 +177,21 @@ _TOP_100_PORTS: tuple[int, ...] = (
 )
 
 
+def _in_any_cidr(ip_str: str, cidrs: tuple[str, ...]) -> bool:
+    """True, wenn ``ip_str`` in einem der ``cidrs`` liegt (``_in_any_net``-Aequivalent).
+
+    Begrenzt den ARP-Merge auf das gescannte Netz -- ein ARP-Cache enthaelt auch
+    Eintraege ausserhalb des Scans (Gateway anderer Interfaces o.ae.). Die CIDRs
+    sind in ``ScanConfig.__post_init__`` bereits validiert; nur die zu pruefende
+    ``ip_str`` kann ungueltig sein (z.B. unsauberer ARP-Output) -> dann False.
+    """
+    try:
+        addr = ip_address(ip_str)
+    except ValueError:
+        return False
+    return any(addr in ip_network(c, strict=False) for c in cidrs)
+
+
 def _group_by_ip[T: (MdnsService, SsdpService)](services: list[T]) -> dict[str, tuple[T, ...]]:
     """Gruppiert Dienste nach ihrer ``ip`` (group_by_ip-Aequivalent des Altcodes).
 
@@ -201,6 +217,7 @@ class RunNetworkScan:
         mdns: MdnsPort,
         ssdp: SsdpPort,
         ipv6: Ipv6EnrichmentPort,
+        arp_table: ArpTablePort,
         scan_history: ScanHistoryRepository,
     ) -> None:
         self._discovery = discovery
@@ -210,6 +227,7 @@ class RunNetworkScan:
         self._mdns = mdns
         self._ssdp = ssdp
         self._ipv6 = ipv6
+        self._arp_table = arp_table
         self._scan_history = scan_history
 
     async def run(self, config: ScanConfig) -> AsyncIterator[ScanEvent]:
@@ -266,6 +284,42 @@ class RunNetworkScan:
                         # behandelt ist -- ein neuer Event-Typ ohne case bricht hier.
                         assert_never(event)
 
+        # ── ARP-Merge: Hosts, die der Ping-Sweep nicht fand (S.7b) ───────────
+        # Faengt ping-stille Geraete, die im OS-Neighbor-Cache stehen (z.B. per
+        # frueheren Traffic gelernt). Zweite ``get_arp_table()``-Abfrage NEBEN der
+        # adapter-internen MAC-Zuordnung (S.4b) -- bewusst akzeptiert (Entscheidung
+        # 3A): der Cache ist billig, und die Tabelle durch den HostDiscoveryPort-
+        # Vertrag durchzureichen waere ein grosser Eingriff fuer eine Mikro-
+        # Optimierung. Nur ARP-ONLY-Hosts werden angehaengt; Ping-Hosts haben ihre
+        # MAC schon -- kein Doppel, kein MAC-Nachtrag (Altcode-treu).
+        discovered_ips = {host.ip for host in discovered}
+        for arp_ip, arp_mac in (await self._arp_table.get_arp_table()).items():
+            if arp_ip in discovered_ips:
+                continue
+            if not _in_any_cidr(arp_ip, config.cidrs):
+                continue
+            # Bewusste Abweichung vom Altcode (Entscheidung 4A): KEIN Zweit-Ping zum
+            # RTT-Messen. Ein ARP-only-Host hat per Definition gerade NICHT auf Ping
+            # geantwortet (sonst stuende er in ``discovered_ips``) -- ein zweiter Ping
+            # liefert fast sicher erneut Timeout -> None. Wir setzen ``rtt_ms=None``
+            # direkt; das spart einen ``ping_host``-Port, den wir sonst nirgends
+            # brauchen, und ist observable nahezu identisch.
+            arp_host = DiscoveredHost(
+                ip=arp_ip, mac=arp_mac, rtt_ms=None, is_alive=True, source="arp"
+            )
+            discovered.append(arp_host)
+            discovered_ips.add(arp_ip)
+            vendor = self._vendor_lookup.lookup(arp_host.mac) if arp_host.mac else ""
+            yield HostFound(
+                ip=arp_host.ip,
+                mac=arp_host.mac,
+                vendor=vendor,
+                rtt_ms=arp_host.rtt_ms,
+                is_unknown=bool(arp_host.mac),
+                source=arp_host.source,
+            )
+
+        # alive_count zaehlt die ARP-Hosts mit (Altcode: len(discovered) NACH dem Merge).
         yield PhaseChanged(phase="discovery", status="done", alive_count=len(discovered))
 
         # ── mDNS/SSDP einsammeln + per IP gruppieren (group_by_ip-Aequivalent) ──

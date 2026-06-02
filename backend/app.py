@@ -357,8 +357,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.dependency_overrides[provide_get_arp_table] = lambda: GetArpTable(arp_table)
 
     # WS-Handler: pro Verbindung einen frischen RunNetworkScan mit den konkreten
-    # Adaptern. FritzHostsPort ist NICHT dabei (Merge -> S.7); die uebrigen
-    # Adapter sind zustandslos, das ScanHistory-Repository wird memoisiert geteilt.
+    # Adaptern. ArpTableAdapter ist seit S.7b dabei (ARP-Merge im Use-Case);
+    # FritzHostsPort ist weiterhin NICHT dabei (Fritz-Merge -> spaeter). Die
+    # uebrigen Adapter sind zustandslos, das ScanHistory-Repository wird geteilt.
     def _build_run_network_scan() -> RunNetworkScan:
         return RunNetworkScan(
             discovery=HostDiscoveryAdapter(),
@@ -368,6 +369,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             mdns=MdnsAdapter(),
             ssdp=SsdpAdapter(),
             ipv6=Ipv6EnrichmentAdapter(),
+            arp_table=arp_table,
             scan_history=scan_history_repository(),
         )
 

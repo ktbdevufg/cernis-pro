@@ -126,6 +126,16 @@ class _FakeIpv6:
         return list(hosts)
 
 
+class _FakeArpTable:
+    """Liefert eine feste ARP-Tabelle. Default leer -> ARP-Merge inaktiv."""
+
+    def __init__(self, table: dict[str, str] | None = None) -> None:
+        self._table = table or {}
+
+    async def get_arp_table(self) -> dict[str, str]:
+        return self._table
+
+
 class _FakeScanHistory:
     def __init__(self) -> None:
         self.saved: tuple[str, tuple[EnrichedHost, ...]] | None = None
@@ -150,6 +160,7 @@ def _make_use_case(
     mdns: _FakeMdns | None = None,
     ssdp: _FakeSsdp | None = None,
     ipv6: _FakeIpv6 | None = None,
+    arp_table: _FakeArpTable | None = None,
     history: _FakeScanHistory | None = None,
 ) -> tuple[RunNetworkScan, _FakeIpv6, _FakeScanHistory]:
     # Die Fakes erfuellen die Port-Protocols strukturell (mypy-geprueft, kein ignore noetig).
@@ -163,6 +174,7 @@ def _make_use_case(
         mdns=mdns or _FakeMdns(),
         ssdp=ssdp or _FakeSsdp(),
         ipv6=ipv6,
+        arp_table=arp_table or _FakeArpTable(),  # default leer -> Merge inaktiv
         scan_history=history,
     )
     return use_case, ipv6, history
@@ -270,6 +282,141 @@ def test_mdns_ssdp_assigned_by_ip() -> None:
     assert len(enriched["10.0.0.3"].ssdp_services) == 1
     # Der mDNS-Dienst fuer 10.0.0.99 (kein Host) taucht nirgends auf.
     assert "10.0.0.99" not in enriched
+
+
+# ── ARP-Merge (S.7b) ────────────────────────────────────────────────────────
+
+
+def test_arp_merge_adds_only_ping_silent_hosts() -> None:
+    """ARP-only-Host wird angehaengt (source="arp", rtt_ms=None); bekannte IP NICHT."""
+    ping_host = DiscoveredHost(ip="192.168.1.2", mac="AA:BB:CC:DD:EE:01", rtt_ms=1.0)
+    discovery = _FakeDiscovery({"192.168.1.0/24": [ping_host]})
+    # ARP enthaelt den Ping-Host (muss uebersprungen werden) UND einen neuen Host.
+    arp = _FakeArpTable(
+        {
+            "192.168.1.2": "FF:FF:FF:FF:FF:FF",  # schon gefunden -> skip, kein Doppel/MAC-Nachtrag
+            "192.168.1.50": "DE:AD:BE:EF:00:01",  # ARP-only -> hinzufuegen
+        }
+    )
+    use_case, _, _ = _make_use_case(discovery=discovery, arp_table=arp)
+
+    config = ScanConfig(
+        cidrs=("192.168.1.0/24",),
+        port_scan=False,
+        mdns_scan=False,
+        ssdp_scan=False,
+        resolve_hostnames=False,
+    )
+    events = _run(use_case, config)
+
+    found = [e for e in events if isinstance(e, HostFound)]
+    # Genau ein Ping-Host + ein ARP-Host -- die bekannte IP wird NICHT verdoppelt.
+    assert {f.ip for f in found} == {"192.168.1.2", "192.168.1.50"}
+    ping_frame = next(f for f in found if f.ip == "192.168.1.2")
+    arp_frame = next(f for f in found if f.ip == "192.168.1.50")
+
+    # Ping-Host unveraendert -- keine MAC-Ueberschreibung aus ARP.
+    assert ping_frame.mac == "AA:BB:CC:DD:EE:01"
+    assert ping_frame.source == "ping"
+
+    # ARP-Host: source="arp", rtt_ms=None (kein Zweit-Ping, Entscheidung 4A),
+    # vendor wie der Ping-Pfad (lookup ueber die MAC).
+    assert arp_frame.source == "arp"
+    assert arp_frame.rtt_ms is None
+    assert arp_frame.mac == "DE:AD:BE:EF:00:01"
+    assert arp_frame.vendor == "ACME"
+    assert arp_frame.is_unknown is True
+
+    # alive_count zaehlt den ARP-Host mit (len(discovered) NACH dem Merge).
+    disc_done = next(
+        e
+        for e in events
+        if isinstance(e, PhaseChanged) and e.phase == "discovery" and e.status == "done"
+    )
+    assert disc_done.alive_count == 2
+
+
+def test_arp_host_runs_through_enrich() -> None:
+    """Der ARP-only-Host laeuft wie ein Ping-Host durch die Enrich-Phase."""
+    discovery = _FakeDiscovery({"10.0.0.0/24": []})  # kein Ping-Host
+    arp = _FakeArpTable({"10.0.0.7": "DE:AD:BE:EF:00:07"})
+    scanner = _FakePortScanner({"10.0.0.7": [PortInfo(port=22, state="open", service="ssh")]})
+    use_case, ipv6, history = _make_use_case(
+        discovery=discovery, arp_table=arp, port_scanner=scanner
+    )
+
+    config = ScanConfig(
+        cidrs=("10.0.0.0/24",),
+        port_scan=True,
+        mdns_scan=False,
+        ssdp_scan=False,
+        resolve_hostnames=False,
+    )
+    events = _run(use_case, config)
+
+    enriched = [e for e in events if isinstance(e, HostEnriched)]
+    assert len(enriched) == 1
+    assert enriched[0].host.ip == "10.0.0.7"
+    assert enriched[0].host.ports == (PortInfo(port=22, state="open", service="ssh"),)
+    # ARP-Host ist Teil des gespeicherten Scans + der IPv6-Batch.
+    assert history.saved is not None
+    assert history.saved[1][0].ip == "10.0.0.7"
+    assert ipv6.called_with is not None and ipv6.called_with[0].ip == "10.0.0.7"
+    assert events[-1] == ScanCompleted(total_found=1)
+
+
+def test_arp_skips_host_outside_scanned_cidrs() -> None:
+    """ARP-Eintrag ausserhalb der config-CIDRs wird uebersprungen (_in_any_cidr)."""
+    discovery = _FakeDiscovery({"192.168.1.0/24": []})
+    arp = _FakeArpTable(
+        {
+            "192.168.1.50": "DE:AD:BE:EF:00:01",  # im Netz -> hinzufuegen
+            "10.99.99.99": "DE:AD:BE:EF:00:02",  # ausserhalb -> skip
+            "not-an-ip": "DE:AD:BE:EF:00:03",  # unsauberer Output -> skip (ValueError)
+        }
+    )
+    use_case, _, _ = _make_use_case(discovery=discovery, arp_table=arp)
+
+    config = ScanConfig(
+        cidrs=("192.168.1.0/24",),
+        port_scan=False,
+        mdns_scan=False,
+        ssdp_scan=False,
+        resolve_hostnames=False,
+    )
+    events = _run(use_case, config)
+
+    found = {f.ip for f in events if isinstance(f, HostFound)}
+    assert found == {"192.168.1.50"}
+
+
+def test_arp_hostfound_is_in_discovery_phase() -> None:
+    """Der ARP-HostFound kommt VOR PhaseChanged(discovery, done), noch in der Discovery-Phase."""
+    discovery = _FakeDiscovery({"192.168.1.0/24": []})
+    arp = _FakeArpTable({"192.168.1.50": "DE:AD:BE:EF:00:01"})
+    use_case, _, _ = _make_use_case(discovery=discovery, arp_table=arp)
+
+    config = ScanConfig(
+        cidrs=("192.168.1.0/24",),
+        port_scan=False,
+        mdns_scan=False,
+        ssdp_scan=False,
+        resolve_hostnames=False,
+    )
+    events = _run(use_case, config)
+
+    types = [type(e).__name__ for e in events]
+    arp_found_idx = next(
+        i for i, e in enumerate(events) if isinstance(e, HostFound) and e.source == "arp"
+    )
+    disc_done_idx = next(
+        i
+        for i, e in enumerate(events)
+        if isinstance(e, PhaseChanged) and e.phase == "discovery" and e.status == "done"
+    )
+    # naechstes PhaseChanged NACH discovery-done ist enrich-running.
+    enrich_running_idx = types.index("PhaseChanged", disc_done_idx + 1)
+    assert arp_found_idx < disc_done_idx < enrich_running_idx
 
 
 # ── Fehlerpfad: Adapter-Exception propagiert (Durchwerfen an S.6) ───────────
