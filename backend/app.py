@@ -69,6 +69,7 @@ from infrastructure.config import APP_NAME, APP_VERSION, AppConfig
 from infrastructure.device_repository import SqliteDeviceRepository
 from infrastructure.logging import configure_logging
 from infrastructure.scanning.arp_table import ArpTableAdapter
+from infrastructure.scanning.fritz_hosts import FritzAuthError, FritzHostsAdapter
 from infrastructure.scanning.host_discovery import HostDiscoveryAdapter
 from infrastructure.scanning.hostname_resolver import HostnameResolverAdapter
 from infrastructure.scanning.ipv6_enrichment import Ipv6EnrichmentAdapter
@@ -174,6 +175,52 @@ async def _scheduled_scan(cidr: str, profile_id: str, schedule_id: int) -> None:
     logger.info("scheduled_scan", cidr=cidr, profile=profile_id)
     discovered = await discover_subnet(cidr, max_concurrent=64, timeout=1.0)
     save_scan(cidr, [{"ip": h.ip, "mac": h.mac, "rtt_ms": h.rtt_ms} for h in discovered])
+
+
+# ── FritzBox-Hosts: Verdrahtungs-Wrapper (best-effort, S.7c) ──────────────────
+
+
+class _FritzHostsWiring:
+    """Verdrahtungs-Wrapper um den ``FritzHostsAdapter`` -- erfuellt ``FritzHostsPort``.
+
+    Buendelt zwei Verdrahtungs-Entscheidungen (S.7c) an EINER Stelle, damit der
+    ``RunNetworkScan``-Use-Case immer mit einem 10. Port baubar bleibt und Fritz
+    sauber best-effort ist:
+
+    * **Nicht konfiguriert** (kein ``fritz_host`` / kein ``fritz_password``): gar
+      keinen echten Adapter bauen -> ``[]`` ohne TR-064-Verbindungsversuch
+      (Entscheidung 2A, expliziter Null-Pfad statt Adapter mit leerem host, der
+      in einen Verbindungs-Timeout liefe).
+    * **Auth-Fehler** (falsche Credentials): ``FritzAuthError`` des echten Adapters
+      wird HIER zu ``[]`` gefangen UND geloggt (Entscheidung 3C). Fritz ist
+      optional -- ein Credential-Tippfehler darf NICHT den ganzen Scan abbrechen
+      (anders als nmap, ein angeforderter Scan-Modus). Das Logging ist PFLICHT:
+      ein verschluckter Auth-Fehler ohne Spur waere ein stiller Fallback (S3); mit
+      Warn-Log ist es dokumentierte best-effort-Semantik.
+
+    Der Use-Case sieht so nie eine ``FritzAuthError`` -- der Schichtungs-Vertrag
+    (application kennt nicht infrastructure) bleibt unberuehrt: der Fang sitzt im
+    Composition Root (app.py ist von den import-linter-Contracts ausgenommen).
+    """
+
+    def __init__(self, host: str, user: str, password: str) -> None:
+        # Echter Adapter nur, wenn host UND password gesetzt sind (wie der Altcode:
+        # Merge nur bei ``fritz_host AND fritz_pass``). Sonst Null-Pfad.
+        self._adapter = (
+            FritzHostsAdapter(host=host, user=user, password=password)
+            if host and password
+            else None
+        )
+
+    async def get_hosts(self) -> list[Any]:
+        if self._adapter is None:
+            return []  # nicht konfiguriert -> leerer Merge, kein Verbindungsversuch
+        try:
+            return await self._adapter.get_hosts()
+        except FritzAuthError as exc:
+            # best-effort: Auth-Fehler killt den Scan nicht -- aber GELOGGT (kein S3).
+            logger.warning("fritz_auth_failed", host=exc.host)
+            return []
 
 
 # ── Frontend-Serving (traversal-sicher) ───────────────────────────────────────
@@ -357,10 +404,20 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.dependency_overrides[provide_get_arp_table] = lambda: GetArpTable(arp_table)
 
     # WS-Handler: pro Verbindung einen frischen RunNetworkScan mit den konkreten
-    # Adaptern. ArpTableAdapter ist seit S.7b dabei (ARP-Merge im Use-Case);
-    # FritzHostsPort ist weiterhin NICHT dabei (Fritz-Merge -> spaeter). Die
-    # uebrigen Adapter sind zustandslos, das ScanHistory-Repository wird geteilt.
+    # Adaptern. ArpTableAdapter (S.7b) + FritzHosts-Wrapper (S.7c) sind dabei. Die
+    # zustandslosen Adapter werden pro Scan neu gebaut; das ScanHistory-Repository
+    # wird geteilt. Die Fritz-Credentials werden PRO SCAN frisch gelesen (Aenderung
+    # in den Settings wirkt ohne App-Neustart).
     def _build_run_network_scan() -> RunNetworkScan:
+        # Credentials zum Scan-Zeitpunkt lesen: host/user aus dem Settings-
+        # Repository (Rohwerte), das Passwort als Klartext DIREKT aus dem
+        # SecretStore (Composition Root darf Secret-Klartext lesen, um einen
+        # Adapter zu bauen -- das ist sein Job; NIE ueber GetSettings, der maskiert).
+        fritz_host_setting = repository().get("fritz_host")
+        fritz_user_setting = repository().get("fritz_user")
+        fritz_host = str(fritz_host_setting.value) if fritz_host_setting is not None else ""
+        fritz_user = str(fritz_user_setting.value) if fritz_user_setting is not None else ""
+        fritz_password = secret_store().get("fritz_password") or ""
         return RunNetworkScan(
             discovery=HostDiscoveryAdapter(),
             port_scanner=PortScannerAdapter(),
@@ -369,6 +426,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             mdns=MdnsAdapter(),
             ssdp=SsdpAdapter(),
             ipv6=Ipv6EnrichmentAdapter(),
+            fritz_hosts=_FritzHostsWiring(fritz_host, fritz_user, fritz_password),
             arp_table=arp_table,
             scan_history=scan_history_repository(),
         )

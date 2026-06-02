@@ -18,10 +18,13 @@ Fluss (am S.1-Characterization-Contract des ``/ws/scan`` ausgerichtet):
 3. ``PhaseChanged(discovery, running)``.
 4. Discovery-Generator je CIDR durchlaufen: ``DiscoveryTick`` -> ``Progress``,
    ``DiscoveryHostFound`` -> ``HostFound``.
+4a. FritzBox-Merge (S.7c): Fritz-only-Hosts (DHCP-Clients der Box, aber ping-still)
+   als ``DiscoveredHost(source="fritzbox")`` anhaengen + ``HostFound`` yielden --
+   noch in der Discovery-Phase, VOR dem ARP-Merge (Altcode-Reihenfolge).
 4b. ARP-Merge (S.7b): ARP-only-Hosts (im OS-Neighbor-Cache, aber ping-still) als
    synthetische ``DiscoveredHost(source="arp")`` anhaengen + ``HostFound`` yielden
    -- noch in der Discovery-Phase, vor ``done``.
-5. ``PhaseChanged(discovery, done, alive_count)`` -- ``alive_count`` inkl. ARP-Hosts.
+5. ``PhaseChanged(discovery, done, alive_count)`` -- ``alive_count`` inkl. Fritz+ARP.
 6. mDNS/SSDP einsammeln (per IP gruppiert).
 7. ``PhaseChanged(enrich, running, total)``.
 8. Pro lebendem Host: Hostname/SMB-Aufloesung, PortScan, mDNS/SSDP zuordnen,
@@ -32,13 +35,6 @@ Fluss (am S.1-Characterization-Contract des ``/ws/scan`` ausgerichtet):
 
 BEWUSST AUFGESCHOBENE LUECKEN (KEINE vergessenen Schritte -- siehe S.6-Merkposten):
 
-* FritzHosts-Merge: Der Altcode merged zusaetzliche Hosts aus der FRITZ!Box-
-  DHCP-Tabelle (``FritzHostsPort.get_hosts``) in die Discovery-Liste -- faengt
-  ping-blockierende Geraete (iPads o.ae.). Das ist hier NICHT enthalten: der
-  ``FritzHostsPort`` ist daher (noch) NICHT injiziert -- ein ungenutzter Port
-  saehe wie ein Bug aus. Kommt mit der S.6-Verdrahtung, wenn das Merge-Verhalten
-  (Fritz-Hosts ausserhalb des gescannten Subnetzes? Reihenfolge der
-  ``HostFound``-Events?) entschieden ist.
 * devices-Persistenz: Der Altcode ruft pro Host ``update_device_from_scan``
   (v2: ``RecordScannedHost``). Das ist ein Seiteneffekt, KEIN Teil der
   Event-Sequenz, und eine scanning->devices-Domaenenkopplung. Bleibt aus dem
@@ -90,6 +86,7 @@ from domain.scanning import (
 )
 from ports.scanning import (
     ArpTablePort,
+    FritzHostsPort,
     HostDiscoveryPort,
     HostnameResolverPort,
     Ipv6EnrichmentPort,
@@ -217,6 +214,7 @@ class RunNetworkScan:
         mdns: MdnsPort,
         ssdp: SsdpPort,
         ipv6: Ipv6EnrichmentPort,
+        fritz_hosts: FritzHostsPort,
         arp_table: ArpTablePort,
         scan_history: ScanHistoryRepository,
     ) -> None:
@@ -227,6 +225,7 @@ class RunNetworkScan:
         self._mdns = mdns
         self._ssdp = ssdp
         self._ipv6 = ipv6
+        self._fritz_hosts = fritz_hosts
         self._arp_table = arp_table
         self._scan_history = scan_history
 
@@ -284,6 +283,48 @@ class RunNetworkScan:
                         # behandelt ist -- ein neuer Event-Typ ohne case bricht hier.
                         assert_never(event)
 
+        # Geteilte Menge der bereits gefundenen IPs -- beide Merges (Fritz, dann
+        # ARP) haengen nur NEUE IPs an und aktualisieren sie fortlaufend, sodass ein
+        # Host, den Fritz schon lieferte, nicht ein zweites Mal ueber ARP kommt.
+        discovered_ips = {host.ip for host in discovered}
+
+        # ── FritzBox-Merge: DHCP-Hosts der FRITZ!Box (S.7c) ──────────────────
+        # Faengt ping-blockierende Geraete (iPads o.ae.), die der Sweep verpasst,
+        # die die Box aber als DHCP-Client kennt. Laeuft VOR dem ARP-Merge
+        # (Altcode-Reihenfolge: Fritz, dann ARP). ``FritzHostsPort`` liefert ``[]``
+        # ohne konfigurierte/erreichbare Box -- der Auth-Fehler-Fall ist im
+        # Verdrahtungs-Wrapper (app.py) zu ``[]`` + Log gefangen (Entscheidung 3C,
+        # best-effort: ein Fritz-Credential-Tippfehler killt nicht den ganzen Scan).
+        # Nur Fritz-ONLY-Hosts werden angehaengt; bekannte IPs bleiben unberuehrt.
+        for fritz_host in await self._fritz_hosts.get_hosts():
+            if fritz_host.ip in discovered_ips:
+                continue
+            if not _in_any_cidr(fritz_host.ip, config.cidrs):
+                continue
+            # rtt_ms=None analog ARP (Entscheidung 4A, S.7b): KEIN Zweit-Ping. Ein
+            # von der Box gemeldeter, ping-stiller Host antwortet auch beim zweiten
+            # Versuch fast sicher nicht -- das spart einen ``ping_host``-Port.
+            # ``source="fritzbox"`` setzt der Adapter bereits (S.4e); hier nur
+            # rtt_ms/is_alive auf den Merge-Zustand bringen.
+            merged = DiscoveredHost(
+                ip=fritz_host.ip,
+                mac=fritz_host.mac,
+                rtt_ms=None,
+                is_alive=True,
+                source=fritz_host.source,
+            )
+            discovered.append(merged)
+            discovered_ips.add(merged.ip)
+            vendor = self._vendor_lookup.lookup(merged.mac) if merged.mac else ""
+            yield HostFound(
+                ip=merged.ip,
+                mac=merged.mac,
+                vendor=vendor,
+                rtt_ms=merged.rtt_ms,
+                is_unknown=bool(merged.mac),
+                source=merged.source,
+            )
+
         # ── ARP-Merge: Hosts, die der Ping-Sweep nicht fand (S.7b) ───────────
         # Faengt ping-stille Geraete, die im OS-Neighbor-Cache stehen (z.B. per
         # frueheren Traffic gelernt). Zweite ``get_arp_table()``-Abfrage NEBEN der
@@ -292,7 +333,6 @@ class RunNetworkScan:
         # Vertrag durchzureichen waere ein grosser Eingriff fuer eine Mikro-
         # Optimierung. Nur ARP-ONLY-Hosts werden angehaengt; Ping-Hosts haben ihre
         # MAC schon -- kein Doppel, kein MAC-Nachtrag (Altcode-treu).
-        discovered_ips = {host.ip for host in discovered}
         for arp_ip, arp_mac in (await self._arp_table.get_arp_table()).items():
             if arp_ip in discovered_ips:
                 continue

@@ -136,6 +136,16 @@ class _FakeArpTable:
         return self._table
 
 
+class _FakeFritzHosts:
+    """Liefert feste Fritz-Hosts. Default leer -> Fritz-Merge inaktiv."""
+
+    def __init__(self, hosts: list[DiscoveredHost] | None = None) -> None:
+        self._hosts = hosts or []
+
+    async def get_hosts(self) -> list[DiscoveredHost]:
+        return self._hosts
+
+
 class _FakeScanHistory:
     def __init__(self) -> None:
         self.saved: tuple[str, tuple[EnrichedHost, ...]] | None = None
@@ -160,6 +170,7 @@ def _make_use_case(
     mdns: _FakeMdns | None = None,
     ssdp: _FakeSsdp | None = None,
     ipv6: _FakeIpv6 | None = None,
+    fritz_hosts: _FakeFritzHosts | None = None,
     arp_table: _FakeArpTable | None = None,
     history: _FakeScanHistory | None = None,
 ) -> tuple[RunNetworkScan, _FakeIpv6, _FakeScanHistory]:
@@ -174,6 +185,7 @@ def _make_use_case(
         mdns=mdns or _FakeMdns(),
         ssdp=ssdp or _FakeSsdp(),
         ipv6=ipv6,
+        fritz_hosts=fritz_hosts or _FakeFritzHosts(),  # default leer -> Merge inaktiv
         arp_table=arp_table or _FakeArpTable(),  # default leer -> Merge inaktiv
         scan_history=history,
     )
@@ -417,6 +429,159 @@ def test_arp_hostfound_is_in_discovery_phase() -> None:
     # naechstes PhaseChanged NACH discovery-done ist enrich-running.
     enrich_running_idx = types.index("PhaseChanged", disc_done_idx + 1)
     assert arp_found_idx < disc_done_idx < enrich_running_idx
+
+
+# ── FritzBox-Merge (S.7c) ─────────────────────────────────────────────────────
+
+
+def test_fritz_merge_adds_only_unknown_hosts() -> None:
+    """Fritz-only-Host wird angehaengt (source="fritzbox", rtt_ms=None); bekannte IP NICHT."""
+    ping_host = DiscoveredHost(ip="192.168.1.2", mac="AA:BB:CC:DD:EE:01", rtt_ms=1.0)
+    discovery = _FakeDiscovery({"192.168.1.0/24": [ping_host]})
+    fritz = _FakeFritzHosts(
+        [
+            # Box meldet den Ping-Host (skip) UND ein ping-stilles iPad (anhaengen).
+            DiscoveredHost(ip="192.168.1.2", mac="FF:FF:FF:FF:FF:FF", source="fritzbox"),
+            DiscoveredHost(ip="192.168.1.77", mac="DE:AD:BE:EF:00:99", source="fritzbox"),
+        ]
+    )
+    use_case, _, _ = _make_use_case(discovery=discovery, fritz_hosts=fritz)
+
+    config = ScanConfig(
+        cidrs=("192.168.1.0/24",),
+        port_scan=False,
+        mdns_scan=False,
+        ssdp_scan=False,
+        resolve_hostnames=False,
+    )
+    events = _run(use_case, config)
+
+    found = [e for e in events if isinstance(e, HostFound)]
+    assert {f.ip for f in found} == {"192.168.1.2", "192.168.1.77"}
+    ping_frame = next(f for f in found if f.ip == "192.168.1.2")
+    fritz_frame = next(f for f in found if f.ip == "192.168.1.77")
+
+    # Ping-Host unveraendert -- keine Ueberschreibung durch die Fritz-Meldung.
+    assert ping_frame.mac == "AA:BB:CC:DD:EE:01"
+    assert ping_frame.source == "ping"
+
+    # Fritz-Host: source="fritzbox", rtt_ms=None (kein Zweit-Ping, Entscheidung 4A).
+    assert fritz_frame.source == "fritzbox"
+    assert fritz_frame.rtt_ms is None
+    assert fritz_frame.mac == "DE:AD:BE:EF:00:99"
+    assert fritz_frame.vendor == "ACME"
+
+    disc_done = next(
+        e
+        for e in events
+        if isinstance(e, PhaseChanged) and e.phase == "discovery" and e.status == "done"
+    )
+    assert disc_done.alive_count == 2  # Ping + Fritz
+
+
+def test_fritz_skips_host_outside_scanned_cidrs() -> None:
+    """Fritz-Host ausserhalb der config-CIDRs wird uebersprungen (_in_any_cidr)."""
+    discovery = _FakeDiscovery({"192.168.1.0/24": []})
+    fritz = _FakeFritzHosts(
+        [
+            DiscoveredHost(ip="192.168.1.77", mac="DE:AD:BE:EF:00:01", source="fritzbox"),
+            DiscoveredHost(ip="10.0.0.5", mac="DE:AD:BE:EF:00:02", source="fritzbox"),  # ausserhalb
+        ]
+    )
+    use_case, _, _ = _make_use_case(discovery=discovery, fritz_hosts=fritz)
+
+    config = ScanConfig(
+        cidrs=("192.168.1.0/24",),
+        port_scan=False,
+        mdns_scan=False,
+        ssdp_scan=False,
+        resolve_hostnames=False,
+    )
+    events = _run(use_case, config)
+
+    found = {f.ip for f in events if isinstance(f, HostFound)}
+    assert found == {"192.168.1.77"}
+
+
+def test_fritz_host_runs_through_enrich() -> None:
+    """Der Fritz-only-Host laeuft wie ein Ping-Host durch die Enrich-Phase."""
+    discovery = _FakeDiscovery({"10.0.0.0/24": []})
+    fritz = _FakeFritzHosts(
+        [DiscoveredHost(ip="10.0.0.9", mac="DE:AD:BE:EF:00:09", source="fritzbox")]
+    )
+    scanner = _FakePortScanner({"10.0.0.9": [PortInfo(port=80, state="open", service="http")]})
+    use_case, ipv6, history = _make_use_case(
+        discovery=discovery, fritz_hosts=fritz, port_scanner=scanner
+    )
+
+    config = ScanConfig(
+        cidrs=("10.0.0.0/24",),
+        port_scan=True,
+        mdns_scan=False,
+        ssdp_scan=False,
+        resolve_hostnames=False,
+    )
+    events = _run(use_case, config)
+
+    enriched = [e for e in events if isinstance(e, HostEnriched)]
+    assert len(enriched) == 1
+    assert enriched[0].host.ip == "10.0.0.9"
+    assert enriched[0].host.ports == (PortInfo(port=80, state="open", service="http"),)
+    assert history.saved is not None and history.saved[1][0].ip == "10.0.0.9"
+    assert ipv6.called_with is not None and ipv6.called_with[0].ip == "10.0.0.9"
+
+
+def test_fritz_merged_before_arp_same_ip_only_once() -> None:
+    """Liefern Fritz UND ARP dieselbe IP, gewinnt Fritz (laeuft zuerst) -- nur einmal."""
+    discovery = _FakeDiscovery({"192.168.1.0/24": []})
+    fritz = _FakeFritzHosts(
+        [DiscoveredHost(ip="192.168.1.50", mac="FF:FF:FF:FF:FF:FF", source="fritzbox")]
+    )
+    arp = _FakeArpTable({"192.168.1.50": "AA:AA:AA:AA:AA:AA"})  # gleiche IP -> ARP skippt sie
+    use_case, _, _ = _make_use_case(discovery=discovery, fritz_hosts=fritz, arp_table=arp)
+
+    config = ScanConfig(
+        cidrs=("192.168.1.0/24",),
+        port_scan=False,
+        mdns_scan=False,
+        ssdp_scan=False,
+        resolve_hostnames=False,
+    )
+    events = _run(use_case, config)
+
+    found = [f for f in events if isinstance(f, HostFound) and f.ip == "192.168.1.50"]
+    assert len(found) == 1
+    # Fritz lief zuerst -> die Fritz-Meldung (source/mac) gewinnt, ARP wird verworfen.
+    assert found[0].source == "fritzbox"
+    assert found[0].mac == "FF:FF:FF:FF:FF:FF"
+
+
+def test_fritz_hostfound_is_in_discovery_phase() -> None:
+    """Der Fritz-HostFound kommt VOR PhaseChanged(discovery, done)."""
+    discovery = _FakeDiscovery({"192.168.1.0/24": []})
+    fritz = _FakeFritzHosts(
+        [DiscoveredHost(ip="192.168.1.50", mac="DE:AD:BE:EF:00:01", source="fritzbox")]
+    )
+    use_case, _, _ = _make_use_case(discovery=discovery, fritz_hosts=fritz)
+
+    config = ScanConfig(
+        cidrs=("192.168.1.0/24",),
+        port_scan=False,
+        mdns_scan=False,
+        ssdp_scan=False,
+        resolve_hostnames=False,
+    )
+    events = _run(use_case, config)
+
+    fritz_found_idx = next(
+        i for i, e in enumerate(events) if isinstance(e, HostFound) and e.source == "fritzbox"
+    )
+    disc_done_idx = next(
+        i
+        for i, e in enumerate(events)
+        if isinstance(e, PhaseChanged) and e.phase == "discovery" and e.status == "done"
+    )
+    assert fritz_found_idx < disc_done_idx
 
 
 # ── Fehlerpfad: Adapter-Exception propagiert (Durchwerfen an S.6) ───────────
