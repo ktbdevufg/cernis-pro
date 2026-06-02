@@ -21,6 +21,19 @@ Fehlerpfad (S.5-Entscheidung 3 / S.6-Merkposten 2): ``NmapScanError`` /
 bewusst NICHT). HIER werden sie gefangen und in einen sauberen ``error``-Frame
 uebersetzt -- KEIN roher 500er/WS-Abbruch. Beide zusammen behandelt.
 
+devices-Projektion (S.7d): Pro ``HostEnriched`` wird der Host auf einen
+``devices.ScannedHost`` projiziert und ueber ``RecordScannedHost`` in die
+devices-DB verbucht -- VOR dem ``host_detail``-Frame (Altcode-Reihenfolge:
+persistieren, dann senden). Das ist ein SEITENEFFEKT in eine FREMDE Domaene und
+gehoert bewusst HIER (Composition Root), NICHT in den scanning-Use-Case: der
+bleibt eine reine Funktion ``ScanConfig -> Event-Strom`` ohne devices-Vokabular
+(scanning soll nicht wissen, dass es devices gibt -- der import-linter erlaubt
+``scanning -> devices`` zwar, aber "erlaubt" ist nicht "sauber"). Best-effort
+(Entscheidung 3C-Linie): ein ``RecordScannedHost``-Fehler (DB gesperrt o.ae.) wird
+gefangen + geloggt, der Scan laeuft weiter -- die Projektion ist ein Nebeneffekt,
+kein Scan-Zweck; ein devices-DB-Problem darf die Scan-Anzeige nicht killen. Mit
+Log ist es kein stiller S3-Fallback.
+
 HostFound-Timing (S.6-Merkposten 1): Der HostDiscoveryAdapter (Variante A)
 buendelt die ``HostFound`` nach den Ticks; der Use-Case gibt das unveraendert
 weiter. Dieser Handler uebernimmt die Reihenfolge der Events 1:1 -- er sortiert
@@ -32,9 +45,12 @@ stillschweigend.)
 from collections.abc import Awaitable, Callable
 from typing import Any, assert_never
 
+import structlog
 from fastapi import WebSocket
 
+from domain.devices import ScannedHost
 from domain.scanning import (
+    EnrichedHost,
     HostEnriched,
     HostFound,
     Info,
@@ -49,6 +65,8 @@ from domain.scanning import (
 from infrastructure.scanning.fritz_hosts import FritzAuthError
 from infrastructure.scanning.port_scanner import NmapScanError
 
+logger = structlog.get_logger()
+
 # Adapter-Exceptions, die der Use-Case bewusst durchwirft (S.5) und die hier in
 # einen ``error``-Frame uebersetzt werden -- statt eines rohen 500ers/Abbruchs.
 _ADAPTER_ERRORS = (NmapScanError, FritzAuthError)
@@ -56,6 +74,28 @@ _ADAPTER_ERRORS = (NmapScanError, FritzAuthError)
 # Factory-Typ: app.py liefert eine Funktion, die pro Verbindung einen frischen
 # RunNetworkScan-Use-Case baut (mit den konkreten Adaptern verdrahtet).
 RunScanFactory = Callable[[], Any]
+
+# Factory-Typ fuer den devices-Projektions-Use-Case (RecordScannedHost). app.py
+# liefert eine Funktion, die ihn frisch baut (mit DeviceRepository + Clock).
+RecordHostFactory = Callable[[], Any]
+
+
+def _project(host: EnrichedHost) -> ScannedHost:
+    """Projiziert einen scanning-``EnrichedHost`` auf einen devices-``ScannedHost``.
+
+    Lebt im Composition Root (darf beide Domaenen), NICHT im scanning-Use-Case.
+    ``ports`` (PortInfo-Objekte) -> ``open_ports`` (int-Tupel). ``category`` wird
+    bewusst NICHT projiziert -- ``ScannedHost`` hat es nicht (Kategorie ist
+    kuratiert, kein Scan-Stammdatum; deckt sich mit dem Altcode-Upsert).
+    """
+    return ScannedHost(
+        mac=host.mac,
+        ip=host.ip,
+        vendor=host.vendor,
+        hostname=host.hostname,
+        os_guess=host.os_guess,
+        open_ports=tuple(p.port for p in host.ports),
+    )
 
 
 def _event_to_frame(event: ScanEvent) -> dict[str, Any]:
@@ -168,11 +208,16 @@ def _build_config(raw: dict[str, Any]) -> ScanConfig:
     )
 
 
-def make_ws_scan(run_scan_factory: RunScanFactory) -> Callable[[WebSocket], Awaitable[None]]:
+def make_ws_scan(
+    run_scan_factory: RunScanFactory,
+    record_host_factory: RecordHostFactory,
+) -> Callable[[WebSocket], Awaitable[None]]:
     """Baut den ``/ws/scan``-Handler mit injizierter ``RunNetworkScan``-Factory.
 
     ``run_scan_factory()`` liefert pro Verbindung einen frischen, mit den
     konkreten Adaptern verdrahteten ``RunNetworkScan``-Use-Case (gebaut in app.py).
+    ``record_host_factory()`` liefert den ``RecordScannedHost``-Use-Case fuer die
+    devices-Projektion (S.7d) -- pro Verbindung einmal gebaut.
     """
 
     async def ws_scan(websocket: WebSocket) -> None:
@@ -194,10 +239,34 @@ def make_ws_scan(run_scan_factory: RunScanFactory) -> Callable[[WebSocket], Awai
         #    (NmapScanError/FritzAuthError) propagieren aus dem Generator -> hier
         #    in einen error-Frame uebersetzt, KEIN roher 500er (S.6-Merkposten 2).
         use_case = run_scan_factory()
+        record_host = record_host_factory()
         try:
             async for event in use_case.run(config):
+                # devices-Projektion (S.7d): pro angereichertem Host VOR dem Frame
+                # persistieren (Altcode-Reihenfolge: erst devices-DB, dann senden).
+                if isinstance(event, HostEnriched):
+                    _record_host(record_host, event.host)
                 await websocket.send_json(_event_to_frame(event))
         except _ADAPTER_ERRORS as exc:
             await websocket.send_json({"type": "error", "message": str(exc)})
 
     return ws_scan
+
+
+def _record_host(record_host: Any, host: EnrichedHost) -> None:
+    """Verbucht einen angereicherten Host in der devices-DB (best-effort, S.7d).
+
+    Hosts OHNE MAC werden uebersprungen: ``ScannedHost``/``RecordScannedHost`` sind
+    MAC-keyed; eine leere MAC erzeugte einen wertlosen Phantom-Eintrag. Bewusste
+    Abweichung vom Altcode, der bedingungslos ``update_device_from_scan`` rief.
+
+    Ein Fehler (z.B. gesperrte DB) wird gefangen + geloggt, der Scan laeuft weiter
+    (best-effort, Entscheidung 3C-Linie): die Projektion ist ein Nebeneffekt, kein
+    Scan-Zweck. Mit Warn-Log ist es kein stiller S3-Fallback.
+    """
+    if not host.mac:
+        return
+    try:
+        record_host(_project(host))
+    except Exception as exc:
+        logger.warning("record_scanned_host_failed", ip=host.ip, mac=host.mac, error=str(exc))

@@ -431,7 +431,17 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             scan_history=scan_history_repository(),
         )
 
-    app.add_api_websocket_route("/ws/scan", make_ws_scan(_build_run_network_scan))
+    # devices-Projektion (S.7d): der WS-Handler verbucht pro angereichertem Host
+    # ueber RecordScannedHost in die devices-DB. Die Projektion EnrichedHost ->
+    # ScannedHost + der Aufruf liegen im Composition Root (ws_scan.py), NICHT im
+    # scanning-Use-Case (keine scanning->devices-Domaenenkopplung). Gleiche
+    # Verdrahtung wie der api-Provider oben (DeviceRepository + Clock).
+    def _build_record_scanned_host() -> RecordScannedHost:
+        return RecordScannedHost(device_repository(), device_clock)
+
+    app.add_api_websocket_route(
+        "/ws/scan", make_ws_scan(_build_run_network_scan, _build_record_scanned_host)
+    )
 
     @app.exception_handler(SecretStoreUnavailableError)
     async def _on_secret_store_unavailable(

@@ -33,13 +33,14 @@ Fluss (am S.1-Characterization-Contract des ``/ws/scan`` ausgerichtet):
    ``Ipv6EnrichmentPort`` arbeitet batch-weise).
 10. ``ScanHistory.save`` -> ``ScanCompleted``.
 
-BEWUSST AUFGESCHOBENE LUECKEN (KEINE vergessenen Schritte -- siehe S.6-Merkposten):
+BEWUSST AUSSERHALB dieses Use-Case (Architektur-Entscheidung, kein vergessener Schritt):
 
 * devices-Persistenz: Der Altcode ruft pro Host ``update_device_from_scan``
-  (v2: ``RecordScannedHost``). Das ist ein Seiteneffekt, KEIN Teil der
-  Event-Sequenz, und eine scanning->devices-Domaenenkopplung. Bleibt aus dem
-  Use-Case heraus; die ``EnrichedHost`` -> ``ScannedHost``-Projektion +
-  ``RecordScannedHost``-Aufruf gehoeren in die S.6-Verdrahtung.
+  (v2: ``RecordScannedHost``). Das ist ein Seiteneffekt in eine FREMDE Domaene,
+  KEIN Teil der Event-Sequenz. Er bleibt bewusst aus diesem Use-Case heraus
+  (scanning soll nicht wissen, dass es devices gibt) -- die ``EnrichedHost`` ->
+  ``ScannedHost``-Projektion + der ``RecordScannedHost``-Aufruf liegen seit S.7d
+  im Composition Root (``ws_scan.py``), wo scanning + devices zusammenkommen.
 
 HostFound-Timing: Der ``HostDiscoveryPort``-Adapter (Variante A, S.4b) buendelt
 alle ``DiscoveryHostFound`` NACH den ``DiscoveryTick``s (entkoppelt vom
