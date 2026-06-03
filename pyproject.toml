@@ -181,15 +181,24 @@ forbidden_modules = ["pydantic", "fastapi", "structlog"]
 # die Uebergangs-Kruecke des Bootstrap-Inits (P2.1b). So kann der Altcode nicht in
 # die sauberen Ringe lecken; jeder Versuch bricht CI.
 #
-# EINE eng eingezaeunte Ausnahme (ADR 0007): die scanning-Infrastructure-Adapter
-# DUERFEN modules/ importieren -- eine Reimplementierung der systemnahen Schicht
-# (Ping/Portscan/mDNS/SSDP/IPv6/Fritz) waere Wegwerf-Arbeit vor dem in Vision 5.2
-# vorgesehenen moeglichen Sprachwechsel. Die Ausnahme ist SUBTRAKTIV ueber
-# ignore_imports umgesetzt, NICHT als zweiter (additiver) Contract: ein forbidden-
-# Contract kann nur verbieten, nie erlauben -- die Lockerung MUSS daher am
-# bestehenden Contract haengen. source_modules/forbidden_modules bleiben
-# unveraendert; ignore_imports schneidet ausschliesslich Importe AUS dem Paket
-# `infrastructure.scanning` (beliebige Tiefe via `**`) in den Altcode heraus.
+# ZWEI eng eingezaeunte Ausnahmen (ADR 0007, in M.4 um monitoring erweitert): die
+# scanning- UND monitoring-Infrastructure-Adapter DUERFEN modules/ importieren --
+# eine Reimplementierung der systemnahen Schicht (scanning: Ping/Portscan/mDNS/SSDP/
+# IPv6/Fritz; monitoring: Ping-Burst + osascript-Notification) waere Wegwerf-Arbeit
+# vor dem in Vision 5.2 vorgesehenen moeglichen Sprachwechsel. Die Ausnahme ist
+# SUBTRAKTIV ueber ignore_imports umgesetzt, NICHT als zweiter (additiver) Contract:
+# ein forbidden-Contract kann nur verbieten, nie erlauben -- die Lockerung MUSS daher
+# am bestehenden Contract haengen. source_modules/forbidden_modules bleiben
+# unveraendert; ignore_imports schneidet ausschliesslich Importe AUS den Paketen
+# `infrastructure.scanning` und `infrastructure.monitoring` (beliebige Tiefe via
+# `**`) in den Altcode heraus.
+#
+# SCOPED innerhalb monitoring (ADR 0007): nur Pinger/Notifier nutzen modules
+# (_ping_burst/_notify_macos); die sqlite-Repos und der TargetSource-Adapter kommen
+# BEWUSST ohne modules aus (eigenes Schema wie SqliteScanHistoryRepository;
+# TargetSource zieht Settings ueber den migrierten ports/settings-Port). Der
+# `**`-Scope deckt das Paket maschinell ab; der minimal gehaltene reale
+# modules-Footprint ist eine bewusste Disziplin, im ADR festgehalten.
 #
 # WICHTIG zur Pattern-Form (in S.4a empirisch korrigiert): Die Zielseite ist
 # `modules` OHNE Suffix -- der forbidden-Contract loest die Kanten gegen das
@@ -212,4 +221,5 @@ source_modules = ["domain", "ports", "application", "infrastructure", "api"]
 forbidden_modules = ["modules"]
 ignore_imports = [
     "infrastructure.scanning.** -> modules",
+    "infrastructure.monitoring.** -> modules",
 ]
