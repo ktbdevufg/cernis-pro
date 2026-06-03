@@ -59,6 +59,7 @@ import structlog
 from domain.monitoring import (
     MonitorEvent,
     MonitorTarget,
+    PingSample,
     ScheduleParseError,
     classify_transition,
     compute_sla_stats,
@@ -167,6 +168,47 @@ class RunMonitor:
         return dict(self._status)
 
 
+# ── Monitor-Lese-Use-Cases (M.9) ────────────────────────────────────────────
+# Duenne Pass-Through-Use-Cases (Muster GetScanHistory/GetSchedules) fuer die
+# REST-Lesepfade ``/api/monitor/events`` + ``/api/monitor/rtt/{id}``. Sie existieren,
+# weil der api-Ring die Repos (Ports) NICHT direkt rufen darf (import-linter:
+# api -> nur application) -- die EINZIGE Schicht, die der Router ansprechen kann.
+# Sie geben die ROHEN Domaenen-Objekte (MonitorEvent / PingSample) heraus; die
+# Response-Shape (ts aus timestamp, datetime-Formatierung, id weggelassen) baut der
+# api-Rand per Attribut-Zugriff -- Naht-Linie wie current_status/Broadcaster: der
+# Use-Case liefert Domaenen-Daten, der Rand die Wire-Form.
+
+
+class GetMonitorEvents:
+    """Letzte Uebergangs-Ereignisse ueber alle Targets (Pass-Through, nur Repo).
+
+    Reicht ``MonitorEventRepository.recent(limit)`` durch (neueste zuerst, ``ts``
+    absteigend wie der Altcode ``get_monitor_events``). Speist ``/api/monitor/events``.
+    Keine Ereignisse -> ``[]``.
+    """
+
+    def __init__(self, repository: MonitorEventRepository) -> None:
+        self._repository = repository
+
+    def __call__(self, limit: int = 100) -> list[MonitorEvent]:
+        return self._repository.recent(limit)
+
+
+class GetRttHistory:
+    """RTT-Verlaufspunkte EINES Targets (Pass-Through, nur Repo).
+
+    Reicht ``RttHistoryRepository.recent(target_id, limit)`` durch (chronologisch,
+    aelteste zuerst -- altcode-treu). Speist ``/api/monitor/rtt/{id}``. Unbekanntes
+    Target / keine Daten -> ``[]``.
+    """
+
+    def __init__(self, repository: RttHistoryRepository) -> None:
+        self._repository = repository
+
+    def __call__(self, target_id: str, limit: int = 120) -> list[PingSample]:
+        return self._repository.recent(target_id, limit)
+
+
 # ── Schedule-Use-Cases (M.6) ────────────────────────────────────────────────
 # Die Altcode-CRUD<->Job-Kopplung (add_schedule ruft _register_job) ist entkoppelt:
 # ``ManageSchedules`` haelt BEIDE Ports und orchestriert add/delete an EINER Stelle.
@@ -181,11 +223,29 @@ class ManageSchedules:
     ``add`` und ``delete`` brauchen beide Ports: die DB-Zeile UND den APScheduler-
     Job. ``add`` ist BEST-EFFORT gegenueber einem kaputten Schedule-String (s.
     ``add``-Docstring).
+
+    v2-ABWEICHUNG (M.9, bewusst ggue. dem abgenommenen M.6): Der
+    ``ScanTriggerCallback`` ist jetzt im ``__init__`` GEBUNDEN (war in M.6 das
+    fuenfte ``add``-Argument). Grund: ``add`` wird ueber ``POST /api/schedules``
+    (M.9) aufgerufen, und der api-Ring kann den Callback NICHT durchreichen -- er ist
+    Composition-Root-gebunden (lebt in ``app.py._scheduled_scan``, ruft ``modules``).
+    EINE Bindungsstelle (hier im ctor) speist BEIDE Pfade: den REST-``add`` UND die
+    lifespan-Registrierung der gespeicherten Schedules (``app.py`` uebergibt
+    denselben Callback an diesen ctor und an ``ScanJobScheduler.register/start``) --
+    so kann REST-add und lifespan-Job nicht divergieren. Die Adapter-Signaturen
+    (``register(schedule, callback)`` / ``start(callback)``) bleiben unveraendert
+    (der Adapter bleibt zustandslos); nur ``add`` verliert das Argument.
     """
 
-    def __init__(self, repository: ScheduleRepository, job_scheduler: ScanJobScheduler) -> None:
+    def __init__(
+        self,
+        repository: ScheduleRepository,
+        job_scheduler: ScanJobScheduler,
+        callback: ScanTriggerCallback,
+    ) -> None:
         self._repository = repository
         self._job_scheduler = job_scheduler
+        self._callback = callback
 
     def add(
         self,
@@ -193,9 +253,11 @@ class ManageSchedules:
         cidr: str,
         profile_id: str,
         schedule: str,
-        callback: ScanTriggerCallback,
     ) -> int:
         """Legt die Schedule-Zeile an und registriert ihren Job (best-effort).
+
+        Der Job wird mit dem im ctor gebundenen ``ScanTriggerCallback`` registriert
+        (s. Klassen-Docstring -- EINE Callback-Quelle).
 
         BEWUSSTE best-effort-Wahl bei kaputtem ``schedule``-String: Die DB-Zeile
         wird IMMER angelegt (``repository.add``), dann der Job registriert. Wirft
@@ -220,7 +282,7 @@ class ManageSchedules:
             "schedule": schedule,
         }
         try:
-            self._job_scheduler.register(row, callback)
+            self._job_scheduler.register(row, self._callback)
         except ScheduleParseError as exc:
             _logger.warning(
                 "schedule_job_not_registered",

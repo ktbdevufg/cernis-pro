@@ -3,6 +3,8 @@
 from application.monitoring.errors import MonitoringApplicationError
 from application.monitoring.use_cases import (
     GetAllSlaStats,
+    GetMonitorEvents,
+    GetRttHistory,
     GetSchedules,
     GetSlaStats,
     ManageSchedules,
@@ -12,6 +14,8 @@ from application.monitoring.use_cases import (
 
 __all__ = [
     "GetAllSlaStats",
+    "GetMonitorEvents",
+    "GetRttHistory",
     "GetSchedules",
     "GetSlaStats",
     "ManageSchedules",

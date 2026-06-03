@@ -98,9 +98,9 @@ class _FakeJobScheduler:
 def test_add_orchestrates_repo_and_job() -> None:
     repo = _FakeRepo()
     jobs = _FakeJobScheduler()
-    uc = ManageSchedules(repo, jobs)
+    uc = ManageSchedules(repo, jobs, _callback)
 
-    sid = uc.add("Nightly", "192.168.1.0/24", "standard", "cron:0 2 * * *", _callback)
+    sid = uc.add("Nightly", "192.168.1.0/24", "standard", "cron:0 2 * * *")
 
     # DB-Zeile angelegt UND Job registriert.
     assert len(repo.list()) == 1
@@ -112,9 +112,9 @@ def test_add_best_effort_keeps_row_skips_job_on_parse_error() -> None:
     # Kaputter Schedule-String: register wirft ScheduleParseError -> gezielt gefangen.
     repo = _FakeRepo()
     jobs = _FakeJobScheduler(raise_parse_error=True)
-    uc = ManageSchedules(repo, jobs)
+    uc = ManageSchedules(repo, jobs, _callback)
 
-    sid = uc.add("Broken", "10.0.0.0/24", "p", "kaputt", _callback)
+    sid = uc.add("Broken", "10.0.0.0/24", "p", "kaputt")
 
     # Zeile DA (sichtbar in der Liste), aber KEIN Job (Warn-geloggt im Use-Case).
     assert len(repo.list()) == 1
@@ -134,10 +134,10 @@ def test_add_propagates_non_parse_error() -> None:
     # ERWARTETE Parse-Fehler ist best-effort, jeder andere Fehler bleibt sichtbar.
     repo = _FakeRepo()
     jobs = _FakeJobScheduler(raise_other=ValueError("ungueltiges Cron-Feld"))
-    uc = ManageSchedules(repo, jobs)
+    uc = ManageSchedules(repo, jobs, _callback)
 
     with pytest.raises(ValueError):
-        uc.add("X", "10.0.0.0/24", "p", "cron:99 99 * * *", _callback)
+        uc.add("X", "10.0.0.0/24", "p", "cron:99 99 * * *")
 
     # Die DB-Zeile wurde dennoch angelegt (add ruft repo.add VOR register) -- aber
     # der unerwartete Fehler propagiert, statt still geschluckt zu werden.
@@ -149,10 +149,10 @@ def test_add_also_propagates_runtime_error() -> None:
     # NUR auf ScheduleParseError, nicht auf Exception/ValueError verbreitert.
     repo = _FakeRepo()
     jobs = _FakeJobScheduler(raise_other=RuntimeError("scheduler kaputt"))
-    uc = ManageSchedules(repo, jobs)
+    uc = ManageSchedules(repo, jobs, _callback)
 
     with pytest.raises(RuntimeError):
-        uc.add("X", "10.0.0.0/24", "p", "interval:1h", _callback)
+        uc.add("X", "10.0.0.0/24", "p", "interval:1h")
 
 
 # ── ManageSchedules.delete ──────────────────────────────────────────────────
@@ -161,8 +161,8 @@ def test_add_also_propagates_runtime_error() -> None:
 def test_delete_orchestrates_repo_and_job() -> None:
     repo = _FakeRepo()
     jobs = _FakeJobScheduler()
-    uc = ManageSchedules(repo, jobs)
-    sid = uc.add("A", "10.0.0.0/24", "p", "interval:1h", _callback)
+    uc = ManageSchedules(repo, jobs, _callback)
+    sid = uc.add("A", "10.0.0.0/24", "p", "interval:1h")
 
     uc.delete(sid)
 

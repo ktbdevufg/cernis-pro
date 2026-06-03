@@ -12,7 +12,7 @@ fastapi/starlette).
 import asyncio
 import sys
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -37,6 +37,17 @@ from api.devices import (
 from api.devices import router as devices_router
 from api.metrics import provide_export_metrics
 from api.metrics import router as metrics_router
+from api.monitoring import (
+    provide_get_all_sla_stats,
+    provide_get_monitor_events,
+    provide_get_rtt_history,
+    provide_get_schedules,
+    provide_get_sla_stats,
+    provide_manage_schedules,
+    provide_monitor_status,
+    provide_update_schedule,
+)
+from api.monitoring import router as monitoring_router
 from api.scanning import (
     provide_get_arp_table,
     provide_get_scan_detail,
@@ -59,6 +70,16 @@ from application.devices import (
     UpdateDeviceMeta,
 )
 from application.metrics import ExportMetrics
+from application.monitoring import (
+    GetAllSlaStats,
+    GetMonitorEvents,
+    GetRttHistory,
+    GetSchedules,
+    GetSlaStats,
+    ManageSchedules,
+    RunMonitor,
+    UpdateSchedule,
+)
 from application.scanning import (
     GetArpTable,
     GetScanDetail,
@@ -72,6 +93,17 @@ from infrastructure.config import APP_NAME, APP_VERSION, AppConfig
 from infrastructure.device_repository import SqliteDeviceRepository
 from infrastructure.logging import configure_logging
 from infrastructure.metrics import SqliteMetricsReader
+from infrastructure.monitoring import (
+    ApschedulerJobScheduler,
+    CompositeTargetSource,
+    MonitorNotifierAdapter,
+    MonitorPingerAdapter,
+    SqliteMonitorEventRepository,
+    SqliteRttHistoryRepository,
+    SqliteScheduleRepository,
+    SqliteSlaSampleRepository,
+    WebSocketMonitorBroadcaster,
+)
 from infrastructure.scanning.arp_table import ArpTableAdapter
 from infrastructure.scanning.fritz_hosts import FritzAuthError, FritzHostsAdapter
 from infrastructure.scanning.host_discovery import HostDiscoveryAdapter
@@ -95,18 +127,8 @@ from infrastructure.settings_repository import SqliteSettingsRepository
 from modules.agent import init_agents_db
 from modules.alerting import init_alerts_db
 from modules.devices_db import init_devices_db
-from modules.interfaces import get_interfaces
-from modules.monitor import (
-    MonitorTarget,
-    run_monitor,
-    stop_monitor,
-)
-from modules.monitor import (
-    configure as configure_monitor,
-)
-from modules.scheduler import init_schedule_db, start_scheduler, stop_scheduler
-from modules.sla import init_sla_db
-from modules.storage import get_setting, init_db
+from modules.storage import init_db
+from ws_monitor import make_ws_monitor
 from ws_scan import make_ws_scan
 
 logger = structlog.get_logger()
@@ -128,44 +150,6 @@ def _check_version_upgrade() -> None:
         if old_version:
             logger.info("version_upgrade", old=old_version, new=APP_VERSION)
         version_file.write_text(APP_VERSION)
-
-
-def _build_monitor_targets() -> list[Any]:
-    """Monitor-Targets aus Interfaces + Settings (wie main.py, ohne toten wlan/lan-Code)."""
-    targets: list[Any] = []
-    for iface in get_interfaces():
-        if iface.gateway and iface.ipv4:
-            targets.append(
-                MonitorTarget(
-                    id=f"gw_{iface.name}",
-                    label=f"Gateway ({iface.name})",
-                    host=iface.gateway,
-                    interface=iface.name,
-                    enabled=True,
-                )
-            )
-    targets.append(
-        MonitorTarget(
-            id="internet_primary",
-            label="Internet (Google DNS)",
-            host="8.8.8.8",
-            interface="",
-            enabled=True,
-        )
-    )
-    targets.append(
-        MonitorTarget(
-            id="internet_secondary",
-            label="Internet (Cloudflare)",
-            host="1.1.1.1",
-            interface="",
-            enabled=True,
-        )
-    )
-    custom = get_setting("monitor_custom_targets", [])
-    for t in custom or []:
-        targets.append(MonitorTarget(**t))
-    return targets
 
 
 async def _scheduled_scan(cidr: str, profile_id: str, schedule_id: int) -> None:
@@ -295,23 +279,36 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         logger.info("startup", service=APP_NAME, version=APP_VERSION)
         # Bootstrap nur, wenn app.py der produktive Owner ist (P2.3). Default aus
         # -> kein echter DB-/Monitor-/Scheduler-Start in Tests oder bei
-        # versehentlichem Doppelstart. Sequenz exakt wie main.py (P2.1a-Contract).
+        # versehentlichem Doppelstart.
         if cfg.bootstrap_on_startup:
             _check_version_upgrade()
             init_db()
             init_devices_db()
-            configure_monitor(_build_monitor_targets(), interval=5)
-            # Referenz auf app.state halten (verhindert vorzeitige GC des Tasks).
-            _app.state.monitor_task = asyncio.create_task(run_monitor())
-            init_schedule_db()
-            init_sla_db()
+            # ── monitoring v2 (M.9): Altcode-Loop (configure_monitor + run_monitor)
+            # und Altcode-Scheduler (start_scheduler) ERSETZT durch die v2-Use-Cases.
+            # Der RunMonitor tickt bis stop(); der Task haengt an app.state (kein GC).
+            # Die gespeicherten aktiven Schedules registriert die Verdrahtung HIER
+            # (der ApschedulerJobScheduler.start() tut das bewusst nicht -- er kennt
+            # das Repo nicht), exakt wie der Altcode-``start_scheduler``.
+            run_monitor_uc = _build_run_monitor()
+            _app.state.run_monitor = run_monitor_uc
+            _app.state.monitor_task = asyncio.create_task(run_monitor_uc.run())
+            job_scheduler().start(_scheduled_scan)
+            for row in schedule_repository().list():
+                if row["enabled"]:
+                    job_scheduler().register(row, _scheduled_scan)
             init_alerts_db()
             init_agents_db()
-            start_scheduler(_scheduled_scan)
         yield
         if cfg.bootstrap_on_startup:
-            stop_monitor()
-            stop_scheduler()
+            # stop() setzt das Loop-Flag (Abbruch nach der laufenden Iteration);
+            # cancel() bricht zusaetzlich ein laufendes sleep(interval) sofort ab.
+            # Den CancelledError beim Awaiten unterdruecken -- erwarteter Abgang.
+            run_monitor_uc.stop()
+            _app.state.monitor_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await _app.state.monitor_task
+            job_scheduler().stop()
         logger.info("shutdown", service=APP_NAME)
 
     app = FastAPI(title="CERNIS PRO", version=APP_VERSION, lifespan=lifespan)
@@ -461,6 +458,103 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     app.include_router(metrics_router)
     app.dependency_overrides[provide_export_metrics] = lambda: ExportMetrics(metrics_reader())
+
+    # ── monitoring-Domaene v2 verdrahten (M.9, Regel 5: ports<->infra nur hier) ──
+    # REST (status/events/rtt/sla/schedules) ueber duenne Use-Cases im api-Ring; der
+    # WS-Handler /ws/monitor lebt im Composition Root (ws_monitor.py), weil er den
+    # Broadcaster-Adapter (infra) mit dem RunMonitor-Status (application) verbindet.
+    # Die vier sqlite-Repos teilen die cernis.db (lru_cache wie scan_history); pinger/
+    # notifier/broadcaster/scheduler sind zustandslos bzw. langlebige Singletons.
+    @lru_cache(maxsize=1)
+    def rtt_history_repository() -> SqliteRttHistoryRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteRttHistoryRepository(get_db_path())
+
+    @lru_cache(maxsize=1)
+    def monitor_event_repository() -> SqliteMonitorEventRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteMonitorEventRepository(get_db_path())
+
+    @lru_cache(maxsize=1)
+    def sla_sample_repository() -> SqliteSlaSampleRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteSlaSampleRepository(get_db_path())
+
+    @lru_cache(maxsize=1)
+    def schedule_repository() -> SqliteScheduleRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteScheduleRepository(get_db_path())
+
+    @lru_cache(maxsize=1)
+    def job_scheduler() -> ApschedulerJobScheduler:
+        return ApschedulerJobScheduler()
+
+    @lru_cache(maxsize=1)
+    def target_source() -> CompositeTargetSource:
+        # Liest die Custom-Targets ueber den migrierten settings-Port (NICHT modules).
+        return CompositeTargetSource(repository())
+
+    # Broadcaster-SINGLETON: EINE langlebige Instanz, die der RunMonitor-Loop
+    # bespielt UND in die die /ws/monitor-Handler subscriben. Beide teilen dieselben
+    # Subscriber -- darum lru_cache (genau eine Instanz pro App), kein per-Request-Bau.
+    @lru_cache(maxsize=1)
+    def monitor_broadcaster() -> WebSocketMonitorBroadcaster:
+        return WebSocketMonitorBroadcaster()
+
+    # RunMonitor pro Lifespan einmal gebaut (haelt den Loop-State _status). Bekommt
+    # den Broadcaster-Singleton -> seine broadcast()-Frames erreichen die WS-Clients.
+    def _build_run_monitor() -> RunMonitor:
+        return RunMonitor(
+            pinger=MonitorPingerAdapter(),
+            rtt_history=rtt_history_repository(),
+            event_repo=monitor_event_repository(),
+            notifier=MonitorNotifierAdapter(),
+            broadcaster=monitor_broadcaster(),
+            target_source=target_source(),
+        )
+
+    # status_provider: die label-angereicherte {tid:{alive,label}}-Map fuer
+    # /api/monitor/status UND den WS-Connect-Frame. Kombiniert RunMonitor.current_status()
+    # (rohe {tid: alive}-Map) mit target_source.load() (label, tid-Fallback). Diese
+    # Komposition kennt nur der Composition Root -- darum als Callable gereicht. Greift
+    # auf den laufenden RunMonitor (app.state) zu; vor dem Start (kein bootstrap) ->
+    # leere Map (kein Loop -> nichts gemessen), niemals ein Fehler.
+    def _monitor_status() -> dict[str, dict[str, Any]]:
+        run_monitor_uc = getattr(app.state, "run_monitor", None)
+        raw = run_monitor_uc.current_status() if run_monitor_uc is not None else {}
+        targets = target_source().load()
+        labels = {t.id: t.label for t in targets}
+        return {tid: {"alive": alive, "label": labels.get(tid, tid)} for tid, alive in raw.items()}
+
+    # ManageSchedules: der ScanTriggerCallback (_scheduled_scan) ist HIER gebunden
+    # (Weg-3-Umbau, M.9) -- EINE Quelle fuer REST-add UND lifespan-Registrierung.
+    app.include_router(monitoring_router)
+    app.dependency_overrides[provide_monitor_status] = lambda: _monitor_status
+    app.dependency_overrides[provide_get_monitor_events] = lambda: GetMonitorEvents(
+        monitor_event_repository()
+    )
+    app.dependency_overrides[provide_get_rtt_history] = lambda: GetRttHistory(
+        rtt_history_repository()
+    )
+    app.dependency_overrides[provide_get_all_sla_stats] = lambda: GetAllSlaStats(
+        sla_sample_repository()
+    )
+    app.dependency_overrides[provide_get_sla_stats] = lambda: GetSlaStats(sla_sample_repository())
+    app.dependency_overrides[provide_get_schedules] = lambda: GetSchedules(schedule_repository())
+    app.dependency_overrides[provide_manage_schedules] = lambda: ManageSchedules(
+        schedule_repository(), job_scheduler(), _scheduled_scan
+    )
+    app.dependency_overrides[provide_update_schedule] = lambda: UpdateSchedule(
+        schedule_repository()
+    )
+
+    app.add_api_websocket_route(
+        "/ws/monitor", make_ws_monitor(monitor_broadcaster(), _monitor_status)
+    )
 
     @app.exception_handler(SecretStoreUnavailableError)
     async def _on_secret_store_unavailable(

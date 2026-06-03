@@ -8,9 +8,11 @@ nur ``pinger`` und ``notifier`` nutzen ``modules`` (``_ping_burst`` /
 ``sla_samples``) kommen bewusst OHNE ``modules`` aus (eigenes Schema), und Settings
 liest ``target_source`` ueber den migrierten ``ports/settings``-Port. Auch die M.6-
 Adapter (``schedule_repository`` SQLite, ``job_scheduler`` APScheduler-direkt) und
-der M.7-Lese-Adapter ``sla_samples`` (SQLite) sind ``modules``-frei.
+der M.7-Lese-Adapter ``sla_samples`` (SQLite) sind ``modules``-frei. Der M.9-WS-
+Fan-out (``broadcaster``, FastAPI-WebSocket) ist ebenfalls ``modules``-frei.
 """
 
+from infrastructure.monitoring.broadcaster import WebSocketMonitorBroadcaster
 from infrastructure.monitoring.job_scheduler import ApschedulerJobScheduler
 from infrastructure.monitoring.monitor_events import SqliteMonitorEventRepository
 from infrastructure.monitoring.notifier import MonitorNotifierAdapter
@@ -29,4 +31,5 @@ __all__ = [
     "SqliteRttHistoryRepository",
     "SqliteScheduleRepository",
     "SqliteSlaSampleRepository",
+    "WebSocketMonitorBroadcaster",
 ]
