@@ -35,6 +35,8 @@ from api.devices import (
     provide_update_device_meta,
 )
 from api.devices import router as devices_router
+from api.metrics import provide_export_metrics
+from api.metrics import router as metrics_router
 from api.scanning import (
     provide_get_arp_table,
     provide_get_scan_detail,
@@ -56,6 +58,7 @@ from application.devices import (
     RecordScannedHost,
     UpdateDeviceMeta,
 )
+from application.metrics import ExportMetrics
 from application.scanning import (
     GetArpTable,
     GetScanDetail,
@@ -68,6 +71,7 @@ from infrastructure.clock import SystemClock
 from infrastructure.config import APP_NAME, APP_VERSION, AppConfig
 from infrastructure.device_repository import SqliteDeviceRepository
 from infrastructure.logging import configure_logging
+from infrastructure.metrics import SqliteMetricsReader
 from infrastructure.scanning.arp_table import ArpTableAdapter
 from infrastructure.scanning.fritz_hosts import FritzAuthError, FritzHostsAdapter
 from infrastructure.scanning.host_discovery import HostDiscoveryAdapter
@@ -442,6 +446,21 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.add_api_websocket_route(
         "/ws/scan", make_ws_scan(_build_run_network_scan, _build_record_scanned_host)
     )
+
+    # ── metrics-Querschnitt (M.8) ────────────────────────────────────────────
+    # Der MetricsReader liest dieselbe cernis.db (devices/rtt_history/sla_samples/
+    # scan_history) wie die anderen Repos -- zustandslos (haelt nur den db_path,
+    # aggregiert pro snapshot()-Aufruf frisch). Darum EINMAL gebaut und geteilt
+    # (lru_cache, Muster wie scan_history_repository); der ExportMetrics-Use-Case
+    # wird pro Request frisch darum gewickelt (guenstig, haelt nur den Reader).
+    @lru_cache(maxsize=1)
+    def metrics_reader() -> SqliteMetricsReader:
+        from modules.db_path import get_db_path
+
+        return SqliteMetricsReader(get_db_path())
+
+    app.include_router(metrics_router)
+    app.dependency_overrides[provide_export_metrics] = lambda: ExportMetrics(metrics_reader())
 
     @app.exception_handler(SecretStoreUnavailableError)
     async def _on_secret_store_unavailable(

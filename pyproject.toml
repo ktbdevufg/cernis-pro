@@ -184,6 +184,29 @@ type = "forbidden"
 source_modules = ["domain"]
 forbidden_modules = ["pydantic", "fastapi", "structlog"]
 
+# Jede Domaene kennt nur sich selbst -- die domain-Subpakete sind wechselseitig
+# unabhaengig. Dieses Prinzip traegt die ganze Migration (jede Fremddomaenen-Naht
+# laeuft ueber die Verdrahtung in app.py, nie ueber einen domain-internen Quer-
+# import: devices-Projektion S.7d, scheduler-Callback M.6, der Broadcaster nimmt
+# Domaenenobjekte statt fremde Typen). Bisher hielten es die Domaenen FAKTISCH ein,
+# ohne Gate. Mit ``domain/metrics`` (M.8) wird die Versuchung erstmals real -- ein
+# Aggregat-Querschnitt, dessen "fauler" Edit ``from domain.monitoring import
+# PingSample`` waere. Darum jetzt strukturell statt punktuell erzwungen: ein
+# independence-Contract ueber ALLE Subpakete, nicht nur metrics (das Prinzip ist
+# universell, das Gate soll es auch sein). ``devices``/``settings`` sind Einzel-
+# module, ``scanning``/``monitoring``/``metrics`` Pakete -- ``independence`` behandelt
+# beide gleich (kein Import zwischen je zwei der genannten Module/Pakete).
+[[tool.importlinter.contracts]]
+name = "domain-Subpakete sind wechselseitig unabhaengig"
+type = "independence"
+modules = [
+    "domain.devices",
+    "domain.scanning",
+    "domain.monitoring",
+    "domain.metrics",
+    "domain.settings",
+]
+
 # Die neuen Ringe duerfen den Altcode (modules/) NIE importieren. Der Legacy-Bezug
 # bleibt strikt auf app.py beschraenkt (Composition Root, nicht analysiert) -- z. B.
 # die Uebergangs-Kruecke des Bootstrap-Inits (P2.1b). So kann der Altcode nicht in
