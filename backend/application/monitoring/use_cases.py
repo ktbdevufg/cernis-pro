@@ -51,6 +51,7 @@ nicht versehentlich abweichend.
 """
 
 import asyncio
+import time
 from typing import Any
 
 import structlog
@@ -60,6 +61,7 @@ from domain.monitoring import (
     MonitorTarget,
     ScheduleParseError,
     classify_transition,
+    compute_sla_stats,
     should_notify,
 )
 from ports.monitoring import (
@@ -72,7 +74,11 @@ from ports.monitoring import (
     ScanJobScheduler,
     ScanTriggerCallback,
     ScheduleRepository,
+    SlaSampleRepository,
 )
+
+# Sekunden pro Tag -- fuer die ``days`` -> ``since``-Umrechnung der SLA-Use-Cases.
+_SECONDS_PER_DAY = 86400
 
 _logger = structlog.get_logger(__name__)
 
@@ -266,3 +272,50 @@ class UpdateSchedule:
 
     def __call__(self, schedule_id: int, enabled: bool | None, name: str | None) -> None:
         self._repository.update(schedule_id, enabled, name)
+
+
+# ── SLA-Lese-Use-Cases (M.7) ────────────────────────────────────────────────
+# Pass-Through-Use-Cases (Muster GetScanHistory/GetSchedules): laden die Sample-
+# Zeilen ueber den Port und reichen sie in die reine Domaenen-Rechnung (M.2).
+# NUR Lesen -- der Schreibpfad ist ein eigener Schritt (M.7b), s. ports/monitoring.
+# Die ``days`` -> ``since``-Umrechnung passiert HIER (now - days*86400), damit das
+# Repo zeitlogik-frei bleibt -- ``time.time()`` direkt wie im Altcode (modules/sla),
+# kein eigener Clock-Port fuer diesen schmalen Schritt.
+
+
+class GetSlaStats:
+    """SLA-Gesamtstatistik EINES Targets ueber ``days`` Tage (Pass-Through, nur Repo).
+
+    Laedt die Sample-Zeilen (``repo.samples_for``) und reicht sie in die reine
+    ``compute_sla_stats`` (M.2). WICHTIG: Die Domaene setzt KEIN ``target_id`` ins
+    Ergebnis-dict (sie kennt das DB-Schluesselfeld nicht) -- dieser Use-Case ergaenzt
+    es, sonst braeche der ``/api/sla/{id}``-Response-Vertrag (der Altcode-
+    ``get_sla_stats`` liefert ``target_id`` mit). Leere Samples -> die Domaenen-Null-
+    Stats (``uptime_pct=None``), ebenfalls mit ``target_id`` angereichert.
+    """
+
+    def __init__(self, repository: SlaSampleRepository) -> None:
+        self._repository = repository
+
+    def __call__(self, target_id: str, days: int = 30) -> dict[str, Any]:
+        since = time.time() - days * _SECONDS_PER_DAY
+        rows = self._repository.samples_for(target_id, since)
+        stats = compute_sla_stats(rows, days)
+        # target_id ergaenzen (Domaene setzt es bewusst nicht) -- Vertrag /api/sla/{id}.
+        return {"target_id": target_id, **stats}
+
+
+class GetAllSlaStats:
+    """SLA-Statistik ALLER getrackten Targets (Pass-Through, orchestriert GetSlaStats).
+
+    Reproduziert den Altcode-``get_all_sla_stats``: ``repo.target_ids()`` -> je id eine
+    ``GetSlaStats``-Berechnung. Keine Targets mit Samples -> ``[]`` (real der
+    Dauerzustand, da ``sla_samples`` nie geschrieben wird -- s. ports/monitoring).
+    """
+
+    def __init__(self, repository: SlaSampleRepository) -> None:
+        self._repository = repository
+        self._get_one = GetSlaStats(repository)
+
+    def __call__(self, days: int = 30) -> list[dict[str, Any]]:
+        return [self._get_one(target_id, days) for target_id in self._repository.target_ids()]

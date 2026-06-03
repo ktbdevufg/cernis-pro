@@ -25,6 +25,7 @@ from domain.monitoring import (
     MonitorEventType,
     MonitorTarget,
     PingSample,
+    SlaSample,
 )
 from ports.monitoring import (
     MonitorBroadcasterPort,
@@ -36,6 +37,7 @@ from ports.monitoring import (
     ScanJobScheduler,
     ScanTriggerCallback,
     ScheduleRepository,
+    SlaSampleRepository,
 )
 
 # ── Fakes: minimale, vertragstreue Implementierungen ────────────────────────
@@ -152,6 +154,18 @@ class _FakeJobScheduler:
         self.registered = [s for s in self.registered if s != schedule_id]
 
 
+class _FakeSlaRepo:
+    def __init__(self, samples: dict[str, list[SlaSample]] | None = None) -> None:
+        # target_id -> Liste von (alive, rtt_ms, ts)-Zeilen.
+        self.samples: dict[str, list[SlaSample]] = samples or {}
+
+    def samples_for(self, target_id: str, since: float) -> list[SlaSample]:
+        return [s for s in self.samples.get(target_id, []) if s[2] > since]
+
+    def target_ids(self) -> list[str]:
+        return list(self.samples.keys())
+
+
 # ── Statische Konformitaet: mypy prueft die Zuweisung an den Port-Typ ───────
 
 
@@ -163,6 +177,7 @@ def _assert_events(_: MonitorEventRepository) -> None: ...
 def _assert_target_source(_: MonitorTargetSource) -> None: ...
 def _assert_schedule_repo(_: ScheduleRepository) -> None: ...
 def _assert_job_scheduler(_: ScanJobScheduler) -> None: ...
+def _assert_sla_repo(_: SlaSampleRepository) -> None: ...
 
 
 def test_fakes_satisfy_ports_statically() -> None:
@@ -175,6 +190,7 @@ def test_fakes_satisfy_ports_statically() -> None:
     _assert_target_source(_FakeTargetSource())
     _assert_schedule_repo(_FakeScheduleRepo())
     _assert_job_scheduler(_FakeJobScheduler())
+    _assert_sla_repo(_FakeSlaRepo())
 
 
 # ── Dynamischer Smoke: Methoden aufrufbar, Domaenentypen kommen heraus ──────
@@ -265,3 +281,15 @@ def test_job_scheduler_lifecycle_and_register() -> None:
     sched.stop()
     # Strukturnachweis: die Methoden sind aufrufbar mit den Port-Signaturen.
     assert isinstance(sched, _FakeJobScheduler)
+
+
+def test_sla_repo_samples_for_and_target_ids() -> None:
+    empty: SlaSampleRepository = _FakeSlaRepo()
+    assert empty.samples_for("wlan", 0.0) == []  # Leer-Zustand, nicht None
+    assert empty.target_ids() == []
+
+    repo: SlaSampleRepository = _FakeSlaRepo({"wlan": [(1, 3.0, 100.0), (0, -1.0, 200.0)]})
+    rows = repo.samples_for("wlan", 0.0)
+    assert rows == [(1, 3.0, 100.0), (0, -1.0, 200.0)]  # (alive, rtt_ms, ts)
+    assert repo.samples_for("wlan", 150.0) == [(0, -1.0, 200.0)]  # since filtert
+    assert repo.target_ids() == ["wlan"]

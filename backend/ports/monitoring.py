@@ -9,9 +9,10 @@ Sechs Vertraege, gruppiert nach Loop-Belang:
   (monitor_events).
 * **Konfiguration** -- ``MonitorTargetSource`` (welche Targets ueberwachen?).
 
-SCOPE (M.3): NUR die Loop-Ports. Die scheduler-/sla-/metrics-Vertraege kommen mit
-ihrer Phase (M.6/M.7/M.8) -- ein Port ohne seinen Adapter+Use-Case waere ein toter
-Vertrag mit Signatur, die sich erst beim Adapter-Bau zeigt. Jeder GEZOGENE Port ist
+SCOPE (M.3): die Loop-Ports; ``ScheduleRepository``/``ScanJobScheduler`` kamen mit
+M.6, ``SlaSampleRepository`` kommt mit M.7. Die metrics-Vertraege folgen mit M.8 --
+ein Port ohne seinen Adapter+Use-Case waere ein toter Vertrag mit Signatur, die sich
+erst beim Adapter-Bau zeigt. Jeder GEZOGENE Port ist
 dagegen als vollstaendige kohaerente Einheit definiert (Repos: save UND recent),
 nicht nach Nutzungsphase zerschnitten -- Muster wie ``ScanHistoryRepository`` /
 ``DeviceRepository``.
@@ -39,6 +40,7 @@ from domain.monitoring import (
     MonitorEventType,
     MonitorTarget,
     PingSample,
+    SlaSample,
 )
 
 # Der Callback, den der ScanJobScheduler bei Faelligkeit eines Schedules ruft.
@@ -289,5 +291,54 @@ class ScanJobScheduler(Protocol):
     def unregister(self, schedule_id: int) -> None:
         """Entfernt den Job einer Schedule-id. Idempotent -- ein nie registrierter
         (oder schon entfernter) Job ist KEIN Fehler (best-effort + Log im Adapter).
+        """
+        ...
+
+
+# ── SLA (M.7) ───────────────────────────────────────────────────────────────
+# NUR die LESE-Seite. Der Schreibpfad (``record``) ist BEWUSST ausgelassen: im
+# Altcode wird ``sla_samples`` NIE geschrieben (``modules/sla.record_sample`` wird
+# importiert, aber nirgends gerufen) -- der Loop schreibt rtt_history + monitor_events,
+# nicht sla_samples. ``/api/sla`` liefert darum dauerhaft ``[]``.
+#
+# Diesen toten Strang zu BELEBEN (record(sample) in den Port + der M.5-RunMonitor
+# ruft ihn pro tick) ist ein bewusster eigener Use-Case-Schritt (M.7b), NICHT Teil
+# von M.7. Begruendung der Schnittlinie (Asymmetrie zur rtt_history.alive-Wurzel
+# aus M.4): Der alive-Fix war ADDITIV am bestehenden rtt_repo.save -- der Loop
+# schrieb ohnehin RTT, die Spalte kam an Ort dazu, kein Eingriff in den Use-Case.
+# Ein sla-Schreibpfad dagegen RIESSE den abgeschlossenen, getesteten M.5-Use-Case
+# wieder auf (neuer Port im Konstruktor + neue tick-Zeile + Test-Update) -- fuer
+# einen Effekt, der vor M.9 unsichtbar bleibt (die /api/sla-Endpunkte sind bis dahin
+# Altcode). Latente Befunde nicht mitten in der Migrations-Phase fixen, sondern als
+# eigenen sichtbaren Schritt -- wie der enabled=False->unregister-Fix in M.6.
+
+
+class SlaSampleRepository(Protocol):
+    """REINE Lese-Persistenz der ``sla_samples``-Tabelle (Altcode ``modules/sla.py``).
+
+    Speist die reinen Domaenen-Funktionen ``compute_sla_stats`` / ``build_hourly_chart``
+    (M.2): die Methoden geben die geladenen Sample-Zeilen als ``SlaSample`` heraus
+    (``(alive, rtt_ms, ts)`` -- exakt die Spaltenreihenfolge der Altcode-Query und das
+    Eingabeformat der Domaenen-Funktionen). KEIN ``record`` -- s. Modul-Kommentar (M.7b).
+    """
+
+    def samples_for(self, target_id: str, since: float) -> list[SlaSample]:
+        """Sample-Zeilen eines Targets ab ``since`` (absoluter Timestamp), chronologisch.
+
+        Reproduziert die Altcode-Query ``SELECT alive, rtt_ms, ts FROM sla_samples
+        WHERE target_id=? AND ts>? ORDER BY ts``. ``since`` ist ein ABSOLUTER ts-Wert
+        -- die ``now - days*86400``-Rechnung macht der Use-Case, das Repo bleibt
+        zeitlogik-frei (Muster ``RttHistoryRepository.recent(limit)``). Reihenfolge
+        AUFSTEIGEND (``ORDER BY ts``), wie der Altcode, damit die Hourly-Buckets der
+        Domaene stimmen. Keine Daten / unbekanntes Target -> ``[]``, niemals ``None``.
+        """
+        ...
+
+    def target_ids(self) -> list[str]:
+        """Alle target_ids mit mindestens einem Sample (Altcode ``SELECT DISTINCT``).
+
+        Speist ``GetAllSlaStats`` (M.7): je id eine Gesamtstatistik. Leere Tabelle ->
+        ``[]``, niemals ``None``. Da ``sla_samples`` im Altcode nie geschrieben wird,
+        ist die Liste real dauerhaft leer (-> ``/api/sla == []``); s. Modul-Kommentar.
         """
         ...
