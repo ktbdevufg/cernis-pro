@@ -111,6 +111,14 @@ module = ["main"]
 follow_imports = "skip"
 ignore_missing_imports = true
 
+# APScheduler (feste dep, M.6 job_scheduler-Adapter) liefert KEINE Typ-Stubs / kein
+# py.typed-Marker -> mypy meldet sonst "import-untyped". Nur die fehlenden Stubs
+# ignorieren (NICHT follow_imports=skip -- es ist Third-Party, kein eigener Legacy-
+# Code wie modules/main). Der Adapter castet die Trigger-Argumente selbst (str/int).
+[[tool.mypy.overrides]]
+module = ["apscheduler.*"]
+ignore_missing_imports = true
+
 # ── pytest ────────────────────────────────────────────────────────────────
 # backend/ ist die Import-Wurzel (wie der Altbestand: `import modules.x`).
 [tool.pytest.ini_options]

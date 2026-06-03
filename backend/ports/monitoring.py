@@ -31,7 +31,8 @@ kein ``infrastructure/``-Import -- import-linter-Contract "ports kennen hoechste
 domain". Import von ``domain`` ist erlaubt (nur die Gegenrichtung ist verboten).
 """
 
-from typing import Protocol
+from collections.abc import Awaitable, Callable
+from typing import Any, Protocol
 
 from domain.monitoring import (
     MonitorEvent,
@@ -39,6 +40,13 @@ from domain.monitoring import (
     MonitorTarget,
     PingSample,
 )
+
+# Der Callback, den der ScanJobScheduler bei Faelligkeit eines Schedules ruft.
+# Signatur exakt wie die Altcode-``_register_job``-kwargs (cidr, profile_id,
+# schedule_id) bzw. ``app._scheduled_scan``. Der Job-Engine-Port kennt scanning
+# NICHT -- er ruft nur diesen generischen Callable; die Verdrahtung an den
+# scanning-Use-Case macht der Composition Root (``app.py``, M.9).
+type ScanTriggerCallback = Callable[[str, str, int], Awaitable[None]]
 
 # ── Messung ───────────────────────────────────────────────────────────────
 
@@ -182,5 +190,104 @@ class MonitorTargetSource(Protocol):
         ueber ``/api/monitor/targets`` geaendertes Custom-Target wirkt beim
         naechsten ``load``). Keine Targets konfiguriert -> die fest verdrahteten
         Internet-Targets bleiben; die Liste ist im Normalfall nie leer.
+        """
+        ...
+
+
+# ── Scheduler (M.6) ───────────────────────────────────────────────────────
+# Zwei getrennte Belange des Altcode-``modules/scheduler.py``: die reine
+# ``scan_schedules``-Persistenz (``ScheduleRepository``) und die APScheduler-Job-
+# Engine (``ScanJobScheduler``). Die Altcode-Kopplung (``add_schedule`` ruft
+# ``_register_job``) wird entkoppelt -- die Orchestrierung beider Ports macht der
+# Use-Case ``ManageSchedules`` (M.6 Schritt 2), nicht das Repository.
+
+
+class ScheduleRepository(Protocol):
+    """REINE Persistenz der ``scan_schedules``-Tabelle (keine Job-Engine).
+
+    Gibt rohe ``dict``-Zeilen heraus (alle neun Spalten), KEIN Domaenen-Modell:
+    die CRUD-Response ist ein 1:1-Tabellen-Dump fuer ``/api/schedules`` ohne
+    Domaenen-Sicht/Auswahl -- ein ``dataclass`` waere hier verhaltensloser
+    Persistenz-Ballast (anders als ``ScanSummary``, das eine bewusste Teil-Sicht
+    strukturiert). Die einzige Schedule-Logik (``parse_schedule``) sitzt in
+    ``domain.monitoring``, nicht in einem Zeilen-Modell.
+    """
+
+    def list(self) -> list[dict[str, Any]]:
+        """Alle Schedules als rohe Zeilen-dicts, nach ``id`` sortiert.
+
+        Leere Tabelle -> ``[]``, niemals ``None``. Form wie Altcode
+        ``get_schedules()`` (neun Spalten: id/name/cidr/profile_id/schedule/
+        enabled/last_run/next_run/created_at).
+        """
+        ...
+
+    def add(self, name: str, cidr: str, profile_id: str, schedule: str) -> int:
+        """Legt eine Schedule-Zeile an (``enabled=1``) und gibt die neue ``id`` zurueck.
+
+        REIN Persistenz: registriert KEINEN Job (die Altcode-Kopplung an
+        ``_register_job`` macht in v2 der Use-Case). Der ``schedule``-String wird
+        hier NICHT geparst -- ungeparst gespeichert, das Parsen passiert beim
+        Job-Registrieren (so landet auch ein -- noch -- unparsbarer String in der
+        Liste; siehe ``ManageSchedules``-best-effort, M.6 Schritt 2).
+        """
+        ...
+
+    def update(self, schedule_id: int, enabled: bool | None, name: str | None) -> None:
+        """Aktualisiert ``enabled`` und/oder ``name`` (``None`` = unveraendert lassen).
+
+        REIN Persistenz. BEFUND (charakterisierungstreu bewahrt, NICHT in M.6
+        gefixt): Der Altcode entfernt bei ``enabled=False`` NICHT den laufenden Job
+        -- ein deaktiviertes Schedule laeuft weiter. Das ist ein latenter Bug; der
+        Fix (``enabled=False`` -> ``unregister``) gaebe ``UpdateSchedule`` spaeter
+        den Job-Port dazu, ist aber ein bewusster eigener Schritt, kein M.6-Auftrag.
+        """
+        ...
+
+    def delete(self, schedule_id: int) -> None:
+        """Loescht die Schedule-Zeile. Idempotent (kein Fehler bei fehlender id).
+
+        REIN Persistenz: entfernt KEINEN Job (der Use-Case ruft zusaetzlich
+        ``ScanJobScheduler.unregister``).
+        """
+        ...
+
+
+class ScanJobScheduler(Protocol):
+    """Die APScheduler-Job-Engine -- Lifecycle + Job-Registrierung (kein DB-Zugriff).
+
+    Kapselt ``AsyncIOScheduler`` hinter dem Port. Kennt scanning NICHT: ``register``
+    nimmt einen generischen ``ScanTriggerCallback``, den die Engine bei Faelligkeit
+    ruft -- die Verdrahtung an den scanning-Use-Case macht der Composition Root
+    (``app.py``, M.9). Das Parsen des Schedule-Strings nutzt die reine
+    ``domain.parse_schedule``; ein ``ScheduleParseError`` propagiert an den Aufrufer
+    (``ManageSchedules`` faengt ihn best-effort).
+    """
+
+    def start(self, callback: ScanTriggerCallback) -> None:
+        """Startet die Engine und registriert die bereits gespeicherten, aktiven Schedules.
+
+        Der ``callback`` wird fuer jede Job-Ausloesung verwendet. Idempotenz/
+        Doppelstart-Schutz ist Adapter-Sache.
+        """
+        ...
+
+    def stop(self) -> None:
+        """Faehrt die Engine herunter (laufende Jobs werden nicht abgewartet)."""
+        ...
+
+    def register(self, schedule: dict[str, Any], callback: ScanTriggerCallback) -> None:
+        """Registriert (oder ersetzt) den Job fuer eine Schedule-Zeile.
+
+        ``schedule`` ist eine Repo-Zeile (id/cidr/profile_id/schedule ...). Der
+        Adapter parst ``schedule["schedule"]`` via ``domain.parse_schedule`` und
+        baut den APScheduler-Trigger -- ein ``ScheduleParseError`` propagiert
+        (kein stiller 24h-Fallback). ``replace_existing`` (Altcode-treu).
+        """
+        ...
+
+    def unregister(self, schedule_id: int) -> None:
+        """Entfernt den Job einer Schedule-id. Idempotent -- ein nie registrierter
+        (oder schon entfernter) Job ist KEIN Fehler (best-effort + Log im Adapter).
         """
         ...

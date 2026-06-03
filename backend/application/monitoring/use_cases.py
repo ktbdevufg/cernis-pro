@@ -51,10 +51,14 @@ nicht versehentlich abweichend.
 """
 
 import asyncio
+from typing import Any
+
+import structlog
 
 from domain.monitoring import (
     MonitorEvent,
     MonitorTarget,
+    ScheduleParseError,
     classify_transition,
     should_notify,
 )
@@ -65,7 +69,12 @@ from ports.monitoring import (
     MonitorPingerPort,
     MonitorTargetSource,
     RttHistoryRepository,
+    ScanJobScheduler,
+    ScanTriggerCallback,
+    ScheduleRepository,
 )
+
+_logger = structlog.get_logger(__name__)
 
 # Sekunden zwischen den tick-Durchlaeufen (Altcode ``_interval``, Default 5).
 _DEFAULT_INTERVAL = 5
@@ -150,3 +159,110 @@ class RunMonitor:
         ``label``-Anreicherung aus den Targets -- siehe Modul-Docstring.
         """
         return dict(self._status)
+
+
+# ── Schedule-Use-Cases (M.6) ────────────────────────────────────────────────
+# Die Altcode-CRUD<->Job-Kopplung (add_schedule ruft _register_job) ist entkoppelt:
+# ``ManageSchedules`` haelt BEIDE Ports und orchestriert add/delete an EINER Stelle.
+# ``GetSchedules``/``UpdateSchedule`` sind duenne Pass-Through-Use-Cases (nur das
+# Repo) -- die EINZIGE Schicht, die der api-Ring (M.9) ansprechen darf (api -> nur
+# application). Muster wie GetScanHistory/GetDevices.
+
+
+class ManageSchedules:
+    """Legt Schedules an / loescht sie -- orchestriert Repo (DB) + Job-Engine.
+
+    ``add`` und ``delete`` brauchen beide Ports: die DB-Zeile UND den APScheduler-
+    Job. ``add`` ist BEST-EFFORT gegenueber einem kaputten Schedule-String (s.
+    ``add``-Docstring).
+    """
+
+    def __init__(self, repository: ScheduleRepository, job_scheduler: ScanJobScheduler) -> None:
+        self._repository = repository
+        self._job_scheduler = job_scheduler
+
+    def add(
+        self,
+        name: str,
+        cidr: str,
+        profile_id: str,
+        schedule: str,
+        callback: ScanTriggerCallback,
+    ) -> int:
+        """Legt die Schedule-Zeile an und registriert ihren Job (best-effort).
+
+        BEWUSSTE best-effort-Wahl bei kaputtem ``schedule``-String: Die DB-Zeile
+        wird IMMER angelegt (``repository.add``), dann der Job registriert. Wirft
+        ``ScanJobScheduler.register`` einen ``ScheduleParseError`` (unparsbarer
+        String, S.1-Fix statt stillem 24h-Fallback), wird er GEZIELT gefangen
+        (nicht ``except Exception``/``ValueError`` -- die eigenstaendige Exception
+        aus M.6 S.1 macht den Fang praezise): Warn-Log, Job NICHT registriert,
+        ``add`` kehrt regulaer zurueck.
+
+        Konsequenz (sichtbar, nie still): Der User sieht sein Schedule in der Liste
+        (Zeile da), aber es laeuft nicht (kein Job, Warn-geloggt). Das ist besser als
+        der Altcode (still 24h -- ein voellig anderes Intervall ohne Spur) UND besser
+        als das ``add`` komplett abzulehnen (dann waere die Eingabe spurlos weg). Der
+        "Zeile-da-aber-kein-Job"-Zustand ist sowohl in der Liste sichtbar als auch
+        geloggt.
+        """
+        schedule_id = self._repository.add(name, cidr, profile_id, schedule)
+        row = {
+            "id": schedule_id,
+            "cidr": cidr,
+            "profile_id": profile_id,
+            "schedule": schedule,
+        }
+        try:
+            self._job_scheduler.register(row, callback)
+        except ScheduleParseError as exc:
+            _logger.warning(
+                "schedule_job_not_registered",
+                schedule_id=schedule_id,
+                schedule=schedule,
+                error=str(exc),
+            )
+        return schedule_id
+
+    def delete(self, schedule_id: int) -> None:
+        """Loescht die Schedule-Zeile UND entfernt ihren Job (beide Ports).
+
+        REIHENFOLGE bewusst: erst die Zeile (``repository.delete``), dann der Job
+        (``job_scheduler.unregister``). Bei einem Teilausfall ist ein verwaister Job
+        OHNE Zeile harmloser als eine Zeile OHNE Job: der verwaiste Job wird beim
+        naechsten ``start()`` nicht neu registriert und stirbt spaetestens beim
+        Neustart, waehrend eine Zeile ohne Job in der Liste scheinbar AKTIV aussieht,
+        aber nie feuert (stiller Tot-Eintrag). Die Reihenfolge nicht umdrehen.
+        ``unregister`` ist ohnehin idempotent (+ Log) -- ein nie/schon entfernter Job
+        ist kein Fehler.
+        """
+        self._repository.delete(schedule_id)
+        self._job_scheduler.unregister(schedule_id)
+
+
+class GetSchedules:
+    """Liste aller Schedules als rohe Zeilen-dicts (Pass-Through, nur Repo)."""
+
+    def __init__(self, repository: ScheduleRepository) -> None:
+        self._repository = repository
+
+    def __call__(self) -> list[dict[str, Any]]:
+        return self._repository.list()
+
+
+class UpdateSchedule:
+    """Aktualisiert ``enabled``/``name`` eines Schedules (Pass-Through, nur Repo).
+
+    BEFUND (charakterisierungstreu bewahrt, NICHT in M.6 gefixt): Bei
+    ``enabled=False`` wird der laufende Job NICHT entfernt -- ein deaktiviertes
+    Schedule laeuft weiter (latenter Altcode-Bug). Der Fix (``enabled=False`` ->
+    ``ScanJobScheduler.unregister``) gaebe diesem Use-Case spaeter den Job-Port dazu;
+    das ist ein bewusster eigener Schritt, kein M.6-Auftrag -- darum hier nur das
+    Repo (Pass-Through), kein Job-Port.
+    """
+
+    def __init__(self, repository: ScheduleRepository) -> None:
+        self._repository = repository
+
+    def __call__(self, schedule_id: int, enabled: bool | None, name: str | None) -> None:
+        self._repository.update(schedule_id, enabled, name)

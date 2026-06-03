@@ -6,19 +6,25 @@ nur ``pinger`` und ``notifier`` nutzen ``modules`` (``_ping_burst`` /
 ``_notify_macos``); ``target_source`` nutzt zusaetzlich ``modules.interfaces``
 (unmigriertes Hilfsmodul). Die sqlite-Repos (``rtt_history`` / ``monitor_events``)
 kommen bewusst OHNE ``modules`` aus (eigenes Schema), und Settings liest
-``target_source`` ueber den migrierten ``ports/settings``-Port.
+``target_source`` ueber den migrierten ``ports/settings``-Port. Auch die M.6-
+Adapter (``schedule_repository`` SQLite, ``job_scheduler`` APScheduler-direkt) sind
+``modules``-frei.
 """
 
+from infrastructure.monitoring.job_scheduler import ApschedulerJobScheduler
 from infrastructure.monitoring.monitor_events import SqliteMonitorEventRepository
 from infrastructure.monitoring.notifier import MonitorNotifierAdapter
 from infrastructure.monitoring.pinger import MonitorPingerAdapter
 from infrastructure.monitoring.rtt_history import SqliteRttHistoryRepository
+from infrastructure.monitoring.schedule_repository import SqliteScheduleRepository
 from infrastructure.monitoring.target_source import CompositeTargetSource
 
 __all__ = [
+    "ApschedulerJobScheduler",
     "CompositeTargetSource",
     "MonitorNotifierAdapter",
     "MonitorPingerAdapter",
     "SqliteMonitorEventRepository",
     "SqliteRttHistoryRepository",
+    "SqliteScheduleRepository",
 ]

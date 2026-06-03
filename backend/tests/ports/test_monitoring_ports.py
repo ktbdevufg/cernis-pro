@@ -18,6 +18,7 @@ KEIN ``@runtime_checkable`` an den Ports -> bewusst KEIN ``isinstance``-Check.
 """
 
 import asyncio
+from typing import Any
 
 from domain.monitoring import (
     MonitorEvent,
@@ -32,6 +33,9 @@ from ports.monitoring import (
     MonitorPingerPort,
     MonitorTargetSource,
     RttHistoryRepository,
+    ScanJobScheduler,
+    ScanTriggerCallback,
+    ScheduleRepository,
 )
 
 # ── Fakes: minimale, vertragstreue Implementierungen ────────────────────────
@@ -92,6 +96,62 @@ class _FakeTargetSource:
         return [MonitorTarget(id="wlan", label="WLAN", host="192.168.1.1", interface="")]
 
 
+class _FakeScheduleRepo:
+    def __init__(self) -> None:
+        self.rows: list[dict[str, Any]] = []
+        self._next_id = 1
+
+    def list(self) -> list[dict[str, Any]]:
+        return list(self.rows)
+
+    def add(self, name: str, cidr: str, profile_id: str, schedule: str) -> int:
+        sid = self._next_id
+        self._next_id += 1
+        self.rows.append(
+            {
+                "id": sid,
+                "name": name,
+                "cidr": cidr,
+                "profile_id": profile_id,
+                "schedule": schedule,
+                "enabled": 1,
+                "last_run": None,
+                "next_run": None,
+                "created_at": "2026-06-03 00:00:00",
+            }
+        )
+        return sid
+
+    def update(self, schedule_id: int, enabled: bool | None, name: str | None) -> None:
+        for row in self.rows:
+            if row["id"] == schedule_id:
+                if enabled is not None:
+                    row["enabled"] = int(enabled)
+                if name is not None:
+                    row["name"] = name
+
+    def delete(self, schedule_id: int) -> None:
+        self.rows = [r for r in self.rows if r["id"] != schedule_id]
+
+
+class _FakeJobScheduler:
+    def __init__(self) -> None:
+        self.started = False
+        self.registered: list[int] = []
+
+    def start(self, callback: ScanTriggerCallback) -> None:
+        self.started = True
+
+    def stop(self) -> None:
+        self.started = False
+
+    def register(self, schedule: dict[str, Any], callback: ScanTriggerCallback) -> None:
+        self.registered.append(int(schedule["id"]))
+
+    def unregister(self, schedule_id: int) -> None:
+        self.registered = [s for s in self.registered if s != schedule_id]
+
+
 # ── Statische Konformitaet: mypy prueft die Zuweisung an den Port-Typ ───────
 
 
@@ -101,6 +161,8 @@ def _assert_broadcaster(_: MonitorBroadcasterPort) -> None: ...
 def _assert_rtt(_: RttHistoryRepository) -> None: ...
 def _assert_events(_: MonitorEventRepository) -> None: ...
 def _assert_target_source(_: MonitorTargetSource) -> None: ...
+def _assert_schedule_repo(_: ScheduleRepository) -> None: ...
+def _assert_job_scheduler(_: ScanJobScheduler) -> None: ...
 
 
 def test_fakes_satisfy_ports_statically() -> None:
@@ -111,6 +173,8 @@ def test_fakes_satisfy_ports_statically() -> None:
     _assert_rtt(_FakeRttHistory())
     _assert_events(_FakeEventRepo())
     _assert_target_source(_FakeTargetSource())
+    _assert_schedule_repo(_FakeScheduleRepo())
+    _assert_job_scheduler(_FakeJobScheduler())
 
 
 # ── Dynamischer Smoke: Methoden aufrufbar, Domaenentypen kommen heraus ──────
@@ -171,3 +235,33 @@ def test_target_source_loads_targets() -> None:
     assert len(targets) == 1
     assert isinstance(targets[0], MonitorTarget)
     assert targets[0].id == "wlan"
+
+
+def test_schedule_repo_crud_roundtrip() -> None:
+    repo: ScheduleRepository = _FakeScheduleRepo()
+    sid = repo.add("Nightly", "192.168.1.0/24", "standard", "cron:0 2 * * *")
+    rows = repo.list()
+    assert len(rows) == 1
+    assert rows[0]["id"] == sid
+    assert rows[0]["enabled"] == 1  # Default
+    repo.update(sid, enabled=False, name="Renamed")
+    row = repo.list()[0]
+    assert row["enabled"] == 0
+    assert row["name"] == "Renamed"
+    repo.delete(sid)
+    assert repo.list() == []
+
+
+def test_job_scheduler_lifecycle_and_register() -> None:
+    sched: ScanJobScheduler = _FakeJobScheduler()
+
+    async def _cb(cidr: str, profile_id: str, schedule_id: int) -> None:
+        return None
+
+    sched.start(_cb)
+    sched.register({"id": 7, "cidr": "10.0.0.0/24", "schedule": "interval:1h"}, _cb)
+    sched.register({"id": 8, "cidr": "10.0.0.0/24", "schedule": "interval:2h"}, _cb)
+    sched.unregister(7)
+    sched.stop()
+    # Strukturnachweis: die Methoden sind aufrufbar mit den Port-Signaturen.
+    assert isinstance(sched, _FakeJobScheduler)
