@@ -30,12 +30,17 @@ from typing import Any
 import structlog
 
 from domain.alerting import SmtpConfig
-from modules.crypto import decrypt
+from domain.settings import Setting
+from modules.crypto import decrypt, encrypt
 from ports.settings import SettingsRepository
 
 _logger = structlog.get_logger(__name__)
 
 _SMTP_CONFIG_KEY = "smtp_config"
+
+# Sentinel, den GET ``/smtp`` als redigiertes Passwort liefert und PUT als "PW
+# unveraendert" interpretiert -- exakt 8x U+2022 BULLET (A.1-Wortlaut, main.py:1075/1081).
+_PASSWORD_SENTINEL = "•" * 8
 
 
 class SettingsSmtpConfigAdapter:
@@ -44,13 +49,16 @@ class SettingsSmtpConfigAdapter:
     def __init__(self, settings: SettingsRepository) -> None:
         self._settings = settings
 
-    def load(self) -> SmtpConfig | None:
+    def _raw_dict(self) -> dict[str, Any] | None:
+        """Gemeinsamer Helfer: das rohe ``smtp_config``-dict oder ``None``."""
         setting = self._settings.get(_SMTP_CONFIG_KEY)
-        if setting is None or not isinstance(setting.value, dict):
-            # Nicht konfiguriert (kein Setting / leeres-oder-falsch-typisiertes dict).
+        if setting is None or not isinstance(setting.value, dict) or not setting.value:
             return None
-        raw: dict[str, Any] = setting.value
-        if not raw:
+        return setting.value
+
+    def load(self) -> SmtpConfig | None:
+        raw = self._raw_dict()
+        if raw is None:
             return None
 
         user = str(raw.get("user", ""))
@@ -63,6 +71,46 @@ class SettingsSmtpConfigAdapter:
             from_addr=str(raw.get("from") or user),
             to=str(raw.get("to", "")),
         )
+
+    def load_raw(self) -> dict[str, Any] | None:
+        """Das ROHE ``smtp_config``-dict (Passwort als CIPHER, NICHT entschluesselt).
+
+        Fuer Anzeige/Redaktion/host-to-Pruefung am api-Rand. Eine flache Kopie, damit
+        der Aufrufer das gespeicherte dict nicht versehentlich mutiert.
+        """
+        raw = self._raw_dict()
+        return dict(raw) if raw is not None else None
+
+    def save(self, config: dict[str, Any]) -> None:
+        """Speichert die SMTP-Config; Sentinel-Logik + ``crypto.encrypt`` aufs Passwort.
+
+        SENTINEL-VERTRAG (v2-HEILUNG des Altcode-Bugs S7): Der Altcode (main.py:1080-1086)
+        uebernahm beim Sentinel den alten CIPHER und schickte ihn dann DOCH durch
+        ``encrypt`` -- ``crypto.encrypt`` ist nicht idempotent (kein ``enc:``-Check), also
+        wurde doppelt verschluesselt und das PW bei jedem PW-erhaltenden Edit korrumpiert.
+        v2 trennt sauber:
+
+            password == SENTINEL  -> alten Cipher UNVERAENDERT uebernehmen (KEIN encrypt)
+            password truthy        -> genau 1x encrypt(neues_klartext_pw)
+            sonst                   -> ""
+
+        Verhalten = was der Altcode MEINTE; der Doppel-encrypt entfaellt. Dokumentiert
+        als Finding S7 in docs/pre_release_202605.md.
+        """
+        payload = dict(config)  # nicht das Aufrufer-dict mutieren
+        new_password = payload.get("password", "")
+
+        if new_password == _PASSWORD_SENTINEL:
+            # PW unveraendert: alten Cipher 1:1 uebernehmen, NICHT re-encrypten.
+            existing = self._raw_dict() or {}
+            payload["password"] = existing.get("password", "")
+        elif new_password:
+            # Echtes neues Klartext-PW -> genau 1x verschluesseln.
+            payload["password"] = str(encrypt(str(new_password)))
+        else:
+            payload["password"] = ""
+
+        self._settings.set(Setting(key=_SMTP_CONFIG_KEY, value=payload))
 
     @staticmethod
     def _coerce_port(value: Any) -> int:

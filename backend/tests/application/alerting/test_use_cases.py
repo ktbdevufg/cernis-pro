@@ -15,7 +15,9 @@ from application.alerting import (
     DeleteAlertRule,
     GetAlertHistory,
     GetAlertRules,
+    GetSmtpConfigRaw,
     RaiseAlert,
+    SaveSmtpConfig,
     SendTestAlert,
     UpdateAlertRule,
 )
@@ -131,13 +133,21 @@ class FakeNotifier:
 class FakeSmtpConfig:
     """In-Memory-SmtpConfigPort."""
 
-    def __init__(self, config: SmtpConfig | None) -> None:
+    def __init__(self, config: SmtpConfig | None, raw: dict[str, object] | None = None) -> None:
         self._config = config
+        self._raw = raw
         self.load_count = 0
+        self.saved: list[dict[str, object]] = []
 
     def load(self) -> SmtpConfig | None:
         self.load_count += 1
         return self._config
+
+    def load_raw(self) -> dict[str, object] | None:
+        return self._raw
+
+    def save(self, config: dict[str, object]) -> None:
+        self.saved.append(config)
 
 
 # ── CRUD / History Pass-Throughs ──────────────────────────────
@@ -230,6 +240,26 @@ def test_send_test_alert_propagates_failure_result() -> None:
     result = asyncio.run(uc())
     assert result is not None
     assert result.success is False
+
+
+# ── SMTP-Config GET/PUT Pass-Throughs ─────────────────────────
+
+
+def test_get_smtp_config_raw_passes_through() -> None:
+    raw: dict[str, object] = {"host": "h", "to": "t", "password": "enc:secret"}
+    uc = GetSmtpConfigRaw(FakeSmtpConfig(None, raw=raw))
+    assert uc() == raw
+
+
+def test_get_smtp_config_raw_none() -> None:
+    assert GetSmtpConfigRaw(FakeSmtpConfig(None, raw=None))() is None
+
+
+def test_save_smtp_config_passes_through() -> None:
+    smtp = FakeSmtpConfig(None)
+    payload = {"host": "h", "to": "t", "password": "neuesPW"}
+    SaveSmtpConfig(smtp)(payload)
+    assert smtp.saved == [payload]
 
 
 # ── RaiseAlert: Orchestrierungs-Vertrag ───────────────────────

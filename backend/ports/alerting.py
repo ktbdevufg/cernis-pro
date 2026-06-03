@@ -32,7 +32,7 @@ erlaubt; ``modules/``/``infrastructure/`` sind verboten (import-linter "ports ke
 hoechstens domain").
 """
 
-from typing import Protocol
+from typing import Any, Protocol
 
 from domain.alerting import AlertEvent, AlertRule, EmailResult, SmtpConfig
 
@@ -146,7 +146,13 @@ class AlertNotifierPort(Protocol):
 
 
 class SmtpConfigPort(Protocol):
-    """Laedt die aufgeloeste SMTP-Konfiguration (settings + crypto.decrypt)."""
+    """Laedt/speichert die SMTP-Konfiguration (settings + crypto).
+
+    Drei Methoden, eine kohaerente Einheit fuer die ``smtp_config``-Verantwortung
+    (Muster ``AlertRuleRepository``: ein Port deckt seine Tabelle/sein Setting ganz ab):
+    ``load`` (entschluesselt, fuer den Versand), ``load_raw`` (roh, Cipher -- fuer
+    Anzeige/Redaktion/host-to-Pruefung) und ``save`` (Sentinel-Logik + crypto.encrypt).
+    """
 
     def load(self) -> SmtpConfig | None:
         """Liefert die ``SmtpConfig`` mit entschluesseltem Passwort, oder ``None``.
@@ -156,5 +162,28 @@ class SmtpConfigPort(Protocol):
         ueber den settings-Port, casted ``port`` zu int und entschluesselt das
         ``password``-Feld via ``crypto.decrypt``; der Use-Case sieht weder settings
         noch crypto.
+        """
+        ...
+
+    def load_raw(self) -> dict[str, Any] | None:
+        """Liefert das ROHE ``smtp_config``-dict (Passwort als CIPHER), oder ``None``.
+
+        Fuer Anzeige (GET ``/smtp`` redigiert das Passwort selbst zu ``••••••••``),
+        Redaktion und die ``host``/``to``-Leer-Pruefung (400 am api-Rand). Das Passwort
+        wird hier NICHT entschluesselt -- der Cipher darf den api-Rand erreichen (er wird
+        dort redigiert), der KLARTEXT niemals (dafuer ist ``load`` fuer den Versand da).
+        ``None`` = nicht konfiguriert.
+        """
+        ...
+
+    def save(self, config: dict[str, Any]) -> None:
+        """Speichert die SMTP-Config (Sentinel-Logik + ``crypto.encrypt`` aufs Passwort).
+
+        Nimmt das ROHE Client-dict (Wire-naeher als ein typisiertes Objekt -- die
+        Sentinel-Erkennung ``password == "••••••••"`` und die Verschluesselung sind
+        Adapter-Sache, der Use-Case reicht nur durch). Sentinel-Vertrag (v2-Heilung des
+        Altcode-Bugs S7, s. ``infrastructure/alerting/smtp_config.py``): Sentinel ->
+        alten Cipher UNVERAENDERT uebernehmen (KEIN re-encrypt); neues Klartext-PW ->
+        genau 1x ``encrypt``; leeres PW -> ``""``.
         """
         ...

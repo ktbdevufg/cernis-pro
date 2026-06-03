@@ -31,6 +31,7 @@ passt zur Cooldown-``float``-Rechnung nicht). Der Test injiziert ``now`` determi
 """
 
 import time
+from typing import Any
 
 from domain.alerting import (
     AlertEvent,
@@ -153,6 +154,34 @@ class SendTestAlert:
             return None
         body = "Test alert from CERNIS PRO\nThis confirms your SMTP configuration is working."
         return await self._notifier.email(self._SUBJECT, body, config)
+
+
+# ── SMTP-Config GET/PUT (A.4b-Naht) ───────────────────────────
+
+
+class GetSmtpConfigRaw:
+    """Liefert das ROHE smtp_config-dict (Passwort als Cipher), oder ``None``.
+
+    Pass-Through ueber ``SmtpConfigPort.load_raw``. Der api-Rand (A.6) redigiert das
+    Passwort selbst zu ``••••••••`` -- der Cipher darf den Rand erreichen, der Klartext
+    nie (dafuer ist ``SmtpConfigPort.load`` fuer den Versand da).
+    """
+
+    def __init__(self, smtp_config: SmtpConfigPort) -> None:
+        self._smtp_config = smtp_config
+
+    def __call__(self) -> dict[str, Any] | None:
+        return self._smtp_config.load_raw()
+
+
+class SaveSmtpConfig:
+    """Speichert die SMTP-Config (Pass-Through; Sentinel-/encrypt-Logik im Adapter)."""
+
+    def __init__(self, smtp_config: SmtpConfigPort) -> None:
+        self._smtp_config = smtp_config
+
+    def __call__(self, config: dict[str, Any]) -> None:
+        self._smtp_config.save(config)
 
 
 # ── RaiseAlert (ersetzt fire_alert, AS-IS; KEIN Trigger in A.5) ──

@@ -162,3 +162,92 @@ def test_decrypt_empty_despite_cipher_logs_warning(monkeypatch: pytest.MonkeyPat
     assert cfg.password == ""
     # ... aber sichtbar geloggt (v2-Sichtbarmachung des S3-Strangs).
     assert "smtp_password_decrypt_empty" in warnings
+
+
+# ── load_raw: roh, Cipher NICHT entschluesselt ────────────────
+
+
+def test_load_raw_none_when_absent() -> None:
+    assert _adapter({}).load_raw() is None
+
+
+def test_load_raw_none_when_empty() -> None:
+    assert _adapter({"smtp_config": {}}).load_raw() is None
+
+
+def test_load_raw_returns_cipher_not_decrypted() -> None:
+    # load_raw gibt das ROHE dict -- password als CIPHER, NICHT entschluesselt.
+    raw = _adapter({"smtp_config": {"host": "h", "to": "t", "password": "enc:secret"}}).load_raw()
+    assert raw is not None
+    assert raw["password"] == "enc:secret"  # Cipher, NICHT "secret"
+    assert raw["host"] == "h"
+
+
+def test_load_raw_is_a_copy() -> None:
+    # Mutation am Rueckgabewert darf das gespeicherte Setting nicht veraendern.
+    adapter = _adapter({"smtp_config": {"host": "h", "to": "t"}})
+    raw = adapter.load_raw()
+    assert raw is not None
+    raw["host"] = "mutated"
+    raw2 = adapter.load_raw()
+    assert raw2 is not None
+    assert raw2["host"] == "h"  # unveraendert
+
+
+# ── save: Sentinel-Vertrag (mock-encrypt) ─────────────────────
+
+
+@pytest.fixture
+def _fake_encrypt(monkeypatch: pytest.MonkeyPatch) -> None:
+    # encrypt am Adapter-Modul: "XYZ" -> "enc:XYZ" (Gegenstueck zur decrypt-Mock-Fixture).
+    monkeypatch.setattr(smtp_config_mod, "encrypt", lambda plaintext: f"enc:{plaintext}")
+
+
+def test_save_new_password_is_encrypted_once(_fake_encrypt: None) -> None:
+    repo = _FakeSettingsRepository()
+    SettingsSmtpConfigAdapter(repo).save({"host": "h", "to": "t", "password": "neuesPW"})
+    stored = repo.get("smtp_config")
+    assert stored is not None
+    assert isinstance(stored.value, dict)
+    # genau 1x encrypt -> "enc:neuesPW" (KEIN Doppel-encrypt).
+    assert stored.value["password"] == "enc:neuesPW"
+
+
+def test_save_sentinel_keeps_old_cipher_without_reencrypt(_fake_encrypt: None) -> None:
+    # SENTINEL-VERTRAG (Heilung S7): alter Cipher bleibt UNVERAENDERT, KEIN re-encrypt.
+    repo = _FakeSettingsRepository({"smtp_config": {"host": "alt", "password": "enc:geheim"}})
+    SettingsSmtpConfigAdapter(repo).save({"host": "neu", "to": "t", "password": "•" * 8})
+    stored = repo.get("smtp_config")
+    assert stored is not None
+    assert isinstance(stored.value, dict)
+    # Alter Cipher 1:1 uebernommen -- NICHT "enc:enc:geheim" (das waere der Altcode-Bug).
+    assert stored.value["password"] == "enc:geheim"
+    # andere Felder aktualisiert.
+    assert stored.value["host"] == "neu"
+
+
+def test_save_empty_password_stays_empty(_fake_encrypt: None) -> None:
+    repo = _FakeSettingsRepository()
+    SettingsSmtpConfigAdapter(repo).save({"host": "h", "to": "t", "password": ""})
+    stored = repo.get("smtp_config")
+    assert stored is not None
+    assert isinstance(stored.value, dict)
+    assert stored.value["password"] == ""
+
+
+def test_save_sentinel_with_no_existing_cipher_yields_empty(_fake_encrypt: None) -> None:
+    # Sentinel, aber kein altes Setting -> alter Cipher ist "" (kein Crash).
+    repo = _FakeSettingsRepository()
+    SettingsSmtpConfigAdapter(repo).save({"host": "h", "to": "t", "password": "•" * 8})
+    stored = repo.get("smtp_config")
+    assert stored is not None
+    assert isinstance(stored.value, dict)
+    assert stored.value["password"] == ""
+
+
+def test_save_does_not_mutate_caller_dict(_fake_encrypt: None) -> None:
+    repo = _FakeSettingsRepository()
+    payload = {"host": "h", "to": "t", "password": "neuesPW"}
+    SettingsSmtpConfigAdapter(repo).save(payload)
+    # Aufrufer-dict bleibt unangetastet (kein In-Place-encrypt).
+    assert payload["password"] == "neuesPW"

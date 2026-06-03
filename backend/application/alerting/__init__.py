@@ -5,7 +5,9 @@ from application.alerting.use_cases import (
     DeleteAlertRule,
     GetAlertHistory,
     GetAlertRules,
+    GetSmtpConfigRaw,
     RaiseAlert,
+    SaveSmtpConfig,
     SendTestAlert,
     UpdateAlertRule,
 )
@@ -15,7 +17,9 @@ __all__ = [
     "DeleteAlertRule",
     "GetAlertHistory",
     "GetAlertRules",
+    "GetSmtpConfigRaw",
     "RaiseAlert",
+    "SaveSmtpConfig",
     "SendTestAlert",
     "UpdateAlertRule",
 ]
