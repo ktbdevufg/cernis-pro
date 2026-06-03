@@ -212,17 +212,18 @@ modules = [
 # die Uebergangs-Kruecke des Bootstrap-Inits (P2.1b). So kann der Altcode nicht in
 # die sauberen Ringe lecken; jeder Versuch bricht CI.
 #
-# ZWEI eng eingezaeunte Ausnahmen (ADR 0007, in M.4 um monitoring erweitert): die
-# scanning- UND monitoring-Infrastructure-Adapter DUERFEN modules/ importieren --
-# eine Reimplementierung der systemnahen Schicht (scanning: Ping/Portscan/mDNS/SSDP/
-# IPv6/Fritz; monitoring: Ping-Burst + osascript-Notification) waere Wegwerf-Arbeit
-# vor dem in Vision 5.2 vorgesehenen moeglichen Sprachwechsel. Die Ausnahme ist
-# SUBTRAKTIV ueber ignore_imports umgesetzt, NICHT als zweiter (additiver) Contract:
-# ein forbidden-Contract kann nur verbieten, nie erlauben -- die Lockerung MUSS daher
-# am bestehenden Contract haengen. source_modules/forbidden_modules bleiben
-# unveraendert; ignore_imports schneidet ausschliesslich Importe AUS den Paketen
-# `infrastructure.scanning` und `infrastructure.monitoring` (beliebige Tiefe via
-# `**`) in den Altcode heraus.
+# DREI eng eingezaeunte Ausnahmen (ADR 0007, in M.4 um monitoring, in A.4 um alerting
+# erweitert): die scanning-, monitoring- UND alerting-Infrastructure-Adapter DUERFEN
+# modules/ importieren -- eine Reimplementierung der systemnahen Schicht (scanning:
+# Ping/Portscan/mDNS/SSDP/IPv6/Fritz; monitoring: Ping-Burst + osascript-Notification;
+# alerting: crypto.decrypt + osascript + SMTP-Versand) waere Wegwerf-Arbeit vor dem in
+# Vision 5.2 vorgesehenen moeglichen Sprachwechsel. Die Ausnahme ist SUBTRAKTIV ueber
+# ignore_imports umgesetzt, NICHT als zweiter (additiver) Contract: ein
+# forbidden-Contract kann nur verbieten, nie erlauben -- die Lockerung MUSS daher am
+# bestehenden Contract haengen. source_modules/forbidden_modules bleiben unveraendert;
+# ignore_imports schneidet ausschliesslich Importe AUS den Paketen
+# `infrastructure.scanning`, `infrastructure.monitoring` und `infrastructure.alerting`
+# (beliebige Tiefe via `**`) in den Altcode heraus.
 #
 # SCOPED innerhalb monitoring (ADR 0007): nur Pinger/Notifier nutzen modules
 # (_ping_burst/_notify_macos); die sqlite-Repos und der TargetSource-Adapter kommen
@@ -230,6 +231,13 @@ modules = [
 # TargetSource zieht Settings ueber den migrierten ports/settings-Port). Der
 # `**`-Scope deckt das Paket maschinell ab; der minimal gehaltene reale
 # modules-Footprint ist eine bewusste Disziplin, im ADR festgehalten.
+#
+# SCOPED innerhalb alerting (ADR 0007, A.4): nur der Notifier- (osascript +
+# notify_email_with_log) und der SmtpConfig-Adapter (crypto.decrypt) nutzen modules;
+# das sqlite-Repo (alert_rules/alert_history) kommt BEWUSST ohne modules aus (eigenes
+# Schema, deckungsgleich mit dem Altcode-init -> CREATE IF NOT EXISTS ist No-Op gegen
+# die bestehende Tabelle). Der SmtpConfig-Adapter zieht das smtp_config-Setting ueber
+# den migrierten ports/settings-Port; nur crypto.decrypt bleibt modules-Bezug.
 #
 # WICHTIG zur Pattern-Form (in S.4a empirisch korrigiert): Die Zielseite ist
 # `modules` OHNE Suffix -- der forbidden-Contract loest die Kanten gegen das
@@ -253,4 +261,5 @@ forbidden_modules = ["modules"]
 ignore_imports = [
     "infrastructure.scanning.** -> modules",
     "infrastructure.monitoring.** -> modules",
+    "infrastructure.alerting.** -> modules",
 ]

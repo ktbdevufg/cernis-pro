@@ -11,6 +11,8 @@ from domain.alerting.models import (
     RULE_TYPE_PORT_CHANGE,
     AlertEvent,
     AlertRule,
+    EmailResult,
+    SmtpConfig,
 )
 
 __all__ = [
@@ -21,5 +23,7 @@ __all__ = [
     "RULE_TYPE_PORT_CHANGE",
     "AlertEvent",
     "AlertRule",
+    "EmailResult",
+    "SmtpConfig",
     "select_rules_to_fire",
 ]

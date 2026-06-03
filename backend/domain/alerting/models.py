@@ -79,3 +79,41 @@ class AlertEvent:
     target: str
     message: str
     timestamp: float
+
+
+@dataclass(frozen=True)
+class SmtpConfig:
+    """Aufgeloeste SMTP-Konfiguration fuer den E-Mail-Versand (reines Wertobjekt).
+
+    Spiegelt die Keys, die der Altcode ``notify_email_with_log`` aus dem
+    ``smtp_config``-dict liest (in A.1/B verifiziert): ``host``, ``port`` (als int),
+    ``user``, ``password`` (KLARTEXT -- der A.4-Adapter entschluesselt beim Laden),
+    ``from_addr``, ``to``. ``from_addr`` faellt im Altcode auf ``user`` zurueck
+    (``smtp_config.get("from", user)``); diesen Default setzt der Adapter beim Mapping.
+
+    Reines stdlib-Wertobjekt, KEIN Import aus anderen Domaenen, kein I/O: das Laden
+    (settings + crypto.decrypt) lebt im A.4-Adapter (``SmtpConfigPort``), nicht hier.
+    """
+
+    host: str
+    port: int
+    user: str
+    password: str
+    from_addr: str
+    to: str
+
+
+@dataclass(frozen=True)
+class EmailResult:
+    """Ergebnis eines E-Mail-Versuchs (Datentraeger, aus Altcode-Rueckgabe-dict).
+
+    ``notify_email_with_log`` gibt IMMER ``{"success": bool, "log": [str]}`` zurueck
+    (wirft nie -- jeder Fehler landet im Log). ``success`` ist exakt dieser
+    Altcode-Wert; der A.6-``/test``-Endpunkt leitet daraus die Statuscodes ab
+    (200 bei ``success``, 503 sonst -- in A.1 fixiert), ``log`` wird an den Client
+    durchgereicht. Typisierter Domaenen-Wert statt rohem dict, damit Use-Case/api
+    die dict-Form nicht kennen muessen.
+    """
+
+    success: bool
+    log: list[str]
