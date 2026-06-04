@@ -54,11 +54,12 @@ nicht versehentlich abweichend.
 
 import asyncio
 import time
-from typing import Any
+from typing import Any, cast
 
 import structlog
 
 from domain.monitoring import (
+    CUSTOM_TARGETS_KEY,
     MonitorEvent,
     MonitorTarget,
     PingSample,
@@ -67,6 +68,7 @@ from domain.monitoring import (
     compute_sla_stats,
     should_notify,
 )
+from domain.settings import Setting, SettingValue
 from ports.monitoring import (
     AlertRaiserPort,
     MonitorBroadcasterPort,
@@ -80,6 +82,7 @@ from ports.monitoring import (
     ScheduleRepository,
     SlaSampleRepository,
 )
+from ports.settings import SettingsRepository
 
 # Sekunden pro Tag -- fuer die ``days`` -> ``since``-Umrechnung der SLA-Use-Cases.
 _SECONDS_PER_DAY = 86400
@@ -393,3 +396,90 @@ class GetAllSlaStats:
 
     def __call__(self, days: int = 30) -> list[dict[str, Any]]:
         return [self._get_one(target_id, days) for target_id in self._repository.target_ids()]
+
+
+# ── Targets-Schreibpfad (M.9-Nachzuegler) ───────────────────────────────────
+# Der LESE-Pfad (``CompositeTargetSource.load``, infrastructure) komponiert die
+# Targets aus drei Quellen; HIER ist nur die benutzerdefinierte Quelle
+# (``monitor_custom_targets`` in den Settings) SCHREIBBAR. Bewusst KEIN eigener
+# Port und KEINE eigene Tabelle: die Custom-Targets sind ein Settings-Wert
+# (``list[dict]``), also nutzt der Schreibpfad das migrierte ``SettingsRepository``
+# direkt (cross-domain Port-Import -- application darf ``ports`` kennen, der
+# import-linter verbietet nur infrastructure/api). Kein ``configure_monitor`` mehr:
+# der ``RunMonitor`` laedt pro ``tick`` frisch via ``MonitorTargetSource.load()``,
+# also wirkt ein hier geschriebenes Target bei der naechsten Iteration automatisch
+# (Altcode-Live-Reload ohne die ``configure``-Kruecke).
+
+
+def _load_custom_targets(repository: SettingsRepository) -> list[dict[str, Any]]:
+    """Liest die rohe Custom-Targets-Liste aus den Settings (leer, wenn nicht gesetzt).
+
+    Altcode-treu: ``get_setting("monitor_custom_targets", []) or []`` -- ein nicht
+    gesetzter Key ODER ein nicht-Listen-Wert ergibt eine leere Liste (kein Fehler),
+    damit der Schreibpfad immer auf einer wohlgeformten Liste appended/filtert.
+    """
+    setting = repository.get(CUSTOM_TARGETS_KEY)
+    if setting is None or not isinstance(setting.value, list):
+        return []
+    # Defensive Kopie + nur dict-Eintraege (kaputte Fremdeintraege wuerden beim
+    # Zurueckschreiben sonst durchgereicht -- der LESE-Pfad ueberspringt sie ohnehin).
+    return [entry for entry in setting.value if isinstance(entry, dict)]
+
+
+def _save_custom_targets(repository: SettingsRepository, targets: list[dict[str, Any]]) -> None:
+    """Schreibt die Custom-Targets-Liste zurueck (``Setting``-validiert)."""
+    # ``list[dict[str, Any]]`` ist ein gueltiger ``SettingValue`` (JSON-serialisierbar);
+    # der Cast macht die Vertraeglichkeit fuer mypy explizit, ohne Laufzeitwirkung.
+    value: SettingValue = cast(SettingValue, targets)
+    repository.set(Setting(key=CUSTOM_TARGETS_KEY, value=value))
+
+
+class AddMonitorTarget:
+    """Fuegt ein benutzerdefiniertes Monitor-Target hinzu (Altcode POST /api/monitor/targets).
+
+    Liest die aktuelle ``monitor_custom_targets``-Liste, haengt das neue Target mit
+    der Altcode-Feldform (``id``/``label``/``host``/``interface``/``enabled``) an und
+    schreibt zurueck. KEINE ``configure``-Folge -- der Loop laedt frisch (Live-Reload).
+    """
+
+    def __init__(self, repository: SettingsRepository) -> None:
+        self._repository = repository
+
+    def __call__(
+        self,
+        target_id: str,
+        label: str,
+        host: str,
+        interface: str = "",
+        enabled: bool = True,
+    ) -> None:
+        targets = _load_custom_targets(self._repository)
+        targets.append(
+            {
+                "id": target_id,
+                "label": label,
+                "host": host,
+                "interface": interface,
+                "enabled": enabled,
+            }
+        )
+        _save_custom_targets(self._repository, targets)
+
+
+class DeleteMonitorTarget:
+    """Entfernt ein benutzerdefiniertes Monitor-Target nach ``id`` (Altcode DELETE).
+
+    Filtert die ``monitor_custom_targets``-Liste nach ``id != target_id`` und schreibt
+    zurueck. Idempotent: eine unbekannte ``id`` filtert nichts heraus (kein Fehler).
+    Eintraege OHNE ``id``-Schluessel werden konservativ BEHALTEN (sie matchen den zu
+    loeschenden ``target_id`` nicht). Nur die fest verdrahteten Internet-/Gateway-
+    Targets liegen ohnehin nicht in den Settings -- sie sind nicht loeschbar.
+    """
+
+    def __init__(self, repository: SettingsRepository) -> None:
+        self._repository = repository
+
+    def __call__(self, target_id: str) -> None:
+        targets = _load_custom_targets(self._repository)
+        remaining = [entry for entry in targets if entry.get("id") != target_id]
+        _save_custom_targets(self._repository, remaining)

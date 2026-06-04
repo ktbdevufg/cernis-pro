@@ -52,6 +52,8 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from application.monitoring import (
+    AddMonitorTarget,
+    DeleteMonitorTarget,
     GetAllSlaStats,
     GetMonitorEvents,
     GetRttHistory,
@@ -81,6 +83,21 @@ class PatchScheduleBody(BaseModel):
 
     enabled: bool | None = None
     name: str | None = None
+
+
+class AddTargetBody(BaseModel):
+    """POST /api/monitor/targets -- ein benutzerdefiniertes Monitor-Target.
+
+    ``id``/``label``/``host`` sind Pflicht (kein sinnvoller Default -- der Altcode
+    griff direkt ``payload["id"]`` etc.); ``interface``/``enabled`` haben die
+    Altcode-Defaults (``""`` / ``True``).
+    """
+
+    id: str
+    label: str
+    host: str
+    interface: str = ""
+    enabled: bool = True
 
 
 # Liefert die label-angereicherte Status-Map ``{tid: {"alive", "label"}}``. Die
@@ -121,6 +138,14 @@ def provide_manage_schedules() -> ManageSchedules:
 
 def provide_update_schedule() -> UpdateSchedule:
     raise NotImplementedError("UpdateSchedule wird in app.py verdrahtet")
+
+
+def provide_add_monitor_target() -> AddMonitorTarget:
+    raise NotImplementedError("AddMonitorTarget wird in app.py verdrahtet")
+
+
+def provide_delete_monitor_target() -> DeleteMonitorTarget:
+    raise NotImplementedError("DeleteMonitorTarget wird in app.py verdrahtet")
 
 
 # ── Serialisierungs-Helfer (Domaenen-Objekt -> Wire-dict am api-Rand) ─────────
@@ -248,4 +273,37 @@ def remove_schedule(
 ) -> dict[str, bool]:
     """Loescht ein Schedule (Zeile + Job). Idempotent bei fehlender id."""
     manage_schedules.delete(schedule_id)
+    return {"ok": True}
+
+
+# ── targets (Schreibpfad, M.9-Nachzuegler) ──────────────────────────────────
+# POST/DELETE auf die benutzerdefinierten Monitor-Targets. KEINE ``configure``-
+# Folge wie im Altcode (main.py:385-408): der RunMonitor laedt pro tick frisch via
+# MonitorTargetSource.load(), also wirkt ein hier geschriebenes Target bei der
+# naechsten Loop-Iteration automatisch (Live-Reload).
+
+
+@router.post("/monitor/targets")
+def add_monitor_target(
+    add_target: Annotated[AddMonitorTarget, Depends(provide_add_monitor_target)],
+    body: AddTargetBody,
+) -> dict[str, bool]:
+    """Fuegt ein benutzerdefiniertes Monitor-Target hinzu -> ``{ok: True}``."""
+    add_target(
+        target_id=body.id,
+        label=body.label,
+        host=body.host,
+        interface=body.interface,
+        enabled=body.enabled,
+    )
+    return {"ok": True}
+
+
+@router.delete("/monitor/targets/{target_id}")
+def remove_monitor_target(
+    target_id: str,
+    delete_target: Annotated[DeleteMonitorTarget, Depends(provide_delete_monitor_target)],
+) -> dict[str, bool]:
+    """Entfernt ein benutzerdefiniertes Monitor-Target nach id. Idempotent -> ``{ok: True}``."""
+    delete_target(target_id)
     return {"ok": True}

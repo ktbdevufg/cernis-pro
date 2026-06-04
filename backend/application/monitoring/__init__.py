@@ -2,6 +2,8 @@
 
 from application.monitoring.errors import MonitoringApplicationError
 from application.monitoring.use_cases import (
+    AddMonitorTarget,
+    DeleteMonitorTarget,
     GetAllSlaStats,
     GetMonitorEvents,
     GetRttHistory,
@@ -13,6 +15,8 @@ from application.monitoring.use_cases import (
 )
 
 __all__ = [
+    "AddMonitorTarget",
+    "DeleteMonitorTarget",
     "GetAllSlaStats",
     "GetMonitorEvents",
     "GetRttHistory",

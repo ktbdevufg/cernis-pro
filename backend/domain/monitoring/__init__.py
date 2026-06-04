@@ -2,6 +2,7 @@
 monitoring-Domaene."""
 
 from domain.monitoring.models import (
+    CUSTOM_TARGETS_KEY,
     MonitorEvent,
     MonitorEventType,
     MonitorTarget,
@@ -25,6 +26,7 @@ from domain.monitoring.transitions import (
 )
 
 __all__ = [
+    "CUSTOM_TARGETS_KEY",
     "CronSpec",
     "IntervalSpec",
     "MonitorEvent",

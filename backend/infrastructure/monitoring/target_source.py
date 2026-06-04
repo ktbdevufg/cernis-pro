@@ -29,13 +29,11 @@ from typing import Any
 
 import structlog
 
-from domain.monitoring import MonitorTarget
+from domain.monitoring import CUSTOM_TARGETS_KEY, MonitorTarget
 from modules.interfaces import get_interfaces
 from ports.settings import SettingsRepository
 
 _logger = structlog.get_logger(__name__)
-
-_CUSTOM_TARGETS_KEY = "monitor_custom_targets"
 
 
 class CompositeTargetSource:
@@ -89,7 +87,7 @@ class CompositeTargetSource:
         # kaputte Eintrag wird sichtbar geloggt (kein stiller S3-Fallback) und
         # uebersprungen; die KeyError-Treue im Mapping bleibt erhalten (ein Target
         # ohne host IST ein Fehler -- er wird geloggt, nicht als gueltig akzeptiert).
-        setting = self._settings.get(_CUSTOM_TARGETS_KEY)
+        setting = self._settings.get(CUSTOM_TARGETS_KEY)
         if setting is not None and isinstance(setting.value, list):
             for entry in setting.value:
                 if not isinstance(entry, dict):

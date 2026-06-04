@@ -25,6 +25,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from api.monitoring import (
+    provide_add_monitor_target,
+    provide_delete_monitor_target,
     provide_get_all_sla_stats,
     provide_get_monitor_events,
     provide_get_rtt_history,
@@ -36,6 +38,8 @@ from api.monitoring import (
 )
 from app import create_app
 from application.monitoring import (
+    AddMonitorTarget,
+    DeleteMonitorTarget,
     GetAllSlaStats,
     GetMonitorEvents,
     GetRttHistory,
@@ -44,7 +48,7 @@ from application.monitoring import (
     ManageSchedules,
     UpdateSchedule,
 )
-from domain.monitoring import MonitorEvent, MonitorEventType, PingSample
+from domain.monitoring import CUSTOM_TARGETS_KEY, MonitorEvent, MonitorEventType, PingSample
 from infrastructure.config import AppConfig
 from infrastructure.monitoring import (
     SqliteMonitorEventRepository,
@@ -52,6 +56,7 @@ from infrastructure.monitoring import (
     SqliteScheduleRepository,
     SqliteSlaSampleRepository,
 )
+from infrastructure.settings_repository import SqliteSettingsRepository
 
 # Fester Timestamp fuer deterministische datetime-Formatierung am api-Rand.
 # 1_700_000_000.0 == 2023-11-14 23:13:20 lokal (der genaue String kommt aus
@@ -123,6 +128,10 @@ def _wired_app(
         schedules, job_scheduler, _scheduled_scan_stub
     )
     app.dependency_overrides[provide_update_schedule] = lambda: UpdateSchedule(schedules)
+    # targets-Schreibpfad auf einer tmp-Settings-DB (kein echtes cernis.db).
+    settings = SqliteSettingsRepository(db_path)
+    app.dependency_overrides[provide_add_monitor_target] = lambda: AddMonitorTarget(settings)
+    app.dependency_overrides[provide_delete_monitor_target] = lambda: DeleteMonitorTarget(settings)
     return app
 
 
@@ -316,3 +325,46 @@ def test_schedule_delete_returns_ok_and_unregisters(db_path: Path) -> None:
     assert resp.status_code == 200
     assert resp.json() == {"ok": True}
     assert jobs.unregistered == [sid]
+
+
+# ── /api/monitor/targets (Schreibpfad, M.9-Nachzuegler) ─────────────────────
+
+
+def test_add_target_persists_in_settings(db_path: Path) -> None:
+    """POST schreibt das Target in den ``monitor_custom_targets``-Settings-Wert."""
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.post(
+            "/api/monitor/targets",
+            json={"id": "srv1", "label": "Server", "host": "10.0.0.5"},
+        )
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True}
+
+    setting = SqliteSettingsRepository(db_path).get(CUSTOM_TARGETS_KEY)
+    assert setting is not None
+    assert setting.value == [
+        {"id": "srv1", "label": "Server", "host": "10.0.0.5", "interface": "", "enabled": True}
+    ]
+
+
+def test_delete_target_removes_from_settings(db_path: Path) -> None:
+    """DELETE entfernt das Target wieder aus dem Settings-Wert (filtert nach id)."""
+    with TestClient(_wired_app(db_path)) as client:
+        client.post("/api/monitor/targets", json={"id": "a", "label": "A", "host": "1.1.1.1"})
+        client.post("/api/monitor/targets", json={"id": "b", "label": "B", "host": "2.2.2.2"})
+        resp = client.delete("/api/monitor/targets/a")
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True}
+
+    setting = SqliteSettingsRepository(db_path).get(CUSTOM_TARGETS_KEY)
+    assert setting is not None
+    assert isinstance(setting.value, list)
+    ids = [entry["id"] for entry in setting.value if isinstance(entry, dict)]
+    assert ids == ["b"]
+
+
+def test_add_target_requires_mandatory_fields(db_path: Path) -> None:
+    """Fehlt ein Pflichtfeld (id/label/host), antwortet FastAPI mit 422 (Body-Validierung)."""
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.post("/api/monitor/targets", json={"label": "no id", "host": "1.2.3.4"})
+    assert resp.status_code == 422

@@ -69,6 +69,8 @@ from api.devices import router as devices_router
 from api.metrics import provide_export_metrics
 from api.metrics import router as metrics_router
 from api.monitoring import (
+    provide_add_monitor_target,
+    provide_delete_monitor_target,
     provide_get_all_sla_stats,
     provide_get_monitor_events,
     provide_get_rtt_history,
@@ -102,6 +104,13 @@ from api.settings import (
     provide_update_setting,
 )
 from api.settings import router as settings_router
+from api.system import (
+    provide_interfaces,
+    provide_system_info,
+    provide_url_opener,
+    provide_version,
+)
+from api.system import router as system_router
 from application.agent import (
     DeleteAgent,
     ListAgents,
@@ -136,6 +145,8 @@ from application.devices import (
 )
 from application.metrics import ExportMetrics
 from application.monitoring import (
+    AddMonitorTarget,
+    DeleteMonitorTarget,
     GetAllSlaStats,
     GetMonitorEvents,
     GetRttHistory,
@@ -181,6 +192,7 @@ from infrastructure.capture import (
 from infrastructure.clock import SystemClock
 from infrastructure.config import APP_NAME, APP_VERSION, AppConfig
 from infrastructure.device_repository import SqliteDeviceRepository
+from infrastructure.interfaces import discover_interfaces
 from infrastructure.logging import configure_logging
 from infrastructure.metrics import SqliteMetricsReader
 from infrastructure.monitoring import (
@@ -736,6 +748,13 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.dependency_overrides[provide_update_schedule] = lambda: UpdateSchedule(
         schedule_repository()
     )
+    # targets-Schreibpfad (M.9-Nachzuegler): Add/Delete auf den migrierten settings-
+    # ``repository()`` (Custom-Targets liegen als ``monitor_custom_targets``-Setting).
+    # Kein eigenes Repo, keine ``configure``-Folge -- der Loop laedt pro tick frisch.
+    app.dependency_overrides[provide_add_monitor_target] = lambda: AddMonitorTarget(repository())
+    app.dependency_overrides[provide_delete_monitor_target] = lambda: DeleteMonitorTarget(
+        repository()
+    )
 
     app.add_api_websocket_route(
         "/ws/monitor", make_ws_monitor(monitor_broadcaster(), _monitor_status)
@@ -949,6 +968,38 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.dependency_overrides[provide_scan_via_agent] = lambda: ScanViaAgent(
         agent_repository(), agent_scan_client, secret_store()
     )
+
+    # ── System-/Glue-Endpunkte verdrahten (ADR-0004 P.1) ─────────────────────────
+    # Self-contained Glue ohne Domaene. Die vier Provider reichen Infrastruktur in den
+    # api-Ring (der infrastructure/modules NICHT kennen darf): Version, der reduzierte
+    # Dependency-Report, die Interface-Liste (Uebergangs-Adapter) und der Browser-Opener.
+
+    def _system_info() -> dict[str, Any]:
+        # REDUZIERT (ADR-0004 P.1): version + nmap-Binary + nur die v2-real-genutzten
+        # Deps. nmap via shutil.which (NICHT modules.portscan._find_nmap). Die mit
+        # main.py sterbenden Quer-Deps (pysnmp/reportlab/fritzconnection/...) sind RAUS.
+        import importlib.util
+        import shutil
+
+        return {
+            "version": APP_VERSION,
+            "nmap": shutil.which("nmap") is not None,
+            "scapy": importlib.util.find_spec("scapy") is not None,
+        }
+
+    def _open_url(url: str) -> None:
+        # Default-Opener: webbrowser.open. Der Schema-Guard (nur http/https) sitzt im
+        # api-Rand (api/system.open_url) -- dieser Opener wird nur bei gueltiger URL
+        # gerufen. Lokaler Import: kein webbrowser im App-Bau-Pfad.
+        import webbrowser
+
+        webbrowser.open(url)
+
+    app.include_router(system_router)
+    app.dependency_overrides[provide_version] = lambda: lambda: APP_VERSION
+    app.dependency_overrides[provide_system_info] = lambda: _system_info
+    app.dependency_overrides[provide_interfaces] = lambda: discover_interfaces
+    app.dependency_overrides[provide_url_opener] = lambda: _open_url
 
     # ── Frontend-Serving ── MUSS als LETZTES registriert werden ──────────────────
     # Der "/"-Mount faengt alle zuvor NICHT gematchten Pfade. Deshalb hier ganz am

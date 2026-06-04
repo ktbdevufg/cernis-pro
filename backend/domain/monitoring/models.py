@@ -37,6 +37,15 @@ class MonitorTarget:
     enabled: bool = True
 
 
+# Settings-Key, unter dem die benutzerdefinierten Monitor-Targets als
+# ``list[dict]`` liegen (Altcode-Key, charakterisierungstreu). Hier in der
+# Domaene zentral, damit der LESE-Pfad (``CompositeTargetSource``, infrastructure)
+# und der SCHREIB-Pfad (``AddMonitorTarget``/``DeleteMonitorTarget``, application)
+# DENSELBEN Key teilen, ohne ihn doppelt zu definieren (Drift-Schutz). domain darf
+# von jedem Ring importiert werden -- ein reiner Wert, keine Logik.
+CUSTOM_TARGETS_KEY = "monitor_custom_targets"
+
+
 @dataclass(frozen=True)
 class PingSample:
     """Aggregiertes Ergebnis eines Ping-Bursts (1:1 aus Altcode ``PingResult``).
