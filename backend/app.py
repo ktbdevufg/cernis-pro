@@ -26,6 +26,17 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 from starlette.types import Scope
 
+from api.alerting import (
+    provide_add_alert_rule,
+    provide_delete_alert_rule,
+    provide_get_alert_history,
+    provide_get_alert_rules,
+    provide_get_smtp_config_raw,
+    provide_save_smtp_config,
+    provide_send_test_alert,
+    provide_update_alert_rule,
+)
+from api.alerting import router as alerting_router
 from api.devices import (
     provide_delete_device,
     provide_get_device,
@@ -61,6 +72,16 @@ from api.settings import (
     provide_update_setting,
 )
 from api.settings import router as settings_router
+from application.alerting import (
+    AddAlertRule,
+    DeleteAlertRule,
+    GetAlertHistory,
+    GetAlertRules,
+    GetSmtpConfigRaw,
+    SaveSmtpConfig,
+    SendTestAlert,
+    UpdateAlertRule,
+)
 from application.devices import (
     DeleteDevice,
     GetDevice,
@@ -88,6 +109,11 @@ from application.scanning import (
     RunNetworkScan,
 )
 from application.settings import GetSettings, UpdateSecret, UpdateSetting
+from infrastructure.alerting import (
+    AlertNotifierAdapter,
+    SettingsSmtpConfigAdapter,
+    SqliteAlertRuleRepository,
+)
 from infrastructure.clock import SystemClock
 from infrastructure.config import APP_NAME, APP_VERSION, AppConfig
 from infrastructure.device_repository import SqliteDeviceRepository
@@ -554,6 +580,50 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     app.add_api_websocket_route(
         "/ws/monitor", make_ws_monitor(monitor_broadcaster(), _monitor_status)
+    )
+
+    # ── alerting-Domaene v2 verdrahten (A.6, Regel 5: ports<->infra nur hier) ──
+    # REST-only: alerting hat KEINEN Loop (kein lifespan-Umbau, kein WS). Drei Adapter:
+    # das Rule-Repo teilt die cernis.db (lru_cache wie scan_history); der Notifier ist
+    # zustandslos; der SmtpConfig-Adapter teilt sich den MIGRIERTEN settings-``repository()``
+    # mit der bestehenden settings-Verdrahtung (das smtp_config-Setting lebt dort, nicht in
+    # einem eigenen Repo). RaiseAlert hat KEINEN Endpunkt und wird in A.6 NICHT verdrahtet
+    # (A.7 macht den monitor-Loop-Trigger live -- dann bekommt er Repo + Notifier + SmtpConfig).
+    @lru_cache(maxsize=1)
+    def alert_rule_repository() -> SqliteAlertRuleRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteAlertRuleRepository(get_db_path())
+
+    alert_notifier = AlertNotifierAdapter()
+
+    def smtp_config_adapter() -> SettingsSmtpConfigAdapter:
+        # Teilt das settings-``repository()`` (smtp_config-Setting). Pro Request frisch
+        # gewickelt (haelt nur den Repo-Verweis) -- guenstig, kein lru_cache noetig.
+        return SettingsSmtpConfigAdapter(repository())
+
+    app.include_router(alerting_router)
+    app.dependency_overrides[provide_get_alert_rules] = lambda: GetAlertRules(
+        alert_rule_repository()
+    )
+    app.dependency_overrides[provide_add_alert_rule] = lambda: AddAlertRule(alert_rule_repository())
+    app.dependency_overrides[provide_update_alert_rule] = lambda: UpdateAlertRule(
+        alert_rule_repository()
+    )
+    app.dependency_overrides[provide_delete_alert_rule] = lambda: DeleteAlertRule(
+        alert_rule_repository()
+    )
+    app.dependency_overrides[provide_get_alert_history] = lambda: GetAlertHistory(
+        alert_rule_repository()
+    )
+    app.dependency_overrides[provide_get_smtp_config_raw] = lambda: GetSmtpConfigRaw(
+        smtp_config_adapter()
+    )
+    app.dependency_overrides[provide_save_smtp_config] = lambda: SaveSmtpConfig(
+        smtp_config_adapter()
+    )
+    app.dependency_overrides[provide_send_test_alert] = lambda: SendTestAlert(
+        smtp_config_adapter(), alert_notifier
     )
 
     @app.exception_handler(SecretStoreUnavailableError)
