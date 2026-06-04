@@ -17,9 +17,7 @@ import { useScan, SCAN_STATE } from './hooks/useScan.js'
 import { useSettings } from './hooks/useSettings.js'
 import { DEFAULT_CONFIG } from './components/ScanSettings.jsx'
 import { Network, GitCompare } from 'lucide-react'
-import FritzBoxView from './views/FritzBoxView.jsx'
 import ReportView from './views/ReportView.jsx'
-import ToolsView from './views/ToolsView.jsx'
 import SettingsView from './views/SettingsView.jsx'
 import SLAView from './views/SLAView.jsx'
 import AlertsView from './views/AlertsView.jsx'
@@ -86,8 +84,6 @@ export default function App() {
   const [countdown, setCountdown]         = useState(0)
   const [monitorStatus, setMonitorStatus] = useState({})
   const [showShortcuts, setShowShortcuts]   = useState(false)
-  const [fritzConnected, setFritzConnected]   = useState(false)
-  const [fritzStatus, setFritzStatus]         = useState(null)
   const [scanProfile, setScanProfile]         = useState('standard')
   const [isDark, setIsDark]               = useState(() => localStorage.getItem('cernis_theme') !== 'light')
 
@@ -303,9 +299,7 @@ export default function App() {
               {activeView === 'monitor'  && <MonitorView monitorStatus={monitorStatus} />}
               {activeView === 'devices'  && <DevicesView />}
               {activeView === 'security' && <SecurityView />}
-              {activeView === 'fritzbox' && <FritzBoxView connected={fritzConnected} onConnect={(s) => { setFritzConnected(true); setFritzStatus(s) }} status={fritzStatus} />}
               {activeView === 'report'   && <ReportView hosts={hosts} />}
-              {activeView === 'tools'    && <ToolsView selectedIface={selectedIface} />}
               {activeView === 'sla'      && <SLAView />}
               {activeView === 'alerts'   && <AlertsView />}
               {activeView === 'infra'    && <InfraView selectedIface={selectedIface} />}

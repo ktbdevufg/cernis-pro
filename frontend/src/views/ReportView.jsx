@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { FileText, Download, Search, AlertTriangle, Shield, ExternalLink, RefreshCw } from 'lucide-react'
+import { FileText, Search, AlertTriangle, Shield, ExternalLink, RefreshCw } from 'lucide-react'
 
 const css = `
 .report-view { position: absolute; inset: 0; display: flex; flex-direction: column; }
@@ -10,38 +10,6 @@ const css = `
 }
 .report-title { font-size: 13px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); }
 .report-body { flex: 1; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 16px; }
-
-/* PDF export card */
-.export-card {
-  background: var(--bg-2); border: 1px solid var(--border); border-radius: 6px; padding: 16px;
-}
-.export-card-title {
-  font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
-  color: var(--text-muted); margin-bottom: 12px; display: flex; align-items: center; gap: 6px;
-}
-.scan-select-row { display: flex; gap: 8px; align-items: center; }
-.scan-select {
-  background: var(--bg-3); border: 1px solid var(--border);
-  color: var(--text-primary); padding: 7px 10px; border-radius: 4px;
-  font-size: 12px; font-family: var(--font-mono); flex: 1;
-}
-.export-pdf-btn {
-  display: flex; align-items: center; gap: 6px;
-  background: var(--accent); color: var(--bg-0);
-  padding: 7px 16px; border-radius: 4px; font-size: 12px; font-weight: 700;
-  text-transform: uppercase; letter-spacing: 0.08em; cursor: pointer; border: none;
-  transition: all 0.15s; white-space: nowrap;
-}
-.export-pdf-btn:hover { background: #33ddff; }
-.export-pdf-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.export-csv-btn {
-  display: flex; align-items: center; gap: 5px;
-  background: var(--bg-3); border: 1px solid var(--border);
-  color: var(--text-secondary); padding: 7px 12px; border-radius: 4px;
-  font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em;
-  cursor: pointer; border: none; transition: all 0.12s;
-}
-.export-csv-btn:hover { color: var(--text-primary); }
 
 /* CVE section */
 .cve-section { background: var(--bg-2); border: 1px solid var(--border); border-radius: 6px; }
@@ -103,15 +71,9 @@ const css = `
 }
 `
 
-function fmtDate(s) {
-  if (!s) return ''
-  return new Date(s + 'Z').toLocaleString('de-DE', { dateStyle:'short', timeStyle:'short' })
-}
-
 export default function ReportView({ hosts }) {
   const [history, setHistory]       = useState([])
   const [selectedScan, setSelected] = useState('')
-  const [exporting, setExporting]   = useState(false)
   const [cveHost, setCveHost]       = useState('')
   const [cves, setCves]             = useState([])
   const [cveLoading, setCveLoading] = useState(false)
@@ -123,34 +85,6 @@ export default function ReportView({ hosts }) {
       if (data.length > 0) setSelected(String(data[0].id))
     }).catch(() => {})
   }, [])
-
-  const [exportResult, setExportResult] = useState(null)
-
-  const saveExport = async (fmt) => {
-    if (!selectedScan) return
-    setExporting(true)
-    setExportResult(null)
-    try {
-      const res = await fetch('/api/export/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scan_id: selectedScan, format: fmt }),
-      })
-      const data = await res.json()
-      if (data.ok) {
-        setExportResult({ ok: true, path: data.path, filename: data.filename })
-      } else {
-        setExportResult({ ok: false, error: data.error })
-      }
-    } catch (e) {
-      setExportResult({ ok: false, error: e.message })
-    }
-    setExporting(false)
-  }
-
-  const exportPDF  = () => saveExport('pdf')
-  const exportCSV  = () => saveExport('csv')
-  const exportJSON = () => saveExport('json')
 
   const runCveLookup = async () => {
     const host = hosts.find(h => h.ip === cveHost)
@@ -186,51 +120,6 @@ export default function ReportView({ hosts }) {
         </div>
 
         <div className="report-body">
-
-          {/* PDF Export */}
-          <div className="export-card">
-            <div className="export-card-title"><Download size={11} /> Export Scan Report</div>
-            <div className="scan-select-row">
-              <select className="scan-select" value={selectedScan}
-                onChange={e => setSelected(e.target.value)}>
-                <option value="">— Select scan —</option>
-                {history.map(h => (
-                  <option key={h.id} value={h.id}>
-                    #{h.id} · {fmtDate(h.scanned_at)} · {h.cidr} · {h.host_count} hosts
-                  </option>
-                ))}
-              </select>
-              <button className="export-pdf-btn" onClick={exportPDF} disabled={!selectedScan}>
-                <FileText size={13} /> PDF Report
-              </button>
-              <button className="export-csv-btn" onClick={exportCSV} disabled={!selectedScan}>
-                <Download size={12} /> CSV
-              </button>
-              <button className="export-csv-btn" onClick={exportJSON} disabled={!selectedScan}>
-                <Download size={12} /> JSON
-              </button>
-            </div>
-            {!selectedScan && (
-              <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:8 }}>
-                Run a scan first to generate a report. The PDF includes all hosts, open ports, OS guesses and security highlights.
-              </div>
-            )}
-            {exporting && (
-              <div style={{ fontSize:11, color:'var(--accent)', marginTop:8, fontFamily:'var(--font-mono)' }}>
-                Exporting...
-              </div>
-            )}
-            {exportResult && (
-              <div style={{ fontSize:11, marginTop:8, fontFamily:'var(--font-mono)', padding:'8px 12px', borderRadius:4,
-                background: exportResult.ok ? 'rgba(0,230,118,0.08)' : 'rgba(255,61,61,0.08)',
-                border: `1px solid ${exportResult.ok ? 'rgba(0,230,118,0.3)' : 'rgba(255,61,61,0.3)'}`,
-                color: exportResult.ok ? 'var(--green)' : 'var(--red)' }}>
-                {exportResult.ok
-                  ? <>Saved: {exportResult.path}</>
-                  : <>Error: {exportResult.error}</>}
-              </div>
-            )}
-          </div>
 
           {/* CVE Lookup */}
           <div className="cve-section">

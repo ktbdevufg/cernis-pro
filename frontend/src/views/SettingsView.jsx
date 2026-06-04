@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Settings, Save, RotateCcw, Plus, Trash2, Play, Clock, Wifi, Database, Radar } from 'lucide-react'
+import { Settings, Save, RotateCcw, Plus, Trash2, Play, Clock, Database, Radar } from 'lucide-react'
 
 const css = `
 .settings-view { position: absolute; inset: 0; display: flex; flex-direction: column; }
@@ -46,19 +46,6 @@ const css = `
 .toggle input:checked + .toggle-slider { background: rgba(0,212,255,0.2); border-color: var(--accent-dim); }
 .toggle input:checked + .toggle-slider::before { transform: translateX(16px); background: var(--accent); }
 
-/* Profiles */
-.profile-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
-.profile-card {
-  background: var(--bg-3); border: 1px solid var(--border); border-radius: 5px;
-  padding: 16px 14px; cursor: pointer; transition: all 0.12s;
-  display: flex; flex-direction: column; gap: 6px;
-}
-.profile-card:hover { border-color: var(--border-bright); }
-.profile-card.builtin { border-left: 2px solid var(--accent-dim); }
-.profile-card.custom  { border-left: 2px solid var(--purple); }
-.profile-name { font-size: 12px; font-weight: 700; color: var(--text-primary); }
-.profile-desc { font-size: 10px; color: var(--text-muted); line-height: 1.4; }
-.profile-icon { font-size: 18px; margin-bottom: 4px; }
 
 /* Schedules */
 .schedule-list { display: flex; flex-direction: column; gap: 6px; }
@@ -110,48 +97,6 @@ const SCHEDULE_OPTIONS = [
   { value: "cron:0 8 * * 1", label: "Weekly Mon 08:00" },
 ]
 
-
-function ShodanKeyRow() {
-  const [key, setKey]       = React.useState('')
-  const [saved, setSaved]   = React.useState(false)
-  const [loading, setLoading] = React.useState(true)
-
-  React.useEffect(() => {
-    fetch('/api/settings').then(r=>r.json()).then(d => {
-      if (d.shodan_api_key) setKey('••••••••')
-      setLoading(false)
-    }).catch(() => setLoading(false))
-  }, [])
-
-  const save = async () => {
-    if (key === '••••••••') return
-    await fetch('/api/settings/shodan-key', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ api_key: key })
-    })
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
-  }
-
-  return (
-    <div className="sv-row" style={{ flexWrap:'wrap', gap:8 }}>
-      <div className="sv-label">
-        Shodan API Key
-        <small>Optional — enables full Shodan lookup. Free key at shodan.io</small>
-      </div>
-      <div style={{ display:'flex', gap:6 }}>
-        <input className="sv-input" type="password"
-          value={key} onChange={e => setKey(e.target.value)}
-          placeholder="Enter Shodan API key…"
-          style={{ width:200 }} />
-        <button className="sv-btn primary" onClick={save}>
-          {saved ? '✓ Saved' : 'Save'}
-        </button>
-      </div>
-    </div>
-  )
-}
 
 function ScanConfigCard({ config, onChange }) {
   const set = (k, v) => onChange({ ...config, [k]: v })
@@ -232,38 +177,27 @@ function ScanConfigCard({ config, onChange }) {
   )
 }
 
+// Bekannte Scan-Profile (IDs deckungsgleich mit App.jsx handleScan PROFILES).
+// Schlanke FE-Konstante als einzige Quelle fuer das Schedule-Dropdown,
+// seit die alte Profile-Route mit main.py stirbt (ADR-0004 P.2).
+const SCAN_PROFILES = [
+  { id: 'quick',    name: 'Quick' },
+  { id: 'standard', name: 'Standard' },
+  { id: 'deep',     name: 'Deep' },
+  { id: 'iot',      name: 'IoT' },
+  { id: 'security', name: 'Security' },
+]
+
 export default function SettingsView({ interfaces, cidr, scanConfig, onScanConfigChange }) {
-  const [profiles, setProfiles] = useState({ defaults: [], custom: [] })
   const [schedules, setSchedules] = useState([])
   // New schedule form
   const [newSched, setNewSched] = useState({ name: '', cidr: cidr || '192.168.1.0/24', profile_id: 'standard', schedule: 'interval:1h' })
 
   const [sysInfo, setSysInfo] = useState({})
-  const [installing, setInstalling] = useState({})
-
-  const installPkg = async (pkg) => {
-    setInstalling(p => ({ ...p, [pkg]: true }))
-    try {
-      const res = await fetch('/api/system/install', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ package: pkg })
-      })
-      const data = await res.json()
-      if (data.ok) {
-        setSysInfo(p => ({ ...p, [pkg]: true }))
-      }
-    } catch (e) {}
-    setInstalling(p => ({ ...p, [pkg]: false }))
-  }
 
   const loadAll = async () => {
     fetch('/api/system/info').then(r=>r.json()).then(d => { setSysInfo(d); }).catch(()=>{})
-    const [p, s] = await Promise.all([
-      fetch('/api/profiles').then(r => r.json()).catch(() => ({ defaults: [], custom: [] })),
-      fetch('/api/schedules').then(r => r.json()).catch(() => []),
-    ])
-    setProfiles(p)
+    const s = await fetch('/api/schedules').then(r => r.json()).catch(() => [])
     setSchedules(s)
   }
 
@@ -294,7 +228,7 @@ export default function SettingsView({ interfaces, cidr, scanConfig, onScanConfi
     loadAll()
   }
 
-  const allProfiles = [...profiles.defaults, ...profiles.custom]
+  const allProfiles = SCAN_PROFILES
 
   return (
     <>
@@ -338,36 +272,6 @@ export default function SettingsView({ interfaces, cidr, scanConfig, onScanConfi
           {scanConfig && onScanConfigChange && (
             <ScanConfigCard config={scanConfig} onChange={onScanConfigChange} />
           )}
-
-          {/* Scan Profiles */}
-          <div className="sv-card">
-            <div className="sv-card-title"><Wifi size={11} /> Scan Profiles</div>
-            <div className="sv-card-body">
-              <div style={{ fontSize:11, color:'var(--text-muted)', marginBottom:4 }}>
-                Built-in profiles — select in toolbar before scanning
-              </div>
-              <div className="profile-grid">
-                {profiles.defaults.map(p => (
-                  <div key={p.id} className="profile-card builtin">
-                    <div className="profile-icon">{p.icon}</div>
-                    <div className="profile-name">{p.name}</div>
-                    <div className="profile-desc">{p.description}</div>
-                  </div>
-                ))}
-                {profiles.custom.map(p => (
-                  <div key={p.id} className="profile-card custom" style={{ position:'relative' }}>
-                    <button onClick={() => fetch(`/api/profiles/${p.id}`, { method:'DELETE' }).then(loadAll)}
-                      style={{ position:'absolute', top:4, right:4, background:'none', border:'none', color:'var(--text-muted)', cursor:'pointer' }}>
-                      <Trash2 size={11} />
-                    </button>
-                    <div className="profile-icon">{p.icon || '⚙'}</div>
-                    <div className="profile-name">{p.name}</div>
-                    <div className="profile-desc">{p.description}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
 
           {/* Scheduled Scans */}
           <div className="sv-card">
@@ -413,7 +317,7 @@ export default function SettingsView({ interfaces, cidr, scanConfig, onScanConfi
                 <div className="add-row" style={{ marginTop:6 }}>
                   <select className="sv-select" value={newSched.profile_id}
                     onChange={e => setNewSched(p => ({ ...p, profile_id: e.target.value }))}>
-                    {allProfiles.map(p => <option key={p.id} value={p.id}>{p.icon} {p.name}</option>)}
+                    {allProfiles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                   </select>
                   <select className="sv-select" value={newSched.schedule}
                     onChange={e => setNewSched(p => ({ ...p, schedule: e.target.value }))}>
@@ -433,9 +337,7 @@ export default function SettingsView({ interfaces, cidr, scanConfig, onScanConfi
             <div className="sv-card-title"><Settings size={11} /> Dependencies</div>
             <div className="sv-card-body">
               {[
-                ['fritzconnection', 'FritzBox TR-064 Integration',      'pip install fritzconnection', false],
                 ['scapy',          'Packet Capture, LLDP, Rogue DHCP', 'pip install scapy',           true],
-                ['pysnmp',         'SNMP Discovery',                    'pip install pysnmp',          false],
                 ['dnspython',      'Advanced DNS Lookup',               'pip install dnspython',       false],
                 ['reportlab',      'PDF Report Export',                 'pip install reportlab',       false],
                 ['cryptography',   'Credential Encryption (AES-128)',   'pip install cryptography',    false],
@@ -453,14 +355,6 @@ export default function SettingsView({ interfaces, cidr, scanConfig, onScanConfi
                     : sysInfo[pkg] === false
                     ? <div style={{ display:'flex', gap:6, alignItems:'center', flexWrap:'wrap' }}>
                         <span style={{ color:'var(--red)', fontSize:11, fontFamily:'var(--font-mono)' }}>✗ missing</span>
-                        {!pkg.includes('nmap') && (
-                          <button
-                            onClick={() => installPkg(pkg)}
-                            disabled={installing[pkg]}
-                            style={{ padding:'2px 9px', borderRadius:3, fontSize:10, fontWeight:700, cursor:'pointer', border:'1px solid rgba(0,212,255,0.3)', background:'rgba(0,212,255,0.1)', color:'var(--accent)', textTransform:'uppercase', letterSpacing:'0.06em' }}>
-                            {installing[pkg] ? 'Installing…' : '⬇ Install'}
-                          </button>
-                        )}
                         <code style={{ fontSize:10, fontFamily:'var(--font-mono)', background:'var(--bg-4)', padding:'2px 7px', borderRadius:3, color:'var(--text-secondary)' }}>{cmd}</code>
                       </div>
                     : <span style={{ color:'var(--text-muted)', fontSize:11 }}>…</span>
@@ -486,14 +380,6 @@ export default function SettingsView({ interfaces, cidr, scanConfig, onScanConfi
                 <div className="sv-label">Encryption Key<small>~/.cernis/keyring (0600)</small></div>
                 <span style={{ fontSize:11, color:'var(--green)', fontFamily:'var(--font-mono)' }}>AES-128 · Active</span>
               </div>
-            </div>
-          </div>
-
-          {/* Internet / API Keys */}
-          <div className="sv-card">
-            <div className="sv-card-title"><Database size={11} /> API Keys</div>
-            <div className="sv-card-body">
-              <ShodanKeyRow />
             </div>
           </div>
 

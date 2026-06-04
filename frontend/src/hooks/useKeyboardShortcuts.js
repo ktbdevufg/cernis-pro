@@ -18,7 +18,6 @@ const SHORTCUTS = [
   { key: 'r',       description: 'Refresh',               action: 'refresh' },
   { key: 't',       description: 'Topology view',         action: 'view_topology' },
   { key: 'm',       description: 'Monitor view',          action: 'view_monitor' },
-  { key: 'g',       description: 'FritzBox view',         action: 'view_fritz' },
   { key: 's',       description: 'Security view',         action: 'view_security' },
   { key: 'Escape',  description: 'Close panel',           action: 'close' },
   { key: '?',       description: 'Show shortcuts',        action: 'help' },
@@ -56,9 +55,6 @@ export default function useKeyboardShortcuts({
           break
         case 'm':
           onViewChange?.('monitor')
-          break
-        case 'g':
-          onViewChange?.('fritz')
           break
         case 's':
           onViewChange?.('security')

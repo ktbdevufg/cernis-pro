@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Wifi, ChevronDown, Play, Square, RefreshCw, Download, Clock } from 'lucide-react'
+import { Wifi, ChevronDown, Play, Square, RefreshCw, Clock } from 'lucide-react'
 
 const css = `
 .toolbar {
@@ -154,30 +154,6 @@ export default function Toolbar({
     if (validateCIDR(v)) onCidrChange(v)
   }
 
-  const [exportMsg, setExportMsg] = useState('')
-  const handleExport = async (fmt) => {
-    if (!lastScanId) return alert('Run a scan first')
-    setExportMsg('Exporting...')
-    try {
-      const res = await fetch('/api/export/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scan_id: lastScanId, format: fmt }),
-      })
-      const data = await res.json()
-      if (data.ok) {
-        setExportMsg(`Saved: ${data.path}`)
-        setTimeout(() => setExportMsg(''), 5000)
-      } else {
-        setExportMsg(`Error: ${data.error}`)
-        setTimeout(() => setExportMsg(''), 5000)
-      }
-    } catch (e) {
-      setExportMsg(`Error: ${e.message}`)
-      setTimeout(() => setExportMsg(''), 5000)
-    }
-  }
-
   return (
     <>
       <style>{css}</style>
@@ -273,18 +249,6 @@ export default function Toolbar({
             </select>
           </div>
 
-          {/* Export */}
-          <button className="icon-btn" onClick={() => handleExport('csv')} title="Export CSV">
-            <Download size={12} /> CSV
-          </button>
-          <button className="icon-btn" onClick={() => handleExport('json')} title="Export JSON">
-            <Download size={12} /> JSON
-          </button>
-          {exportMsg && (
-            <span style={{ fontSize:10, fontFamily:'var(--font-mono)', color: exportMsg.startsWith('Error') ? 'var(--red)' : 'var(--green)', whiteSpace:'nowrap' }}>
-              {exportMsg}
-            </span>
-          )}
         </div>
       </div>
       {open && <div style={{ position:'fixed', inset:0, zIndex:299 }} onClick={() => setOpen(false)} />}

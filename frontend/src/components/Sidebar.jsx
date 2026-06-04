@@ -1,5 +1,5 @@
 import React from 'react'
-import { Radar, Activity, Database, Shield, Settings, Router, FileText, Wrench, TrendingUp, Bell, Sun, Moon, Server } from 'lucide-react'
+import { Radar, Activity, Database, Shield, Settings, FileText, TrendingUp, Bell, Sun, Moon, Server } from 'lucide-react'
 
 const css = `
 .sidebar {
@@ -122,9 +122,7 @@ const NAV_ITEMS = [
   { id: 'monitor',  icon: Activity, label: 'MONITOR' },
   { id: 'devices',  icon: Database, label: 'DEVICES' },
   { id: 'security', icon: Shield,   label: 'SECURITY' },
-  { id: 'fritzbox', icon: Router,   label: 'FRITZBOX' },
   { id: 'report',   icon: FileText,  label: 'REPORT' },
-  { id: 'tools',    icon: Wrench,    label: 'TOOLS' },
   { id: 'sla',      icon: TrendingUp, label: 'SLA' },
   { id: 'alerts',   icon: Bell,      label: 'ALERTS' },
   { id: 'infra',    icon: Server,    label: 'INFRA' },

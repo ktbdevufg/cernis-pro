@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { X, Wifi, Server, Globe, Radio, Shield, Zap, Tag, FileText, Save, Power, ExternalLink, AlertTriangle, Lock } from 'lucide-react'
+import { X, Wifi, Server, Globe, Radio, Shield, Tag, FileText, Save, ExternalLink, AlertTriangle, Lock } from 'lucide-react'
 
 const css = `
 .host-detail {
@@ -111,20 +111,6 @@ const css = `
 }
 .os-acc { font-size: 10px; color: var(--text-muted); margin-top: 3px; }
 
-/* WoL button */
-.wol-btn {
-  display: flex; align-items: center; justify-content: center; gap: 6px;
-  width: 100%; padding: 8px; border-radius: 4px; cursor: pointer;
-  background: rgba(0,230,118,0.08); border: 1px solid rgba(0,230,118,0.25);
-  color: var(--green); font-size: 12px; font-weight: 700;
-  text-transform: uppercase; letter-spacing: 0.08em; transition: all 0.15s;
-}
-.wol-btn:hover { background: rgba(0,230,118,0.15); box-shadow: 0 0 16px rgba(0,230,118,0.15); }
-.wol-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.wol-status { font-size: 10px; text-align: center; margin-top: 4px; font-family: var(--font-mono); }
-.wol-status.ok  { color: var(--green); }
-.wol-status.err { color: var(--red); }
-
 .empty-detail {
   flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
   color: var(--text-muted); gap: 8px; font-size: 12px; padding: 20px; text-align: center;
@@ -159,49 +145,6 @@ function RTTBar({ rtt }) {
 }
 
 
-
-function BannerSection({ host, ports }) {
-  const [banners, setBanners] = React.useState(null)
-  const [loading, setLoading] = React.useState(false)
-
-  const grab = async () => {
-    setLoading(true)
-    const res = await fetch('/api/tools/banner', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ host, ports }),
-    })
-    setBanners(await res.json())
-    setLoading(false)
-  }
-
-  if (!ports?.some(p => [80,443,8080,8443,8000,3000,9000].includes(p.port))) return null
-
-  return (
-    <div className="hd-section">
-      <div className="hd-section-title">
-        <Globe size={10}/> HTTP Banners
-        {!banners && !loading && (
-          <button onClick={grab} style={{ marginLeft:'auto', background:'rgba(0,212,255,0.1)', border:'1px solid var(--accent-dim)', color:'var(--accent)', padding:'2px 8px', borderRadius:3, fontSize:9, fontWeight:700, cursor:'pointer', textTransform:'uppercase' }}>
-            Grab
-          </button>
-        )}
-        {loading && <span style={{ marginLeft:'auto', fontSize:9, color:'var(--text-muted)' }}>fetching…</span>}
-      </div>
-      {banners && banners.map((b, i) => (
-        <div key={i} style={{ background:'var(--bg-3)', borderRadius:4, padding:'7px 10px', marginBottom:4, fontSize:11 }}>
-          <div style={{ display:'flex', justifyContent:'space-between', marginBottom:2 }}>
-            <span style={{ fontFamily:'var(--font-mono)', color:'var(--accent)' }}>{b.url}</span>
-            <span style={{ fontFamily:'var(--font-mono)', color: b.status < 400 ? 'var(--green)' : 'var(--red)' }}>{b.status}</span>
-          </div>
-          {b.title && <div style={{ color:'var(--text-primary)', fontWeight:600, marginBottom:2 }}>{b.title}</div>}
-          {b.server && <div style={{ color:'var(--text-muted)' }}>Server: {b.server}</div>}
-          {b.powered_by && <div style={{ color:'var(--text-muted)' }}>Powered by: {b.powered_by}</div>}
-          {b.error && <div style={{ color:'var(--red)', fontSize:10 }}>✗ {b.error}</div>}
-        </div>
-      ))}
-    </div>
-  )
-}
 
 function DefaultCredsSection({ host, ports, vendor }) {
   const [results, setResults] = React.useState(null)
@@ -299,18 +242,11 @@ function TLSSection({ host, ports }) {
 export default function HostDetail({ host, onClose }) {
   if (!host) return null
 
-  const sendWoL = async () => {
-    if (!host.mac) return
-    await fetch('/api/wol/send', { method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ mac: host.mac }) })
-  }
   const [label, setLabel]   = useState('')
   const [notes, setNotes]   = useState('')
   const [tags, setTags]     = useState([])
   const [tagInput, setTagInput] = useState('')
   const [saved, setSaved]   = useState(false)
-  const [wolStatus, setWolStatus] = useState(null)
 
   useEffect(() => {
     if (host) {
@@ -318,7 +254,6 @@ export default function HostDetail({ host, onClose }) {
       setNotes(host.notes || '')
       setTags(host.tags || [])
       setSaved(false)
-      setWolStatus(null)
     }
   }, [host?.ip])
 
@@ -356,19 +291,6 @@ export default function HostDetail({ host, onClose }) {
     }
   }
   const removeTag = (t) => setTags(prev => prev.filter(x => x !== t))
-
-  const handleWol = async () => {
-    if (!host.mac) return
-    setWolStatus('sending')
-    const res = await fetch('/api/wol', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mac: host.mac }),
-    })
-    const data = await res.json()
-    setWolStatus(data.ok ? 'ok' : 'err')
-    setTimeout(() => setWolStatus(null), 4000)
-  }
 
   return (
     <>
@@ -441,19 +363,6 @@ export default function HostDetail({ host, onClose }) {
             )}
           </div>
 
-          {/* Wake-on-LAN */}
-          {host.mac && (
-            <div className="hd-section">
-              <div className="hd-section-title"><Power size={10} />Wake-on-LAN</div>
-              <button className="wol-btn" onClick={handleWol} disabled={wolStatus === 'sending'}>
-                <Zap size={14} />
-                {wolStatus === 'sending' ? 'Sending…' : 'Send Magic Packet'}
-              </button>
-              {wolStatus === 'ok'  && <div className="wol-status ok">✓ Magic packet sent to {host.mac}</div>}
-              {wolStatus === 'err' && <div className="wol-status err">✗ Failed — check MAC address</div>}
-            </div>
-          )}
-
           {/* OS Detection */}
           {host.os_guess && (
             <div className="hd-section">
@@ -480,9 +389,6 @@ export default function HostDetail({ host, onClose }) {
               </div>
             </div>
           )}
-
-          {/* HTTP Banners */}
-          <BannerSection host={host.ip} ports={host.ports} />
 
           {/* Default Credentials */}
           <DefaultCredsSection host={host.ip} ports={host.ports} vendor={host.vendor} />
