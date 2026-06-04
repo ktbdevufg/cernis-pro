@@ -119,6 +119,19 @@ ignore_missing_imports = true
 module = ["apscheduler.*"]
 ignore_missing_imports = true
 
+# scapy (feste dep, C.3 capture-Adapter) liefert nur PARTIELLE Stubs: die dynamisch
+# erzeugten Layer-Klassen (DNS/IP/TCP/Ether/... , scapy.contrib.{lldp,cdp}) und die
+# AsyncSniffer-Callback-Attribute fehlen darin -> mypy meldet sonst flaechig
+# "attr-defined". Darum follow_imports=skip (wie modules/main, NICHT nur
+# ignore_missing_imports wie apscheduler): die Stubs sind unvollstaendig genug, dass
+# das Hineinlaufen mehr Rauschen als Sicherheit bringt. Der Adapter kapselt scapy
+# ohnehin komplett in ``_scapy`` und arbeitet sonst nur mit den eigenen
+# Domaenenmodellen -- die scapy-Seite ist bewusst untypisiert (``pkt: Any``).
+[[tool.mypy.overrides]]
+module = ["scapy.*"]
+follow_imports = "skip"
+ignore_missing_imports = true
+
 # ── pytest ────────────────────────────────────────────────────────────────
 # backend/ ist die Import-Wurzel (wie der Altbestand: `import modules.x`).
 [tool.pytest.ini_options]
