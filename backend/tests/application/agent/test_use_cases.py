@@ -145,8 +145,17 @@ def test_list_agents_returns_enabled_only(
 def test_save_agent_writes_repo_and_token_separately(
     repo: FakeAgentRepository, secrets: FakeSecretStore
 ) -> None:
-    SaveAgent(repo, secrets)(_agent(), token="s3cret")
-    # Stammdaten im Repository ...
+    # SaveAgent nimmt jetzt PRIMITIVE (das RemoteAgent entsteht im Use-Case, damit
+    # der api-Rand kein domain-Objekt bauen muss) -- gleiche Werte wie _agent().
+    SaveAgent(repo, secrets)(
+        AGENT_ID,
+        "VPS Netcup",
+        "http://vps.example.de:8766",
+        True,
+        ("10.0.0.0/24",),
+        token="s3cret",
+    )
+    # Stammdaten im Repository (vom Use-Case gebautes RemoteAgent == _agent()) ...
     assert repo.get(AGENT_ID) == _agent()
     # ... Token getrennt im SecretStore unter token_key(id).
     assert secrets.get(token_key(AGENT_ID)) == "s3cret"
@@ -156,7 +165,9 @@ def test_save_agent_empty_token_deletes_from_secret_store(
     repo: FakeAgentRepository, secrets: FakeSecretStore
 ) -> None:
     secrets.set(token_key(AGENT_ID), "alt")
-    SaveAgent(repo, secrets)(_agent(), token="")
+    SaveAgent(repo, secrets)(
+        AGENT_ID, "VPS Netcup", "http://vps.example.de:8766", True, ("10.0.0.0/24",), token=""
+    )
     # Leeres Token -> Secret geloescht (idempotentes Muster UpdateSecret).
     assert secrets.exists(token_key(AGENT_ID)) is False
     # Stammdaten trotzdem gespeichert.
@@ -167,7 +178,9 @@ def test_save_agent_none_token_deletes_from_secret_store(
     repo: FakeAgentRepository, secrets: FakeSecretStore
 ) -> None:
     secrets.set(token_key(AGENT_ID), "alt")
-    SaveAgent(repo, secrets)(_agent(), token=None)
+    SaveAgent(repo, secrets)(
+        AGENT_ID, "VPS Netcup", "http://vps.example.de:8766", True, ("10.0.0.0/24",), token=None
+    )
     assert secrets.exists(token_key(AGENT_ID)) is False
 
 

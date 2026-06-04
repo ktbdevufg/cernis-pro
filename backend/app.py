@@ -26,6 +26,14 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 from starlette.types import Scope
 
+from api.agent import (
+    provide_delete_agent,
+    provide_list_agents,
+    provide_ping_agent,
+    provide_save_agent,
+    provide_scan_via_agent,
+)
+from api.agent import router as agent_router
 from api.alerting import (
     provide_add_alert_rule,
     provide_delete_alert_rule,
@@ -94,6 +102,13 @@ from api.settings import (
     provide_update_setting,
 )
 from api.settings import router as settings_router
+from application.agent import (
+    DeleteAgent,
+    ListAgents,
+    PingAgent,
+    SaveAgent,
+    ScanViaAgent,
+)
 from application.alerting import (
     AddAlertRule,
     DeleteAlertRule,
@@ -148,6 +163,11 @@ from application.security import (
 )
 from application.settings import GetSettings, UpdateSecret, UpdateSetting
 from domain.monitoring import MonitorEvent, MonitorEventType
+from infrastructure.agent import (
+    SqliteAgentRepository,
+    UrllibAgentPinger,
+    WebsocketsAgentScanClient,
+)
 from infrastructure.alerting import (
     AlertNotifierAdapter,
     SettingsSmtpConfigAdapter,
@@ -200,7 +220,6 @@ from infrastructure.settings_repository import SqliteSettingsRepository
 # nur hier erlaubt (Composition Root, nicht vom import-linter analysiert); ein
 # Guardrail-Contract verbietet den Ringen jeden modules/-Import. Jede Gruppe
 # faellt weg, sobald die jeweilige Domaene migriert ist.
-from modules.agent import init_agents_db
 from modules.alerting import init_alerts_db
 from modules.devices_db import init_devices_db
 from modules.storage import init_db
@@ -441,7 +460,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 if row["enabled"]:
                     job_scheduler().register(row, _scheduled_scan)
             init_alerts_db()
-            init_agents_db()
+            # agent (A.4+5): KEIN init_agents_db mehr -- das v2-SqliteAgentRepository
+            # legt die remote_agents-Tabelle beim Bau selbst an (_ensure_schema),
+            # Muster wie die schedule/sla-Repos. Der letzte modules.agent-Bootstrap-
+            # Faden faellt damit weg.
         yield
         if cfg.bootstrap_on_startup:
             # stop() setzt das Loop-Flag (Abbruch nach der laufenden Iteration);
@@ -889,6 +911,44 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.dependency_overrides[provide_get_lldp_neighbors] = lambda: GetLldpNeighbors(capture_lldp())
 
     app.add_api_websocket_route("/ws/pcap", make_ws_pcap(capture_broadcaster()))
+
+    # ── agent-Domaene v2 verdrahten (A.4+5, Regel 5: ports<->infra nur hier) ──
+    # REST-only (Client-Seite): GET/POST/DELETE /api/agents + ping/scan. KEIN WS --
+    # der einzige agent-WS (/agent/scan) lebt auf der ZURUECKGESTELLTEN Server-Seite
+    # (modules.agent.create_agent_app), die hier nicht verdrahtet wird; der scan-
+    # Endpunkt ist REST mit wait_for, der WebsocketsAgentScanClient macht die
+    # ausgehende WS-Verbindung INTERN. Das Repository teilt die cernis.db (lru_cache
+    # wie scan_history) und legt die remote_agents-Tabelle beim Bau selbst an
+    # (_ensure_schema -- darum entfiel init_agents_db im lifespan). Der secret_store()
+    # ist der SETTINGS-Singleton (oben): der Agent-Token lebt unter token_key(id) im
+    # SELBEN Keystore, Variante-B-Trennung (Stammdaten im Repo, Secret getrennt).
+    # Pinger/ScanClient sind zustandslos -> einmal gebaut, pro Request frisch um den
+    # Use-Case gewickelt (guenstig). KEIN Exception-Handler noetig: AgentNotFoundError
+    # mappt der api-Rand selbst auf 404, alles andere im scan-Pfad auf 503;
+    # SecretStoreUnavailableError faengt der bestehende globale 503-Handler.
+    @lru_cache(maxsize=1)
+    def agent_repository() -> SqliteAgentRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteAgentRepository(get_db_path())
+
+    agent_pinger = UrllibAgentPinger()
+    agent_scan_client = WebsocketsAgentScanClient()
+
+    app.include_router(agent_router)
+    app.dependency_overrides[provide_list_agents] = lambda: ListAgents(agent_repository())
+    app.dependency_overrides[provide_save_agent] = lambda: SaveAgent(
+        agent_repository(), secret_store()
+    )
+    app.dependency_overrides[provide_delete_agent] = lambda: DeleteAgent(
+        agent_repository(), secret_store()
+    )
+    app.dependency_overrides[provide_ping_agent] = lambda: PingAgent(
+        agent_repository(), agent_pinger, secret_store()
+    )
+    app.dependency_overrides[provide_scan_via_agent] = lambda: ScanViaAgent(
+        agent_repository(), agent_scan_client, secret_store()
+    )
 
     # ── Frontend-Serving ── MUSS als LETZTES registriert werden ──────────────────
     # Der "/"-Mount faengt alle zuvor NICHT gematchten Pfade. Deshalb hier ganz am

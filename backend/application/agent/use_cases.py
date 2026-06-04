@@ -32,21 +32,37 @@ class ListAgents:
 
 
 class SaveAgent:
-    """Legt einen Agenten an/aktualisiert ihn; verwahrt den Token getrennt."""
+    """Legt einen Agenten an/aktualisiert ihn; verwahrt den Token getrennt.
+
+    Nimmt PRIMITIVE (nicht ein fertiges ``RemoteAgent``) -- das Domaenen-Objekt
+    entsteht HIER, im application-Ring, der ``domain`` kennen darf. So muss der
+    api-Rand kein ``domain``-Objekt konstruieren (Schichtungs-Regel: api ->
+    nur application, NICHT domain); Hausmuster ``UpdateDeviceMeta``.
+    """
 
     def __init__(self, repository: AgentRepository, secret_store: SecretStore) -> None:
         self._repository = repository
         self._secret_store = secret_store
 
-    def __call__(self, agent: RemoteAgent, token: str | None) -> None:
+    def __call__(
+        self,
+        agent_id: str,
+        name: str,
+        url: str,
+        enabled: bool,
+        cidrs: tuple[str, ...] | list[str],
+        token: str | None,
+    ) -> None:
+        # Das Domaenen-Aggregat entsteht im Use-Case (cidrs -> tuple, da frozen).
+        agent = RemoteAgent(id=agent_id, name=name, url=url, enabled=enabled, cidrs=tuple(cidrs))
         # Stammdaten ins Repository (tokenlos) ...
         self._repository.save(agent)
         # ... das Geheimnis getrennt in den SecretStore (Muster UpdateSecret):
         # gesetzter Token -> speichern, leer/None -> loeschen (idempotent).
         if token:
-            self._secret_store.set(token_key(agent.id), token)
+            self._secret_store.set(token_key(agent_id), token)
         else:
-            self._secret_store.delete(token_key(agent.id))
+            self._secret_store.delete(token_key(agent_id))
 
 
 class DeleteAgent:

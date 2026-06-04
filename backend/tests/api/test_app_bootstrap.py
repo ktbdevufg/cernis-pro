@@ -13,6 +13,11 @@ Task + ``ApschedulerJobScheduler.start()`` + register der gespeicherten Schedule
 Bau selbst an (``_ensure_schema``). Der main.py-seitige Contract
 (``test_app_bootstrap_contract.py``) bleibt unberuehrt -- er friert die Altcode-
 Sequenz ein, M.9 wechselt den Einstiegspunkt NICHT.
+
+v2-ABWEICHUNG (A.4+5): Auch ``init_agents_db`` entfaellt aus der v2-Sequenz -- das
+``SqliteAgentRepository`` legt die ``remote_agents``-Tabelle beim Bau selbst an
+(``_ensure_schema``, gleiche Logik wie schedule/sla). Der main.py-Contract behaelt
+``init_agents_db`` (friert v1 ein); hier ist es raus.
 """
 
 from collections.abc import Callable, Iterator
@@ -33,7 +38,6 @@ _SYNC_STEPS = (
     "init_db",
     "init_devices_db",
     "init_alerts_db",
-    "init_agents_db",
 )
 
 
@@ -142,7 +146,6 @@ def test_app_lifespan_startup_runs_v2_monitoring(bootstrap_calls: list[str], tmp
         "init_db",
         "init_devices_db",
         "init_alerts_db",
-        "init_agents_db",
     ]
 
 
