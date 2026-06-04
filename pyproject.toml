@@ -207,6 +207,7 @@ modules = [
     "domain.settings",
     "domain.alerting",
     "domain.security",
+    "domain.capture",
 ]
 
 # Die neuen Ringe duerfen den Altcode (modules/) NIE importieren. Der Legacy-Bezug
