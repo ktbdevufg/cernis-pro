@@ -31,6 +31,7 @@ from datetime import datetime
 from pathlib import Path
 
 from domain.security import ArpAlert, ArpEntry
+from ports.security import ArpAlertRecord, ArpBaselineRecord
 
 
 class SqliteArpGuardRepository:
@@ -82,9 +83,28 @@ class SqliteArpGuardRepository:
     # ── Baseline ────────────────────────────────────────────────────────────
 
     def load_baseline(self) -> list[ArpEntry]:
+        # ZEITFREI fuer RunArpScan/Erkennung (SEC.2): nur ip/mac/vendor.
         with self._connect() as conn:
             rows = conn.execute("SELECT ip, mac, vendor FROM arp_baseline").fetchall()
         return [ArpEntry(ip=r["ip"], mac=r["mac"], vendor=r["vendor"] or "") for r in rows]
+
+    def load_baseline_records(self) -> list[ArpBaselineRecord]:
+        # Lese-/Wire-Pfad MIT Zeit: first_seen/last_seen aus den DB-Spalten. ORDER BY ip
+        # (Altcode get_arp_baseline).
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT ip, mac, vendor, first_seen, last_seen FROM arp_baseline ORDER BY ip"
+            ).fetchall()
+        return [
+            ArpBaselineRecord(
+                ip=r["ip"],
+                mac=r["mac"],
+                vendor=r["vendor"] or "",
+                first_seen=r["first_seen"],
+                last_seen=r["last_seen"],
+            )
+            for r in rows
+        ]
 
     def save_baseline_entry(self, entry: ArpEntry) -> None:
         now = time.time()
@@ -132,13 +152,15 @@ class SqliteArpGuardRepository:
                 ),
             )
 
-    def recent_alerts(self, limit: int) -> list[ArpAlert]:
+    def recent_alerts(self, limit: int) -> list[ArpAlertRecord]:
+        # Lese-/Wire-Pfad MIT Zeit: ts + datetime aus den DB-Spalten (das Frontend
+        # rendert datetime). KEIN id (bewusste Streichung, s. ArpAlertRecord-Docstring).
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM arp_alerts ORDER BY ts DESC LIMIT ?", (limit,)
             ).fetchall()
         return [
-            ArpAlert(
+            ArpAlertRecord(
                 alert_type=r["alert_type"],
                 ip=r["ip"],
                 old_mac=r["old_mac"] or "",
@@ -147,6 +169,8 @@ class SqliteArpGuardRepository:
                 new_vendor=r["new_vendor"] or "",
                 severity=r["severity"],
                 message=r["message"] or "",
+                ts=r["ts"],
+                datetime=r["datetime"] or "",
             )
             for r in rows
         ]

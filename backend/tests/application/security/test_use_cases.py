@@ -20,7 +20,14 @@ from application.security import (
     RunArpScan,
 )
 from domain.security import ArpAlert, ArpEntry
-from ports.security import CredFinding, CveFinding, PortQuery, TlsFinding
+from ports.security import (
+    ArpAlertRecord,
+    ArpBaselineRecord,
+    CredFinding,
+    CveFinding,
+    PortQuery,
+    TlsFinding,
+)
 
 # ── Fakes ───────────────────────────────────────────────────────────────────
 
@@ -49,8 +56,17 @@ class RecordingRepo:
         self._alerts: list[ArpAlert] = []
 
     def load_baseline(self) -> list[ArpEntry]:
+        # ZEITFREI fuer RunArpScan (unveraendert -- additiver Nachzug).
         self.seq.append("load_baseline")
         return list(self._baseline.values())
+
+    def load_baseline_records(self) -> list[ArpBaselineRecord]:
+        # Lese-Pfad MIT Zeit (Dummy-Zeit im Fake; der echte Adapter liest DB-Spalten).
+        self.seq.append("load_baseline_records")
+        return [
+            ArpBaselineRecord(e.ip, e.mac, e.vendor, first_seen=1000.0, last_seen=2000.0)
+            for e in self._baseline.values()
+        ]
 
     def save_baseline_entry(self, entry: ArpEntry) -> None:
         self.seq.append(f"save_baseline:{entry.ip}")
@@ -64,9 +80,24 @@ class RecordingRepo:
         self.seq.append(f"save_alert:{alert.alert_type}")
         self._alerts.append(alert)
 
-    def recent_alerts(self, limit: int) -> list[ArpAlert]:
+    def recent_alerts(self, limit: int) -> list[ArpAlertRecord]:
+        # Lese-Pfad MIT Zeit: ArpAlert -> ArpAlertRecord (Dummy-Zeit im Fake).
         self.seq.append(f"recent_alerts:{limit}")
-        return self._alerts[-limit:][::-1]
+        return [
+            ArpAlertRecord(
+                alert_type=a.alert_type,
+                ip=a.ip,
+                old_mac=a.old_mac,
+                new_mac=a.new_mac,
+                old_vendor=a.old_vendor,
+                new_vendor=a.new_vendor,
+                severity=a.severity,
+                message=a.message,
+                ts=1000.0,
+                datetime="2026-01-01 00:00:00",
+            )
+            for a in self._alerts[-limit:][::-1]
+        ]
 
     def clear_alerts(self) -> None:
         self.seq.append("clear_alerts")
@@ -159,17 +190,22 @@ def test_run_arp_scan_passes_current_and_baseline_to_detect() -> None:
 # ── Pass-Throughs ───────────────────────────────────────────────────────────
 
 
-def test_get_arp_alerts_passthrough() -> None:
+def test_get_arp_alerts_passthrough_returns_records() -> None:
     repo = RecordingRepo()
     repo._alerts.append(ArpAlert("ip_conflict", "x", "", "M", "", "V", "high", "m"))
-    assert len(GetArpAlerts(repo)(limit=10)) == 1
+    result = GetArpAlerts(repo)(limit=10)
+    assert len(result) == 1
+    assert isinstance(result[0], ArpAlertRecord)  # Lese-Pfad gibt Record MIT Zeit
+    assert result[0].datetime == "2026-01-01 00:00:00"
     assert "recent_alerts:10" in repo.seq
 
 
-def test_get_arp_baseline_passthrough() -> None:
+def test_get_arp_baseline_passthrough_returns_records() -> None:
     repo = RecordingRepo()
     repo._baseline["192.168.1.10"] = ArpEntry("192.168.1.10", "AA", "AcmeCorp")
-    assert GetArpBaseline(repo)() == [ArpEntry("192.168.1.10", "AA", "AcmeCorp")]
+    result = GetArpBaseline(repo)()
+    assert result == [ArpBaselineRecord("192.168.1.10", "AA", "AcmeCorp", 1000.0, 2000.0)]
+    assert "load_baseline_records" in repo.seq  # ruft den Zeit-Pfad, NICHT load_baseline
 
 
 def test_clear_arp_baseline_passthrough() -> None:
@@ -181,30 +217,50 @@ def test_clear_arp_baseline_passthrough() -> None:
 
 
 class _FakeCve:
+    def __init__(self) -> None:
+        self.received: object = None
+
     async def lookup_for_host(self, ports: object) -> list[CveFinding]:
+        self.received = ports
         return [CveFinding("CVE-1", "d", "HIGH", 7.5, "2023", port=22)]
 
 
 class _FakeTls:
+    def __init__(self) -> None:
+        self.received: object = None
+
     async def inspect_host(self, host: str, ports: object) -> list[TlsFinding]:
+        self.received = ports
         return [TlsFinding(host=host, port=443, grade="A")]
 
 
 class _FakeCreds:
+    def __init__(self) -> None:
+        self.received: object = None
+
     async def check_host(self, host: str, ports: object, vendor: str = "") -> list[CredFinding]:
+        self.received = ports
         return [CredFinding(host, 80, "http", "admin", "admin", True, "http_basic")]
 
 
-def test_lookup_cves_passthrough() -> None:
-    r = asyncio.run(LookupCves(_FakeCve())([PortQuery(22, "ssh")]))
+def test_lookup_cves_passthrough_wandelt_dict_zu_portquery() -> None:
+    # api reicht rohe Port-dicts; der Use-Case wandelt in PortQuery (api importiert
+    # PortQuery nicht).
+    fake = _FakeCve()
+    r = asyncio.run(LookupCves(fake)([{"port": 22, "service": "ssh"}]))
     assert r[0].cve_id == "CVE-1"
+    assert fake.received == [PortQuery(22, "ssh")]  # Wandlung passiert im Use-Case
 
 
-def test_inspect_tls_passthrough() -> None:
-    r = asyncio.run(InspectTls(_FakeTls())("example.com", [443]))
+def test_inspect_tls_passthrough_extrahiert_port_nummern() -> None:
+    fake = _FakeTls()
+    r = asyncio.run(InspectTls(fake)("example.com", [{"port": 443, "service": "https"}]))
     assert r[0].grade == "A"
+    assert fake.received == [443]  # nur die Port-Nummern (Altcode inspect_host_ports)
 
 
-def test_check_default_creds_passthrough() -> None:
-    r = asyncio.run(CheckDefaultCreds(_FakeCreds())("h", [PortQuery(80, "http")], "ubnt"))
+def test_check_default_creds_passthrough_wandelt_dict() -> None:
+    fake = _FakeCreds()
+    r = asyncio.run(CheckDefaultCreds(fake)("h", [{"port": 80, "service": "http"}], "ubnt"))
     assert r[0].method == "http_basic"
+    assert fake.received == [PortQuery(80, "http")]

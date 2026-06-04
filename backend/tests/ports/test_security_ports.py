@@ -20,6 +20,8 @@ from collections.abc import Sequence
 
 from domain.security import ArpAlert, ArpEntry
 from ports.security import (
+    ArpAlertRecord,
+    ArpBaselineRecord,
     ArpGuardRepository,
     CredFinding,
     CveFinding,
@@ -44,6 +46,12 @@ class FakeArpGuardRepository:
     def load_baseline(self) -> list[ArpEntry]:
         return list(self._baseline.values())
 
+    def load_baseline_records(self) -> list[ArpBaselineRecord]:
+        return [
+            ArpBaselineRecord(e.ip, e.mac, e.vendor, first_seen=1.0, last_seen=2.0)
+            for e in self._baseline.values()
+        ]
+
     def save_baseline_entry(self, entry: ArpEntry) -> None:
         self._baseline[entry.ip] = entry
 
@@ -53,8 +61,22 @@ class FakeArpGuardRepository:
     def save_alert(self, alert: ArpAlert) -> None:
         self._alerts.append(alert)
 
-    def recent_alerts(self, limit: int) -> list[ArpAlert]:
-        return self._alerts[-limit:][::-1]
+    def recent_alerts(self, limit: int) -> list[ArpAlertRecord]:
+        return [
+            ArpAlertRecord(
+                a.alert_type,
+                a.ip,
+                a.old_mac,
+                a.new_mac,
+                a.old_vendor,
+                a.new_vendor,
+                a.severity,
+                a.message,
+                ts=1.0,
+                datetime="t",
+            )
+            for a in self._alerts[-limit:][::-1]
+        ]
 
     def clear_alerts(self) -> None:
         self._alerts.clear()
@@ -149,7 +171,10 @@ def test_arp_guard_repository_roundtrip() -> None:
         message="...",
     )
     repo.save_alert(alert)
-    assert repo.recent_alerts(50) == [alert]
+    # recent_alerts gibt ArpAlertRecord (mit Zeit), nicht ArpAlert.
+    recs = repo.recent_alerts(50)
+    assert len(recs) == 1 and recs[0].alert_type == "ip_conflict"
+    assert recs[0].datetime == "t"  # Zeit im Record
 
     # clear_alerts laesst baseline unberuehrt (SEC.1-Vertrag 7).
     repo.clear_alerts()

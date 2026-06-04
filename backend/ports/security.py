@@ -48,6 +48,54 @@ from typing import Protocol
 
 from domain.security import ArpAlert, ArpEntry
 
+# ── ARP-Lese-Records (Wire-nahe Rand-Typen MIT Zeit, NICHT domain) ──────────
+#
+# Die Domaenentypen ArpEntry/ArpAlert sind bewusst ZEITFREI (SEC.2: Zeit ist
+# Persistenz-Rand). Der Lese-/Wire-Pfad braucht aber die DB-Zeitspalten (das Frontend
+# rendert ``alert.datetime`` + ``baseline.first_seen/last_seen``). Diese Read-Records
+# tragen die Zeit -- analog ``ScanRecord``/``ScanSummary`` (Read-Views mit Zeit), aber
+# hier in ``ports`` statt domain, konsistent zu CveFinding/TlsFinding (SEC-Rand-Typen).
+# Der SCHREIB-/Erkennungs-Pfad (RunArpScan) nutzt weiter die zeitfreien Domaenentypen.
+
+
+@dataclass(frozen=True)
+class ArpAlertRecord:
+    """Lese-View eines gespeicherten ARP-Alerts (= ArpAlert-Felder + ts + datetime).
+
+    Was ``recent_alerts()`` liefert. KEIN ``id``: der Altcode-``get_arp_alerts``-dict
+    trug die AUTOINCREMENT-``id`` mit (``SELECT *``), aber das Frontend (SecurityView)
+    liest sie nie -- bewusste Streichung (toter Wire-Ballast, analog dem alerting
+    ``events-id``-Befund). ``ts`` ist epoch-float, ``datetime`` ISO-Text (beide aus den
+    DB-Spalten; der SEC.4-Adapter setzt sie beim ``save_alert``).
+    """
+
+    alert_type: str
+    ip: str
+    old_mac: str
+    new_mac: str
+    old_vendor: str
+    new_vendor: str
+    severity: str
+    message: str
+    ts: float
+    datetime: str
+
+
+@dataclass(frozen=True)
+class ArpBaselineRecord:
+    """Lese-View eines Baseline-Eintrags (= ip/mac/vendor + first_seen + last_seen).
+
+    Was ``load_baseline_records()`` liefert. Felder 1:1 zur Altcode-``get_arp_baseline``-
+    dict-Form. ``first_seen``/``last_seen`` epoch-float (DB-Spalten, vom Adapter gesetzt).
+    """
+
+    ip: str
+    mac: str
+    vendor: str
+    first_seen: float
+    last_seen: float
+
+
 # ── Persistenz ────────────────────────────────────────────────────────────
 
 
@@ -61,9 +109,19 @@ class ArpGuardRepository(Protocol):
     """
 
     def load_baseline(self) -> list[ArpEntry]:
-        """Alle bekannten Baseline-Eintraege (``arp_baseline``) als ``ArpEntry``.
+        """Alle Baseline-Eintraege als ZEITFREIE ``ArpEntry`` (fuer RunArpScan/Erkennung).
 
-        Leere Baseline -> ``[]``, niemals ``None``.
+        Leere Baseline -> ``[]``, niemals ``None``. Der Lese-/Wire-Pfad (Frontend braucht
+        first_seen/last_seen) nutzt ``load_baseline_records`` -- diese Methode bleibt
+        bewusst zeitfrei, weil die Erkennung (SEC.2) keine Zeit liest.
+        """
+        ...
+
+    def load_baseline_records(self) -> list[ArpBaselineRecord]:
+        """Alle Baseline-Eintraege als ``ArpBaselineRecord`` MIT Zeit (Lese-/Wire-Pfad).
+
+        Wie ``load_baseline``, aber mit ``first_seen``/``last_seen`` -- fuer den
+        ``GetArpBaseline``-Lese-Use-Case (Frontend rendert die Zeitspalten). Leer -> ``[]``.
         """
         ...
 
@@ -90,12 +148,13 @@ class ArpGuardRepository(Protocol):
         """
         ...
 
-    def recent_alerts(self, limit: int) -> list[ArpAlert]:
-        """Die juengsten Alerts (``ORDER BY ts DESC LIMIT``), neueste zuerst.
+    def recent_alerts(self, limit: int) -> list[ArpAlertRecord]:
+        """Die juengsten Alerts als ``ArpAlertRecord`` (mit ts/datetime), neueste zuerst.
 
-        Wegen der Momentaufnahme-Semantik (Use-Case ruft ``clear_alerts`` vor jedem
-        Scan) enthaelt ``arp_alerts`` praktisch nur den letzten Scan -- der ``limit``
-        ist dadurch faktisch wirkungslos (SEC.1-Befund E.1), bleibt aber am Vertrag.
+        Lese-/Wire-Pfad (das Frontend rendert ``datetime``). ``ORDER BY ts DESC LIMIT``.
+        Wegen der Momentaufnahme-Semantik (Use-Case ruft ``clear_alerts`` vor jedem Scan)
+        enthaelt ``arp_alerts`` praktisch nur den letzten Scan -- der ``limit`` ist
+        dadurch faktisch wirkungslos (SEC.1-Befund E.1), bleibt aber am Vertrag.
         """
         ...
 
@@ -245,6 +304,8 @@ class DefaultCredsChecker(Protocol):
 
 
 __all__ = [
+    "ArpAlertRecord",
+    "ArpBaselineRecord",
     "ArpGuardRepository",
     "CredFinding",
     "CveFinding",

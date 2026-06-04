@@ -66,6 +66,16 @@ from api.scanning import (
     provide_lookup_vendor,
 )
 from api.scanning import router as scanning_router
+from api.security import (
+    provide_check_default_creds,
+    provide_clear_arp_baseline,
+    provide_get_arp_alerts,
+    provide_get_arp_baseline,
+    provide_inspect_tls,
+    provide_lookup_cves,
+    provide_run_arp_scan,
+)
+from api.security import router as security_router
 from api.settings import (
     provide_get_settings,
     provide_update_secret,
@@ -109,6 +119,15 @@ from application.scanning import (
     LookupVendor,
     RunNetworkScan,
 )
+from application.security import (
+    CheckDefaultCreds,
+    ClearArpBaseline,
+    GetArpAlerts,
+    GetArpBaseline,
+    InspectTls,
+    LookupCves,
+    RunArpScan,
+)
 from application.settings import GetSettings, UpdateSecret, UpdateSetting
 from domain.monitoring import MonitorEvent, MonitorEventType
 from infrastructure.alerting import (
@@ -143,6 +162,12 @@ from infrastructure.scanning.scan_history import SqliteScanHistoryRepository
 from infrastructure.scanning.ssdp import SsdpAdapter
 from infrastructure.scanning.vendor_lookup import VendorLookupAdapter
 from infrastructure.secret_store import KeyringSecretStore, SecretStoreUnavailableError
+from infrastructure.security import (
+    CveLookupAdapter,
+    DefaultCredsCheckerAdapter,
+    SqliteArpGuardRepository,
+    TlsInspectorAdapter,
+)
 from infrastructure.settings_repository import SqliteSettingsRepository
 
 # ── ÜBERGANGS-KRÜCKE P2.1b: Bootstrap-Init aus dem Altcode (modules/) ──────────
@@ -705,6 +730,41 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     )
     app.dependency_overrides[provide_send_test_alert] = lambda: SendTestAlert(
         smtp_config_adapter(), alert_notifier
+    )
+
+    # ── security-Domaene v2 verdrahten (SEC.6, Regel 5: ports<->infra nur hier) ──
+    # ARP-Guard: eigenes SQLite (teilt die DB mit settings/devices/scanning). Die drei
+    # Inspektoren (cve/tls/creds) sind zustandslose stdlib-Adapter (kein modules-Import,
+    # kein ADR-0007). RunArpScan WIEDERVERWENDET die bestehenden scanning-Adapter
+    # ``arp_table`` + ``vendor_lookup`` (oben instanziiert) -- KEIN zweiter Adapter.
+    # KEINE alerting-Naht: ARP-Alerts feuern keine alerting-Regeln (DF1, Naht-Notiz steht).
+    @lru_cache(maxsize=1)
+    def arp_guard_repository() -> SqliteArpGuardRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteArpGuardRepository(get_db_path())
+
+    cve_lookup_adapter = CveLookupAdapter()
+    tls_inspector_adapter = TlsInspectorAdapter()
+    default_creds_adapter = DefaultCredsCheckerAdapter()
+
+    app.include_router(security_router)
+    # RunArpScan: arp_table + vendor_lookup sind DIESELBEN Instanzen wie im scanning-Block
+    # (Wiederverwendung, kein zweiter ArpTable/Vendor-Adapter).
+    app.dependency_overrides[provide_run_arp_scan] = lambda: RunArpScan(
+        arp_table, vendor_lookup, arp_guard_repository()
+    )
+    app.dependency_overrides[provide_get_arp_alerts] = lambda: GetArpAlerts(arp_guard_repository())
+    app.dependency_overrides[provide_get_arp_baseline] = lambda: GetArpBaseline(
+        arp_guard_repository()
+    )
+    app.dependency_overrides[provide_clear_arp_baseline] = lambda: ClearArpBaseline(
+        arp_guard_repository()
+    )
+    app.dependency_overrides[provide_lookup_cves] = lambda: LookupCves(cve_lookup_adapter)
+    app.dependency_overrides[provide_inspect_tls] = lambda: InspectTls(tls_inspector_adapter)
+    app.dependency_overrides[provide_check_default_creds] = lambda: CheckDefaultCreds(
+        default_creds_adapter
     )
 
     @app.exception_handler(SecretStoreUnavailableError)

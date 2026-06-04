@@ -120,7 +120,33 @@ def test_save_baseline_preserves_first_seen(repo: SqliteArpGuardRepository) -> N
     assert row[2] == "CC:CC:CC:33:33:33"  # mac aktualisiert (INSERT OR REPLACE)
 
 
-def test_alert_roundtrip_and_time_columns(repo: SqliteArpGuardRepository) -> None:
+def test_load_baseline_records_returns_time(repo: SqliteArpGuardRepository) -> None:
+    # AUFLAGE A (Zeit-Wiederherstellung): load_baseline_records liefert ArpBaselineRecord
+    # MIT first_seen/last_seen (der Lese-Pfad fuers Frontend). load_baseline (zeitfrei)
+    # bleibt fuer RunArpScan.
+    repo.save_baseline_entry(ArpEntry("192.168.1.10", "AA:AA:AA:11:11:11", "AcmeCorp"))
+    records = repo.load_baseline_records()
+    assert len(records) == 1
+    r = records[0]
+    assert (r.ip, r.mac, r.vendor) == ("192.168.1.10", "AA:AA:AA:11:11:11", "AcmeCorp")
+    # ZEIT durchgereicht: first_seen/last_seen float > 0 (vom Adapter beim save gesetzt).
+    assert isinstance(r.first_seen, float) and r.first_seen > 0
+    assert isinstance(r.last_seen, float) and r.last_seen > 0
+
+
+def test_load_baseline_stays_timefree_for_scan(repo: SqliteArpGuardRepository) -> None:
+    # Additiv-Beweis: load_baseline gibt WEITER zeitfreie ArpEntry (RunArpScan-Pfad
+    # unveraendert) -- KEIN first_seen/last_seen am ArpEntry.
+    repo.save_baseline_entry(ArpEntry("192.168.1.10", "AA:AA:AA:11:11:11", "AcmeCorp"))
+    entries = repo.load_baseline()
+    assert entries == [ArpEntry("192.168.1.10", "AA:AA:AA:11:11:11", "AcmeCorp")]
+    assert not hasattr(entries[0], "first_seen")
+
+
+def test_alert_roundtrip_returns_record_with_time(repo: SqliteArpGuardRepository) -> None:
+    # AUFLAGE A (Zeit-Wiederherstellung): recent_alerts liefert ArpAlertRecord MIT ts +
+    # datetime (vorher gab es nur ArpAlert ohne Zeit -> die Wire-Luecke). Beweist, dass
+    # die Zeit jetzt durch den Lese-Pfad kommt (nicht 0/leer).
     alert = ArpAlert(
         alert_type="mac_changed",
         ip="192.168.1.10",
@@ -133,16 +159,22 @@ def test_alert_roundtrip_and_time_columns(repo: SqliteArpGuardRepository) -> Non
     )
     repo.save_alert(alert)
     loaded = repo.recent_alerts(50)
-    assert loaded == [alert]  # alle Domaenenfelder treu zurueck
-
-    # Zeitspalten am Rand: ts (REAL) + datetime (ISO-Text), beide gesetzt.
-    import sqlite3 as _sq
-
-    conn = _sq.connect(repo._db_path)
-    ts, dt = conn.execute("SELECT ts, datetime FROM arp_alerts").fetchone()
-    conn.close()
-    assert isinstance(ts, float)
-    assert isinstance(dt, str) and len(dt) == len("2026-01-01 00:00:00")
+    assert len(loaded) == 1
+    rec = loaded[0]
+    # alle Domaenenfelder treu.
+    assert rec.alert_type == "mac_changed"
+    assert rec.ip == "192.168.1.10"
+    assert rec.old_mac == "AA:AA:AA:11:11:11"
+    assert rec.new_mac == "BB:BB:BB:22:22:22"
+    assert rec.old_vendor == "AcmeCorp"
+    assert rec.new_vendor == "BetaInc"
+    assert rec.severity == "high"
+    assert rec.message == "IP 192.168.1.10: MAC changed ..."
+    # ZEIT durchgereicht (der Kern der Heilung): ts float > 0, datetime ISO-Text.
+    assert isinstance(rec.ts, float) and rec.ts > 0
+    assert isinstance(rec.datetime, str) and len(rec.datetime) == len("2026-01-01 00:00:00")
+    # KEIN id-Feld am Record (bewusste Streichung).
+    assert not hasattr(rec, "id")
 
 
 def test_recent_alerts_orders_ts_desc(repo: SqliteArpGuardRepository) -> None:

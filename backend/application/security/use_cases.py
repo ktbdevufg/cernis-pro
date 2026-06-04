@@ -19,10 +19,13 @@ Rand. RunArpScan reicht nur ``ArpEntry``/``ArpAlert`` durch, braucht keine ``now
 """
 
 from collections.abc import Sequence
+from typing import Any
 
 from domain.security import ArpAlert, ArpEntry, detect_arp_anomalies
 from ports.scanning import ArpTablePort, VendorLookupPort
 from ports.security import (
+    ArpAlertRecord,
+    ArpBaselineRecord,
     ArpGuardRepository,
     CredFinding,
     CveFinding,
@@ -105,23 +108,25 @@ class RunArpScan:
 
 
 class GetArpAlerts:
-    """Die juengsten ARP-Alerts (neueste zuerst). Wegen E.1 praktisch nur der letzte Scan."""
+    """Die juengsten ARP-Alerts als ``ArpAlertRecord`` (mit Zeit). Wegen E.1 praktisch
+    nur der letzte Scan."""
 
     def __init__(self, repository: ArpGuardRepository) -> None:
         self._repository = repository
 
-    def __call__(self, limit: int = 50) -> list[ArpAlert]:
+    def __call__(self, limit: int = 50) -> list[ArpAlertRecord]:
         return self._repository.recent_alerts(limit)
 
 
 class GetArpBaseline:
-    """Die aktuelle ARP-Baseline (alle bekannten ip/mac/vendor-Eintraege)."""
+    """Die aktuelle ARP-Baseline als ``ArpBaselineRecord`` (mit first_seen/last_seen --
+    der Lese-Pfad, das Frontend rendert die Zeit)."""
 
     def __init__(self, repository: ArpGuardRepository) -> None:
         self._repository = repository
 
-    def __call__(self) -> list[ArpEntry]:
-        return self._repository.load_baseline()
+    def __call__(self) -> list[ArpBaselineRecord]:
+        return self._repository.load_baseline_records()
 
 
 class ClearArpBaseline:
@@ -137,28 +142,51 @@ class ClearArpBaseline:
 # ── Inspektor-Use-Cases (duenne Pass-Throughs, async) ───────────────────────
 
 
+# Eingabe-Wandlung: der api-Ring reicht die ROHEN Port-dicts ({port, service}) durch
+# (er darf den ports-Typ ``PortQuery`` nicht importieren). Die Use-Cases wandeln hier --
+# reine Datenwandlung ohne I/O, der Use-Case kennt ``ports`` legitim (Muster:
+# typisierte Eingabe wird unterhalb von api gebaut, wie ws_scan._build_config).
+
+
+def _to_port_queries(ports: Sequence[dict[str, Any]]) -> list[PortQuery]:
+    """Roh-Port-dicts -> PortQuery. ``port`` Pflicht (int-baar), ``service`` optional.
+
+    Ein kaputtes dict (``port`` fehlt / nicht-int) wirft KeyError/ValueError und
+    propagiert -> HTTP 500. AS-IS altcode-treu (der Altcode ``lookup_cves_for_host``
+    warf bei ``p["port"]`` denselben KeyError -> 500). KEIN stiller Fehler -- es wirft
+    SICHTBAR (kein leerer Lookup). Das Frontend schickt immer ``port:int``, trifft es
+    nie. Ein sauberer 422 via striktem pydantic-Body-Modell ist ein api-Haertungs-
+    Nachzug (zusammen mit S1 CORS/Auth, Phase 4), KEIN SEC.6-Scope (DF V3b, Karl).
+    """
+    return [PortQuery(port=int(p["port"]), service=str(p.get("service", ""))) for p in ports]
+
+
 class LookupCves:
-    """CVE-Lookup fuer die offenen Ports eines Hosts (Pass-Through zum CveLookup-Port)."""
+    """CVE-Lookup fuer die offenen Ports eines Hosts. Nimmt rohe Port-dicts (api-Rand
+    importiert PortQuery nicht), wandelt intern und reicht an den CveLookup-Port."""
 
     def __init__(self, cve_lookup: CveLookup) -> None:
         self._cve_lookup = cve_lookup
 
-    async def __call__(self, ports: Sequence[PortQuery]) -> list[CveFinding]:
-        return await self._cve_lookup.lookup_for_host(ports)
+    async def __call__(self, ports: Sequence[dict[str, Any]]) -> list[CveFinding]:
+        return await self._cve_lookup.lookup_for_host(_to_port_queries(ports))
 
 
 class InspectTls:
-    """TLS-Inspektion der HTTPS-Ports eines Hosts (Pass-Through zum TlsInspector-Port)."""
+    """TLS-Inspektion der HTTPS-Ports eines Hosts. Nimmt rohe Port-dicts, extrahiert die
+    Port-Nummern und reicht an den TlsInspector-Port (Altcode inspect_host_ports nahm
+    ebenfalls list[dict] und zog ``p["port"]``)."""
 
     def __init__(self, tls_inspector: TlsInspector) -> None:
         self._tls_inspector = tls_inspector
 
-    async def __call__(self, host: str, ports: Sequence[int]) -> list[TlsFinding]:
-        return await self._tls_inspector.inspect_host(host, ports)
+    async def __call__(self, host: str, ports: Sequence[dict[str, Any]]) -> list[TlsFinding]:
+        port_numbers = [int(p["port"]) for p in ports]
+        return await self._tls_inspector.inspect_host(host, port_numbers)
 
 
 class CheckDefaultCreds:
-    """Default-Credential-Check eines Hosts (Pass-Through zum DefaultCredsChecker-Port).
+    """Default-Credential-Check eines Hosts. Nimmt rohe Port-dicts, wandelt intern.
 
     INTRUSIV (aktive Logins) -- die Ethik-/Opt-in-Frage ist DF5 (als Finding
     dokumentiert), KEIN technischer Gate hier.
@@ -168,6 +196,6 @@ class CheckDefaultCreds:
         self._creds_checker = creds_checker
 
     async def __call__(
-        self, host: str, ports: Sequence[PortQuery], vendor: str = ""
+        self, host: str, ports: Sequence[dict[str, Any]], vendor: str = ""
     ) -> list[CredFinding]:
-        return await self._creds_checker.check_host(host, ports, vendor)
+        return await self._creds_checker.check_host(host, _to_port_queries(ports), vendor)
