@@ -37,7 +37,9 @@ Pro-Target-Sequenz (altcode-treu, ``run_monitor`` Z.236-285):
     -> event = classify_transition(prev, now, sample.loss_pct)
     -> status[id] = now            (IMMER -- auch ohne Event; prev der naechsten Runde)
     -> wenn event: event_repo.save(MonitorEvent)
-                   + wenn should_notify(prev, event): notifier.notify(MonitorEvent)
+                   + wenn should_notify(prev, event):
+                         notifier.notify(MonitorEvent)        (Desktop-Notification)
+                         alert_raiser.raise_alert(MonitorEvent) (regelbasierter Alert, A.7a)
     -> IMMER broadcaster.broadcast(target, sample, event)
 
 BEWUSSTE, HARMLOSE REORDERING ggue. Altcode: Dort lief ``_notify_macos`` INLINE in
@@ -66,6 +68,7 @@ from domain.monitoring import (
     should_notify,
 )
 from ports.monitoring import (
+    AlertRaiserPort,
     MonitorBroadcasterPort,
     MonitorEventRepository,
     MonitorNotifierPort,
@@ -98,6 +101,7 @@ class RunMonitor:
         notifier: MonitorNotifierPort,
         broadcaster: MonitorBroadcasterPort,
         target_source: MonitorTargetSource,
+        alert_raiser: AlertRaiserPort,
         interval: int = _DEFAULT_INTERVAL,
     ) -> None:
         self._pinger = pinger
@@ -106,6 +110,7 @@ class RunMonitor:
         self._notifier = notifier
         self._broadcaster = broadcaster
         self._target_source = target_source
+        self._alert_raiser = alert_raiser
         self._interval = interval
         # target_id -> letzter bekannter alive-Zustand (None = noch nie gemessen).
         self._status: dict[str, bool] = {}
@@ -143,7 +148,14 @@ class RunMonitor:
             )
             self._event_repo.save(monitor_event)
             if should_notify(prev, event):
+                # Zwei best-effort-Konsequenzen an DERSELBEN Flanke (A.7a): die
+                # Desktop-Notification UND der regelbasierte Alert. Beide Ports werfen
+                # NIE (Adapter faengt+loggt) -> gegenseitig isoliert ohne try/except
+                # hier; Reihenfolge verhaltensneutral (notify wie bisher zuerst). Der
+                # Use-Case reicht nur sein MonitorEvent durch -- KEIN rule_type/message-
+                # Wissen (alerting-blind; das Mapping lebt im app.py-Adapter).
                 await self._notifier.notify(monitor_event)
+                await self._alert_raiser.raise_alert(monitor_event)
 
         # IMMER broadcasten -- auch bei event=None (Altcode: monitor_update jede Runde).
         await self._broadcaster.broadcast(target, sample, event)

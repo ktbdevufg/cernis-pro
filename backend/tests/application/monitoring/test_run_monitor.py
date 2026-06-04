@@ -97,6 +97,21 @@ class _RecordingBroadcaster:
         self.updates.append((target.id, sample.alive, event))
 
 
+class _RecordingAlertRaiser:
+    """Fake-AlertRaiserPort (A.7a): zeichnet die durchgereichten MonitorEvents auf.
+
+    Erfuellt den Best-effort-Vertrag (wirft nie). Speist die Flanken-Tests (Auflage 2):
+    raise_alert wird GENAU an should_notify-Flanken gerufen (nicht bei Erstmessung,
+    nicht bei degraded, nicht bei event=None).
+    """
+
+    def __init__(self) -> None:
+        self.raised: list[MonitorEvent] = []
+
+    async def raise_alert(self, event: MonitorEvent) -> None:
+        self.raised.append(event)
+
+
 class _StaticTargetSource:
     def __init__(self, targets: list[MonitorTarget]) -> None:
         self._targets = targets
@@ -114,11 +129,19 @@ def _target(tid: str = "wlan", *, enabled: bool = True) -> MonitorTarget:
 def _build(
     pinger: _FakePinger,
     targets: list[MonitorTarget],
-) -> tuple[RunMonitor, _RecordingRtt, _RecordingEvents, _RecordingNotifier, _RecordingBroadcaster]:
+) -> tuple[
+    RunMonitor,
+    _RecordingRtt,
+    _RecordingEvents,
+    _RecordingNotifier,
+    _RecordingBroadcaster,
+    _RecordingAlertRaiser,
+]:
     rtt = _RecordingRtt()
     events = _RecordingEvents()
     notifier = _RecordingNotifier()
     broadcaster = _RecordingBroadcaster()
+    alert_raiser = _RecordingAlertRaiser()
     uc = RunMonitor(
         pinger=pinger,
         rtt_history=rtt,
@@ -126,8 +149,9 @@ def _build(
         notifier=notifier,
         broadcaster=broadcaster,
         target_source=_StaticTargetSource(targets),
+        alert_raiser=alert_raiser,
     )
-    return uc, rtt, events, notifier, broadcaster
+    return uc, rtt, events, notifier, broadcaster, alert_raiser
 
 
 # ── Eine Iteration ──────────────────────────────────────────────────────────
@@ -139,7 +163,9 @@ def test_tick_first_measurement_up_saves_event_no_notify() -> None:
     sample = PingSample(
         target_id="wlan", host="h", alive=True, rtt_ms=2.0, loss_pct=0.0, timestamp=99.0
     )
-    uc, rtt, events, notifier, broadcaster = _build(_FakePinger(default=sample), [_target()])
+    uc, rtt, events, notifier, broadcaster, alert_raiser = _build(
+        _FakePinger(default=sample), [_target()]
+    )
 
     asyncio.run(uc.tick())
 
@@ -149,6 +175,7 @@ def test_tick_first_measurement_up_saves_event_no_notify() -> None:
     assert events.saved[0].rtt_ms == 2.0
     assert events.saved[0].timestamp == 99.0  # aus PingSample.timestamp
     assert notifier.notified == []  # KEINE Notification bei Erstmessung
+    assert alert_raiser.raised == []  # und KEIN Alert bei Erstmessung (A.7a, should_notify False)
     assert broadcaster.updates == [("wlan", True, MonitorEventType.UP)]  # broadcast IMMER
     assert uc.current_status() == {"wlan": True}
 
@@ -156,13 +183,16 @@ def test_tick_first_measurement_up_saves_event_no_notify() -> None:
 def test_tick_stable_up_no_event_but_broadcasts() -> None:
     # prev=True, now=True, loss<=30 -> kein Event. broadcast TROTZDEM (event=None).
     sample = PingSample(target_id="wlan", host="h", alive=True, rtt_ms=1.0, loss_pct=0.0)
-    uc, _rtt, events, notifier, broadcaster = _build(_FakePinger(default=sample), [_target()])
+    uc, _rtt, events, notifier, broadcaster, alert_raiser = _build(
+        _FakePinger(default=sample), [_target()]
+    )
     uc._status["wlan"] = True  # prev = True
 
     asyncio.run(uc.tick())
 
     assert events.saved == []  # kein Uebergang
     assert notifier.notified == []
+    assert alert_raiser.raised == []  # kein Event -> kein Alert (A.7a)
     assert broadcaster.updates == [("wlan", True, None)]  # broadcast mit event=None
     assert uc.current_status() == {"wlan": True}
 
@@ -171,7 +201,9 @@ def test_tick_degraded_event_but_no_notify() -> None:
     # prev=True, now=True, loss>30 -> DEGRADED. save_event JA, notify NEIN
     # (should_notify gibt fuer degraded False).
     sample = PingSample(target_id="wlan", host="h", alive=True, rtt_ms=5.0, loss_pct=50.0)
-    uc, _rtt, events, notifier, broadcaster = _build(_FakePinger(default=sample), [_target()])
+    uc, _rtt, events, notifier, broadcaster, alert_raiser = _build(
+        _FakePinger(default=sample), [_target()]
+    )
     uc._status["wlan"] = True
 
     asyncio.run(uc.tick())
@@ -179,17 +211,21 @@ def test_tick_degraded_event_but_no_notify() -> None:
     assert len(events.saved) == 1
     assert events.saved[0].event is MonitorEventType.DEGRADED
     assert notifier.notified == []  # degraded -> keine Notification
+    assert alert_raiser.raised == []  # degraded -> KEIN Alert (A.7a, should_notify False)
     assert broadcaster.updates == [("wlan", True, MonitorEventType.DEGRADED)]
 
 
 def test_tick_disabled_target_skipped() -> None:
-    uc, rtt, _events, _notifier, broadcaster = _build(_FakePinger(), [_target(enabled=False)])
+    uc, rtt, _events, _notifier, broadcaster, alert_raiser = _build(
+        _FakePinger(), [_target(enabled=False)]
+    )
 
     asyncio.run(uc.tick())
 
     # Kein Ping, kein rtt, kein broadcast, kein Status fuer disabled Target.
     assert rtt.saved == []
     assert broadcaster.updates == []
+    assert alert_raiser.raised == []  # disabled -> nichts, auch kein Alert
     assert uc.current_status() == {}
 
 
@@ -200,7 +236,9 @@ def test_tick_multiple_targets_each_processed() -> None:
             "b": [PingSample(target_id="b", host="h", alive=False, rtt_ms=-1.0)],
         }
     )
-    uc, rtt, events, _notifier, broadcaster = _build(pinger, [_target("a"), _target("b")])
+    uc, rtt, events, _notifier, broadcaster, _alert_raiser = _build(
+        pinger, [_target("a"), _target("b")]
+    )
 
     asyncio.run(uc.tick())
 
@@ -225,11 +263,12 @@ def test_two_ticks_up_then_down_fires_down_with_notify() -> None:
             ]
         }
     )
-    uc, _rtt, events, notifier, broadcaster = _build(pinger, [_target()])
+    uc, _rtt, events, notifier, broadcaster, alert_raiser = _build(pinger, [_target()])
 
     asyncio.run(uc.tick())  # 1: up
     assert uc.current_status() == {"wlan": True}
     assert notifier.notified == []  # Erstmessung -> kein notify
+    assert alert_raiser.raised == []  # Erstmessung -> kein Alert
 
     asyncio.run(uc.tick())  # 2: down-Flanke
     assert uc.current_status() == {"wlan": False}
@@ -237,6 +276,9 @@ def test_two_ticks_up_then_down_fires_down_with_notify() -> None:
     # Notify NUR beim DOWN (Flanke mit prev=True), nicht beim ersten UP.
     assert len(notifier.notified) == 1
     assert notifier.notified[0].event is MonitorEventType.DOWN
+    # Alert an DERSELBEN Flanke wie notify (A.7a): genau 1x, mit dem DOWN-Event.
+    assert len(alert_raiser.raised) == 1
+    assert alert_raiser.raised[0].event is MonitorEventType.DOWN
     # broadcast in BEIDEN Ticks.
     assert [u[2] for u in broadcaster.updates] == [MonitorEventType.UP, MonitorEventType.DOWN]
 
@@ -251,7 +293,7 @@ def test_two_ticks_down_then_up_recovery_notifies() -> None:
             ]
         }
     )
-    uc, _rtt, events, notifier, _broadcaster = _build(pinger, [_target()])
+    uc, _rtt, events, notifier, _broadcaster, alert_raiser = _build(pinger, [_target()])
 
     asyncio.run(uc.tick())
     asyncio.run(uc.tick())
@@ -259,13 +301,16 @@ def test_two_ticks_down_then_up_recovery_notifies() -> None:
     assert [e.event for e in events.saved] == [MonitorEventType.DOWN, MonitorEventType.UP]
     assert len(notifier.notified) == 1
     assert notifier.notified[0].event is MonitorEventType.UP
+    # Recovery-Flanke loest AUCH einen Alert aus (A.7a): genau 1x, mit dem UP-Event.
+    assert len(alert_raiser.raised) == 1
+    assert alert_raiser.raised[0].event is MonitorEventType.UP
 
 
 def test_two_ticks_stable_down_second_yields_no_event() -> None:
     # tick 1: Erstmessung down (DOWN-Event). tick 2: weiterhin down (prev=False,
     # now=False) -> KEIN Event (dauerhaft-ab erzeugt nichts), aber broadcast.
     pinger = _FakePinger(default=PingSample(target_id="wlan", host="h", alive=False, rtt_ms=-1.0))
-    uc, _rtt, events, _notifier, broadcaster = _build(pinger, [_target()])
+    uc, _rtt, events, _notifier, broadcaster, alert_raiser = _build(pinger, [_target()])
 
     asyncio.run(uc.tick())
     asyncio.run(uc.tick())
@@ -273,6 +318,8 @@ def test_two_ticks_stable_down_second_yields_no_event() -> None:
     assert [e.event for e in events.saved] == [MonitorEventType.DOWN]  # nur tick 1
     assert len(broadcaster.updates) == 2  # broadcast in beiden
     assert broadcaster.updates[1] == ("wlan", False, None)  # tick 2: kein Event
+    # tick 1 Erstmessung-down (kein Alert), tick 2 dauerhaft-down (kein Event) -> nie ein Alert.
+    assert alert_raiser.raised == []
 
 
 # ── current_status() defensive Kopie ────────────────────────────────────────
@@ -293,3 +340,93 @@ def test_stop_clears_running_flag() -> None:
     uc._running = True
     uc.stop()
     assert uc._running is False
+
+
+# ── A.7a: AlertRaiser an der should_notify-Flanke (Auflage 2, Mutationsprobe) ──
+# Diese Tests nageln die Trigger-Flanke EXPLIZIT fest -- raise_alert haengt an
+# should_notify(prev, event), NICHT an (event is not None). Der subtile Fall ist die
+# Erstmessung-down (prev=None, now=False -> DOWN): event ist nicht None, aber
+# should_notify ist False -> KEIN Alert. Ein Alert beim ersten Tick waere Rauschen.
+# MUTATIONSPROBE (manuell belegt, s. A.7a-Spec): haengt man raise_alert im Use-Case
+# an `if event is not None` statt `if should_notify(prev, event)`, MUSS
+# test_first_measurement_down_no_alert rot werden (raise_alert feuerte beim ersten DOWN).
+
+
+def test_first_measurement_down_no_alert() -> None:
+    # prev=None, now=False -> DOWN-Event, aber should_notify(None, DOWN)=False.
+    # save_event JA (Event existiert), raise_alert NEIN (Flanke an should_notify).
+    # DAS ist der Mutations-Wachhund: an `if event is not None` wuerde er hier feuern.
+    sample = PingSample(target_id="wlan", host="h", alive=False, rtt_ms=-1.0)
+    uc, _rtt, events, _notifier, _broadcaster, alert_raiser = _build(
+        _FakePinger(default=sample), [_target()]
+    )
+
+    asyncio.run(uc.tick())
+
+    assert len(events.saved) == 1  # DOWN-Event IST da (event is not None)
+    assert events.saved[0].event is MonitorEventType.DOWN
+    assert alert_raiser.raised == []  # ...aber KEIN Alert (should_notify False bei Erstmessung)
+
+
+def test_down_flank_raises_alert_with_down_event() -> None:
+    # up->down (prev=True, now=False): should_notify(True, DOWN)=True -> Alert mit DOWN.
+    sample = PingSample(target_id="wlan", host="h", alive=False, rtt_ms=-1.0)
+    uc, _rtt, _events, _notifier, _broadcaster, alert_raiser = _build(
+        _FakePinger(default=sample), [_target()]
+    )
+    uc._status["wlan"] = True  # prev = True
+
+    asyncio.run(uc.tick())
+
+    assert len(alert_raiser.raised) == 1
+    assert alert_raiser.raised[0].event is MonitorEventType.DOWN
+    assert alert_raiser.raised[0].target_id == "wlan"
+
+
+def test_up_flank_raises_alert_with_up_event() -> None:
+    # down->up (prev=False, now=True): should_notify(False, UP)=True -> Alert mit UP.
+    sample = PingSample(target_id="wlan", host="h", alive=True, rtt_ms=3.0)
+    uc, _rtt, _events, _notifier, _broadcaster, alert_raiser = _build(
+        _FakePinger(default=sample), [_target()]
+    )
+    uc._status["wlan"] = False  # prev = False
+
+    asyncio.run(uc.tick())
+
+    assert len(alert_raiser.raised) == 1
+    assert alert_raiser.raised[0].event is MonitorEventType.UP
+
+
+def test_alert_raiser_failure_does_not_break_tick() -> None:
+    # Best-effort-Vertrag des Ports: faellt der Raiser aus, darf der tick NICHT
+    # sterben -- UND die notify-Konsequenz davor bleibt unberuehrt. (Hier prueft der
+    # Test die Use-Case-Seite: der Loop ruft den Port und verlaesst sich darauf, dass
+    # er nie wirft -- der Adapter garantiert das, s. _MonitorAlertRaiser-Test.)
+    class _ThrowingAlertRaiser:
+        async def raise_alert(self, event: MonitorEvent) -> None:
+            raise RuntimeError("raiser kaputt")
+
+    sample = PingSample(target_id="wlan", host="h", alive=False, rtt_ms=-1.0)
+    rtt = _RecordingRtt()
+    events = _RecordingEvents()
+    notifier = _RecordingNotifier()
+    broadcaster = _RecordingBroadcaster()
+    uc = RunMonitor(
+        pinger=_FakePinger(default=sample),
+        rtt_history=rtt,
+        event_repo=events,
+        notifier=notifier,
+        broadcaster=broadcaster,
+        target_source=_StaticTargetSource([_target()]),
+        alert_raiser=_ThrowingAlertRaiser(),
+    )
+    uc._status["wlan"] = True  # prev=True -> DOWN-Flanke, should_notify True
+
+    # Der Use-Case faengt NICHT selbst (Vertrag: der Adapter wirft nie). Ein wirklich
+    # werfender Fake demonstriert, dass DANN der tick mitstirbt -- genau warum der
+    # Adapter den Fang tragen MUSS. notify lief davor (Konsequenz-Reihenfolge).
+    import pytest
+
+    with pytest.raises(RuntimeError, match="raiser kaputt"):
+        asyncio.run(uc.tick())
+    assert len(notifier.notified) == 1  # notify lief VOR dem Raiser-Ausfall

@@ -4,7 +4,8 @@ Sechs Vertraege, gruppiert nach Loop-Belang:
 
 * **Messung** -- ``MonitorPingerPort`` (pingt ein Target -> PingSample).
 * **Konsequenzen** -- ``MonitorNotifierPort`` (Notification), ``MonitorBroadcasterPort``
-  (Live-Update an die Subscriber).
+  (Live-Update an die Subscriber), ``AlertRaiserPort`` (regelbasierter Alert, A.7a --
+  alerting-Naht ueber app.py, der Port nennt nichts aus alerting).
 * **Persistenz** -- ``RttHistoryRepository`` (rtt_history), ``MonitorEventRepository``
   (monitor_events).
 * **Konfiguration** -- ``MonitorTargetSource`` (welche Targets ueberwachen?).
@@ -120,6 +121,35 @@ class MonitorBroadcasterPort(Protocol):
         (alive/rtt_ms/loss_pct/timestamp), ``event`` den erkannten Uebergang oder
         ``None`` (kein Uebergang -- das Frame traegt dann ``event: null``, wie im
         Altcode). Keine Subscriber -> die Methode tut nichts (kein Fehler).
+        """
+        ...
+
+
+class AlertRaiserPort(Protocol):
+    """Loest einen Alert fuer einen erkannten Uebergang aus (alerting-Naht, A.7a).
+
+    Die ZWEITE Konsequenz neben ``MonitorNotifierPort``: erst ``classify_transition``
+    bestimmt das Event, ``should_notify`` entscheidet OB -- bei ``True`` ruft der Loop
+    sowohl ``notify`` (Desktop-Notification) als auch diesen Port (regelbasierter
+    Alert: alert_history-Write + E-Mail/macos je Nutzer-Regel). Der Loop reicht nur
+    sein eigenes ``MonitorEvent`` durch und bleibt alerting-blind: das Mapping
+    ``MonitorEvent`` -> ``RaiseAlert(rule_type/target/message)`` lebt im Composition
+    Root (``app.py``, ``_MonitorAlertRaiser``), NICHT hier -- so nennt dieser Port
+    (und damit ``ports/monitoring``) NICHTS aus der alerting-Domaene (independence,
+    CI-hart). Symmetrisch zur ``MonitorNotifierPort``-Naht (M.2/M.3): die Domaene
+    kennt weder das ``osascript`` des Notifiers noch die ``alert_rules``-Auswahl des
+    Raisers.
+    """
+
+    async def raise_alert(self, event: MonitorEvent) -> None:
+        """Loest fuer ``event`` die passenden Alert-Regeln aus.
+
+        Best-effort -- EXAKT wie ``MonitorNotifierPort.notify``: wirft NIE. Der
+        Adapter faengt+loggt jeden Fehler selbst; ein fehlgeschlagener Alert ist KEIN
+        Loop-Fehler und darf weder den ``tick`` killen noch die ``notify``-Konsequenz
+        verschlucken (beide Konsequenzen sind dadurch gegenseitig isoliert, ohne dass
+        der Use-Case ein try/except braucht). Matcht keine Regel -> no-op (kein
+        Fehler), wie der vom Port vorgesehene Ruhezustand.
         """
         ...
 

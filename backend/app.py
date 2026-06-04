@@ -78,6 +78,7 @@ from application.alerting import (
     GetAlertHistory,
     GetAlertRules,
     GetSmtpConfigRaw,
+    RaiseAlert,
     SaveSmtpConfig,
     SendTestAlert,
     UpdateAlertRule,
@@ -109,6 +110,7 @@ from application.scanning import (
     RunNetworkScan,
 )
 from application.settings import GetSettings, UpdateSecret, UpdateSetting
+from domain.monitoring import MonitorEvent, MonitorEventType
 from infrastructure.alerting import (
     AlertNotifierAdapter,
     SettingsSmtpConfigAdapter,
@@ -235,6 +237,72 @@ class _FritzHostsWiring:
             # best-effort: Auth-Fehler killt den Scan nicht -- aber GELOGGT (kein S3).
             logger.warning("fritz_auth_failed", host=exc.host)
             return []
+
+
+# ── monitoring -> alerting-Trigger-Naht (A.7a) ────────────────────────────────
+# Der erste echte VERHALTENS-Change der alerting-Migration: ab hier feuert RaiseAlert
+# real, wenn der monitor-Loop eine up/down-Flanke erkennt (alert_history wird
+# beschrieben, Alerts gehen je Nutzer-Regel raus). Die Naht lebt HIER im Composition
+# Root -- nicht in infrastructure -- weil sie BEIDE Domaenen kennt: sie liest ein
+# domain/monitoring.MonitorEvent UND ruft den application/alerting.RaiseAlert-Use-Case.
+# Ein infrastructure-Adapter duerfte application NICHT importieren (Contract
+# "infrastructure kennt nicht application"); app.py ist als Composition Root von den
+# import-linter-Contracts ausgenommen und der einzige erlaubte Ort. Muster wie
+# _scheduled_scan (M.6-ScanTriggerCallback) und _FritzHostsWiring: eine kleine
+# Verdrahtungs-Klasse, die einen Port strukturell erfuellt.
+
+# Der Alert-Message-Wortlaut, dupliziert aus MonitorNotifierAdapter._MESSAGES (infra).
+# Bewusst Option (i): View-Vokabular ("{label} is DOWN"/"is back UP") gehoert nicht in
+# die Domaene (models.py VIEW-Prinzip). Die Duplikation ist als VERTRAG abgesichert --
+# ein Test (test_alert_message_wording_matches_notifier) nagelt fest, dass dieses Dict
+# zeichengleich mit dem Notifier-Dict ist, sonst liefen Notification-Text und
+# alert_history-message kuenftig still auseinander. GLEICHE FORM wie _MESSAGES
+# (dict[MonitorEventType, str] mit {label}-Template), damit der Test schlicht == prueft.
+_ALERT_MESSAGES: dict[MonitorEventType, str] = {
+    MonitorEventType.DOWN: "{label} is DOWN",
+    MonitorEventType.UP: "{label} is back UP",
+}
+
+
+class _MonitorAlertRaiser:
+    """Verdrahtungs-Wrapper, der ``AlertRaiserPort`` erfuellt -- mappt MonitorEvent -> RaiseAlert.
+
+    Haelt den ``RaiseAlert``-Use-Case und uebersetzt das durchgereichte
+    ``MonitorEvent`` in den alerting-Aufruf (DF2-Mapping, A.7a):
+
+    * ``rule_type = "host_down"`` fuer BEIDE Flanken (down UND up) -- eine
+      Nutzer-Regel mit Typ ``host_down`` faengt beide Richtungen; ein eigener
+      rule_type fuer ``up`` wuerde nie eine existierende Regel matchen (toter Strang).
+    * ``target = event.target_id`` -- der stabile/semantische Target-Bezeichner
+      (= Frontend-Target-Kennung), gegen den die Regel mit ``target`` exakt oder
+      ``"any"`` matcht.
+    * ``message`` aus ``_ALERT_MESSAGES`` -- exakt der Notifier-Wortlaut (Vertrag, s.o.).
+
+    BEST-EFFORT (Port-Vertrag, EXAKT wie der MonitorNotifierAdapter): faengt JEDEN
+    Fehler des Use-Cases und loggt ihn -- wirft NIE in den Loop. So bleibt die
+    raise_alert-Konsequenz von der notify-Konsequenz isoliert (keine kann die andere
+    verschlucken), ohne dass der RunMonitor-Use-Case ein try/except braucht.
+    """
+
+    def __init__(self, raise_alert: RaiseAlert) -> None:
+        self._raise_alert = raise_alert
+
+    async def raise_alert(self, event: MonitorEvent) -> None:
+        template = _ALERT_MESSAGES.get(event.event)
+        if template is None:
+            # Nur up/down loesen einen Alert aus (should_notify filtert das im
+            # Use-Case bereits auf genau diese zwei Flanken -- hier defensiv kein Ruf).
+            return
+        message = template.format(label=event.label)
+        try:
+            await self._raise_alert(
+                rule_type="host_down",
+                target=event.target_id,
+                message=message,
+            )
+        except Exception:
+            # Best-effort: nie ein Loop-Fehler. MIT Log (kein stiller S3-Fang).
+            logger.warning("monitor_alert_raise_failed", target_id=event.target_id)
 
 
 # ── Frontend-Serving (traversal-sicher) ───────────────────────────────────────
@@ -533,6 +601,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     # RunMonitor pro Lifespan einmal gebaut (haelt den Loop-State _status). Bekommt
     # den Broadcaster-Singleton -> seine broadcast()-Frames erreichen die WS-Clients.
+    # alert_raiser (A.7a): die monitoring->alerting-Naht. _MonitorAlertRaiser haelt
+    # einen frischen RaiseAlert mit den drei alerting-Adaptern (alle weiter unten im
+    # alerting-Block definiert -- diese Closure laeuft erst im lifespan, da sind alle
+    # Provider da; spaete Namensaufloesung, Muster wie _scheduled_scan). Der RunMonitor
+    # bleibt alerting-blind: er ruft nur AlertRaiserPort.raise_alert(event).
     def _build_run_monitor() -> RunMonitor:
         return RunMonitor(
             pinger=MonitorPingerAdapter(),
@@ -541,6 +614,13 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             notifier=MonitorNotifierAdapter(),
             broadcaster=monitor_broadcaster(),
             target_source=target_source(),
+            alert_raiser=_MonitorAlertRaiser(
+                RaiseAlert(
+                    alert_rule_repository(),
+                    alert_notifier,
+                    smtp_config_adapter(),
+                )
+            ),
         )
 
     # status_provider: die label-angereicherte {tid:{alive,label}}-Map fuer
@@ -587,8 +667,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     # das Rule-Repo teilt die cernis.db (lru_cache wie scan_history); der Notifier ist
     # zustandslos; der SmtpConfig-Adapter teilt sich den MIGRIERTEN settings-``repository()``
     # mit der bestehenden settings-Verdrahtung (das smtp_config-Setting lebt dort, nicht in
-    # einem eigenen Repo). RaiseAlert hat KEINEN Endpunkt und wird in A.6 NICHT verdrahtet
-    # (A.7 macht den monitor-Loop-Trigger live -- dann bekommt er Repo + Notifier + SmtpConfig).
+    # einem eigenen Repo). RaiseAlert hat KEINEN Endpunkt; ab A.7a ist er ueber die
+    # monitoring->alerting-Naht (_MonitorAlertRaiser, im _build_run_monitor oben) am
+    # monitor-Loop verdrahtet -- er bekommt dort Repo + Notifier + SmtpConfig.
     @lru_cache(maxsize=1)
     def alert_rule_repository() -> SqliteAlertRuleRepository:
         from modules.db_path import get_db_path
