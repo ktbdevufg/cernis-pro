@@ -1,7 +1,7 @@
 """Datentraeger des metrics-Querschnitts -- reine Wertobjekte (stdlib, ADR 0002).
 
 metrics ist ein LESE-/AGGREGAT-QUERSCHNITT ueber mehrere Quell-Domaenen (devices,
-rtt_history, sla_samples, scan_history -- spaeter alert_history, M.8b). Es ist KEINE
+rtt_history, sla_samples, scan_history, alert_history (A.7b)). Es ist KEINE
 Fach-Domaene mit Verhalten, sondern buendelt die fertig aggregierten Kennzahlen aus
 diesen Quellen fuer den Export (Prometheus / InfluxDB / Home Assistant).
 
@@ -78,10 +78,17 @@ class MetricsSnapshot:
     Null-Snapshot (alle Zaehler 0, alle Listen leer) ist damit ein valider Zustand,
     der valide leere/0-Metriken erzeugt.
 
-    ``alerts_24h`` fehlt BEWUSST: ``alert_history`` gehoert zur noch nicht
-    migrierten alerting-Domaene. Der metrics-Querschnitt deckt hier die VIER
-    migrierten Quellen; die ``cernis_alerts_24h``-Metrik folgt als M.8b-Nachzuegler
-    nach der alerting-Migration (dann ein ``alerts_24h``-Feld + die Format-Zeile).
+    ``alerts_24h`` (A.7b): COUNT der ``alert_history``-Zeilen der letzten 24h. In M.8
+    bewusst ausgelassen (alerting war nicht migriert -> Vorwaerts-Kopplung an eine
+    nicht-existente Domaene); ab A.7a beschreibt der monitor-Trigger ``alert_history``
+    real, darum jetzt freigeschaltet. Es ist ein NACKTER ``int`` -- KEIN Import aus
+    ``domain.alerting`` (die metrics-Domaene bleibt isoliert; der Reader liest die
+    ``alert_history``-Tabelle DIREKT per SQL, wie rtt_history/sla_samples, nicht ueber
+    den alerting-Port). Charakterisierungstreu wird das Feld NUR von ``to_prometheus``
+    gerendert -- der Altcode fuehrte ``cernis_alerts_24h`` ausschliesslich im
+    Prometheus-Block; influx/HA hatten es nie (s. ``format.py``). Welche Formate ein
+    Snapshot-Feld rendern, ist Sache der Format-Funktionen -- das Feld selbst ist
+    formatuebergreifend nur Datum.
     """
 
     # ── devices (ISO-Text-Zeitachse: last_seen) ──────────────────────────────
@@ -100,3 +107,6 @@ class MetricsSnapshot:
     # ── scan_history (ISO-Text-Zeitachse: scanned_at) -- 7d-Aggregat ──────────
     scans_7d: int = 0
     scan_hosts_max: int = 0
+
+    # ── alert_history (epoch-float-Zeitachse: ts) -- 24h-COUNT (A.7b) ─────────
+    alerts_24h: int = 0

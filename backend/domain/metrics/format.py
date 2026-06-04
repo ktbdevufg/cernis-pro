@@ -119,6 +119,17 @@ def to_prometheus(snapshot: MetricsSnapshot, now_ms: int) -> str:
         [({}, snapshot.scan_hosts_max)],
     )
 
+    # ── Alert-Metrik (A.7b) ────────────────────────────────────────────────────
+    # NUR Prometheus: der Altcode fuehrte cernis_alerts_24h ausschliesslich hier
+    # (counter); influx/HA hatten es nie -> bleiben unveraendert (keine Format-
+    # Erweiterung in A.7b -- das waere ein eigener Feature-Entscheid, nicht Migration).
+    metric(
+        "cernis_alerts_24h",
+        "Alerts fired in last 24h",
+        "counter",
+        [({}, snapshot.alerts_24h)],
+    )
+
     lines.append("")  # trailing newline (Altcode-treu)
     return "\n".join(lines)
 

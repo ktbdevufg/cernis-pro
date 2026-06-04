@@ -39,6 +39,7 @@ _FULL = MetricsSnapshot(
     ),
     scans_7d=7,
     scan_hosts_max=42,
+    alerts_24h=3,
 )
 
 
@@ -82,6 +83,14 @@ def test_prometheus_scan_block() -> None:
     assert "cernis_scan_hosts_max 42" in out
 
 
+def test_prometheus_alerts_24h_present_with_altcode_wording() -> None:
+    # A.7b: cernis_alerts_24h NUR in Prometheus, exakt Altcode-Wortlaut (counter).
+    out = to_prometheus(_FULL, now_ms=0)
+    assert "# HELP cernis_alerts_24h Alerts fired in last 24h" in out
+    assert "# TYPE cernis_alerts_24h counter" in out
+    assert "cernis_alerts_24h 3" in out
+
+
 def test_prometheus_empty_snapshot_is_valid_zeroed_output() -> None:
     # GEHEILT (M.8-Robustheit): leere DB -> Null-Snapshot -> valide 0-Ausgabe,
     # NICHT die Altcode-ERROR-Zeile.
@@ -89,6 +98,8 @@ def test_prometheus_empty_snapshot_is_valid_zeroed_output() -> None:
     assert "# ERROR" not in out
     assert "cernis_devices_total 0" in out
     assert "cernis_scans_last_7d 0" in out
+    # alerts_24h auch im Null-Snapshot als 0 sichtbar (A.7b, leere-History).
+    assert "cernis_alerts_24h 0" in out
     # keine Target-abhaengigen Zeilen ohne rtt/sla-Punkte
     assert "cernis_monitor_rtt_ms{" not in out
     assert "cernis_sla_uptime_pct{" not in out
@@ -121,6 +132,15 @@ def test_influxdb_empty_snapshot_emits_zeroed_device_line() -> None:
     assert out == "cernis,source=devices total=0i,known=0i,active_24h=0i 99"
 
 
+def test_influxdb_has_no_alerts_24h() -> None:
+    # VERTRAG (A.7b): v1 fuehrte alerts_24h NUR in Prometheus; influx bewusst ohne --
+    # charakterisierungstreu, keine Format-Erweiterung. Festgenagelt, damit niemand
+    # spaeter denkt es sei vergessen UND eine versehentliche Erweiterung rot wird.
+    out = to_influxdb(_FULL, measurement="cernis", now_ns=1)
+    assert "alerts_24h" not in out
+    assert "alerts" not in out
+
+
 # ── Home Assistant ─────────────────────────────────────────────────────────
 
 
@@ -146,3 +166,11 @@ def test_homeassistant_empty_snapshot_is_zero_state_not_error() -> None:
     assert "error" not in out["attributes"]
     assert out["attributes"]["devices_total"] == 0
     assert out["attributes"]["monitor"] == {}
+
+
+def test_homeassistant_has_no_alerts_24h() -> None:
+    # VERTRAG (A.7b): v1 fuehrte alerts_24h NUR in Prometheus; HA bewusst ohne --
+    # charakterisierungstreu, keine Format-Erweiterung (s. influx-Vertrag).
+    out = to_homeassistant(_FULL)
+    assert "alerts_24h" not in out["attributes"]
+    assert "alerts" not in out["attributes"]

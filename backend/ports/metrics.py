@@ -20,12 +20,14 @@ sla-24h-GROUP-BY) -- mehr Kopplung ohne echte DRY-Ersparnis. Ein eigener
 ``MetricsReader`` ist das ``SlaSampleRepository``-Muster: ein schlanker,
 zweckgebundener Lesevertrag, dessen Adapter die SQL-Aggregate kapselt.
 
-VIER Quellen, NICHT fuenf: ``alert_history`` (alerting-Domaene) ist NICHT migriert.
-Den ``alert_history``-Block hier als Uebergangs-Kruecke direkt zu lesen waere eine
-Vorwaerts-Kopplung an eine nicht-existente v2-Domaene -- bewusst ausgelassen. Die
-``cernis_alerts_24h``-Metrik fehlt im v2-Pfad, bis alerting migriert ist; sie kommt
-als M.8b-Nachzuegler zurueck (dann eine ``alerts``-Aggregat-Methode hier + die
-Format-Zeile in ``domain.metrics``).
+FUENFTE Quelle ``alert_history`` (A.7b): in M.8 bewusst ausgelassen (alerting war nicht
+migriert -> ein direkter Lese-Block waere Vorwaerts-Kopplung an eine nicht-existente
+v2-Domaene gewesen). Ab A.7a beschreibt der monitor-Trigger ``alert_history`` real, darum
+freigeschaltet: der Adapter zaehlt die 24h-Zeilen DIREKT per SQL (M.8-Trennung -- metrics
+kennt die TABELLE, nicht den alerting-Port). Charakterisierungstreu rendert nur
+``to_prometheus`` das Feld (Altcode: ``cernis_alerts_24h`` nur dort; influx/HA nie). Die
+Port-Signatur aendert sich NICHT -- ``snapshot()`` gibt weiter ``MetricsSnapshot``, nur um
+das ``alerts_24h``-Feld erweitert.
 
 leere-DB-Robustheit (M.8, bewusste v2-Verbesserung): ``snapshot`` wirft NICHT bei
 leerer/fehlender Tabelle -- jede Quelle liefert dann ``0``/``[]`` (der Null-Snapshot
@@ -50,11 +52,12 @@ class MetricsReader(Protocol):
     """Liest den vollstaendigen metrics-Lese-Querschnitt als ``MetricsSnapshot``."""
 
     def snapshot(self) -> MetricsSnapshot:
-        """Aktueller metrics-Querschnitt ueber die vier migrierten Quellen.
+        """Aktueller metrics-Querschnitt ueber die fuenf Quellen.
 
-        Aggregiert frisch aus devices / rtt_history / sla_samples / scan_history:
-        Device-Zaehler inkl. beider Aktiv-Fenster (1h/24h), latest-RTT pro Target,
-        24h-SLA-Aggregat pro Target, 7d-Scan-Aggregat. Die zwei Zeitkonventionen der
+        Aggregiert frisch aus devices / rtt_history / sla_samples / scan_history /
+        alert_history: Device-Zaehler inkl. beider Aktiv-Fenster (1h/24h), latest-RTT
+        pro Target, 24h-SLA-Aggregat pro Target, 7d-Scan-Aggregat, 24h-Alert-COUNT
+        (A.7b). Die zwei Zeitkonventionen der
         Quellen (epoch-float ``ts`` fuer rtt/sla, ISO-Text ``last_seen``/
         ``scanned_at`` fuer devices/scan) bedient der Adapter -- BEWUSST nicht
         vereinheitlicht (Altcode-IST).

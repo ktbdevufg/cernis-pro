@@ -1,15 +1,20 @@
 """SQLite-Adapter fuer den Port ``MetricsReader`` (M.8): liest den metrics-Querschnitt.
 
-Aggregiert frisch aus VIER migrierten Quell-Tabellen derselben ``cernis.db``
-(``devices`` / ``rtt_history`` / ``sla_samples`` / ``scan_history``) in ein
-``MetricsSnapshot``. Reproduziert die SQL-Aggregate des Altcode ``modules/metrics.py``
--- aber gespeist in das reine Domaenen-Aggregat statt direkt in Export-Text.
+Aggregiert frisch aus FUENF Quell-Tabellen derselben ``cernis.db``
+(``devices`` / ``rtt_history`` / ``sla_samples`` / ``scan_history`` / ``alert_history``)
+in ein ``MetricsSnapshot``. Reproduziert die SQL-Aggregate des Altcode
+``modules/metrics.py`` -- aber gespeist in das reine Domaenen-Aggregat statt direkt in
+Export-Text.
 
-VIER Quellen, NICHT fuenf: ``alert_history`` (alerting-Domaene, NICHT migriert) ist
-BEWUSST ausgelassen -- den ``alert_history``-Block hier direkt zu lesen waere eine
-Vorwaerts-Kopplung an eine nicht-existente v2-Domaene. Die ``cernis_alerts_24h``-
-Metrik fehlt im v2-Pfad, bis alerting migriert ist (M.8b-Nachzuegler: dann ein
-``alerts``-Aggregat hier + das Feld im Snapshot + die Format-Zeile).
+``alert_history`` (A.7b): in M.8 als FUENFTE Quelle BEWUSST ausgelassen -- alerting war
+nicht migriert, ein direkter Lese-Block waere Vorwaerts-Kopplung an eine nicht-existente
+v2-Domaene gewesen. Ab A.7a beschreibt der monitor-Trigger ``alert_history`` real, darum
+jetzt freigeschaltet: ``_read_alerts`` zaehlt die Zeilen der letzten 24h (epoch-float
+``ts``-Konvention, wie rtt/sla). Der Reader liest die Tabelle DIREKT per SQL (wie alle
+anderen Quellen), NICHT ueber den alerting-Port -- das ist die M.8-Trennung: metrics ist
+Querschnitt-Leser, kennt die TABELLEN, nicht die Domaenen. Charakterisierungstreu rendert
+nur ``to_prometheus`` das Feld (Altcode fuehrte ``cernis_alerts_24h`` nur dort; influx/HA
+nie -- KEINE Format-Erweiterung in A.7b).
 
 REINER KONSUMENT -- legt KEINE Tabellen an (kein ``_ensure_schema``, anders als die
 schreibenden Repos und anders als der M.7-Lese-Adapter, der charakterisierungstreu
@@ -54,6 +59,7 @@ from domain.metrics import MetricsSnapshot, RttPoint, SlaPoint
 # Zeitfenster (Sekunden) -- Altcode-treu.
 _RTT_WINDOW_S = 300  # letzte 5 Minuten: latest-per-target RTT
 _SLA_WINDOW_S = 86400  # letzte 24h: SLA-Aggregat
+_ALERTS_WINDOW_S = 86400  # letzte 24h: alert_history-COUNT (A.7b)
 
 
 class SqliteMetricsReader:
@@ -81,6 +87,7 @@ class SqliteMetricsReader:
             rtt_points = self._read_rtt_points(conn, now)
             sla_points = self._read_sla_points(conn, now)
             scans = self._read_scans(conn)
+            alerts_24h = self._read_alerts(conn, now)
 
         return MetricsSnapshot(
             device_total=devices["total"],
@@ -92,6 +99,7 @@ class SqliteMetricsReader:
             sla_points=sla_points,
             scans_7d=scans["scans_7d"],
             scan_hosts_max=scans["scan_hosts_max"],
+            alerts_24h=alerts_24h,
         )
 
     # ── devices (ISO-Text-Zeitachse) ─────────────────────────────────────────
@@ -214,3 +222,27 @@ class SqliteMetricsReader:
         if row is None:
             return {"scans_7d": 0, "scan_hosts_max": 0}
         return {"scans_7d": row["total"] or 0, "scan_hosts_max": row["max_hosts"] or 0}
+
+    # ── alert_history (epoch-float-Zeitachse) -- 24h-COUNT (A.7b) ──────────────
+
+    def _read_alerts(self, conn: sqlite3.Connection, now: float) -> int:
+        """Anzahl der ``alert_history``-Zeilen der letzten 24h -- epoch-float-Vergleich.
+
+        Altcode-treu (``modules/metrics.py`` Alert-Block): ``SELECT COUNT(*) FROM
+        alert_history WHERE ts > ?`` mit ``ts > now - 86400``. ``ts`` ist epoch-float
+        (gehoert zur rtt/sla-Konvention, NICHT zur ISO-Text-Konvention von
+        devices/scan -- BEWUSST nicht vereinheitlicht). Fehlende ``alert_history``-
+        Tabelle -> ``0`` (leere-DB-Fall, kein Throw); ``COUNT`` ueber 0 Zeilen ist 0,
+        das ``or 0`` faengt den NULL-Rand (Altcode-Muster). Da ``alert_history`` ab
+        A.7a real beschrieben wird, ist der 0-Fall = leere History.
+        """
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) AS total FROM alert_history WHERE ts > ?",
+                (now - _ALERTS_WINDOW_S,),
+            ).fetchone()
+        except sqlite3.OperationalError:
+            return 0
+        if row is None:
+            return 0
+        return int(row["total"] or 0)
