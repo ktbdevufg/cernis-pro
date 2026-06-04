@@ -37,6 +37,18 @@ from api.alerting import (
     provide_update_alert_rule,
 )
 from api.alerting import router as alerting_router
+from api.capture import (
+    provide_capture_lldp,
+    provide_capture_status,
+    provide_get_lldp_neighbors,
+    provide_pcap_path,
+    provide_recent_packets,
+    provide_save_dir,
+    provide_start_capture,
+    provide_start_capture_uc,
+    provide_stop_capture,
+)
+from api.capture import router as capture_router
 from api.devices import (
     provide_delete_device,
     provide_get_device,
@@ -93,6 +105,12 @@ from application.alerting import (
     SendTestAlert,
     UpdateAlertRule,
 )
+from application.capture import (
+    CaptureLldp,
+    GetLldpNeighbors,
+    RunCapture,
+    StartCapture,
+)
 from application.devices import (
     DeleteDevice,
     GetDevice,
@@ -134,6 +152,11 @@ from infrastructure.alerting import (
     AlertNotifierAdapter,
     SettingsSmtpConfigAdapter,
     SqliteAlertRuleRepository,
+)
+from infrastructure.capture import (
+    ScapyLldpSniffer,
+    ScapyPacketSniffer,
+    WebSocketCaptureBroadcaster,
 )
 from infrastructure.clock import SystemClock
 from infrastructure.config import APP_NAME, APP_VERSION, AppConfig
@@ -182,6 +205,7 @@ from modules.alerting import init_alerts_db
 from modules.devices_db import init_devices_db
 from modules.storage import init_db
 from ws_monitor import make_ws_monitor
+from ws_pcap import make_ws_pcap
 from ws_scan import make_ws_scan
 
 logger = structlog.get_logger()
@@ -427,6 +451,14 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             _app.state.monitor_task.cancel()
             with suppress(asyncio.CancelledError):
                 await _app.state.monitor_task
+            # capture-Loop (C.5): laeuft NUR, wenn ueber POST /api/pcap/start gestartet
+            # (kein startup-Autostart). Beim Shutdown sauber stoppen + canceln, falls aktiv.
+            capture_task = getattr(_app.state, "capture_task", None)
+            if capture_task is not None and not capture_task.done():
+                run_capture().stop()
+                capture_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await capture_task
             job_scheduler().stop()
         logger.info("shutdown", service=APP_NAME)
 
@@ -777,6 +809,86 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             status_code=503,
             content={"detail": "Secret-Speicher (OS-Keystore) ist nicht verfuegbar."},
         )
+
+    # ── capture-Domaene v2 verdrahten (C.4+5, Regel 5: ports<->infra nur hier) ──
+    # REST (pcap/lldp) ueber duenne Use-Cases im api-Ring; der WS-Handler /ws/pcap
+    # lebt im Composition Root (ws_pcap.py, Broadcaster-Adapter -> WS-Transport).
+    # Drei langlebige Singletons (lru_cache, EINE Instanz pro App): der Sniffer (haelt
+    # den AsyncSniffer + die scapy-Rohpakete fuer wrpcap), der LLDP-Sniffer und der
+    # Broadcaster (den der RunCapture-Loop bespielt UND in den die /ws/pcap-Handler
+    # subscriben -- beide teilen dieselben Subscriber). RunCapture + CaptureLldp halten
+    # den Loop-State (Stats/Ringpuffer bzw. Nachbartabelle) und sind darum ebenfalls
+    # Singletons. capture_task laeuft NICHT im startup (anders als der monitor-Loop) --
+    # er startet on-demand ueber POST /api/pcap/start; der lifespan-shutdown cancelt ihn.
+    @lru_cache(maxsize=1)
+    def packet_sniffer() -> ScapyPacketSniffer:
+        return ScapyPacketSniffer()
+
+    @lru_cache(maxsize=1)
+    def lldp_sniffer() -> ScapyLldpSniffer:
+        return ScapyLldpSniffer()
+
+    @lru_cache(maxsize=1)
+    def capture_broadcaster() -> WebSocketCaptureBroadcaster:
+        return WebSocketCaptureBroadcaster()
+
+    # Ziel-Pfad der temp-pcap, die RunCapture.stop() schreibt (Altcode: _pcap_file im
+    # tempdir mit Zeitstempel-Name -- hier ein fester Name pro App, der bei jedem Stop
+    # ueberschrieben wird; status/save lesen den zuletzt geschriebenen Pfad).
+    import tempfile
+
+    _capture_pcap_path = str(Path(tempfile.gettempdir()) / "cernis_capture.pcap")
+
+    @lru_cache(maxsize=1)
+    def run_capture() -> RunCapture:
+        return RunCapture(packet_sniffer(), capture_broadcaster(), _capture_pcap_path)
+
+    @lru_cache(maxsize=1)
+    def capture_lldp() -> CaptureLldp:
+        return CaptureLldp(lldp_sniffer())
+
+    # StartCapture-Composition-Callable: prueft (StartCapture-Use-Case) und startet bei
+    # ok=True den RunCapture-Loop als Task (create_task + app.state.capture_task -- das
+    # kennt nur der Composition Root, NICHT der api-Ring). Ein bereits laufender Capture
+    # wird nicht doppelt gestartet (Altcode: if _capture_running: return ok) -- der alte
+    # Task bleibt, das ``ok`` wird durchgereicht. Gibt das {ok,error} des Use-Case zurueck.
+    def _start_capture(interface: str | None, bpf_filter: str, max_packets: int) -> dict[str, Any]:
+        result = StartCapture(packet_sniffer())()
+        if not result["ok"]:
+            return result
+        existing = getattr(app.state, "capture_task", None)
+        if existing is not None and not existing.done():
+            # Bereits ein Capture aktiv -- nicht doppelt starten (altcode-treu).
+            return result
+        app.state.capture_task = asyncio.create_task(
+            run_capture().run(interface, bpf_filter, max_packets)
+        )
+        return result
+
+    def _stop_capture() -> None:
+        run_capture().stop()
+
+    # save-Ziel-Verzeichnis (Filesystem-Policy -> Composition Root, NICHT Use-Case):
+    # Desktop/Schreibtisch/Downloads/Home-Fallback, altcode-treu (main.api_pcap_save).
+    def _save_dir() -> Path:
+        home = Path.home()
+        for candidate in [home / "Desktop", home / "Schreibtisch", home / "Downloads", home]:
+            if candidate.is_dir():
+                return candidate
+        return home
+
+    app.include_router(capture_router)
+    app.dependency_overrides[provide_start_capture_uc] = lambda: StartCapture(packet_sniffer())
+    app.dependency_overrides[provide_start_capture] = lambda: _start_capture
+    app.dependency_overrides[provide_stop_capture] = lambda: _stop_capture
+    app.dependency_overrides[provide_capture_status] = lambda: run_capture().status
+    app.dependency_overrides[provide_recent_packets] = lambda: run_capture().recent_packets
+    app.dependency_overrides[provide_pcap_path] = lambda: run_capture().pcap_path
+    app.dependency_overrides[provide_save_dir] = lambda: _save_dir
+    app.dependency_overrides[provide_capture_lldp] = lambda: capture_lldp()
+    app.dependency_overrides[provide_get_lldp_neighbors] = lambda: GetLldpNeighbors(capture_lldp())
+
+    app.add_api_websocket_route("/ws/pcap", make_ws_pcap(capture_broadcaster()))
 
     # ── Frontend-Serving ── MUSS als LETZTES registriert werden ──────────────────
     # Der "/"-Mount faengt alle zuvor NICHT gematchten Pfade. Deshalb hier ganz am
