@@ -43,6 +43,18 @@ class AppConfig(BaseSettings):
     # CERNIS_BOOTSTRAP_ON_STARTUP=true und dokumentiert so den Uebergang.
     bootstrap_on_startup: bool = False
 
+    # Per-App-Durchsatz (traffic Stufe 2): ob der Poller beim Start als Dauer-Loop
+    # mitlaeuft (AUTO). Greift NUR zusammen mit ``bootstrap_on_startup`` (kein Poll
+    # in Tests/ohne produktiven Owner). Default False -> der Durchsatz wird erst auf
+    # Anforderung erfasst (MANUELL ueber POST /api/traffic/poll/start), sparsam wie
+    # der capture-Loop. Ueber ``CERNIS_TRAFFIC_POLL_AUTO`` einschaltbar.
+    traffic_poll_auto: bool = False
+
+    # Poll-Intervall des Durchsatz-Pollers in Sekunden (Vision-"Regler": kleiner =
+    # feiner aufgeloeste Momentanrate, mehr Last). Gilt fuer AUTO und MANUELL.
+    # Ueber ``CERNIS_TRAFFIC_POLL_INTERVAL`` anpassbar.
+    traffic_poll_interval: float = 1.0
+
     # Verzeichnis des gebauten React-Frontends (frontend-dist). Hat Vorrang vor
     # der automatischen Suche (siehe app._resolve_frontend_dir). None -> Suche;
     # findet sich keins, laeuft die App API-only ohne Frontend-Serving.

@@ -112,7 +112,12 @@ from api.system import (
     provide_version,
 )
 from api.system import router as system_router
-from api.traffic import provide_check_traffic_permission, provide_list_app_traffic
+from api.traffic import (
+    provide_check_traffic_permission,
+    provide_list_app_traffic,
+    provide_start_poll,
+    provide_stop_poll,
+)
 from api.traffic import router as traffic_router
 from application.agent import (
     DeleteAgent,
@@ -177,7 +182,7 @@ from application.security import (
     RunArpScan,
 )
 from application.settings import GetSettings, UpdateSecret, UpdateSetting
-from application.traffic import CheckTrafficPermission, ListAppTraffic
+from application.traffic import CheckTrafficPermission, ListAppTraffic, PollThroughput
 from domain.monitoring import MonitorEvent, MonitorEventType
 from infrastructure.agent import (
     SqliteAgentRepository,
@@ -474,6 +479,14 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             run_monitor_uc = _build_run_monitor()
             _app.state.run_monitor = run_monitor_uc
             _app.state.monitor_task = asyncio.create_task(run_monitor_uc.run())
+            # traffic-Durchsatz-Poller AUTO (T.4b-2): nur wenn explizit eingeschaltet.
+            # Default aus -> der Durchsatz wird sparsam erst auf Anforderung erfasst
+            # (MANUELL ueber POST /api/traffic/poll/start). Nutzt DENSELBEN Singleton +
+            # app.state-Keys wie der MANUELL-Pfad (eine Instanz, ein State).
+            if cfg.traffic_poll_auto:
+                poll_throughput_uc = _poll_throughput()
+                _app.state.poll_throughput = poll_throughput_uc
+                _app.state.poll_task = asyncio.create_task(poll_throughput_uc.run())
             job_scheduler().start(_scheduled_scan)
             for row in schedule_repository().list():
                 if row["enabled"]:
@@ -500,6 +513,17 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 capture_task.cancel()
                 with suppress(asyncio.CancelledError):
                     await capture_task
+            # traffic-Poll-Loop (T.4b-2): laeuft per AUTO (oben) ODER MANUELL
+            # (POST /api/traffic/poll/start). Beim Shutdown sauber stoppen + canceln,
+            # falls aktiv -- selber Pfad fuer beide Modi (ein Singleton/Task).
+            poll_task = getattr(_app.state, "poll_task", None)
+            if poll_task is not None and not poll_task.done():
+                poll_uc = getattr(_app.state, "poll_throughput", None)
+                if poll_uc is not None:
+                    poll_uc.stop()
+                poll_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await poll_task
             job_scheduler().stop()
         logger.info("shutdown", service=APP_NAME)
 
@@ -1017,18 +1041,60 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         InterfaceDiscoveryAdapter()
     )
 
-    # ── traffic-Domaene v2 verdrahten (T.3, Per-App-Netzwerk-Monitoring Stufe 1) ──
-    # Zustandslose Adapter direkt instanziiert (Muster InterfaceDiscoveryAdapter):
-    # PsutilTrafficAdapter liefert die Verbindungssicht (Stufe 1), der Use-Case
-    # buendelt sie pro App. TrafficPermissionAdapter prueft lokal die Sicht-Tiefe
-    # (Root/CAP_NET_ADMIN). Stufe-2-Durchsatz + Polling-Zustand folgen in T.4.
+    # ── traffic-Domaene v2 verdrahten (T.3+T.4b-2, Per-App-Netzwerk-Monitoring) ──
+    # GETEILTER Adapter-Singleton (lru_cache, Muster run_capture): Poller UND Leser
+    # nutzen DIESELBE PsutilTrafficAdapter-Instanz -- sonst pollt der eine, liest der
+    # andere aus einer zweiten Instanz. Der Adapter ist zustandslos, der Singleton
+    # ist hier nur Disziplin (eine Quelle), kein State.
+    @lru_cache(maxsize=1)
+    def _traffic_adapter() -> PsutilTrafficAdapter:
+        return PsutilTrafficAdapter()
+
+    # PollThroughput-Singleton: haelt den Mess-/Raten-State ueber die Zeit. AUTO
+    # (lifespan) UND MANUELL (Endpunkte) greifen auf DENSELBEN Singleton zu -- so
+    # gibt es nur einen State, und der Doppelstart-Schutz (poll_task.done()) hindert
+    # zwei parallele Loops. Intervall aus der Config (Vision-Regler).
+    @lru_cache(maxsize=1)
+    def _poll_throughput() -> PollThroughput:
+        return PollThroughput(_traffic_adapter(), interval=cfg.traffic_poll_interval)
+
+    # ListAppTraffic-Runner (Naht current_rates -> rates, Muster _monitor_status):
+    # liest die Raten des laufenden Pollers ueber app.state (Fallback {} ohne Poller
+    # -> ehrliche Stufe 1, Raten None) und reicht sie an den Use-Case. Greift auf den
+    # GETEILTEN Adapter zu (gleiche Quelle wie der Poller).
+    async def _list_app_traffic() -> list[Any]:
+        poll = getattr(app.state, "poll_throughput", None)
+        rates = poll.current_rates() if poll is not None else {}
+        return await ListAppTraffic(_traffic_adapter())(rates)
+
+    # MANUELL-Lebenszyklus (Muster _start_capture): startet den Poll-Loop als Task an
+    # app.state, kein Doppelstart (task.done()-Check). AUTO (lifespan) nutzt denselben
+    # Singleton + dieselben app.state-Keys -- laeuft AUTO bereits, verhindert der
+    # done()-Check hier einen zweiten Task.
+    def _start_poll() -> dict[str, Any]:
+        poll = _poll_throughput()
+        app.state.poll_throughput = poll
+        existing = getattr(app.state, "poll_task", None)
+        if existing is not None and not existing.done():
+            return {"ok": True}  # bereits aktiv -- nicht doppelt starten
+        app.state.poll_task = asyncio.create_task(poll.run())
+        return {"ok": True}
+
+    def _stop_poll() -> None:
+        poll = getattr(app.state, "poll_throughput", None)
+        if poll is not None:
+            poll.stop()
+        task = getattr(app.state, "poll_task", None)
+        if task is not None:
+            task.cancel()
+
     app.include_router(traffic_router)
-    app.dependency_overrides[provide_list_app_traffic] = lambda: ListAppTraffic(
-        PsutilTrafficAdapter()
-    )
+    app.dependency_overrides[provide_list_app_traffic] = lambda: _list_app_traffic
     app.dependency_overrides[provide_check_traffic_permission] = lambda: CheckTrafficPermission(
         TrafficPermissionAdapter()
     )
+    app.dependency_overrides[provide_start_poll] = lambda: _start_poll
+    app.dependency_overrides[provide_stop_poll] = lambda: _stop_poll
 
     # ── Frontend-Serving ── MUSS als LETZTES registriert werden ──────────────────
     # Der "/"-Mount faengt alle zuvor NICHT gematchten Pfade. Deshalb hier ganz am
