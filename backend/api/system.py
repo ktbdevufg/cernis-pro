@@ -1,19 +1,21 @@
 """FastAPI-Router der System-/Glue-Endpunkte (v2, ADR-0004 P.1).
 
 Aeusserer Ring: nimmt HTTP entgegen. Self-contained Glue-Routen, die KEINER
-Domaene gehoeren (Tauri-Ready-Probe, URL-Oeffnen, Dependency-Report, Uebergangs-
-Interface-Liste). Der api-Ring kennt KEIN ``infrastructure`` und KEIN ``modules``
-(Regel 4): wo eine Route Infrastruktur braucht (System-Info, Interface-Discovery,
-Browser-Oeffnen), kommt sie als ``Callable`` per Dependency herein -- verdrahtet im
-Composition Root (``app.py``). Muster wie ``MonitorStatusProvider`` (api/monitoring)
-und die capture-Runner.
+Domaene gehoeren (Tauri-Ready-Probe, URL-Oeffnen, Dependency-Report). Der api-Ring
+kennt KEIN ``infrastructure`` und KEIN ``modules`` (Regel 4): wo eine Route
+Infrastruktur braucht (System-Info, Browser-Oeffnen), kommt sie als ``Callable``
+per Dependency herein -- verdrahtet im Composition Root (``app.py``). Muster wie
+``MonitorStatusProvider`` (api/monitoring) und die capture-Runner.
 
 Endpunkte:
 
 * ``GET  /api/status``       -> ``{status, version}`` (HTTP 200; Tauri-Ready-Probe).
 * ``POST /api/open-url``     -> oeffnet eine http/https-URL im Default-Browser.
 * ``GET  /api/system/info``  -> Verfuegbarkeit der real genutzten v2-Deps + nmap.
-* ``GET  /api/interfaces``   -> Netzwerk-Interfaces (Uebergangs-Endpunkt, s. unten).
+
+``GET /api/interfaces`` ist KEIN System-Glue mehr: der fruhere Uebergangs-Endpunkt
+ist durch die vollwertige interfaces-Domaene abgeloest (eigener Router
+``api/interfaces.py``, I.3).
 
 ABWEICHUNGEN ggue. dem Altcode (main.py, der unangetastet weiterlaeuft):
 
@@ -22,9 +24,6 @@ ABWEICHUNGEN ggue. dem Altcode (main.py, der unangetastet weiterlaeuft):
   (pysnmp/reportlab/fritzconnection/dnspython/apscheduler/cryptography/websockets)
   sind RAUS. ``/api/system/install`` (pip-Installer fuer eben jene Deps) wird in v2
   NICHT gebaut.
-* ``/api/interfaces`` ist ein UEBERGANGS-Endpunkt -- wird spaeter durch die
-  vollwertige interfaces-Domaene ersetzt. Bis dahin liefert er die Liste ueber einen
-  injizierten Provider (v2-nativer infrastructure-Adapter, modules-frei).
 """
 
 from collections.abc import Callable
@@ -54,14 +53,6 @@ type SystemInfoProvider = Callable[[], dict[str, Any]]
 
 def provide_system_info() -> SystemInfoProvider:
     raise NotImplementedError("SystemInfoProvider wird in app.py verdrahtet")
-
-
-# Liefert die Interface-Liste (Uebergangs-Adapter infrastructure.interfaces).
-type InterfacesProvider = Callable[[], list[dict[str, Any]]]
-
-
-def provide_interfaces() -> InterfacesProvider:
-    raise NotImplementedError("InterfacesProvider wird in app.py verdrahtet")
 
 
 # Oeffnet eine URL im Default-Browser. Als Callable injiziert, damit der Test einen
@@ -118,17 +109,3 @@ def system_info(
 ) -> dict[str, Any]:
     """Reduzierter Verfuegbarkeits-Report: ``version`` + ``nmap`` + real genutzte Deps."""
     return info_provider()
-
-
-@router.get("/interfaces")
-def interfaces(
-    interfaces_provider: Annotated[InterfacesProvider, Depends(provide_interfaces)],
-) -> list[dict[str, Any]]:
-    """Netzwerk-Interfaces (Uebergangs-Endpunkt).
-
-    Liefert dieselbe Feldform wie der Altcode (``useInterfaces.js``/Toolbar.jsx lesen
-    ``name``/``ipv4``/``ipv4_prefix``/``mac``/``gateway``/``ipv6_link_local``/``mtu``/
-    ``host_count``/``network_cidr`` u. a.). Wird spaeter durch die vollwertige
-    interfaces-Domaene ersetzt.
-    """
-    return interfaces_provider()

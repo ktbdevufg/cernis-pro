@@ -66,6 +66,8 @@ from api.devices import (
     provide_update_device_meta,
 )
 from api.devices import router as devices_router
+from api.interfaces import provide_list_interfaces
+from api.interfaces import router as interfaces_router
 from api.metrics import provide_export_metrics
 from api.metrics import router as metrics_router
 from api.monitoring import (
@@ -105,7 +107,6 @@ from api.settings import (
 )
 from api.settings import router as settings_router
 from api.system import (
-    provide_interfaces,
     provide_system_info,
     provide_url_opener,
     provide_version,
@@ -143,6 +144,7 @@ from application.devices import (
     RecordScannedHost,
     UpdateDeviceMeta,
 )
+from application.interfaces import ListInterfaces
 from application.metrics import ExportMetrics
 from application.monitoring import (
     AddMonitorTarget,
@@ -192,7 +194,7 @@ from infrastructure.capture import (
 from infrastructure.clock import SystemClock
 from infrastructure.config import APP_NAME, APP_VERSION, AppConfig
 from infrastructure.device_repository import SqliteDeviceRepository
-from infrastructure.interfaces import discover_interfaces
+from infrastructure.interfaces_linux import InterfaceDiscoveryAdapter
 from infrastructure.logging import configure_logging
 from infrastructure.metrics import SqliteMetricsReader
 from infrastructure.monitoring import (
@@ -998,8 +1000,17 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.include_router(system_router)
     app.dependency_overrides[provide_version] = lambda: lambda: APP_VERSION
     app.dependency_overrides[provide_system_info] = lambda: _system_info
-    app.dependency_overrides[provide_interfaces] = lambda: discover_interfaces
     app.dependency_overrides[provide_url_opener] = lambda: _open_url
+
+    # ── interfaces-Domaene v2 verdrahten (I.3, loest den Uebergangs-Endpunkt ab) ──
+    # Zustandsloser Adapter direkt instanziiert (Muster ArpTableAdapter): der
+    # Use-Case holt die rohen Interfaces ueber den Port und reichert sie fachlich an
+    # (type/status/is_primary). Die fruhere system.py-Glue-Naht + der Uebergangs-
+    # Adapter infrastructure.interfaces sind entfallen.
+    app.include_router(interfaces_router)
+    app.dependency_overrides[provide_list_interfaces] = lambda: ListInterfaces(
+        InterfaceDiscoveryAdapter()
+    )
 
     # ── Frontend-Serving ── MUSS als LETZTES registriert werden ──────────────────
     # Der "/"-Mount faengt alle zuvor NICHT gematchten Pfade. Deshalb hier ganz am

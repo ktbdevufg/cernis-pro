@@ -15,7 +15,6 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from api.system import (
-    provide_interfaces,
     provide_system_info,
     provide_url_opener,
 )
@@ -86,36 +85,3 @@ def test_system_info_liefert_reduzierten_report(app: FastAPI) -> None:
     # Die mit main.py sterbenden Quer-Deps tauchen NICHT auf.
     for dead in ("pysnmp", "reportlab", "fritzconnection", "dnspython"):
         assert dead not in body
-
-
-def test_interfaces_liefert_uebergangs_feldform(app: FastAPI) -> None:
-    """``/api/interfaces`` liefert die Altcode-Feldform (Uebergangs-Endpunkt).
-
-    Der Discovery-Provider wird gemockt -- der Test belegt, dass der Endpunkt die
-    Liste 1:1 durchreicht und das FE die erwarteten Felder bekommt.
-    """
-    fake_ifaces: list[dict[str, Any]] = [
-        {
-            "name": "eth0",
-            "ipv4": "192.168.1.10",
-            "ipv4_prefix": 24,
-            "mac": "aa:bb:cc:dd:ee:ff",
-            "gateway": "192.168.1.1",
-            "ipv6_link_local": "fe80::1",
-            "mtu": 1500,
-            "network_cidr": "192.168.1.0/24",
-            "host_count": 254,
-            "hw_type": "Ethernet",
-            "hw_icon": "🔌",
-        }
-    ]
-    app.dependency_overrides[provide_interfaces] = lambda: lambda: fake_ifaces
-
-    with TestClient(app) as client:
-        response = client.get("/api/interfaces")
-    assert response.status_code == 200
-    body = response.json()
-    assert body == fake_ifaces
-    iface = body[0]
-    for field in ("name", "ipv4", "ipv4_prefix", "mac", "gateway", "network_cidr", "host_count"):
-        assert field in iface
