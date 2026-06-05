@@ -54,6 +54,17 @@ except Exception:
 d, b, h = collect_all('psutil')
 datas += d; binaries += b; hiddenimports += h
 
+# -- v2-Bausteine (structlog/pydantic/pydantic_settings/keyring) --
+# Nachzuegler des Entry-Wechsels ADR-0004 P.3 (main:app -> app:app).
+# app.py + die v2-Adapter ziehen diese Deps; der alte main.py-Spec kannte sie nicht.
+# collect_all (nicht nur hiddenimports): pydantic hat die C-Ext pydantic_core,
+# keyring laedt Backends lazy ueber entry_points (SecretService/libsecret/kwallet).
+for _v2pkg in ('structlog', 'pydantic', 'pydantic_settings', 'keyring'):
+    _d, _b, _h = collect_all(_v2pkg)
+    datas += _d
+    binaries += _b
+    hiddenimports += _h
+
 # ── Application files ─────────────────────────────────────────
 datas += [('modules', 'modules')]
 if os.path.exists('data'):
