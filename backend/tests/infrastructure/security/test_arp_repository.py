@@ -1,16 +1,11 @@
-"""Tests fuer ``SqliteArpGuardRepository`` (SEC.4) -- Schema-Vertrag + round-trip.
+"""Tests fuer ``SqliteArpGuardRepository`` (SEC.4) -- round-trip des v2-Adapters.
 
-AUFLAGE A1 (Schema-Vertrag, NICHT zirkulaer): Der Schema-Test baut die Altcode-Tabellen
-ueber das ECHTE ``modules.arp_guard._init_arp_db`` (DB_PATH am Altcode-Namespace gebogen,
-wie SEC.1) und vergleicht ``PRAGMA table_info`` (name/type/notnull/default/pk je Spalte)
-v2-Adapter vs. echtes init fuer BEIDE Tabellen. Das beweist: v2-Repo + Altcode teilen
-GENAU dieselbe Tabelle. Mutationsprobe (im Test dokumentiert): eine v2-Spalte aendern ->
-der Vergleich wird rot.
-
-Reine Struktur-Migration, AS-IS -- KEINE Heilung.
+Reine Struktur-Migration, AS-IS -- KEINE Heilung. (Der frueher hier gefuehrte
+Schema-Vertrag gegen das echte ``modules.arp_guard._init_arp_db`` ist mit dem
+Loeschen des Altcode-moduls in ADR-0004 P.4 entfallen -- es gibt keine Altcode-
+Tabelle mehr, gegen die verglichen werden koennte.)
 """
 
-import sqlite3
 from pathlib import Path
 
 import pytest
@@ -20,24 +15,6 @@ from infrastructure.security.arp_repository import SqliteArpGuardRepository
 from ports.security import ArpGuardRepository
 
 
-def _init_altcode_db(db_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Legt die Altcode-Tabellen ueber das ECHTE _init_arp_db in db_path an."""
-    from modules import arp_guard as altcode
-
-    monkeypatch.setattr(altcode, "DB_PATH", str(db_path))
-    altcode._init_arp_db()
-
-
-def _table_schema(db_path: Path, table: str) -> list[tuple[object, ...]]:
-    """PRAGMA table_info als vergleichbare Liste (name, type, notnull, default, pk)."""
-    conn = sqlite3.connect(db_path)
-    try:
-        rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
-    finally:
-        conn.close()
-    return [tuple(row[1:]) for row in rows]  # cid (Position) weglassen
-
-
 @pytest.fixture
 def repo(tmp_path: Path) -> SqliteArpGuardRepository:
     return SqliteArpGuardRepository(tmp_path / "cernis.db")
@@ -45,46 +22,6 @@ def repo(tmp_path: Path) -> SqliteArpGuardRepository:
 
 def test_conforms_to_repository_protocol(repo: SqliteArpGuardRepository) -> None:
     _: ArpGuardRepository = repo
-
-
-# ── A1: Schema deckungsgleich mit echtem _init_arp_db ─────────
-
-
-def test_baseline_schema_matches_altcode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    alt_db = tmp_path / "alt.db"
-    _init_altcode_db(alt_db, monkeypatch)
-    v2_db = tmp_path / "v2.db"
-    SqliteArpGuardRepository(v2_db)
-
-    assert _table_schema(v2_db, "arp_baseline") == _table_schema(alt_db, "arp_baseline")
-
-
-def test_alerts_schema_matches_altcode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    alt_db = tmp_path / "alt.db"
-    _init_altcode_db(alt_db, monkeypatch)
-    v2_db = tmp_path / "v2.db"
-    SqliteArpGuardRepository(v2_db)
-
-    assert _table_schema(v2_db, "arp_alerts") == _table_schema(alt_db, "arp_alerts")
-
-
-def test_v2_reads_altcode_table_without_conflict(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # Altcode-Tabelle anlegen + Zeile schreiben -> v2-Adapter (CREATE IF NOT EXISTS =
-    # No-Op) liest sie ohne Schema-Konflikt.
-    db = tmp_path / "cernis.db"
-    _init_altcode_db(db, monkeypatch)
-    conn = sqlite3.connect(db)
-    conn.execute(
-        "INSERT INTO arp_baseline (ip, mac, vendor, first_seen, last_seen) VALUES (?,?,?,?,?)",
-        ("192.168.1.10", "AA:AA:AA:11:11:11", "AcmeCorp", 1000.0, 1000.0),
-    )
-    conn.commit()
-    conn.close()
-
-    repo = SqliteArpGuardRepository(db)
-    assert repo.load_baseline() == [ArpEntry("192.168.1.10", "AA:AA:AA:11:11:11", "AcmeCorp")]
 
 
 # ── round-trip: ArpEntry/ArpAlert rein -> SQLite -> raus ──────

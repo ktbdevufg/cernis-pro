@@ -9,7 +9,6 @@ ein spaetes Setzen der Env-Var wuerde diesen Wert nicht mehr aendern.
 Festgehalten wird, was die Schreib-Helfer in die Tabellen schreiben und wie die
 Lese-Helfer es zurueckliefern:
     monitor:   _save_event/_save_rtt  ->  get_monitor_events/get_rtt_history
-    scheduler: add/update/delete_schedule -> get_schedules
 """
 
 from pathlib import Path
@@ -120,96 +119,3 @@ def test_get_rtt_history_filters_by_target(monitor_storage: Any) -> None:
     )
     assert len(monitor.get_rtt_history("wlan")) == 1
     assert monitor.get_rtt_history("wlan")[0]["rtt_ms"] == 1.0
-
-
-# ── scheduler: scan_schedules ─────────────────────────────────
-
-
-@pytest.fixture
-def scheduler_storage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
-    from modules import scheduler
-
-    monkeypatch.setattr(scheduler, "DB_PATH", str(tmp_path / "cernis.db"))
-    scheduler.init_schedule_db()
-    return scheduler
-
-
-def test_add_schedule_then_get_roundtrip(scheduler_storage: Any) -> None:
-    scheduler = scheduler_storage
-    sid = scheduler.add_schedule(
-        name="Nightly",
-        cidr="192.168.1.0/24",
-        profile_id="standard",
-        schedule="cron:0 2 * * *",
-    )
-    assert isinstance(sid, int)
-
-    rows = scheduler.get_schedules()
-    assert len(rows) == 1
-    row = rows[0]
-    assert set(row.keys()) == {
-        "id",
-        "name",
-        "cidr",
-        "profile_id",
-        "schedule",
-        "enabled",
-        "last_run",
-        "next_run",
-        "created_at",
-    }
-    assert row["id"] == sid
-    assert row["name"] == "Nightly"
-    assert row["cidr"] == "192.168.1.0/24"
-    assert row["profile_id"] == "standard"
-    assert row["schedule"] == "cron:0 2 * * *"
-    assert row["enabled"] == 1  # DEFAULT 1
-    assert row["last_run"] is None
-    assert row["next_run"] is None
-
-
-def test_update_schedule_changes_enabled_and_name(scheduler_storage: Any) -> None:
-    scheduler = scheduler_storage
-    sid = scheduler.add_schedule(
-        name="A", cidr="10.0.0.0/24", profile_id="p", schedule="interval:1h"
-    )
-
-    scheduler.update_schedule(sid, enabled=False, name="B")
-    row = scheduler.get_schedules()[0]
-    assert row["enabled"] == 0
-    assert row["name"] == "B"
-
-
-def test_update_schedule_none_args_are_noops(scheduler_storage: Any) -> None:
-    scheduler = scheduler_storage
-    sid = scheduler.add_schedule(
-        name="A", cidr="10.0.0.0/24", profile_id="p", schedule="interval:1h"
-    )
-
-    scheduler.update_schedule(sid)  # enabled=None, name=None -> nichts aendern
-    row = scheduler.get_schedules()[0]
-    assert row["enabled"] == 1
-    assert row["name"] == "A"
-
-
-def test_delete_schedule_removes_row(scheduler_storage: Any) -> None:
-    scheduler = scheduler_storage
-    sid = scheduler.add_schedule(
-        name="A", cidr="10.0.0.0/24", profile_id="p", schedule="interval:1h"
-    )
-    assert len(scheduler.get_schedules()) == 1
-
-    scheduler.delete_schedule(sid)
-    assert scheduler.get_schedules() == []
-
-
-def test_get_schedules_orders_by_id(scheduler_storage: Any) -> None:
-    scheduler = scheduler_storage
-    s1 = scheduler.add_schedule(
-        name="A", cidr="10.0.0.0/24", profile_id="p", schedule="interval:1h"
-    )
-    s2 = scheduler.add_schedule(
-        name="B", cidr="10.0.0.0/24", profile_id="p", schedule="interval:2h"
-    )
-    rows = scheduler.get_schedules()
-    assert [r["id"] for r in rows] == sorted([s1, s2])

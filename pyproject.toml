@@ -63,7 +63,6 @@ target-version = "py312"
 src = ["backend"]
 extend-exclude = [
     "backend/modules",
-    "backend/main.py",
     "backend/cernis_cli.py",
     "backend/runtime_hook.py",
     "backend/data",
@@ -100,15 +99,6 @@ files = [
 # importieren, ohne dass mypy in den Legacy-Code hineinlaeuft.
 [[tool.mypy.overrides]]
 module = ["modules", "modules.*"]
-follow_imports = "skip"
-ignore_missing_imports = true
-
-# Der Legacy-Einstiegspunkt main.py ist ebenfalls untypisiert und nicht Teil der
-# strikten Pruefung. Characterization-Tests (z. B. der Bootstrap-Lifespan-Contract)
-# duerfen `import main`, ohne dass mypy in den Legacy-Code hineinlaeuft -- gleiches
-# Muster wie modules/. Faellt weg, sobald der Einstiegspunkt auf app.py gewechselt ist.
-[[tool.mypy.overrides]]
-module = ["main"]
 follow_imports = "skip"
 ignore_missing_imports = true
 
