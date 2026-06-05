@@ -66,7 +66,13 @@ for _v2pkg in ('structlog', 'pydantic', 'pydantic_settings', 'keyring'):
     hiddenimports += _h
 
 # ── Application files ─────────────────────────────────────────
-datas += [('modules', 'modules')]
+# modules/ nur als Quelltext bundlen -- kein __pycache__/.pyc (ADR-0004 P.4c).
+# Pauschales ('modules','modules') wuerde verwaiste .pyc geloeschter Altcode-modules
+# (P.4) mitnehmen; das .py-glob fasst nur die lebenden Quelldateien.
+datas += [
+    (str(p), 'modules')
+    for p in __import__('pathlib').Path('modules').glob('*.py')
+]
 if os.path.exists('data'):
     datas += [('data', 'data')]
 if os.path.exists('data/oui.json'):

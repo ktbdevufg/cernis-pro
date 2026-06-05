@@ -13,13 +13,6 @@ Endpunkte (Form altcode-treu, jetzt ueber den v2-Pfad -> GEHEILTE Form, weil der
 * ``GET /metrics``                  -> Prometheus-Text (``text/plain; version=0.0.4``).
 * ``GET /api/export/influxdb``       -> InfluxDB-Line-Protocol (``text/plain``).
 * ``GET /api/export/homeassistant``  -> Home-Assistant-State-JSON.
-
-WICHTIG zum Live-Zustand: Dieser Router lebt in der v2-App (``app.py:create_app``),
-die NOCH NICHT der Live-Server ist -- ``main:app`` (Altcode-Monolith) bedient die
-Endpunkte weiter ueber ``modules.metrics``, bis der Einstiegspunkt-Wechsel
-(``main:app`` -> ``app:app``) bzw. M.9 erfolgt. Erst dann faellt ``modules/metrics.py``
-weg (M.8-Nachzuegler). Hier wird die geheilte v2-Form in der v2-App per Endpunkt-Test
-bewiesen.
 """
 
 from typing import Annotated, Any
