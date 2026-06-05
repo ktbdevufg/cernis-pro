@@ -110,6 +110,14 @@ ignore_missing_imports = true
 module = ["apscheduler.*"]
 ignore_missing_imports = true
 
+# psutil (feste dep, T.3 traffic-Adapter) liefert KEINE Typ-Stubs / kein py.typed-
+# Marker -> mypy meldet sonst "import-untyped". Nur die fehlenden Stubs ignorieren
+# (wie apscheduler, NICHT follow_imports=skip -- Third-Party, kein Legacy-Code). Der
+# Adapter castet die psutil-Rueckgaben selbst (sconn-Felder/Process.name -> str).
+[[tool.mypy.overrides]]
+module = ["psutil.*"]
+ignore_missing_imports = true
+
 # scapy (feste dep, C.3 capture-Adapter) liefert nur PARTIELLE Stubs: die dynamisch
 # erzeugten Layer-Klassen (DNS/IP/TCP/Ether/... , scapy.contrib.{lldp,cdp}) und die
 # AsyncSniffer-Callback-Attribute fehlen darin -> mypy meldet sonst flaechig

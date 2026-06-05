@@ -112,6 +112,8 @@ from api.system import (
     provide_version,
 )
 from api.system import router as system_router
+from api.traffic import provide_check_traffic_permission, provide_list_app_traffic
+from api.traffic import router as traffic_router
 from application.agent import (
     DeleteAgent,
     ListAgents,
@@ -175,6 +177,7 @@ from application.security import (
     RunArpScan,
 )
 from application.settings import GetSettings, UpdateSecret, UpdateSetting
+from application.traffic import CheckTrafficPermission, ListAppTraffic
 from domain.monitoring import MonitorEvent, MonitorEventType
 from infrastructure.agent import (
     SqliteAgentRepository,
@@ -226,6 +229,8 @@ from infrastructure.security import (
     TlsInspectorAdapter,
 )
 from infrastructure.settings_repository import SqliteSettingsRepository
+from infrastructure.traffic_linux import PsutilTrafficAdapter
+from infrastructure.traffic_permission import TrafficPermissionAdapter
 
 # ── ÜBERGANGS-KRÜCKE P2.1b: Bootstrap-Init aus dem Altcode (modules/) ──────────
 # app.py ist Bootstrap-Owner und ruft die Init-/Teardown-Funktionen der noch
@@ -1010,6 +1015,19 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.include_router(interfaces_router)
     app.dependency_overrides[provide_list_interfaces] = lambda: ListInterfaces(
         InterfaceDiscoveryAdapter()
+    )
+
+    # ── traffic-Domaene v2 verdrahten (T.3, Per-App-Netzwerk-Monitoring Stufe 1) ──
+    # Zustandslose Adapter direkt instanziiert (Muster InterfaceDiscoveryAdapter):
+    # PsutilTrafficAdapter liefert die Verbindungssicht (Stufe 1), der Use-Case
+    # buendelt sie pro App. TrafficPermissionAdapter prueft lokal die Sicht-Tiefe
+    # (Root/CAP_NET_ADMIN). Stufe-2-Durchsatz + Polling-Zustand folgen in T.4.
+    app.include_router(traffic_router)
+    app.dependency_overrides[provide_list_app_traffic] = lambda: ListAppTraffic(
+        PsutilTrafficAdapter()
+    )
+    app.dependency_overrides[provide_check_traffic_permission] = lambda: CheckTrafficPermission(
+        TrafficPermissionAdapter()
     )
 
     # ── Frontend-Serving ── MUSS als LETZTES registriert werden ──────────────────
