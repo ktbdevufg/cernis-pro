@@ -12,8 +12,10 @@ from domain.traffic import (
     Connection,
     ConnSample,
     Endpoint,
+    _canonical_ip,
     aggregate_by_app,
     compute_rate,
+    make_socket_key,
     match_samples,
     normalize_status,
 )
@@ -205,3 +207,53 @@ def test_match_samples_empty() -> None:
     assert match_samples([], []) == []
     assert match_samples([_sample("a")], []) == []
     assert match_samples([], [_sample("a")]) == []
+
+
+# ── _canonical_ip ────────────────────────────────────────────────────────────
+
+
+def test_canonical_ip_ipv4_unchanged() -> None:
+    assert _canonical_ip("172.18.1.156") == "172.18.1.156"
+
+
+def test_canonical_ip_mapped_ss_and_psutil_identical() -> None:
+    # DER Kern: ss-Form (mit Klammern) und psutil-Form (ohne) -> identisch.
+    ss_form = _canonical_ip("[::ffff:172.18.1.156]")
+    psutil_form = _canonical_ip("::ffff:172.18.1.156")
+    assert ss_form == psutil_form == "172.18.1.156"
+
+
+def test_canonical_ip_real_ipv6_bracket_and_plain_identical() -> None:
+    assert _canonical_ip("[::1]") == _canonical_ip("::1") == "::1"
+    assert _canonical_ip("[2001:db8::1]") == _canonical_ip("2001:db8::1") == "2001:db8::1"
+
+
+def test_canonical_ip_garbage_returns_raw() -> None:
+    # Unparsebares -> roh zurueck (best-effort, nie werfen).
+    assert _canonical_ip("nicht-ip") == "nicht-ip"
+    assert _canonical_ip("") == ""
+
+
+# ── make_socket_key ──────────────────────────────────────────────────────────
+
+
+def test_make_socket_key_ss_and_psutil_same_socket_identical() -> None:
+    # DER entscheidende Test: derselbe IPv6-mapped Socket aus ss vs. psutil
+    # ergibt denselben key (sonst paaren sie in match_samples nicht).
+    ss_key = make_socket_key("tcp", "[::ffff:172.18.1.156]", 3389, "[::ffff:172.18.1.152]", 49946)
+    psutil_key = make_socket_key("tcp", "::ffff:172.18.1.156", 3389, "::ffff:172.18.1.152", 49946)
+    assert ss_key == psutil_key
+    assert ss_key == "tcp:172.18.1.156:3389:172.18.1.152:49946"
+
+
+def test_make_socket_key_ipv4() -> None:
+    assert make_socket_key("tcp", "1.2.3.4", 80, "5.6.7.8", 12345) == "tcp:1.2.3.4:80:5.6.7.8:12345"
+
+
+def test_make_socket_key_remote_none() -> None:
+    # LISTEN o. Ae.: kein Remote -> leere remote-Teile, key bleibt stabil.
+    assert make_socket_key("tcp", "0.0.0.0", 22, None, None) == "tcp:0.0.0.0:22::"
+
+
+def test_make_socket_key_carries_l4_prefix() -> None:
+    assert make_socket_key("udp", "1.2.3.4", 53, "5.6.7.8", 53).startswith("udp:")

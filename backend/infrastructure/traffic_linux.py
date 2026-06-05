@@ -43,7 +43,14 @@ import time
 
 import psutil
 
-from domain.traffic import Connection, ConnSample, Endpoint, L4Protocol, normalize_status
+from domain.traffic import (
+    Connection,
+    ConnSample,
+    Endpoint,
+    L4Protocol,
+    make_socket_key,
+    normalize_status,
+)
 
 # psutil-``SocketKind`` -> Domaenen-L4. NUR TCP/UDP werden aufgenommen; andere
 # Socket-Typen (RAW/SEQPACKET o. Ae.) sind fuer die Per-App-Sicht uninteressant und
@@ -107,6 +114,22 @@ _BYTES_SENT_RE = re.compile(r"bytes_sent:(\d+)")
 _BYTES_RECEIVED_RE = re.compile(r"bytes_received:(\d+)")
 
 
+def _split_addr_port(token: str) -> tuple[str, int] | None:
+    """``ss``-Adressspalte (``ip:port`` bzw. ``[ipv6]:port``) -> ``(ip, port)``.
+
+    Der Port haengt immer hinter dem LETZTEN ``:`` (``rsplit``), die IP davor --
+    das traegt sowohl IPv4 (``1.2.3.4:443``) als auch IPv6 (``[::1]:443``, der
+    IPv6-Teil enthaelt selbst Doppelpunkte). Die ``[...]``-Klammern bleiben am IP-
+    Teil und werden erst von ``_canonical_ip`` (Domaene) entfernt -- so liegt die
+    Kanonisierung an EINER Stelle. Nicht-numerischer Port / fehlendes ``:`` ->
+    ``None`` (der Aufrufer ueberspringt den Socket, best-effort).
+    """
+    ip, sep, port = token.rpartition(":")
+    if not sep or not port.isdigit():
+        return None
+    return (ip, int(port))
+
+
 def parse_ss_output(text: str) -> list[tuple[str, int, int]]:
     """Parst ``ss -tin``-Output zu ``(key, bytes_sent, bytes_received)`` je TCP-Socket.
 
@@ -116,13 +139,15 @@ def parse_ss_output(text: str) -> list[tuple[str, int, int]]:
     ``bytes_sent``/``bytes_received``). Die Header-Zeile (``State Recv-Q ...``) wird
     uebersprungen.
 
-    ``key = f"tcp:{local}:{remote}"`` (Adressen wie in der ss-Zeile, IPv6 in
-    ``[...]``) -- kein Inode/PID noetig, das Parsing braucht KEIN Root. Fehlendes
-    ``bytes_sent``/``bytes_received`` -> ``0`` (frischer Socket ohne Verkehr; so taucht
-    der Socket dennoch ueber BEIDE Messpunkte in ``match_samples`` auf). Sockets ohne
-    Adressspalten werden uebersprungen. ZEITFREI -- kein ``monotonic`` hier (der
-    Adapter stempelt). Best-effort: unparsebare Zeilen werden ignoriert, nie wird
-    geworfen.
+    Der ``key`` entsteht ueber die Domaenen-Funktion ``make_socket_key`` (kanonische,
+    quellenunabhaengige Identitaet) -- NICHT aus rohen ss-Strings: so ergibt derselbe
+    Socket aus ss UND psutil denselben ``key`` (IPv4-mapped/IPv6-Klammern werden in
+    ``_canonical_ip`` vereinheitlicht). Kein Inode/PID noetig, das Parsing braucht
+    KEIN Root. Fehlendes ``bytes_sent``/``bytes_received`` -> ``0`` (frischer Socket
+    ohne Verkehr; so taucht der Socket dennoch ueber BEIDE Messpunkte in
+    ``match_samples`` auf). Sockets ohne (parsbare) Adressspalten werden uebersprungen.
+    ZEITFREI -- kein ``monotonic`` hier (der Adapter stempelt). Best-effort:
+    unparsebare Zeilen werden ignoriert, nie wird geworfen.
     """
     result: list[tuple[str, int, int]] = []
     current_key: str | None = None
@@ -161,11 +186,13 @@ def parse_ss_output(text: str) -> list[tuple[str, int, int]]:
         # Header-Zeile (``State Recv-Q ...``) oder zu kurze Zeile -> kein Socket.
         if len(parts) < 5 or parts[0] in ("State", "Recv-Q"):
             continue
-        local, remote = parts[-2], parts[-1]
-        # Plausibilitaet: beide Spalten muessen einen Port (``:``) tragen.
-        if ":" not in local or ":" not in remote:
+        local = _split_addr_port(parts[-2])
+        remote = _split_addr_port(parts[-1])
+        # Beide Adressspalten muessen als ip:port parsbar sein, sonst kein Socket.
+        if local is None or remote is None:
             continue
-        current_key = f"tcp:{local}:{remote}"
+        # Kanonischer key ueber die Domaene (deckt sich mit dem Stufe-1-key).
+        current_key = make_socket_key("tcp", local[0], local[1], remote[0], remote[1])
         have_socket = True
 
     _flush()

@@ -24,6 +24,7 @@ DARSTELLUNG bleibt draussen: keine Icons/Emojis, kein Mensch-lesbares Formatiere
 von Raten ("1,2 MB/s") -- das fuehrt api/Frontend. Die Domaene fuehrt nur Zahlen.
 """
 
+import ipaddress
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
@@ -144,6 +145,55 @@ def normalize_status(raw: str) -> ConnectionStatus:
     Hochlaufen. Rein: kein I/O, kein State, gleiches ``raw`` -> gleiches Ergebnis.
     """
     return _STATUS_MAP.get(raw.upper(), "other")
+
+
+def _canonical_ip(raw: str) -> str:
+    """Kanonisiert eine IP-Adresse fuer die Socket-Identitaet -- rein, best-effort.
+
+    Entfernt ss-Klammern (``[::1]`` -> ``::1``), loest IPv4-mapped IPv6 auf
+    (``::ffff:172.18.1.156`` -> ``172.18.1.156``) und vereinheitlicht IPv6-
+    Schreibweisen (``ip_address``-Kanonform). So werden die ss-Adressform (mit
+    Klammern) und die psutil-Form (ohne) DECKUNGSGLEICH -- die Voraussetzung dafuer,
+    dass derselbe Socket aus beiden Quellen denselben ``make_socket_key`` ergibt.
+
+    Unparsebares -> roh zurueck (best-effort, nie werfen): ein nicht parsbarer Wert
+    soll die Paarung nicht crashen, sondern hoechstens diesen einen Socket nicht
+    paaren lassen. Rein: kein I/O.
+    """
+    stripped = raw.strip("[]")
+    try:
+        addr = ipaddress.ip_address(stripped)
+    except ValueError:
+        return raw  # best-effort: lieber die rohe Form als ein Crash
+    # ``ipv4_mapped`` gibt es NUR auf IPv6Address (None, wenn nicht gemappt); eine
+    # IPv4Address hat das Attribut gar nicht -> defensiv per getattr abfragen.
+    mapped = getattr(addr, "ipv4_mapped", None)
+    return str(mapped) if mapped else str(addr)
+
+
+def make_socket_key(
+    l4: L4Protocol,
+    local_ip: str,
+    local_port: int,
+    remote_ip: str | None,
+    remote_port: int | None,
+) -> str:
+    """Kanonische, quellenunabhaengige Socket-Identitaet fuer die Raten-Paarung -- rein.
+
+    Stufe 1 (psutil) und Stufe 2 (``ss``) erzeugen damit denselben ``key`` fuer
+    denselben Socket, trotz unterschiedlicher Adress-TEXTform (Klammern/mapped). Die
+    IPs laufen durch ``_canonical_ip``, die Ports bleiben numerisch. Ein abwesender
+    Remote-Endpunkt (z. B. LISTEN -> ``remote_ip``/``remote_port`` ``None``) wird als
+    leerer Teil dargestellt -- der ``key`` bleibt stabil und kollidiert nicht mit
+    einem echten Remote ``:0``.
+
+    Form: ``f"{l4}:{lip}:{lport}:{rip}:{rport}"``. Rein: kein I/O, gleiche Eingabe ->
+    gleicher ``key``.
+    """
+    lip = _canonical_ip(local_ip)
+    rip = _canonical_ip(remote_ip) if remote_ip else ""
+    rport_s = str(remote_port) if remote_port is not None else ""
+    return f"{l4}:{lip}:{local_port}:{rip}:{rport_s}"
 
 
 def _sum_known_rates(values: Sequence[float | None]) -> float | None:

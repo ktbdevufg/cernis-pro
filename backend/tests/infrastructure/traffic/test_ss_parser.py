@@ -45,16 +45,25 @@ def test_parse_socket_without_any_bytes() -> None:
     assert result == [("tcp:172.18.1.156:53648:140.82.121.5:443", 0, 0)]
 
 
-def test_parse_ipv6_address() -> None:
-    # IPv6 in [...] -> key korrekt mit Klammern gebildet.
+def test_parse_ipv6_mapped_address_canonicalized() -> None:
+    # IPv6 in [...], IPv4-mapped -> kanonischer key (Klammern weg, mapped -> IPv4).
+    # So paart er mit der psutil-Form (::ffff:...) desselben Sockets.
     text = (
         "ESTAB 0      0      [::ffff:172.18.1.156]:3389  [::ffff:172.18.1.152]:49946\n"
         "\t cubic bytes_sent:7891874 bytes_acked:7888016 bytes_received:8210318\n"
     )
     result = parse_ss_output(text)
-    assert result == [
-        ("tcp:[::ffff:172.18.1.156]:3389:[::ffff:172.18.1.152]:49946", 7891874, 8210318)
-    ]
+    assert result == [("tcp:172.18.1.156:3389:172.18.1.152:49946", 7891874, 8210318)]
+
+
+def test_parse_real_ipv6_address() -> None:
+    # Echte IPv6 (nicht mapped) -> Klammern weg, IPv6 bleibt IPv6 (kanonisiert).
+    text = (
+        "ESTAB 0      0      [2001:db8::1]:443  [2001:db8::2]:55000\n"
+        "\t cubic bytes_sent:10 bytes_received:20\n"
+    )
+    result = parse_ss_output(text)
+    assert result == [("tcp:2001:db8::1:443:2001:db8::2:55000", 10, 20)]
 
 
 def test_parse_multiple_sockets_in_order() -> None:
