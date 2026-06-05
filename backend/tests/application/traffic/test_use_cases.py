@@ -14,8 +14,9 @@ from application.traffic import (
     CheckTrafficPermission,
     ListAppTraffic,
     MeasureThroughput,
+    PollThroughput,
 )
-from domain.traffic import Connection, ConnSample, Endpoint
+from domain.traffic import Connection, ConnSample, Endpoint, make_socket_key
 
 # ── In-Memory-Fakes der Ports ────────────────────────────────────────────────
 
@@ -40,6 +41,27 @@ class FakePerProcessTrafficProvider:
     async def sample_throughput(self) -> list[ConnSample]:
         self.sample_throughput_calls += 1
         return list(self._samples)
+
+
+class SequencedTrafficProvider:
+    """Provider, der bei JEDEM ``sample_throughput`` den naechsten Messpunkt liefert.
+
+    Fuer ``PollThroughput``-Tests: tick 1 sieht ``rounds[0]``, tick 2 ``rounds[1]``, ...
+    (so lassen sich zwei aufeinanderfolgende Messpunkte mit bekannten Byte-Deltas
+    vorgeben). ``list_connections`` wird hier nicht gebraucht -> leer.
+    """
+
+    def __init__(self, rounds: list[list[ConnSample]]) -> None:
+        self._rounds = rounds
+        self._index = 0
+
+    async def list_connections(self) -> list[Connection]:
+        return []
+
+    async def sample_throughput(self) -> list[ConnSample]:
+        result = self._rounds[self._index] if self._index < len(self._rounds) else []
+        self._index += 1
+        return result
 
 
 class FakeTrafficPermission:
@@ -163,3 +185,106 @@ def test_measure_throughput_empty() -> None:
     assert MeasureThroughput()([], []) == {}
     assert MeasureThroughput()([_sample("a", 0, 0, 1.0)], []) == {}
     assert MeasureThroughput()([], [_sample("a", 0, 0, 1.0)]) == {}
+
+
+# ── PollThroughput (lebender Use-Case, RunMonitor-Muster) ────────────────────
+
+
+def test_poll_first_tick_no_rates_yet() -> None:
+    # Erster tick: nur ein Messpunkt -> keine Raten (ehrlich leer, nicht 0).
+    provider = SequencedTrafficProvider([[_sample("k", 1000, 2000, 10.0)]])
+    poll = PollThroughput(provider)
+    asyncio.run(poll.tick())
+    assert poll.current_rates() == {}
+
+
+def test_poll_second_tick_computes_rates() -> None:
+    # Zwei Messpunkte mit bekannten Byte-Deltas ueber dt=2s -> erwartete bps.
+    provider = SequencedTrafficProvider(
+        [
+            [_sample("k", 1000, 2000, 10.0)],
+            [_sample("k", 3000, 2500, 12.0)],
+        ]
+    )
+    poll = PollThroughput(provider)
+    asyncio.run(poll.tick())  # prev gesetzt, noch keine Raten
+    asyncio.run(poll.tick())  # rechnet gegen prev
+    rates = poll.current_rates()
+    # sent (3000-1000)/2 = 1000, recv (2500-2000)/2 = 250
+    assert rates == {"k": (1000.0, 250.0)}
+
+
+def test_poll_stop_sets_running_false() -> None:
+    poll = PollThroughput(SequencedTrafficProvider([]))
+    poll._running = True
+    poll.stop()
+    assert poll._running is False
+
+
+def test_poll_current_rates_is_defensive_copy() -> None:
+    provider = SequencedTrafficProvider(
+        [
+            [_sample("k", 0, 0, 10.0)],
+            [_sample("k", 100, 0, 12.0)],
+        ]
+    )
+    poll = PollThroughput(provider)
+    asyncio.run(poll.tick())
+    asyncio.run(poll.tick())
+    snapshot = poll.current_rates()
+    snapshot["k"] = (999.0, 999.0)  # Mutation am Ergebnis
+    snapshot["neu"] = (1.0, 1.0)
+    # interner State unberuehrt
+    assert poll.current_rates() == {"k": (50.0, 0.0)}
+
+
+# ── ListAppTraffic mit Raten-Anreicherung ────────────────────────────────────
+
+
+def _key_of(conn: Connection) -> str:
+    return make_socket_key(
+        conn.l4,
+        conn.local.ip,
+        conn.local.port,
+        conn.remote.ip if conn.remote else None,
+        conn.remote.port if conn.remote else None,
+    )
+
+
+def test_list_app_traffic_enriches_matching_socket() -> None:
+    conn = _conn("firefox", pid=10)
+    fake = FakePerProcessTrafficProvider(connections=[conn])
+    rates = {_key_of(conn): (1234.0, 567.0)}
+    result = asyncio.run(ListAppTraffic(fake)(rates))
+    app = result[0]
+    assert app.connections[0].send_rate_bps == 1234.0
+    assert app.connections[0].recv_rate_bps == 567.0
+
+
+def test_list_app_traffic_no_match_leaves_rates_none() -> None:
+    conn = _conn("firefox", pid=10)
+    fake = FakePerProcessTrafficProvider(connections=[conn])
+    # Map mit einem FREMDEN key -> diese Verbindung bleibt None.
+    result = asyncio.run(ListAppTraffic(fake)({"tcp:9.9.9.9:1:8.8.8.8:2": (1.0, 2.0)}))
+    assert result[0].connections[0].send_rate_bps is None
+    assert result[0].connections[0].recv_rate_bps is None
+
+
+def test_list_app_traffic_without_rates_is_stage1() -> None:
+    # Kein rates-Argument -> unveraendertes Stufe-1-Verhalten (alle Raten None).
+    fake = FakePerProcessTrafficProvider(connections=[_conn("firefox", pid=10)])
+    result = asyncio.run(ListAppTraffic(fake)())
+    assert result[0].connections[0].send_rate_bps is None
+    assert result[0].total_send_rate_bps is None
+
+
+def test_list_app_traffic_aggregates_app_rate_totals() -> None:
+    # Zwei Verbindungen derselben App, beide mit Rate -> total_* summiert.
+    c1 = _conn("firefox", pid=10, port=1111)
+    c2 = _conn("firefox", pid=10, port=2222)
+    fake = FakePerProcessTrafficProvider(connections=[c1, c2])
+    rates = {_key_of(c1): (100.0, 10.0), _key_of(c2): (50.0, 5.0)}
+    result = asyncio.run(ListAppTraffic(fake)(rates))
+    app = result[0]
+    assert app.total_send_rate_bps == 150.0
+    assert app.total_recv_rate_bps == 15.0

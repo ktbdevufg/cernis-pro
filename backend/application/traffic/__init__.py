@@ -5,11 +5,13 @@ from application.traffic.use_cases import (
     CheckTrafficPermission,
     ListAppTraffic,
     MeasureThroughput,
+    PollThroughput,
 )
 
 __all__ = [
     "CheckTrafficPermission",
     "ListAppTraffic",
     "MeasureThroughput",
+    "PollThroughput",
     "TrafficApplicationError",
 ]
