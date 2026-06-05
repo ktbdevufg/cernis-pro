@@ -128,10 +128,10 @@ export default function App() {
     }
   }, [])
 
-  // Auto-select first interface
+  // Auto-select primary interface (vom Backend bestimmt)
   useEffect(() => {
     if (interfaces.length > 0 && !selectedIface) {
-      const active = interfaces.find(i => i.ipv4 && i.gateway) || interfaces[0]
+      const active = interfaces.find(i => i.is_primary) || interfaces[0]
       setSelectedIface(active)
       if (active.network_cidr) setCidr(active.network_cidr)
     }
