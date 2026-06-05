@@ -22,16 +22,24 @@ SCOPE (CLAUDE.md "Nur Linux x64"): psutil ist plattformuebergreifend, aber die
 v2-Stufe-2-Quelle (``sock_diag``) ist Linux. Stufe 1 hier ist plattformneutral; der
 Plattform-Riegel sitzt im Rechte-Adapter (``traffic_permission.py``).
 
-Stufe 2 (``sample_throughput``) ist hier bewusst NICHT implementiert -- der Port
-verlangt die Methode, aber der Durchsatz (sock_diag) folgt in T.4. Ein ehrlicher
-``NotImplementedError`` statt eines leeren Stubs (kein stiller Fallback, S3).
+Stufe 2 (``sample_throughput``, T.4a) liest die KUMULATIVEN TCP-Byte-Zaehler ueber
+``ss -tin`` (iproute2; diese Version hat kein JSON -> Text-Parsing). EINEN Messpunkt
+je Aufruf; die Raten-Berechnung aus zwei Messpunkten macht der Use-Case ueber die
+Domaene (``match_samples``/``compute_rate``). Der ``key`` ist ``tcp:local:remote``
+(kein Inode/PID noetig -- ``ss -tin`` zeigt sie ohnehin nicht, und das Parsing
+braucht KEIN Root). NUR TCP: UDP hat keine kumulativen Byte-Zaehler. Der Adapter
+stempelt ``monotonic_ts`` (die Uhr lebt in der Infrastruktur, nie in der Domaene).
+Der Poller + Lebenszyklus (AUTO/MANUELL) folgen in T.4b.
 
 Self-contained stdlib + psutil -- kein ``modules``-Import (import-linter-Contract
 "neue Ringe importieren NICHT modules" bleibt unberuehrt).
 """
 
 import asyncio
+import re
 import socket
+import subprocess
+import time
 
 import psutil
 
@@ -71,6 +79,97 @@ def _endpoint(addr: object) -> Endpoint | None:
     if not addr:
         return None
     return Endpoint(ip=addr.ip, port=addr.port)  # type: ignore[attr-defined]
+
+
+def _run(cmd: list[str]) -> str:
+    """Fuehrt ein Kommando aus und gibt stdout zurueck (Fehler -> leerer String).
+
+    Best-effort wie ``infrastructure/interfaces_linux._run``: ein fehlendes Tool
+    (``ss`` nicht da) / Timeout ist KEIN Fehler des Durchsatz-Pfads, sondern liefert
+    "keine Daten" -> leerer Output -> ``[]`` (der vertragliche Leer-Zustand des Ports,
+    kein verdecktes Scheitern).
+    """
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            timeout=5,
+            encoding="utf-8",
+            errors="replace",
+        )
+        return result.stdout or ""
+    except Exception:
+        return ""
+
+
+# Byte-Zaehler-Tokens in der ss-Detailzeile (z. B. ``bytes_sent:11320827``).
+_BYTES_SENT_RE = re.compile(r"bytes_sent:(\d+)")
+_BYTES_RECEIVED_RE = re.compile(r"bytes_received:(\d+)")
+
+
+def parse_ss_output(text: str) -> list[tuple[str, int, int]]:
+    """Parst ``ss -tin``-Output zu ``(key, bytes_sent, bytes_received)`` je TCP-Socket.
+
+    Zwei-Zeilen-Struktur von ``ss -tin``: eine Socket-Zeile OHNE fuehrenden Whitespace
+    (``STATE recv-q send-q LOCAL:PORT PEER:PORT [Process]``), gefolgt von einer
+    Detailzeile MIT fuehrendem Whitespace (die ``key:value``-Tokens inkl.
+    ``bytes_sent``/``bytes_received``). Die Header-Zeile (``State Recv-Q ...``) wird
+    uebersprungen.
+
+    ``key = f"tcp:{local}:{remote}"`` (Adressen wie in der ss-Zeile, IPv6 in
+    ``[...]``) -- kein Inode/PID noetig, das Parsing braucht KEIN Root. Fehlendes
+    ``bytes_sent``/``bytes_received`` -> ``0`` (frischer Socket ohne Verkehr; so taucht
+    der Socket dennoch ueber BEIDE Messpunkte in ``match_samples`` auf). Sockets ohne
+    Adressspalten werden uebersprungen. ZEITFREI -- kein ``monotonic`` hier (der
+    Adapter stempelt). Best-effort: unparsebare Zeilen werden ignoriert, nie wird
+    geworfen.
+    """
+    result: list[tuple[str, int, int]] = []
+    current_key: str | None = None
+    bytes_sent = 0
+    bytes_received = 0
+    have_socket = False
+
+    def _flush() -> None:
+        # Den zuletzt gesammelten Socket abschliessen (Bytes ggf. 0).
+        if have_socket and current_key is not None:
+            result.append((current_key, bytes_sent, bytes_received))
+
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        # Detailzeile: fuehrender Whitespace -> Byte-Tokens zum aktuellen Socket.
+        if line[0].isspace():
+            if not have_socket:
+                continue  # Detailzeile ohne vorangehende Socket-Zeile -> ignorieren
+            sent_match = _BYTES_SENT_RE.search(line)
+            recv_match = _BYTES_RECEIVED_RE.search(line)
+            if sent_match:
+                bytes_sent = int(sent_match.group(1))
+            if recv_match:
+                bytes_received = int(recv_match.group(1))
+            continue
+
+        # Socket-Zeile (kein fuehrender Whitespace): vorigen Socket abschliessen.
+        _flush()
+        bytes_sent = 0
+        bytes_received = 0
+        have_socket = False
+        current_key = None
+
+        parts = line.split()
+        # Header-Zeile (``State Recv-Q ...``) oder zu kurze Zeile -> kein Socket.
+        if len(parts) < 5 or parts[0] in ("State", "Recv-Q"):
+            continue
+        local, remote = parts[-2], parts[-1]
+        # Plausibilitaet: beide Spalten muessen einen Port (``:``) tragen.
+        if ":" not in local or ":" not in remote:
+            continue
+        current_key = f"tcp:{local}:{remote}"
+        have_socket = True
+
+    _flush()
+    return result
 
 
 class PsutilTrafficAdapter:
@@ -116,10 +215,25 @@ class PsutilTrafficAdapter:
         return result
 
     async def sample_throughput(self) -> list[ConnSample]:
-        """Stufe 2 (Durchsatz): NICHT implementiert -- folgt in T.4 (``sock_diag``).
+        """Stufe 2: EIN Messpunkt der kumulativen TCP-Byte-Zaehler (``ss -tin``).
 
-        Ehrlicher ``NotImplementedError`` statt eines leeren Stubs: der Port verlangt
-        die Methode, aber die Stufe-2-Byte-Zaehler-Quelle (``sock_diag``) und der
-        Polling-Zustand werden erst in T.4 gebaut (kein stiller Fallback, S3).
+        Blockierendes ``ss``-Subprocess-I/O -> ``run_in_executor`` (Loop bleibt frei).
+        ``ss`` fehlt/Timeout -> leerer Output -> ``[]`` (vertraglicher Leer-Zustand).
         """
-        raise NotImplementedError("Stufe-2-Durchsatz (sock_diag) folgt in T.4")
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._sample_throughput_sync)
+
+    def _sample_throughput_sync(self) -> list[ConnSample]:
+        """Synchroner Durchsatz-Kern (laeuft im Executor-Thread).
+
+        ``ss -tin`` -> ``parse_ss_output`` (reine, zeitfreie Funktion) -> je Socket ein
+        ``ConnSample``. Der Adapter stempelt EINEN gemeinsamen ``monotonic_ts`` fuer
+        die ganze Momentaufnahme (die Uhr lebt hier in der Infrastruktur, nie in der
+        Domaene). Die Raten aus zwei Messpunkten rechnet der Use-Case (T.4b).
+        """
+        text = _run(["ss", "-tin"])
+        ts = time.monotonic()
+        return [
+            ConnSample(key=key, bytes_sent=sent, bytes_received=recv, monotonic_ts=ts)
+            for key, sent, recv in parse_ss_output(text)
+        ]
