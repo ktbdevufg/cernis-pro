@@ -94,7 +94,7 @@ hiddenimports += [
 
 # ── Analysis ──────────────────────────────────────────────────
 a = Analysis(
-    ['main.py'],
+    ['serve.py'],
     pathex=['.'],
     binaries=binaries,
     datas=datas,
