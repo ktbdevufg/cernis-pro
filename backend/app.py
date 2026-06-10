@@ -209,6 +209,7 @@ from infrastructure.alerting import (
     SqliteAlertRuleRepository,
 )
 from infrastructure.analysis import BuiltinRuleProvider, StaticHelpLinkResolver
+from infrastructure.analysis_host_history_db import SqliteHostHistoryRepository
 from infrastructure.analysis_rules_db import SqliteUserRuleRepository
 from infrastructure.capture import (
     ScapyLldpSniffer,
@@ -698,8 +699,19 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     def _build_record_scanned_host() -> RecordScannedHost:
         return RecordScannedHost(device_repository(), device_clock)
 
+    # analysis-Host-Historie-Schreibnaht (C.2): die zweite, von der devices-Projektion
+    # UNABHAENGIGE Schreib-Naht. Liefert das record_seen-Callable (mac) -> None aus dem
+    # Host-Historie-Repo. Das Repo (host_history_repository) ist als lru_cache erst im
+    # analysis-Block weiter unten definiert; diese Closure laeuft aber erst bei der
+    # WS-Verbindung (spaete Namensaufloesung, Muster _build_run_monitor/_scheduled_scan).
+    # Diese Naht pflegt die Historie, aus der die LESE-Naht (_analyze_snapshot) spaeter
+    # ObservedHost.is_known fuellt -- die Baseline der new_host_seen-Regel (ADR 0013).
+    def _build_record_seen() -> Any:
+        return host_history_repository().record_seen
+
     app.add_api_websocket_route(
-        "/ws/scan", make_ws_scan(_build_run_network_scan, _build_record_scanned_host)
+        "/ws/scan",
+        make_ws_scan(_build_run_network_scan, _build_record_scanned_host, _build_record_seen),
     )
 
     # ── metrics-Querschnitt (M.8) ────────────────────────────────────────────
@@ -1169,6 +1181,17 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
         return SqliteUserRuleRepository(get_db_path())
 
+    # Host-Historie-Repo (C.2): analysis' erstes GEDAECHTNIS (gesehene Host-MACs),
+    # teilt die cernis.db (lru_cache, Muster analysis_rule_repository). Zwei getrennte
+    # Naehte greifen darauf zu: die SCHREIB-Naht am Scan (ws_scan, record_seen) pflegt
+    # die Historie, die LESE-Naht in _analyze_snapshot (known_macs) fuellt daraus
+    # ObservedHost.is_known. Scan schreibt, GET /api/analysis liest -- siehe ADR 0013.
+    @lru_cache(maxsize=1)
+    def host_history_repository() -> SqliteHostHistoryRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteHostHistoryRepository(get_db_path())
+
     # Kein Poller, kein app.state, kein lifespan-Eingriff -- wie process. Die zwei
     # Adapter (BuiltinRuleProvider/StaticHelpLinkResolver) sind zustandslos. Die
     # SNAPSHOT-PROJEKTION aus traffic+process lebt HIER im Composition Root, NICHT im
@@ -1239,12 +1262,22 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 logger.warning("analysis.hosts_skipped_corrupt_scan", scan_id=summaries[0].scan_id)
                 record = None
             if record is not None:
+                # Lese-Naht (C.2): die bekannten MACs EINMAL holen (Bulk, statt N
+                # is_known-Aufrufe) und je Host is_known setzen. REINER Lesevorgang --
+                # die Historie wird beim SCANNEN gepflegt (Schreib-Naht in ws_scan),
+                # NICHT hier: GET /api/analysis schreibt nicht (Variante 2, ADR 0013).
+                # MAC-lose Hosts -> is_known True (nicht als neu werten, gleiche Linie
+                # wie das Repository). Daraus folgt die Baseline: nach dem ersten Scan
+                # sind alle gesehenen Hosts bekannt; new_host_seen feuert ab dem zweiten
+                # Scan fuer echte Neuzugaenge.
+                known = host_history_repository().known_macs()
                 hosts_observed = tuple(
                     ObservedHost(
                         ip=h.ip,
                         hostname=h.hostname,
                         vendor=h.vendor,
                         open_ports=frozenset(p.port for p in h.ports if p.state == "open"),
+                        is_known=(h.mac in known) if h.mac else True,
                     )
                     for h in record.hosts
                 )

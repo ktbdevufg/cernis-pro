@@ -65,16 +65,39 @@ class _FakeRecordScannedHost:
         self.recorded.append(scanned)
 
 
+class _FakeRecordSeen:
+    """Faengt die Host-Historie-Schreibnaht (C.2, analysis_known_hosts).
+
+    Sammelt die uebergebenen MACs; optional wirft er, um den best-effort-Fehlerpfad
+    zu pruefen. Das echte Pendant ist ``SqliteHostHistoryRepository.record_seen``.
+    """
+
+    def __init__(self, raise_exc: Exception | None = None) -> None:
+        self.seen: list[str] = []
+        self._raise_exc = raise_exc
+
+    def __call__(self, mac: str) -> None:
+        if self._raise_exc is not None:
+            raise self._raise_exc
+        self.seen.append(mac)
+
+
 def _client(
     events: list[ScanEvent],
     raise_at_end: Exception | None = None,
     recorder: _FakeRecordScannedHost | None = None,
+    seen_recorder: _FakeRecordSeen | None = None,
 ) -> TestClient:
     record = recorder or _FakeRecordScannedHost()
+    record_seen = seen_recorder or _FakeRecordSeen()
     app = FastAPI()
     app.add_api_websocket_route(
         "/ws/scan",
-        make_ws_scan(lambda: _FakeRunNetworkScan(events, raise_at_end), lambda: record),
+        make_ws_scan(
+            lambda: _FakeRunNetworkScan(events, raise_at_end),
+            lambda: record,
+            lambda: record_seen,
+        ),
     )
     return TestClient(app)
 
@@ -291,3 +314,51 @@ def test_record_failure_is_best_effort_scan_continues(monkeypatch: pytest.Monkey
     assert len(logged) == 1
     assert logged[0][0] == "record_scanned_host_failed"
     assert logged[0][1]["mac"] == "AA:BB:CC:DD:EE:11"
+
+
+# ── analysis-Host-Historie-Schreibnaht (C.2) ───────────────────────────────────
+
+
+def test_host_enriched_records_seen_mac_in_history() -> None:
+    """HostEnriched -> record_seen mit der Host-MAC (Baseline fuer new_host_seen)."""
+    host = EnrichedHost(ip="192.168.1.7", mac="AA:BB:CC:DD:EE:20", category="server")
+    seen = _FakeRecordSeen()
+    with _client([HostEnriched(host=host)], seen_recorder=seen).websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "192.168.1.0/24"})
+        ws.receive_json()  # host_detail-Frame
+
+    assert seen.seen == ["AA:BB:CC:DD:EE:20"]
+
+
+def test_host_without_mac_is_not_recorded_in_history() -> None:
+    """Host ohne MAC: KEIN record_seen (skip), Frame trotzdem gesendet."""
+    host = EnrichedHost(ip="192.168.1.8", mac="", category="unknown")
+    seen = _FakeRecordSeen()
+    with _client([HostEnriched(host=host)], seen_recorder=seen).websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "192.168.1.0/24"})
+        frame = ws.receive_json()
+
+    assert frame["type"] == "host_detail"  # Frame kommt trotzdem
+    assert seen.seen == []  # aber NICHT in der Historie (MAC-keyed, skip)
+
+
+def test_record_seen_failure_is_best_effort_scan_continues(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """record_seen wirft -> Scan laeuft weiter, Frames kommen, Fehler GELOGGT."""
+    logged: list[tuple[str, dict[str, Any]]] = []
+    monkeypatch.setattr(ws_scan.logger, "warning", lambda event, **kw: logged.append((event, kw)))
+
+    host = EnrichedHost(ip="10.0.0.7", mac="AA:BB:CC:DD:EE:21", category="server")
+    seen = _FakeRecordSeen(raise_exc=RuntimeError("database is locked"))
+    events: list[ScanEvent] = [HostEnriched(host=host), ScanCompleted(total_found=1)]
+    with _client(events, seen_recorder=seen).websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "10.0.0.0/24"})
+        frames = [ws.receive_json() for _ in range(2)]
+
+    # Trotz DB-Fehler: host_detail + scan_complete kommen durch (Scan nicht abgebrochen).
+    assert [f["type"] for f in frames] == ["host_detail", "scan_complete"]
+    # Und der Fehler ist GELOGGT (Pflicht: stiller Fang waere S3).
+    assert len(logged) == 1
+    assert logged[0][0] == "record_seen_host_failed"
+    assert logged[0][1]["mac"] == "AA:BB:CC:DD:EE:21"

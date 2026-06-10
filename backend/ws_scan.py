@@ -83,6 +83,11 @@ RunScanFactory = Callable[[], Any]
 # liefert eine Funktion, die ihn frisch baut (mit DeviceRepository + Clock).
 RecordHostFactory = Callable[[], Any]
 
+# Factory-Typ fuer die analysis-Host-Historie-Schreibnaht (C.2). app.py liefert eine
+# Funktion, die ein ``record_seen``-Callable ``(mac) -> None`` zurueckgibt (aus dem
+# SqliteHostHistoryRepository). Pro Verbindung einmal geholt -- wie record_host.
+RecordSeenFactory = Callable[[], Any]
+
 
 def _project(host: EnrichedHost) -> ScannedHost:
     """Projiziert einen scanning-``EnrichedHost`` auf einen devices-``ScannedHost``.
@@ -225,6 +230,7 @@ def _build_config(raw: dict[str, Any]) -> ScanConfig:
 def make_ws_scan(
     run_scan_factory: RunScanFactory,
     record_host_factory: RecordHostFactory,
+    record_seen_factory: RecordSeenFactory,
 ) -> Callable[[WebSocket], Awaitable[None]]:
     """Baut den ``/ws/scan``-Handler mit injizierter ``RunNetworkScan``-Factory.
 
@@ -232,6 +238,12 @@ def make_ws_scan(
     konkreten Adaptern verdrahteten ``RunNetworkScan``-Use-Case (gebaut in app.py).
     ``record_host_factory()`` liefert den ``RecordScannedHost``-Use-Case fuer die
     devices-Projektion (S.7d) -- pro Verbindung einmal gebaut.
+    ``record_seen_factory()`` liefert das ``record_seen``-Callable der analysis-
+    Host-Historie (C.2) -- ebenfalls pro Verbindung einmal geholt. Diese zweite,
+    UNABHAENGIGE Schreib-Naht traegt jeden gesehenen Host (per MAC) in die Historie
+    ein und bildet so die BASELINE fuer die analysis-Regel ``new_host_seen``: der
+    erste Scan macht alle Hosts "bekannt", "neu" feuert erst ab dem zweiten Scan fuer
+    echte Neuzugaenge (Scan schreibt, GET /api/analysis liest -- siehe ADR 0013).
     """
 
     async def ws_scan(websocket: WebSocket) -> None:
@@ -254,12 +266,18 @@ def make_ws_scan(
         #    in einen error-Frame uebersetzt, KEIN roher 500er (S.6-Merkposten 2).
         use_case = run_scan_factory()
         record_host = record_host_factory()
+        record_seen = record_seen_factory()
         try:
             async for event in use_case.run(config):
                 # devices-Projektion (S.7d): pro angereichertem Host VOR dem Frame
                 # persistieren (Altcode-Reihenfolge: erst devices-DB, dann senden).
+                # analysis-Host-Historie (C.2): pro Host NEBEN der devices-Projektion
+                # die MAC in die Historie eintragen -- die Baseline fuer new_host_seen.
+                # Beide Naehte sind best-effort und unabhaengig; die Reihenfolge ist
+                # unkritisch (keine schreibt der anderen Daten vor).
                 if isinstance(event, HostEnriched):
                     _record_host(record_host, event.host)
+                    _record_seen_host(record_seen, event.host)
                 await websocket.send_json(_event_to_frame(event))
         except _ADAPTER_ERRORS as exc:
             await websocket.send_json({"type": "error", "message": str(exc)})
@@ -284,3 +302,26 @@ def _record_host(record_host: Any, host: EnrichedHost) -> None:
         record_host(_project(host))
     except Exception as exc:
         logger.warning("record_scanned_host_failed", ip=host.ip, mac=host.mac, error=str(exc))
+
+
+def _record_seen_host(record_seen: Any, host: EnrichedHost) -> None:
+    """Traegt die Host-MAC in die analysis-Host-Historie ein (best-effort, C.2).
+
+    Die zweite, von der devices-Projektion UNABHAENGIGE Schreib-Naht. Sie pflegt das
+    "schon gesehen?"-Gedaechtnis, aus dem die analysis-Lese-Naht (``_analyze_snapshot``
+    in app.py) spaeter ``ObservedHost.is_known`` fuellt -- und damit die BASELINE der
+    Regel ``new_host_seen`` (ADR 0013): nach dem ERSTEN Scan sind alle gesehenen Hosts
+    bekannt, "neu" feuert ab dem ZWEITEN Scan fuer echte Neuzugaenge.
+
+    Hosts OHNE MAC werden uebersprungen -- gleiche Linie wie ``_record_host`` und das
+    Repository (``record_seen`` ist MAC-keyed; ohne stabile Identitaet waere "neu" nur
+    Rauschen). Ein Fehler (z.B. gesperrte DB) wird gefangen + geloggt, der Scan laeuft
+    weiter (best-effort wie die devices-Projektion). Mit Warn-Log kein stiller
+    S3-Fallback.
+    """
+    if not host.mac:
+        return
+    try:
+        record_seen(host.mac)
+    except Exception as exc:
+        logger.warning("record_seen_host_failed", ip=host.ip, mac=host.mac, error=str(exc))

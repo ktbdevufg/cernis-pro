@@ -15,7 +15,7 @@ host-Beobachtung weiterhin.
 """
 
 import asyncio
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 
@@ -78,13 +78,34 @@ class _FakeUserRuleRepo:
         return ()
 
 
+class _FakeHostHistoryRepo:
+    """Fake der analysis-Host-Historie (C.2) -- eine feste Menge bekannter MACs.
+
+    Die Lese-Naht (``_analyze_snapshot``) ruft NUR ``known_macs`` (Bulk-Lesepfad);
+    ``record_seen`` ist hier ein no-op (die Lese-Naht schreibt nicht). Default:
+    leere Historie (alle Hosts unbekannt) -- die Tests, die die Historie variieren,
+    uebergeben ihre eigene MAC-Menge.
+    """
+
+    known: ClassVar[set[str]] = set()
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None: ...
+
+    def known_macs(self) -> set[str]:
+        return set(self.known)
+
+    def record_seen(self, mac: str) -> None: ...  # no-op (Lese-Naht schreibt nicht)
+
+
 def _wire_fakes(monkeypatch: pytest.MonkeyPatch) -> None:
     """Ersetzt am app-Import-Ort alle Live-Quellen-Adapter durch Fakes (kein psutil,
-    keine echte DB) -- nur das ScanHistory-Verhalten variieren die Tests selbst."""
+    keine echte DB) -- nur das ScanHistory-/Host-Historie-Verhalten variieren die
+    Tests selbst. Standard-Host-Historie: leer (alle Hosts unbekannt)."""
     monkeypatch.setattr(app_module, "PsutilTrafficAdapter", _FakeTrafficAdapter)
     monkeypatch.setattr(app_module, "PsutilProcessAdapter", _FakeProcessAdapter)
     monkeypatch.setattr(app_module, "ProcessPermissionAdapter", _FakeProcessPermission)
     monkeypatch.setattr(app_module, "SqliteUserRuleRepository", _FakeUserRuleRepo)
+    monkeypatch.setattr(app_module, "SqliteHostHistoryRepository", _FakeHostHistoryRepo)
 
 
 def _rule_ids(observations: list[Any]) -> list[str]:
@@ -155,3 +176,45 @@ def test_intact_latest_scan_yields_host_observation(monkeypatch: pytest.MonkeyPa
     assert "host_remote_access_port" in rule_ids
     # Und die traffic-Quelle bleibt ebenfalls vorhanden (beide Quellen).
     assert "remote_access_port" in rule_ids
+
+
+def test_known_host_not_new_unknown_host_is_new(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Lese-Naht (C.2): Historie kennt MAC X, nicht MAC Y -> is_known True fuer X,
+    False fuer Y; new_host_seen erscheint NUR fuer Y (echter Neuzugang)."""
+
+    class _TwoHostScanHistoryRepo:
+        """Juengster Scan mit zwei Hosts: X (bekannt) und Y (neu). Keine offenen
+        Ports -> KEIN host_remote_access_port; isoliert die new_host_seen-Naht."""
+
+        def __init__(self, *args: Any, **kwargs: Any) -> None: ...
+
+        def list(self, limit: int) -> list[ScanSummary]:
+            return [ScanSummary(scan_id=10, cidr="192.168.1.0/24", host_count=2)]
+
+        def get(self, scan_id: int) -> ScanRecord:
+            return ScanRecord(
+                scan_id=scan_id,
+                cidr="192.168.1.0/24",
+                hosts=(
+                    EnrichedHost(ip="192.168.1.51", mac="AA:BB:CC:00:00:0X", hostname="known"),
+                    EnrichedHost(ip="192.168.1.52", mac="AA:BB:CC:00:00:0Y", hostname="neu"),
+                ),
+            )
+
+    class _HistoryKnowsX(_FakeHostHistoryRepo):
+        """Historie kennt nur MAC X -- Y ist neu."""
+
+        known: ClassVar[set[str]] = {"AA:BB:CC:00:00:0X"}
+
+    _wire_fakes(monkeypatch)
+    monkeypatch.setattr(app_module, "SqliteScanHistoryRepository", _TwoHostScanHistoryRepo)
+    monkeypatch.setattr(app_module, "SqliteHostHistoryRepository", _HistoryKnowsX)
+
+    app = create_app(AppConfig())
+    runner = app.dependency_overrides[provide_analyze]()
+    observations = asyncio.run(runner())
+
+    # new_host_seen feuert -- und NUR fuer den unbekannten Host Y (subject = dessen ip).
+    new_host_obs = [o for o in observations if o.observation.rule_id == "new_host_seen"]
+    assert len(new_host_obs) == 1
+    assert new_host_obs[0].observation.subject == "192.168.1.52"  # Y, nicht X
