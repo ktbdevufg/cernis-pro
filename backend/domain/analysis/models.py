@@ -1,0 +1,76 @@
+"""Eingabe-Modelle der analysis-Domaene -- analysis' eigene, entkoppelte Sicht.
+
+Reine Wertobjekte (stdlib + dataclasses, ADR 0002): kein I/O, keine Uhr, kein
+Framework. analysis ist die interpretierende Domaene -- sie nimmt einen neutralen
+Schnappschuss der Lage und laesst Regeln darueber laufen (siehe ``rules.py`` und
+``engine.py``).
+
+BEWUSST eigene Typen (independence-Contract): analysis importiert KEINE andere
+domain-Subdomaene. Statt ``domain.traffic.Connection`` / ``domain.process.ProcessInfo``
+/ ``domain.scanning.EnrichedHost`` zu verwenden, definiert analysis hier schlanke
+eigene Eingabe-Typen mit genau den Feldern, die die Regeln brauchen. Die Projektion
+aus den echten Fremd-Objekten in diese Sicht passiert spaeter im application-Ring --
+NICHT hier (sonst koppelte analysis an Schwester-Domaenen, was der
+independence-Contract maschinell verbietet).
+"""
+
+from dataclasses import dataclass, field
+
+
+@dataclass(frozen=True)
+class ObservedConnection:
+    """Eine beobachtete Netzwerk-Verbindung -- analysis' Sicht (entkoppelt von traffic).
+
+    Nur die Felder, die Regeln brauchen. ``app_name``/``pid``/``remote_ip``/
+    ``remote_port`` sind ehrlich ``None``, wenn die Quelle sie nicht kennt -- KEIN
+    erfundener Wert. ``l4`` ist das Transportprotokoll (z. B. "tcp"/"udp"),
+    ``status`` der Verbindungszustand (z. B. "ESTABLISHED").
+    """
+
+    app_name: str | None = None
+    pid: int | None = None
+    remote_ip: str | None = None
+    remote_port: int | None = None
+    l4: str = ""
+    status: str = ""
+
+
+@dataclass(frozen=True)
+class ObservedProcess:
+    """Ein beobachteter Prozess -- analysis' Sicht (entkoppelt von process).
+
+    ``pid`` ist immer vorhanden, ``name`` nie ``None`` (nicht lesbar -> ""). ``exe_path``
+    ist der Pfad zum ausgefuehrten Programm und ehrlich ``None``, wenn nicht ermittelbar
+    -- die Regeln unterscheiden bewusst zwischen "kein Pfad" (None) und einem konkreten
+    Pfad. ``cmdline`` ist die Argumentliste (leeres Tuple = nicht lesbar).
+    """
+
+    pid: int
+    name: str = ""
+    exe_path: str | None = None
+    cmdline: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ObservedHost:
+    """Ein beobachteter Host -- analysis' Sicht (entkoppelt von scanning)."""
+
+    ip: str
+    hostname: str = ""
+    vendor: str = ""
+
+
+@dataclass(frozen=True)
+class Snapshot:
+    """analysis' GESAMTE Sicht auf die Lage zu einem Zeitpunkt -- ein neutraler Schnitt.
+
+    Ein Schnappschuss buendelt die drei beobachteten Mengen (Verbindungen, Prozesse,
+    Hosts), ueber die die RuleEngine deklarative Regeln laufen laesst. Jede Menge ist
+    per Default leer -- ein leerer Snapshot ist gueltig und liefert keine Beobachtungen.
+    Die Befuellung (Projektion aus traffic/process/scanning) ist Sache des
+    application-Rings, nicht der Domaene.
+    """
+
+    connections: tuple[ObservedConnection, ...] = field(default_factory=tuple)
+    processes: tuple[ObservedProcess, ...] = field(default_factory=tuple)
+    hosts: tuple[ObservedHost, ...] = field(default_factory=tuple)
