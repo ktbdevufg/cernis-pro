@@ -53,6 +53,7 @@ def _proc(pid: int, ppid: int | None = None) -> ProcessInfo:
         owner="kbach",
         status="sleeping",
         create_time=None,
+        exe_path="/usr/bin/foo",
         cmdline=("/usr/bin/foo",),
     )
 

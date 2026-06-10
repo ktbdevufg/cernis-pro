@@ -28,6 +28,7 @@ def _proc(
         owner="kbach",
         status="sleeping",
         create_time=None,
+        exe_path="/usr/bin/foo",
         cmdline=cmdline,
     )
 

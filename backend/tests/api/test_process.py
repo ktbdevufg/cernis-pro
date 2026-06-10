@@ -36,6 +36,7 @@ def _proc(pid: int, ppid: int | None = None, *, name: str = "foo") -> ProcessInf
         owner="kbach",
         status="sleeping",
         create_time=123.0,
+        exe_path="/usr/bin/foo",
         cmdline=("/usr/bin/foo",),
     )
 
@@ -75,6 +76,7 @@ def test_processes_flat_wire_form(app: FastAPI) -> None:
         "owner": "kbach",
         "status": "sleeping",
         "create_time": 123.0,
+        "exe_path": "/usr/bin/foo",
         "cmdline": ["/usr/bin/foo"],
     }
 

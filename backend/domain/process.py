@@ -43,6 +43,9 @@ class ProcessInfo:
     * ``status=None`` -- Lebenszustand nicht lesbar.
     * ``create_time=None`` -- Startzeit (als uebergebenes FELD, keine interne Uhr) nicht
       lesbar.
+    * ``exe_path=None`` -- absoluter Pfad zum ausgefuehrten Programm nicht ermittelbar
+      (rootless oft nicht lesbar, Kernel-Threads haben keinen) -- KEIN erfundener Wert,
+      ehrlich ``None`` analog ``owner``/``status``.
     * ``cmdline=()`` -- leeres Tuple heisst "nicht lesbar" (z. B. Kernel-Thread, dessen
       ``/proc/<pid>/cmdline`` leer ist) -- NICHT "kein Argument".
     """
@@ -53,6 +56,7 @@ class ProcessInfo:
     owner: str | None
     status: str | None
     create_time: float | None
+    exe_path: str | None
     cmdline: tuple[str, ...]
 
 

@@ -52,8 +52,9 @@ def provide_check_process_permission() -> CheckProcessPermission:
 
 def _process_to_dict(p: Any) -> dict[str, Any]:
     # p ist ein domain.ProcessInfo; per Attribut-Zugriff serialisiert (kein
-    # domain-Import). Nicht lesbare Felder sind null (ppid/owner/status/create_time)
-    # bzw. leere Liste (cmdline) -- die ehrliche rootless-Naht spiegelt sich im Wire.
+    # domain-Import). Nicht lesbare Felder sind null (ppid/owner/status/create_time/
+    # exe_path) bzw. leere Liste (cmdline) -- die ehrliche rootless-Naht spiegelt sich
+    # im Wire.
     return {
         "pid": p.pid,
         "ppid": p.ppid,
@@ -61,6 +62,7 @@ def _process_to_dict(p: Any) -> dict[str, Any]:
         "owner": p.owner,
         "status": p.status,
         "create_time": p.create_time,
+        "exe_path": p.exe_path,
         "cmdline": list(p.cmdline),
     }
 

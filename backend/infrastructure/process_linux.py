@@ -15,7 +15,8 @@ Schablone ``infrastructure/traffic_linux.py`` / ``interfaces_linux.py``:
 
 ROOTLESS-REALITAET (Vision 4.2): ``psutil.process_iter`` wirft OHNE Root NICHT --
 fremde Prozesse sind als ``pid``/``name`` sichtbar, aber die Detailfelder
-(``owner``/``status``/``create_time``/``cmdline``) werfen ``psutil.AccessDenied``. Diese
+(``owner``/``status``/``create_time``/``exe_path``/``cmdline``) werfen
+``psutil.AccessDenied``. Diese
 Felder werden dann ehrlich ``None`` bzw. leer gesetzt, der Prozess aber NICHT
 weggelassen -- das ist die "nicht lesbar / benoetigt Root"-Luecke, die die Domaene
 (``classify_kind``/``build_process_tree``) traegt. Kein erfundener Wert, kein Wegwerfen.
@@ -64,6 +65,8 @@ def _to_process_info(proc: Any) -> ProcessInfo:
     * ``owner`` (``username()``) -- sonst ``None``.
     * ``status`` -- sonst ``None``.
     * ``create_time`` -- sonst ``None``.
+    * ``exe_path`` (``exe()``) -- absoluter Programmpfad, sonst ``None`` (fremder Prozess:
+      ``AccessDenied``; Kernel-Thread: kein ausfuehrbares Programm).
     * ``cmdline`` -- ``tuple(...)``, sonst ``()`` (leer = nicht lesbar, z. B. Kernel-Thread).
 
     psutil ist untypisiert (kein py.typed): die ``Any``-Rueckgaben werden explizit
@@ -74,6 +77,7 @@ def _to_process_info(proc: Any) -> ProcessInfo:
     owner = _safe(lambda: str(proc.username()), None)
     status = _safe(lambda: str(proc.status()), None)
     create_time = _safe(lambda: float(proc.create_time()), None)
+    exe_path = _safe(lambda: str(proc.exe()), None)
     empty_cmdline: tuple[str, ...] = ()
     cmdline = _safe(lambda: tuple(str(arg) for arg in proc.cmdline()), empty_cmdline)
     return ProcessInfo(
@@ -83,6 +87,7 @@ def _to_process_info(proc: Any) -> ProcessInfo:
         owner=owner,
         status=status,
         create_time=create_time,
+        exe_path=exe_path,
         cmdline=cmdline,
     )
 
