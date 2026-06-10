@@ -21,17 +21,25 @@ from domain.analysis.rules import (
     RuleKind,
     Severity,
 )
+from domain.analysis.validation import (
+    IssueSeverity,
+    RuleIssue,
+    validate_rules,
+)
 
 __all__ = [
     "DEFAULT_RULES",
     "HelpKind",
+    "IssueSeverity",
     "Observation",
     "ObservedConnection",
     "ObservedHost",
     "ObservedProcess",
     "Rule",
+    "RuleIssue",
     "RuleKind",
     "Severity",
     "Snapshot",
     "evaluate",
+    "validate_rules",
 ]
