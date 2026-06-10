@@ -124,6 +124,63 @@ def test_legacy_blob_without_source_defaults_to_ping() -> None:
     assert host.source == "ping"
 
 
+def test_korrekte_paare_bleiben_erhalten() -> None:
+    """Korrekt geformte ``properties`` ([[k, v], ...]) -> verlustfreies tuple.
+
+    Regression gegen Ueberkorrektur: die Formpruefung in ``_str_pairs`` darf
+    gueltige Paare NICHT verwerfen.
+    """
+    data = {
+        "ip": "10.0.0.5",
+        "mac": "AA:BB:CC:DD:EE:01",
+        "mdns_services": [
+            {"name": "_smb._tcp", "properties": [["k", "v"], ["a", "b"]]},
+        ],
+    }
+    host = dict_to_host(scan_id=7, data=data)
+    assert host.mdns_services[0].properties == (("k", "v"), ("a", "b"))
+
+
+def test_flache_properties_liste_wird_corrupt_scan_error() -> None:
+    """Formfremdes ``properties`` (flache String-Liste statt [key, value]-Paaren)
+    -> benannter ``CorruptScanError`` MIT scan_id-Bezug, NICHT nackter ValueError.
+
+    MUTATIONSPROBE (durchgefuehrt, ROT bestaetigt, zurueckgesetzt): wird die
+    Laengen-Pruefung in ``_str_pairs`` auf ``!= 2`` verfaelscht, faellt der
+    Schwester-Test ``test_korrekte_paare_bleiben_erhalten``; wird die
+    ``isinstance``-Pruefung gelockert (Strings durchlassen), faellt
+    ``test_zwei_zeichen_string_ist_kein_paar``. Vor dem Fix lieferte dieser Pfad
+    einen nackten ``ValueError`` "too many values to unpack" ohne scan_id-Bezug.
+    """
+    data = {
+        "ip": "10.0.0.5",
+        "mac": "AA:BB:CC:DD:EE:01",
+        "mdns_services": [
+            {"name": "_smb._tcp", "properties": ["gcgl", "model", "at"]},
+        ],
+    }
+    with pytest.raises(CorruptScanError) as exc:
+        dict_to_host(scan_id=10, data=data)
+    assert exc.value.scan_id == 10  # Fehler MIT scan_id-Bezug
+
+
+def test_zwei_zeichen_string_ist_kein_paar() -> None:
+    """Ein 2-Zeichen-String wie "ab" darf NICHT als Paar (a, b) durchgehen.
+
+    Schaerft die isinstance-(list, tuple)-Pruefung ab: ``len("ab") == 2`` allein
+    wuerde den String sonst still als Paar entpacken. MUTATIONSPROBE: faellt die
+    ``isinstance``-Pruefung weg, laeuft dieser Test entweder still durch (falsches
+    Paar) oder kracht roh -- statt sauberem ``CorruptScanError``.
+    """
+    data = {
+        "ip": "10.0.0.5",
+        "mac": "AA:BB:CC:DD:EE:01",
+        "mdns_services": [{"name": "_smb._tcp", "properties": ["ab", "cd"]}],
+    }
+    with pytest.raises(CorruptScanError):
+        dict_to_host(scan_id=11, data=data)
+
+
 def test_save_empty_hosts_roundtrips(repo: SqliteScanHistoryRepository) -> None:
     repo.save("10.0.0.0/30", ())
     scan_id = repo.list(20)[0].scan_id

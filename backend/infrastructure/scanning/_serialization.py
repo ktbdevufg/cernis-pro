@@ -30,7 +30,9 @@ class CorruptScanError(Exception):
     """Ein zu deserialisierender Host-Blob ist kein gueltiges JSON-Objekt.
 
     Ersetzt den stillen ``or "[]"``-Rueckfall des Altcodes: ein kaputter Blob ist
-    ein Fehler MIT ``scan_id``-Bezug (Muster wie ``CorruptDeviceError``).
+    ein Fehler MIT ``scan_id``-Bezug (Muster wie ``CorruptDeviceError``). Dazu
+    zaehlt auch ein formfremdes verschachteltes Feld (z. B. ``mDNS``-properties als
+    flache String-Liste statt ``[key, value]``-Paaren).
     """
 
     def __init__(self, scan_id: int, raw_value: str) -> None:
@@ -46,9 +48,27 @@ def host_to_dict(host: EnrichedHost) -> dict[str, Any]:
     return asdict(host)
 
 
-def _str_pairs(raw: Any) -> tuple[tuple[str, str], ...]:
-    """JSON-Liste von [key, value]-Paaren -> tuple[tuple[str, str], ...]."""
-    return tuple((str(k), str(v)) for k, v in raw)
+def _str_pairs(scan_id: int, raw: Any) -> tuple[tuple[str, str], ...]:
+    """JSON-Liste von [key, value]-Paaren -> tuple[tuple[str, str], ...].
+
+    Formfremdes ``properties`` (z. B. eine flache String-Liste aus altem
+    Bestandsdatensatz statt [key, value]-Paaren) wird als benannter
+    ``CorruptScanError`` (mit ``scan_id``-Bezug) gemeldet -- NICHT als nackter
+    ``ValueError``, und NICHT still repariert (kein Datenverlust). Vervollstaendigt
+    die S3-Linie ("kein stiller Fallback") an dieser Stelle.
+    """
+    pairs: list[tuple[str, str]] = []
+    try:
+        items = list(raw)
+    except TypeError as exc:
+        raise CorruptScanError(scan_id, json.dumps(raw)) from exc
+    for item in items:
+        if isinstance(item, (list, tuple)) and len(item) == 2:
+            k, v = item
+            pairs.append((str(k), str(v)))
+        else:
+            raise CorruptScanError(scan_id, json.dumps(raw))
+    return tuple(pairs)
 
 
 def dict_to_host(scan_id: int, data: Any) -> EnrichedHost:
@@ -63,7 +83,7 @@ def dict_to_host(scan_id: int, data: Any) -> EnrichedHost:
             port=m.get("port", 0),
             hostname=m.get("hostname", ""),
             is_ndi=m.get("is_ndi", False),
-            properties=_str_pairs(m.get("properties", ())),
+            properties=_str_pairs(scan_id, m.get("properties", ())),
             ip=m.get("ip", ""),
         )
         for m in data.get("mdns_services", ())
