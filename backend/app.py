@@ -83,6 +83,8 @@ from api.monitoring import (
     provide_update_schedule,
 )
 from api.monitoring import router as monitoring_router
+from api.process import provide_check_process_permission, provide_list_processes
+from api.process import router as process_router
 from api.scanning import (
     provide_get_arp_table,
     provide_get_scan_detail,
@@ -165,6 +167,7 @@ from application.monitoring import (
     RunMonitor,
     UpdateSchedule,
 )
+from application.process import CheckProcessPermission, ListProcesses
 from application.scanning import (
     GetArpTable,
     GetScanDetail,
@@ -216,6 +219,8 @@ from infrastructure.monitoring import (
     SqliteSlaSampleRepository,
     WebSocketMonitorBroadcaster,
 )
+from infrastructure.process_linux import PsutilProcessAdapter
+from infrastructure.process_permission import ProcessPermissionAdapter
 from infrastructure.scanning.arp_table import ArpTableAdapter
 from infrastructure.scanning.fritz_hosts import FritzAuthError, FritzHostsAdapter
 from infrastructure.scanning.host_discovery import HostDiscoveryAdapter
@@ -1095,6 +1100,27 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     )
     app.dependency_overrides[provide_start_poll] = lambda: _start_poll
     app.dependency_overrides[provide_stop_poll] = lambda: _stop_poll
+
+    # ── process-Domaene v2 verdrahten (P.3, reine Lese-Sicht aus /proc) ──────────
+    # Zustandslose Adapter direkt instanziiert (Muster interfaces). Kein Poller, kein
+    # app.state -- process ist reine Lese-Domaene. Der Runner entscheidet anhand view
+    # zwischen flat()/tree() und serialisiert NICHT (das macht der api-Ring) -- er gibt
+    # Domaenen-Objekte als list[Any] zurueck (flat: ProcessInfo-Liste; tree:
+    # ProcessNode-Wald als Liste). Der api-Ring kennt keine domain-Typen, daher Any.
+    def _process_adapter() -> PsutilProcessAdapter:
+        return PsutilProcessAdapter()  # zustandslos, pro Aufruf billig
+
+    async def _list_processes(view: str) -> list[Any]:
+        uc = ListProcesses(_process_adapter())
+        if view == "tree":
+            return list(await uc.tree())  # Wald als Liste von ProcessNode
+        return await uc.flat()  # flache ProcessInfo-Liste
+
+    app.include_router(process_router)
+    app.dependency_overrides[provide_list_processes] = lambda: _list_processes
+    app.dependency_overrides[provide_check_process_permission] = lambda: CheckProcessPermission(
+        ProcessPermissionAdapter()
+    )
 
     # ── Frontend-Serving ── MUSS als LETZTES registriert werden ──────────────────
     # Der "/"-Mount faengt alle zuvor NICHT gematchten Pfade. Deshalb hier ganz am
