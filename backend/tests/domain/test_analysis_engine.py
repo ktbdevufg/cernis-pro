@@ -29,6 +29,10 @@ zurueckgesetzt -- der Test faengt den jeweiligen kritischen Vertrag also wirklic
 * (c) high_connection_count: Schwellen-Vergleich in ``engine`` von ``<=`` auf ``<``
   verfaelscht (Off-by-one) -> ``test_rule_c_grenze_*`` ROT (Wert == Schwelle wuerde
   faelschlich treffen). Zurueckgesetzt.
+* (b2) host_remote_access_port: in ``_eval_host_remote_port`` die Schnittmenge
+  verfaelscht (``matched = host.open_ports`` statt ``host.open_ports & rule.ports``)
+  -> ``test_rule_b2_nur_gewoehnliche_ports_trifft_nicht`` ROT (80/443 treffen
+  faelschlich). Zurueckgesetzt.
 """
 
 import pytest
@@ -36,6 +40,7 @@ import pytest
 from domain.analysis import (
     DEFAULT_RULES,
     ObservedConnection,
+    ObservedHost,
     ObservedProcess,
     Snapshot,
     evaluate,
@@ -68,6 +73,10 @@ def _proc(
     cmdline: tuple[str, ...] = ("foo",),
 ) -> ObservedProcess:
     return ObservedProcess(pid=pid, name="foo", kind=kind, exe_path=exe_path, cmdline=cmdline)
+
+
+def _host(ip: str, *, open_ports: frozenset[int] = frozenset()) -> ObservedHost:
+    return ObservedHost(ip=ip, hostname="host", vendor="ACME", open_ports=open_ports)
 
 
 # ── leerer Snapshot ─────────────────────────────────────────────────────────
@@ -236,6 +245,76 @@ def test_rule_b_ohne_ip_nutzt_port_als_subject() -> None:
     obs = evaluate(snap, DEFAULT_RULES)
     assert len(obs) == 1
     assert obs[0].subject == "port 22"
+
+
+# ── (b2) host_remote_access_port (Geraet haelt Fernzugriffs-Port offen) ───────
+
+
+def test_rule_b2_host_mit_offenem_port_22_trifft() -> None:
+    """Host mit offenem Port 22 -> genau EINE Observation der host-Regel.
+
+    Geraeteseitiges Gegenstueck zu (b): nicht eine Verbindung ZU Port 22, sondern ein
+    Geraet, das Port 22 OFFEN haelt. subject ist die Host-ip, der Port steht im detail.
+    """
+    snap = Snapshot(hosts=(_host("10.0.0.5", open_ports=frozenset({22})),))
+    obs = evaluate(snap, DEFAULT_RULES)
+    assert len(obs) == 1
+    assert obs[0].rule_id == "host_remote_access_port"
+    assert obs[0].help_kind == "remote_access_port"
+    assert obs[0].severity == "notable"
+    assert obs[0].subject == "10.0.0.5"
+    assert "22" in obs[0].detail
+
+
+def test_rule_b2_mehrere_fernzugriffs_ports_eine_gebuendelte_observation() -> None:
+    """Host mit 22 UND 3389 offen -> genau EINE Observation, beide Ports gebuendelt.
+
+    Die Buendelung verhindert Mehrfach-Meldung desselben Geraets: pro Host eine
+    Beobachtung, die getroffenen Ports aufsteigend sortiert im value ("22, 3389").
+    """
+    snap = Snapshot(hosts=(_host("10.0.0.6", open_ports=frozenset({3389, 22})),))
+    obs = evaluate(snap, DEFAULT_RULES)
+    assert len(obs) == 1
+    assert obs[0].rule_id == "host_remote_access_port"
+    assert obs[0].subject == "10.0.0.6"
+    assert "22, 3389" in obs[0].detail
+
+
+def test_rule_b2_nur_gewoehnliche_ports_trifft_nicht() -> None:
+    """Host mit nur 80/443 offen -> KEINE host-Observation (kein Fernzugriffs-Port).
+
+    MUTATIONSPROBE (durchgefuehrt, ROT bestaetigt, zurueckgesetzt): in
+    ``_eval_host_remote_port`` die Schnittmengen-Pruefung verfaelscht
+    (``matched = host.open_ports`` statt ``host.open_ports & rule.ports``, also ALLE
+    offenen Ports als Treffer) -> dieser Test ROT (80/443 wuerden faelschlich treffen).
+    Zurueckgesetzt.
+    """
+    snap = Snapshot(hosts=(_host("10.0.0.7", open_ports=frozenset({80, 443})),))
+    assert evaluate(snap, DEFAULT_RULES) == []
+
+
+def test_rule_b2_host_ohne_offene_ports_trifft_nicht() -> None:
+    snap = Snapshot(hosts=(_host("10.0.0.8", open_ports=frozenset()),))
+    assert evaluate(snap, DEFAULT_RULES) == []
+
+
+def test_rule_b2_zwei_hosts_je_port_22_nach_subject_sortiert() -> None:
+    # Zwei Hosts mit je offenem 22 -> zwei Observations, nach subject (ip) sortiert.
+    snap = Snapshot(
+        hosts=(
+            _host("10.0.0.20", open_ports=frozenset({22})),
+            _host("10.0.0.10", open_ports=frozenset({22})),
+        )
+    )
+    obs = [o for o in evaluate(snap, DEFAULT_RULES) if o.rule_id == "host_remote_access_port"]
+    assert len(obs) == 2
+    assert [o.subject for o in obs] == ["10.0.0.10", "10.0.0.20"]
+
+
+def test_rule_b2_host_ohne_ip_wird_uebersprungen() -> None:
+    # Leere ip -> kein sinnvolles subject -> uebersprungen, trotz offenem Fernzugriffs-Port.
+    snap = Snapshot(hosts=(_host("", open_ports=frozenset({22})),))
+    assert evaluate(snap, DEFAULT_RULES) == []
 
 
 # ── (c) high_connection_count ───────────────────────────────────────────────

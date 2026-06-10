@@ -50,6 +50,8 @@ def _apply_rule(rule: Rule, snapshot: Snapshot) -> list[Observation]:
             return _eval_connection_remote_port(rule, snapshot)
         case "pid_connection_count":
             return _eval_pid_connection_count(rule, snapshot)
+        case "host_remote_port":
+            return _eval_host_remote_port(rule, snapshot)
 
 
 def _eval_process_temp_path(rule: Rule, snapshot: Snapshot) -> list[Observation]:
@@ -155,6 +157,45 @@ def _eval_connection_remote_port(rule: Rule, snapshot: Snapshot) -> list[Observa
                 severity=rule.severity,
                 title=rule.title,
                 detail=rule.detail_template.format(subject=subject, value=port),
+                help_kind=rule.help_kind,
+                subject=subject,
+            )
+        )
+    return out
+
+
+def _eval_host_remote_port(rule: Rule, snapshot: Snapshot) -> list[Observation]:
+    """Treffer je HOST, der mindestens einen Port aus ``rule.ports`` offen haelt.
+
+    Geraeteseitiges Gegenstueck zur Verbindungs-Regel ``connection_remote_port``: dort
+    sieht die Engine eine VERBINDUNG zu einem Fernzugriffs-Port, hier ein GERAET, das so
+    einen Port OFFEN anbietet (Stand letzter Scan, aus den projizierten Hosts).
+
+    BUENDELUNG: pro Host genau EINE Beobachtung -- nicht eine je getroffenem Port. Sonst
+    wuerde dasselbe Geraet mehrfach gemeldet. Die getroffenen Ports (Schnittmenge
+    ``host.open_ports & rule.ports``) werden aufsteigend sortiert, kommagetrennt in den
+    ``{value}``-Platzhalter gebuendelt (z. B. "22, 3389"). ``subject`` ist die Host-ip.
+
+    Leere Schnittmenge -> kein Treffer fuer den Host. Hosts ohne ip (leerer String)
+    werden uebersprungen (kein sinnvolles subject). Deterministisch: Hosts in
+    Snapshot-Reihenfolge; die Engine sortiert am Ende ohnehin global nach
+    (severity, rule_id, subject).
+    """
+    out: list[Observation] = []
+    for host in snapshot.hosts:
+        if not host.ip:
+            continue
+        matched = host.open_ports & rule.ports
+        if not matched:
+            continue
+        value = ", ".join(str(port) for port in sorted(matched))
+        subject = host.ip
+        out.append(
+            Observation(
+                rule_id=rule.id,
+                severity=rule.severity,
+                title=rule.title,
+                detail=rule.detail_template.format(subject=subject, value=value),
                 help_kind=rule.help_kind,
                 subject=subject,
             )

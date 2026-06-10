@@ -195,7 +195,7 @@ from application.security import (
 )
 from application.settings import GetSettings, UpdateSecret, UpdateSetting
 from application.traffic import CheckTrafficPermission, ListAppTraffic, PollThroughput
-from domain.analysis import ObservedConnection, ObservedProcess, Rule, Snapshot
+from domain.analysis import ObservedConnection, ObservedHost, ObservedProcess, Rule, Snapshot
 from domain.monitoring import MonitorEvent, MonitorEventType
 from domain.process import classify_kind
 from infrastructure.agent import (
@@ -241,7 +241,7 @@ from infrastructure.scanning.hostname_resolver import HostnameResolverAdapter
 from infrastructure.scanning.ipv6_enrichment import Ipv6EnrichmentAdapter
 from infrastructure.scanning.mdns import MdnsAdapter
 from infrastructure.scanning.port_scanner import PortScannerAdapter
-from infrastructure.scanning.scan_history import SqliteScanHistoryRepository
+from infrastructure.scanning.scan_history import CorruptScanError, SqliteScanHistoryRepository
 from infrastructure.scanning.ssdp import SsdpAdapter
 from infrastructure.scanning.vendor_lookup import VendorLookupAdapter
 from infrastructure.secret_store import KeyringSecretStore, SecretStoreUnavailableError
@@ -1215,10 +1215,43 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # Permission-Adapter lebt hier in der Verdrahtung; die Domaene sieht nur ein bool.
         perm = CheckProcessPermission(ProcessPermissionAdapter())()
         full_visibility = bool(perm["ok"])
-        # hosts NICHT setzen (keine der drei Start-Regeln nutzt sie) -> Default leeres Tuple.
+        # hosts-Projektion (B): die dritte Datenquelle ist der JUENGSTE gespeicherte Scan.
+        # Anders als connections/processes (live gelesen) sind Hosts nur so aktuell wie
+        # dieser Scan -- die Sicht ist "Stand juengster Scan", keine Live-Host-Sicht (das
+        # ist die Natur der Quelle, kein Mangel). Reuse des bestehenden
+        # scan_history_repository() (lru_cache, im scanning-Block verdrahtet) -- KEINE
+        # zweite Instanz. Die Projektion EnrichedHost -> ObservedHost lebt HIER im
+        # Composition Root (Fremd-Domaenen-Kopplung gehoert in die Verdrahtung); analysis
+        # bekommt nur die offenen Port-NUMMERN (state == "open"), nicht die PortInfo-Objekte
+        # (independence-Contract). Kein Scan -> leer (gueltiger Zustand, keine host-Beobachtung).
+        summaries = scan_history_repository().list(1)
+        hosts_observed: tuple[ObservedHost, ...] = ()
+        if summaries:
+            try:
+                record = scan_history_repository().get(summaries[0].scan_id)
+            except CorruptScanError:
+                # Host-Schicht ausfallsicher (Entscheidung A): ein unlesbarer juengster
+                # Scan darf den Lageueberblick (traffic/process) nicht faellen. KEIN
+                # stiller Fallback im verbotenen Sinn -- scan_history.get() wirft weiterhin
+                # laut, wer den Scan gezielt abruft; nur diese interpretierende Projektion
+                # ueberspringt die unlesbare Host-Quelle. Spaeter in der GUI sichtbar machen
+                # ("Host-Daten aus letztem Scan nicht lesbar").
+                logger.warning("analysis.hosts_skipped_corrupt_scan", scan_id=summaries[0].scan_id)
+                record = None
+            if record is not None:
+                hosts_observed = tuple(
+                    ObservedHost(
+                        ip=h.ip,
+                        hostname=h.hostname,
+                        vendor=h.vendor,
+                        open_ports=frozenset(p.port for p in h.ports if p.state == "open"),
+                    )
+                    for h in record.hosts
+                )
         snapshot = Snapshot(
             connections=observed_connections,
             processes=observed_processes,
+            hosts=hosts_observed,
             full_process_visibility=full_visibility,
         )
         # ADDITIV (A.2): die Engine sieht die eingebauten Defaults UND die gespeicherten

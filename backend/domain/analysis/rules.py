@@ -45,6 +45,7 @@ type RuleKind = Literal[
     "process_masquerade",
     "connection_remote_port",
     "pid_connection_count",
+    "host_remote_port",
 ]
 
 
@@ -140,6 +141,21 @@ DEFAULT_RULES: tuple[Rule, ...] = (
         title="Verbindung zu einem Fernzugriffs-Port",
         detail_template="Verbindung zu {subject} nutzt einen typischen "
         "Fernzugriffs-Port ({value}).",
+        ports=frozenset({22, 3389, 5800, 5900}),
+    ),
+    # (b2) Geraeteseitiges Gegenstueck zu (b): ein HOST, der einen typischen
+    # Fernzugriffs-Port OFFEN haelt. Waehrend (b) eine VERBINDUNG zu so einem Port sieht
+    # (live, aus traffic), sieht diese Regel ein GERAET, das so einen Port offen anbietet
+    # (Stand letzter Scan, aus den gespeicherten Hosts). Dieselbe Portmenge wie (b)
+    # (konsistent) und derselbe ``help_kind`` "remote_access_port" -- ein Hilfe-Link fuer
+    # beide. Thematisch direkt hinter (b) gruppiert.
+    Rule(
+        id="host_remote_access_port",
+        severity="notable",
+        help_kind="remote_access_port",
+        kind="host_remote_port",
+        title="Host hat einen Fernzugriffs-Port offen",
+        detail_template="Host {subject} hat einen typischen Fernzugriffs-Port offen ({value}).",
         ports=frozenset({22, 3389, 5800, 5900}),
     ),
     # (c) Ein pid mit ungewoehnlich vielen aktiven Verbindungen ueber der Schwelle.

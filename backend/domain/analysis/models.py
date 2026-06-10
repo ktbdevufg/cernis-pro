@@ -61,11 +61,19 @@ class ObservedProcess:
 
 @dataclass(frozen=True)
 class ObservedHost:
-    """Ein beobachteter Host -- analysis' Sicht (entkoppelt von scanning)."""
+    """Ein beobachteter Host -- analysis' Sicht (entkoppelt von scanning).
+
+    ``open_ports`` sind die Portnummern, deren Port-Zustand "open" ist -- BEWUSST nur
+    die Nummern (``frozenset[int]``), nicht die vollen ``PortInfo``-Objekte aus scanning:
+    analysis braucht fuer host-Regeln nur die Nummern, und so bleibt die Sicht entkoppelt
+    (kein ``PortInfo``-Import -> independence-Contract). Die Projektion (Composition Root)
+    filtert ``state == "open"`` und nimmt nur die port-Nummern.
+    """
 
     ip: str
     hostname: str = ""
     vendor: str = ""
+    open_ports: frozenset[int] = frozenset()
 
 
 @dataclass(frozen=True)
