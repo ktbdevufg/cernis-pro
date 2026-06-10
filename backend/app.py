@@ -45,6 +45,8 @@ from api.alerting import (
     provide_update_alert_rule,
 )
 from api.alerting import router as alerting_router
+from api.analysis import provide_analyze
+from api.analysis import router as analysis_router
 from api.capture import (
     provide_capture_lldp,
     provide_capture_status,
@@ -139,6 +141,7 @@ from application.alerting import (
     SendTestAlert,
     UpdateAlertRule,
 )
+from application.analysis import AnalyzeSnapshot
 from application.capture import (
     CaptureLldp,
     GetLldpNeighbors,
@@ -186,6 +189,7 @@ from application.security import (
 )
 from application.settings import GetSettings, UpdateSecret, UpdateSetting
 from application.traffic import CheckTrafficPermission, ListAppTraffic, PollThroughput
+from domain.analysis import ObservedConnection, ObservedProcess, Snapshot
 from domain.monitoring import MonitorEvent, MonitorEventType
 from infrastructure.agent import (
     SqliteAgentRepository,
@@ -197,6 +201,7 @@ from infrastructure.alerting import (
     SettingsSmtpConfigAdapter,
     SqliteAlertRuleRepository,
 )
+from infrastructure.analysis import BuiltinRuleProvider, StaticHelpLinkResolver
 from infrastructure.capture import (
     ScapyLldpSniffer,
     ScapyPacketSniffer,
@@ -1121,6 +1126,51 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.dependency_overrides[provide_check_process_permission] = lambda: CheckProcessPermission(
         ProcessPermissionAdapter()
     )
+
+    # ── analysis-Domaene v2 verdrahten (AN.3, reine Lese-/Rechen-Domaene) ─────────
+    # Kein Poller, kein app.state, kein lifespan-Eingriff -- wie process. Die zwei
+    # Adapter (BuiltinRuleProvider/StaticHelpLinkResolver) sind zustandslos. Die
+    # SNAPSHOT-PROJEKTION aus traffic+process lebt HIER im Composition Root, NICHT im
+    # Use-Case oder Adapter -- sie kennt BEIDE Fremd-Domaenen (Muster _list_app_traffic /
+    # _list_processes / _build_run_network_scan: Fremd-Domaenen-Kopplung gehoert in die
+    # Verdrahtung). Reuse der bestehenden Helfer _traffic_adapter()/_process_adapter()
+    # (beide oben im traffic- bzw. process-Block definiert) -- KEINE zweite Adapter-Instanz.
+    async def _analyze_snapshot() -> list[Any]:
+        # Verbindungssicht frisch holen -- DIESELBE Quelle wie _list_app_traffic, aber
+        # OHNE Raten (analysis braucht nur die Verbindungen, nicht den Durchsatz -> Stufe 1,
+        # rates leer). ListAppTraffic liefert AppTraffic-Gruppen mit .connections; die
+        # Connections aller Apps flachen wir zu ObservedConnection.
+        apps = await ListAppTraffic(_traffic_adapter())({})
+        observed_connections = tuple(
+            ObservedConnection(
+                app_name=conn.app_name,
+                pid=conn.pid,
+                remote_ip=conn.remote.ip if conn.remote else None,
+                remote_port=conn.remote.port if conn.remote else None,
+                l4=conn.l4,
+                status=conn.status,
+            )
+            for app_traffic in apps
+            for conn in app_traffic.connections
+        )
+        # Prozess-Sicht frisch holen (flache ProcessInfo-Liste) und zu ObservedProcess
+        # projizieren -- exe_path ist die analysis-relevante Quelle (P.5).
+        processes = await ListProcesses(_process_adapter()).flat()
+        observed_processes = tuple(
+            ObservedProcess(
+                pid=p.pid,
+                name=p.name,
+                exe_path=p.exe_path,
+                cmdline=p.cmdline,
+            )
+            for p in processes
+        )
+        # hosts NICHT setzen (keine der drei Start-Regeln nutzt sie) -> Default leeres Tuple.
+        snapshot = Snapshot(connections=observed_connections, processes=observed_processes)
+        return AnalyzeSnapshot(BuiltinRuleProvider(), StaticHelpLinkResolver())(snapshot)
+
+    app.include_router(analysis_router)
+    app.dependency_overrides[provide_analyze] = lambda: _analyze_snapshot
 
     # ── Frontend-Serving ── MUSS als LETZTES registriert werden ──────────────────
     # Der "/"-Mount faengt alle zuvor NICHT gematchten Pfade. Deshalb hier ganz am
