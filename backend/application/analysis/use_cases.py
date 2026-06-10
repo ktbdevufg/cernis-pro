@@ -11,10 +11,11 @@ Der Use-Case bleibt duenn und frei von Fremd-Domaenen-Kopplung: er bekommt den f
 Regeln holen -> Domaene auswerten -> jede Beobachtung um ihre Hilfe-URL buendeln.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
-from domain.analysis import Observation, Snapshot, evaluate
-from ports.analysis import HelpLinkResolver, RuleProvider
+from domain.analysis import Observation, Rule, RuleIssue, Snapshot, evaluate
+from ports.analysis import HelpLinkResolver, RuleProvider, UserRuleStore
 
 
 @dataclass(frozen=True)
@@ -60,3 +61,39 @@ class AnalyzeSnapshot:
             )
             for obs in observations
         ]
+
+
+class AddUserRules:
+    """Speichert benutzer-eigene Regeln gestuft -- duenn ueber den ``UserRuleStore``-Port.
+
+    Kennt den Adapter NUR ueber den schmalen ``ports.analysis.UserRuleStore``-Vertrag
+    (Protocol-Injektion, nie ein konkreter Adapter -- Schichtung). Der Use-Case enthaelt
+    KEINE Eigenlogik: er reicht die neuen Regeln an den Store durch und gibt dessen
+    ``RuleIssue``-Befunde zurueck. Die gestufte Semantik (error -> nichts gespeichert; nur
+    warning -> gespeichert + warnings gemeldet) liegt im Adapter (validiert ueber die reine
+    Domaenenfunktion); der api-Rand uebersetzt ``error`` in HTTP 422.
+
+    Synchron: der Store ist ein lokaler SQLite-Zugriff ohne Loop-/Netz-I/O -- ehrlich kein
+    ``async``.
+    """
+
+    def __init__(self, repo: UserRuleStore) -> None:
+        self._repo = repo
+
+    def __call__(self, new_rules: Sequence[Rule]) -> list[RuleIssue]:
+        return self._repo.add_rules(new_rules)
+
+
+class ListUserRules:
+    """Listet die GESPEICHERTEN eigenen Regeln (ohne die Defaults) -- duenner Pass-Through.
+
+    Der Nutzer verwaltet seine EIGENEN Regeln; die eingebauten ``DEFAULT_RULES`` sind nicht
+    Teil dieser Liste (sie kommen additiv erst im Composite-Lesepfad der Engine dazu, AN-A.2).
+    Synchron wie ``AddUserRules`` (lokaler SQLite-Zugriff).
+    """
+
+    def __init__(self, repo: UserRuleStore) -> None:
+        self._repo = repo
+
+    def __call__(self) -> tuple[Rule, ...]:
+        return self._repo.get_rules()

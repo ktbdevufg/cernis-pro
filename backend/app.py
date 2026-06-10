@@ -45,7 +45,13 @@ from api.alerting import (
     provide_update_alert_rule,
 )
 from api.alerting import router as alerting_router
-from api.analysis import provide_analyze
+from api.analysis import (
+    UserRuleBody,
+    provide_add_user_rules,
+    provide_analyze,
+    provide_delete_user_rule,
+    provide_list_user_rules,
+)
 from api.analysis import router as analysis_router
 from api.capture import (
     provide_capture_lldp,
@@ -141,7 +147,7 @@ from application.alerting import (
     SendTestAlert,
     UpdateAlertRule,
 )
-from application.analysis import AnalyzeSnapshot
+from application.analysis import AddUserRules, AnalyzeSnapshot, ListUserRules
 from application.capture import (
     CaptureLldp,
     GetLldpNeighbors,
@@ -189,7 +195,7 @@ from application.security import (
 )
 from application.settings import GetSettings, UpdateSecret, UpdateSetting
 from application.traffic import CheckTrafficPermission, ListAppTraffic, PollThroughput
-from domain.analysis import ObservedConnection, ObservedProcess, Snapshot
+from domain.analysis import ObservedConnection, ObservedProcess, Rule, Snapshot
 from domain.monitoring import MonitorEvent, MonitorEventType
 from domain.process import classify_kind
 from infrastructure.agent import (
@@ -203,6 +209,7 @@ from infrastructure.alerting import (
     SqliteAlertRuleRepository,
 )
 from infrastructure.analysis import BuiltinRuleProvider, StaticHelpLinkResolver
+from infrastructure.analysis_rules_db import SqliteUserRuleRepository
 from infrastructure.capture import (
     ScapyLldpSniffer,
     ScapyPacketSniffer,
@@ -340,6 +347,30 @@ class _FritzHostsWiring:
             # best-effort: Auth-Fehler killt den Scan nicht -- aber GELOGGT (kein S3).
             logger.warning("fritz_auth_failed", host=exc.host)
             return []
+
+
+class _CompositeRuleProvider:
+    """Kombiniert mehrere ``RuleProvider`` ADDITIV -- erfuellt selbst den RuleProvider-Port.
+
+    A.2-Verdrahtung: die analysis-Engine soll die eingebauten ``DEFAULT_RULES`` UND die
+    benutzer-eigenen, gespeicherten Regeln sehen. Diese additive Kombination lebt HIER im
+    Composition Root (nicht im DB-Adapter -- jeder Adapter bleibt sortenrein) als kleiner
+    Wrapper-Provider, Muster wie ``_FritzHostsWiring``/``_MonitorAlertRaiser``: eine kleine
+    Verdrahtungs-Klasse, die einen Port (``ports.analysis.RuleProvider``) strukturell
+    erfuellt.
+
+    ``get_rules`` konkateniert die Regeln der gehaltenen Provider IN REIHENFOLGE (Defaults
+    zuerst, dann DB). Es kombiniert die PROVIDER, nicht rohe Listen -- der
+    ``BuiltinRuleProvider`` liefert die Defaults schon, der ``SqliteUserRuleRepository`` die
+    gespeicherten. Ohne gespeicherte Regeln liefert er exakt die Defaults (additiv: ein
+    leerer User-Store aendert das Verhalten nicht).
+    """
+
+    def __init__(self, *providers: BuiltinRuleProvider | SqliteUserRuleRepository) -> None:
+        self._providers = providers
+
+    def get_rules(self) -> tuple[Rule, ...]:
+        return tuple(rule for provider in self._providers for rule in provider.get_rules())
 
 
 # ── monitoring -> alerting-Trigger-Naht (A.7a) ────────────────────────────────
@@ -1128,7 +1159,16 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         ProcessPermissionAdapter()
     )
 
-    # ── analysis-Domaene v2 verdrahten (AN.3, reine Lese-/Rechen-Domaene) ─────────
+    # ── analysis-Domaene v2 verdrahten (AN.3 + A.2, reine Lese-/Rechen-Domaene) ───
+    # Lazy-memoisiertes User-Regel-Repo (lru_cache, Muster scan_history_repository):
+    # teilt die cernis.db mit dem uebrigen Bestand. Es erfuellt BEIDE analysis-Ports
+    # (RuleProvider als Lese-Quelle + UserRuleStore als Verwaltungs-Vertrag).
+    @lru_cache(maxsize=1)
+    def analysis_rule_repository() -> SqliteUserRuleRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteUserRuleRepository(get_db_path())
+
     # Kein Poller, kein app.state, kein lifespan-Eingriff -- wie process. Die zwei
     # Adapter (BuiltinRuleProvider/StaticHelpLinkResolver) sind zustandslos. Die
     # SNAPSHOT-PROJEKTION aus traffic+process lebt HIER im Composition Root, NICHT im
@@ -1181,10 +1221,43 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             processes=observed_processes,
             full_process_visibility=full_visibility,
         )
-        return AnalyzeSnapshot(BuiltinRuleProvider(), StaticHelpLinkResolver())(snapshot)
+        # ADDITIV (A.2): die Engine sieht die eingebauten Defaults UND die gespeicherten
+        # eigenen Regeln -- ueber den CompositeRuleProvider (Defaults zuerst, dann DB).
+        # NUR diese eine Zeile der AN.3-Verdrahtung aendert sich; der Rest bleibt.
+        rule_provider = _CompositeRuleProvider(BuiltinRuleProvider(), analysis_rule_repository())
+        return AnalyzeSnapshot(rule_provider, StaticHelpLinkResolver())(snapshot)
+
+    # A.2-Verwaltungs-Runner: der api-Ring bleibt domain-frei -- das Bauen der
+    # domain.Rule aus dem Request-DTO + der Aufruf der Use-Cases passiert HIER im
+    # Composition Root (Muster _analyze_snapshot). Alle drei nutzen dasselbe Repo.
+    def _add_user_rules(bodies: list[UserRuleBody]) -> list[Any]:
+        new_rules = [
+            Rule(
+                id=body.id,
+                severity=body.severity,  # type: ignore[arg-type]
+                help_kind=body.help_kind,  # type: ignore[arg-type]
+                kind=body.kind,  # type: ignore[arg-type]
+                title=body.title,
+                detail_template=body.detail_template,
+                path_prefixes=tuple(body.path_prefixes),
+                ports=frozenset(body.ports),
+                threshold=body.threshold,
+            )
+            for body in bodies
+        ]
+        return AddUserRules(analysis_rule_repository())(new_rules)
+
+    def _list_user_rules() -> list[Any]:
+        return list(ListUserRules(analysis_rule_repository())())
+
+    def _delete_user_rule(rule_id: str) -> None:
+        analysis_rule_repository().delete_rule(rule_id)
 
     app.include_router(analysis_router)
     app.dependency_overrides[provide_analyze] = lambda: _analyze_snapshot
+    app.dependency_overrides[provide_add_user_rules] = lambda: _add_user_rules
+    app.dependency_overrides[provide_list_user_rules] = lambda: _list_user_rules
+    app.dependency_overrides[provide_delete_user_rule] = lambda: _delete_user_rule
 
     # ── Frontend-Serving ── MUSS als LETZTES registriert werden ──────────────────
     # Der "/"-Mount faengt alle zuvor NICHT gematchten Pfade. Deshalb hier ganz am

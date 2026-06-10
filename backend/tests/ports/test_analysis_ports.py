@@ -15,8 +15,11 @@ KEIN ``@runtime_checkable`` an den Ports -> bewusst KEIN ``isinstance``-Check fu
 Konformitaet; die traegt mypy, nicht die Laufzeit.
 """
 
+from pathlib import Path
+
 from domain.analysis import DEFAULT_RULES, HelpKind, Rule
-from ports.analysis import HelpLinkResolver, RuleProvider
+from infrastructure.analysis_rules_db import SqliteUserRuleRepository
+from ports.analysis import HelpLinkResolver, RuleProvider, UserRuleStore
 
 # ── Fakes: minimale, vertragstreue Implementierungen ────────────────────────
 
@@ -38,12 +41,18 @@ class _FakeHelpLinkResolver:
 
 def _assert_rule_provider(_: RuleProvider) -> None: ...
 def _assert_help_resolver(_: HelpLinkResolver) -> None: ...
+def _assert_user_rule_store(_: UserRuleStore) -> None: ...
 
 
 def test_fakes_satisfy_ports_statically() -> None:
     """mypy-Beweis: jeder Fake genuegt seinem Port (Konformitaet rein statisch)."""
     _assert_rule_provider(_FakeRuleProvider())
     _assert_help_resolver(_FakeHelpLinkResolver())
+
+
+def test_db_adapter_satisfies_user_rule_store_statically(tmp_path: Path) -> None:
+    """mypy-Beweis: der SQLite-Adapter erfuellt den UserRuleStore-Verwaltungs-Port (A.2)."""
+    _assert_user_rule_store(SqliteUserRuleRepository(tmp_path / "cernis.db"))
 
 
 # ── Dynamischer Smoke: Methoden synchron aufrufbar, erwartete Typen ─────────
