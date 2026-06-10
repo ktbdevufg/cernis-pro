@@ -68,12 +68,21 @@ class ObservedHost:
     analysis braucht fuer host-Regeln nur die Nummern, und so bleibt die Sicht entkoppelt
     (kein ``PortInfo``-Import -> independence-Contract). Die Projektion (Composition Root)
     filtert ``state == "open"`` und nimmt nur die port-Nummern.
+
+    ``is_known`` sagt, ob dieser Host in der bisherigen Host-Historie schon bekannt ist.
+    Default ``True`` ("im Zweifel bekannt"): ein unbekannter Historie-Zustand soll NICHT
+    faelschlich als neuer Host anschlagen -- zurueckhaltend, genau wie
+    ``full_process_visibility`` bei ``process_masquerade``. Die Regel ``new_host_seen``
+    feuert, wenn ``is_known`` ``False`` ist. Die Befuellung (Abgleich gegen die
+    persistierte Host-Historie) ist Sache der Composition Root (C.2), NICHT der Domaene
+    -- analysis sieht nur das ``bool`` und kennt KEINE Persistenz (independence/Reinheit).
     """
 
     ip: str
     hostname: str = ""
     vendor: str = ""
     open_ports: frozenset[int] = frozenset()
+    is_known: bool = True
 
 
 @dataclass(frozen=True)

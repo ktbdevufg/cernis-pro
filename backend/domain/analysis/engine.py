@@ -52,6 +52,8 @@ def _apply_rule(rule: Rule, snapshot: Snapshot) -> list[Observation]:
             return _eval_pid_connection_count(rule, snapshot)
         case "host_remote_port":
             return _eval_host_remote_port(rule, snapshot)
+        case "host_new":
+            return _eval_host_new(rule, snapshot)
 
 
 def _eval_process_temp_path(rule: Rule, snapshot: Snapshot) -> list[Observation]:
@@ -196,6 +198,41 @@ def _eval_host_remote_port(rule: Rule, snapshot: Snapshot) -> list[Observation]:
                 severity=rule.severity,
                 title=rule.title,
                 detail=rule.detail_template.format(subject=subject, value=value),
+                help_kind=rule.help_kind,
+                subject=subject,
+            )
+        )
+    return out
+
+
+def _eval_host_new(rule: Rule, snapshot: Snapshot) -> list[Observation]:
+    """Treffer je HOST, der im Netz ERSTMALS auftaucht (``is_known == False``).
+
+    analysis' erstes GEDAECHTNIS -- aber die Engine bleibt ZUSTANDSLOS: ``is_known`` ist
+    ein SNAPSHOT-FAKTUM (ein ``bool`` je ``ObservedHost``), das die Projektion in der
+    Composition Root (C.2) aus dem Host-Historie-Repository gefuellt hat. Die Engine kennt
+    KEIN Repository, KEINE Persistenz -- sie wertet nur das bool aus, GENAU wie
+    ``full_process_visibility`` bei ``process_masquerade``. So bleibt die deterministische
+    analysis-Engine rein.
+
+    Treffer fuer jeden Host mit ``is_known == False`` UND nicht-leerer ``ip``. ``subject``
+    ist die Host-ip; das ``detail_template`` nutzt NUR ``{subject}`` (kein ``{value}``) --
+    darum genuegt ``.format(subject=...)``. Bekannte Hosts (``is_known == True``, der
+    zurueckhaltende Default) ODER Hosts ohne ip (leerer String, kein sinnvolles subject)
+    treffen NICHT. Deterministisch: Hosts in Snapshot-Reihenfolge; die Engine sortiert am
+    Ende ohnehin global nach ``(severity, rule_id, subject)``.
+    """
+    out: list[Observation] = []
+    for host in snapshot.hosts:
+        if host.is_known or not host.ip:
+            continue
+        subject = host.ip
+        out.append(
+            Observation(
+                rule_id=rule.id,
+                severity=rule.severity,
+                title=rule.title,
+                detail=rule.detail_template.format(subject=subject),
                 help_kind=rule.help_kind,
                 subject=subject,
             )

@@ -33,6 +33,10 @@ zurueckgesetzt -- der Test faengt den jeweiligen kritischen Vertrag also wirklic
   verfaelscht (``matched = host.open_ports`` statt ``host.open_ports & rule.ports``)
   -> ``test_rule_b2_nur_gewoehnliche_ports_trifft_nicht`` ROT (80/443 treffen
   faelschlich). Zurueckgesetzt.
+* (b3) new_host_seen: in ``_eval_host_new`` die ``is_known``-Pruefung invertiert
+  (``if not host.is_known or not host.ip:`` statt ``if host.is_known or not host.ip:``,
+  sodass BEKANNTE Hosts treffen) -> ``test_rule_b3_bekannter_host_trifft_nicht`` ROT
+  (der bekannte Host schlaegt faelschlich an). Zurueckgesetzt.
 """
 
 import pytest
@@ -75,8 +79,15 @@ def _proc(
     return ObservedProcess(pid=pid, name="foo", kind=kind, exe_path=exe_path, cmdline=cmdline)
 
 
-def _host(ip: str, *, open_ports: frozenset[int] = frozenset()) -> ObservedHost:
-    return ObservedHost(ip=ip, hostname="host", vendor="ACME", open_ports=open_ports)
+def _host(
+    ip: str,
+    *,
+    open_ports: frozenset[int] = frozenset(),
+    is_known: bool = True,
+) -> ObservedHost:
+    return ObservedHost(
+        ip=ip, hostname="host", vendor="ACME", open_ports=open_ports, is_known=is_known
+    )
 
 
 # ── leerer Snapshot ─────────────────────────────────────────────────────────
@@ -315,6 +326,53 @@ def test_rule_b2_host_ohne_ip_wird_uebersprungen() -> None:
     # Leere ip -> kein sinnvolles subject -> uebersprungen, trotz offenem Fernzugriffs-Port.
     snap = Snapshot(hosts=(_host("", open_ports=frozenset({22})),))
     assert evaluate(snap, DEFAULT_RULES) == []
+
+
+# ── (b3) new_host_seen (Geraet taucht erstmals im Netz auf) ───────────────────
+
+
+def test_rule_b3_neuer_host_trifft() -> None:
+    """ObservedHost mit is_known=False und gesetzter ip -> genau EINE Observation.
+
+    analysis' erstes GEDAECHTNIS: ``is_known`` ist ein Snapshot-FAKTUM (von der
+    Projektion in C.2 gefuellt); die Engine wertet nur das bool aus. subject ist die ip.
+    """
+    snap = Snapshot(hosts=(_host("10.0.0.99", is_known=False),))
+    obs = evaluate(snap, DEFAULT_RULES)
+    assert len(obs) == 1
+    assert obs[0].rule_id == "new_host_seen"
+    assert obs[0].help_kind == "new_host"
+    assert obs[0].severity == "notable"
+    assert obs[0].subject == "10.0.0.99"
+
+
+def test_rule_b3_bekannter_host_trifft_nicht() -> None:
+    """ObservedHost mit is_known=True -> KEINE Observation (bekannter Host, Default-Fall).
+
+    MUTATIONSPROBE (durchgefuehrt, ROT bestaetigt, zurueckgesetzt): in ``_eval_host_new``
+    die ``is_known``-Pruefung invertiert (``if not host.is_known or not host.ip:`` statt
+    ``if host.is_known or not host.ip:``, sodass BEKANNTE Hosts treffen) -> dieser Test
+    ROT (der bekannte Host schlaegt faelschlich an). Zurueckgesetzt.
+    """
+    snap = Snapshot(hosts=(_host("10.0.0.99", is_known=True),))
+    assert evaluate(snap, DEFAULT_RULES) == []
+
+
+def test_rule_b3_neuer_host_ohne_ip_trifft_nicht() -> None:
+    # is_known=False, aber leere ip -> kein sinnvolles subject -> uebersprungen.
+    snap = Snapshot(hosts=(_host("", is_known=False),))
+    assert evaluate(snap, DEFAULT_RULES) == []
+
+
+def test_rule_b3_default_is_known_true_schlaegt_nicht_an() -> None:
+    """Ein ObservedHost OHNE explizites is_known schlaegt NICHT an -- zurueckhaltender Default.
+
+    Sichert, dass der Default ``is_known=True`` ist ("im Zweifel bekannt"): ein
+    unbekannter Historie-Zustand soll nicht faelschlich als neuer Host anschlagen.
+    """
+    host = ObservedHost(ip="10.0.0.42")  # is_known nicht gesetzt
+    assert host.is_known is True
+    assert evaluate(Snapshot(hosts=(host,)), DEFAULT_RULES) == []
 
 
 # ── (c) high_connection_count ───────────────────────────────────────────────

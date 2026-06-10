@@ -30,6 +30,7 @@ type HelpKind = Literal[
     "process_masquerade",
     "remote_access_port",
     "high_connection_count",
+    "new_host",
 ]
 
 # BEWUSST nur zwei neutrale Stufen -- analysis urteilt nie. "info" = reine Einordnung,
@@ -46,6 +47,7 @@ type RuleKind = Literal[
     "connection_remote_port",
     "pid_connection_count",
     "host_remote_port",
+    "host_new",
 ]
 
 
@@ -157,6 +159,21 @@ DEFAULT_RULES: tuple[Rule, ...] = (
         title="Host hat einen Fernzugriffs-Port offen",
         detail_template="Host {subject} hat einen typischen Fernzugriffs-Port offen ({value}).",
         ports=frozenset({22, 3389, 5800, 5900}),
+    ),
+    # (b3) Ein HOST, der im Netz ERSTMALS auftaucht ("seit deinem letzten Scan neu
+    # dazugekommen"). analysis' erstes GEDAECHTNIS: das "schon gesehen?" kommt als FAKTUM
+    # in den Snapshot (``ObservedHost.is_known``), GENAU wie ``full_process_visibility``
+    # bei ``process_masquerade`` -- die Engine wertet nur das bool aus, kennt KEINE
+    # Persistenz. Die Historie-Mechanik (MAC-Abgleich) lebt im Repository (infrastructure)
+    # + Composition Root (C.2), NICHT hier. Eigener ``help_kind`` "new_host": ein neues
+    # Geraet ist ein eigenes Thema, kein Fernzugriff. Thematisch bei den host-Regeln.
+    Rule(
+        id="new_host_seen",
+        severity="notable",
+        help_kind="new_host",
+        kind="host_new",
+        title="Neues Geraet im Netzwerk",
+        detail_template="Host {subject} ist neu -- in frueheren Scans nicht gesehen.",
     ),
     # (c) Ein pid mit ungewoehnlich vielen aktiven Verbindungen ueber der Schwelle.
     Rule(
