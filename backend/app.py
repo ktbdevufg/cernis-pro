@@ -191,6 +191,7 @@ from application.settings import GetSettings, UpdateSecret, UpdateSetting
 from application.traffic import CheckTrafficPermission, ListAppTraffic, PollThroughput
 from domain.analysis import ObservedConnection, ObservedProcess, Snapshot
 from domain.monitoring import MonitorEvent, MonitorEventType
+from domain.process import classify_kind
 from infrastructure.agent import (
     SqliteAgentRepository,
     UrllibAgentPinger,
@@ -1160,6 +1161,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             ObservedProcess(
                 pid=p.pid,
                 name=p.name,
+                kind=classify_kind(p),
                 exe_path=p.exe_path,
                 cmdline=p.cmdline,
             )

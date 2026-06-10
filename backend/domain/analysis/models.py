@@ -39,14 +39,22 @@ class ObservedConnection:
 class ObservedProcess:
     """Ein beobachteter Prozess -- analysis' Sicht (entkoppelt von process).
 
-    ``pid`` ist immer vorhanden, ``name`` nie ``None`` (nicht lesbar -> ""). ``exe_path``
-    ist der Pfad zum ausgefuehrten Programm und ehrlich ``None``, wenn nicht ermittelbar
-    -- die Regeln unterscheiden bewusst zwischen "kein Pfad" (None) und einem konkreten
-    Pfad. ``cmdline`` ist die Argumentliste (leeres Tuple = nicht lesbar).
+    ``pid`` ist immer vorhanden, ``name`` nie ``None`` (nicht lesbar -> ""). ``kind`` ist
+    die kernel/userland-Einordnung (von der Projektion aus ``domain.process.classify_kind``
+    gefuellt); echte Kernel-Threads werden von der Auffaelligkeits-Regel uebersprungen, weil
+    ihr fehlender ``exe_path`` Natur ist, kein Verhalten. Bewusst als ``str`` modelliert
+    (Werte "kernel"|"userland"), damit analysis NICHT den ``ProcessKind``-Typ aus
+    ``domain.process`` importieren muss (independence-Contract). Default ``"userland"``: ein
+    nicht gesetztes ``kind`` soll NICHT faelschlich als kernel ausgeblendet werden ("im
+    Zweifel sichtbar/Userland"). ``exe_path`` ist der Pfad zum ausgefuehrten Programm und
+    ehrlich ``None``, wenn nicht ermittelbar -- die Regeln unterscheiden bewusst zwischen
+    "kein Pfad" (None) und einem konkreten Pfad. ``cmdline`` ist die Argumentliste (leeres
+    Tuple = nicht lesbar).
     """
 
     pid: int
     name: str = ""
+    kind: str = "userland"
     exe_path: str | None = None
     cmdline: tuple[str, ...] = ()
 

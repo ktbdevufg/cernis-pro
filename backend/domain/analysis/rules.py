@@ -27,6 +27,7 @@ from typing import Literal
 # Schluessel mit.
 type HelpKind = Literal[
     "process_suspicious_path",
+    "process_masquerade",
     "remote_access_port",
     "high_connection_count",
 ]
@@ -40,7 +41,8 @@ type Severity = Literal["info", "notable"]
 # ``engine.evaluate`` rechtfertigt. Die konkreten Schwellen/Mengen/Praefixe sind
 # Parameter am ``Rule``-Objekt (Daten), keine Literale im Kern.
 type RuleKind = Literal[
-    "process_path_prefix",
+    "process_temp_path",
+    "process_masquerade",
     "connection_remote_port",
     "pid_connection_count",
 ]
@@ -70,8 +72,10 @@ class Rule:
     ``kind`` waehlt die Pruefart; die uebrigen Felder sind ihre Parameter:
 
     * ``path_prefixes`` -- Praefixe, unter denen ein ``exe_path`` als auffaellig gilt
-      (z. B. /tmp, /dev/shm, /var/tmp). Genutzt von ``kind="process_path_prefix"``;
-      diese Pruefung schlaegt zusaetzlich an, wenn ``exe_path`` ganz fehlt (``None``).
+      (z. B. /tmp, /dev/shm, /var/tmp). Genutzt von ``kind="process_temp_path"`` (Treffer
+      nur fuer Userland-Prozesse, deren ``exe_path`` unter einem dieser Praefixe liegt).
+      ``kind="process_masquerade"`` nutzt dieselben Praefixe NUR zur Abgrenzung (ein
+      temp-Pfad-Prozess loest dort NICHT zusaetzlich aus -- die Faelle sind disjunkt).
     * ``ports`` -- Portmenge, deren ``remote_port`` als auffaellig gilt (z. B.
       Fernzugriffs-Ports). Genutzt von ``kind="connection_remote_port"``.
     * ``threshold`` -- Schwelle fuer die Anzahl aktiver Verbindungen je pid. Genutzt von
@@ -95,19 +99,36 @@ class Rule:
     threshold: int = 0
 
 
-# Die drei Start-Regeln als Daten. Schwellen/Portlisten/Pfad-Praefixe sind hier
-# REGEL-PARAMETER, keine Literale im Engine-Kern -- eine vierte Regel ist ein weiterer
+# Die Start-Regeln als Daten. Schwellen/Portlisten/Pfad-Praefixe sind hier
+# REGEL-PARAMETER, keine Literale im Engine-Kern -- eine weitere Regel ist ein weiterer
 # Eintrag in diesem Tuple (oder eine zur Laufzeit uebergebene Regel), nichts weiter.
 DEFAULT_RULES: tuple[Rule, ...] = (
-    # (a) Prozess ohne erkennbaren exe_path ODER exe_path unter einem temporaeren Praefix.
+    # (a) Userland-Prozess, dessen exe_path unter einem temporaeren Praefix liegt.
+    # Echte Kernel-Threads (kind=="kernel") sind ausgeschlossen -- ihr fehlender Pfad ist
+    # Natur, kein Verhalten (siehe engine._eval_process_temp_path). DISJUNKT zu (b): ein
+    # temp-Pfad-Prozess loest NUR hier aus, nicht zusaetzlich als Tarnverdacht.
     Rule(
-        id="process_suspicious_path",
+        id="process_temp_path",
         severity="notable",
         help_kind="process_suspicious_path",
-        kind="process_path_prefix",
-        title="Prozess laeuft aus einem ungewoehnlichen Pfad",
-        detail_template="Prozess {subject} hat keinen erkennbaren Programmpfad "
-        "oder laeuft aus einem temporaeren Verzeichnis ({value}).",
+        kind="process_temp_path",
+        title="Prozess laeuft aus einem temporaeren Verzeichnis",
+        detail_template="Prozess {subject} laeuft aus einem temporaeren Verzeichnis ({value}).",
+        path_prefixes=("/tmp/", "/dev/shm/", "/var/tmp/"),
+    ),
+    # (a2) Userland-Prozess, der sich wie Kernel-Infrastruktur tarnt: leeres cmdline ODER
+    # fehlender exe_path (None), OBWOHL er Userland ist (kind != "kernel"). Zurueckhaltend
+    # ("info"): rootless ist "kein Pfad" mehrdeutig; der Root-Kontext, der das verschaerfte,
+    # ist ein spaeterer Schnitt. DISJUNKT zu (a): greift NICHT, wenn der exe_path unter einem
+    # temp-Praefix liegt (dann ist (a) zustaendig) -- die Praedikate ueberschneiden sich nie.
+    Rule(
+        id="process_masquerade",
+        severity="info",
+        help_kind="process_masquerade",
+        kind="process_masquerade",
+        title="Userland-Prozess sieht aus wie Kernel-Infrastruktur",
+        detail_template="Prozess {subject} hat {value}, ist aber kein Kernel-Thread "
+        "-- moeglicher Tarnverdacht.",
         path_prefixes=("/tmp/", "/dev/shm/", "/var/tmp/"),
     ),
     # (b) Verbindung zu einem typischen Fernzugriffs-Port.

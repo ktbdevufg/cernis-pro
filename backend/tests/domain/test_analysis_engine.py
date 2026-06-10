@@ -1,16 +1,24 @@
 """Unit-Tests der analysis-RuleEngine -- reine Logik, kein I/O, keine Uhr.
 
-Prueft, dass ``evaluate`` deterministisch ist, jede der drei Start-Regeln
-(``DEFAULT_RULES``) bei passender Eingabe genau die erwartete ``Observation`` erzeugt
-und bei unpassender KEINE, ein leerer Snapshot ``[]`` liefert und die Sortierung stabil
-ist. Alle Werte kommen als Felder herein -> rein deterministisch.
+Prueft, dass ``evaluate`` deterministisch ist, jede Start-Regel (``DEFAULT_RULES``) bei
+passender Eingabe genau die erwartete ``Observation`` erzeugt und bei unpassender KEINE,
+ein leerer Snapshot ``[]`` liefert und die Sortierung stabil ist. Alle Werte kommen als
+Felder herein -> rein deterministisch.
+
+KERNFIX AN.3: echte Kernel-Threads (``kind == "kernel"``) erzeugen NIE eine
+process-Beobachtung -- ihr fehlender ``exe_path``/leeres ``cmdline`` ist Natur, kein
+Verhalten. Userland-Auffaelligkeiten werden differenziert gezeigt: temp-Pfad (notable) vs.
+Tarnverdacht (info, leeres cmdline ODER fehlender Pfad).
 
 MUTATIONSPROBEN (durchgefuehrt waehrend der Entwicklung, hier dokumentiert): Fuer jede
-der drei Regeln wurde EINE Mutation am Domaenen-Code probiert und ROT bestaetigt, dann
+Regel wurde EINE Mutation am Domaenen-Code probiert und ROT bestaetigt, dann
 zurueckgesetzt -- der Test faengt den jeweiligen kritischen Vertrag also wirklich:
 
-* (a) process_suspicious_path: Pfad-Praefix ``/tmp/`` aus ``DEFAULT_RULES`` entfernt
-  -> ``test_rule_a_*`` ROT (der /tmp-Treffer entfaellt). Zurueckgesetzt.
+* (kind-Filter) ``if proc.kind == "kernel": continue`` in ``_eval_process_masquerade``
+  ENTFERNT -> ``test_kernel_thread_erzeugt_keine_beobachtung`` ROT (der kernel-Thread mit
+  leerem cmdline + None-Pfad wuerde faelschlich als Tarnverdacht treffen). Zurueckgesetzt.
+* (a) process_temp_path: Pfad-Praefix ``/tmp/`` aus ``DEFAULT_RULES`` entfernt
+  -> ``test_rule_a_tmp_pfad_trifft`` ROT (der /tmp-Treffer entfaellt). Zurueckgesetzt.
 * (b) remote_access_port: Portmenge in ``DEFAULT_RULES`` geleert (``frozenset()``)
   -> ``test_rule_b_*`` ROT (kein Port trifft mehr). Zurueckgesetzt.
 * (c) high_connection_count: Schwellen-Vergleich in ``engine`` von ``<=`` auf ``<``
@@ -45,8 +53,14 @@ def _conn(
     )
 
 
-def _proc(pid: int, *, exe_path: str | None = "/usr/bin/foo") -> ObservedProcess:
-    return ObservedProcess(pid=pid, name="foo", exe_path=exe_path, cmdline=("foo",))
+def _proc(
+    pid: int,
+    *,
+    kind: str = "userland",
+    exe_path: str | None = "/usr/bin/foo",
+    cmdline: tuple[str, ...] = ("foo",),
+) -> ObservedProcess:
+    return ObservedProcess(pid=pid, name="foo", kind=kind, exe_path=exe_path, cmdline=cmdline)
 
 
 # ── leerer Snapshot ─────────────────────────────────────────────────────────
@@ -65,30 +79,85 @@ def test_keine_treffer_keine_beobachtungen() -> None:
     assert evaluate(snap, DEFAULT_RULES) == []
 
 
-# ── (a) process_suspicious_path ─────────────────────────────────────────────
+# ── KERNFIX: echte Kernel-Threads sind raus ──────────────────────────────────
 
 
-def test_rule_a_kein_exe_path_trifft() -> None:
-    snap = Snapshot(processes=(_proc(123, exe_path=None),))
-    obs = evaluate(snap, DEFAULT_RULES)
-    assert len(obs) == 1
-    assert obs[0].rule_id == "process_suspicious_path"
-    assert obs[0].help_kind == "process_suspicious_path"
-    assert obs[0].severity == "notable"
-    assert obs[0].subject == "pid 123"
+def test_kernel_thread_erzeugt_keine_beobachtung() -> None:
+    """Ein kind=="kernel"-Prozess ohne exe_path und mit leerem cmdline -> KEINE Beobachtung.
+
+    Der Kernfix: vorher (kombinierte Logik ohne kind-Pruefung) waere genau das ein
+    Treffer gewesen -- echte Kernel-Threads (kswapd/kworker/...) haben nie einen exe_path,
+    das ist ihre Natur, kein Verhalten.
+
+    MUTATIONSPROBE (durchgefuehrt, ROT bestaetigt, zurueckgesetzt): den Waechter
+    ``if proc.kind == "kernel": continue`` in ``_eval_process_masquerade`` entfernt
+    -> dieser Test ROT (der Kernel-Thread schlaegt faelschlich als Tarnverdacht an).
+    """
+    snap = Snapshot(processes=(_proc(2, kind="kernel", exe_path=None, cmdline=()),))
+    assert evaluate(snap, DEFAULT_RULES) == []
+
+
+# ── (a) process_temp_path (Userland, exe_path unter temp-Praefix) ─────────────
 
 
 def test_rule_a_tmp_pfad_trifft() -> None:
+    """Userland-Prozess mit exe_path unter /tmp/ -> (a) notable.
+
+    MUTATIONSPROBE (durchgefuehrt, ROT bestaetigt, zurueckgesetzt): das Pfad-Praefix
+    ``/tmp/`` aus ``DEFAULT_RULES`` (process_temp_path) entfernt -> dieser Test ROT
+    (der /tmp-Treffer entfaellt).
+    """
     snap = Snapshot(processes=(_proc(7, exe_path="/tmp/evil"),))
     obs = evaluate(snap, DEFAULT_RULES)
     assert len(obs) == 1
-    assert obs[0].rule_id == "process_suspicious_path"
+    assert obs[0].rule_id == "process_temp_path"
+    assert obs[0].help_kind == "process_suspicious_path"
+    assert obs[0].severity == "notable"
+    assert obs[0].subject == "pid 7"
     assert "/tmp/evil" in obs[0].detail
+
+
+def test_rule_a_kernel_thread_in_temp_trifft_nicht() -> None:
+    # Selbst ein kernel-Prozess mit /tmp-Pfad ist raus (kind-Filter vor dem Pfad-Check).
+    snap = Snapshot(processes=(_proc(7, kind="kernel", exe_path="/tmp/evil"),))
+    assert evaluate(snap, DEFAULT_RULES) == []
 
 
 def test_rule_a_normaler_pfad_trifft_nicht() -> None:
     snap = Snapshot(processes=(_proc(8, exe_path="/usr/bin/legit"),))
     assert evaluate(snap, DEFAULT_RULES) == []
+
+
+# ── (a2) process_masquerade (Userland-Tarnverdacht) ───────────────────────────
+
+
+def test_rule_a2_leere_cmdline_trifft_info() -> None:
+    # Userland mit leerem cmdline (aber kind="userland") -> (a2) info (Tarnverdacht).
+    snap = Snapshot(processes=(_proc(50, exe_path="/usr/bin/foo", cmdline=()),))
+    obs = evaluate(snap, DEFAULT_RULES)
+    assert len(obs) == 1
+    assert obs[0].rule_id == "process_masquerade"
+    assert obs[0].help_kind == "process_masquerade"
+    assert obs[0].severity == "info"
+    assert obs[0].subject == "pid 50"
+
+
+def test_rule_a2_kein_exe_path_trifft_info() -> None:
+    # Userland mit exe_path None (kind="userland") -> (a2) info.
+    snap = Snapshot(processes=(_proc(123, exe_path=None),))
+    obs = evaluate(snap, DEFAULT_RULES)
+    assert len(obs) == 1
+    assert obs[0].rule_id == "process_masquerade"
+    assert obs[0].severity == "info"
+    assert obs[0].subject == "pid 123"
+
+
+def test_disjunkt_tmp_userland_erzeugt_genau_eine_beobachtung() -> None:
+    # Ein /tmp-Userland-Prozess loest GENAU (a) aus, nicht zusaetzlich (a2) -- disjunkt.
+    snap = Snapshot(processes=(_proc(9, exe_path="/tmp/evil"),))
+    obs = evaluate(snap, DEFAULT_RULES)
+    assert len(obs) == 1
+    assert obs[0].rule_id == "process_temp_path"
 
 
 # ── (b) remote_access_port ──────────────────────────────────────────────────
@@ -156,17 +225,19 @@ def test_evaluate_deterministisch() -> None:
 
 
 def test_sortierung_notable_vor_info_dann_rule_id_dann_subject() -> None:
-    # Mischung aus allen drei Regeln: zwei "notable" (a, b) und eine "info" (c).
+    # Mischung mehrerer Regeln: zwei "notable" (process_temp_path, remote_access_port)
+    # und eine "info" (high_connection_count). Der /tmp-Prozess ist userland (Default).
     many_conns = tuple(_conn(pid=42, remote_ip="9.9.9.9", remote_port=443) for _ in range(51))
     snap = Snapshot(
-        processes=(_proc(2, exe_path="/tmp/a"),),
+        processes=(_proc(20, exe_path="/tmp/a"),),
         connections=(_conn(remote_ip="8.8.8.8", remote_port=3389), *many_conns),
     )
     obs = evaluate(snap, DEFAULT_RULES)
     rule_ids = [o.rule_id for o in obs]
-    # notable (process_suspicious_path, remote_access_port) vor info (high_connection_count).
+    # notable (process_temp_path, remote_access_port) vor info (high_connection_count);
+    # innerhalb notable nach rule_id: process_temp_path < remote_access_port.
     assert rule_ids == [
-        "process_suspicious_path",
+        "process_temp_path",
         "remote_access_port",
         "high_connection_count",
     ]

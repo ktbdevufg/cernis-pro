@@ -49,6 +49,7 @@ class StaticHelpLinkResolver:
     # einen Domaenen-Eingriff. Ein neuer HelpKind bringt hier genau einen neuen Eintrag mit.
     _HELP_URLS: ClassVar[dict[HelpKind, str]] = {
         "process_suspicious_path": "https://de.wikipedia.org/wiki/Ausf%C3%BChrbare_Datei",
+        "process_masquerade": "https://de.wikipedia.org/wiki/Rootkit",
         "remote_access_port": "https://de.wikipedia.org/wiki/Liste_der_standardisierten_Ports",
         "high_connection_count": "https://de.wikipedia.org/wiki/Netzwerk-Socket",
     }

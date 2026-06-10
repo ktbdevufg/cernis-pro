@@ -5,7 +5,7 @@ Belegt fuer die zwei zustandslosen Adapter:
 * ``BuiltinRuleProvider`` liefert exakt die eingebauten ``DEFAULT_RULES`` und erfuellt
   ``ports.analysis.RuleProvider`` (Konformitaet rein statisch ueber mypy, Muster
   ``test_analysis_ports.py``).
-* ``StaticHelpLinkResolver`` deckt GENAU die drei aktuellen HelpKinds mit nicht-leeren
+* ``StaticHelpLinkResolver`` deckt GENAU die vier aktuellen HelpKinds mit nicht-leeren
   https-URLs ab und erfuellt ``ports.analysis.HelpLinkResolver`` (ebenfalls statisch).
 
 KEIN ``@runtime_checkable`` an den Ports -> bewusst KEIN ``isinstance``-Check; die
@@ -43,17 +43,18 @@ def test_builtin_rule_provider_returns_default_rules() -> None:
 
 
 def test_static_help_resolver_covers_all_help_kinds() -> None:
-    """Jeder der drei aktuellen HelpKinds -> nicht-leere https-URL (Tabelle deckt GENAU sie ab).
+    """Jeder der vier aktuellen HelpKinds -> nicht-leere https-URL (Tabelle deckt GENAU sie ab).
 
     ``HelpKind`` ist eine geschlossene Literal-Union; ein nicht modellierter Wert ist nicht
     testbar. Stattdessen pruefen wir gegen die echten Literal-Werte, dass die Tabelle GENAU
-    diese drei abdeckt -- waechst die Union, faellt dieser Test (gewollt: neuer Kind braucht
+    diese vier abdeckt -- waechst die Union, faellt dieser Test (gewollt: neuer Kind braucht
     eine neue URL).
     """
     resolver = StaticHelpLinkResolver()
     kinds = get_args(HelpKind.__value__)
     assert set(kinds) == {
         "process_suspicious_path",
+        "process_masquerade",
         "remote_access_port",
         "high_connection_count",
     }
