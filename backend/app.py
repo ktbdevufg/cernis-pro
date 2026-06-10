@@ -1167,8 +1167,20 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             )
             for p in processes
         )
+        # Rechte-Status als Eingabe-Faktum des Snapshots: rootless schweigt der
+        # kein-Pfad-Tarnverdacht (mehrdeutig), Root zeigt ihn als notable (AN.3-fix-2).
+        # Reuse des BESTEHENDEN Permission-Pfads (CheckProcessPermission +
+        # ProcessPermissionAdapter, beide schon im process-Block verdrahtet) -- NICHT
+        # os.geteuid direkt, KEINE zweite Instanz-Logik. Die Kopplung an den
+        # Permission-Adapter lebt hier in der Verdrahtung; die Domaene sieht nur ein bool.
+        perm = CheckProcessPermission(ProcessPermissionAdapter())()
+        full_visibility = bool(perm["ok"])
         # hosts NICHT setzen (keine der drei Start-Regeln nutzt sie) -> Default leeres Tuple.
-        snapshot = Snapshot(connections=observed_connections, processes=observed_processes)
+        snapshot = Snapshot(
+            connections=observed_connections,
+            processes=observed_processes,
+            full_process_visibility=full_visibility,
+        )
         return AnalyzeSnapshot(BuiltinRuleProvider(), StaticHelpLinkResolver())(snapshot)
 
     app.include_router(analysis_router)

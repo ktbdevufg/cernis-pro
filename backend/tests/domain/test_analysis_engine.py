@@ -17,6 +17,11 @@ zurueckgesetzt -- der Test faengt den jeweiligen kritischen Vertrag also wirklic
 * (kind-Filter) ``if proc.kind == "kernel": continue`` in ``_eval_process_masquerade``
   ENTFERNT -> ``test_kernel_thread_erzeugt_keine_beobachtung`` ROT (der kernel-Thread mit
   leerem cmdline + None-Pfad wuerde faelschlich als Tarnverdacht treffen). Zurueckgesetzt.
+* (AN.3-fix-2: Rechte-Waechter) ``snapshot.full_process_visibility`` aus dem (ii)-Zweig
+  von ``_eval_process_masquerade`` ENTFERNT (``if path is None:`` statt
+  ``if path is None and snapshot.full_process_visibility:``) ->
+  ``test_masquerade_kein_pfad_rootless_schweigt`` ROT (der fehlende Pfad trifft auch
+  rootless). Zurueckgesetzt.
 * (a) process_temp_path: Pfad-Praefix ``/tmp/`` aus ``DEFAULT_RULES`` entfernt
   -> ``test_rule_a_tmp_pfad_trifft`` ROT (der /tmp-Treffer entfaellt). Zurueckgesetzt.
 * (b) remote_access_port: Portmenge in ``DEFAULT_RULES`` geleert (``frozenset()``)
@@ -25,6 +30,8 @@ zurueckgesetzt -- der Test faengt den jeweiligen kritischen Vertrag also wirklic
   verfaelscht (Off-by-one) -> ``test_rule_c_grenze_*`` ROT (Wert == Schwelle wuerde
   faelschlich treffen). Zurueckgesetzt.
 """
+
+import pytest
 
 from domain.analysis import (
     DEFAULT_RULES,
@@ -131,9 +138,14 @@ def test_rule_a_normaler_pfad_trifft_nicht() -> None:
 # ── (a2) process_masquerade (Userland-Tarnverdacht) ───────────────────────────
 
 
-def test_rule_a2_leere_cmdline_trifft_info() -> None:
-    # Userland mit leerem cmdline (aber kind="userland") -> (a2) info (Tarnverdacht).
-    snap = Snapshot(processes=(_proc(50, exe_path="/usr/bin/foo", cmdline=()),))
+@pytest.mark.parametrize("full_visibility", [False, True])
+def test_rule_a2_leere_cmdline_trifft_info(full_visibility: bool) -> None:
+    # Userland mit leerem cmdline (aber kind="userland") -> (a2)(i) info (Tarnverdacht).
+    # In BEIDEN Modi verlaesslich: ein leeres cmdline trifft mit UND ohne volle Sicht.
+    snap = Snapshot(
+        processes=(_proc(50, exe_path="/usr/bin/foo", cmdline=()),),
+        full_process_visibility=full_visibility,
+    )
     obs = evaluate(snap, DEFAULT_RULES)
     assert len(obs) == 1
     assert obs[0].rule_id == "process_masquerade"
@@ -142,14 +154,56 @@ def test_rule_a2_leere_cmdline_trifft_info() -> None:
     assert obs[0].subject == "pid 50"
 
 
-def test_rule_a2_kein_exe_path_trifft_info() -> None:
-    # Userland mit exe_path None (kind="userland") -> (a2) info.
+def test_masquerade_kein_pfad_rootless_schweigt() -> None:
+    """Userland ohne exe_path, OHNE volle Sicht (Default rootless) -> KEIN Treffer.
+
+    Rootless ist ein fehlender Pfad mehrdeutig (evtl. nur fehlende Leserechte), kein
+    verlaessliches Signal -- die Regel schweigt (Vision 4.4: kein Anschwaerzen von
+    Harmlosem). cmdline ist gefuellt, also greift auch (i) nicht.
+
+    MUTATIONSPROBE (durchgefuehrt, ROT bestaetigt, zurueckgesetzt): den
+    ``full_process_visibility``-Waechter in (ii) entfernt (``if path is None:`` statt
+    ``if path is None and snapshot.full_process_visibility:``) -> dieser Test ROT (der
+    fehlende Pfad schlaegt auch rootless als Tarnverdacht an).
+    """
     snap = Snapshot(processes=(_proc(123, exe_path=None),))
+    assert evaluate(snap, DEFAULT_RULES) == []
+
+
+def test_masquerade_kein_pfad_unter_root_notable() -> None:
+    # Derselbe Prozess, aber unter voller Sicht (Root): kein Pfad trotz Lesrecht ist ein
+    # echtes, staerkeres Signal -> genau EINE Beobachtung, severity notable.
+    snap = Snapshot(processes=(_proc(123, exe_path=None),), full_process_visibility=True)
+    obs = evaluate(snap, DEFAULT_RULES)
+    assert len(obs) == 1
+    assert obs[0].rule_id == "process_masquerade"
+    assert obs[0].severity == "notable"
+    assert obs[0].subject == "pid 123"
+
+
+def test_masquerade_beide_ausloeser_unter_root_eine_notable() -> None:
+    # Userland, exe_path None UND leeres cmdline, unter voller Sicht: genau EINE
+    # Beobachtung, Prioritaet (ii) -> notable (nicht zwei, nicht info).
+    snap = Snapshot(
+        processes=(_proc(77, exe_path=None, cmdline=()),),
+        full_process_visibility=True,
+    )
+    obs = evaluate(snap, DEFAULT_RULES)
+    assert len(obs) == 1
+    assert obs[0].rule_id == "process_masquerade"
+    assert obs[0].severity == "notable"
+    assert obs[0].subject == "pid 77"
+
+
+def test_masquerade_beide_ausloeser_rootless_eine_info() -> None:
+    # Derselbe Prozess rootless (Default): (ii) faellt weg, (i) leeres cmdline greift ->
+    # genau EINE Beobachtung, severity info.
+    snap = Snapshot(processes=(_proc(77, exe_path=None, cmdline=()),))
     obs = evaluate(snap, DEFAULT_RULES)
     assert len(obs) == 1
     assert obs[0].rule_id == "process_masquerade"
     assert obs[0].severity == "info"
-    assert obs[0].subject == "pid 123"
+    assert obs[0].subject == "pid 77"
 
 
 def test_disjunkt_tmp_userland_erzeugt_genau_eine_beobachtung() -> None:

@@ -82,13 +82,30 @@ def _eval_process_temp_path(rule: Rule, snapshot: Snapshot) -> list[Observation]
 
 
 def _eval_process_masquerade(rule: Rule, snapshot: Snapshot) -> list[Observation]:
-    """Treffer, wenn ein USERLAND-Prozess wie Kernel-Infrastruktur aussieht.
+    """Treffer, wenn ein USERLAND-Prozess wie Kernel-Infrastruktur aussieht -- rechte-bewusst.
 
-    Tarnverdacht: leeres ``cmdline`` ODER fehlender ``exe_path`` (None), OBWOHL der Prozess
-    Userland ist (``kind != "kernel"``). Echte Kernel-Threads sind ausgeschlossen -- ihr
-    leeres ``cmdline``/fehlender Pfad ist Natur. DISJUNKT zu ``process_temp_path``: liegt
-    der ``exe_path`` unter einem temp-Praefix, ist (a) zustaendig und (a2) schweigt -- so
-    erzeugt ein /tmp-Prozess genau EINE Beobachtung, nie zwei.
+    Tarnverdacht-Ausloeser fuer einen Userland-Prozess (``kind != "kernel"``), beide
+    DISJUNKT zu ``process_temp_path`` (liegt der ``exe_path`` unter einem temp-Praefix,
+    ist (a) zustaendig und diese Regel schweigt -- ein /tmp-Prozess erzeugt nie zwei):
+
+    * (i) leeres ``cmdline`` -> IMMER ein Treffer (in beiden Modi rootless wie Root
+      verlaesslich). Severity: ``info`` (= ``rule.severity``).
+    * (ii) fehlender ``exe_path`` (None) -> Treffer NUR bei voller Prozess-Sicht
+      (``snapshot.full_process_visibility``). Unter Root DARF jeder Pfad gelesen werden;
+      fehlt er trotzdem, ist das ein echtes, staerkeres Signal (z. B. geloeschtes Binary)
+      -> Severity ``notable`` (faellt auf), explizit in der Auswertung gesetzt (nicht
+      ``rule.severity``, das ist der info-Default fuer (i)). Rootless
+      (``full_process_visibility`` False) ist ein fehlender Pfad mehrdeutig (evtl. nur
+      fehlende Leserechte) -> KEIN Treffer fuer (ii) (zu mehrdeutig, Vision 4.4: kein
+      Anschwaerzen von Harmlosem).
+
+    Echte Kernel-Threads sind ausgeschlossen (``kind == "kernel"`` greift VOR dem
+    Pfad-Check) -- ihr leeres ``cmdline``/fehlender Pfad ist Natur.
+
+    PRIORITAET bei beiden Ausloegern (leeres cmdline UND exe_path None unter Root): genau
+    EINE Beobachtung, der staerkere Fall (ii) ``notable`` gewinnt. Rootless faellt (ii)
+    weg, dann greift (i) ``info``. Reihenfolge/Determinismus unveraendert -- die Engine
+    sortiert am Ende global.
     """
     out: list[Observation] = []
     for proc in snapshot.processes:
@@ -98,17 +115,22 @@ def _eval_process_masquerade(rule: Rule, snapshot: Snapshot) -> list[Observation
         # Disjunktheit: ein temp-Pfad-Prozess gehoert (a), nicht hierher.
         if path is not None and any(path.startswith(prefix) for prefix in rule.path_prefixes):
             continue
-        if path is None:
+        # (ii) kein Pfad -- nur unter voller Sicht (Root) ein verlaessliches Signal; dann
+        # staerker als ein leeres cmdline -> notable. Prioritaet vor (i).
+        if path is None and snapshot.full_process_visibility:
             value = "keinen erkennbaren Programmpfad"
+            severity: Severity = "notable"
+        # (i) leeres cmdline -- in beiden Modi verlaesslich -> info (rule.severity).
         elif not proc.cmdline:
             value = "eine leere Kommandozeile"
+            severity = rule.severity
         else:
             continue
         subject = f"pid {proc.pid}"
         out.append(
             Observation(
                 rule_id=rule.id,
-                severity=rule.severity,
+                severity=severity,
                 title=rule.title,
                 detail=rule.detail_template.format(subject=subject, value=value),
                 help_kind=rule.help_kind,

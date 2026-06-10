@@ -77,8 +77,19 @@ class Snapshot:
     per Default leer -- ein leerer Snapshot ist gueltig und liefert keine Beobachtungen.
     Die Befuellung (Projektion aus traffic/process/scanning) ist Sache des
     application-Rings, nicht der Domaene.
+
+    ``full_process_visibility`` sagt, ob die Prozess-Detailfelder vollstaendig lesbar
+    sind (Root). Es steuert, ob die ``process_masquerade``-Regel den "kein exe_path"-Fall
+    als Signal wertet (nur bei voller Sicht verlaesslich -- Root DARF jeden Pfad lesen,
+    fehlt er trotzdem, ist das echt auffaellig); rootless ist ein fehlender Pfad
+    mehrdeutig (evtl. nur fehlende Leserechte). KEIN Urteil, nur Kontext. Bewusst als
+    ``bool``, NICHT als Permission-Port -- analysis bleibt entkoppelt (independence-
+    Contract); die Composition Root fuellt es aus dem bestehenden
+    ``CheckProcessPermission``-Ergebnis. Default ``False``: "im Zweifel rootless", also
+    der zurueckhaltende Modus.
     """
 
     connections: tuple[ObservedConnection, ...] = field(default_factory=tuple)
     processes: tuple[ObservedProcess, ...] = field(default_factory=tuple)
     hosts: tuple[ObservedHost, ...] = field(default_factory=tuple)
+    full_process_visibility: bool = False
