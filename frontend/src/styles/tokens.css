@@ -1,0 +1,69 @@
+/*
+ * Design-Token-System (CERNIS PRO 2.0)
+ * Logo-Türkis/Teal als Akzent, nicht flächig.
+ * Umschaltung über data-theme="light"|"dark" auf <html>.
+ * Komponenten nutzen NUR diese Variablen, nie feste Farben.
+ */
+
+:root {
+  /* Radien */
+  --radius-md: 8px;
+  --radius-lg: 12px;
+}
+
+/* Hell (Default) */
+:root,
+[data-theme="light"] {
+  --color-bg: #ffffff;
+  --color-bar: #f7f6f2;
+  --color-text: #1a1a18;
+  --color-text-sec: #5f5e5a;
+  --color-text-tert: #888780;
+  --color-border: rgba(0, 0, 0, 0.12);
+  --color-card: #f7f6f2;
+
+  --color-accent: #0F6E56;
+  --color-accent-bg: #E1F5EE;
+
+  --sev-high-text: #A32D2D;
+  --sev-high-bd: #E24B4A;
+  --sev-high-bg: #FCEBEB;
+  --sev-med-text: #854F0B;
+  --sev-med-bd: #EF9F27;
+  --sev-med-bg: #FAEEDA;
+  --sev-low-text: #5f5e5a;
+  --sev-low-bd: #B4B2A9;
+  --sev-low-bg: #f1efe8;
+
+  --color-link: #185FA5;
+  --color-ok-bg: #E1F5EE;
+  --color-ok-text: #0F6E56;
+}
+
+/* Dunkel */
+[data-theme="dark"] {
+  --color-bg: #1c1c1a;
+  --color-bar: #141413;
+  --color-text: #ecebe6;
+  --color-text-sec: #b4b2a9;
+  --color-text-tert: #888780;
+  --color-border: rgba(255, 255, 255, 0.14);
+  --color-card: #222220;
+
+  --color-accent: #5DCAA5;
+  --color-accent-bg: #085041;
+
+  --sev-high-text: #F09595;
+  --sev-high-bd: #A32D2D;
+  --sev-high-bg: #2e1414;
+  --sev-med-text: #FAC775;
+  --sev-med-bd: #854F0B;
+  --sev-med-bg: #2e2206;
+  --sev-low-text: #b4b2a9;
+  --sev-low-bd: #444441;
+  --sev-low-bg: #222220;
+
+  --color-link: #85B7EB;
+  --color-ok-bg: #0c2e26;
+  --color-ok-text: #9FE1CB;
+}

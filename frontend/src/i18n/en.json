@@ -1,0 +1,25 @@
+{
+  "app": {
+    "version": "v2.0"
+  },
+  "header": {
+    "manual": "Manual"
+  },
+  "nav": {
+    "overview": "Overview",
+    "observe": "Observe",
+    "investigate": "Investigate",
+    "export": "Export"
+  },
+  "placeholder": {
+    "inProgress": "in progress"
+  },
+  "theme": {
+    "light": "light",
+    "dark": "dark"
+  },
+  "lang": {
+    "de": "DE",
+    "en": "EN"
+  }
+}

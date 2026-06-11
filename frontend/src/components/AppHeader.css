@@ -1,0 +1,42 @@
+/* Kopfzeile */
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 20px;
+  background: var(--color-bar);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.app-header__brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.app-header__logo {
+  height: 44px;
+  width: auto;
+}
+
+.app-header__wordmark {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.app-header__version {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--color-text-tert);
+}
+
+.app-header__controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
