@@ -35,6 +35,22 @@ Block 1b (Tool-/Paketmanager-Erkennung) -- reine Daten + zwei reine Funktionen:
 * ``assemble_report`` -- baut den ``ToolReport`` (sortierte Statuses, fehlende ermittelt,
   Install-Befehl ueber ``build_install_command``). Rein, kein I/O.
 
+Block 2a (Banner-Grabbing) -- rein lokales TCP-Klopfen + Lesen der Begruessungszeile,
+hier nur die reine Heuristik + das Wertobjekt + die Bereinigung (kein Socket-I/O, das
+ist Infrastruktur):
+
+* ``BannerProbe`` -- WIE ein Banner geholt wird: ``"passive"`` (der Dienst gruesst selbst)
+  oder ``"http_head"`` (eine minimale HTTP-HEAD-Anfrage senden).
+* ``probe_for_port`` -- die EINZIGE Heuristik (rein, deterministisch, mutationsproben-
+  tauglich): Klartext-Web-Ports -> ``"http_head"``, alles andere -> ``"passive"``.
+  TLS-Ports (443/8443) bewusst NICHT als ``http_head`` -- ein roher Connect dorthin
+  spraeche TLS, kein Klartext-HTTP (kein TLS-Handshake in 2a, siehe ADR 0014 Block 2a).
+* ``BannerResult`` -- das Ergebnis als frozen Wertobjekt. ``banner`` ehrlich ``None``,
+  wenn nichts kam (Timeout/leere Antwort) -- KEIN erfundener Wert. ``state`` benennt das
+  Ergebnis ehrlich (ok/no_banner/closed/filtered).
+* ``sanitize_banner`` -- bereinigt die rohe Begruessung rein + deterministisch (erste
+  Zeile, Steuerzeichen raus, auf Maximallaenge gekuerzt) -- testbar ohne Netz.
+
 DARSTELLUNG bleibt draussen: kein Mensch-lesbares Formatieren, keine Icons -- das fuehrt
 api/Frontend. Die Domaene fuehrt nur Werte.
 """
@@ -271,3 +287,85 @@ def assemble_report(
     missing = [status.name for status in statuses if not status.available]
     install_command = build_install_command(manager, missing)
     return ToolReport(manager=manager, statuses=statuses, install_command=install_command)
+
+
+# ── Block 2a: Banner-Grabbing (reine Heuristik + Wertobjekt + Bereinigung) ─────
+
+# WIE ein Banner geholt wird. PEP-695-Alias wie ``DnsRecordType``/``PackageManager`` -- ein
+# reines Kategorie-Etikett ohne Verhalten. ``passive`` = nach dem Connect kurz lauschen
+# (der Dienst gruesst selbst, z. B. SSH/SMTP/FTP). ``http_head`` = eine minimale HTTP-HEAD-
+# Anfrage senden und die Statuszeile + den ``Server``-Header als Banner lesen.
+type BannerProbe = Literal["passive", "http_head"]
+
+# Klartext-HTTP-Web-Ports, die per minimaler HTTP-HEAD-Anfrage gegruesst werden. BEWUSST
+# OHNE die TLS-Ports {443, 8443}: ein roher TCP-Connect dorthin spricht TLS, kein Klartext-
+# HTTP -- eine HEAD-Anfrage gaebe Muell. In 2a wird KEIN TLS-Handshake gesprochen (Scope-
+# Grenze, ADR 0014 Block 2a); TLS-Ports fallen daher in ``passive`` und gruessen bei rohem
+# Connect nicht -> ehrlich ``no_banner``. Reine Daten -- die einzige Heuristik-Quelle.
+_HTTP_HEAD_PORTS: frozenset[int] = frozenset({80, 8080, 8000, 8008})
+
+# Maximale Bannerlaenge nach der Bereinigung. Ein Banner ist eine kurze Begruessung/ein
+# Server-Header -- mehr ist fuer ein Diagnose-Werkzeug Laerm und ein Risiko (uferlose
+# Antwort eines boesartigen Diensts). 512 Zeichen sind grosszuegig fuer reale Banner.
+_MAX_BANNER_LEN = 512
+
+
+def probe_for_port(port: int) -> BannerProbe:
+    """Bestimmt die Banner-Methode fuer ``port`` -- rein, deterministisch, testbar.
+
+    Klartext-Web-Ports ({80, 8080, 8000, 8008}) -> ``"http_head"`` (eine minimale
+    HTTP-HEAD-Anfrage senden); alle anderen Ports -> ``"passive"`` (kurz lauschen, der
+    Dienst gruesst selbst). Die TLS-Ports {443, 8443} sind BEWUSST NICHT in der
+    http_head-Menge: ein roher Connect dorthin spraeche TLS, kein Klartext-HTTP -- in 2a
+    wird kein TLS-Handshake gesprochen (Scope-Grenze), darum gelten sie als ``passive``
+    und gruessen bei rohem Connect nicht (ehrlich ``no_banner`` im Adapter).
+
+    Das ist die EINZIGE Heuristik der Banner-Domaene -- rein, kein I/O, keine Uhr; gleiche
+    Eingabe -> gleiches Ergebnis (mutationsproben-tauglich).
+    """
+    if port in _HTTP_HEAD_PORTS:
+        return "http_head"
+    return "passive"
+
+
+@dataclass(frozen=True)
+class BannerResult:
+    """Das Ergebnis eines Banner-Grabs als reines Wertobjekt (frozen).
+
+    ``target``/``port`` sind das angeklopfte Ziel, ``probe`` die verwendete Methode
+    (``passive``/``http_head`` -- die ehrliche Auskunft, WIE geholt wurde). ``banner`` ist
+    die gelesene Begruessungszeile bzw. der Server-Header, ehrlich ``None``, wenn nichts
+    Lesbares kam (Timeout, leere Antwort) -- KEIN erfundener Wert. ``state`` benennt das
+    Ergebnis: ``"ok"`` = Banner gelesen; ``"no_banner"`` = verbunden, aber keine lesbare
+    Antwort; ``"closed"`` = aktiv abgewiesen (ConnectionRefused); ``"filtered"`` = Timeout/
+    unerreichbar. ``banner`` ist NUR bei ``"ok"`` nicht-``None``.
+    """
+
+    target: str
+    port: int
+    probe: BannerProbe
+    banner: str | None
+    state: Literal["ok", "no_banner", "closed", "filtered"]
+
+
+def sanitize_banner(raw: str) -> str:
+    """Bereinigt eine rohe Banner-Antwort -- rein, deterministisch, testbar.
+
+    Drei Schritte, in dieser Reihenfolge:
+
+    1. **Erste Zeile**: ein Banner ist eine Begruessungszeile -- alles ab dem ersten
+       Zeilenumbruch (``\\r``/``\\n``) faellt weg.
+    2. **Steuerzeichen raus**: nicht-druckbare Zeichen (``\\x00``-Bereich, Steuerzeichen)
+       werden entfernt -- ein Banner ist Text, kein Byte-Strom; fuehrende/folgende
+       Leerzeichen werden getrimmt.
+    3. **Laengenbegrenzung**: auf ``_MAX_BANNER_LEN`` (512) Zeichen gekuerzt -- eine
+       uferlose Antwort wird begrenzt (Diagnose-Werkzeug, kein Byte-Sammler).
+
+    Rein: kein I/O, keine Uhr; gleiche Eingabe -> gleiches Ergebnis. Leere Eingabe (oder
+    eine, die nach der Bereinigung leer ist) -> leerer String (der Adapter entscheidet
+    daraus die ``no_banner``-Semantik).
+    """
+    first_line = raw.splitlines()[0] if raw.splitlines() else ""
+    # Nur druckbare Zeichen behalten (Steuerzeichen wie \t,\x00,\x1b raus); dann trimmen.
+    printable = "".join(ch for ch in first_line if ch.isprintable())
+    return printable.strip()[:_MAX_BANNER_LEN]

@@ -7,6 +7,7 @@ from application.diagnostics.errors import (
 from application.diagnostics.use_cases import (
     CheckDiagnosticsTools,
     CheckTraceroutePermission,
+    GrabBanner,
     ResolveDns,
     RunTraceroute,
 )
@@ -16,6 +17,7 @@ __all__ = [
     "CheckTraceroutePermission",
     "DiagnosticsApplicationError",
     "DiagnosticsToolMissingError",
+    "GrabBanner",
     "ResolveDns",
     "RunTraceroute",
 ]

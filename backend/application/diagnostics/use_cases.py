@@ -15,6 +15,11 @@ Drei Use-Cases (duenn, Muster ``ListProcesses``/``CheckProcessPermission``):
   bedeutet ``ok=True``: die privilegierte (genauere) Methode ist verfuegbar; ``ok=False``
   + Text: nur die unprivilegierte (ungenauere) Methode, mit Begruendung.
 
+Block 2a:
+
+* ``GrabBanner`` -- duenner Pass-Through ueber den ``BannerGrabber`` (Muster
+  ``RunTraceroute``): das Anklopfen ueber den Grabber durchreichen, keine eigene Logik.
+
 Block 1b:
 
 * ``CheckDiagnosticsTools`` -- duenne Orchestrierung (Muster der uebrigen UCs): ermittelt
@@ -31,6 +36,7 @@ from collections.abc import Sequence
 from domain.diagnostics import (
     ALL_TOOLS,
     TOOL_PACKAGES,
+    BannerResult,
     DnsRecordType,
     DnsResult,
     ToolReport,
@@ -38,6 +44,7 @@ from domain.diagnostics import (
     assemble_report,
 )
 from ports.diagnostics import (
+    BannerGrabber,
     DnsResolver,
     PackageManagerDetector,
     ToolDetector,
@@ -77,6 +84,23 @@ class RunTraceroute:
     async def __call__(self, target: str, privileged: bool) -> TracerouteResult:
         """Misst den Pfad zu ``target`` (duenner Pass-Through; ``privileged`` durchgereicht)."""
         return await self._runner.run(target, privileged)
+
+
+class GrabBanner:
+    """Banner-Grabbing (2a): duenner Pass-Through ueber den ``BannerGrabber``.
+
+    Duenn (Muster ``RunTraceroute``): das Anklopfen ueber den Grabber durchreichen, keine
+    eigene Logik. Der Port kommt per Constructor-Injection als Protocol-Typ herein -- nie
+    ein konkreter Adapter. Ehrliche Semantik liegt im Grabber/der Domaene (kein erfundener
+    Banner) -- der Use-Case reicht das ``BannerResult`` unveraendert durch.
+    """
+
+    def __init__(self, grabber: BannerGrabber) -> None:
+        self._grabber = grabber
+
+    async def __call__(self, target: str, port: int) -> BannerResult:
+        """Klopft an ``target:port`` und liest die Begruessung (duenner Pass-Through)."""
+        return await self._grabber.grab(target, port)
 
 
 class CheckTraceroutePermission:

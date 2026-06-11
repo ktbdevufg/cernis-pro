@@ -77,6 +77,7 @@ from api.devices import router as devices_router
 from api.diagnostics import (
     provide_check_tools,
     provide_check_traceroute_permission,
+    provide_grab_banner,
     provide_resolve_dns,
     provide_run_traceroute,
 )
@@ -172,6 +173,7 @@ from application.devices import (
 from application.diagnostics import (
     CheckDiagnosticsTools,
     CheckTraceroutePermission,
+    GrabBanner,
     ResolveDns,
     RunTraceroute,
 )
@@ -238,6 +240,7 @@ from infrastructure.diagnostics_linux import (
     LinuxPackageManagerDetector,
     LinuxTraceroutePermission,
     ShutilToolDetector,
+    SocketBannerGrabber,
     SystemTracerouteRunner,
 )
 from infrastructure.interfaces_linux import InterfaceDiscoveryAdapter
@@ -1222,6 +1225,16 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         return CheckDiagnosticsTools(ShutilToolDetector(), LinuxPackageManagerDetector())(tools)
 
     app.dependency_overrides[provide_check_tools] = lambda: _check_tools
+
+    # ── diagnostics 2a: Banner-Grabbing verdrahten ────────────────────────────────
+    # Zustandsloser asyncio-Socket-Adapter direkt instanziiert (Muster oben). Der Runner
+    # reicht target/port an den duennen Use-Case durch und gibt das BannerResult als Any
+    # zurueck (der api-Ring serialisiert, kennt keine domain-Typen). KEIN Tool-/Rechte-
+    # Thema -- ein gewoehnlicher TCP-Connect. KEINE konfigurierbaren Payloads.
+    async def _grab_banner(target: str, port: int) -> Any:
+        return await GrabBanner(SocketBannerGrabber())(target, port)
+
+    app.dependency_overrides[provide_grab_banner] = lambda: _grab_banner
 
     @app.exception_handler(DiagnosticsToolMissing)
     async def _on_diagnostics_tool_missing(

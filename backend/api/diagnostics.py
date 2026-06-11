@@ -19,6 +19,12 @@ Attribut-Zugriff zu JSON serialisiert (Typ ``Any``, Muster ``api/process``).
   (Erstinstallation); MIT ``tools`` nur die genannten (Laufzeit). Liefert den ``ToolReport``
   als dict (``manager`` str|null, ``statuses[]`` {name, available}, ``install_command``
   str|null). KEINE Selbst-Installation -- nur der Befehls-TEXT (Sicherheits-Prinzip).
+* ``GET /api/diagnostics/banner?target=<host>&port=<n>`` (2a) -- klopft EINMAL an den Port
+  und liest die Begruessung. ``target`` Pflicht (str), ``port`` Pflicht (int, FastAPI
+  validiert 1..65535). Liefert das ``BannerResult`` als dict (``target``, ``port``,
+  ``probe``, ``banner`` str|null, ``state``). ``banner`` ist ehrlich ``null``, wenn nichts
+  kam (kein erfundener Wert). KEINE konfigurierbaren Payloads -- nur eine minimale
+  Standard-Anfrage (Sicherheits-Grenze: Diagnose, kein Byte-Sender).
 
 TOOL-FEHLT -> HTTP: Fehlt das System-Binary (``dig``/``traceroute``), wirft der Adapter
 ``infrastructure.diagnostics_linux.DiagnosticsToolMissing``. Diesen infrastruktur-nahen
@@ -53,6 +59,9 @@ type RunTracerouteRunner = Callable[[str, bool], Awaitable[Any]]
 # 1b: prueft die angefragten (oder bei None alle) Tools und liefert den rohen ToolReport
 # (``Any`` -- der api-Ring kennt keine domain-Typen). Synchron: reine lokale which-Checks.
 type CheckToolsRunner = Callable[[list[str] | None], Any]
+# 2a: klopft an target:port und liefert das rohe BannerResult (``Any`` -- der api-Ring kennt
+# keine domain-Typen). Async: blockierendes Socket-I/O im Adapter ueber asyncio gekapselt.
+type GrabBannerRunner = Callable[[str, int], Awaitable[Any]]
 
 
 # Dependency-Marker: im Composition Root (app.py) per dependency_overrides mit den
@@ -71,6 +80,10 @@ def provide_check_traceroute_permission() -> CheckTraceroutePermission:
 
 def provide_check_tools() -> CheckToolsRunner:
     raise NotImplementedError("CheckToolsRunner wird in app.py verdrahtet")
+
+
+def provide_grab_banner() -> GrabBannerRunner:
+    raise NotImplementedError("GrabBannerRunner wird in app.py verdrahtet")
 
 
 def _record_to_dict(r: Any) -> dict[str, Any]:
@@ -112,6 +125,17 @@ def _tool_report_to_dict(report: Any) -> dict[str, Any]:
         "manager": report.manager,
         "statuses": [_tool_status_to_dict(status) for status in report.statuses],
         "install_command": report.install_command,
+    }
+
+
+def _banner_result_to_dict(result: Any) -> dict[str, Any]:
+    # result ist ein domain.BannerResult; banner ist ehrlich str|None (kein erfundener Wert).
+    return {
+        "target": result.target,
+        "port": result.port,
+        "probe": result.probe,
+        "banner": result.banner,
+        "state": result.state,
     }
 
 
@@ -178,3 +202,21 @@ def check_tools(
     """
     report = check(tools)
     return _tool_report_to_dict(report)
+
+
+@router.get("/banner")
+async def grab_banner(
+    target: str,
+    grab: Annotated[GrabBannerRunner, Depends(provide_grab_banner)],
+    port: Annotated[int, Query(ge=1, le=65535)],
+) -> dict[str, Any]:
+    """Banner-Grabbing (2a): klopft EINMAL an ``target:port`` und liest die Begruessung.
+
+    ``target`` (str) und ``port`` (int, 1..65535) sind Pflicht -- FastAPI lehnt fehlendes/
+    ungueltiges ``port`` selbst mit 422 ab (kein Raten). Der Runner liefert das
+    ``BannerResult``; der Router serialisiert es (``target``, ``port``, ``probe``,
+    ``banner`` str|null, ``state``). ``banner`` ist ehrlich ``null``, wenn nichts kam (kein
+    erfundener Wert). KEINE konfigurierbaren Payloads -- nur eine minimale Standard-Anfrage.
+    """
+    result = await grab(target, port)
+    return _banner_result_to_dict(result)

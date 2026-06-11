@@ -13,11 +13,13 @@ from collections.abc import Sequence
 from application.diagnostics import (
     CheckDiagnosticsTools,
     CheckTraceroutePermission,
+    GrabBanner,
     ResolveDns,
     RunTraceroute,
 )
 from domain.diagnostics import (
     ALL_TOOLS,
+    BannerResult,
     DnsRecord,
     DnsRecordType,
     DnsResult,
@@ -65,6 +67,18 @@ class FakeTraceroutePermission:
 
     def check_permission(self) -> str | None:
         return self._permission_error
+
+
+class FakeBannerGrabber:
+    """In-Memory-Implementierung des ``BannerGrabber``-Protocols."""
+
+    def __init__(self, result: BannerResult) -> None:
+        self._result = result
+        self.calls: list[tuple[str, int]] = []
+
+    async def grab(self, target: str, port: int) -> BannerResult:
+        self.calls.append((target, port))
+        return self._result
 
 
 class FakeToolDetector:
@@ -138,6 +152,30 @@ def test_run_traceroute_pass_through_privileged_false() -> None:
     out = asyncio.run(RunTraceroute(fake)("example.com", False))
     assert out.privileged is False
     assert fake.calls == [("example.com", False)]
+
+
+# ── GrabBanner (2a, Pass-Through) ─────────────────────────────────────────────
+
+
+def test_grab_banner_pass_through() -> None:
+    result = BannerResult(
+        target="example.com", port=22, probe="passive", banner="SSH-2.0-OpenSSH", state="ok"
+    )
+    fake = FakeBannerGrabber(result)
+    out = asyncio.run(GrabBanner(fake)("example.com", 22))
+    assert out is result
+    assert fake.calls == [("example.com", 22)]
+
+
+def test_grab_banner_no_banner_is_passed_through() -> None:
+    # Ein no_banner-Ergebnis (kein erfundener Wert) wird unveraendert durchgereicht.
+    result = BannerResult(
+        target="example.com", port=443, probe="passive", banner=None, state="no_banner"
+    )
+    fake = FakeBannerGrabber(result)
+    out = asyncio.run(GrabBanner(fake)("example.com", 443))
+    assert out.banner is None
+    assert out.state == "no_banner"
 
 
 # ── CheckTraceroutePermission ({ok, error}-Naht) ──────────────────────────────

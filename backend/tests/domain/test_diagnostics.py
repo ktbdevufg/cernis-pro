@@ -11,6 +11,7 @@ import pytest
 from domain.diagnostics import (
     ALL_TOOLS,
     TOOL_PACKAGES,
+    BannerResult,
     DnsRecord,
     DnsResult,
     ToolReport,
@@ -20,6 +21,8 @@ from domain.diagnostics import (
     assemble_report,
     build_install_command,
     dedup_records,
+    probe_for_port,
+    sanitize_banner,
 )
 
 # ── Wertobjekte (frozen + ehrliche None-Naht) ─────────────────────────────────
@@ -241,3 +244,76 @@ def test_assemble_report_unknown_availability_defaults_false() -> None:
     report = assemble_report("apt", {}, ["dig"])
     assert report.statuses == (ToolStatus(name="dig", available=False),)
     assert report.install_command == "sudo apt install dnsutils"
+
+
+# ── Block 2a: probe_for_port (einzige Heuristik, mutationsproben-tauglich) ─────
+
+
+def test_probe_for_port_plaintext_web_ports_are_http_head() -> None:
+    # Die Klartext-Web-Ports -> http_head (minimale HTTP-HEAD-Anfrage).
+    for port in (80, 8080, 8000, 8008):
+        assert probe_for_port(port) == "http_head"
+
+
+def test_probe_for_port_other_ports_are_passive() -> None:
+    # Nicht-Web-Ports -> passive (der Dienst gruesst selbst).
+    for port in (22, 25, 21, 3306, 6379, 12345):
+        assert probe_for_port(port) == "passive"
+
+
+def test_probe_for_port_tls_ports_are_passive_not_http_head() -> None:
+    # TLS-Ports {443, 8443} sind BEWUSST passive (kein TLS-Handshake in 2a) -- ein roher
+    # Connect spraeche TLS, kein Klartext-HTTP. Mutationsprobe gegen "443 in http_head-Menge".
+    assert probe_for_port(443) == "passive"
+    assert probe_for_port(8443) == "passive"
+
+
+# ── Block 2a: sanitize_banner (erste Zeile, Steuerzeichen raus, gekuerzt) ──────
+
+
+def test_sanitize_banner_keeps_first_line_only() -> None:
+    # Mehrzeilige Antwort -> nur die erste Zeile (ein Banner ist eine Begruessungszeile).
+    assert sanitize_banner("SSH-2.0-OpenSSH_9.6\r\nzweite Zeile") == "SSH-2.0-OpenSSH_9.6"
+
+
+def test_sanitize_banner_strips_control_characters() -> None:
+    # Steuerzeichen (Tab, \x00, ESC) raus; nur druckbarer Text bleibt.
+    assert sanitize_banner("220\x00 smtp\x1b ready\t!") == "220 smtp ready!"
+
+
+def test_sanitize_banner_truncates_to_max_length() -> None:
+    # Eine uferlose Antwort wird auf 512 Zeichen gekuerzt. Mutationsprobe: Kuerzung raus -> rot.
+    raw = "x" * 1000
+    result = sanitize_banner(raw)
+    assert len(result) == 512
+    assert result == "x" * 512
+
+
+def test_sanitize_banner_empty_input() -> None:
+    # Leere Eingabe -> leerer String (der Adapter leitet daraus no_banner ab).
+    assert sanitize_banner("") == ""
+
+
+def test_sanitize_banner_only_control_chars_becomes_empty() -> None:
+    # Eine Zeile nur aus Steuerzeichen -> leer (kein erfundener Banner).
+    assert sanitize_banner("\x00\x01\x02") == ""
+
+
+# ── Block 2a: BannerResult (frozen + ehrliche None-Naht) ──────────────────────
+
+
+def test_banner_result_is_frozen() -> None:
+    result = BannerResult(
+        target="example.com", port=22, probe="passive", banner="SSH-2.0", state="ok"
+    )
+    with pytest.raises(AttributeError):
+        result.banner = "anders"  # type: ignore[misc]
+
+
+def test_banner_result_no_banner_is_honest_none() -> None:
+    # Verbunden, aber keine lesbare Antwort -> banner ehrlich None, state no_banner.
+    result = BannerResult(
+        target="example.com", port=443, probe="passive", banner=None, state="no_banner"
+    )
+    assert result.banner is None
+    assert result.state == "no_banner"

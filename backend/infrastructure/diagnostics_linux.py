@@ -16,11 +16,23 @@ traffic -- System-Tools statt Python-Libs, ADR 0014):
   deterministischer Reihenfolge gefundene Paketmanager. Reine ``which``-Pruefung, KEIN
   Distro-Raten ueber ``/etc/os-release`` -- robust gegen Derivate (ein Derivat erbt den
   Paketmanager seiner Basis, nicht zwingend den Distro-Namen).
+* ``SocketBannerGrabber`` (``BannerGrabber``, 2a) -- klopft EINMAL an einen Port und liest
+  die Begruessung. Die Methode kommt aus ``domain.probe_for_port`` (passive vs. http_head);
+  Verbindung ueber ``asyncio.open_connection`` mit ``wait_for``-Timeouts. SICHERHEITS-
+  GRENZE: bei ``http_head`` wird GENAU eine minimale, standardkonforme HTTP-HEAD-Anfrage
+  gesendet (keine konfigurierbaren Payloads); bei ``passive`` wird NICHTS gesendet, nur
+  gelesen -- Banner-Grabbing bleibt Diagnose, kein Byte-Sender.
+
+TLS-PORTS in 2a (ADR 0014 Block 2a): {443, 8443} sind in ``domain.probe_for_port`` bewusst
+NICHT in der http_head-Menge -- ein roher Connect dorthin spraeche TLS, kein Klartext-HTTP.
+Sie gelten als ``passive`` und gruessen bei rohem Connect nicht -> ehrlich ``no_banner``.
+KEIN TLS-Handshake in 2a (das waere Scope-Ausweitung).
 
 Schablone ``infrastructure/process_linux.py``: ``async``-Methoden kapseln das blockierende
 Subprocess-I/O ueber ``run_in_executor`` (Event-Loop bleibt frei); der synchrone Kern und
 die reinen Parser-Helfer liegen ausserhalb der Klassen und sind ohne Adapter-Instanz
-testbar.
+testbar. Der Banner-Adapter (2a) ist nativ ``async`` (asyncio-Sockets statt Subprocess) --
+sein blockierendes I/O ist bereits non-blocking ueber den Event-Loop gekapselt.
 
 TOOL-FEHLT-NAHT (Ring-Realitaet, vom Auftrag vorgesehene Abweichung): Der
 import-linter-Contract "infrastructure kennt nicht application/api" verbietet diesem Ring,
@@ -37,6 +49,7 @@ Plattform-Riegel sitzt im Rechte-Adapter (``geteuid``/``which``). Kein ``modules
 """
 
 import asyncio
+import contextlib
 import os
 import re
 import shutil
@@ -44,6 +57,8 @@ import subprocess
 from collections.abc import Sequence
 
 from domain.diagnostics import (
+    BannerProbe,
+    BannerResult,
     DnsRecord,
     DnsRecordType,
     DnsResult,
@@ -51,6 +66,8 @@ from domain.diagnostics import (
     TracerouteHop,
     TracerouteResult,
     dedup_records,
+    probe_for_port,
+    sanitize_banner,
 )
 
 
@@ -74,6 +91,14 @@ class DiagnosticsToolMissing(Exception):
 # (mehrere Hops a mehrere Probes), darum grosszuegiger als dig.
 _DIG_TIMEOUT_SECS = 10.0
 _TRACEROUTE_TIMEOUT_SECS = 60.0
+# Banner-Grabbing (2a): kurze Connect-/Read-Timeouts -- ein stiller Port darf den Request
+# nicht haengen lassen. Getrennt, weil ein Connect schnell scheitern soll, das Lesen aber
+# kurz auf die Begruessung wartet.
+_BANNER_CONNECT_TIMEOUT_SECS = 3.0
+_BANNER_READ_TIMEOUT_SECS = 3.0
+# Maximale Rohbytes, die beim passiven Lauschen gelesen werden -- die Begruessung ist kurz;
+# die Domaene (``sanitize_banner``) kuerzt ohnehin auf die erste Zeile + Maximallaenge.
+_BANNER_READ_MAX_BYTES = 1024
 
 
 # ── DNS-Parser (rein, testbar) ────────────────────────────────────────────────
@@ -289,6 +314,127 @@ class LinuxPackageManagerDetector:
             if shutil.which(manager) is not None:
                 return manager
         return None
+
+
+# ── Block 2a: Banner-Grabbing (asyncio-Sockets, eine minimale Anfrage) ─────────
+
+
+def _build_http_head_request(target: str) -> bytes:
+    """Baut GENAU eine minimale, standardkonforme HTTP-HEAD-Anfrage -- rein, testbar.
+
+    ``HEAD / HTTP/1.0\\r\\nHost: <target>\\r\\n\\r\\n`` -- HTTP/1.0 schliesst die Verbindung
+    nach der Antwort von selbst (kein keep-alive-Aufraeumen noetig). ``HEAD`` fordert NUR
+    die Header an (kein Body) -- genug fuer Statuszeile + ``Server``-Header. SICHERHEITS-
+    GRENZE: das ist die EINZIGE Anfrage, die der Adapter je sendet; keine konfigurierbaren
+    Payloads, kein generischer Byte-Sender (Banner-Grabbing bleibt Diagnose).
+    """
+    return f"HEAD / HTTP/1.0\r\nHost: {target}\r\n\r\n".encode()
+
+
+def _banner_from_http_head(response: str) -> str | None:
+    """Extrahiert Statuszeile + ``Server``-Header aus einer HTTP-HEAD-Antwort -- rein.
+
+    Die erste Zeile ist die Statuszeile (z. B. ``HTTP/1.0 200 OK``); ein ``Server:``-Header
+    (case-insensitiv) wird, falls vorhanden, angehaengt (``HTTP/1.0 200 OK | Server:
+    nginx``). Ohne lesbare Statuszeile -> ``None`` (der Aufrufer leitet daraus ``no_banner``
+    ab). Rein: gleiche Eingabe -> gleiches Ergebnis (kein I/O).
+    """
+    lines = response.splitlines()
+    status_line = lines[0].strip() if lines else ""
+    if not status_line:
+        return None
+    for line in lines[1:]:
+        if line.lower().startswith("server:"):
+            server_value = line.split(":", 1)[1].strip()
+            return f"{status_line} | Server: {server_value}"
+    return status_line
+
+
+class SocketBannerGrabber:
+    """Erfuellt das ``BannerGrabber``-Protocol (2a) ueber rohe asyncio-TCP-Sockets.
+
+    Bestimmt die Methode ueber ``domain.probe_for_port`` (passive vs. http_head),
+    verbindet ueber ``asyncio.open_connection`` mit ``wait_for``-Timeouts und liest die
+    Begruessung. SICHERHEITS-GRENZE: bei ``http_head`` GENAU eine minimale HTTP-HEAD-Anfrage
+    (keine konfigurierbaren Payloads); bei ``passive`` wird NICHTS gesendet, nur gelesen.
+    Ehrliche Semantik (kein erfundener Banner): Connect ok + Banner gelesen -> ``ok``;
+    Connect ok + nichts Lesbares -> ``no_banner``; ConnectionRefused -> ``closed``;
+    Timeout/unerreichbar -> ``filtered``.
+    """
+
+    async def grab(self, target: str, port: int) -> BannerResult:
+        """Klopft an ``target:port`` und liest die Begruessung -> ``BannerResult``.
+
+        Die Methode kommt aus ``domain.probe_for_port`` -- TLS-Ports {443, 8443} sind dort
+        bewusst ``passive`` (kein TLS-Handshake in 2a; ein roher Connect gruesst dort nicht
+        -> ehrlich ``no_banner``). Das blockierende Socket-I/O ist bereits non-blocking
+        ueber den asyncio-Event-Loop gekapselt; die Methode bleibt sauber ``async``.
+        """
+        probe = probe_for_port(port)
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(target, port),
+                timeout=_BANNER_CONNECT_TIMEOUT_SECS,
+            )
+        except ConnectionRefusedError:
+            # Aktiv abgewiesen -- der Port ist zu, aber erreichbar.
+            return BannerResult(target=target, port=port, probe=probe, banner=None, state="closed")
+        except (TimeoutError, OSError):
+            # Timeout (asyncio.wait_for) oder unerreichbar (OSError, z. B. no route).
+            return BannerResult(
+                target=target, port=port, probe=probe, banner=None, state="filtered"
+            )
+        try:
+            raw = await self._read_banner(reader, writer, target, probe)
+        finally:
+            writer.close()
+            # Beim Schliessen darf ein bereits halb-offener Socket nicht den Befund kippen.
+            with contextlib.suppress(OSError):
+                await writer.wait_closed()
+        if probe == "http_head":
+            banner = _banner_from_http_head(raw)
+        else:
+            cleaned = sanitize_banner(raw)
+            banner = cleaned or None
+        if banner is None:
+            # Verbunden, aber keine lesbare Antwort -> ehrlich no_banner (kein erfundener Wert).
+            return BannerResult(
+                target=target, port=port, probe=probe, banner=None, state="no_banner"
+            )
+        return BannerResult(
+            target=target,
+            port=port,
+            probe=probe,
+            banner=sanitize_banner(banner),
+            state="ok",
+        )
+
+    async def _read_banner(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+        target: str,
+        probe: BannerProbe,
+    ) -> str:
+        """Sendet (nur bei http_head) die EINE Anfrage und liest die rohe Antwort.
+
+        ``http_head``: sendet GENAU die minimale HTTP-HEAD-Anfrage und liest die Header-
+        Antwort. ``passive``: sendet NICHTS, liest nur kurz mit (der Dienst gruesst selbst).
+        Ein Read-Timeout liefert die bis dahin gelesenen Bytes (ehrliche Teil-Sicht -- leer
+        bei stillen Diensten, woraus der Aufrufer ``no_banner`` ableitet).
+        """
+        if probe == "http_head":
+            writer.write(_build_http_head_request(target))
+            await writer.drain()
+        try:
+            data = await asyncio.wait_for(
+                reader.read(_BANNER_READ_MAX_BYTES),
+                timeout=_BANNER_READ_TIMEOUT_SECS,
+            )
+        except (TimeoutError, OSError):
+            # Stiller Dienst / Lesefehler -> leer (Aufrufer leitet no_banner ab).
+            return ""
+        return data.decode(errors="replace")
 
 
 # ── Subprocess-Aufrufe (gekapselt, in Tests gemockt) ──────────────────────────

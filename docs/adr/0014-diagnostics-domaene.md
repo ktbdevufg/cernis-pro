@@ -86,3 +86,33 @@ Zwei wiederkehrende Spannungen, die dieses ADR auflöst:
 - **Kein neuer import-linter-Contract nötig** — gleiche Domäne `diagnostics`, der `independence`-Contract für `domain.diagnostics` aus 1a deckt 1b mit ab.
 - Das Fehlt-Erlebnis ist jetzt handlungsorientiert (konkreter Install-Befehl) statt nur ein 503 — ohne dass das Backend je selbst installiert oder Zustand führt.
 - **Grenze:** die Registry wächst mit jedem neuen System-Tool, das CERNIS PRO nutzt — aber das ist genau die _eine_ Stelle, an der ein neues Tool registriert wird (Binary → Paketnamen je Manager).
+
+## Block 2a: Banner-Grabbing
+
+- **Status:** Akzeptiert
+- **Datum:** 2026-06-11
+- **Bezug:** baut auf 1a (Frage-Antwort-Werkzeug über fünf Ringe, async-Runner-Muster `SystemTracerouteRunner`); ADR 0001 (keine stillen Fallbacks, ehrliche None-/state-Semantik); CLAUDE.md (Nur Linux x64; Banner-Grabbing bleibt Diagnose, kein Angriffswerkzeug)
+
+### Kontext
+
+Banner-Grabbing ergänzt die aktiven Frage-Antwort-Werkzeuge um „**was begrüßt mich auf diesem Port?**" — rein lokales TCP-Klopfen + Lesen der Begrüßungszeile. Block 2a ist bewusst **eng geschnitten**: KEIN externer Dienst, KEIN Token, KEINE Settings (das ist 2b). Nur ein Connect, höchstens eine minimale Standard-Anfrage, eine gelesene Begrüßung.
+
+### Entscheidung
+
+1. **Eine einzige Heuristik im domain-Ring (`probe_for_port`).** Klartext-Web-Ports `{80, 8080, 8000, 8008}` → `http_head` (eine minimale HTTP-HEAD-Anfrage senden), alle anderen → `passive` (kurz lauschen, der Dienst grüßt selbst). Rein, deterministisch, mutationsproben-tauglich — die heikelste Stelle (passive vs. aktiv) liegt im testbaren Domänen-Ring.
+
+2. **TLS-Ports `{443, 8443}` bewusst NICHT als `http_head`.** Ein roher TCP-Connect dorthin spricht TLS, kein Klartext-HTTP — eine HEAD-Anfrage gäbe Müll. **Kein TLS-Handshake in 2a** (das wäre Scope-Ausweitung). Saubere Wahl: TLS-Ports aus der http_head-Menge herausgenommen, sie fallen in `passive` und grüßen bei rohem Connect nicht → ehrlich `no_banner`.
+
+3. **NUR eine minimale, standardkonforme HTTP-HEAD-Anfrage** (`HEAD / HTTP/1.0\r\nHost: <target>\r\n\r\n`), nie mehr. Bei `passive` wird **nichts** gesendet, nur gelesen. **Sicherheits-Grenze:** keine konfigurierbaren Payloads, kein generischer Byte-Sender — Banner-Grabbing bleibt Diagnose, kein Angriffswerkzeug.
+
+4. **Async-Adapter über `asyncio.open_connection` mit `wait_for`-Timeouts** (3 s Connect, 3 s Read) — Muster `SystemTracerouteRunner` (async-Runner), nur nativ async (asyncio-Sockets statt Subprocess). **KEIN Rechte-Port** (anders als traceroute): ein gewöhnlicher TCP-Connect braucht keine besonderen Rechte.
+
+5. **Ehrliche state-/None-Semantik (kein erfundener Banner):** Connect ok + Banner gelesen → `state="ok"`; Connect ok + nichts Lesbares → `no_banner`; `ConnectionRefused` → `closed`; Timeout/unerreichbar → `filtered`. `banner` ist NUR bei `ok` nicht-`null` — bei `no_banner`/`closed`/`filtered` ehrlich `null`.
+
+6. **Reine Bereinigung im domain-Ring (`sanitize_banner`):** erste Zeile, Steuerzeichen raus, auf 512 Zeichen gekürzt — rein, deterministisch, testbar (uferlose/binäre Antwort eines bösartigen Diensts wird begrenzt).
+
+### Konsequenzen
+
+- **Kein neuer import-linter-Contract nötig** — gleiche Domäne `diagnostics`, der `independence`-Contract für `domain.diagnostics` aus 1a deckt 2a mit ab.
+- Die zwei heiklen Stellen (Methoden-Wahl, Bereinigung) liegen rein im domain-Ring, ohne Netz testbar; das Socket-I/O ist in **einem** Adapter gekapselt (Sprach-Wechsel bleibt lokal).
+- **Grenze:** TLS-Dienste liefern in 2a kein Banner (ehrlich `no_banner`) — ein echter TLS-Handshake (Zertifikat/ALPN als „Banner") wäre ein späterer, bewusster Schnitt, kein stiller Fallback.

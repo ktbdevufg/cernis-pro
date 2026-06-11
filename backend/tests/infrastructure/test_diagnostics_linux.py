@@ -20,7 +20,10 @@ from infrastructure.diagnostics_linux import (
     LinuxPackageManagerDetector,
     LinuxTraceroutePermission,
     ShutilToolDetector,
+    SocketBannerGrabber,
     SystemTracerouteRunner,
+    _banner_from_http_head,
+    _build_http_head_request,
     _parse_dig_answer,
     _parse_traceroute,
 )
@@ -240,3 +243,162 @@ def test_package_manager_detect_apt_beats_pacman(monkeypatch: pytest.MonkeyPatch
 def test_package_manager_detect_none_when_no_manager(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(shutil, "which", _which_only())
     assert LinuxPackageManagerDetector().detect() is None
+
+
+# ── Block 2a: SocketBannerGrabber (gefakte asyncio-Sockets, kein echtes Netz) ──
+
+
+class _FakeReader:
+    """Gefakter ``asyncio.StreamReader``: liefert vordefinierte Bytes (oder Timeout)."""
+
+    def __init__(self, data: bytes = b"", *, raise_timeout: bool = False) -> None:
+        self._data = data
+        self._raise_timeout = raise_timeout
+
+    async def read(self, _n: int) -> bytes:
+        if self._raise_timeout:
+            raise TimeoutError
+        return self._data
+
+
+class _FakeWriter:
+    """Gefakter ``asyncio.StreamWriter``: merkt sich Geschriebenes, kein echter Socket."""
+
+    def __init__(self) -> None:
+        self.written: bytes = b""
+        self.closed = False
+
+    def write(self, data: bytes) -> None:
+        self.written += data
+
+    async def drain(self) -> None:
+        pass
+
+    def close(self) -> None:
+        self.closed = True
+
+    async def wait_closed(self) -> None:
+        pass
+
+
+def _patch_open_connection(
+    monkeypatch: pytest.MonkeyPatch,
+    reader: _FakeReader,
+    writer: _FakeWriter,
+) -> None:
+    """Ersetzt ``asyncio.open_connection`` durch ein Stand-in, das (reader, writer) liefert."""
+
+    async def _fake_open(_host: str, _port: int) -> tuple[_FakeReader, _FakeWriter]:
+        return reader, writer
+
+    monkeypatch.setattr("infrastructure.diagnostics_linux.asyncio.open_connection", _fake_open)
+
+
+def test_build_http_head_request_is_minimal_and_standard() -> None:
+    # GENAU eine minimale HTTP-HEAD-Anfrage -- keine konfigurierbaren Payloads.
+    assert (
+        _build_http_head_request("example.com") == b"HEAD / HTTP/1.0\r\nHost: example.com\r\n\r\n"
+    )
+
+
+def test_banner_from_http_head_extracts_status_and_server() -> None:
+    response = "HTTP/1.0 200 OK\r\nServer: nginx/1.25\r\nContent-Type: text/html\r\n\r\n"
+    assert _banner_from_http_head(response) == "HTTP/1.0 200 OK | Server: nginx/1.25"
+
+
+def test_banner_from_http_head_without_server_header() -> None:
+    response = "HTTP/1.0 404 Not Found\r\nContent-Type: text/html\r\n\r\n"
+    assert _banner_from_http_head(response) == "HTTP/1.0 404 Not Found"
+
+
+def test_banner_from_http_head_empty_is_none() -> None:
+    assert _banner_from_http_head("") is None
+
+
+def test_grab_banner_passive_reads_greeting_ok(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Passiver Port (22): der Dienst gruesst selbst -> ok, Banner gelesen + bereinigt.
+    writer = _FakeWriter()
+    _patch_open_connection(monkeypatch, _FakeReader(b"SSH-2.0-OpenSSH_9.6\r\n"), writer)
+    result = asyncio.run(SocketBannerGrabber().grab("example.com", 22))
+    assert result.state == "ok"
+    assert result.probe == "passive"
+    assert result.banner == "SSH-2.0-OpenSSH_9.6"
+    # Passive: NICHTS gesendet (nur gelesen) -- Sicherheits-Grenze.
+    assert writer.written == b""
+
+
+def test_grab_banner_empty_response_is_no_banner(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Verbunden, aber stiller Dienst (leere Antwort) -> no_banner, banner ehrlich None.
+    _patch_open_connection(monkeypatch, _FakeReader(b""), _FakeWriter())
+    result = asyncio.run(SocketBannerGrabber().grab("example.com", 22))
+    assert result.state == "no_banner"
+    assert result.banner is None
+
+
+def test_grab_banner_connection_refused_is_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Aktiv abgewiesen -> closed, banner None.
+    async def _refuse(_host: str, _port: int) -> tuple[_FakeReader, _FakeWriter]:
+        raise ConnectionRefusedError
+
+    monkeypatch.setattr("infrastructure.diagnostics_linux.asyncio.open_connection", _refuse)
+    result = asyncio.run(SocketBannerGrabber().grab("example.com", 22))
+    assert result.state == "closed"
+    assert result.banner is None
+
+
+def test_grab_banner_connect_timeout_is_filtered(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Connect-Timeout (wait_for) -> filtered, banner None.
+    async def _hang(_host: str, _port: int) -> tuple[_FakeReader, _FakeWriter]:
+        raise TimeoutError
+
+    monkeypatch.setattr("infrastructure.diagnostics_linux.asyncio.open_connection", _hang)
+    result = asyncio.run(SocketBannerGrabber().grab("example.com", 22))
+    assert result.state == "filtered"
+    assert result.banner is None
+
+
+def test_grab_banner_unreachable_oserror_is_filtered(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Unerreichbar (OSError, z. B. no route) -> filtered.
+    async def _unreach(_host: str, _port: int) -> tuple[_FakeReader, _FakeWriter]:
+        raise OSError("no route to host")
+
+    monkeypatch.setattr("infrastructure.diagnostics_linux.asyncio.open_connection", _unreach)
+    result = asyncio.run(SocketBannerGrabber().grab("example.com", 22))
+    assert result.state == "filtered"
+    assert result.banner is None
+
+
+def test_grab_banner_read_timeout_is_no_banner(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Connect ok, aber der Read laeuft in den Timeout -> no_banner (kein erfundener Wert).
+    _patch_open_connection(monkeypatch, _FakeReader(raise_timeout=True), _FakeWriter())
+    result = asyncio.run(SocketBannerGrabber().grab("example.com", 22))
+    assert result.state == "no_banner"
+    assert result.banner is None
+
+
+def test_grab_banner_http_head_sends_head_and_extracts_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Web-Port (80): http_head -> GENAU eine HEAD-Anfrage gesendet, Server-Header extrahiert.
+    writer = _FakeWriter()
+    response = b"HTTP/1.0 200 OK\r\nServer: nginx/1.25\r\nContent-Type: text/html\r\n\r\n"
+    _patch_open_connection(monkeypatch, _FakeReader(response), writer)
+    result = asyncio.run(SocketBannerGrabber().grab("example.com", 80))
+    assert result.probe == "http_head"
+    assert result.state == "ok"
+    assert result.banner == "HTTP/1.0 200 OK | Server: nginx/1.25"
+    # GENAU die eine minimale HEAD-Anfrage gesendet -- keine konfigurierbaren Payloads.
+    assert writer.written == b"HEAD / HTTP/1.0\r\nHost: example.com\r\n\r\n"
+
+
+def test_grab_banner_tls_port_is_passive_no_banner(monkeypatch: pytest.MonkeyPatch) -> None:
+    # TLS-Port (443): passive (kein TLS-Handshake in 2a). Ein TLS-Dienst gruesst bei rohem
+    # Connect nicht -> hier leere Antwort simuliert -> ehrlich no_banner, NICHT http_head.
+    writer = _FakeWriter()
+    _patch_open_connection(monkeypatch, _FakeReader(b""), writer)
+    result = asyncio.run(SocketBannerGrabber().grab("example.com", 443))
+    assert result.probe == "passive"
+    assert result.state == "no_banner"
+    assert result.banner is None
+    # Auch hier: NICHTS gesendet (passive) -- kein Klartext-HTTP an einen TLS-Port.
+    assert writer.written == b""

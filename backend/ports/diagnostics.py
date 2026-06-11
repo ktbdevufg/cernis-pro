@@ -26,6 +26,13 @@ Block 1b (Tool-/Paketmanager-Erkennung) -- zwei synchrone Erkennungs-Vertraege (
   keiner. Die Erkennungs-Reihenfolge (welcher gewinnt) legt der Adapter fest, nicht der
   Port -- der Vertrag verlangt nur "der erste gefundene".
 
+Block 2a (Banner-Grabbing) -- ein async DATEN-Vertrag (Muster ``TracerouteRunner``):
+
+* ``BannerGrabber`` -- die Banner-DATEN-Quelle. ``grab`` klopft EINMAL an einen Port und
+  liest die Begruessung. ``async`` (blockierendes Socket-I/O im Adapter ueber asyncio
+  gekapselt, Muster ``TracerouteRunner``). BEWUSST KEIN Rechte-Port: Banner-Grabbing ist
+  ein gewoehnlicher TCP-Connect und braucht keine besonderen Rechte (kein Root-Thema).
+
 Bewusste Entscheidung: KEIN ``@runtime_checkable`` (Muster wie settings/devices/
 scanning/capture/interfaces/traffic/process). Die Vertragspruefung laeuft statisch ueber
 mypy und ueber die Verdrahtung im Composition Root (``app.py``), nicht zur Laufzeit per
@@ -39,7 +46,13 @@ domain". Import von ``domain`` ist erlaubt (nur die Gegenrichtung ist verboten).
 from collections.abc import Sequence
 from typing import Protocol
 
-from domain.diagnostics import DnsRecordType, DnsResult, PackageManager, TracerouteResult
+from domain.diagnostics import (
+    BannerResult,
+    DnsRecordType,
+    DnsResult,
+    PackageManager,
+    TracerouteResult,
+)
 
 
 class DnsResolver(Protocol):
@@ -113,6 +126,27 @@ class ToolDetector(Protocol):
         Reiner Verfuegbarkeits-Check eines EINZELNEN Binaries -- ob ueber ``shutil.which``
         oder anders, ist Adapter-Sache. Schnelle lokale Pruefung, daher synchron (Muster
         ``TraceroutePermissionPort.is_available``).
+        """
+        ...
+
+
+class BannerGrabber(Protocol):
+    """Daten-Quelle der diagnostics-Domaene (2a): TCP-Banner eines Ports lesen."""
+
+    async def grab(self, target: str, port: int) -> BannerResult:
+        """Klopft EINMAL an ``target:port`` und liest die Begruessung -> ``BannerResult``.
+
+        Bestimmt ueber ``domain.probe_for_port`` die Methode (``passive`` -- kurz lauschen,
+        der Dienst gruesst selbst; ``http_head`` -- EINE minimale HTTP-HEAD-Anfrage senden)
+        und liest die Begruessungszeile bzw. den Server-Header. Ehrliche Semantik (kein
+        erfundener Banner): ``state`` benennt ``ok``/``no_banner``/``closed``/``filtered``,
+        ``banner`` ist NUR bei ``ok`` nicht-``None``.
+
+        Blockierendes Socket-I/O im Adapter; ueber asyncio gekapselt (Muster
+        ``TracerouteRunner``), die Methode bleibt ``async``. KEIN Rechte-Port: ein
+        gewoehnlicher TCP-Connect braucht keine besonderen Rechte. SICHERHEITS-GRENZE: der
+        Adapter sendet NIE mehr als die eine minimale Standard-Anfrage (keine
+        konfigurierbaren Payloads) -- Banner-Grabbing bleibt Diagnose, kein Byte-Sender.
         """
         ...
 

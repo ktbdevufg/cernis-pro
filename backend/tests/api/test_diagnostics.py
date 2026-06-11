@@ -19,11 +19,13 @@ from fastapi.testclient import TestClient
 from api.diagnostics import (
     provide_check_tools,
     provide_check_traceroute_permission,
+    provide_grab_banner,
     provide_resolve_dns,
     provide_run_traceroute,
 )
 from app import create_app
 from domain.diagnostics import (
+    BannerResult,
     DnsRecord,
     DnsResult,
     ToolReport,
@@ -302,3 +304,110 @@ def test_tools_manager_none_serializes_null(app: FastAPI) -> None:
     body = response.json()
     assert body["manager"] is None
     assert body["install_command"] is None
+
+
+# ── banner (2a) ────────────────────────────────────────────────────────────────
+
+
+def test_banner_wire_form_ok(app: FastAPI) -> None:
+    """200-Pfad: target/port kommen am Runner an, BannerResult wird serialisiert."""
+
+    result = BannerResult(
+        target="example.com", port=22, probe="passive", banner="SSH-2.0-OpenSSH", state="ok"
+    )
+    seen: dict[str, Any] = {}
+
+    async def _fake_grab(target: str, port: int) -> Any:
+        seen["target"] = target
+        seen["port"] = port
+        return result
+
+    app.dependency_overrides[provide_grab_banner] = lambda: _fake_grab
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/diagnostics/banner", params={"target": "example.com", "port": 22}
+        )
+
+    assert response.status_code == 200
+    assert seen == {"target": "example.com", "port": 22}
+    assert response.json() == {
+        "target": "example.com",
+        "port": 22,
+        "probe": "passive",
+        "banner": "SSH-2.0-OpenSSH",
+        "state": "ok",
+    }
+
+
+def test_banner_no_banner_serializes_null(app: FastAPI) -> None:
+    """``banner`` ist ehrlich ``null`` im Wire, wenn nichts kam (kein erfundener Wert)."""
+
+    result = BannerResult(
+        target="example.com", port=443, probe="passive", banner=None, state="no_banner"
+    )
+
+    async def _fake_grab(target: str, port: int) -> Any:
+        return result
+
+    app.dependency_overrides[provide_grab_banner] = lambda: _fake_grab
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/diagnostics/banner", params={"target": "example.com", "port": 443}
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["banner"] is None
+    assert body["state"] == "no_banner"
+
+
+def test_banner_port_required(app: FastAPI) -> None:
+    """Fehlender Pflichtparameter ``port`` -> 422 (kein Raten)."""
+
+    async def _fake_grab(target: str, port: int) -> Any:
+        return BannerResult(
+            target=target, port=port, probe="passive", banner=None, state="no_banner"
+        )
+
+    app.dependency_overrides[provide_grab_banner] = lambda: _fake_grab
+
+    with TestClient(app) as client:
+        response = client.get("/api/diagnostics/banner", params={"target": "example.com"})
+
+    assert response.status_code == 422
+
+
+def test_banner_target_required(app: FastAPI) -> None:
+    """Fehlender Pflichtparameter ``target`` -> 422."""
+
+    async def _fake_grab(target: str, port: int) -> Any:
+        return BannerResult(
+            target=target, port=port, probe="passive", banner=None, state="no_banner"
+        )
+
+    app.dependency_overrides[provide_grab_banner] = lambda: _fake_grab
+
+    with TestClient(app) as client:
+        response = client.get("/api/diagnostics/banner", params={"port": 22})
+
+    assert response.status_code == 422
+
+
+def test_banner_port_out_of_range(app: FastAPI) -> None:
+    """``port`` ausserhalb 1..65535 -> 422 (FastAPI-Grenze)."""
+
+    async def _fake_grab(target: str, port: int) -> Any:
+        return BannerResult(
+            target=target, port=port, probe="passive", banner=None, state="no_banner"
+        )
+
+    app.dependency_overrides[provide_grab_banner] = lambda: _fake_grab
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/diagnostics/banner", params={"target": "example.com", "port": 70000}
+        )
+
+    assert response.status_code == 422
