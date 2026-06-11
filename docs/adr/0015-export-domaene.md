@@ -1,4 +1,4 @@
-# ADR 0015 — export-Domäne: Berichte aus gespeicherten Scans (Block 1: CSV / JSON / PDF)
+# ADR 0015 — export-Domäne: Berichte als CSV / JSON / PDF (Block 1: Scan · Block 2: Analyse-Befunde)
 
 - **Status:** Akzeptiert
 - **Datum:** 2026-06-11
@@ -54,3 +54,27 @@ Drei wiederkehrende Spannungen, die dieses ADR auflöst:
 
 **Anschluss (spätere Blöcke)**
 - Weitere Exportquellen (Analyse-Befunde, Diagnose-Ergebnisse) hängen sich später als **eigene Schnitte** an dasselbe Muster: je Quelle eine Projektion im Composition Root auf `Exportable*`-/eigene Modelle, dieselben format-gerechten Serialisierer, derselbe Renderer-Port.
+
+## Block 2: Analyse-Befunde (CSV / JSON / PDF)
+
+Zweite Datenquelle der export-Domäne: die **aktuellen Analyse-Befunde**. Sie folgt exakt dem Block-1-Muster (eigene `Exportable*`-Typen + Projektion im Composition Root, format-gerechte Serialisierer, derselbe Renderer-Port) — mit drei bewussten Unterschieden, die sich aus der Natur der Quelle ergeben.
+
+1. **Kein gespeicherter Stand → kein `analysis_id`, frischer Snapshot, async.** Anders als der Scan (mit gespeicherter `scan_id`) hat die Analyse **keinen** gespeicherten Stand: `GET /api/analysis` baut den Snapshot bei **jedem** Aufruf frisch aus traffic + process + jüngstem Scan (`_analyze_snapshot`). Der Analyse-Export nutzt **genau diesen Pfad** → er exportiert „die Analyse von jetzt", konsistent mit der Analyse-Ansicht. Daraus folgt:
+   - **Kein `analysis_id`-Pfadparameter.** Die Route ist `GET /api/export/analysis?format=csv|json|pdf` (kein `/{id}`).
+   - **Kein `NotFound`-Fall.** Die Analyse wird immer frisch erzeugt, sie kann nicht „fehlen" — es gibt kein `ScanNotFound`-Äquivalent (Auftrag: keinen künstlichen Fehlerfall erfinden). Schlägt der Snapshot-Bau selbst fehl, propagiert das sauber.
+   - **`ExportAnalysis` ist async** (anders als der synchrone `ExportScan`): der `analysis_provider` ist ein `Callable[[], Awaitable[ExportableAnalysis]]`, das der Use-Case awaited; die Route `export_analysis` ist `async def`. Das Serialisieren/Rendern selbst bleibt synchron (reine Funktionen bzw. CPU-Rendern).
+
+2. **`domain.export` bleibt analysis-frei (independence).** `domain.export` importiert **nicht** `domain.analysis`. Eigene schlanke `ExportableFinding` (`rule_id`/`severity`/`title`/`detail`/`subject`/`help_kind`/`help_url`) + `ExportableAnalysis` (`generated_at`/`findings`/`finding_count`). `severity` ist bewusst **`str`** (Werte `"info"`/`"notable"`), **kein** Import von `domain.analysis.Severity`. Die Projektion `ResolvedObservation → ExportableFinding` lebt im Composition Root (`_project_analysis_to_exportable`, Muster `_project_scan_to_exportable`) und reuse't `_analyze_snapshot` (keine zweite Snapshot-Projektion).
+
+3. **`generated_at` als Feld — die Domäne fragt keine Uhr.** `generated_at` (ISO, **wann** der Export erzeugt wurde) kommt als **Feld** in `ExportableAnalysis` herein; der Composition Root füllt es über die **eine Zeitquelle** (`SystemClock`, UTC, `.isoformat()`) direkt bei der Projektion. Der Use-Case braucht darum **keine** eigene Uhr (symmetrisch zu `ExportScan`, der nur einen Provider kennt) — ADR 0002/0001 (keine Uhr im domain-/use-case-Kern).
+
+4. **`PdfReportModel` generalisiert (Verbesserung des Block-1-Modells).** In Block 1 trug `PdfReportModel` fest die **scan-spezifischen** Kopf-Felder `scanned_at`/`cidr`/`host_count`, und der `ReportlabRenderer` rendert dafür **hartkodierte** Labels (`Scan-Zeitpunkt`/`Gescanntes Netz`/`Geräteanzahl`). Das war ein fälschlich scan-spezifisches Berichts-Modell. Block 2 nutzt **dasselbe** Modell mit einem anderen Kopf — darum trägt `PdfReportModel` jetzt **generische** `meta: tuple[tuple[str, str], ...]` (Label/Wert-Paare); der Renderer iteriert nur über sie (keine hartkodierten Labels mehr). `build_pdf_model` (Scan) liefert seinen Kopf semantisch identisch als Paare `[("Scan-Zeitpunkt", …), ("Gescanntes Netz", …), ("Geräteanzahl", …)]` — **Ausgabe unverändert**, nur generisch. `build_analysis_pdf_model` liefert `[("Erzeugt am", generated_at), ("Anzahl Befunde", finding_count)]`. **Eine bewusste Verbesserung** (kein zweites Modell, keine Renderer-Verzweigung); berührt `domain.export.PdfReportModel`, `infrastructure.export_pdf` und die betroffenen Block-1-Tests (prüfen jetzt `meta` statt der Einzelfelder).
+
+5. **Format-gerechte Vollständigkeit (wie Block 1, befund-gerecht).**
+   - **JSON = alles:** verlustfrei die komplette `ExportableAnalysis` (`generated_at`/`finding_count` + alle Befund-Felder inkl. `rule_id`/`help_kind`/`help_url`). `sort_keys`/`indent=2`/`ensure_ascii=False` — deterministisch.
+   - **CSV = Tabelle:** eine Zeile pro Befund, **definierte Spalten-Reihenfolge** `severity,title,subject,detail,rule_id,help_kind,help_url` (severity zuerst — wonach man zuerst schaut — dann der lesbare Text, dann die technischen Schlüssel). **Keine** erzwungene Sortierung: die Befund-Reihenfolge bleibt die von `AnalyzeSnapshot` (bereits deterministisch sortiert). Escaping über das stdlib-`csv`-Modul.
+   - **PDF = lesbarer Bericht:** Kopf (Titel „CERNIS PRO — Analyse-Bericht", `Erzeugt am`, `Anzahl Befunde`) + Tabelle **reduziert** auf `severity,title,subject,detail`. `rule_id`/`help_kind`/`help_url` sind **bewusst nicht** in der PDF-Tabelle (zu breit/technisch für einen lesbaren Bericht — sie bleiben verlustfrei in CSV/JSON). `detail` wird für die Zellenbreite über den reinen Helfer `_truncate` auf 120 Zeichen gekürzt (nur im PDF; CSV/JSON führen das volle `detail`).
+
+6. **Dateiname mit Zeitstempel.** `filename = cernis-analysis-<YYYYMMDD-HHMMSS>.<ext>` (kompakt aus `generated_at`) — ein Zeitstempel ist hier nützlich, da es (anders als beim Scan) **keine** `analysis_id` gibt; mehrere Exporte bleiben unterscheidbar. `media_type` wie Block 1 (`text/csv` | `application/json` | `application/pdf`).
+
+**Unverändert wiederverwendet (nicht dupliziert):** `ExportResult` (application), der `ReportRenderer`-Port + `ReportlabRenderer` (kein neuer Port nötig — dasselbe `PdfReportModel`), der `independence`-Contract (kein neuer import-linter-Contract — `domain.export` reiht sich weiter ein; `domain.export` importiert **nicht** `domain.analysis`, die Projektion sitzt am Composition Root).

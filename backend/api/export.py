@@ -7,19 +7,27 @@ Typen werden hier NICHT importiert -- der Runner kommt per FastAPI-Dependency he
 das ``ExportResult`` (Bytes + ``media_type`` + Dateiname); der Router macht daraus eine
 ``Response`` mit ``Content-Disposition: attachment`` (der Browser laedt die Datei herunter).
 
-* ``GET /api/export/scan/{scan_id}?format=csv|json|pdf`` -- exportiert den gespeicherten
-  Scan ``scan_id`` im gewuenschten Format. ``format`` ist ein PFLICHT-Literal-Query-Param
-  (FastAPI lehnt ein ungueltiges ``format`` selbst mit 422 ab -- kein Raten). Liefert die
-  Datei als Download (``media_type`` + ``Content-Disposition: attachment; filename="..."``).
+* ``GET /api/export/scan/{scan_id}?format=csv|json|pdf`` (Block 1) -- exportiert den
+  gespeicherten Scan ``scan_id`` im gewuenschten Format. ``format`` ist ein PFLICHT-Literal-
+  Query-Param (FastAPI lehnt ein ungueltiges ``format`` selbst mit 422 ab -- kein Raten).
+  Liefert die Datei als Download (``media_type`` + ``Content-Disposition: attachment; ...``).
+  SYNCHRON.
+* ``GET /api/export/analysis?format=csv|json|pdf`` (Block 2) -- exportiert die AKTUELLEN
+  Analyse-Befunde im gewuenschten Format. KEIN ``scan_id``/``analysis_id``-Pfadparameter: die
+  Analyse hat keinen gespeicherten Stand, der Runner baut den Snapshot bei jedem Aufruf frisch
+  (genau wie GET /api/analysis -- "die Analyse von jetzt", ADR 0015). ASYNC -- der Runner
+  awaitet den frischen Snapshot-Bau (traffic/process). Kein NotFound (die Analyse kann nicht
+  fehlen). ``format`` ist wieder ein PFLICHT-Literal-Query-Param (422 bei ungueltig).
 
 SCAN-NICHT-GEFUNDEN -> HTTP: Existiert die ``scan_id`` nicht, wirft der Use-Case
 ``application.export.ScanNotFoundError``. Diesen application-Zustand bildet ein GLOBALER
 ``exception_handler`` im Composition Root (``app.py``) auf **404** ab (Muster der
 diagnostics-Rechte-/Dienst-Naht: das Mapping sitzt am Composition Root, der api-Ring bleibt
-domain-/infra-frei). Der api-Ring importiert die Exception bewusst NICHT zum Werfen.
+domain-/infra-frei). Der api-Ring importiert die Exception bewusst NICHT zum Werfen. Der
+Analyse-Export hat keinen solchen Fall (immer frisch erzeugt).
 """
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Response
@@ -58,6 +66,50 @@ def export_scan(
     nicht, wirft der Use-Case ``ScanNotFoundError`` -> 404 (globaler Handler).
     """
     result = export(scan_id, format)
+    # result ist ein application.ExportResult; per Attribut-Zugriff gelesen (kein
+    # application-Typ-Import im Router -- der api-Ring kennt nur die drei Attribute).
+    return Response(
+        content=result.content,  # type: ignore[attr-defined]
+        media_type=result.media_type,  # type: ignore[attr-defined]
+        headers={
+            "Content-Disposition": f'attachment; filename="{result.filename}"'  # type: ignore[attr-defined]
+        },
+    )
+
+
+# Composition-Root-Callable (Block 2): bekommt das validierte Format-Literal und liefert das
+# ``ExportResult`` (Bytes + media_type + Dateiname). ASYNC (``Awaitable``), anders als der
+# synchrone Scan-Runner: der ExportAnalysis-Use-Case awaitet den frischen Snapshot-Bau
+# (traffic/process). KEIN ``scan_id``-Parameter -- die Analyse hat keine id. Der api-Ring
+# kennt den ``ExportResult``-Typ NICHT als domain/infrastructure (application-Struktur, ueber
+# die drei Attribute gelesen).
+type ExportAnalysisRunner = Callable[[Literal["csv", "json", "pdf"]], Awaitable[object]]
+
+
+# Dependency-Marker: im Composition Root (app.py) per dependency_overrides mit dem echten
+# ExportAnalysis-Use-Case (ueber die analysis->export-Projektion) verdrahtet. Ohne
+# Verdrahtung bewusst ein lauter Fehler (Muster ``provide_export_scan``).
+def provide_export_analysis() -> ExportAnalysisRunner:
+    raise NotImplementedError("ExportAnalysisRunner wird in app.py verdrahtet")
+
+
+@router.get("/analysis")
+async def export_analysis(
+    export: Annotated[ExportAnalysisRunner, Depends(provide_export_analysis)],
+    format: Literal["csv", "json", "pdf"],
+) -> Response:
+    """Exportiert die AKTUELLEN Analyse-Befunde als Download im gewuenschten Format.
+
+    KEIN ``scan_id``/``analysis_id``: die Analyse hat keinen gespeicherten Stand, der Runner
+    baut den Snapshot bei jedem Aufruf frisch (genau wie GET /api/analysis -- "die Analyse von
+    jetzt", ADR 0015). ASYNC: der Runner awaitet den frischen Snapshot-Bau (traffic/process).
+    ``format`` ist ein PFLICHT-Literal-Query-Param (``?format=csv|json|pdf``); FastAPI lehnt
+    ein fehlendes/ungueltiges ``format`` selbst mit 422 ab. Der Runner liefert das
+    ``ExportResult`` (Bytes + ``media_type`` + Dateiname); der Router verpackt es in eine
+    ``Response`` mit ``Content-Disposition: attachment; filename="..."`` -- so laedt der
+    Browser die Datei als Download. Kein NotFound (die Analyse kann nicht fehlen).
+    """
+    result = await export(format)
     # result ist ein application.ExportResult; per Attribut-Zugriff gelesen (kein
     # application-Typ-Import im Router -- der api-Ring kennt nur die drei Attribute).
     return Response(

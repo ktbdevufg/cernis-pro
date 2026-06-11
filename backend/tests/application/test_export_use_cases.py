@@ -6,16 +6,27 @@ Keine echten Adapter -- wir testen gegen das ``scan_provider``-Callable + den
 der pdf-Pfad ruft ``renderer.render_pdf`` mit genau dem aus dem Scan gebauten ``PdfReportModel``.
 """
 
+import asyncio
 import json
 
 import pytest
 
-from application.export import ExportResult, ExportScan, ScanNotFoundError, ScanProvider
+from application.export import (
+    AnalysisProvider,
+    ExportAnalysis,
+    ExportResult,
+    ExportScan,
+    ScanNotFoundError,
+    ScanProvider,
+)
 from domain.export import (
+    ExportableAnalysis,
+    ExportableFinding,
     ExportableHost,
     ExportablePort,
     ExportableScan,
     PdfReportModel,
+    build_analysis_pdf_model,
     build_pdf_model,
 )
 
@@ -138,3 +149,86 @@ def test_unknown_scan_id_does_not_render() -> None:
     with pytest.raises(ScanNotFoundError):
         use_case(999, "pdf")
     assert renderer.calls == []
+
+
+# ── Block 2: ExportAnalysis (async, Fake-analysis_provider + Fake-Renderer) ────
+#
+# Alle drei Formate liefern korrekten content/media_type/filename; der pdf-Pfad ruft
+# render_pdf mit genau dem aus der Analyse gebauten Modell; der Provider wird awaited (async).
+
+
+def _analysis() -> ExportableAnalysis:
+    return ExportableAnalysis(
+        generated_at="2026-06-11T12:34:56+00:00",
+        findings=(
+            ExportableFinding(
+                rule_id="remote_access_port",
+                severity="notable",
+                title="Verbindung zu einem Fernzugriffs-Port",
+                detail="Verbindung zu 1.2.3.4:5900 (5900).",
+                subject="1.2.3.4:5900",
+                help_kind="remote_access_port",
+                help_url="https://help.example/remote",
+            ),
+        ),
+        finding_count=1,
+    )
+
+
+def _analysis_provider_for(analysis: ExportableAnalysis) -> AnalysisProvider:
+    async def _provider() -> ExportableAnalysis:
+        return analysis
+
+    return _provider
+
+
+def test_export_analysis_json() -> None:
+    use_case = ExportAnalysis(_analysis_provider_for(_analysis()), FakeRenderer())
+
+    result = asyncio.run(use_case("json"))
+
+    assert isinstance(result, ExportResult)
+    assert result.media_type == "application/json"
+    # Zeitstempel im Dateinamen (kein analysis_id) -- kompakt aus generated_at.
+    assert result.filename == "cernis-analysis-20260611-123456.json"
+    payload = json.loads(result.content.decode("utf-8"))
+    assert payload["finding_count"] == 1
+    assert payload["findings"][0]["subject"] == "1.2.3.4:5900"
+
+
+def test_export_analysis_csv() -> None:
+    use_case = ExportAnalysis(_analysis_provider_for(_analysis()), FakeRenderer())
+
+    result = asyncio.run(use_case("csv"))
+
+    assert result.media_type == "text/csv"
+    assert result.filename == "cernis-analysis-20260611-123456.csv"
+    text = result.content.decode("utf-8")
+    assert text.splitlines()[0].startswith("severity,title,subject")
+    assert "1.2.3.4:5900" in text
+
+
+def test_export_analysis_pdf_calls_renderer_with_expected_model() -> None:
+    analysis = _analysis()
+    renderer = FakeRenderer()
+    use_case = ExportAnalysis(_analysis_provider_for(analysis), renderer)
+
+    result = asyncio.run(use_case("pdf"))
+
+    assert result.media_type == "application/pdf"
+    assert result.filename == "cernis-analysis-20260611-123456.pdf"
+    assert result.content == b"%PDF-FAKE"
+    assert len(renderer.calls) == 1
+    assert renderer.calls[0] == build_analysis_pdf_model(analysis)
+
+
+def test_export_analysis_empty_is_valid() -> None:
+    """Eine leere Analyse (0 findings) ist ein gueltiger Export (kein Fehler)."""
+    empty = ExportableAnalysis(generated_at="2026-06-11T00:00:00+00:00")
+    use_case = ExportAnalysis(_analysis_provider_for(empty), FakeRenderer())
+
+    result = asyncio.run(use_case("json"))
+
+    payload = json.loads(result.content.decode("utf-8"))
+    assert payload["finding_count"] == 0
+    assert payload["findings"] == []

@@ -13,19 +13,29 @@ seiner ``Observed*``-Projektion im Composition Root, ADR 0015). So importiert de
 KEINE scanning-Use-Cases und KEINE scanning-Domaene -- nur das Callable + den Renderer +
 ``domain.export``.
 
-* ``ExportScan`` -- holt den (projizierten) Scan zur ``scan_id`` (``None`` ->
+* ``ExportScan`` (Block 1) -- holt den (projizierten) Scan zur ``scan_id`` (``None`` ->
   ``ScanNotFoundError``) und serialisiert ihn je nach Format: CSV/JSON ueber die reinen
   domain-Funktionen (Ergebnis als UTF-8-Bytes), PDF ueber ``build_pdf_model`` +
   ``renderer.render_pdf``. Liefert ein ``ExportResult`` (Bytes + ``media_type`` + Dateiname).
+  Synchron.
+* ``ExportAnalysis`` (Block 2) -- holt die AKTUELLEN Analyse-Befunde ueber ein async
+  ``analysis_provider``-Callable (frisch analysiert + projiziert im Composition Root, wie
+  GET /api/analysis) und serialisiert sie je Format (``analysis_to_json``/``analysis_to_csv``/
+  ``build_analysis_pdf_model`` + ``renderer.render_pdf``). ASYNC -- der Snapshot-Bau ist
+  async. Kein NotFound: die Analyse wird immer frisch erzeugt (kein ``analysis_id``).
 """
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from application.export.errors import ScanNotFoundError
 from domain.export import (
+    ExportableAnalysis,
     ExportableScan,
     ExportFormat,
+    analysis_to_csv,
+    analysis_to_json,
+    build_analysis_pdf_model,
     build_pdf_model,
     to_csv,
     to_json,
@@ -120,3 +130,93 @@ class ExportScan:
         if fmt == "csv":
             return to_csv(scan).encode("utf-8")
         return self._renderer.render_pdf(build_pdf_model(scan))
+
+
+# ── Block 2: Analyse-Befunde exportieren (ADR 0015, Block 2) ──────────────────────────────
+#
+# Liefert die AKTUELLE ``ExportableAnalysis`` (frisch analysiert + projiziert im Composition
+# Root -- Muster ``ScanProvider``). ASYNC, weil der Snapshot-Bau (traffic/process) async ist:
+# der Composition-Root-Provider awaitet ``_analyze_snapshot`` und projiziert das Ergebnis.
+# Anders als ``ScanProvider`` gibt es KEIN ``None``/NotFound: die Analyse wird immer frisch
+# erzeugt, sie kann nicht "fehlen" (kein ``analysis_id``, ADR 0015). ``generated_at`` setzt
+# der Composition Root ueber die ``Clock`` direkt in die projizierte ``ExportableAnalysis``
+# (Fremd-Domaenen-/Uhr-Kopplung gehoert in die Verdrahtung) -- der Use-Case braucht darum
+# KEINE eigene Uhr (symmetrisch zu ``ExportScan``, der auch nur einen Provider kennt).
+AnalysisProvider = Callable[[], Awaitable[ExportableAnalysis]]
+
+
+class ExportAnalysis:
+    """Exportiert die aktuellen Analyse-Befunde als CSV/JSON/PDF (Block 2).
+
+    Duenn (Muster ``ExportScan``): orchestriert die reine Domaene (``analysis_to_json``/
+    ``analysis_to_csv``/``build_analysis_pdf_model``) + den ``ReportRenderer``, keine
+    Eigenlogik ausser dem Format-Switch. Der ``analysis_provider`` + der Renderer kommen per
+    Constructor-Injection herein (Callable bzw. Protocol-Typ) -- nie ein konkreter Adapter,
+    nie ein analysis-Import (die frische Analyse + Projektion auf ``ExportableAnalysis`` lebt
+    im Composition Root, independence-Contract).
+
+    ASYNC -- anders als ``ExportScan`` (synchron): der ``analysis_provider`` baut den Snapshot
+    frisch aus traffic/process (async, wie GET /api/analysis). Der Use-Case awaitet ihn; das
+    eigentliche Serialisieren/Rendern bleibt synchron (reine Funktionen bzw. CPU-Rendern).
+    """
+
+    def __init__(self, analysis_provider: AnalysisProvider, renderer: ReportRenderer) -> None:
+        self._analysis_provider = analysis_provider
+        self._renderer = renderer
+
+    async def __call__(self, fmt: ExportFormat) -> ExportResult:
+        """Exportiert die aktuellen Befunde im Format ``fmt`` -> ``ExportResult``.
+
+        Holt die aktuelle ``ExportableAnalysis`` ueber den ``analysis_provider`` (await --
+        frischer Snapshot-Bau). Je nach ``fmt``:
+
+        * ``json`` -> ``analysis_to_json`` (verlustfrei strukturiert), als UTF-8-Bytes.
+        * ``csv`` -> ``analysis_to_csv`` (flache Befund-Tabelle), als UTF-8-Bytes.
+        * ``pdf`` -> ``build_analysis_pdf_model`` (reines Modell) + ``renderer.render_pdf``.
+
+        Der ``media_type`` + die Datei-Endung kommen aus ``_FORMAT_MEDIA_TYPES``; der
+        ``filename`` ist ``cernis-analysis-<generated_at-kompakt>.<ext>`` -- ein Zeitstempel
+        im Namen ist nuetzlich, da es (anders als beim Scan) keine ``analysis_id`` gibt
+        (mehrere Exporte bleiben unterscheidbar). ``fmt`` ist bereits ein gueltiges
+        ``ExportFormat``-Literal (der api-Rand validiert via FastAPI 422).
+        """
+        analysis = await self._analysis_provider()
+        content = self._render(analysis, fmt)
+        media_type, ext = _FORMAT_MEDIA_TYPES[fmt]
+        filename = f"cernis-analysis-{_filename_stamp(analysis.generated_at)}.{ext}"
+        return ExportResult(content=content, media_type=media_type, filename=filename)
+
+    def _render(self, analysis: ExportableAnalysis, fmt: ExportFormat) -> bytes:
+        """Serialisiert die projizierte Analyse in das Zielformat -> Bytes (Format-Switch).
+
+        CSV/JSON: die reine domain-Funktion liefert einen String, der hier UTF-8-kodiert wird
+        (deterministisch, ``ensure_ascii=False`` haelt Sonderzeichen lesbar). PDF: das reine
+        ``build_analysis_pdf_model`` + der ``ReportRenderer`` (das Rendern ist Infrastruktur,
+        hier nur der Aufruf).
+        """
+        if fmt == "json":
+            return analysis_to_json(analysis).encode("utf-8")
+        if fmt == "csv":
+            return analysis_to_csv(analysis).encode("utf-8")
+        return self._renderer.render_pdf(build_analysis_pdf_model(analysis))
+
+
+def _filename_stamp(generated_at: str) -> str:
+    """Macht aus dem ISO-``generated_at`` einen dateinamen-tauglichen kompakten Stempel.
+
+    Reduziert ``"2026-06-11T12:00:00+00:00"`` auf ``"20260611-120000"`` -- nur Ziffern +
+    ein Bindestrich, sodass der Stempel ohne Quoting in einen Dateinamen passt. Robust gegen
+    Varianten des ISO-Strings (Bruchsekunden, Zeitzonen-Offset): es werden schlicht alle
+    Ziffern der ersten beiden ISO-Bestandteile (Datum + Zeit) genommen. Faellt der Wert
+    voellig unerwartet aus (keine Ziffern), bleibt ``"unknown"`` (kein leerer Stempel) --
+    KEIN Fehler, da der Dateiname nur kosmetisch ist (ADR 0015, Block 2).
+    """
+    head = generated_at.replace("T", " ").split(" ")
+    date_part = "".join(ch for ch in head[0] if ch.isdigit())
+    time_part = ""
+    if len(head) > 1:
+        # Zeit-Teil bis zum Zeitzonen-/Bruchsekunden-Trenner; nur die Ziffern (HHMMSS).
+        time_raw = head[1].split("+")[0].split("-")[0].split(".")[0]
+        time_part = "".join(ch for ch in time_raw if ch.isdigit())
+    stamp = f"{date_part}-{time_part}" if time_part else date_part
+    return stamp if date_part else "unknown"

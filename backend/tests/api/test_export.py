@@ -7,14 +7,14 @@ ergibt 422 (Pflicht-Literal); eine unbekannte ``scan_id`` ergibt 404 (globaler H
 einen Fake ersetzt -- kein echter Scan/Repository/reportlab noetig.
 """
 
-from collections.abc import Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from typing import Literal
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api.export import provide_export_scan
+from api.export import provide_export_analysis, provide_export_scan
 from app import create_app
 from application.export import ExportResult, ScanNotFoundError
 from infrastructure.config import AppConfig
@@ -97,3 +97,68 @@ def test_export_unknown_scan_id_is_404(app: FastAPI) -> None:
 
     assert response.status_code == 404
     assert "999" in response.json()["detail"]
+
+
+# ── Block 2: GET /api/export/analysis (async Route, kein scan_id) ──────────────
+
+
+def _fake_analysis_runner() -> Callable[[Literal["csv", "json", "pdf"]], Awaitable[ExportResult]]:
+    """Ein Fake-ExportAnalysisRunner: je Format ein ExportResult (async, kein NotFound)."""
+
+    media = {
+        "csv": ("text/csv", b"severity,title\nnotable,X"),
+        "json": ("application/json", b'{"finding_count": 1}'),
+        "pdf": ("application/pdf", b"%PDF-FAKE"),
+    }
+
+    async def _run(fmt: Literal["csv", "json", "pdf"]) -> ExportResult:
+        media_type, content = media[fmt]
+        return ExportResult(
+            content=content, media_type=media_type, filename=f"cernis-analysis-20260611.{fmt}"
+        )
+
+    return _run
+
+
+@pytest.mark.parametrize(
+    ("fmt", "media_type"),
+    [
+        ("csv", "text/csv"),
+        ("json", "application/json"),
+        ("pdf", "application/pdf"),
+    ],
+)
+def test_export_analysis_each_format_downloads(app: FastAPI, fmt: str, media_type: str) -> None:
+    """Jedes Format: 200 + korrekter Content-Type + Content-Disposition-Download-Header."""
+    app.dependency_overrides[provide_export_analysis] = lambda: _fake_analysis_runner()
+
+    with TestClient(app) as client:
+        response = client.get("/api/export/analysis", params={"format": fmt})
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith(media_type)
+    assert (
+        response.headers["content-disposition"]
+        == f'attachment; filename="cernis-analysis-20260611.{fmt}"'
+    )
+    assert response.content
+
+
+def test_export_analysis_invalid_format_is_422(app: FastAPI) -> None:
+    """Ein ungueltiges ``format`` ist 422 (Pflicht-Literal -- FastAPI validiert)."""
+    app.dependency_overrides[provide_export_analysis] = lambda: _fake_analysis_runner()
+
+    with TestClient(app) as client:
+        response = client.get("/api/export/analysis", params={"format": "xml"})
+
+    assert response.status_code == 422
+
+
+def test_export_analysis_missing_format_is_422(app: FastAPI) -> None:
+    """Ohne ``format`` ist 422 (Pflicht-Query-Param)."""
+    app.dependency_overrides[provide_export_analysis] = lambda: _fake_analysis_runner()
+
+    with TestClient(app) as client:
+        response = client.get("/api/export/analysis")
+
+    assert response.status_code == 422

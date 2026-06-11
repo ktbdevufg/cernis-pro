@@ -85,7 +85,7 @@ from api.diagnostics import (
     provide_run_traceroute,
 )
 from api.diagnostics import router as diagnostics_router
-from api.export import provide_export_scan
+from api.export import provide_export_analysis, provide_export_scan
 from api.export import router as export_router
 from api.interfaces import provide_list_interfaces
 from api.interfaces import router as interfaces_router
@@ -186,7 +186,7 @@ from application.diagnostics import (
     RogueDhcpPermissionError,
     RunTraceroute,
 )
-from application.export import ExportScan, ScanNotFoundError
+from application.export import ExportAnalysis, ExportScan, ScanNotFoundError
 from application.interfaces import ListInterfaces
 from application.metrics import ExportMetrics
 from application.monitoring import (
@@ -221,7 +221,13 @@ from application.security import (
 from application.settings import GetSettings, UpdateSecret, UpdateSetting
 from application.traffic import CheckTrafficPermission, ListAppTraffic, PollThroughput
 from domain.analysis import ObservedConnection, ObservedHost, ObservedProcess, Rule, Snapshot
-from domain.export import ExportableHost, ExportablePort, ExportableScan
+from domain.export import (
+    ExportableAnalysis,
+    ExportableFinding,
+    ExportableHost,
+    ExportablePort,
+    ExportableScan,
+)
 from domain.monitoring import MonitorEvent, MonitorEventType
 from domain.process import classify_kind
 from infrastructure.agent import (
@@ -1511,6 +1517,60 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # NUR diese eine Zeile der AN.3-Verdrahtung aendert sich; der Rest bleibt.
         rule_provider = _CompositeRuleProvider(BuiltinRuleProvider(), analysis_rule_repository())
         return AnalyzeSnapshot(rule_provider, StaticHelpLinkResolver())(snapshot)
+
+    # ── export-Domaene Block 2 verdrahten (Analyse-Befunde -> CSV/JSON/PDF, ADR 0015) ──
+    # Der ExportAnalysis-Use-Case kennt KEINE analysis-Domaene: er bekommt die Befunde ueber
+    # ein schlankes, ASYNC analysis_provider-Callable, das HIER im Composition Root die
+    # AKTUELLE Analyse frisch erzeugt (Reuse von _analyze_snapshot -- KEINE zweite Snapshot-
+    # Projektion) UND auf domain.export.ExportableAnalysis PROJIZIERT (Muster
+    # _project_scan_to_exportable / analysis' Observed*-Projektion -- Fremd-Domaenen-Kopplung
+    # gehoert in die Verdrahtung, NICHT in domain.export, independence-Contract). generated_at
+    # kommt aus der EINEN Zeitquelle (SystemClock, UTC, ISO) -- die Domaene fragt keine Uhr;
+    # der Composition Root setzt das Feld direkt in die projizierte ExportableAnalysis. Der
+    # Renderer ist der zustandslose ReportlabRenderer (derselbe wie Block 1, generisches
+    # PdfReportModel). Anders als der Scan-Export: ASYNC + KEIN analysis_id (die Analyse hat
+    # keinen gespeicherten Stand -> "die Analyse von jetzt", kein NotFound).
+    export_clock = SystemClock()
+
+    def _project_analysis_to_exportable(
+        resolved: list[Any], generated_at: str
+    ) -> ExportableAnalysis:
+        # resolved ist die list[ResolvedObservation] aus _analyze_snapshot (.observation +
+        # .help_url); per Attribut-Zugriff auf die schlanken export-Typen projiziert
+        # (independence: domain.export kennt analysis NICHT). severity kommt als str herein
+        # (kein Severity-Import). Die Befund-Reihenfolge bleibt die der Eingabe (AnalyzeSnapshot
+        # liefert bereits deterministisch sortiert). generated_at ist der ISO-Zeitstempel des
+        # Exports (von der Uhr, hier hereingereicht -- die Domaene fragt keine Uhr).
+        findings = tuple(
+            ExportableFinding(
+                rule_id=r.observation.rule_id,
+                severity=r.observation.severity,
+                title=r.observation.title,
+                detail=r.observation.detail,
+                subject=r.observation.subject,
+                help_kind=r.observation.help_kind,
+                help_url=r.help_url,
+            )
+            for r in resolved
+        )
+        return ExportableAnalysis(
+            generated_at=generated_at,
+            findings=findings,
+            finding_count=len(findings),
+        )
+
+    async def _analysis_provider() -> ExportableAnalysis:
+        # Die AKTUELLE Analyse frisch erzeugen -- DERSELBE Pfad wie GET /api/analysis (Reuse
+        # _analyze_snapshot, async). generated_at ist der Erzeugungs-Zeitpunkt des Exports
+        # (SystemClock, UTC) als ISO-String. Dann auf ExportableAnalysis projizieren.
+        resolved = await _analyze_snapshot()
+        generated_at = export_clock.now().isoformat()
+        return _project_analysis_to_exportable(resolved, generated_at)
+
+    async def _export_analysis(fmt: Literal["csv", "json", "pdf"]) -> Any:
+        return await ExportAnalysis(_analysis_provider, ReportlabRenderer())(fmt)
+
+    app.dependency_overrides[provide_export_analysis] = lambda: _export_analysis
 
     # A.2-Verwaltungs-Runner: der api-Ring bleibt domain-frei -- das Bauen der
     # domain.Rule aus dem Request-DTO + der Aufruf der Use-Cases passiert HIER im
