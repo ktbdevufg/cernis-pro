@@ -17,6 +17,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from api.diagnostics import (
+    provide_check_tools,
     provide_check_traceroute_permission,
     provide_resolve_dns,
     provide_run_traceroute,
@@ -25,6 +26,8 @@ from app import create_app
 from domain.diagnostics import (
     DnsRecord,
     DnsResult,
+    ToolReport,
+    ToolStatus,
     TracerouteHop,
     TracerouteResult,
 )
@@ -216,3 +219,86 @@ def test_traceroute_permission_only_unprivileged(app: FastAPI) -> None:
 
     assert response.status_code == 200
     assert response.json() == {"ok": False, "error": msg}
+
+
+# ── tools (1b) ────────────────────────────────────────────────────────────────
+
+
+def test_tools_without_param_checks_all(app: FastAPI) -> None:
+    """Ohne ``tools`` kommt ``None`` am Runner an (Erstinstallation: alle pruefen)."""
+
+    report = ToolReport(
+        manager="apt",
+        statuses=(
+            ToolStatus(name="dig", available=True),
+            ToolStatus(name="traceroute", available=True),
+        ),
+        install_command=None,
+    )
+    seen: dict[str, Any] = {}
+
+    def _fake_check(tools: list[str] | None) -> Any:
+        seen["tools"] = tools
+        return report
+
+    app.dependency_overrides[provide_check_tools] = lambda: _fake_check
+
+    with TestClient(app) as client:
+        response = client.get("/api/diagnostics/tools")
+
+    assert response.status_code == 200
+    assert seen["tools"] is None  # ohne Param -> None (alle)
+    assert response.json() == {
+        "manager": "apt",
+        "statuses": [
+            {"name": "dig", "available": True},
+            {"name": "traceroute", "available": True},
+        ],
+        "install_command": None,
+    }
+
+
+def test_tools_with_repeatable_param_checks_subset(app: FastAPI) -> None:
+    """``?tools=dig`` kommt als Liste am Runner an; install_command im Wire serialisiert."""
+
+    report = ToolReport(
+        manager="apt",
+        statuses=(ToolStatus(name="dig", available=False),),
+        install_command="sudo apt install dnsutils",
+    )
+    seen: dict[str, Any] = {}
+
+    def _fake_check(tools: list[str] | None) -> Any:
+        seen["tools"] = tools
+        return report
+
+    app.dependency_overrides[provide_check_tools] = lambda: _fake_check
+
+    with TestClient(app) as client:
+        response = client.get("/api/diagnostics/tools", params=[("tools", "dig")])
+
+    assert response.status_code == 200
+    assert seen["tools"] == ["dig"]
+    body = response.json()
+    assert body["install_command"] == "sudo apt install dnsutils"
+    assert body["statuses"] == [{"name": "dig", "available": False}]
+
+
+def test_tools_manager_none_serializes_null(app: FastAPI) -> None:
+    """Kein Manager erkannt -> manager + install_command sind ehrlich ``null`` im Wire."""
+
+    report = ToolReport(
+        manager=None,
+        statuses=(ToolStatus(name="dig", available=False),),
+        install_command=None,
+    )
+
+    app.dependency_overrides[provide_check_tools] = lambda: lambda _tools: report
+
+    with TestClient(app) as client:
+        response = client.get("/api/diagnostics/tools", params=[("tools", "dig")])
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["manager"] is None
+    assert body["install_command"] is None

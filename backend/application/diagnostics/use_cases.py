@@ -14,12 +14,36 @@ Drei Use-Cases (duenn, Muster ``ListProcesses``/``CheckProcessPermission``):
   ``CheckProcessPermission``): ``is_available`` -> ``check_permission`` -> dict. Hier
   bedeutet ``ok=True``: die privilegierte (genauere) Methode ist verfuegbar; ``ok=False``
   + Text: nur die unprivilegierte (ungenauere) Methode, mit Begruendung.
+
+Block 1b:
+
+* ``CheckDiagnosticsTools`` -- duenne Orchestrierung (Muster der uebrigen UCs): ermittelt
+  pro Tool die Verfuegbarkeit (``ToolDetector``) und den Paketmanager
+  (``PackageManagerDetector``) und ruft die reine domain-Funktion ``assemble_report``.
+  Keine eigene Logik ausser Orchestrierung; synchron (reine lokale Checks, Muster
+  ``CheckTraceroutePermission``). ``requested_tools`` None/leer -> ``ALL_TOOLS``
+  (Erstinstallation: alle pruefen); sonst genau die genannten (Laufzeit). Unbekannte
+  Tool-Namen (nicht in ``TOOL_PACKAGES``) werden defensiv ignoriert (nicht erfunden).
 """
 
 from collections.abc import Sequence
 
-from domain.diagnostics import DnsRecordType, DnsResult, TracerouteResult
-from ports.diagnostics import DnsResolver, TraceroutePermissionPort, TracerouteRunner
+from domain.diagnostics import (
+    ALL_TOOLS,
+    TOOL_PACKAGES,
+    DnsRecordType,
+    DnsResult,
+    ToolReport,
+    TracerouteResult,
+    assemble_report,
+)
+from ports.diagnostics import (
+    DnsResolver,
+    PackageManagerDetector,
+    ToolDetector,
+    TraceroutePermissionPort,
+    TracerouteRunner,
+)
 
 
 class ResolveDns:
@@ -91,3 +115,33 @@ class CheckTraceroutePermission:
     def check_permission(self) -> str | None:
         """Rechte-Begruendung oder ``None`` (fuer einen spaeteren ``permission_error``)."""
         return self._permission.check_permission()
+
+
+class CheckDiagnosticsTools:
+    """Tool-Bericht (1b): orchestriert Detector + Paketmanager -> ``assemble_report``.
+
+    Duenn (Muster ``CheckTraceroutePermission``): keine eigene Logik ausser Orchestrierung.
+    Die Ports kommen per Constructor-Injection als Protocol-Typ herein -- nie ein konkreter
+    Adapter. Synchron, weil beide Erkennungen reine lokale Checks sind (which-basiert).
+    """
+
+    def __init__(self, detector: ToolDetector, pm: PackageManagerDetector) -> None:
+        self._detector = detector
+        self._pm = pm
+
+    def __call__(self, requested_tools: Sequence[str] | None) -> ToolReport:
+        """Prueft die angefragten (oder alle) Tools -> ``ToolReport``.
+
+        ``requested_tools`` ``None`` ODER leer -> ``ALL_TOOLS`` (Erstinstallations-Fall:
+        alle registrierten Tools pruefen). Sonst genau die genannten (Laufzeit-Fall);
+        unbekannte Tool-Namen (nicht in ``TOOL_PACKAGES``) werden defensiv ignoriert
+        (nicht erfunden). Pro Tool die Verfuegbarkeit (``detector.is_available``), dazu der
+        Manager (``pm.detect()``), dann die reine domain-Funktion ``assemble_report``.
+        """
+        if requested_tools:
+            tools = [tool for tool in requested_tools if tool in TOOL_PACKAGES]
+        else:
+            tools = list(ALL_TOOLS)
+        availability = {tool: self._detector.is_available(tool) for tool in tools}
+        manager = self._pm.detect()
+        return assemble_report(manager, availability, tools)

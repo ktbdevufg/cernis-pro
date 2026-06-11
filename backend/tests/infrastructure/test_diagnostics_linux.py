@@ -17,7 +17,9 @@ from domain.diagnostics import DnsRecord
 from infrastructure.diagnostics_linux import (
     DiagnosticsToolMissing,
     DigDnsResolver,
+    LinuxPackageManagerDetector,
     LinuxTraceroutePermission,
+    ShutilToolDetector,
     SystemTracerouteRunner,
     _parse_dig_answer,
     _parse_traceroute,
@@ -186,3 +188,55 @@ def test_permission_non_root_gives_hint_without_install_cmd(
     assert hint is not None
     assert "Root" in hint
     assert "apt" not in hint and "dnf" not in hint
+
+
+# ── Block 1b: ShutilToolDetector ──────────────────────────────────────────────
+
+
+def test_tool_detector_available_when_binary_present(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(shutil, "which", lambda _name: "/usr/bin/dig")
+    assert ShutilToolDetector().is_available("dig") is True
+
+
+def test_tool_detector_unavailable_when_binary_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
+    assert ShutilToolDetector().is_available("dig") is False
+
+
+# ── Block 1b: LinuxPackageManagerDetector (Reihenfolge, erster gewinnt) ────────
+
+
+def _which_only(*present: str) -> "object":
+    """Baut ein ``shutil.which``-Stand-in, das nur die genannten Binaries 'findet'."""
+
+    def _which(name: str) -> str | None:
+        return f"/usr/bin/{name}" if name in present else None
+
+    return _which
+
+
+def test_package_manager_detect_first_in_order_wins(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Sowohl dnf als auch yum da -> der frueher gelistete (dnf) gewinnt.
+    monkeypatch.setattr(shutil, "which", _which_only("dnf", "yum"))
+    assert LinuxPackageManagerDetector().detect() == "dnf"
+
+
+def test_package_manager_detect_apt(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(shutil, "which", _which_only("apt"))
+    assert LinuxPackageManagerDetector().detect() == "apt"
+
+
+def test_package_manager_detect_pacman(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(shutil, "which", _which_only("pacman"))
+    assert LinuxPackageManagerDetector().detect() == "pacman"
+
+
+def test_package_manager_detect_apt_beats_pacman(monkeypatch: pytest.MonkeyPatch) -> None:
+    # apt steht vor pacman in der Reihenfolge -> apt gewinnt, egal welcher zuerst gefunden wird.
+    monkeypatch.setattr(shutil, "which", _which_only("pacman", "apt"))
+    assert LinuxPackageManagerDetector().detect() == "apt"
+
+
+def test_package_manager_detect_none_when_no_manager(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(shutil, "which", _which_only())
+    assert LinuxPackageManagerDetector().detect() is None

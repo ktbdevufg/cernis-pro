@@ -1,4 +1,4 @@
-# ADR 0014 — diagnostics-Domäne: Frage-Antwort-Werkzeuge (Block 1a: DNS + traceroute)
+# ADR 0014 — diagnostics-Domäne: Frage-Antwort-Werkzeuge (Block 1a: DNS + traceroute; Block 1b: Tool-/Paketmanager-Erkennung)
 
 - **Status:** Akzeptiert
 - **Datum:** 2026-06-11
@@ -52,3 +52,37 @@ Zwei wiederkehrende Spannungen, die dieses ADR auflöst:
 - **Abhängigkeit von installierten System-Tools** (`dig`/`traceroute`): fehlt eines, ist die Funktion ein ehrlicher 503 — Block 1b liefert Erkennung + Install-Hinweis, damit das Fehlt-Erlebnis handlungsorientiert wird.
 - **rootless traceroute funktioniert** (UDP, ungenauer); die genauere ICMP-Methode braucht Root — die Differenz ist benannt, nicht verschwiegen (kein stiller Fallback, S3).
 - **Parser an die `dig`/`traceroute`-Ausgabe gebunden**: robust gegen Timeout-Hops/leere Antworten getestet, aber an die reale Tool-Ausgabe gekoppelt (gekapselt in den reinen Parser-Helfern, ohne echten Netz-/Subprocess-Aufruf testbar).
+
+## Block 1b: Tool-/Paketmanager-Erkennung
+
+- **Status:** Akzeptiert
+- **Datum:** 2026-06-11
+- **Bezug:** baut auf 1a (Entscheidung 8: Erkennung + Install-Hinweis bewusst auf 1b verschoben); CLAUDE.md (keine stillen Fallbacks S3; keine Selbst-Eskalation von Rechten); ADR 0011 (Rechte-/Detector-Port-Vorbild `ProcessPermissionPort` → `ToolDetector`/`PackageManagerDetector`)
+
+### Kontext
+
+1a liefert DNS/traceroute, aber das Fehlt-Erlebnis ist nur ein nackter 503 (»Programm 'dig' wurde nicht gefunden«). Block 1b macht es handlungsorientiert: erkennen, welche Tools fehlen, welcher Paketmanager vorliegt, und den passenden Install-Befehls-**Text** liefern — über alle fünf Ringe, ohne neue Abhängigkeit und ohne neue Domäne.
+
+### Entscheidung
+
+1. **Registry als einzige Quelle der Wahrheit im domain-Ring.** `TOOL_PACKAGES: dict[str, dict[PackageManager, str]]` ist reine Daten (Block 1b) — die EINZIGE Stelle, die weiß, welche Tools CERNIS PRO verwendet (`dig`/`traceroute`) und wie das Paket je Manager heißt. `ALL_TOOLS` wird daraus abgeleitet (keine zweite, divergierende Liste). Die Adapter erkennen nur; sie wissen nicht, _was_ es zu erkennen gibt.
+
+2. **`dig`-Paketnamen-Unterschied ist der eigentliche Grund für die Registry:** Debian/Ubuntu `dnsutils`, RHEL/Fedora/SUSE `bind-utils`, Arch `bind`. `traceroute` heißt überall `traceroute` (nur das Befehls-Schema unterscheidet sich).
+
+3. **`yum` mappt bewusst auf dieselben Paketnamen wie `dnf`** (RHEL-Altsysteme nutzen dieselben `bind-utils`/`traceroute`-Pakete).
+
+4. **Paketmanager-Erkennung über `which`, nicht über `/etc/os-release`.** `LinuxPackageManagerDetector` prüft in fester, deterministischer Reihenfolge (`apt → dnf → yum → zypper → pacman`) und gibt den ERSTEN gefundenen zurück. Robust gegen Derivate: ein Derivat erbt den Paketmanager seiner Basis, nicht zwingend den Distro-Namen. `dnf` vor `yum`, damit auf Systemen mit beiden der modernere gewinnt.
+
+5. **Ehrliche None-Semantik durchgehend (kein Raten):** kein Manager erkannt → `install_command` `None`; nichts fehlt → `None`; unbekanntes Tool (nicht in `TOOL_PACKAGES`) → übersprungen, nicht erfunden. `build_install_command`/`assemble_report` sind rein, deterministisch (dedup + Sortierung), voll testbar — die heikelste Stelle (die unterschiedlichen Paketnamen) liegt im domain-Ring.
+
+6. **KEINE Selbst-Installation (Sicherheits-Prinzip).** Das Backend führt NIE einen Paketmanager-Befehl aus — es liefert nur den Befehls-**Text**. Der Nutzer entscheidet und führt aus.
+
+7. **Backend bleibt zustandslos — kein Erststart-Gedächtnis.** Kein „alle Tools schon mal geprüft?"-Flag im Backend. `GET /api/diagnostics/tools` ohne `tools`-Param = alle prüfen (Erstinstallation), mit `tools=…` = gezielt (Laufzeit). WANN die GUI „alle" abfragt, entscheidet die GUI, nicht das Backend.
+
+8. **Detektoren als eigene synchrone Ports** (`ToolDetector`/`PackageManagerDetector`, Muster `TraceroutePermissionPort`): schnelle lokale `which`-Checks, kein Loop-I/O → synchron. Der Use-Case `CheckDiagnosticsTools` orchestriert nur (Detector + Manager → reine `assemble_report`).
+
+### Konsequenzen
+
+- **Kein neuer import-linter-Contract nötig** — gleiche Domäne `diagnostics`, der `independence`-Contract für `domain.diagnostics` aus 1a deckt 1b mit ab.
+- Das Fehlt-Erlebnis ist jetzt handlungsorientiert (konkreter Install-Befehl) statt nur ein 503 — ohne dass das Backend je selbst installiert oder Zustand führt.
+- **Grenze:** die Registry wächst mit jedem neuen System-Tool, das CERNIS PRO nutzt — aber das ist genau die _eine_ Stelle, an der ein neues Tool registriert wird (Binary → Paketnamen je Manager).

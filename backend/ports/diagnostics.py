@@ -17,6 +17,15 @@ Drei Vertraege, getrennt nach Belang:
   (privilegierte) Methode ist moeglich; ohne Rechte wird die unprivilegierte Methode
   verwendet (ehrlicher Hinweis, kein stiller Fallback, S3).
 
+Block 1b (Tool-/Paketmanager-Erkennung) -- zwei synchrone Erkennungs-Vertraege (Muster
+``TraceroutePermissionPort``: schnelle, lokale which-Pruefungen ohne Loop-I/O):
+
+* ``ToolDetector`` -- prueft, ob ein EINZELNES Binary nutzbar ist (which-basiert; ob das
+  ueber ``shutil.which`` oder anders geschieht, ist Adapter-Sache).
+* ``PackageManagerDetector`` -- welcher bekannte Paketmanager im PATH liegt; ``None`` wenn
+  keiner. Die Erkennungs-Reihenfolge (welcher gewinnt) legt der Adapter fest, nicht der
+  Port -- der Vertrag verlangt nur "der erste gefundene".
+
 Bewusste Entscheidung: KEIN ``@runtime_checkable`` (Muster wie settings/devices/
 scanning/capture/interfaces/traffic/process). Die Vertragspruefung laeuft statisch ueber
 mypy und ueber die Verdrahtung im Composition Root (``app.py``), nicht zur Laufzeit per
@@ -30,7 +39,7 @@ domain". Import von ``domain`` ist erlaubt (nur die Gegenrichtung ist verboten).
 from collections.abc import Sequence
 from typing import Protocol
 
-from domain.diagnostics import DnsRecordType, DnsResult, TracerouteResult
+from domain.diagnostics import DnsRecordType, DnsResult, PackageManager, TracerouteResult
 
 
 class DnsResolver(Protocol):
@@ -91,5 +100,32 @@ class TraceroutePermissionPort(Protocol):
         KEIN stiller Fallback (ADR 0001/S3): die fehlende Berechtigung wird benannt, nicht
         verschwiegen. KEIN distro-spezifischer Install-Befehl hier (das ist Block 1b).
         Schnelle lokale Pruefung, daher synchron.
+        """
+        ...
+
+
+class ToolDetector(Protocol):
+    """Erkennungs-Vertrag (1b): ist ein einzelnes System-Binary nutzbar? (which-basiert)."""
+
+    def is_available(self, tool: str) -> bool:
+        """``True``, wenn das Binary ``tool`` nutzbar (im PATH) ist, sonst ``False``.
+
+        Reiner Verfuegbarkeits-Check eines EINZELNEN Binaries -- ob ueber ``shutil.which``
+        oder anders, ist Adapter-Sache. Schnelle lokale Pruefung, daher synchron (Muster
+        ``TraceroutePermissionPort.is_available``).
+        """
+        ...
+
+
+class PackageManagerDetector(Protocol):
+    """Erkennungs-Vertrag (1b): welcher bekannte Paketmanager liegt im PATH?"""
+
+    def detect(self) -> PackageManager | None:
+        """Der erste gefundene bekannte Paketmanager, sonst ``None``.
+
+        ``None`` heisst "kein bekannter Paketmanager im PATH" -- dann liefert die Domaene
+        ehrlich keinen Install-Befehl (KEIN Raten). Die Erkennungs-Reihenfolge (welcher
+        Manager gewinnt, wenn mehrere da sind) legt der Adapter fest, nicht dieser Vertrag.
+        Schnelle lokale which-Pruefung, daher synchron.
         """
         ...

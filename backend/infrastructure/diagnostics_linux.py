@@ -10,6 +10,12 @@ traffic -- System-Tools statt Python-Libs, ADR 0014):
   ``TracerouteHop`` (nicht-antwortende Hops als ``address``/``rtt_ms`` ``None``).
 * ``LinuxTraceroutePermission`` (``TraceroutePermissionPort``) -- lokale, synchrone
   Rechte-Pruefung (Binary da? + ``geteuid``).
+* ``ShutilToolDetector`` (``ToolDetector``, 1b) -- ein einzelnes Binary nutzbar?
+  (``shutil.which``).
+* ``LinuxPackageManagerDetector`` (``PackageManagerDetector``, 1b) -- der erste in fester,
+  deterministischer Reihenfolge gefundene Paketmanager. Reine ``which``-Pruefung, KEIN
+  Distro-Raten ueber ``/etc/os-release`` -- robust gegen Derivate (ein Derivat erbt den
+  Paketmanager seiner Basis, nicht zwingend den Distro-Namen).
 
 Schablone ``infrastructure/process_linux.py``: ``async``-Methoden kapseln das blockierende
 Subprocess-I/O ueber ``run_in_executor`` (Event-Loop bleibt frei); der synchrone Kern und
@@ -41,6 +47,7 @@ from domain.diagnostics import (
     DnsRecord,
     DnsRecordType,
     DnsResult,
+    PackageManager,
     TracerouteHop,
     TracerouteResult,
     dedup_records,
@@ -249,6 +256,39 @@ class LinuxTraceroutePermission:
             "wird die unprivilegierte (ungenauere) Methode verwendet - starte das Backend "
             "als Root, z.B. 'sudo cernis-backend', fuer die genauere Messung."
         )
+
+
+# ── Block 1b: Tool-/Paketmanager-Erkennung (reine which-Adapter) ───────────────
+
+# Erkennungs-Reihenfolge der Paketmanager (fest + deterministisch). Der ERSTE im PATH
+# gefundene gewinnt -- KEIN Distro-Raten ueber /etc/os-release (robust gegen Derivate).
+# apt vor dnf/yum: Debian/Ubuntu-Linie zuerst; yum (RHEL-Alt) nach dnf (RHEL-neu), damit
+# auf Systemen mit beiden der modernere dnf gewinnt.
+_PACKAGE_MANAGER_ORDER: tuple[PackageManager, ...] = ("apt", "dnf", "yum", "zypper", "pacman")
+
+
+class ShutilToolDetector:
+    """Erfuellt das ``ToolDetector``-Protocol ueber ``shutil.which`` (1b)."""
+
+    def is_available(self, tool: str) -> bool:
+        """``True``, wenn ``tool`` im PATH liegt (``shutil.which`` != None), sonst ``False``."""
+        return shutil.which(tool) is not None
+
+
+class LinuxPackageManagerDetector:
+    """Erfuellt das ``PackageManagerDetector``-Protocol ueber ``shutil.which`` (1b)."""
+
+    def detect(self) -> PackageManager | None:
+        """Der erste in ``_PACKAGE_MANAGER_ORDER`` gefundene Manager, sonst ``None``.
+
+        Reine ``which``-Pruefung in fester Reihenfolge -- KEIN Distro-Raten ueber
+        ``/etc/os-release`` (ein Derivat erbt den Paketmanager, nicht zwingend den Namen).
+        Keiner im PATH -> ``None`` (dann liefert die Domaene ehrlich keinen Install-Befehl).
+        """
+        for manager in _PACKAGE_MANAGER_ORDER:
+            if shutil.which(manager) is not None:
+                return manager
+        return None
 
 
 # ── Subprocess-Aufrufe (gekapselt, in Tests gemockt) ──────────────────────────

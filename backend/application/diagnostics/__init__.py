@@ -5,12 +5,14 @@ from application.diagnostics.errors import (
     DiagnosticsToolMissingError,
 )
 from application.diagnostics.use_cases import (
+    CheckDiagnosticsTools,
     CheckTraceroutePermission,
     ResolveDns,
     RunTraceroute,
 )
 
 __all__ = [
+    "CheckDiagnosticsTools",
     "CheckTraceroutePermission",
     "DiagnosticsApplicationError",
     "DiagnosticsToolMissingError",

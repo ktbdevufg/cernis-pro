@@ -9,10 +9,16 @@ herein -> rein deterministisch, kein I/O, keine Uhr.
 import pytest
 
 from domain.diagnostics import (
+    ALL_TOOLS,
+    TOOL_PACKAGES,
     DnsRecord,
     DnsResult,
+    ToolReport,
+    ToolStatus,
     TracerouteHop,
     TracerouteResult,
+    assemble_report,
+    build_install_command,
     dedup_records,
 )
 
@@ -108,3 +114,130 @@ def test_dedup_records_first_occurrence_wins_identity() -> None:
         DnsRecord(record_type="MX", value="10 a.example."),
         DnsRecord(record_type="MX", value="20 b.example."),
     )
+
+
+# ── Block 1b: Registry (einzige Quelle der Wahrheit) ──────────────────────────
+
+
+def test_all_tools_is_sorted_and_derived_from_registry() -> None:
+    # ALL_TOOLS ist deterministisch sortiert und deckt sich mit den Registry-Keys.
+    assert ALL_TOOLS == ("dig", "traceroute")
+    assert set(ALL_TOOLS) == set(TOOL_PACKAGES.keys())
+
+
+def test_tool_status_is_frozen() -> None:
+    status = ToolStatus(name="dig", available=True)
+    with pytest.raises(AttributeError):
+        status.available = False  # type: ignore[misc]
+
+
+def test_tool_report_is_frozen() -> None:
+    report = ToolReport(manager=None, statuses=(), install_command=None)
+    with pytest.raises(AttributeError):
+        report.manager = "apt"  # type: ignore[misc]
+
+
+# ── build_install_command (heikelste Stelle: Paketnamen je Manager) ───────────
+
+
+def test_build_install_command_apt_dig_is_dnsutils() -> None:
+    # apt: dig steckt im Paket ``dnsutils`` (NICHT bind-utils) -- der entscheidende Unterschied.
+    cmd = build_install_command("apt", ["dig"])
+    assert cmd == "sudo apt install dnsutils"
+
+
+def test_build_install_command_dnf_dig_is_bind_utils() -> None:
+    cmd = build_install_command("dnf", ["dig"])
+    assert cmd == "sudo dnf install bind-utils"
+
+
+def test_build_install_command_yum_matches_dnf_package_names() -> None:
+    # yum mappt bewusst auf dieselben Paketnamen wie dnf (RHEL-Altsysteme).
+    assert build_install_command("yum", ["dig"]) == "sudo yum install bind-utils"
+    assert build_install_command("yum", ["traceroute"]) == "sudo yum install traceroute"
+
+
+def test_build_install_command_zypper_dig_is_bind_utils() -> None:
+    cmd = build_install_command("zypper", ["dig"])
+    assert cmd == "sudo zypper install bind-utils"
+
+
+def test_build_install_command_pacman_uses_dash_s_and_bind() -> None:
+    # pacman: ``-S`` statt ``install`` UND dig steckt im Paket ``bind``.
+    cmd = build_install_command("pacman", ["dig"])
+    assert cmd == "sudo pacman -S bind"
+
+
+def test_build_install_command_traceroute_same_name_everywhere() -> None:
+    # traceroute heisst ueberall ``traceroute`` -- nur das Befehls-Schema unterscheidet sich.
+    assert build_install_command("apt", ["traceroute"]) == "sudo apt install traceroute"
+    assert build_install_command("pacman", ["traceroute"]) == "sudo pacman -S traceroute"
+
+
+def test_build_install_command_manager_none_returns_none() -> None:
+    # Kein bekannter Manager -> None, KEIN geratener Befehl.
+    assert build_install_command(None, ["dig", "traceroute"]) is None
+
+
+def test_build_install_command_no_missing_returns_none() -> None:
+    # Nichts fehlt -> None (es gibt nichts zu installieren).
+    assert build_install_command("apt", []) is None
+
+
+def test_build_install_command_dedups_and_sorts_packages() -> None:
+    # Mehrere Tools, deren Pakete teils gleich heissen: dedup + deterministische Sortierung.
+    # apt: dig->dnsutils, traceroute->traceroute -> aufsteigend: dnsutils traceroute.
+    cmd = build_install_command("apt", ["traceroute", "dig", "dig"])
+    assert cmd == "sudo apt install dnsutils traceroute"
+
+
+def test_build_install_command_skips_unknown_tool() -> None:
+    # Ein unbekanntes Tool wird uebersprungen (nicht erfunden) -- nur das bekannte zaehlt.
+    cmd = build_install_command("apt", ["dig", "nmap"])
+    assert cmd == "sudo apt install dnsutils"
+
+
+def test_build_install_command_only_unknown_returns_none() -> None:
+    # Nur unbekannte Tools -> keine Pakete uebrig -> None (kein leerer Befehl).
+    assert build_install_command("apt", ["nmap", "curl"]) is None
+
+
+# ── assemble_report ───────────────────────────────────────────────────────────
+
+
+def test_assemble_report_statuses_sorted_by_name() -> None:
+    # Eingangsreihenfolge bewusst verdreht; statuses aufsteigend nach name.
+    report = assemble_report("apt", {"traceroute": True, "dig": False}, ["traceroute", "dig"])
+    assert report.statuses == (
+        ToolStatus(name="dig", available=False),
+        ToolStatus(name="traceroute", available=True),
+    )
+
+
+def test_assemble_report_missing_drives_install_command() -> None:
+    # dig fehlt, traceroute da -> install_command nur fuer dig (apt: dnsutils).
+    report = assemble_report("apt", {"dig": False, "traceroute": True}, ["dig", "traceroute"])
+    assert report.manager == "apt"
+    assert report.install_command == "sudo apt install dnsutils"
+
+
+def test_assemble_report_nothing_missing_no_command() -> None:
+    # Alles da -> install_command None (nichts zu installieren), Manager trotzdem gefuehrt.
+    report = assemble_report("dnf", {"dig": True, "traceroute": True}, ["dig", "traceroute"])
+    assert report.install_command is None
+    assert report.manager == "dnf"
+
+
+def test_assemble_report_manager_none_command_none() -> None:
+    # Tool fehlt, aber kein Manager bekannt -> install_command ehrlich None (kein Raten).
+    report = assemble_report(None, {"dig": False}, ["dig"])
+    assert report.manager is None
+    assert report.install_command is None
+    assert report.statuses == (ToolStatus(name="dig", available=False),)
+
+
+def test_assemble_report_unknown_availability_defaults_false() -> None:
+    # Fehlt der Verfuegbarkeits-Eintrag, gilt das Tool defensiv als nicht verfuegbar.
+    report = assemble_report("apt", {}, ["dig"])
+    assert report.statuses == (ToolStatus(name="dig", available=False),)
+    assert report.install_command == "sudo apt install dnsutils"

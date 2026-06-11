@@ -14,6 +14,11 @@ Attribut-Zugriff zu JSON serialisiert (Typ ``Any``, Muster ``api/process``).
   processes). Liefert das ``TracerouteResult`` als dict.
 * ``GET /api/diagnostics/traceroute/permission`` -- die ``{ok, error}``-Rechte-Naht
   (``CheckTraceroutePermission``): ``ok=true`` = privilegierte (genauere) Methode moeglich.
+* ``GET /api/diagnostics/tools?tools=dig&tools=traceroute`` (1b) -- ``tools`` ist ein
+  WIEDERHOLBARER Query-Parameter. OHNE ``tools`` werden ALLE registrierten Tools geprueft
+  (Erstinstallation); MIT ``tools`` nur die genannten (Laufzeit). Liefert den ``ToolReport``
+  als dict (``manager`` str|null, ``statuses[]`` {name, available}, ``install_command``
+  str|null). KEINE Selbst-Installation -- nur der Befehls-TEXT (Sicherheits-Prinzip).
 
 TOOL-FEHLT -> HTTP: Fehlt das System-Binary (``dig``/``traceroute``), wirft der Adapter
 ``infrastructure.diagnostics_linux.DiagnosticsToolMissing``. Diesen infrastruktur-nahen
@@ -45,6 +50,9 @@ _DEFAULT_DNS_TYPES: list[str] = ["A", "AAAA", "PTR"]
 # Projektion bleibt am Rand (dieser Router) -- die Runner serialisieren NICHT.
 type ResolveDnsRunner = Callable[[str, list[str]], Awaitable[Any]]
 type RunTracerouteRunner = Callable[[str, bool], Awaitable[Any]]
+# 1b: prueft die angefragten (oder bei None alle) Tools und liefert den rohen ToolReport
+# (``Any`` -- der api-Ring kennt keine domain-Typen). Synchron: reine lokale which-Checks.
+type CheckToolsRunner = Callable[[list[str] | None], Any]
 
 
 # Dependency-Marker: im Composition Root (app.py) per dependency_overrides mit den
@@ -59,6 +67,10 @@ def provide_run_traceroute() -> RunTracerouteRunner:
 
 def provide_check_traceroute_permission() -> CheckTraceroutePermission:
     raise NotImplementedError("CheckTraceroutePermission wird in app.py verdrahtet")
+
+
+def provide_check_tools() -> CheckToolsRunner:
+    raise NotImplementedError("CheckToolsRunner wird in app.py verdrahtet")
 
 
 def _record_to_dict(r: Any) -> dict[str, Any]:
@@ -86,6 +98,20 @@ def _traceroute_result_to_dict(result: Any) -> dict[str, Any]:
         "target": result.target,
         "privileged": result.privileged,
         "hops": [_hop_to_dict(hop) for hop in result.hops],
+    }
+
+
+def _tool_status_to_dict(s: Any) -> dict[str, Any]:
+    # s ist ein domain.ToolStatus; per Attribut-Zugriff serialisiert (kein domain-Import).
+    return {"name": s.name, "available": s.available}
+
+
+def _tool_report_to_dict(report: Any) -> dict[str, Any]:
+    # report ist ein domain.ToolReport; manager/install_command sind ehrlich str|None.
+    return {
+        "manager": report.manager,
+        "statuses": [_tool_status_to_dict(status) for status in report.statuses],
+        "install_command": report.install_command,
     }
 
 
@@ -135,3 +161,20 @@ def get_traceroute_permission(
     (Root); ``ok=false`` + Begruendung = nur die unprivilegierte (ungenauere) Methode.
     """
     return check_permission_uc()
+
+
+@router.get("/tools")
+def check_tools(
+    check: Annotated[CheckToolsRunner, Depends(provide_check_tools)],
+    tools: Annotated[list[str] | None, Query()] = None,
+) -> dict[str, Any]:
+    """Tool-/Paketmanager-Bericht (1b); ``tools`` ist ein optionaler wiederholbarer Param.
+
+    OHNE ``tools`` (``None``) -> ALLE registrierten Tools pruefen (Erstinstallation); MIT
+    ``tools=dig&tools=traceroute`` -> nur die genannten (Laufzeit). Der Runner liefert den
+    ``ToolReport``; der Router serialisiert ihn (``manager`` str|null, ``statuses[]``,
+    ``install_command`` str|null -- ehrlich ``null``, wenn nichts fehlt oder kein Manager
+    bekannt ist). KEINE Selbst-Installation -- nur der Befehls-TEXT (Sicherheits-Prinzip).
+    """
+    report = check(tools)
+    return _tool_report_to_dict(report)

@@ -75,6 +75,7 @@ from api.devices import (
 )
 from api.devices import router as devices_router
 from api.diagnostics import (
+    provide_check_tools,
     provide_check_traceroute_permission,
     provide_resolve_dns,
     provide_run_traceroute,
@@ -169,6 +170,7 @@ from application.devices import (
     UpdateDeviceMeta,
 )
 from application.diagnostics import (
+    CheckDiagnosticsTools,
     CheckTraceroutePermission,
     ResolveDns,
     RunTraceroute,
@@ -233,7 +235,9 @@ from infrastructure.device_repository import SqliteDeviceRepository
 from infrastructure.diagnostics_linux import (
     DiagnosticsToolMissing,
     DigDnsResolver,
+    LinuxPackageManagerDetector,
     LinuxTraceroutePermission,
+    ShutilToolDetector,
     SystemTracerouteRunner,
 )
 from infrastructure.interfaces_linux import InterfaceDiscoveryAdapter
@@ -1208,6 +1212,16 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.dependency_overrides[provide_check_traceroute_permission] = lambda: (
         CheckTraceroutePermission(LinuxTraceroutePermission())
     )
+
+    # ── diagnostics 1b: Tool-/Paketmanager-Erkennung verdrahten ───────────────────
+    # Zustandslose which-Adapter direkt instanziiert (Muster oben). Der Runner reicht den
+    # optionalen ``tools``-Param (None -> alle) an den synchronen Use-Case durch und gibt
+    # den ToolReport als Any zurueck (der api-Ring serialisiert, kennt keine domain-Typen).
+    # KEINE Selbst-Installation -- der Use-Case liefert nur den Befehls-TEXT.
+    def _check_tools(tools: list[str] | None) -> Any:
+        return CheckDiagnosticsTools(ShutilToolDetector(), LinuxPackageManagerDetector())(tools)
+
+    app.dependency_overrides[provide_check_tools] = lambda: _check_tools
 
     @app.exception_handler(DiagnosticsToolMissing)
     async def _on_diagnostics_tool_missing(

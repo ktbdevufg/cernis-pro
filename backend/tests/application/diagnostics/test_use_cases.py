@@ -11,14 +11,17 @@ import asyncio
 from collections.abc import Sequence
 
 from application.diagnostics import (
+    CheckDiagnosticsTools,
     CheckTraceroutePermission,
     ResolveDns,
     RunTraceroute,
 )
 from domain.diagnostics import (
+    ALL_TOOLS,
     DnsRecord,
     DnsRecordType,
     DnsResult,
+    PackageManager,
     TracerouteHop,
     TracerouteResult,
 )
@@ -62,6 +65,32 @@ class FakeTraceroutePermission:
 
     def check_permission(self) -> str | None:
         return self._permission_error
+
+
+class FakeToolDetector:
+    """In-Memory-Implementierung des ``ToolDetector``-Protocols.
+
+    ``present`` ist die Menge der "vorhandenen" Tools; alles andere gilt als fehlend.
+    ``calls`` belegt, welche Tools ueberhaupt geprueft wurden (Erst- vs. Laufzeit-Fall).
+    """
+
+    def __init__(self, present: set[str]) -> None:
+        self._present = present
+        self.calls: list[str] = []
+
+    def is_available(self, tool: str) -> bool:
+        self.calls.append(tool)
+        return tool in self._present
+
+
+class FakePackageManagerDetector:
+    """In-Memory-Implementierung des ``PackageManagerDetector``-Protocols."""
+
+    def __init__(self, manager: PackageManager | None) -> None:
+        self._manager = manager
+
+    def detect(self) -> PackageManager | None:
+        return self._manager
 
 
 # ── ResolveDns ───────────────────────────────────────────────────────────────
@@ -142,3 +171,50 @@ def test_check_permission_pass_throughs() -> None:
     uc = CheckTraceroutePermission(fake)
     assert uc.is_available() is True
     assert uc.check_permission() == "x"
+
+
+# ── CheckDiagnosticsTools (1b) ────────────────────────────────────────────────
+
+
+def test_check_tools_none_checks_all_registered_tools() -> None:
+    # requested None -> ALL_TOOLS (Erstinstallations-Fall: alle pruefen).
+    detector = FakeToolDetector(present={"dig", "traceroute"})
+    pm = FakePackageManagerDetector("apt")
+    report = CheckDiagnosticsTools(detector, pm)(None)
+    assert [s.name for s in report.statuses] == list(ALL_TOOLS)
+    assert sorted(detector.calls) == sorted(ALL_TOOLS)
+    assert report.install_command is None  # alles da
+
+
+def test_check_tools_empty_also_checks_all() -> None:
+    # Leere Liste verhaelt sich wie None (Erstinstallation: alle).
+    detector = FakeToolDetector(present={"dig", "traceroute"})
+    report = CheckDiagnosticsTools(detector, FakePackageManagerDetector("apt"))([])
+    assert [s.name for s in report.statuses] == list(ALL_TOOLS)
+
+
+def test_check_tools_subset_checks_only_named() -> None:
+    # requested Teilmenge -> nur die genannten geprueft (Laufzeit-Fall).
+    detector = FakeToolDetector(present=set())
+    report = CheckDiagnosticsTools(detector, FakePackageManagerDetector("apt"))(["dig"])
+    assert detector.calls == ["dig"]
+    assert [s.name for s in report.statuses] == ["dig"]
+    # dig fehlt -> apt-Befehl (dnsutils).
+    assert report.install_command == "sudo apt install dnsutils"
+
+
+def test_check_tools_ignores_unknown_tool() -> None:
+    # Unbekanntes Tool wird defensiv ignoriert (nicht geprueft, nicht erfunden).
+    detector = FakeToolDetector(present={"dig"})
+    report = CheckDiagnosticsTools(detector, FakePackageManagerDetector("apt"))(["dig", "nmap"])
+    assert detector.calls == ["dig"]
+    assert [s.name for s in report.statuses] == ["dig"]
+
+
+def test_check_tools_manager_none_means_no_install_command() -> None:
+    # Tool fehlt, aber kein Manager erkannt -> install_command ehrlich None (kein Raten).
+    detector = FakeToolDetector(present=set())
+    report = CheckDiagnosticsTools(detector, FakePackageManagerDetector(None))(["traceroute"])
+    assert report.manager is None
+    assert report.install_command is None
+    assert report.statuses[0].available is False
