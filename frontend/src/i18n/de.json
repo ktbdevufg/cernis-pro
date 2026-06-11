@@ -14,6 +14,38 @@
   "placeholder": {
     "inProgress": "in Arbeit"
   },
+  "overview": {
+    "empty": {
+      "title": "Noch nichts beobachtet",
+      "text": "Es liegen noch keine Beobachtungen vor. Starte einen Scan, um das Netzwerk aufzunehmen.",
+      "startScan": "Ersten Scan starten"
+    },
+    "situation": {
+      "attention_one": "1 Beobachtung, die Beachtung verdient",
+      "attention_other": "{{count}} Beobachtungen, die Beachtung verdienen"
+    },
+    "findingsHeading": "Auffälliges zuerst",
+    "findings": {
+      "newDevice": {
+        "title": "Neues Gerät im Netzwerk",
+        "subtitle": "Ein bisher unbekanntes Gerät wurde im Netz gesehen."
+      },
+      "outboundConnection": {
+        "title": "Ungewöhnliche ausgehende Verbindung",
+        "subtitle": "Eine ausgehende Verbindung weicht vom gewohnten Muster ab."
+      }
+    },
+    "metrics": {
+      "appsWithTraffic": "Apps mit Verkehr",
+      "activeConnections": "Aktive Verbindungen",
+      "devicesOnNetwork": "Geräte im Netz"
+    },
+    "stateToggle": {
+      "label": "Anzeige (temporär)",
+      "empty": "leer",
+      "data": "Daten"
+    }
+  },
   "theme": {
     "light": "hell",
     "dark": "dunkel"

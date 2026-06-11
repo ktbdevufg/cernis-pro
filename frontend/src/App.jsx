@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 
 import AppHeader from "./components/AppHeader.jsx";
 import TabNav, { REITER } from "./components/TabNav.jsx";
+import OverviewView from "./views/OverviewView.jsx";
 import "./App.css";
 
 const THEME_KEY = "cernis_theme";
@@ -54,10 +55,14 @@ export default function App() {
       <TabNav active={activeTab} onChange={setActiveTab} />
 
       <main className="app__content">
-        <section className="app__placeholder">
-          <h1>{t(`nav.${activeTab}`)}</h1>
-          <p className="app__placeholder-note">{t("placeholder.inProgress")}</p>
-        </section>
+        {activeTab === "overview" ? (
+          <OverviewView />
+        ) : (
+          <section className="app__placeholder">
+            <h1>{t(`nav.${activeTab}`)}</h1>
+            <p className="app__placeholder-note">{t("placeholder.inProgress")}</p>
+          </section>
+        )}
       </main>
     </div>
   );
