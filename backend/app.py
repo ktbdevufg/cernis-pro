@@ -15,7 +15,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import structlog
 from fastapi import FastAPI, Request
@@ -85,6 +85,8 @@ from api.diagnostics import (
     provide_run_traceroute,
 )
 from api.diagnostics import router as diagnostics_router
+from api.export import provide_export_scan
+from api.export import router as export_router
 from api.interfaces import provide_list_interfaces
 from api.interfaces import router as interfaces_router
 from api.metrics import provide_export_metrics
@@ -184,6 +186,7 @@ from application.diagnostics import (
     RogueDhcpPermissionError,
     RunTraceroute,
 )
+from application.export import ExportScan, ScanNotFoundError
 from application.interfaces import ListInterfaces
 from application.metrics import ExportMetrics
 from application.monitoring import (
@@ -218,6 +221,7 @@ from application.security import (
 from application.settings import GetSettings, UpdateSecret, UpdateSetting
 from application.traffic import CheckTrafficPermission, ListAppTraffic, PollThroughput
 from domain.analysis import ObservedConnection, ObservedHost, ObservedProcess, Rule, Snapshot
+from domain.export import ExportableHost, ExportablePort, ExportableScan
 from domain.monitoring import MonitorEvent, MonitorEventType
 from domain.process import classify_kind
 from infrastructure.agent import (
@@ -254,6 +258,7 @@ from infrastructure.diagnostics_linux import (
     SocketBannerGrabber,
     SystemTracerouteRunner,
 )
+from infrastructure.export_pdf import ReportlabRenderer
 from infrastructure.interfaces_linux import InterfaceDiscoveryAdapter
 from infrastructure.logging import configure_logging
 from infrastructure.metrics import SqliteMetricsReader
@@ -1310,6 +1315,80 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # Composition Root, der api-Ring bleibt clean. Die Meldung ist die Rechte-Begruendung.
         logger.error("rogue_dhcp_permission_denied")
         return JSONResponse(status_code=403, content={"detail": exc.message})
+
+    # ── export-Domaene v2 verdrahten (Block 1: gespeicherter Scan -> CSV/JSON/PDF, ADR 0015) ──
+    # Der ExportScan-Use-Case kennt KEINE scanning-Domaene: er bekommt den Scan ueber ein
+    # schlankes scan_provider-Callable (scan_id -> ExportableScan | None), das HIER im
+    # Composition Root die scanning-Daten holt UND auf domain.export.Exportable* PROJIZIERT
+    # (genau das analysis-Muster mit seiner Observed*-Projektion -- Fremd-Domaenen-Kopplung
+    # gehoert in die Verdrahtung, NICHT in domain.export, independence-Contract). Reuse des
+    # bestehenden GetScanDetail + scan_history_repository() (lru_cache, im scanning-Block
+    # verdrahtet) -- KEINE zweite Instanz. Der Renderer ist der zustandslose ReportlabRenderer.
+    def _project_scan_to_exportable(record: Any) -> ExportableScan:
+        # record ist ein domain.scanning.ScanRecord; per Attribut-Zugriff auf die schlanken
+        # export-Typen projiziert (independence: domain.export kennt scanning NICHT). Die
+        # Listen werden so verlustarm uebernommen, wie JSON sie braucht: ports als
+        # ExportablePort (protocol fest "tcp" -- PortInfo traegt kein Protokoll-Feld, der
+        # socket-/nmap-Scan ist TCP, ADR 0015), mdns/ssdp als menschenlesbare String-Tupel
+        # (mDNS-Typ bzw. SSDP-server/st -- so viel, wie verlustarm noetig, ohne die volle
+        # scanning-Komplexitaet zu duplizieren).
+        hosts = tuple(
+            ExportableHost(
+                ip=host.ip,
+                mac=host.mac,
+                vendor=host.vendor,
+                hostname=host.hostname,
+                rtt_ms=host.rtt_ms,
+                os_guess=host.os_guess,
+                os_accuracy=host.os_accuracy,
+                category=host.category,
+                label=host.label,
+                tags=tuple(host.tags),
+                source=host.source,
+                ports=tuple(
+                    ExportablePort(port=p.port, protocol="tcp", service=p.service)
+                    for p in host.ports
+                ),
+                mdns_services=tuple(
+                    svc.type or svc.name for svc in host.mdns_services if (svc.type or svc.name)
+                ),
+                ssdp_services=tuple(
+                    svc.server or svc.st for svc in host.ssdp_services if (svc.server or svc.st)
+                ),
+            )
+            for host in record.hosts
+        )
+        return ExportableScan(
+            scan_id=record.scan_id,
+            cidr=record.cidr,
+            host_count=record.host_count,
+            scanned_at=record.scanned_at,
+            hosts=hosts,
+        )
+
+    def _scan_provider(scan_id: int) -> ExportableScan | None:
+        # GetScanDetail liefert den ScanRecord | None (None = Scan-ID gibt es nicht, ein
+        # gueltiger Zustand). Nur ein gefundener Scan wird projiziert; None reicht der
+        # Use-Case in seine ScanNotFoundError -> 404 (kein stiller leerer Export, ADR 0001).
+        record = GetScanDetail(scan_history_repository())(scan_id)
+        if record is None:
+            return None
+        return _project_scan_to_exportable(record)
+
+    def _export_scan(scan_id: int, fmt: Literal["csv", "json", "pdf"]) -> Any:
+        return ExportScan(_scan_provider, ReportlabRenderer())(scan_id, fmt)
+
+    app.include_router(export_router)
+    app.dependency_overrides[provide_export_scan] = lambda: _export_scan
+
+    @app.exception_handler(ScanNotFoundError)
+    async def _on_scan_not_found(_request: Request, exc: ScanNotFoundError) -> JSONResponse:
+        # Nicht existierende scan_id -> 404 (die Ressource gibt es nicht, kein leerer Export).
+        # Muster der diagnostics-Rechte-/Dienst-Naht: das Mapping sitzt am Composition Root,
+        # der api-Ring bleibt clean. Reiner application-Zustand (der scan_provider lieferte
+        # None) -- kein infra-Ausfall.
+        logger.info("export_scan_not_found", scan_id=exc.scan_id)
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
 
     # ── analysis-Domaene v2 verdrahten (AN.3 + A.2, reine Lese-/Rechen-Domaene) ───
     # Lazy-memoisiertes User-Regel-Repo (lru_cache, Muster scan_history_repository):

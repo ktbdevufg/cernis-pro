@@ -131,6 +131,15 @@ module = ["scapy.*"]
 follow_imports = "skip"
 ignore_missing_imports = true
 
+# reportlab (feste dep, Block-1 export-Adapter, ADR 0015) liefert KEINE Typ-Stubs / kein
+# py.typed-Marker -> mypy meldet sonst "import-untyped". Nur die fehlenden Stubs ignorieren
+# (wie apscheduler/psutil, NICHT follow_imports=skip -- Third-Party, kein Legacy-Code). Der
+# Adapter (``infrastructure.export_pdf``) kapselt reportlab komplett und arbeitet sonst nur
+# mit dem eigenen ``domain.export.PdfReportModel`` -- die reportlab-Seite bleibt lokal.
+[[tool.mypy.overrides]]
+module = ["reportlab.*"]
+ignore_missing_imports = true
+
 # ── pytest ────────────────────────────────────────────────────────────────
 # backend/ ist die Import-Wurzel (wie der Altbestand: `import modules.x`).
 [tool.pytest.ini_options]
@@ -226,6 +235,7 @@ modules = [
     "domain.process",
     "domain.analysis",
     "domain.diagnostics",
+    "domain.export",
 ]
 
 # Die neuen Ringe duerfen den Altcode (modules/) NIE importieren. Der Legacy-Bezug
