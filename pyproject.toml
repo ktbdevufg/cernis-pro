@@ -225,6 +225,7 @@ modules = [
     "domain.traffic",
     "domain.process",
     "domain.analysis",
+    "domain.diagnostics",
 ]
 
 # Die neuen Ringe duerfen den Altcode (modules/) NIE importieren. Der Legacy-Bezug

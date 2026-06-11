@@ -74,6 +74,12 @@ from api.devices import (
     provide_update_device_meta,
 )
 from api.devices import router as devices_router
+from api.diagnostics import (
+    provide_check_traceroute_permission,
+    provide_resolve_dns,
+    provide_run_traceroute,
+)
+from api.diagnostics import router as diagnostics_router
 from api.interfaces import provide_list_interfaces
 from api.interfaces import router as interfaces_router
 from api.metrics import provide_export_metrics
@@ -162,6 +168,11 @@ from application.devices import (
     RecordScannedHost,
     UpdateDeviceMeta,
 )
+from application.diagnostics import (
+    CheckTraceroutePermission,
+    ResolveDns,
+    RunTraceroute,
+)
 from application.interfaces import ListInterfaces
 from application.metrics import ExportMetrics
 from application.monitoring import (
@@ -219,6 +230,12 @@ from infrastructure.capture import (
 from infrastructure.clock import SystemClock
 from infrastructure.config import APP_NAME, APP_VERSION, AppConfig
 from infrastructure.device_repository import SqliteDeviceRepository
+from infrastructure.diagnostics_linux import (
+    DiagnosticsToolMissing,
+    DigDnsResolver,
+    LinuxTraceroutePermission,
+    SystemTracerouteRunner,
+)
 from infrastructure.interfaces_linux import InterfaceDiscoveryAdapter
 from infrastructure.logging import configure_logging
 from infrastructure.metrics import SqliteMetricsReader
@@ -1170,6 +1187,37 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.dependency_overrides[provide_check_process_permission] = lambda: CheckProcessPermission(
         ProcessPermissionAdapter()
     )
+
+    # ── diagnostics-Domaene v2 verdrahten (1a: DNS + traceroute, ADR 0014) ────────
+    # Zustandslose Adapter direkt instanziiert (Muster process/interfaces). Kein Poller,
+    # kein app.state -- reine Frage-Antwort-Domaene. Die Runner reichen die HTTP-Parameter
+    # an die duennen Use-Cases durch und geben das Domaenen-Objekt als Any zurueck (der
+    # api-Ring serialisiert, kennt keine domain-Typen).
+    async def _resolve_dns(query: str, types: list[str]) -> Any:
+        # ``types`` kommt als list[str] vom api-Ring; die Werte sind die DnsRecordType-
+        # Literale (FastAPI validiert sie nicht gegen das Literal -- der Adapter reicht
+        # unbekannte Typen schlicht an dig weiter, eine leere Antwort ist kein Fehler).
+        return await ResolveDns(DigDnsResolver())(query, types)  # type: ignore[arg-type]
+
+    async def _run_traceroute(target: str, privileged: bool) -> Any:
+        return await RunTraceroute(SystemTracerouteRunner())(target, privileged)
+
+    app.include_router(diagnostics_router)
+    app.dependency_overrides[provide_resolve_dns] = lambda: _resolve_dns
+    app.dependency_overrides[provide_run_traceroute] = lambda: _run_traceroute
+    app.dependency_overrides[provide_check_traceroute_permission] = lambda: (
+        CheckTraceroutePermission(LinuxTraceroutePermission())
+    )
+
+    @app.exception_handler(DiagnosticsToolMissing)
+    async def _on_diagnostics_tool_missing(
+        _request: Request, exc: DiagnosticsToolMissing
+    ) -> JSONResponse:
+        # Fehlendes System-Binary (dig/traceroute) ist ein Fehler, kein stiller Fallback
+        # (ADR 0001). Vorbild SecretStoreUnavailableError: infra-Exception -> 503. Die
+        # neutrale Meldung benennt das fehlende Programm; der Install-Hinweis folgt in 1b.
+        logger.error("diagnostics_tool_missing", tool=exc.tool)
+        return JSONResponse(status_code=503, content={"detail": exc.message})
 
     # ── analysis-Domaene v2 verdrahten (AN.3 + A.2, reine Lese-/Rechen-Domaene) ───
     # Lazy-memoisiertes User-Regel-Repo (lru_cache, Muster scan_history_repository):
