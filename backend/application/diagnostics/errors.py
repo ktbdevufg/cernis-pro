@@ -35,6 +35,27 @@ class DiagnosticsToolMissingError(DiagnosticsApplicationError):
     """
 
 
+class RogueDhcpPermissionError(DiagnosticsApplicationError):
+    """Rogue-DHCP wurde ohne Root angefragt -- ehrliche Sperre, kein Fallback (Block 3).
+
+    Anders als die Tool-fehlt-Naht (eine infra-EIGENE Exception, weil der Adapter den
+    Ausfall erkennt) ist DIES ein APPLICATION-Zustand: der Use-Case wertet den Rechte-Port
+    aus und sperrt VOR dem Discovery, wenn nmap fehlt ODER kein Root vorliegt. Rogue-DHCP
+    braucht rohe DHCP-Pakete -> Root, es gibt KEINE rootless Alternative (anders als
+    traceroute, das eine ungenauere rootless-Methode hat). Darum eine ehrliche Sperre statt
+    eines stillen Fallbacks (S3); keine Selbst-Eskalation (CLAUDE.md).
+
+    ``message`` traegt die nutzerseitige Begruendung (vom Rechte-Port). Der api-Rand bildet
+    diese Exception auf **403** ab (Muster der process/traffic-Permission-403, ueber einen
+    globalen ``exception_handler`` im Composition Root) -- die Discovery ist nicht erlaubt,
+    nicht der Dienst kaputt. Der Probe wird in diesem Fall NICHT gerufen.
+    """
+
+    def __init__(self, message: str) -> None:
+        self.message = message
+        super().__init__(message)
+
+
 class ExternalCheckError(DiagnosticsApplicationError):
     """Der externe cpnetcheck-Dienst war nicht erreichbar/lieferte einen Fehler (2b).
 

@@ -27,6 +27,15 @@ traffic -- System-Tools statt Python-Libs, ADR 0014):
   + ``POST /v1/portcheck`` mit Bearer-Token. HTTPS-Cert-PFLICHT (KEIN ``verify=False``).
   SICHERHEITSNAHT: jeder Dienst-/Netz-/Parsefehler wird zu ``ExternalCheckFailed`` mit
   NEUTRALER Meldung -- der Token wird NIE geloggt/zurueckgegeben, interne Details leaken NIE.
+* ``NmapDhcpProbe`` (``DhcpProbe``, 3) -- sendet EIN DHCP DISCOVER ueber
+  ``nmap --script broadcast-dhcp-discover`` (blockierend ueber ``run_in_executor`` gekapselt,
+  Muster ``SystemTracerouteRunner``) und parst die Offers robust zu ``(server_ip,
+  server_mac|None)``. KEINE Klassifikation (das ist Domaene). nmap fehlt -> infra-eigene
+  ``DiagnosticsToolMissing`` (wie DNS/traceroute). Kein Offer -> ``[]``.
+* ``LinuxDhcpPermission`` (``DhcpPermissionPort``, 3) -- lokale, synchrone Rechte-Pruefung:
+  ``is_available`` = ``nmap`` im PATH; ``check_permission`` = ``None`` wenn ``geteuid()==0``,
+  sonst die Sperr-Begruendung "als Root starten". Anders als traceroute KEINE rootless
+  Alternative (rohe DHCP-Pakete brauchen Root) und KEIN Install-Befehl (Block 1b).
 
 TLS-PORTS in 2a (ADR 0014 Block 2a): {443, 8443} sind in ``domain.probe_for_port`` bewusst
 NICHT in der http_head-Menge -- ein roher Connect dorthin spraeche TLS, kein Klartext-HTTP.
@@ -136,6 +145,10 @@ _BANNER_READ_MAX_BYTES = 1024
 # Dienst-Gesamtdeckel (10 Ports a wenige Sekunden + Reserve).
 _CPNETCHECK_CONNECT_TIMEOUT_SECS = 5.0
 _CPNETCHECK_READ_TIMEOUT_SECS = 35.0
+# Rogue-DHCP (3): nmap broadcast-dhcp-discover wartet auf DHCP-Offers im lokalen Netz --
+# das kann ein paar Sekunden dauern (DHCP-Server antworten nicht sofort). Grosszuegiger
+# als dig, knapper als traceroute (ein Broadcast + Sammeln der Antworten, keine Hop-Kette).
+_NMAP_DHCP_TIMEOUT_SECS = 30.0
 
 
 # ── DNS-Parser (rein, testbar) ────────────────────────────────────────────────
@@ -684,3 +697,122 @@ class HttpxReachabilityProvider:
         except ValueError:
             # Kaputtes/kein JSON -- neutral (der Rohbody leakt nicht).
             raise ExternalCheckFailed(_CPNETCHECK_GENERIC_MSG) from None
+
+
+# ── Block 3: Rogue-DHCP-Discovery (nmap broadcast-dhcp-discover) ───────────────
+
+# nmap gibt das Skript-Ergebnis als eingerueckte ``| key: value``-Bloecke aus. Der
+# DHCP-Server eines Offers steht in der Zeile ``Server Identifier: <ip>`` (Option 54 --
+# die kanonische Quelle der Server-IP, robuster als die Quell-IP des Pakets). Pro Offer
+# kann zusaetzlich eine MAC auftauchen (``Server MAC: <mac>`` o. ae., abhaengig von
+# nmap-Version/-Skript) -- liegt keine vor, bleibt sie ehrlich None.
+_DHCP_SERVER_ID_RE = re.compile(r"Server Identifier:\s*([0-9a-fA-F:.]+)")
+# Eine MAC in der nmap-Ausgabe (sechs Hex-Paare, ``:``- oder ``-``-getrennt). nmap weist
+# sie bei broadcast-dhcp-discover nicht zwingend aus -- fehlt sie, ist die MAC ehrlich None.
+_DHCP_SERVER_MAC_RE = re.compile(r"Server MAC:\s*([0-9a-fA-F]{2}(?:[:-][0-9a-fA-F]{2}){5})")
+# Trenner zwischen Offers: nmap leitet jeden Offer mit ``Response N of M:`` ein. Daran wird
+# die Ausgabe in Bloecke zerlegt, damit eine MAC dem richtigen Server zugeordnet bleibt.
+_DHCP_RESPONSE_RE = re.compile(r"Response\s+\d+\s+of\s+\d+", re.IGNORECASE)
+
+
+def _parse_nmap_dhcp(output: str) -> list[tuple[str, str | None]]:
+    """Parst die ``nmap broadcast-dhcp-discover``-Ausgabe -> ``(ip, mac|None)``-Liste -- rein.
+
+    Zerlegt die Ausgabe an den ``Response N of M``-Marken in Offer-Bloecke (faellt auf "ein
+    einziger Block" zurueck, wenn keine Marke da ist -- aeltere nmap-Ausgaben). Pro Block
+    die erste ``Server Identifier: <ip>``-Zeile als Server-IP; eine ``Server MAC: <mac>``-
+    Zeile, falls vorhanden, als MAC (sonst ehrlich ``None`` -- KEIN erfundener Wert). Bloecke
+    ohne Server Identifier werden uebersprungen (kein Offer). Reihenfolge bleibt erhalten;
+    die Domaene (``classify_dhcp_servers``) dedupliziert+sortiert. Rein: kein I/O.
+    """
+    # An den Response-Marken splitten; das erste Segment vor der ersten Marke (Kopf) traegt
+    # keinen Server Identifier und faellt durch die Pruefung unten heraus.
+    segments = _DHCP_RESPONSE_RE.split(output) if _DHCP_RESPONSE_RE.search(output) else [output]
+    servers: list[tuple[str, str | None]] = []
+    for segment in segments:
+        id_match = _DHCP_SERVER_ID_RE.search(segment)
+        if id_match is None:
+            continue  # kein Server Identifier in diesem Block -- kein Offer
+        ip = id_match.group(1)
+        mac_match = _DHCP_SERVER_MAC_RE.search(segment)
+        mac = mac_match.group(1) if mac_match is not None else None
+        servers.append((ip, mac))
+    return servers
+
+
+def _run_nmap_dhcp() -> str:
+    """Ruft ``nmap --script broadcast-dhcp-discover`` -> rohe stdout -- gekapselt, gemockt.
+
+    ``broadcast-dhcp-discover`` sendet EIN DHCP DISCOVER ins lokale Netz und sammelt die
+    Offers. ``-e`` wird NICHT gesetzt -- nmap waehlt das Interface selbst (robust gegen
+    fehlende Interface-Kenntnis hier; das Skript broadcastet ohnehin). Ein nicht-Null-
+    Returncode oder Timeout wird als die bis dahin gesammelte stdout behandelt (kein Offer
+    -> leere Ausgabe -> ``[]``). Ein fehlendes Binary faengt der Aufrufer ueber
+    ``shutil.which`` ab. ROOT-PFLICHTIG -- der Use-Case sperrt VORHER (kein blindes Laufen).
+    """
+    try:
+        completed = subprocess.run(
+            ["nmap", "--script", "broadcast-dhcp-discover"],
+            capture_output=True,
+            text=True,
+            timeout=_NMAP_DHCP_TIMEOUT_SECS,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        partial = exc.stdout
+        if isinstance(partial, bytes):
+            return partial.decode(errors="replace")
+        return partial or ""
+    return completed.stdout
+
+
+class NmapDhcpProbe:
+    """Erfuellt das ``DhcpProbe``-Protocol (3) ueber ``nmap broadcast-dhcp-discover``."""
+
+    async def discover(self) -> list[tuple[str, str | None]]:
+        """Sendet EIN DHCP DISCOVER ueber nmap -> rohe ``(ip, mac|None)``-Offers.
+
+        Blockierendes ``nmap``-Subprocess-I/O -> ``run_in_executor`` (Loop bleibt frei,
+        Muster ``SystemTracerouteRunner``). Fehlt ``nmap`` im PATH -> ``DiagnosticsToolMissing``
+        (kein stiller Fallback). Kein Offer -> ``[]``. KEINE Klassifikation hier (Domaene).
+        """
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._discover_sync)
+
+    def _discover_sync(self) -> list[tuple[str, str | None]]:
+        """Synchroner Discovery-Kern (laeuft im Executor-Thread).
+
+        Fehlt ``nmap`` -> ``DiagnosticsToolMissing``. Sonst ``_run_nmap_dhcp`` aufrufen und
+        die Ausgabe ueber ``_parse_nmap_dhcp`` zu ``(ip, mac|None)``-Tupeln parsen.
+        """
+        if shutil.which("nmap") is None:
+            raise DiagnosticsToolMissing("nmap")
+        return _parse_nmap_dhcp(_run_nmap_dhcp())
+
+
+class LinuxDhcpPermission:
+    """Erfuellt das ``DhcpPermissionPort``-Protocol (3) (lokale Rechte-Pruefung, Linux)."""
+
+    def is_available(self) -> bool:
+        """``True``, wenn das ``nmap``-Binary im PATH liegt, sonst ``False``."""
+        return shutil.which("nmap") is not None
+
+    def check_permission(self) -> str | None:
+        """``None`` wenn als Root laufend (``geteuid() == 0``), sonst die Sperr-Begruendung.
+
+        Rogue-DHCP sendet ROHE DHCP-Pakete -- das braucht Root, und anders als traceroute
+        gibt es KEINE rootless Alternative (ehrliche Sperre, kein stiller Fallback, S3).
+        Als Root -> ``None`` (Discovery moeglich). Sonst der Hinweis, CERNIS PRO als Root zu
+        starten. KEINE Selbst-Eskalation; KEIN distro-spezifischer Install-Befehl (Block 1b).
+
+        SCOPE (CLAUDE.md "Nur Linux x64"): ``os.geteuid`` ist Unix; auf Nicht-Unix gibt es
+        kein euid-Konzept -- dort ist Root nicht feststellbar, daher die Sperre (defensiv,
+        ``is_available`` riegelt ohnehin ueber das Binary ab).
+        """
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
+            return None
+        return (
+            "Rogue-DHCP-Erkennung benoetigt Root (rohe DHCP-Pakete) und hat keine "
+            "rootless Alternative. CERNIS PRO muss als Root gestartet werden, z.B. "
+            "'sudo cernis-backend'."
+        )

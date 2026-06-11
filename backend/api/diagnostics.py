@@ -36,6 +36,17 @@ Attribut-Zugriff zu JSON serialisiert (Typ ``Any``, Muster ``api/process``).
   ``configured=false`` = nicht konfiguriert (Modell D). Der Token wird NIE im Body
   ausgegeben.
 
+* ``GET /api/diagnostics/dhcp`` (3) -- Rogue-DHCP-Erkennung: sendet EIN DHCP DISCOVER und
+  sammelt die antwortenden DHCP-Server, klassifiziert gegen die erwartete Menge (Setting
+  ``expected_dhcp_servers`` ODER Gateway-Fallback). Liefert ``{servers:[{ip, mac, is_
+  expected}], expected:[...], has_unexpected}``. ``mac`` ist ehrlich ``null``, wenn nmap sie
+  nicht ausweist. ZEIGEN+EINORDNEN ohne Urteil (``is_expected``/``has_unexpected`` sind
+  Fakten). ROOT-PFLICHTIG: ohne Root wirft der Use-Case ``RogueDhcpPermissionError`` -> 403
+  (globaler Handler, Muster der Tool-fehlt-/Dienst-Naht); der Probe laeuft NIE blind.
+* ``GET /api/diagnostics/dhcp/permission`` (3) -- die ``{ok, error}``-Rechte-Naht
+  (``CheckDhcpPermission``): ``ok=true`` = Root vorhanden, Discovery moeglich; ``ok=false`` +
+  Begruendung = gesperrt (nmap fehlt ODER kein Root, KEINE rootless Alternative).
+
 TOOL-FEHLT -> HTTP: Fehlt das System-Binary (``dig``/``traceroute``), wirft der Adapter
 ``infrastructure.diagnostics_linux.DiagnosticsToolMissing``. Diesen infrastruktur-nahen
 Ausfall faengt ein GLOBALER ``exception_handler`` im Composition Root (``app.py``) und
@@ -51,6 +62,16 @@ Gateway -- externer Dienst) abgebildet (siehe ADR 0014 Block 2b /
 ``application.diagnostics.errors.ExternalCheckError``). Der api-Ring importiert die
 Exception bewusst NICHT (api -> nur application); das Mapping bleibt am Composition Root.
 NIE Token/interne Details im Fehler-Body.
+
+ROGUE-DHCP-RECHTE -> HTTP (3): Wird ``GET /api/diagnostics/dhcp`` ohne Root angefragt
+(oder fehlt ``nmap``), wirft der Use-Case ``application.diagnostics.RogueDhcpPermissionError``
+-- der Probe laeuft NIE blind gegen fehlendes Root. Diesen application-Zustand bildet ein
+GLOBALER ``exception_handler`` im Composition Root (``app.py``) auf **403** ab (die Discovery
+ist nicht erlaubt, nicht der Dienst kaputt) -- konsistent zur Tool-fehlt-/Dienst-Naht (die
+das Mapping ebenfalls am Composition Root halten). Anders als bei DNS/traceroute importiert
+der api-Ring DIESE application-Exception bewusst NICHT zum Werfen; das Mapping sitzt am
+Composition Root. ``CheckDhcpPermission`` (``GET /api/diagnostics/dhcp/permission``) liefert
+den Rechte-Status separat als ``{ok, error}`` (kein 403, sondern ein Auskunfts-Endpunkt).
 """
 
 from collections.abc import Awaitable, Callable
@@ -59,7 +80,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Query
 from pydantic import Field
 
-from application.diagnostics import CheckTraceroutePermission
+from application.diagnostics import CheckDhcpPermission, CheckTraceroutePermission
 
 router = APIRouter(prefix="/api/diagnostics", tags=["diagnostics"])
 
@@ -87,6 +108,10 @@ type GrabBannerRunner = Callable[[str, int], Awaitable[Any]]
 # Liefert das rohe ExternalCheckResult (``Any`` -- der api-Ring kennt keine domain-Typen).
 # Async: HTTP-I/O im Adapter ueber httpx gekapselt.
 type CheckExternalRunner = Callable[[list[int] | None], Awaitable[Any]]
+# 3: sendet EIN DHCP DISCOVER, klassifiziert und liefert das rohe RogueDhcpResult (``Any`` --
+# der api-Ring kennt keine domain-Typen). Async: blockierendes nmap im Adapter ueber
+# run_in_executor gekapselt. KEINE Parameter -- die erwartete Menge zieht der Use-Case selbst.
+type DetectRogueDhcpRunner = Callable[[], Awaitable[Any]]
 
 
 # Dependency-Marker: im Composition Root (app.py) per dependency_overrides mit den
@@ -113,6 +138,14 @@ def provide_grab_banner() -> GrabBannerRunner:
 
 def provide_check_external() -> CheckExternalRunner:
     raise NotImplementedError("CheckExternalRunner wird in app.py verdrahtet")
+
+
+def provide_detect_rogue_dhcp() -> DetectRogueDhcpRunner:
+    raise NotImplementedError("DetectRogueDhcpRunner wird in app.py verdrahtet")
+
+
+def provide_check_dhcp_permission() -> CheckDhcpPermission:
+    raise NotImplementedError("CheckDhcpPermission wird in app.py verdrahtet")
 
 
 def _record_to_dict(r: Any) -> dict[str, Any]:
@@ -193,6 +226,21 @@ def _external_ports_to_dict(result: Any) -> dict[str, Any]:
         "family": result.family,
         "results": [_external_port_to_dict(p) for p in result.ports],
         "error": result.error,
+    }
+
+
+def _dhcp_server_to_dict(s: Any) -> dict[str, Any]:
+    # s ist ein domain.DhcpServer; ``mac`` ist ehrlich str|None (kein erfundener Wert).
+    return {"ip": s.ip, "mac": s.mac, "is_expected": s.is_expected}
+
+
+def _rogue_dhcp_to_dict(result: Any) -> dict[str, Any]:
+    # result ist ein domain.RogueDhcpResult; ``expected`` die zugrunde gelegte Menge (leer =
+    # keine Erwartung konfiguriert), ``has_unexpected`` ein Fakt (kein Urteil).
+    return {
+        "servers": [_dhcp_server_to_dict(s) for s in result.servers],
+        "expected": list(result.expected),
+        "has_unexpected": result.has_unexpected,
     }
 
 
@@ -313,3 +361,34 @@ async def external_ports(
     """
     result = await check(ports)
     return _external_ports_to_dict(result)
+
+
+@router.get("/dhcp")
+async def detect_rogue_dhcp(
+    detect: Annotated[DetectRogueDhcpRunner, Depends(provide_detect_rogue_dhcp)],
+) -> dict[str, Any]:
+    """Rogue-DHCP-Erkennung (3): EIN DHCP DISCOVER, antwortende Server klassifizieren.
+
+    Keine Parameter -- die erwartete Menge zieht der Use-Case selbst (Setting
+    ``expected_dhcp_servers`` ODER Gateway-Fallback). Der Runner liefert das
+    ``RogueDhcpResult``; der Router serialisiert es (``servers[]`` {ip, mac str|null,
+    is_expected}, ``expected[]``, ``has_unexpected``). ``mac`` ist ehrlich ``null``, wenn
+    nmap sie nicht ausweist. ZEIGEN+EINORDNEN ohne Urteil. ROOT-PFLICHTIG: ohne Root (oder
+    fehlt nmap) -> 403 (globaler Handler ``RogueDhcpPermissionError``); der Probe laeuft NIE
+    blind gegen fehlendes Root.
+    """
+    result = await detect()
+    return _rogue_dhcp_to_dict(result)
+
+
+@router.get("/dhcp/permission")
+def get_dhcp_permission(
+    check_permission_uc: Annotated[CheckDhcpPermission, Depends(provide_check_dhcp_permission)],
+) -> dict[str, Any]:
+    """Rechte-Status fuer die Rogue-DHCP-Erkennung (3).
+
+    ``{ok, error}``-Form: ``ok=true`` = Root vorhanden, Discovery moeglich; ``ok=false`` +
+    Begruendung = gesperrt (``nmap`` fehlt ODER kein Root -- Rogue-DHCP braucht Root, KEINE
+    rootless Alternative). Auskunfts-Endpunkt (kein 403 -- das ist die Daten-Route ``/dhcp``).
+    """
+    return check_permission_uc()

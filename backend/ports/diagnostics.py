@@ -45,6 +45,24 @@ Block 2b (externer IP/Port-Check via cpnetcheck) -- ein async DATEN-Vertrag (HTT
   application-/infra-eigene Exception (``ExternalCheckError``), KEIN Domaenentyp -- der
   Adapter wirft mit NEUTRALER Meldung (NIE den Token, NIE interne Details).
 
+Block 3 (Rogue-DHCP-Erkennung) -- ein async DATEN-Vertrag + ein synchroner Rechte-Vertrag
+(Muster ``TracerouteRunner`` + ``TraceroutePermissionPort``):
+
+* ``DhcpProbe`` -- die Rogue-DHCP-DATEN-Quelle. ``discover`` sendet EIN DHCP DISCOVER ins
+  lokale Netz und liefert die ROHE Liste der antwortenden Server als ``(server_ip,
+  server_mac|None)``-Tupel -- KEINE Klassifikation hier (das ist Domaene, ``classify_dhcp_
+  servers``); der Probe liefert nur die rohen Funde. ``async`` (blockierendes nmap im
+  Adapter ueber ``run_in_executor``, Muster ``TracerouteRunner``). Anders als traceroute
+  gibt es hier KEINEN rootless-Fallback -- rohe DHCP-Pakete brauchen Root; der Rechte-Port
+  riegelt VOR dem Aufruf ab (kein blindes Laufen gegen fehlendes Root).
+* ``DhcpPermissionPort`` -- die RECHTE-Abfrage fuer Rogue-DHCP, eigener Port (Muster
+  ``TraceroutePermissionPort``). Synchron: schnelle, lokale Pruefungen ohne Netz-/Loop-I/O.
+  Anders als traceroute (das eine ungenauere rootless-Methode hat) ist Rogue-DHCP
+  ROOT-PFLICHTIG ohne Alternative: ``check_permission`` ``None`` = Root vorhanden (Discovery
+  moeglich), sonst die Begruendung "muss als Root gestartet werden" -- eine EHRLICHE SPERRE,
+  kein stiller Fallback (S3) und keine Selbst-Eskalation (CLAUDE.md). KEIN distro-
+  spezifischer Install-Befehl hier (das deckt Block 1b/``TOOL_PACKAGES`` ab).
+
 Bewusste Entscheidung: KEIN ``@runtime_checkable`` (Muster wie settings/devices/
 scanning/capture/interfaces/traffic/process). Die Vertragspruefung laeuft statisch ueber
 mypy und ueber die Verdrahtung im Composition Root (``app.py``), nicht zur Laufzeit per
@@ -211,5 +229,58 @@ class ExternalReachabilityProvider(Protocol):
         dedup, ``domain.validate_requested_ports``) -- der Dienst setzt seine Whitelist
         zusaetzlich durch. Ein Dienst-/Netzfehler ist eine ``ExternalCheckError`` (neutrale
         Meldung), KEIN leeres/erfundenes Ergebnis.
+        """
+        ...
+
+
+class DhcpProbe(Protocol):
+    """Daten-Quelle der diagnostics-Domaene (3): Rogue-DHCP-Discovery (rohe Offers)."""
+
+    async def discover(self) -> list[tuple[str, str | None]]:
+        """Sendet EIN DHCP DISCOVER und liefert die rohen Offers -> ``(ip, mac|None)``-Liste.
+
+        Liefert je antwortendem DHCP-Server ein ``(server_ip, server_mac|None)``-Tupel
+        (``mac`` ehrlich ``None``, wenn nmap sie nicht ausweist -- KEIN erfundener Wert).
+        Kein antwortender Server -> ``[]`` (vertraglicher Leer-Zustand, KEIN Fehler). KEINE
+        Klassifikation hier (erwartet vs. unerwartet) -- das ist Domaene
+        (``classify_dhcp_servers``); der Probe liefert nur die rohen Funde.
+
+        Blockierendes System-Tooling (``nmap --script broadcast-dhcp-discover``) im Adapter;
+        ueber ``run_in_executor`` gekapselt, die Methode bleibt ``async`` (Muster
+        ``TracerouteRunner``). ROOT-PFLICHTIG (rohe DHCP-Pakete): der Aufrufer (Use-Case)
+        prueft VORHER ueber ``DhcpPermissionPort`` -- der Probe laeuft NIE blind gegen
+        fehlendes Root. Ein echter Fehler (fehlendes ``nmap``-Binary) ist eine Exception,
+        kein leeres Ergebnis.
+        """
+        ...
+
+
+class DhcpPermissionPort(Protocol):
+    """Rechte-Abfrage fuer Rogue-DHCP (eigener Port; synchron wie traceroute/process).
+
+    Anders als ``TraceroutePermissionPort`` (das eine ungenauere rootless-Methode kennt)
+    ist Rogue-DHCP ROOT-PFLICHTIG OHNE Alternative -- rohe DHCP-Pakete brauchen Root. Darum
+    ist ``check_permission`` hier eine EHRLICHE SPERRE (kein Fallback-Hinweis), kein stiller
+    Rueckfall (S3) und keine Selbst-Eskalation (CLAUDE.md).
+    """
+
+    def is_available(self) -> bool:
+        """``True``, wenn ``nmap`` grundsaetzlich nutzbar ist (Binary im PATH), sonst ``False``.
+
+        Reiner Verfuegbarkeits-Check (unabhaengig von Berechtigungen -- die prueft
+        ``check_permission``). Schnelle lokale Pruefung, daher synchron (Muster
+        ``TraceroutePermissionPort.is_available``).
+        """
+        ...
+
+    def check_permission(self) -> str | None:
+        """``None`` = Root vorhanden (Discovery moeglich), sonst die Sperr-Begruendung.
+
+        ``None`` heisst "Root vorhanden" -- das DHCP DISCOVER (rohe Pakete) ist moeglich.
+        Ein nicht-leerer String ist die Begruendung: Rogue-DHCP braucht Root, es gibt KEINE
+        rootless Alternative -> CERNIS PRO muss als Root gestartet werden. EHRLICHE SPERRE
+        (kein stiller Fallback, S3); KEINE Selbst-Eskalation. KEIN distro-spezifischer
+        Install-Befehl hier (das deckt Block 1b/``TOOL_PACKAGES`` ab). Schnelle lokale
+        Pruefung, daher synchron.
         """
         ...

@@ -14,12 +14,15 @@ import pytest
 
 from application.diagnostics import (
     DEFAULT_CPNETCHECK_URL,
+    CheckDhcpPermission,
     CheckDiagnosticsTools,
     CheckExternalReachability,
     CheckTraceroutePermission,
+    DetectRogueDhcp,
     ExternalCheckError,
     GrabBanner,
     ResolveDns,
+    RogueDhcpPermissionError,
     RunTraceroute,
 )
 from domain.diagnostics import (
@@ -34,6 +37,7 @@ from domain.diagnostics import (
     TracerouteHop,
     TracerouteResult,
 )
+from domain.interfaces import NetworkInterface
 from domain.settings import Setting, SettingValue
 
 # ── In-Memory-Fakes der Ports ────────────────────────────────────────────────
@@ -190,6 +194,46 @@ class FakeSecretStore:
         return key in self._data
 
 
+class FakeDhcpProbe:
+    """In-Memory-Implementierung des ``DhcpProbe``-Protocols (3).
+
+    ``offers`` sind die rohen ``(ip, mac|None)``-Funde; ``calls`` zaehlt, OB der Probe
+    ueberhaupt gerufen wurde (zentral fuer die Root-Sperre: bei fehlendem Root NICHT gerufen).
+    """
+
+    def __init__(self, offers: list[tuple[str, str | None]] | None = None) -> None:
+        self._offers = offers or []
+        self.calls = 0
+
+    async def discover(self) -> list[tuple[str, str | None]]:
+        self.calls += 1
+        return self._offers
+
+
+class FakeDhcpPermission:
+    """In-Memory-Implementierung des ``DhcpPermissionPort``-Protocols (3)."""
+
+    def __init__(self, available: bool = True, permission_error: str | None = None) -> None:
+        self._available = available
+        self._permission_error = permission_error
+
+    def is_available(self) -> bool:
+        return self._available
+
+    def check_permission(self) -> str | None:
+        return self._permission_error
+
+
+class FakeInterfaceDiscovery:
+    """In-Memory-Implementierung des ``InterfaceDiscoveryPort``-Protocols (Gateway-Quelle)."""
+
+    def __init__(self, interfaces: list[NetworkInterface] | None = None) -> None:
+        self._interfaces = interfaces or []
+
+    async def discover(self) -> list[NetworkInterface]:
+        return list(self._interfaces)
+
+
 # ── ResolveDns ───────────────────────────────────────────────────────────────
 
 
@@ -298,8 +342,9 @@ def test_check_permission_pass_throughs() -> None:
 
 
 def test_check_tools_none_checks_all_registered_tools() -> None:
-    # requested None -> ALL_TOOLS (Erstinstallations-Fall: alle pruefen).
-    detector = FakeToolDetector(present={"dig", "traceroute"})
+    # requested None -> ALL_TOOLS (Erstinstallations-Fall: alle pruefen). Block 3 ergaenzt
+    # ``nmap`` -> alle drei muessen "present" sein, damit install_command None bleibt.
+    detector = FakeToolDetector(present={"dig", "nmap", "traceroute"})
     pm = FakePackageManagerDetector("apt")
     report = CheckDiagnosticsTools(detector, pm)(None)
     assert [s.name for s in report.statuses] == list(ALL_TOOLS)
@@ -309,7 +354,7 @@ def test_check_tools_none_checks_all_registered_tools() -> None:
 
 def test_check_tools_empty_also_checks_all() -> None:
     # Leere Liste verhaelt sich wie None (Erstinstallation: alle).
-    detector = FakeToolDetector(present={"dig", "traceroute"})
+    detector = FakeToolDetector(present={"dig", "nmap", "traceroute"})
     report = CheckDiagnosticsTools(detector, FakePackageManagerDetector("apt"))([])
     assert [s.name for s in report.statuses] == list(ALL_TOOLS)
 
@@ -325,11 +370,23 @@ def test_check_tools_subset_checks_only_named() -> None:
 
 
 def test_check_tools_ignores_unknown_tool() -> None:
-    # Unbekanntes Tool wird defensiv ignoriert (nicht geprueft, nicht erfunden).
+    # Unbekanntes Tool wird defensiv ignoriert (nicht geprueft, nicht erfunden). ``nmap`` ist
+    # seit Block 3 registriert -- als Beispiel fuer "unbekannt" dient hier ``frobnicate``.
     detector = FakeToolDetector(present={"dig"})
-    report = CheckDiagnosticsTools(detector, FakePackageManagerDetector("apt"))(["dig", "nmap"])
+    report = CheckDiagnosticsTools(detector, FakePackageManagerDetector("apt"))(
+        ["dig", "frobnicate"]
+    )
     assert detector.calls == ["dig"]
     assert [s.name for s in report.statuses] == ["dig"]
+
+
+def test_check_tools_nmap_is_now_known_and_checked() -> None:
+    # Block 3: ``nmap`` ist registriert -> es wird geprueft; fehlt es, kommt der apt-Befehl.
+    detector = FakeToolDetector(present=set())
+    report = CheckDiagnosticsTools(detector, FakePackageManagerDetector("apt"))(["nmap"])
+    assert detector.calls == ["nmap"]
+    assert [s.name for s in report.statuses] == ["nmap"]
+    assert report.install_command == "sudo apt install nmap"
 
 
 def test_check_tools_manager_none_means_no_install_command() -> None:
@@ -470,3 +527,139 @@ def test_external_empty_port_list_is_ip_only() -> None:
     assert result.configured is True
     assert provider.ip_calls == [("https://dienst.example", "tok")]
     assert provider.port_calls == []
+
+
+# ── CheckDhcpPermission (3, {ok, error}-Naht) ─────────────────────────────────
+
+
+def test_dhcp_permission_root_available() -> None:
+    # check_permission None -> Root vorhanden, Discovery moeglich -> ok=True.
+    fake = FakeDhcpPermission(available=True, permission_error=None)
+    assert CheckDhcpPermission(fake)() == {"ok": True, "error": ""}
+
+
+def test_dhcp_permission_no_root_is_blocked() -> None:
+    # check_permission Text -> gesperrt (kein Root), ok=False + Begruendung.
+    msg = "Rogue-DHCP-Erkennung benoetigt Root."
+    fake = FakeDhcpPermission(available=True, permission_error=msg)
+    assert CheckDhcpPermission(fake)() == {"ok": False, "error": msg}
+
+
+def test_dhcp_permission_nmap_missing() -> None:
+    # nmap fehlt -> nicht verfuegbar, ok=False + nicht-leerer Grund.
+    result = CheckDhcpPermission(FakeDhcpPermission(available=False))()
+    assert result["ok"] is False
+    assert result["error"]
+
+
+# ── DetectRogueDhcp (3) ───────────────────────────────────────────────────────
+
+
+def _iface(name: str, gateway: str | None, ipv4: str | None = "192.168.1.50") -> NetworkInterface:
+    # Ein roher NetworkInterface, wie ihn der Discovery-Port liefert (vor der Klassifikation).
+    return NetworkInterface(name=name, ipv4=ipv4, gateway=gateway, is_up=True)
+
+
+def _detect_uc(
+    probe: FakeDhcpProbe,
+    permission: FakeDhcpPermission | None = None,
+    settings: dict[str, SettingValue] | None = None,
+    interfaces: list[NetworkInterface] | None = None,
+) -> DetectRogueDhcp:
+    return DetectRogueDhcp(
+        probe,
+        permission or FakeDhcpPermission(available=True, permission_error=None),
+        FakeSettingsRepository(settings),
+        FakeInterfaceDiscovery(interfaces),
+    )
+
+
+def test_detect_uses_user_list_when_set() -> None:
+    # Nutzerliste gesetzt -> sie gilt als Erwartung; das Gateway wird IGNORIERT.
+    probe = FakeDhcpProbe(offers=[("192.168.1.1", None), ("192.168.1.66", None)])
+    uc = _detect_uc(
+        probe,
+        settings={"expected_dhcp_servers": ["192.168.1.1"]},
+        interfaces=[_iface("eth0", gateway="10.0.0.254")],  # anderes Gateway -- darf nicht ziehen
+    )
+    result = asyncio.run(uc())
+    assert result.expected == ("192.168.1.1",)
+    by_ip = {s.ip: s.is_expected for s in result.servers}
+    assert by_ip == {"192.168.1.1": True, "192.168.1.66": False}
+    assert result.has_unexpected is True
+
+
+def test_detect_falls_back_to_primary_gateway_when_list_empty() -> None:
+    # Keine Nutzerliste -> Gateway des primaeren Interface ist die Erwartung.
+    probe = FakeDhcpProbe(offers=[("192.168.1.1", None)])
+    uc = _detect_uc(
+        probe,
+        settings={},
+        interfaces=[
+            _iface("lo", gateway=None, ipv4="127.0.0.1"),
+            _iface("eth0", gateway="192.168.1.1"),
+        ],
+    )
+    result = asyncio.run(uc())
+    assert result.expected == ("192.168.1.1",)
+    assert result.servers[0].is_expected is True
+    assert result.has_unexpected is False
+
+
+def test_detect_empty_list_value_falls_back_to_gateway() -> None:
+    # Setting vorhanden, aber leere Liste -> wie nicht gesetzt: Gateway-Fallback greift.
+    probe = FakeDhcpProbe(offers=[("192.168.1.1", None)])
+    uc = _detect_uc(
+        probe,
+        settings={"expected_dhcp_servers": []},
+        interfaces=[_iface("eth0", gateway="192.168.1.1")],
+    )
+    result = asyncio.run(uc())
+    assert result.expected == ("192.168.1.1",)
+
+
+def test_detect_no_gateway_means_empty_expected() -> None:
+    # Kein primaeres Interface mit Gateway -> leere Erwartung (alle gefundenen unexpected).
+    probe = FakeDhcpProbe(offers=[("192.168.1.1", None)])
+    uc = _detect_uc(
+        probe,
+        settings={},
+        interfaces=[_iface("eth0", gateway=None, ipv4=None)],
+    )
+    result = asyncio.run(uc())
+    assert result.expected == ()
+    assert result.servers[0].is_expected is False
+    assert result.has_unexpected is True
+
+
+def test_detect_ignores_non_string_list_entries() -> None:
+    # Typfremde Eintraege in der Liste werden defensiv uebersprungen (nicht erfunden).
+    probe = FakeDhcpProbe(offers=[("192.168.1.1", None)])
+    uc = _detect_uc(
+        probe,
+        settings={"expected_dhcp_servers": [123, "192.168.1.1", ""]},
+        interfaces=[_iface("eth0", gateway="10.9.9.9")],
+    )
+    result = asyncio.run(uc())
+    # Nur der gueltige String-Eintrag zaehlt -> Gateway-Fallback wird NICHT gezogen.
+    assert result.expected == ("192.168.1.1",)
+
+
+def test_detect_blocks_without_root_probe_not_called() -> None:
+    # Kein Root -> RogueDhcpPermissionError, der Probe wird NICHT gerufen (ehrliche Sperre).
+    probe = FakeDhcpProbe(offers=[("192.168.1.1", None)])
+    permission = FakeDhcpPermission(available=True, permission_error="braucht Root")
+    uc = _detect_uc(probe, permission=permission)
+    with pytest.raises(RogueDhcpPermissionError):
+        asyncio.run(uc())
+    assert probe.calls == 0
+
+
+def test_detect_blocks_when_nmap_missing_probe_not_called() -> None:
+    # nmap fehlt -> RogueDhcpPermissionError, Probe NICHT gerufen.
+    probe = FakeDhcpProbe(offers=[("192.168.1.1", None)])
+    permission = FakeDhcpPermission(available=False)
+    uc = _detect_uc(probe, permission=permission)
+    with pytest.raises(RogueDhcpPermissionError):
+        asyncio.run(uc())
+    assert probe.calls == 0

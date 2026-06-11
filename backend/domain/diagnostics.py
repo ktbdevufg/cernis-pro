@@ -69,6 +69,27 @@ Infrastruktur, der configured-Zustand ist application):
   Rein, deterministisch, mutationsproben-tauglich. KEINE Whitelist-Doppelung (die
   durchsetzt der Dienst; der Client darf grosszuegiger sein, aber Bereich+max+dedup lokal).
 
+Block 3 (Rogue-DHCP-Erkennung) -- reine Klassifikation gefundener DHCP-Server gegen eine
+erwartete Menge (kein I/O, kein nmap-Wissen -- das Senden des DHCP DISCOVER ist
+Infrastruktur):
+
+* ``DhcpServer`` -- ein antwortender DHCP-Server als frozen Wertobjekt. ``ip`` ist die
+  Quell-IP des Offers, ``mac`` die zugehoerige MAC ehrlich ``None``, wenn nmap sie nicht
+  liefert (KEIN erfundener Wert). ``is_expected`` ist das Klassifikations-Ergebnis: ist
+  dieser Server in der zugrunde gelegten Erwartungsmenge?
+* ``RogueDhcpResult`` -- das gebuendelte Ergebnis. ``servers`` die gefundenen Server
+  (dedupliziert, deterministisch nach IP sortiert), ``expected`` die zugrunde gelegte
+  Erwartungsmenge (fuer Transparenz im Wire -- das Frontend kann "keine Erwartung
+  konfiguriert" daran erkennen), ``has_unexpected`` ob mindestens ein gefundener Server
+  NICHT erwartet war.
+* ``classify_dhcp_servers`` -- die EINZIGE Heuristik (rein, deterministisch, mutations-
+  proben-tauglich): normalisiert/dedupliziert die Funde nach IP, markiert jeden als
+  ``is_expected`` (IP in Erwartungsmenge?), sortiert deterministisch nach IP. Leere
+  Erwartung -> ALLE gefundenen gelten als unexpected (ehrlich: ohne Erwartung ist jeder
+  Server "unerwartet"; der api-Rand/Frontend kennzeichnet den Fall "keine Erwartung
+  konfiguriert"). ZEIGEN+EINORDNEN, NICHT verurteilen -- ``is_expected``/``has_unexpected``
+  sind Fakten, kein Urteil ("GEFAHR" o. Ae. ist nicht Sache der Domaene).
+
 DARSTELLUNG bleibt draussen: kein Mensch-lesbares Formatieren, keine Icons -- das fuehrt
 api/Frontend. Die Domaene fuehrt nur Werte.
 """
@@ -192,6 +213,17 @@ TOOL_PACKAGES: dict[str, dict[PackageManager, str]] = {
         "yum": "bind-utils",
         "zypper": "bind-utils",
         "pacman": "bind",
+    },
+    "nmap": {
+        # nmap heisst bei allen fuenf Managern schlicht ``nmap`` (kein Distro-Unterschied
+        # wie bei ``dig``). Registriert fuer Block 3 (Rogue-DHCP via
+        # ``nmap --script broadcast-dhcp-discover``); die 1b-Tool-Erkennung greift dadurch
+        # auch fuer nmap, ALL_TOOLS leitet sich automatisch mit ab.
+        "apt": "nmap",
+        "dnf": "nmap",
+        "yum": "nmap",
+        "zypper": "nmap",
+        "pacman": "nmap",
     },
     "traceroute": {
         "apt": "traceroute",
@@ -480,3 +512,94 @@ def validate_requested_ports(ports: Sequence[int]) -> tuple[int, ...]:
         if len(valid) >= _MAX_REQUESTED_PORTS:
             break  # Dienst-Obergrenze gespiegelt -- ueberzaehlige abschneiden
     return tuple(valid)
+
+
+# ── Block 3: Rogue-DHCP-Erkennung (reine Klassifikation + Wertobjekte) ─────────
+
+
+@dataclass(frozen=True)
+class DhcpServer:
+    """Ein antwortender DHCP-Server (ein Offer) als reines Wertobjekt (frozen, Block 3).
+
+    ``ip`` ist die Quell-IP des DHCP-Offers, ``mac`` die zugehoerige MAC -- ehrlich
+    ``None``, wenn nmap sie nicht liefert (KEIN erfundener Wert). ``is_expected`` ist das
+    Klassifikations-Ergebnis: ist dieser Server in der zugrunde gelegten Erwartungsmenge?
+    Die Domaene VERURTEILT nicht -- ``is_expected`` ist ein Fakt (erwartet ja/nein), kein
+    "GEFAHR"-Urteil (das fuehrt, wenn ueberhaupt, der api-Rand/das Frontend).
+    """
+
+    ip: str
+    mac: str | None
+    is_expected: bool
+
+
+@dataclass(frozen=True)
+class RogueDhcpResult:
+    """Das gebuendelte Ergebnis der Rogue-DHCP-Erkennung (frozen, Block 3).
+
+    ``servers`` sind die gefundenen DHCP-Server (dedupliziert nach IP, deterministisch
+    nach IP sortiert). ``expected`` ist die zugrunde gelegte Erwartungsmenge (fuer
+    Transparenz im Wire -- ist sie leer, war keine Erwartung konfiguriert; das kann der
+    api-Rand/das Frontend kenntlich machen). ``has_unexpected`` ist ``True``, wenn
+    mindestens ein gefundener Server NICHT in ``expected`` ist -- ein Fakt, kein Urteil
+    (zeigen+einordnen, nicht verurteilen).
+    """
+
+    servers: tuple[DhcpServer, ...]
+    expected: tuple[str, ...]
+    has_unexpected: bool
+
+
+def _normalize_ip(ip: str) -> str:
+    """Normalisiert eine IP-Adresse fuer den Vergleich -- rein, deterministisch.
+
+    Nur ein ``strip`` der umgebenden Leerzeichen (eine IP traegt keine relevante
+    Gross-/Kleinschreibung; eine semantische Adress-Normalisierung -- z. B. IPv6-Kompaktion
+    -- waere Raten und bleibt bewusst aus). Gleiche Eingabe -> gleiches Ergebnis.
+    """
+    return ip.strip()
+
+
+def classify_dhcp_servers(
+    found_ips_macs: Sequence[tuple[str, str | None]], expected: Sequence[str]
+) -> RogueDhcpResult:
+    """Klassifiziert gefundene DHCP-Server gegen die erwartete Menge -- rein, testbar.
+
+    Das Herz von Block 3 (rein, deterministisch, mutationsproben-tauglich):
+
+    1. **Normalisieren/Deduplizieren** der Funde NACH IP (``_normalize_ip`` -- trim): zwei
+       Offers derselben IP sind derselbe Server. Das ERSTE Vorkommen gewinnt die Identitaet
+       (samt seiner MAC) -- ein spaeteres Duplikat (auch mit anderer/fehlender MAC) wird
+       verworfen.
+    2. **Markieren** jedes Servers als ``is_expected = (ip in expected-Menge)`` -- die
+       Erwartungsmenge wird ebenfalls normalisiert (trim), damit ein fuehrendes Leerzeichen
+       im Setting nicht zu einem falschen "unerwartet" fuehrt.
+    3. **``has_unexpected``** = mindestens ein gefundener Server ist NICHT erwartet.
+    4. **Deterministisch nach IP sortiert** -- gleiche Eingabe (in beliebiger Reihenfolge)
+       -> gleiches Ergebnis (stabile Wire-Form).
+
+    Leere ``expected``-Menge -> ALLE gefundenen gelten als unexpected (``is_expected`` ist
+    dann fuer jeden ``False``, ``has_unexpected`` True, sofern ueberhaupt ein Server
+    gefunden wurde). Das ist ehrlich: ohne Erwartung ist jeder Server "unerwartet" -- der
+    api-Rand/das Frontend kann den Fall "keine Erwartung konfiguriert" (leeres ``expected``)
+    kenntlich machen.
+
+    ZEIGEN+EINORDNEN, NICHT verurteilen: ``is_expected``/``has_unexpected`` sind Fakten, kein
+    Urteil. Rein: kein I/O, keine Uhr; gleiche Eingabe -> gleiches Ergebnis.
+    """
+    expected_set = {_normalize_ip(ip) for ip in expected}
+    seen: set[str] = set()
+    servers: list[DhcpServer] = []
+    for raw_ip, mac in found_ips_macs:
+        ip = _normalize_ip(raw_ip)
+        if ip in seen:
+            continue  # Dedup nach IP: erstes Vorkommen gewinnt (samt seiner MAC)
+        seen.add(ip)
+        servers.append(DhcpServer(ip=ip, mac=mac, is_expected=ip in expected_set))
+    sorted_servers = tuple(sorted(servers, key=lambda s: s.ip))
+    has_unexpected = any(not s.is_expected for s in sorted_servers)
+    return RogueDhcpResult(
+        servers=sorted_servers,
+        expected=tuple(sorted(expected_set)),
+        has_unexpected=has_unexpected,
+    )

@@ -12,17 +12,20 @@ from domain.diagnostics import (
     ALL_TOOLS,
     TOOL_PACKAGES,
     BannerResult,
+    DhcpServer,
     DnsRecord,
     DnsResult,
     ExternalCheckResult,
     ExternalIpResult,
     ExternalPortResult,
+    RogueDhcpResult,
     ToolReport,
     ToolStatus,
     TracerouteHop,
     TracerouteResult,
     assemble_report,
     build_install_command,
+    classify_dhcp_servers,
     dedup_records,
     probe_for_port,
     sanitize_banner,
@@ -128,8 +131,20 @@ def test_dedup_records_first_occurrence_wins_identity() -> None:
 
 def test_all_tools_is_sorted_and_derived_from_registry() -> None:
     # ALL_TOOLS ist deterministisch sortiert und deckt sich mit den Registry-Keys.
-    assert ALL_TOOLS == ("dig", "traceroute")
+    # Block 3 ergaenzt ``nmap`` (Rogue-DHCP) -> jetzt drei registrierte Tools.
+    assert ALL_TOOLS == ("dig", "nmap", "traceroute")
     assert set(ALL_TOOLS) == set(TOOL_PACKAGES.keys())
+
+
+def test_nmap_registered_for_all_managers_as_nmap() -> None:
+    # Block 3: nmap heisst bei allen fuenf Managern schlicht ``nmap`` (kein Distro-Unterschied).
+    assert TOOL_PACKAGES["nmap"] == {
+        "apt": "nmap",
+        "dnf": "nmap",
+        "yum": "nmap",
+        "zypper": "nmap",
+        "pacman": "nmap",
+    }
 
 
 def test_tool_status_is_frozen() -> None:
@@ -200,13 +215,14 @@ def test_build_install_command_dedups_and_sorts_packages() -> None:
 
 def test_build_install_command_skips_unknown_tool() -> None:
     # Ein unbekanntes Tool wird uebersprungen (nicht erfunden) -- nur das bekannte zaehlt.
-    cmd = build_install_command("apt", ["dig", "nmap"])
+    # ``nmap`` ist seit Block 3 registriert; als "unbekannt" dient hier ``curl``.
+    cmd = build_install_command("apt", ["dig", "curl"])
     assert cmd == "sudo apt install dnsutils"
 
 
 def test_build_install_command_only_unknown_returns_none() -> None:
     # Nur unbekannte Tools -> keine Pakete uebrig -> None (kein leerer Befehl).
-    assert build_install_command("apt", ["nmap", "curl"]) is None
+    assert build_install_command("apt", ["curl", "wget"]) is None
 
 
 # ── assemble_report ───────────────────────────────────────────────────────────
@@ -412,3 +428,110 @@ def test_external_check_result_configured_with_ports() -> None:
     assert result.checked_ip == "203.0.113.7"
     assert result.ports[0].state == "filtered"
     assert result.error is None
+
+
+# ── Block 3: Rogue-DHCP (Wertobjekte + classify_dhcp_servers) ──────────────────
+
+
+def test_dhcp_server_is_frozen() -> None:
+    server = DhcpServer(ip="192.168.1.1", mac="aa:bb:cc:dd:ee:ff", is_expected=True)
+    with pytest.raises(AttributeError):
+        server.is_expected = False  # type: ignore[misc]
+
+
+def test_rogue_dhcp_result_is_frozen() -> None:
+    result = RogueDhcpResult(servers=(), expected=(), has_unexpected=False)
+    with pytest.raises(AttributeError):
+        result.has_unexpected = True  # type: ignore[misc]
+
+
+def test_classify_marks_expected_and_unexpected() -> None:
+    # Ein erwarteter (Gateway) + ein unerwarteter Server -> korrekte is_expected-Flags.
+    result = classify_dhcp_servers(
+        [("192.168.1.1", "aa:bb:cc:dd:ee:ff"), ("192.168.1.66", None)],
+        ["192.168.1.1"],
+    )
+    by_ip = {s.ip: s for s in result.servers}
+    assert by_ip["192.168.1.1"].is_expected is True
+    assert by_ip["192.168.1.66"].is_expected is False
+    assert result.has_unexpected is True
+    assert result.expected == ("192.168.1.1",)
+
+
+def test_classify_all_expected_has_no_unexpected() -> None:
+    # Alle gefundenen sind erwartet -> has_unexpected False (kein Urteil, nur Fakt).
+    result = classify_dhcp_servers(
+        [("10.0.0.1", None), ("10.0.0.2", None)],
+        ["10.0.0.1", "10.0.0.2"],
+    )
+    assert all(s.is_expected for s in result.servers)
+    assert result.has_unexpected is False
+
+
+def test_classify_empty_expected_makes_all_unexpected() -> None:
+    # Leere Erwartung -> ALLE gefundenen gelten als unexpected (ehrlich: ohne Erwartung
+    # ist jeder Server unerwartet). expected bleibt leer (Frontend kann das kenntlich machen).
+    result = classify_dhcp_servers([("192.168.1.1", None)], [])
+    assert result.servers[0].is_expected is False
+    assert result.has_unexpected is True
+    assert result.expected == ()
+
+
+def test_classify_no_servers_found_is_not_unexpected() -> None:
+    # Kein Server gefunden -> leere servers, has_unexpected False (nichts Unerwartetes da).
+    result = classify_dhcp_servers([], ["192.168.1.1"])
+    assert result.servers == ()
+    assert result.has_unexpected is False
+
+
+def test_classify_dedups_by_ip_first_occurrence_wins() -> None:
+    # Zwei Offers derselben IP -> ein Server; das erste Vorkommen (samt MAC) gewinnt.
+    result = classify_dhcp_servers(
+        [("192.168.1.1", "aa:bb:cc:dd:ee:ff"), ("192.168.1.1", None)],
+        ["192.168.1.1"],
+    )
+    assert len(result.servers) == 1
+    assert result.servers[0].mac == "aa:bb:cc:dd:ee:ff"
+
+
+def test_classify_sorts_servers_deterministically_by_ip() -> None:
+    # Eingabe-Reihenfolge egal -> Ergebnis aufsteigend nach IP (stabile Wire-Form).
+    result = classify_dhcp_servers(
+        [("192.168.1.66", None), ("192.168.1.1", None), ("192.168.1.9", None)],
+        [],
+    )
+    assert [s.ip for s in result.servers] == ["192.168.1.1", "192.168.1.66", "192.168.1.9"]
+
+
+def test_classify_mac_none_is_honest() -> None:
+    # nmap liefert keine MAC -> ehrlich None, kein erfundener Wert.
+    result = classify_dhcp_servers([("192.168.1.1", None)], ["192.168.1.1"])
+    assert result.servers[0].mac is None
+
+
+def test_classify_trims_ips_for_comparison() -> None:
+    # Fuehrende/folgende Leerzeichen (z. B. aus dem Setting) brechen den Vergleich nicht.
+    result = classify_dhcp_servers([("  192.168.1.1  ", None)], [" 192.168.1.1 "])
+    assert result.servers[0].ip == "192.168.1.1"
+    assert result.servers[0].is_expected is True
+
+
+# ── Mutationsproben (classify_dhcp_servers ist das Herz) ───────────────────────
+
+
+def test_classify_mutation_probe_is_expected_comparison() -> None:
+    # Invertiert man den is_expected-Vergleich (ip in expected -> ip NOT in expected), kippt
+    # genau diese Behauptung: ein erwarteter Server MUSS is_expected True tragen.
+    result = classify_dhcp_servers([("192.168.1.1", None)], ["192.168.1.1"])
+    assert result.servers[0].is_expected is True
+    assert result.has_unexpected is False
+
+
+def test_classify_mutation_probe_dedup_and_sort() -> None:
+    # Faellt das Dedup weg, kaemen zwei Server; faellt die Sortierung weg, waere die
+    # Reihenfolge die Eingabe-Reihenfolge (66 vor 1) -- beide Behauptungen wuerden rot.
+    result = classify_dhcp_servers(
+        [("192.168.1.66", None), ("192.168.1.1", None), ("192.168.1.66", None)],
+        [],
+    )
+    assert [s.ip for s in result.servers] == ["192.168.1.1", "192.168.1.66"]

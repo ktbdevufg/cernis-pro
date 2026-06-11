@@ -75,9 +75,11 @@ from api.devices import (
 )
 from api.devices import router as devices_router
 from api.diagnostics import (
+    provide_check_dhcp_permission,
     provide_check_external,
     provide_check_tools,
     provide_check_traceroute_permission,
+    provide_detect_rogue_dhcp,
     provide_grab_banner,
     provide_resolve_dns,
     provide_run_traceroute,
@@ -172,11 +174,14 @@ from application.devices import (
     UpdateDeviceMeta,
 )
 from application.diagnostics import (
+    CheckDhcpPermission,
     CheckDiagnosticsTools,
     CheckExternalReachability,
     CheckTraceroutePermission,
+    DetectRogueDhcp,
     GrabBanner,
     ResolveDns,
+    RogueDhcpPermissionError,
     RunTraceroute,
 )
 from application.interfaces import ListInterfaces
@@ -241,8 +246,10 @@ from infrastructure.diagnostics_linux import (
     DigDnsResolver,
     ExternalCheckFailed,
     HttpxReachabilityProvider,
+    LinuxDhcpPermission,
     LinuxPackageManagerDetector,
     LinuxTraceroutePermission,
+    NmapDhcpProbe,
     ShutilToolDetector,
     SocketBannerGrabber,
     SystemTracerouteRunner,
@@ -1275,6 +1282,34 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # geloggt, was den Token enthalten koennte.
         logger.error("external_check_failed")
         return JSONResponse(status_code=502, content={"detail": exc.message})
+
+    # ── diagnostics 3: Rogue-DHCP-Erkennung verdrahten ────────────────────────────
+    # Zustandslose Adapter direkt instanziiert (Muster process/interfaces). Der Use-Case
+    # zieht die erwartete Menge selbst (Setting expected_dhcp_servers via repository() ODER
+    # Gateway-Fallback ueber den BESTEHENDEN interfaces-Port InterfaceDiscoveryAdapter, Muster
+    # wie 2b settings/secret injiziert). Vor dem Discovery prueft er die Root-Rechte
+    # (LinuxDhcpPermission); ohne Root wirft er RogueDhcpPermissionError -> 403 (Handler
+    # unten), der Probe laeuft NIE blind. Der Runner gibt das RogueDhcpResult als Any zurueck.
+    async def _detect_rogue_dhcp() -> Any:
+        return await DetectRogueDhcp(
+            NmapDhcpProbe(), LinuxDhcpPermission(), repository(), InterfaceDiscoveryAdapter()
+        )()
+
+    app.dependency_overrides[provide_detect_rogue_dhcp] = lambda: _detect_rogue_dhcp
+    app.dependency_overrides[provide_check_dhcp_permission] = lambda: CheckDhcpPermission(
+        LinuxDhcpPermission()
+    )
+
+    @app.exception_handler(RogueDhcpPermissionError)
+    async def _on_rogue_dhcp_permission(
+        _request: Request, exc: RogueDhcpPermissionError
+    ) -> JSONResponse:
+        # Rogue-DHCP ohne Root (oder nmap fehlt) -> 403 (die Discovery ist nicht erlaubt,
+        # nicht der Dienst kaputt). Ehrliche Sperre, kein stiller Fallback (S3) -- der Probe
+        # wurde NICHT gerufen. Muster der Tool-fehlt-/Dienst-Naht: das Mapping sitzt am
+        # Composition Root, der api-Ring bleibt clean. Die Meldung ist die Rechte-Begruendung.
+        logger.error("rogue_dhcp_permission_denied")
+        return JSONResponse(status_code=403, content={"detail": exc.message})
 
     # ── analysis-Domaene v2 verdrahten (AN.3 + A.2, reine Lese-/Rechen-Domaene) ───
     # Lazy-memoisiertes User-Regel-Repo (lru_cache, Muster scan_history_repository):

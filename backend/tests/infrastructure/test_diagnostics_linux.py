@@ -20,14 +20,17 @@ from infrastructure.diagnostics_linux import (
     DigDnsResolver,
     ExternalCheckFailed,
     HttpxReachabilityProvider,
+    LinuxDhcpPermission,
     LinuxPackageManagerDetector,
     LinuxTraceroutePermission,
+    NmapDhcpProbe,
     ShutilToolDetector,
     SocketBannerGrabber,
     SystemTracerouteRunner,
     _banner_from_http_head,
     _build_http_head_request,
     _parse_dig_answer,
+    _parse_nmap_dhcp,
     _parse_traceroute,
 )
 
@@ -555,3 +558,100 @@ def test_external_unknown_port_state_maps_to_error() -> None:
     provider = _provider_with(handler)
     with pytest.raises(ExternalCheckFailed):
         asyncio.run(provider.check_ports(_BASE_URL, _TOKEN, [80]))
+
+
+# ── Block 3: Rogue-DHCP (nmap-Parser + Permission, kein echtes nmap/Netz) ──────
+
+# Realistische nmap broadcast-dhcp-discover-Ausgabe: EIN antwortender DHCP-Server.
+_NMAP_ONE_SERVER = """\
+Pre-scan script results:
+| broadcast-dhcp-discover:
+|   Response 1 of 1:
+|     Interface: eth0
+|     IP Offered: 192.168.1.50
+|     DHCP Message Type: DHCPOFFER
+|     Server Identifier: 192.168.1.1
+|     IP Address Lease Time: 1d00h00m00s
+|_    Subnet Mask: 255.255.255.0
+Nmap done: 0 IP addresses (0 hosts up) scanned in 5.20 seconds
+"""
+
+# Zwei antwortende DHCP-Server (ein erwarteter + ein potenzieller Rogue), zweiter mit MAC.
+_NMAP_TWO_SERVERS = """\
+Pre-scan script results:
+| broadcast-dhcp-discover:
+|   Response 1 of 2:
+|     IP Offered: 192.168.1.50
+|     Server Identifier: 192.168.1.1
+|   Response 2 of 2:
+|     IP Offered: 192.168.1.180
+|     Server Identifier: 192.168.1.66
+|_    Server MAC: de:ad:be:ef:00:01
+Nmap done: 0 IP addresses (0 hosts up) scanned in 6.10 seconds
+"""
+
+# Kein DHCP-Server geantwortet (kein Skript-Ergebnis).
+_NMAP_NO_SERVER = "Nmap done: 0 IP addresses (0 hosts up) scanned in 5.00 seconds\n"
+
+
+def test_parse_nmap_dhcp_one_server() -> None:
+    result = _parse_nmap_dhcp(_NMAP_ONE_SERVER)
+    assert result == [("192.168.1.1", None)]
+
+
+def test_parse_nmap_dhcp_two_servers_with_mac() -> None:
+    result = _parse_nmap_dhcp(_NMAP_TWO_SERVERS)
+    # Reihenfolge der Funde bleibt erhalten (Domaene sortiert spaeter); MAC nur beim zweiten.
+    assert result == [("192.168.1.1", None), ("192.168.1.66", "de:ad:be:ef:00:01")]
+
+
+def test_parse_nmap_dhcp_no_server() -> None:
+    assert _parse_nmap_dhcp(_NMAP_NO_SERVER) == []
+
+
+def test_dhcp_probe_tool_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    # nmap fehlt -> DiagnosticsToolMissing (kein stiller Fallback, Muster dig/traceroute).
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
+    with pytest.raises(DiagnosticsToolMissing):
+        asyncio.run(NmapDhcpProbe().discover())
+
+
+def test_dhcp_probe_parses_offers(monkeypatch: pytest.MonkeyPatch) -> None:
+    # nmap da + gemockte Ausgabe -> geparste Offers (kein echter nmap-/Netzaufruf).
+    monkeypatch.setattr(shutil, "which", lambda _name: "/usr/bin/nmap")
+    monkeypatch.setattr(
+        "infrastructure.diagnostics_linux._run_nmap_dhcp", lambda: _NMAP_TWO_SERVERS
+    )
+    result = asyncio.run(NmapDhcpProbe().discover())
+    assert result == [("192.168.1.1", None), ("192.168.1.66", "de:ad:be:ef:00:01")]
+
+
+def test_dhcp_permission_is_available_true_when_nmap_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(shutil, "which", lambda _name: "/usr/bin/nmap")
+    assert LinuxDhcpPermission().is_available() is True
+
+
+def test_dhcp_permission_is_available_false_when_nmap_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
+    assert LinuxDhcpPermission().is_available() is False
+
+
+def test_dhcp_permission_root_means_discovery_possible(monkeypatch: pytest.MonkeyPatch) -> None:
+    # geteuid 0 -> Discovery moeglich -> None (keine Sperre).
+    monkeypatch.setattr(os, "geteuid", lambda: 0)
+    assert LinuxDhcpPermission().check_permission() is None
+
+
+def test_dhcp_permission_non_root_blocks_without_install_cmd(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Kein Root -> Sperr-Begruendung, KEIN Install-Befehl (Block 1b), KEINE rootless Alternative.
+    monkeypatch.setattr(os, "geteuid", lambda: 1000)
+    hint = LinuxDhcpPermission().check_permission()
+    assert hint is not None
+    assert "Root" in hint
+    assert "sudo apt" not in hint and "install" not in hint.lower()

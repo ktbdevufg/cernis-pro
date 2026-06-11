@@ -42,10 +42,29 @@ Block 2b:
   zwei api-Routen. Dienst-Fehler (``ExternalCheckError`` des Providers) werden NICHT
   verschluckt: sie laufen durch zum api-Rand, der sie (Muster ``DiagnosticsToolMissing`` ->
   503) auf **502** abbildet -- konsistent zum bestehenden diagnostics-Durchwurf-Muster.
+
+Block 3:
+
+* ``DetectRogueDhcp`` -- die Rogue-DHCP-Erkennung. Bestimmt die ERWARTETE Server-Menge:
+  das Nutzer-Setting ``expected_dhcp_servers`` (Liste) ueber ``SettingsRepository``, wenn
+  gesetzt+nicht-leer; SONST Fallback auf das Gateway des primaeren Interface (ueber den
+  bestehenden ``InterfaceDiscoveryPort`` + die reine domain-Funktion ``select_primary`` --
+  NICHT direkt ein Adapter, Muster wie 2b ``settings_repo``/``secret_store`` injiziert).
+  Kein Gateway ermittelbar -> erwartete Menge leer (die Domaene behandelt das: alle
+  gefundenen gelten dann als unerwartet). VOR ``probe.discover()`` wird die Root-Rechte-
+  Pruefung (``DhcpPermissionPort``) ausgewertet -- fehlt Root, wird der Probe NICHT gerufen,
+  sondern eine ``RogueDhcpPermissionError`` geworfen (ehrliche Sperre, kein blindes Laufen).
+  Die Klassifikation (erwartet vs. unerwartet) macht die reine domain-Funktion
+  ``classify_dhcp_servers``.
+* ``CheckDhcpPermission`` -- die ``{ok, error}``-Rechte-Naht (Muster
+  ``CheckTraceroutePermission``): ``is_available`` -> ``check_permission`` -> dict.
+  ``ok=False`` + Text, wenn nmap fehlt ODER kein Root (Rogue-DHCP ist root-pflichtig ohne
+  Alternative -- anders als traceroute KEINE rootless Methode).
 """
 
 from collections.abc import Sequence
 
+from application.diagnostics.errors import RogueDhcpPermissionError
 from domain.diagnostics import (
     ALL_TOOLS,
     TOOL_PACKAGES,
@@ -53,13 +72,18 @@ from domain.diagnostics import (
     DnsRecordType,
     DnsResult,
     ExternalCheckResult,
+    RogueDhcpResult,
     ToolReport,
     TracerouteResult,
     assemble_report,
+    classify_dhcp_servers,
     validate_requested_ports,
 )
+from domain.interfaces import select_primary
 from ports.diagnostics import (
     BannerGrabber,
+    DhcpPermissionPort,
+    DhcpProbe,
     DnsResolver,
     ExternalReachabilityProvider,
     PackageManagerDetector,
@@ -67,6 +91,7 @@ from ports.diagnostics import (
     TraceroutePermissionPort,
     TracerouteRunner,
 )
+from ports.interfaces import InterfaceDiscoveryPort
 from ports.settings import SecretStore, SettingsRepository
 
 # Default-cpnetcheck-URL, falls das (NICHT-geheime) Setting ``cpnetcheck_url`` nicht
@@ -80,6 +105,12 @@ DEFAULT_CPNETCHECK_URL = "https://cpnetcheck.bach.world"
 # ein normales Setting. Hier als benannte Konstanten, damit der Lese-Pfad eindeutig ist.
 _CPNETCHECK_TOKEN_KEY = "cpnetcheck_token"
 _CPNETCHECK_URL_KEY = "cpnetcheck_url"
+
+# Setting-Key der NUTZERLISTE erwarteter DHCP-Server (Block 3, NICHT-geheim, Liste). Wird
+# ueber die bestehenden settings-Use-Cases (UpdateSetting) gesetzt/geloescht und hier ueber
+# ``SettingsRepository`` gelesen -- kein neuer Setting-Mechanismus (SettingValue erlaubt
+# list). Ist es gesetzt+nicht-leer -> es ist die Erwartungsmenge; sonst Gateway-Fallback.
+_EXPECTED_DHCP_SERVERS_KEY = "expected_dhcp_servers"
 
 # Neutraler Hinweis fuer den nicht-konfigurierten Zustand (Modell D, ADR 0001). KEIN
 # stiller Fallback -- der Zustand wird explizit benannt, nicht verschwiegen.
@@ -283,3 +314,128 @@ class CheckExternalReachability:
             ports=(),
             error=None,
         )
+
+
+class CheckDhcpPermission:
+    """Rechte-Naht fuer Rogue-DHCP: is_available -> check_permission -> {ok, error}.
+
+    Duenn (Muster ``CheckTraceroutePermission``): prueft Verfuegbarkeit (``nmap`` da?) und
+    dann die Root-Rechte (``check_permission``) ueber den Rechte-Port und gibt die
+    ``{ok, error}``-Form zurueck. Anders als traceroute (das eine ungenauere rootless-Methode
+    kennt) ist Rogue-DHCP ROOT-PFLICHTIG ohne Alternative: ``ok=True`` heisst, das DHCP
+    DISCOVER ist moeglich (Root vorhanden); ``ok=False`` + Text heisst, es ist GESPERRT
+    (nmap fehlt ODER kein Root). Der api-Rand reicht die Form unveraendert durch.
+    """
+
+    def __init__(self, permission: DhcpPermissionPort) -> None:
+        self._permission = permission
+
+    def __call__(self) -> dict[str, object]:
+        """``{"ok": True, "error": ""}`` wenn Discovery moeglich, sonst ``ok=False`` + Grund.
+
+        ``is_available`` False -> Binary nicht nutzbar (``nmap`` fehlt). Sonst
+        ``check_permission``: ein nicht-leerer Text ist die Sperr-Begruendung (Rogue-DHCP
+        braucht Root, keine rootless Alternative) -> ``ok=False``. ``None`` -> Root vorhanden,
+        Discovery moeglich -> ``ok=True``.
+        """
+        if not self._permission.is_available():
+            return {
+                "ok": False,
+                "error": "Das Programm 'nmap' ist auf dieser Plattform nicht verfuegbar.",
+            }
+        text = self._permission.check_permission()
+        return {"ok": text is None, "error": text or ""}
+
+    def is_available(self) -> bool:
+        """Reiner Verfuegbarkeits-Check (fuer einen spaeteren ``/available``-Pfad)."""
+        return self._permission.is_available()
+
+    def check_permission(self) -> str | None:
+        """Rechte-Begruendung oder ``None`` (fuer einen spaeteren ``permission_error``)."""
+        return self._permission.check_permission()
+
+
+class DetectRogueDhcp:
+    """Rogue-DHCP-Erkennung (3): erwartete Menge bestimmen, Discovery, klassifizieren.
+
+    Orchestriert vier Ports (``DhcpProbe``/``DhcpPermissionPort``/``SettingsRepository``/
+    ``InterfaceDiscoveryPort``) + zwei reine domain-Funktionen (``select_primary`` fuer das
+    Fallback-Gateway, ``classify_dhcp_servers`` fuer die Klassifikation). Die Ports kommen
+    per Constructor-Injection als Protocol-Typ herein -- nie ein konkreter Adapter (Muster
+    wie 2b ``settings_repo``/``secret_store`` injiziert; die Gateway-Quelle ist der
+    bestehende interfaces-Port, NICHT ein Adapter).
+
+    ERWARTETE MENGE: das Nutzer-Setting ``expected_dhcp_servers`` (Liste) wenn gesetzt+nicht-
+    leer; SONST Fallback auf das Gateway des primaeren Interface (``select_primary`` ueber die
+    rohen Interfaces des Ports). Kein Gateway -> leere Erwartung (die Domaene behandelt das:
+    alle gefundenen gelten dann als unerwartet).
+
+    ROOT-PFLICHT: VOR ``probe.discover()`` wird ``permission`` ausgewertet. Fehlt Root (oder
+    nmap), wird der Probe NICHT gerufen, sondern ``RogueDhcpPermissionError`` geworfen --
+    ehrliche Sperre, kein blindes Laufen gegen fehlendes Root, keine Selbst-Eskalation.
+    """
+
+    def __init__(
+        self,
+        probe: DhcpProbe,
+        permission: DhcpPermissionPort,
+        settings_repo: SettingsRepository,
+        interfaces: InterfaceDiscoveryPort,
+    ) -> None:
+        self._probe = probe
+        self._permission = permission
+        self._settings_repo = settings_repo
+        self._interfaces = interfaces
+
+    async def __call__(self) -> RogueDhcpResult:
+        """Fuehrt die Rogue-DHCP-Erkennung aus -> ``RogueDhcpResult``.
+
+        Erst die Rechte-Pruefung (root-pflichtig): nmap fehlt ODER kein Root ->
+        ``RogueDhcpPermissionError`` (der Probe wird NICHT gerufen). Sonst die erwartete
+        Menge bestimmen (Setting ODER Gateway-Fallback), das DHCP DISCOVER ueber den Probe
+        senden und die rohen Funde + erwartete Menge an die reine domain-Funktion
+        ``classify_dhcp_servers`` uebergeben.
+        """
+        # Root-pflichtig, keine rootless Alternative -- VOR dem Discovery sperren (S3).
+        if not self._permission.is_available():
+            raise RogueDhcpPermissionError(
+                "Das Programm 'nmap' ist auf dieser Plattform nicht verfuegbar."
+            )
+        permission_error = self._permission.check_permission()
+        if permission_error is not None:
+            raise RogueDhcpPermissionError(permission_error)
+        expected = await self._expected_servers()
+        found = await self._probe.discover()
+        return classify_dhcp_servers(found, expected)
+
+    async def _expected_servers(self) -> list[str]:
+        """Ermittelt die erwartete DHCP-Server-Menge: Nutzer-Setting ODER Gateway-Fallback.
+
+        Setting ``expected_dhcp_servers`` (Liste) wenn gesetzt+nicht-leer -> dessen
+        String-Eintraege (typfremde Eintraege werden defensiv uebersprungen, nicht
+        erfunden). Sonst Fallback: das Gateway des primaeren Interface (``select_primary``
+        ueber die rohen Interfaces). Kein primaeres Interface / kein Gateway -> leere Liste
+        (die Domaene behandelt das: alle gefundenen gelten dann als unerwartet).
+        """
+        setting = self._settings_repo.get(_EXPECTED_DHCP_SERVERS_KEY)
+        if setting is not None and isinstance(setting.value, list):
+            configured = [item for item in setting.value if isinstance(item, str) and item.strip()]
+            if configured:
+                return configured
+        return await self._gateway_fallback()
+
+    async def _gateway_fallback(self) -> list[str]:
+        """Gateway des primaeren Interface als Erwartungsmenge -- leer, wenn keins.
+
+        Holt die rohen Interfaces ueber den Port, bestimmt das primaere ueber die reine
+        domain-Funktion ``select_primary`` (deterministisch) und nimmt dessen ``gateway``.
+        Kein primaeres Interface ODER kein Gateway gesetzt -> leere Liste (kein Raten).
+        """
+        interfaces = await self._interfaces.discover()
+        primary_name = select_primary(interfaces)
+        if primary_name is None:
+            return []
+        for iface in interfaces:
+            if iface.name == primary_name and iface.gateway:
+                return [iface.gateway]
+        return []

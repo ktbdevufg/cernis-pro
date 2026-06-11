@@ -17,20 +17,25 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from api.diagnostics import (
+    provide_check_dhcp_permission,
     provide_check_external,
     provide_check_tools,
     provide_check_traceroute_permission,
+    provide_detect_rogue_dhcp,
     provide_grab_banner,
     provide_resolve_dns,
     provide_run_traceroute,
 )
 from app import create_app
+from application.diagnostics import RogueDhcpPermissionError
 from domain.diagnostics import (
     BannerResult,
+    DhcpServer,
     DnsRecord,
     DnsResult,
     ExternalCheckResult,
     ExternalPortResult,
+    RogueDhcpResult,
     ToolReport,
     ToolStatus,
     TracerouteHop,
@@ -603,3 +608,103 @@ def test_external_ports_service_error_maps_to_502(app: FastAPI) -> None:
         response = client.get("/api/diagnostics/external/ports", params=[("ports", "443")])
 
     assert response.status_code == 502
+
+
+# ── Rogue-DHCP (3) ─────────────────────────────────────────────────────────────
+
+
+def test_dhcp_wire_form_with_unexpected(app: FastAPI) -> None:
+    """``GET /api/diagnostics/dhcp`` serialisiert das RogueDhcpResult (mit unexpected)."""
+
+    result = RogueDhcpResult(
+        servers=(
+            DhcpServer(ip="192.168.1.1", mac=None, is_expected=True),
+            DhcpServer(ip="192.168.1.66", mac="de:ad:be:ef:00:01", is_expected=False),
+        ),
+        expected=("192.168.1.1",),
+        has_unexpected=True,
+    )
+
+    async def _fake_detect() -> Any:
+        return result
+
+    app.dependency_overrides[provide_detect_rogue_dhcp] = lambda: _fake_detect
+
+    with TestClient(app) as client:
+        response = client.get("/api/diagnostics/dhcp")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "servers": [
+            {"ip": "192.168.1.1", "mac": None, "is_expected": True},
+            {"ip": "192.168.1.66", "mac": "de:ad:be:ef:00:01", "is_expected": False},
+        ],
+        "expected": ["192.168.1.1"],
+        "has_unexpected": True,
+    }
+
+
+def test_dhcp_wire_form_no_unexpected(app: FastAPI) -> None:
+    """Alle erwartet -> has_unexpected false, mac ehrlich null."""
+
+    result = RogueDhcpResult(
+        servers=(DhcpServer(ip="192.168.1.1", mac=None, is_expected=True),),
+        expected=("192.168.1.1",),
+        has_unexpected=False,
+    )
+
+    async def _fake_detect() -> Any:
+        return result
+
+    app.dependency_overrides[provide_detect_rogue_dhcp] = lambda: _fake_detect
+
+    with TestClient(app) as client:
+        response = client.get("/api/diagnostics/dhcp")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["has_unexpected"] is False
+    assert body["servers"][0]["mac"] is None
+
+
+def test_dhcp_without_root_maps_to_403(app: FastAPI) -> None:
+    """Ohne Root wirft der Use-Case RogueDhcpPermissionError -> globaler Handler 403."""
+
+    async def _fake_detect() -> Any:
+        raise RogueDhcpPermissionError("Rogue-DHCP-Erkennung benoetigt Root.")
+
+    app.dependency_overrides[provide_detect_rogue_dhcp] = lambda: _fake_detect
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get("/api/diagnostics/dhcp")
+
+    assert response.status_code == 403
+    assert "Root" in response.json()["detail"]
+
+
+def test_dhcp_permission_ok_wire_form(app: FastAPI) -> None:
+    """``GET /api/diagnostics/dhcp/permission`` liefert die {ok, error}-Naht."""
+
+    app.dependency_overrides[provide_check_dhcp_permission] = lambda: _FakePermission(
+        ok=True, error=""
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/api/diagnostics/dhcp/permission")
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "error": ""}
+
+
+def test_dhcp_permission_blocked_wire_form(app: FastAPI) -> None:
+    """ok=false + Begruendung, wenn kein Root / nmap fehlt."""
+
+    app.dependency_overrides[provide_check_dhcp_permission] = lambda: _FakePermission(
+        ok=False, error="braucht Root"
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/api/diagnostics/dhcp/permission")
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": False, "error": "braucht Root"}

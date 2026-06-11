@@ -1,4 +1,4 @@
-# ADR 0014 — diagnostics-Domäne: Frage-Antwort-Werkzeuge (Block 1a: DNS + traceroute; Block 1b: Tool-/Paketmanager-Erkennung; Block 2a: Banner-Grabbing; Block 2b: externer IP/Port-Check via cpnetcheck)
+# ADR 0014 — diagnostics-Domäne: Frage-Antwort-Werkzeuge (Block 1a: DNS + traceroute; Block 1b: Tool-/Paketmanager-Erkennung; Block 2a: Banner-Grabbing; Block 2b: externer IP/Port-Check via cpnetcheck; Block 3: Rogue-DHCP-Erkennung)
 
 - **Status:** Akzeptiert
 - **Datum:** 2026-06-11
@@ -148,3 +148,45 @@ Der Vertrag des externen Diensts: `GET /v1/myip` (→ `{ip, family}`) und `POST 
 - **Kein neuer import-linter-Contract nötig** — gleiche Domäne `diagnostics`; der `independence`-Contract für `domain.diagnostics` aus 1a deckt 2b mit ab. Der Use-Case importiert `ports.settings` (`SettingsRepository`/`SecretStore`) — das ist `application → ports` (erlaubt) und **genau das Muster, das `application.agent` für den `SecretStore` schon nutzt**; kein domain↔domain- und kein Ring-Verstoß.
 - Die heiklen Stellen (Modell-D-Gate, Port-Validierung, Token-Redaction) liegen testbar im domain-/application-Ring; das HTTP-I/O ist in **einem** Adapter gekapselt (gegen `httpx.MockTransport` ohne Netz testbar, Sprach-Wechsel bleibt lokal).
 - **Grenze:** der externe Dienst ist eine Abhängigkeit — fällt er aus, ist das ein ehrlicher 502 (kein stiller Fallback auf einen anderen Dienst). Die Austauschbarkeit über `cpnetcheck_url` hält den Anbieter offen.
+
+## Block 3: Rogue-DHCP-Erkennung
+
+- **Status:** Akzeptiert
+- **Datum:** 2026-06-11
+- **Bezug:** baut auf 1a (Frage-Antwort-Werkzeug über fünf Ringe, async-Runner-Muster `SystemTracerouteRunner`, Rechte-Port-Muster `TraceroutePermissionPort`); 1b (Tool-Registry `TOOL_PACKAGES`); 2b (Setting-Lesen über `SettingsRepository`); ADR 0009 (interfaces: `select_primary`/`InterfaceDiscoveryPort` als Gateway-Quelle); ADR 0001 (keine stillen Fallbacks, S3); CLAUDE.md (Nur Linux x64; keine Selbst-Eskalation von Rechten)
+
+### Kontext
+
+Block 3 ergänzt die aktiven Frage-Antwort-Werkzeuge um „**antwortet hier ein DHCP-Server, den ich nicht erwarte?**" — ein klassischer Hinweis auf einen falsch konfigurierten oder bösartigen DHCP-Server (Rogue DHCP) im lokalen Netz. Methode: `nmap --script broadcast-dhcp-discover` sendet **ein** DHCP DISCOVER ins lokale Netz und sammelt **alle** antwortenden Offers; CERNIS vergleicht die antwortenden Server gegen eine **erwartete Menge**.
+
+**Speedtest gestrichen, lokale Bandbreite via traffic:** Der ursprünglich für diesen Block angedachte Speedtest ist **gestrichen** (kein verlässlicher, lizenzfreier, anbieterneutraler Mess-Endpunkt ohne Drittabhängigkeit; ein eigener Mess-Server wäre eigene Infrastruktur). Die **lokale Bandbreite/Durchsatz-Sicht** ist bereits durch die **traffic-Domäne** (ADR 0010, Per-App-Netzwerk-Monitoring) abgedeckt — eine zweite Messung hier wäre Doppelung. Block 3 ist damit **nur** Rogue-DHCP-Erkennung.
+
+### Entscheidung
+
+1. **Reine Klassifikation im domain-Ring (`classify_dhcp_servers`).** Frozen `DhcpServer` (`ip`, `mac` ehrlich `None`, `is_expected`) + `RogueDhcpResult` (`servers`, `expected` für Wire-Transparenz, `has_unexpected`). Die Funktion normalisiert/dedupliziert die Funde **nach IP** (erstes Vorkommen gewinnt samt MAC), markiert `is_expected = (ip in expected-Menge)`, sortiert deterministisch nach IP. **Rein, deterministisch, mutationsproben-tauglich** — das Herz des Blocks liegt im testbaren Ring (kein nmap-Wissen, kein I/O).
+
+2. **Erwartete Menge: Nutzerliste ODER Gateway-Fallback.** Das **NICHT-geheime** Setting `expected_dhcp_servers` (Liste — `SettingValue` erlaubt `list`, **kein** neuer Mechanismus) gilt, wenn gesetzt+nicht-leer; gesetzt/gelöscht über die bestehenden settings-Use-Cases (`UpdateSetting`), gelesen im Use-Case über `SettingsRepository`. **Sonst Fallback** auf das Gateway des primären Interface — über den **bestehenden** `InterfaceDiscoveryPort` + die reine domain-Funktion `select_primary` (NICHT direkt ein Adapter; injiziert als Protocol, **genau das 2b-Muster** für `settings_repo`/`secret_store`). Kein Gateway ermittelbar → erwartete Menge **leer**.
+
+3. **Leere Erwartung → alle gefundenen gelten als unexpected (ehrlich).** Ohne Erwartung ist jeder antwortende Server „unerwartet" — das ist korrekt. Der api-Rand/das Frontend kann den Fall „keine Erwartung konfiguriert" am leeren `expected` erkennen und kenntlich machen.
+
+4. **Zeigen+einordnen, NICHT verurteilen.** `is_expected`/`has_unexpected` sind **Fakten**, kein Urteil (kein „GEFAHR"). Die Wertung überlässt die Domäne dem Frontend.
+
+5. **Root-pflichtig, KEINE rootless Alternative — ehrliche Sperre.** Rohe DHCP-Pakete brauchen Root. Anders als traceroute (das eine ungenauere rootless-Methode hat, ADR 0014 Entscheidung 3) gibt es hier **keine** Alternative. Eigener `DhcpPermissionPort` (synchron, Muster `TraceroutePermissionPort`): `is_available` (nmap im PATH) + `check_permission` (`None` = Root vorhanden, sonst „als Root starten"). Der Use-Case `DetectRogueDhcp` prüft die Rechte **VOR** `probe.discover()` und wirft bei fehlendem Root eine **application-eigene** `RogueDhcpPermissionError` → **403** (globaler `exception_handler` im Composition Root, Muster der Tool-fehlt-/Dienst-Naht). Der Probe läuft **NIE blind** gegen fehlendes Root; **keine Selbst-Eskalation** (CLAUDE.md), **kein stiller Fallback** (S3). `CheckDhcpPermission` liefert separat die `{ok, error}`-Auskunft.
+
+6. **`nmap` in der 1b-Tool-Registry (`TOOL_PACKAGES`).** Bei allen fünf Managern heißt das Paket schlicht `nmap` (kein Distro-Unterschied wie bei `dig`). Dadurch greift die 1b-Tool-Erkennung (`/api/diagnostics/tools`) auch für nmap; `ALL_TOOLS` leitet sich automatisch mit ab. Der Install-Hinweis ist damit über Block 1b abgedeckt — der Rechte-Port nennt **keinen** Install-Befehl (saubere Trennung).
+
+7. **System-Binary statt Python-Lib** (nmap broadcast-dhcp-discover) — **Konsistenz mit `ss`/`dig`/`traceroute`** (ADR 0010/0014): kein eigener DHCP-Client-Stack, der das verlässliche Tool nachbaut; der systemnahe Aufruf bleibt in **einem** Adapter (`NmapDhcpProbe`) gekapselt. nmap fehlt → infra-eigene `DiagnosticsToolMissing` → 503 (Muster dig/traceroute). Der Parser ist gegen realistische nmap-Beispielausgaben (ein/zwei/kein Server) ohne echten Netz-/nmap-Aufruf getestet.
+
+### Konsequenzen
+
+**Positiv**
+- Die heikelste Stelle (erwartet vs. unerwartet, Dedup, Sortierung) liegt **rein im domain-Ring**, mutationsproben-getestet; das nmap-/Netz-I/O ist in **einem** Adapter gekapselt (Sprach-Wechsel bleibt lokal).
+- **Ehrliche Sperre** statt stillem Fallback: ohne Root ein klarer 403 mit Begründung, kein blindes Laufen.
+- **Wiederverwendung** statt Doppelung: die Gateway-Quelle ist der bestehende interfaces-Port (`select_primary`), das Setting-Lesen das bestehende 2b-Muster — kein neuer Mechanismus.
+- **Ehrliche None-/leer-Semantik:** MAC `None`, wenn nmap sie nicht ausweist; leere Erwartung → alle unexpected.
+
+**Kosten / Grenzen**
+- **Root-Pflicht:** ohne Root ist die Funktion ein ehrlicher 403 — bewusst, keine rootless Annäherung (rohe DHCP-Pakete gehen nicht anders).
+- **Abhängigkeit von nmap:** fehlt es, ist die Funktion ein ehrlicher 503; Block 1b liefert den Install-Hinweis (`nmap` ist registriert).
+- **Parser an die nmap-Ausgabe gebunden:** robust gegen ein/zwei/kein Server getestet, aber an die reale `broadcast-dhcp-discover`-Ausgabe gekoppelt (gekapselt im reinen Parser, ohne echten Aufruf testbar).
+- **Kein neuer import-linter-Contract nötig** — gleiche Domäne `diagnostics`; der `independence`-Contract für `domain.diagnostics` deckt Block 3 mit ab. Der Use-Case importiert `ports.diagnostics` + `ports.interfaces` + `ports.settings` und `domain.interfaces.select_primary` — das ist `application → ports`/`application → domain` (beides erlaubt; `application.monitoring` nutzt bereits zwei domain-Subpakete) und **kein** application↔application-Import (`ListInterfaces` wurde bewusst **nicht** injiziert, sondern der rohe Port + die reine domain-Funktion — so bleibt das real existierende Muster „application kennt nur domain+ports" unberührt).
