@@ -33,6 +33,18 @@ Block 2a (Banner-Grabbing) -- ein async DATEN-Vertrag (Muster ``TracerouteRunner
   gekapselt, Muster ``TracerouteRunner``). BEWUSST KEIN Rechte-Port: Banner-Grabbing ist
   ein gewoehnlicher TCP-Connect und braucht keine besonderen Rechte (kein Root-Thema).
 
+Block 2b (externer IP/Port-Check via cpnetcheck) -- ein async DATEN-Vertrag (HTTP-I/O):
+
+* ``ExternalReachabilityProvider`` -- die externe Erreichbarkeits-DATEN-Quelle: ruft einen
+  cpnetcheck-konformen Dienst als CLIENT auf (``get_external_ip`` -> die oeffentliche IP;
+  ``check_ports`` -> IP + Port-Ergebnisse). ``async`` (HTTP-I/O ueber ``httpx.AsyncClient``
+  im Adapter). ``base_url``/``token`` kommen als Parameter herein -- der Port ist REINE
+  Mechanik des Aufrufs; der configured-/Konfigurations-Zustand wird NICHT hier, sondern im
+  Use-Case entschieden (er liest URL/Token und ruft den Provider nur, wenn beides da ist).
+  Dienst-Fehler (HTTP 4xx/5xx, Netzfehler, Timeout, JSON-Parsefehler) sind eine
+  application-/infra-eigene Exception (``ExternalCheckError``), KEIN Domaenentyp -- der
+  Adapter wirft mit NEUTRALER Meldung (NIE den Token, NIE interne Details).
+
 Bewusste Entscheidung: KEIN ``@runtime_checkable`` (Muster wie settings/devices/
 scanning/capture/interfaces/traffic/process). Die Vertragspruefung laeuft statisch ueber
 mypy und ueber die Verdrahtung im Composition Root (``app.py``), nicht zur Laufzeit per
@@ -50,6 +62,8 @@ from domain.diagnostics import (
     BannerResult,
     DnsRecordType,
     DnsResult,
+    ExternalIpResult,
+    ExternalPortResult,
     PackageManager,
     TracerouteResult,
 )
@@ -161,5 +175,41 @@ class PackageManagerDetector(Protocol):
         ehrlich keinen Install-Befehl (KEIN Raten). Die Erkennungs-Reihenfolge (welcher
         Manager gewinnt, wenn mehrere da sind) legt der Adapter fest, nicht dieser Vertrag.
         Schnelle lokale which-Pruefung, daher synchron.
+        """
+        ...
+
+
+class ExternalReachabilityProvider(Protocol):
+    """Daten-Quelle der diagnostics-Domaene (2b): externer cpnetcheck-Dienst als CLIENT.
+
+    Ruft einen cpnetcheck-konformen Dienst ueber HTTPS auf. ``base_url``/``token`` kommen
+    als Parameter herein -- der Port ist REINE Mechanik des Aufrufs; ob das Feature
+    konfiguriert ist (URL/Token gesetzt), entscheidet der Use-Case, NICHT dieser Vertrag.
+    ``async`` (HTTP-I/O ueber ``httpx.AsyncClient`` im Adapter, Muster ``TracerouteRunner``
+    fuer die async-Naht). Dienst-Fehler (HTTP 4xx/5xx, Netzfehler, Timeout, JSON-
+    Parsefehler) sind eine application-/infra-eigene Exception (``ExternalCheckError``) mit
+    NEUTRALER Meldung -- KEIN Domaenentyp, NIE Token/interne Details.
+    """
+
+    async def get_external_ip(self, base_url: str, token: str) -> ExternalIpResult:
+        """Fragt die oeffentliche IP von CERNIS beim externen Dienst ab -> ``ExternalIpResult``.
+
+        ``GET <base_url>/v1/myip`` mit ``Authorization: Bearer <token>`` -> die aus Sicht
+        des Dienstes sichtbare oeffentliche Adresse + Familie. Ein Dienst-/Netzfehler ist
+        eine ``ExternalCheckError`` (neutrale Meldung), KEIN leeres/erfundenes Ergebnis.
+        """
+        ...
+
+    async def check_ports(
+        self, base_url: str, token: str, ports: Sequence[int]
+    ) -> tuple[ExternalIpResult, tuple[ExternalPortResult, ...]]:
+        """Prueft, ob ``ports`` von aussen erreichbar sind -> (IP, Port-Ergebnisse).
+
+        ``POST <base_url>/v1/portcheck`` mit Bearer-Token + JSON ``{"ports": [...],
+        "protocol": "tcp"}`` -> die gepruefte IP + je Port ein ``ExternalPortResult``
+        (reachable + state). ``ports`` ist bereits client-seitig validiert (Bereich/max/
+        dedup, ``domain.validate_requested_ports``) -- der Dienst setzt seine Whitelist
+        zusaetzlich durch. Ein Dienst-/Netzfehler ist eine ``ExternalCheckError`` (neutrale
+        Meldung), KEIN leeres/erfundenes Ergebnis.
         """
         ...

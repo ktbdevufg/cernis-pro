@@ -33,3 +33,30 @@ class DiagnosticsToolMissingError(DiagnosticsApplicationError):
     NUR neutrale Meldung ("Programm 'dig' wurde nicht gefunden.") -- KEIN distro-
     spezifischer Install-Befehl (Block 1b reichert die Erkennung+den Install-Hinweis an).
     """
+
+
+class ExternalCheckError(DiagnosticsApplicationError):
+    """Der externe cpnetcheck-Dienst war nicht erreichbar/lieferte einen Fehler (2b).
+
+    Analog ``DiagnosticsToolMissingError`` der kanonische application-Aufhaenger fuer den
+    Dienst-Ausfall des externen IP/Port-Checks (HTTP 4xx/5xx, Netzfehler, Timeout, JSON-
+    Parsefehler). Der INFRASTRUKTUR-Adapter wirft diese Exception (anders als die
+    Tool-fehlt-Naht, die eine infra-EIGENE Exception wirft -- ``ExternalCheckError`` traegt
+    KEINEN application-internen Zustand, nur eine neutrale Meldung, darf also vom
+    infrastructure-Ring NICHT importiert werden; siehe unten). Der Composition Root
+    (``app.py``) bildet sie ueber einen globalen ``exception_handler`` auf **502** ab
+    (Bad Gateway -- der Fehler liegt im externen Dienst, nicht in CERNIS).
+
+    NUR neutrale Meldung -- NIE den Token, NIE interne Details (Sicherheitsnaht, ADR 0014
+    Block 2b). 401 vom Dienst -> "Authentifizierung am externen Dienst fehlgeschlagen".
+
+    WICHTIG (Ring-Realitaet, wie die Tool-fehlt-Naht): Der import-linter-Contract
+    "infrastructure kennt nicht application/api" verbietet dem Adapter, diese
+    application-Exception zu werfen. Darum wirft der Adapter -- exakt wie bei
+    ``DiagnosticsToolMissing`` -- eine INFRASTRUKTUR-eigene Exception
+    (``infrastructure.diagnostics_linux.ExternalCheckFailed``), die der Composition Root auf
+    502 abbildet. Diese application-Klasse bleibt der domaenen-konforme Aufhaenger und wird
+    vom api-Ring NICHT gebraucht (das Mapping sitzt am Composition Root) -- sie ist die
+    kanonische Bedeutung "externer Check fehlgeschlagen" der Domaene und steht den
+    Use-Case-Tests als Durchwurf-/Mapping-Typ zur Verfuegung.
+    """

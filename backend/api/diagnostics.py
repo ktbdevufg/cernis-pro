@@ -26,18 +26,38 @@ Attribut-Zugriff zu JSON serialisiert (Typ ``Any``, Muster ``api/process``).
   kam (kein erfundener Wert). KEINE konfigurierbaren Payloads -- nur eine minimale
   Standard-Anfrage (Sicherheits-Grenze: Diagnose, kein Byte-Sender).
 
+* ``GET /api/diagnostics/external/ip`` (2b) -- externer IP-Check ueber einen cpnetcheck-
+  konformen Dienst (Modell D). Liefert ``{configured, ip, family, error}``;
+  ``configured=false`` = nicht konfiguriert (URL/Token fehlt, neutraler Hinweis, KEIN
+  Aussen-Aufruf). KEINE Speicherung. Der Token wird NIE im Body ausgegeben.
+* ``GET /api/diagnostics/external/ports?ports=80&ports=443`` (2b) -- externer Port-Check.
+  ``ports`` ist ein wiederholbarer Pflicht-Query-Param (int, FastAPI validiert 1..65535).
+  Liefert ``{configured, checked_ip, family, results:[{port,reachable,state}], error}``.
+  ``configured=false`` = nicht konfiguriert (Modell D). Der Token wird NIE im Body
+  ausgegeben.
+
 TOOL-FEHLT -> HTTP: Fehlt das System-Binary (``dig``/``traceroute``), wirft der Adapter
 ``infrastructure.diagnostics_linux.DiagnosticsToolMissing``. Diesen infrastruktur-nahen
 Ausfall faengt ein GLOBALER ``exception_handler`` im Composition Root (``app.py``) und
 bildet ihn auf 503 ab -- exakt wie ``SecretStoreUnavailableError`` (siehe ADR 0014 /
 ``application.diagnostics.errors``). Der api-Ring importiert die Exception bewusst NICHT
 (api -> nur application); das Mapping bleibt am Composition Root.
+
+EXTERNER-DIENST-FEHLER -> HTTP (2b): Scheitert der externe cpnetcheck-Dienst (HTTP >=400,
+Netzfehler, Timeout, kaputtes JSON), wirft der Adapter
+``infrastructure.diagnostics_linux.ExternalCheckFailed``. Dieser infra-nahe Ausfall wird
+GENAUSO ueber einen globalen ``exception_handler`` im Composition Root auf **502** (Bad
+Gateway -- externer Dienst) abgebildet (siehe ADR 0014 Block 2b /
+``application.diagnostics.errors.ExternalCheckError``). Der api-Ring importiert die
+Exception bewusst NICHT (api -> nur application); das Mapping bleibt am Composition Root.
+NIE Token/interne Details im Fehler-Body.
 """
 
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import Field
 
 from application.diagnostics import CheckTraceroutePermission
 
@@ -62,6 +82,11 @@ type CheckToolsRunner = Callable[[list[str] | None], Any]
 # 2a: klopft an target:port und liefert das rohe BannerResult (``Any`` -- der api-Ring kennt
 # keine domain-Typen). Async: blockierendes Socket-I/O im Adapter ueber asyncio gekapselt.
 type GrabBannerRunner = Callable[[str, int], Awaitable[Any]]
+# 2b: externer Check ueber cpnetcheck. EINE Runner-Signatur mit optionaler Portliste
+# (``None`` -> reiner IP-Check; Liste -> IP + Port-Check) bedient BEIDE Routen unten.
+# Liefert das rohe ExternalCheckResult (``Any`` -- der api-Ring kennt keine domain-Typen).
+# Async: HTTP-I/O im Adapter ueber httpx gekapselt.
+type CheckExternalRunner = Callable[[list[int] | None], Awaitable[Any]]
 
 
 # Dependency-Marker: im Composition Root (app.py) per dependency_overrides mit den
@@ -84,6 +109,10 @@ def provide_check_tools() -> CheckToolsRunner:
 
 def provide_grab_banner() -> GrabBannerRunner:
     raise NotImplementedError("GrabBannerRunner wird in app.py verdrahtet")
+
+
+def provide_check_external() -> CheckExternalRunner:
+    raise NotImplementedError("CheckExternalRunner wird in app.py verdrahtet")
 
 
 def _record_to_dict(r: Any) -> dict[str, Any]:
@@ -136,6 +165,34 @@ def _banner_result_to_dict(result: Any) -> dict[str, Any]:
         "probe": result.probe,
         "banner": result.banner,
         "state": result.state,
+    }
+
+
+def _external_port_to_dict(p: Any) -> dict[str, Any]:
+    # p ist ein domain.ExternalPortResult; per Attribut-Zugriff serialisiert.
+    return {"port": p.port, "reachable": p.reachable, "state": p.state}
+
+
+def _external_ip_to_dict(result: Any) -> dict[str, Any]:
+    # result ist ein domain.ExternalCheckResult; IP-Sicht (2b). ``ip`` aus checked_ip --
+    # ehrlich null, wenn nicht konfiguriert. ``configured``/``error`` benennen den Zustand.
+    return {
+        "configured": result.configured,
+        "ip": result.checked_ip,
+        "family": result.family,
+        "error": result.error,
+    }
+
+
+def _external_ports_to_dict(result: Any) -> dict[str, Any]:
+    # result ist ein domain.ExternalCheckResult; Port-Sicht (2b). ``results`` ist je Port
+    # ein {port,reachable,state}; leer, wenn nicht konfiguriert oder reiner IP-Check.
+    return {
+        "configured": result.configured,
+        "checked_ip": result.checked_ip,
+        "family": result.family,
+        "results": [_external_port_to_dict(p) for p in result.ports],
+        "error": result.error,
     }
 
 
@@ -220,3 +277,39 @@ async def grab_banner(
     """
     result = await grab(target, port)
     return _banner_result_to_dict(result)
+
+
+@router.get("/external/ip")
+async def external_ip(
+    check: Annotated[CheckExternalRunner, Depends(provide_check_external)],
+) -> dict[str, Any]:
+    """Externer IP-Check (2b): die aus Sicht des cpnetcheck-Diensts oeffentliche IP.
+
+    Ruft den Runner OHNE Ports (reiner IP-Check). Liefert ``{configured, ip, family,
+    error}``: ``configured=false`` heisst "nicht konfiguriert" (URL/Token fehlt) -> ``ip``/
+    ``family`` ``null``, ``error`` traegt den neutralen Hinweis (KEIN Aufruf nach aussen,
+    Modell D). Bei einem Dienstfehler wirft der Adapter -> 502 (globaler Handler). Der Token
+    wird NIE im Body ausgegeben.
+    """
+    result = await check(None)
+    return _external_ip_to_dict(result)
+
+
+@router.get("/external/ports")
+async def external_ports(
+    check: Annotated[CheckExternalRunner, Depends(provide_check_external)],
+    ports: Annotated[list[Annotated[int, Field(ge=1, le=65535)]], Query()],
+) -> dict[str, Any]:
+    """Externer Port-Check (2b): sind die Ports von aussen erreichbar?
+
+    ``ports`` ist ein wiederholbarer Pflicht-Query-Param (``?ports=80&ports=443``); FastAPI
+    validiert JEDEN Wert als int im Bereich 1..65535 (Item-level ``Field(ge/le)`` -- ein
+    Constraint direkt auf ``list[int]`` wuerde gegen die ganze Liste pruefen; ungueltig ->
+    422). Der Runner reicht die Ports an den Use-Case (der dedupt/begrenzt client-seitig).
+    Liefert ``{configured,
+    checked_ip, family, results:[{port,reachable,state}], error}``: ``configured=false`` ->
+    nicht konfiguriert (neutraler Hinweis, kein Aussen-Aufruf). Dienstfehler -> 502
+    (globaler Handler). Der Token wird NIE im Body ausgegeben.
+    """
+    result = await check(ports)
+    return _external_ports_to_dict(result)

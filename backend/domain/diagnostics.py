@@ -51,6 +51,24 @@ ist Infrastruktur):
 * ``sanitize_banner`` -- bereinigt die rohe Begruessung rein + deterministisch (erste
   Zeile, Steuerzeichen raus, auf Maximallaenge gekuerzt) -- testbar ohne Netz.
 
+Block 2b (externer IP/Port-Check via cpnetcheck) -- reine Wertobjekte + eine reine
+Validierungsfunktion (kein I/O, kein HTTP, keine Uhr -- der Aufruf nach aussen ist
+Infrastruktur, der configured-Zustand ist application):
+
+* ``ExternalIpResult`` -- die vom externen Dienst gemeldete oeffentliche IP + Familie
+  (ipv4/ipv6) als frozen Wertobjekt.
+* ``ExternalPortResult`` -- das Ergebnis EINES geprueften Ports vom externen Dienst:
+  ``reachable`` (von aussen erreichbar?) + ``state`` (open/closed/filtered).
+* ``ExternalCheckResult`` -- das gebuendelte Ergebnis. ``configured`` False heisst: das
+  Feature ist nicht konfiguriert (URL/Token fehlt) -- ``checked_ip``/``family`` ``None``,
+  ``ports`` leer, ``error`` traegt den neutralen Hinweis, KEIN Aufruf nach aussen. Bei
+  einem Dienst-/Netzfehler traegt ``error`` die neutrale Fehlermeldung (NIE Token/interne
+  Details). Ehrliche None-Semantik (kein erfundener Wert).
+* ``validate_requested_ports`` -- spiegelt die Dienst-Grenzen client-seitig (dedup,
+  Bereich 1..65535, max 10), damit offensichtlich Ungueltiges gar nicht erst rausgeht.
+  Rein, deterministisch, mutationsproben-tauglich. KEINE Whitelist-Doppelung (die
+  durchsetzt der Dienst; der Client darf grosszuegiger sein, aber Bereich+max+dedup lokal).
+
 DARSTELLUNG bleibt draussen: kein Mensch-lesbares Formatieren, keine Icons -- das fuehrt
 api/Frontend. Die Domaene fuehrt nur Werte.
 """
@@ -369,3 +387,96 @@ def sanitize_banner(raw: str) -> str:
     # Nur druckbare Zeichen behalten (Steuerzeichen wie \t,\x00,\x1b raus); dann trimmen.
     printable = "".join(ch for ch in first_line if ch.isprintable())
     return printable.strip()[:_MAX_BANNER_LEN]
+
+
+# ── Block 2b: externer IP/Port-Check via cpnetcheck (reine Werte + Validierung) ─
+
+# Maximale Anzahl Ports pro Port-Check-Anfrage -- spiegelt die Dienst-Grenze client-
+# seitig (der Dienst lehnt mehr mit 422 ab). Eine kleine Grenze haelt die Anfrage
+# diagnose-typisch knapp; mehr Ports bedeuten laengere Pruefzeit beim Dienst.
+_MAX_REQUESTED_PORTS = 10
+# Gueltiger TCP/UDP-Port-Bereich. 0 ist kein nutzbarer Ziel-Port, 65535 die Obergrenze.
+_MIN_PORT = 1
+_MAX_PORT = 65535
+
+
+@dataclass(frozen=True)
+class ExternalIpResult:
+    """Die vom externen cpnetcheck-Dienst gemeldete oeffentliche IP (frozen, 2b).
+
+    ``ip`` ist die aus Sicht des Dienstes sichtbare oeffentliche Adresse von CERNIS,
+    ``family`` die Adressfamilie (``"ipv4"``/``"ipv6"``, wie der Dienst sie meldet). Die
+    Domaene interpretiert die Werte NICHT weiter -- sie fuehrt sie (der Dienst ist die
+    Quelle der Wahrheit ueber die extern sichtbare Adresse).
+    """
+
+    ip: str
+    family: str
+
+
+@dataclass(frozen=True)
+class ExternalPortResult:
+    """Das Ergebnis EINES vom externen Dienst geprueften Ports (frozen, 2b).
+
+    ``port`` ist der gepruefte Ziel-Port, ``reachable`` ob er von aussen erreichbar ist,
+    ``state`` benennt das Ergebnis ehrlich: ``"open"`` (erreichbar), ``"closed"`` (aktiv
+    abgewiesen) oder ``"filtered"`` (keine Antwort/geblockt). ``reachable`` ist die
+    verdichtete Ja/Nein-Sicht, ``state`` die genauere Auskunft des Diensts.
+    """
+
+    port: int
+    reachable: bool
+    state: Literal["open", "closed", "filtered"]
+
+
+@dataclass(frozen=True)
+class ExternalCheckResult:
+    """Das gebuendelte Ergebnis des externen Checks (frozen, 2b) -- ehrliche Semantik.
+
+    ``configured`` False heisst: das Feature ist nicht konfiguriert (cpnetcheck-URL und/
+    oder -Token fehlt) -- dann ist ``checked_ip``/``family`` ``None``, ``ports`` leer und
+    ``error`` traegt den neutralen Hinweis; in diesem Fall erfolgt KEIN Aufruf nach aussen
+    (Modell D, ADR 0001 -- kein stiller Fallback). ``configured`` True heisst: der Dienst
+    wurde gerufen; dann tragen ``checked_ip``/``family`` die Antwort (bei reinem IP-Check
+    bleibt ``ports`` leer) und ``error`` ist ``None`` bei Erfolg bzw. bei einem
+    Dienst-/Netzfehler die NEUTRALE Fehlermeldung (NIE Token/interne Details).
+    """
+
+    configured: bool
+    checked_ip: str | None
+    family: str | None
+    ports: tuple[ExternalPortResult, ...]
+    error: str | None
+
+
+def validate_requested_ports(ports: Sequence[int]) -> tuple[int, ...]:
+    """Validiert die angefragten Ports client-seitig -- rein, deterministisch, testbar.
+
+    Spiegelt die Dienst-Grenzen, damit offensichtlich Ungueltiges gar nicht erst nach
+    aussen geht (der Dienst setzt eine Whitelist zusaetzlich durch -- die wird hier NICHT
+    gedoppelt; der Client darf grosszuegiger sein, aber Bereich+max+dedup lokal):
+
+    1. **Bereich**: nur Ports ``1..65535`` -- alles ausserhalb wird verworfen (ein Port 0
+       oder >65535 ist kein gueltiges Ziel).
+    2. **Dedup**: doppelte Ports werden auf das erste Vorkommen reduziert (gleiche Pruefung
+       zweimal anzufragen ist Laerm).
+    3. **Maximal ``_MAX_REQUESTED_PORTS`` (10)**: spiegelt die Dienst-Obergrenze; ueber die
+       Grenze hinaus wird abgeschnitten (die ersten 10 gueltigen, in Eingabe-Reihenfolge).
+
+    Die Eingabe-Reihenfolge bleibt erhalten (nach Dedup) -- der Nutzer sieht seine Ports
+    in der angefragten Ordnung. Rein: kein I/O, keine Uhr; gleiche Eingabe -> gleiches
+    Ergebnis. Leere/komplett ungueltige Eingabe -> leeres Tupel (der Aufrufer entscheidet,
+    ob das ein reiner IP-Check ist).
+    """
+    seen: set[int] = set()
+    valid: list[int] = []
+    for port in ports:
+        if port < _MIN_PORT or port > _MAX_PORT:
+            continue  # ausserhalb des gueltigen Bereichs -- verwerfen, nicht korrigieren
+        if port in seen:
+            continue  # Dedup: erstes Vorkommen gewinnt
+        seen.add(port)
+        valid.append(port)
+        if len(valid) >= _MAX_REQUESTED_PORTS:
+            break  # Dienst-Obergrenze gespiegelt -- ueberzaehlige abschneiden
+    return tuple(valid)

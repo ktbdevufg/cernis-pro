@@ -30,7 +30,12 @@ class Setting:
 # Keys, deren GESAMTER Wert geheim ist (ADR 0001). smtp_config ist bewusst nicht
 # dabei: dort ist nur das verschachtelte Passwort geheim -- das gehoert in die
 # kuenftige alerting-Domaene mit eigenem, bereits redigierendem Endpunkt.
-SECRET_KEYS: frozenset[str] = frozenset({"shodan_api_key", "fritz_password"})
+# cpnetcheck_token (ADR 0014 Block 2b): der Bearer-Token fuer den externen
+# cpnetcheck-Dienst -- als ganzer Wert geheim. Allein durch diesen Eintrag wird er
+# automatisch redigiert (GetSettings/redact) und ausschliesslich ueber UpdateSecret
+# setzbar; UpdateSetting lehnt ihn via is_secret() ab. Die zugehoerige NICHT-geheime
+# URL (cpnetcheck_url) ist KEIN Secret und liegt darum nicht hier.
+SECRET_KEYS: frozenset[str] = frozenset({"shodan_api_key", "fritz_password", "cpnetcheck_token"})
 
 # Platzhalter, der einen redigierten Secret-Wert nach aussen ersetzt.
 # "[REDACTED]" weil: (1) truthy -> erfuellt die Praesenzpruefung des Frontends

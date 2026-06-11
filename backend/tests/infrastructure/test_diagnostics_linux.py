@@ -11,12 +11,15 @@ import asyncio
 import os
 import shutil
 
+import httpx
 import pytest
 
 from domain.diagnostics import DnsRecord
 from infrastructure.diagnostics_linux import (
     DiagnosticsToolMissing,
     DigDnsResolver,
+    ExternalCheckFailed,
+    HttpxReachabilityProvider,
     LinuxPackageManagerDetector,
     LinuxTraceroutePermission,
     ShutilToolDetector,
@@ -402,3 +405,153 @@ def test_grab_banner_tls_port_is_passive_no_banner(monkeypatch: pytest.MonkeyPat
     assert result.banner is None
     # Auch hier: NICHTS gesendet (passive) -- kein Klartext-HTTP an einen TLS-Port.
     assert writer.written == b""
+
+
+# ── Block 2b: HttpxReachabilityProvider gegen httpx.MockTransport (kein Netz) ──
+
+_BASE_URL = "https://cpnetcheck.example"
+_TOKEN = "supergeheim-token-xyz"
+
+
+def _provider_with(handler: object) -> HttpxReachabilityProvider:
+    # MockTransport ersetzt das Netz -- KEINE echten Aufrufe. Der Provider baut den Client
+    # mit diesem Transport (verify-Naht bleibt unberuehrt; im Test irrelevant, kein TLS).
+    return HttpxReachabilityProvider(transport=httpx.MockTransport(handler))  # type: ignore[arg-type]
+
+
+def test_external_ip_200_parses_result_and_sets_bearer() -> None:
+    seen: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        seen["auth"] = request.headers.get("Authorization")
+        return httpx.Response(200, json={"ip": "203.0.113.7", "family": "ipv4"})
+
+    provider = _provider_with(handler)
+    result = asyncio.run(provider.get_external_ip(_BASE_URL, _TOKEN))
+    assert (result.ip, result.family) == ("203.0.113.7", "ipv4")
+    # Bearer-Header gesetzt, HTTPS-URL, korrekter Pfad.
+    assert seen["auth"] == f"Bearer {_TOKEN}"
+    assert seen["url"] == f"{_BASE_URL}/v1/myip"
+    assert str(seen["url"]).startswith("https://")
+
+
+def test_external_portcheck_200_parses_results_and_sends_body() -> None:
+    seen: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        seen["body"] = request.content
+        return httpx.Response(
+            200,
+            json={
+                "checked_ip": "203.0.113.7",
+                "family": "ipv4",
+                "results": [
+                    {"port": 80, "reachable": True, "state": "open"},
+                    {"port": 443, "reachable": False, "state": "filtered"},
+                ],
+            },
+        )
+
+    provider = _provider_with(handler)
+    ip, ports = asyncio.run(provider.check_ports(_BASE_URL, _TOKEN, [80, 443]))
+    assert ip.ip == "203.0.113.7"
+    assert [(p.port, p.reachable, p.state) for p in ports] == [
+        (80, True, "open"),
+        (443, False, "filtered"),
+    ]
+    assert seen["url"] == f"{_BASE_URL}/v1/portcheck"
+    # JSON-Body trug die Ports + Protokoll.
+    assert b'"ports"' in seen["body"]  # type: ignore[operator]
+    assert b'"tcp"' in seen["body"]  # type: ignore[operator]
+
+
+def test_external_401_maps_to_auth_error_without_token() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, json={"error": "bad token"})
+
+    provider = _provider_with(handler)
+    with pytest.raises(ExternalCheckFailed) as exc:
+        asyncio.run(provider.get_external_ip(_BASE_URL, _TOKEN))
+    # Neutrale Auth-Meldung -- der Token leakt NICHT in den Fehlertext.
+    assert "Authentifizierung" in exc.value.message
+    assert _TOKEN not in exc.value.message
+    assert _TOKEN not in str(exc.value)
+
+
+def test_external_422_maps_to_generic_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(422, json={"error": "invalid ports"})
+
+    provider = _provider_with(handler)
+    with pytest.raises(ExternalCheckFailed) as exc:
+        asyncio.run(provider.check_ports(_BASE_URL, _TOKEN, [80]))
+    # Der Dienst-Body ("invalid ports") wird NICHT durchgereicht.
+    assert "invalid ports" not in exc.value.message
+    assert _TOKEN not in exc.value.message
+
+
+def test_external_503_maps_to_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, json={"error": "down"})
+
+    provider = _provider_with(handler)
+    with pytest.raises(ExternalCheckFailed):
+        asyncio.run(provider.get_external_ip(_BASE_URL, _TOKEN))
+
+
+def test_external_timeout_maps_to_error_without_token() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectTimeout("timed out", request=request)
+
+    provider = _provider_with(handler)
+    with pytest.raises(ExternalCheckFailed) as exc:
+        asyncio.run(provider.get_external_ip(_BASE_URL, _TOKEN))
+    assert _TOKEN not in exc.value.message
+    assert _TOKEN not in str(exc.value)
+
+
+def test_external_network_error_maps_to_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("no route", request=request)
+
+    provider = _provider_with(handler)
+    with pytest.raises(ExternalCheckFailed):
+        asyncio.run(provider.get_external_ip(_BASE_URL, _TOKEN))
+
+
+def test_external_broken_json_maps_to_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        # 200, aber kein gueltiges JSON -- der Rohbody leakt nicht.
+        return httpx.Response(200, content=b"<html>not json</html>")
+
+    provider = _provider_with(handler)
+    with pytest.raises(ExternalCheckFailed):
+        asyncio.run(provider.get_external_ip(_BASE_URL, _TOKEN))
+
+
+def test_external_schema_mismatch_maps_to_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        # 200, JSON, aber ip fehlt -> Schema-Abweichung -> Fehler (kein erfundener Wert).
+        return httpx.Response(200, json={"family": "ipv4"})
+
+    provider = _provider_with(handler)
+    with pytest.raises(ExternalCheckFailed):
+        asyncio.run(provider.get_external_ip(_BASE_URL, _TOKEN))
+
+
+def test_external_unknown_port_state_maps_to_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "checked_ip": "203.0.113.7",
+                "family": "ipv4",
+                "results": [{"port": 80, "reachable": True, "state": "weird"}],
+            },
+        )
+
+    provider = _provider_with(handler)
+    with pytest.raises(ExternalCheckFailed):
+        asyncio.run(provider.check_ports(_BASE_URL, _TOKEN, [80]))

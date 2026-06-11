@@ -29,6 +29,19 @@ Block 1b:
   ``CheckTraceroutePermission``). ``requested_tools`` None/leer -> ``ALL_TOOLS``
   (Erstinstallation: alle pruefen); sonst genau die genannten (Laufzeit). Unbekannte
   Tool-Namen (nicht in ``TOOL_PACKAGES``) werden defensiv ignoriert (nicht erfunden).
+
+Block 2b:
+
+* ``CheckExternalReachability`` -- der externe IP/Port-Check (Modell D). Liest Token
+  (``SecretStore``, Muster agent ``secret_store.get(...) or ""``) + URL
+  (``SettingsRepository``, Default-Fallback ``DEFAULT_CPNETCHECK_URL`` wenn nicht gesetzt)
+  und ruft den ``ExternalReachabilityProvider`` NUR, wenn Token UND URL gesetzt sind. Sonst
+  ehrlich ``ExternalCheckResult(configured=False, ...)`` mit neutralem Hinweis -- KEIN
+  Aufruf nach aussen (ADR 0001, kein stiller Fallback). Eine Methode mit optionaler
+  Portliste (``ports=None`` -> reiner IP-Check; Liste -> IP + Port-Check), passend zu den
+  zwei api-Routen. Dienst-Fehler (``ExternalCheckError`` des Providers) werden NICHT
+  verschluckt: sie laufen durch zum api-Rand, der sie (Muster ``DiagnosticsToolMissing`` ->
+  503) auf **502** abbildet -- konsistent zum bestehenden diagnostics-Durchwurf-Muster.
 """
 
 from collections.abc import Sequence
@@ -39,17 +52,39 @@ from domain.diagnostics import (
     BannerResult,
     DnsRecordType,
     DnsResult,
+    ExternalCheckResult,
     ToolReport,
     TracerouteResult,
     assemble_report,
+    validate_requested_ports,
 )
 from ports.diagnostics import (
     BannerGrabber,
     DnsResolver,
+    ExternalReachabilityProvider,
     PackageManagerDetector,
     ToolDetector,
     TraceroutePermissionPort,
     TracerouteRunner,
+)
+from ports.settings import SecretStore, SettingsRepository
+
+# Default-cpnetcheck-URL, falls das (NICHT-geheime) Setting ``cpnetcheck_url`` nicht
+# gesetzt ist. Die Konstante lebt HIER in der diagnostics-Schicht (NICHT in settings --
+# settings ist ein generischer KV-Store ohne Default-Mechanik). Der Use-Case faellt bei
+# Abwesenheit des Settings auf diesen Wert zurueck (austauschbar ueber das Setting).
+DEFAULT_CPNETCHECK_URL = "https://cpnetcheck.bach.world"
+
+# Settings-/Secret-Keys des externen Checks. ``cpnetcheck_token`` ist ein Secret
+# (domain.settings.SECRET_KEYS -> redigiert, nur ueber UpdateSecret setzbar); die URL ist
+# ein normales Setting. Hier als benannte Konstanten, damit der Lese-Pfad eindeutig ist.
+_CPNETCHECK_TOKEN_KEY = "cpnetcheck_token"
+_CPNETCHECK_URL_KEY = "cpnetcheck_url"
+
+# Neutraler Hinweis fuer den nicht-konfigurierten Zustand (Modell D, ADR 0001). KEIN
+# stiller Fallback -- der Zustand wird explizit benannt, nicht verschwiegen.
+_NOT_CONFIGURED_HINT = (
+    "Externer Check nicht konfiguriert: bitte cpnetcheck-URL und Token in den Einstellungen setzen."
 )
 
 
@@ -169,3 +204,82 @@ class CheckDiagnosticsTools:
         availability = {tool: self._detector.is_available(tool) for tool in tools}
         manager = self._pm.detect()
         return assemble_report(manager, availability, tools)
+
+
+class CheckExternalReachability:
+    """Externer IP/Port-Check via cpnetcheck (2b, Modell D): nur aktiv bei URL+Token.
+
+    Orchestriert den ``ExternalReachabilityProvider`` mit der Settings-/Secret-Naht: liest
+    den Token (``SecretStore``, Muster agent: ``get(...) or ""``) und die URL
+    (``SettingsRepository``, Default-Fallback ``DEFAULT_CPNETCHECK_URL``). Ist Token ODER
+    URL leer -> ``ExternalCheckResult(configured=False, ...)`` mit neutralem Hinweis, OHNE
+    Aufruf nach aussen (ADR 0001, kein stiller Fallback). Sonst ruft er den Provider und
+    baut das ``ExternalCheckResult(configured=True, ...)``.
+
+    Die Ports kommen per Constructor-Injection als Protocol-Typ herein -- nie ein konkreter
+    Adapter (settings_repo + secret_store ebenfalls als Protocol, Muster agent). Dienst-/
+    Netzfehler (``ExternalCheckError``) verschluckt der Use-Case NICHT: sie laufen durch zum
+    api-Rand (-> 502), konsistent zum bestehenden diagnostics-Durchwurf-Muster
+    (``DiagnosticsToolMissing`` -> 503). EINE Methode mit optionaler Portliste passt zu den
+    zwei api-Routen (``ports=None`` -> reiner IP-Check; Liste -> IP + Port-Check).
+    """
+
+    def __init__(
+        self,
+        provider: ExternalReachabilityProvider,
+        settings_repo: SettingsRepository,
+        secret_store: SecretStore,
+    ) -> None:
+        self._provider = provider
+        self._settings_repo = settings_repo
+        self._secret_store = secret_store
+
+    async def __call__(self, ports: Sequence[int] | None = None) -> ExternalCheckResult:
+        """Fuehrt den externen Check aus -> ``ExternalCheckResult`` (Modell D).
+
+        ``ports`` ``None``/leer -> reiner IP-Check (``get_external_ip``); sonst zusaetzlich
+        Port-Check (``check_ports``) ueber die client-seitig validierten Ports
+        (``validate_requested_ports`` -- Bereich/max/dedup). Token leer ODER URL leer ->
+        ``configured=False`` + neutraler Hinweis, KEIN Aufruf nach aussen. Sonst Provider-
+        Aufruf; eine ``ExternalCheckError`` des Providers wird NICHT gefangen (Durchwurf ->
+        api-Rand -> 502).
+        """
+        # Token als Klartext aus dem SecretStore (Muster agent: ``get(...) or ""`` -- ein
+        # nicht gesetzter Token ist "" und damit leer). Die URL ueber das (Roh-)Setting;
+        # fehlt es ODER ist sein Wert leer -> Default-Konstante (austauschbar ueber das
+        # Setting, kein settings-interner Default-Mechanismus).
+        token = self._secret_store.get(_CPNETCHECK_TOKEN_KEY) or ""
+        url_setting = self._settings_repo.get(_CPNETCHECK_URL_KEY)
+        url = (
+            str(url_setting.value)
+            if url_setting is not None and url_setting.value
+            else DEFAULT_CPNETCHECK_URL
+        )
+        # Modell D: nur aktiv, wenn Token UND URL gesetzt sind. Der Token ist die echte
+        # Huerde (die URL hat einen Default) -- ohne Token kein Aufruf nach aussen.
+        if not token or not url:
+            return ExternalCheckResult(
+                configured=False,
+                checked_ip=None,
+                family=None,
+                ports=(),
+                error=_NOT_CONFIGURED_HINT,
+            )
+        requested = validate_requested_ports(ports) if ports else ()
+        if requested:
+            ip, port_results = await self._provider.check_ports(url, token, requested)
+            return ExternalCheckResult(
+                configured=True,
+                checked_ip=ip.ip,
+                family=ip.family,
+                ports=port_results,
+                error=None,
+            )
+        ip = await self._provider.get_external_ip(url, token)
+        return ExternalCheckResult(
+            configured=True,
+            checked_ip=ip.ip,
+            family=ip.family,
+            ports=(),
+            error=None,
+        )

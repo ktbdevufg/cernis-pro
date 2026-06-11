@@ -75,6 +75,7 @@ from api.devices import (
 )
 from api.devices import router as devices_router
 from api.diagnostics import (
+    provide_check_external,
     provide_check_tools,
     provide_check_traceroute_permission,
     provide_grab_banner,
@@ -172,6 +173,7 @@ from application.devices import (
 )
 from application.diagnostics import (
     CheckDiagnosticsTools,
+    CheckExternalReachability,
     CheckTraceroutePermission,
     GrabBanner,
     ResolveDns,
@@ -237,6 +239,8 @@ from infrastructure.device_repository import SqliteDeviceRepository
 from infrastructure.diagnostics_linux import (
     DiagnosticsToolMissing,
     DigDnsResolver,
+    ExternalCheckFailed,
+    HttpxReachabilityProvider,
     LinuxPackageManagerDetector,
     LinuxTraceroutePermission,
     ShutilToolDetector,
@@ -1245,6 +1249,32 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # neutrale Meldung benennt das fehlende Programm; der Install-Hinweis folgt in 1b.
         logger.error("diagnostics_tool_missing", tool=exc.tool)
         return JSONResponse(status_code=503, content={"detail": exc.message})
+
+    # ── diagnostics 2b: externer IP/Port-Check via cpnetcheck verdrahten ───────────
+    # Modell D: der Use-Case liest URL (settings-``repository()``) + Token (``secret_store()``,
+    # die DIESELBEN lazy-memoisierten Factories wie settings/agent) und ruft den
+    # httpx-Provider NUR, wenn beides gesetzt ist. Der Runner reicht die optionale Portliste
+    # (None -> reiner IP-Check) an den Use-Case durch und gibt das ExternalCheckResult als
+    # Any zurueck (der api-Ring serialisiert, kennt keine domain-Typen). Der Provider ist
+    # zustandslos (httpx.AsyncClient pro Aufruf) -- pro Request frisch gewickelt, kein State.
+    async def _check_external(ports: list[int] | None) -> Any:
+        return await CheckExternalReachability(
+            HttpxReachabilityProvider(), repository(), secret_store()
+        )(ports)
+
+    app.dependency_overrides[provide_check_external] = lambda: _check_external
+
+    @app.exception_handler(ExternalCheckFailed)
+    async def _on_external_check_failed(
+        _request: Request, exc: ExternalCheckFailed
+    ) -> JSONResponse:
+        # Externer cpnetcheck-Dienst gescheitert -> 502 (Bad Gateway, der Fehler liegt im
+        # externen Dienst, nicht in CERNIS). Vorbild DiagnosticsToolMissing -> 503: infra-
+        # Exception, am Composition Root gemappt. Die Meldung ist NEUTRAL -- der Adapter hat
+        # bereits jeden Token/internen Detail entfernt; hier wird NICHTS Zusaetzliches
+        # geloggt, was den Token enthalten koennte.
+        logger.error("external_check_failed")
+        return JSONResponse(status_code=502, content={"detail": exc.message})
 
     # ── analysis-Domaene v2 verdrahten (AN.3 + A.2, reine Lese-/Rechen-Domaene) ───
     # Lazy-memoisiertes User-Regel-Repo (lru_cache, Muster scan_history_repository):

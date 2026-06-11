@@ -17,6 +17,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from api.diagnostics import (
+    provide_check_external,
     provide_check_tools,
     provide_check_traceroute_permission,
     provide_grab_banner,
@@ -28,13 +29,15 @@ from domain.diagnostics import (
     BannerResult,
     DnsRecord,
     DnsResult,
+    ExternalCheckResult,
+    ExternalPortResult,
     ToolReport,
     ToolStatus,
     TracerouteHop,
     TracerouteResult,
 )
 from infrastructure.config import AppConfig
-from infrastructure.diagnostics_linux import DiagnosticsToolMissing
+from infrastructure.diagnostics_linux import DiagnosticsToolMissing, ExternalCheckFailed
 
 
 @pytest.fixture
@@ -411,3 +414,192 @@ def test_banner_port_out_of_range(app: FastAPI) -> None:
         )
 
     assert response.status_code == 422
+
+
+# ── external (2b) ──────────────────────────────────────────────────────────────
+
+
+def test_external_ip_not_configured_wire(app: FastAPI) -> None:
+    """configured=False-Pfad: ip/family null, error traegt den neutralen Hinweis."""
+
+    result = ExternalCheckResult(
+        configured=False,
+        checked_ip=None,
+        family=None,
+        ports=(),
+        error="Externer Check nicht konfiguriert: bitte cpnetcheck-URL und Token setzen.",
+    )
+    seen: dict[str, Any] = {}
+
+    async def _fake_check(ports: list[int] | None) -> Any:
+        seen["ports"] = ports
+        return result
+
+    app.dependency_overrides[provide_check_external] = lambda: _fake_check
+
+    with TestClient(app) as client:
+        response = client.get("/api/diagnostics/external/ip")
+
+    assert response.status_code == 200
+    # Reiner IP-Check -> ports None am Runner.
+    assert seen["ports"] is None
+    body = response.json()
+    assert body == {
+        "configured": False,
+        "ip": None,
+        "family": None,
+        "error": result.error,
+    }
+
+
+def test_external_ip_configured_wire(app: FastAPI) -> None:
+    """configured=True-Pfad (IP): ip/family serialisiert, error null."""
+
+    result = ExternalCheckResult(
+        configured=True,
+        checked_ip="203.0.113.7",
+        family="ipv4",
+        ports=(),
+        error=None,
+    )
+
+    async def _fake_check(ports: list[int] | None) -> Any:
+        return result
+
+    app.dependency_overrides[provide_check_external] = lambda: _fake_check
+
+    with TestClient(app) as client:
+        response = client.get("/api/diagnostics/external/ip")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "configured": True,
+        "ip": "203.0.113.7",
+        "family": "ipv4",
+        "error": None,
+    }
+
+
+def test_external_ports_configured_wire(app: FastAPI) -> None:
+    """configured=True-Pfad (Ports): ports kommen am Runner an, results serialisiert."""
+
+    result = ExternalCheckResult(
+        configured=True,
+        checked_ip="203.0.113.7",
+        family="ipv4",
+        ports=(
+            ExternalPortResult(port=80, reachable=True, state="open"),
+            ExternalPortResult(port=443, reachable=False, state="filtered"),
+        ),
+        error=None,
+    )
+    seen: dict[str, Any] = {}
+
+    async def _fake_check(ports: list[int] | None) -> Any:
+        seen["ports"] = ports
+        return result
+
+    app.dependency_overrides[provide_check_external] = lambda: _fake_check
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/diagnostics/external/ports", params=[("ports", "80"), ("ports", "443")]
+        )
+
+    assert response.status_code == 200
+    assert seen["ports"] == [80, 443]
+    assert response.json() == {
+        "configured": True,
+        "checked_ip": "203.0.113.7",
+        "family": "ipv4",
+        "results": [
+            {"port": 80, "reachable": True, "state": "open"},
+            {"port": 443, "reachable": False, "state": "filtered"},
+        ],
+        "error": None,
+    }
+
+
+def test_external_ports_not_configured_wire(app: FastAPI) -> None:
+    """configured=False-Pfad (Ports): results leer, checked_ip null, error gesetzt."""
+
+    result = ExternalCheckResult(
+        configured=False,
+        checked_ip=None,
+        family=None,
+        ports=(),
+        error="Externer Check nicht konfiguriert.",
+    )
+
+    async def _fake_check(ports: list[int] | None) -> Any:
+        return result
+
+    app.dependency_overrides[provide_check_external] = lambda: _fake_check
+
+    with TestClient(app) as client:
+        response = client.get("/api/diagnostics/external/ports", params=[("ports", "80")])
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["configured"] is False
+    assert body["checked_ip"] is None
+    assert body["results"] == []
+    assert body["error"] == "Externer Check nicht konfiguriert."
+
+
+def test_external_ports_required(app: FastAPI) -> None:
+    """Fehlender Pflichtparameter ``ports`` -> 422 (kein Raten)."""
+
+    async def _fake_check(ports: list[int] | None) -> Any:
+        raise AssertionError("darf bei 422 nicht gerufen werden")
+
+    app.dependency_overrides[provide_check_external] = lambda: _fake_check
+
+    with TestClient(app) as client:
+        response = client.get("/api/diagnostics/external/ports")
+
+    assert response.status_code == 422
+
+
+def test_external_ports_invalid_value_422(app: FastAPI) -> None:
+    """``ports`` ausserhalb 1..65535 -> 422 (FastAPI-Grenze, kein Use-Case-Aufruf)."""
+
+    async def _fake_check(ports: list[int] | None) -> Any:
+        raise AssertionError("darf bei 422 nicht gerufen werden")
+
+    app.dependency_overrides[provide_check_external] = lambda: _fake_check
+
+    with TestClient(app) as client:
+        response = client.get("/api/diagnostics/external/ports", params=[("ports", "70000")])
+
+    assert response.status_code == 422
+
+
+def test_external_ip_service_error_maps_to_502(app: FastAPI) -> None:
+    """Dienstfehler (ExternalCheckFailed) -> 502 (globaler Handler), Token nie im Body."""
+
+    async def _fake_check(ports: list[int] | None) -> Any:
+        raise ExternalCheckFailed("Der externe Erreichbarkeits-Dienst ist nicht erreichbar.")
+
+    app.dependency_overrides[provide_check_external] = lambda: _fake_check
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get("/api/diagnostics/external/ip")
+
+    assert response.status_code == 502
+    detail = response.json()["detail"]
+    assert "erreichbar" in detail
+
+
+def test_external_ports_service_error_maps_to_502(app: FastAPI) -> None:
+    """Auch der Port-Pfad mappt ExternalCheckFailed auf 502."""
+
+    async def _fake_check(ports: list[int] | None) -> Any:
+        raise ExternalCheckFailed("Authentifizierung am externen Dienst fehlgeschlagen.")
+
+    app.dependency_overrides[provide_check_external] = lambda: _fake_check
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get("/api/diagnostics/external/ports", params=[("ports", "443")])
+
+    assert response.status_code == 502

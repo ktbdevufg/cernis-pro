@@ -10,9 +10,14 @@ Binary fehlt). Async via ``asyncio.run`` (Projektmuster, kein pytest-asyncio).
 import asyncio
 from collections.abc import Sequence
 
+import pytest
+
 from application.diagnostics import (
+    DEFAULT_CPNETCHECK_URL,
     CheckDiagnosticsTools,
+    CheckExternalReachability,
     CheckTraceroutePermission,
+    ExternalCheckError,
     GrabBanner,
     ResolveDns,
     RunTraceroute,
@@ -23,10 +28,13 @@ from domain.diagnostics import (
     DnsRecord,
     DnsRecordType,
     DnsResult,
+    ExternalIpResult,
+    ExternalPortResult,
     PackageManager,
     TracerouteHop,
     TracerouteResult,
 )
+from domain.settings import Setting, SettingValue
 
 # ── In-Memory-Fakes der Ports ────────────────────────────────────────────────
 
@@ -105,6 +113,81 @@ class FakePackageManagerDetector:
 
     def detect(self) -> PackageManager | None:
         return self._manager
+
+
+class FakeReachabilityProvider:
+    """In-Memory-Implementierung des ``ExternalReachabilityProvider``-Protocols (2b).
+
+    ``ip``/``port_results`` sind die zurueckgegebenen Werte; ``raise_error`` simuliert einen
+    Dienstfehler (``ExternalCheckError``). ``ip_calls``/``port_calls`` belegen, OB und WIE
+    der Provider gerufen wurde (zentral fuer den configured=False-Fall: kein Aufruf).
+    """
+
+    def __init__(
+        self,
+        ip: ExternalIpResult | None = None,
+        port_results: tuple[ExternalPortResult, ...] = (),
+        raise_error: bool = False,
+    ) -> None:
+        self._ip = ip or ExternalIpResult(ip="203.0.113.7", family="ipv4")
+        self._port_results = port_results
+        self._raise_error = raise_error
+        self.ip_calls: list[tuple[str, str]] = []
+        self.port_calls: list[tuple[str, str, tuple[int, ...]]] = []
+
+    async def get_external_ip(self, base_url: str, token: str) -> ExternalIpResult:
+        self.ip_calls.append((base_url, token))
+        if self._raise_error:
+            raise ExternalCheckError("Dienst fehlgeschlagen")
+        return self._ip
+
+    async def check_ports(
+        self, base_url: str, token: str, ports: Sequence[int]
+    ) -> tuple[ExternalIpResult, tuple[ExternalPortResult, ...]]:
+        self.port_calls.append((base_url, token, tuple(ports)))
+        if self._raise_error:
+            raise ExternalCheckError("Dienst fehlgeschlagen")
+        return self._ip, self._port_results
+
+
+class FakeSettingsRepository:
+    """In-Memory-Implementierung des ``SettingsRepository``-Protocols (nur ``get`` relevant)."""
+
+    def __init__(self, values: dict[str, SettingValue] | None = None) -> None:
+        self._data: dict[str, SettingValue] = dict(values or {})
+
+    def get_all(self) -> dict[str, SettingValue]:
+        return dict(self._data)
+
+    def get(self, key: str) -> Setting | None:
+        if key not in self._data:
+            return None
+        return Setting(key=key, value=self._data[key])
+
+    def set(self, setting: Setting) -> None:
+        self._data[setting.key] = setting.value
+
+    def delete(self, key: str) -> None:
+        self._data.pop(key, None)
+
+
+class FakeSecretStore:
+    """In-Memory-Implementierung des ``SecretStore``-Protocols (nur ``get`` relevant)."""
+
+    def __init__(self, secrets: dict[str, str] | None = None) -> None:
+        self._data: dict[str, str] = dict(secrets or {})
+
+    def get(self, key: str) -> str | None:
+        return self._data.get(key)
+
+    def set(self, key: str, value: str) -> None:
+        self._data[key] = value
+
+    def delete(self, key: str) -> None:
+        self._data.pop(key, None)
+
+    def exists(self, key: str) -> bool:
+        return key in self._data
 
 
 # ── ResolveDns ───────────────────────────────────────────────────────────────
@@ -256,3 +339,134 @@ def test_check_tools_manager_none_means_no_install_command() -> None:
     assert report.manager is None
     assert report.install_command is None
     assert report.statuses[0].available is False
+
+
+# ── CheckExternalReachability (2b, Modell D) ──────────────────────────────────
+
+
+def _make_uc(
+    provider: FakeReachabilityProvider,
+    secrets: dict[str, str] | None = None,
+    settings: dict[str, SettingValue] | None = None,
+) -> CheckExternalReachability:
+    return CheckExternalReachability(
+        provider, FakeSettingsRepository(settings), FakeSecretStore(secrets)
+    )
+
+
+def test_external_no_token_not_configured_no_call() -> None:
+    # Kein Token -> configured=False, neutraler Hinweis, KEIN Provider-Aufruf.
+    provider = FakeReachabilityProvider()
+    uc = _make_uc(provider, secrets={}, settings={"cpnetcheck_url": "https://x.example"})
+    result = asyncio.run(uc(None))
+    assert result.configured is False
+    assert result.checked_ip is None
+    assert result.ports == ()
+    assert result.error and "nicht konfiguriert" in result.error
+    # Fake-Provider verifiziert "nicht gerufen".
+    assert provider.ip_calls == []
+    assert provider.port_calls == []
+
+
+def test_external_empty_token_not_configured() -> None:
+    # Leerer Token (== "") -> wie kein Token: configured=False, kein Aufruf.
+    provider = FakeReachabilityProvider()
+    uc = _make_uc(provider, secrets={"cpnetcheck_token": ""})
+    result = asyncio.run(uc([80]))
+    assert result.configured is False
+    assert provider.ip_calls == []
+    assert provider.port_calls == []
+
+
+def test_external_token_set_url_absent_uses_default() -> None:
+    # Token da, URL nicht gesetzt -> Default-URL greift, Provider wird gerufen.
+    provider = FakeReachabilityProvider()
+    uc = _make_uc(provider, secrets={"cpnetcheck_token": "geheim"}, settings={})
+    result = asyncio.run(uc(None))
+    assert result.configured is True
+    assert result.checked_ip == "203.0.113.7"
+    assert result.family == "ipv4"
+    # Default-URL + Token kamen am Provider an (reiner IP-Check).
+    assert provider.ip_calls == [(DEFAULT_CPNETCHECK_URL, "geheim")]
+    assert provider.port_calls == []
+
+
+def test_external_empty_url_value_uses_default() -> None:
+    # URL-Setting vorhanden, aber leerer Wert -> Default greift (kein leerer Aufruf).
+    provider = FakeReachabilityProvider()
+    uc = _make_uc(
+        provider,
+        secrets={"cpnetcheck_token": "geheim"},
+        settings={"cpnetcheck_url": ""},
+    )
+    result = asyncio.run(uc(None))
+    assert result.configured is True
+    assert provider.ip_calls == [(DEFAULT_CPNETCHECK_URL, "geheim")]
+
+
+def test_external_both_set_ip_only() -> None:
+    # Beides gesetzt, ports None -> reiner IP-Check, Ergebnis korrekt gebaut.
+    provider = FakeReachabilityProvider(ip=ExternalIpResult(ip="198.51.100.9", family="ipv6"))
+    uc = _make_uc(
+        provider,
+        secrets={"cpnetcheck_token": "tok"},
+        settings={"cpnetcheck_url": "https://dienst.example"},
+    )
+    result = asyncio.run(uc(None))
+    assert result.configured is True
+    assert result.checked_ip == "198.51.100.9"
+    assert result.family == "ipv6"
+    assert result.ports == ()
+    assert result.error is None
+    assert provider.ip_calls == [("https://dienst.example", "tok")]
+    assert provider.port_calls == []
+
+
+def test_external_both_set_port_check() -> None:
+    # Beides gesetzt + ports -> Port-Check, validierte Ports am Provider, Ergebnis gebaut.
+    provider = FakeReachabilityProvider(
+        ip=ExternalIpResult(ip="203.0.113.7", family="ipv4"),
+        port_results=(
+            ExternalPortResult(port=80, reachable=True, state="open"),
+            ExternalPortResult(port=443, reachable=False, state="filtered"),
+        ),
+    )
+    uc = _make_uc(
+        provider,
+        secrets={"cpnetcheck_token": "tok"},
+        settings={"cpnetcheck_url": "https://dienst.example"},
+    )
+    result = asyncio.run(uc([80, 80, 443]))
+    assert result.configured is True
+    assert result.checked_ip == "203.0.113.7"
+    assert [p.port for p in result.ports] == [80, 443]
+    assert result.ports[1].state == "filtered"
+    # Dedup griff client-seitig: 80 nur einmal am Provider.
+    assert provider.port_calls == [("https://dienst.example", "tok", (80, 443))]
+    assert provider.ip_calls == []
+
+
+def test_external_provider_error_propagates() -> None:
+    # Provider wirft ExternalCheckError -> Durchwurf (nicht verschluckt, kein error-Feld).
+    provider = FakeReachabilityProvider(raise_error=True)
+    uc = _make_uc(
+        provider,
+        secrets={"cpnetcheck_token": "tok"},
+        settings={"cpnetcheck_url": "https://dienst.example"},
+    )
+    with pytest.raises(ExternalCheckError):
+        asyncio.run(uc(None))
+
+
+def test_external_empty_port_list_is_ip_only() -> None:
+    # Leere Portliste -> wie None: reiner IP-Check (kein Port-Check-Aufruf).
+    provider = FakeReachabilityProvider()
+    uc = _make_uc(
+        provider,
+        secrets={"cpnetcheck_token": "tok"},
+        settings={"cpnetcheck_url": "https://dienst.example"},
+    )
+    result = asyncio.run(uc([]))
+    assert result.configured is True
+    assert provider.ip_calls == [("https://dienst.example", "tok")]
+    assert provider.port_calls == []

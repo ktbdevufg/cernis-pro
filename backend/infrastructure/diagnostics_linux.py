@@ -22,6 +22,11 @@ traffic -- System-Tools statt Python-Libs, ADR 0014):
   GRENZE: bei ``http_head`` wird GENAU eine minimale, standardkonforme HTTP-HEAD-Anfrage
   gesendet (keine konfigurierbaren Payloads); bei ``passive`` wird NICHTS gesendet, nur
   gelesen -- Banner-Grabbing bleibt Diagnose, kein Byte-Sender.
+* ``HttpxReachabilityProvider`` (``ExternalReachabilityProvider``, 2b) -- ruft einen
+  externen cpnetcheck-konformen Dienst als CLIENT (``httpx.AsyncClient``): ``GET /v1/myip``
+  + ``POST /v1/portcheck`` mit Bearer-Token. HTTPS-Cert-PFLICHT (KEIN ``verify=False``).
+  SICHERHEITSNAHT: jeder Dienst-/Netz-/Parsefehler wird zu ``ExternalCheckFailed`` mit
+  NEUTRALER Meldung -- der Token wird NIE geloggt/zurueckgegeben, interne Details leaken NIE.
 
 TLS-PORTS in 2a (ADR 0014 Block 2a): {443, 8443} sind in ``domain.probe_for_port`` bewusst
 NICHT in der http_head-Menge -- ein roher Connect dorthin spraeche TLS, kein Klartext-HTTP.
@@ -55,6 +60,9 @@ import re
 import shutil
 import subprocess
 from collections.abc import Sequence
+from typing import Any
+
+import httpx
 
 from domain.diagnostics import (
     BannerProbe,
@@ -62,6 +70,8 @@ from domain.diagnostics import (
     DnsRecord,
     DnsRecordType,
     DnsResult,
+    ExternalIpResult,
+    ExternalPortResult,
     PackageManager,
     TracerouteHop,
     TracerouteResult,
@@ -86,6 +96,27 @@ class DiagnosticsToolMissing(Exception):
         super().__init__(self.message)
 
 
+class ExternalCheckFailed(Exception):
+    """Der externe cpnetcheck-Dienst lieferte einen Fehler -- infra-eigen (2b).
+
+    Vorbild ``DiagnosticsToolMissing``/``SecretStoreUnavailableError``: eine infrastruktur-
+    eigene Exception, die der Composition Root (``app.py``) ueber einen globalen
+    ``exception_handler`` auf **502** (Bad Gateway -- externer Dienst) abbildet. Der
+    import-linter-Contract "infrastructure kennt nicht application/api" verbietet dem
+    Adapter, die application-Exception ``ExternalCheckError`` zu werfen -- darum diese
+    infra-eigene Variante (das Mapping auf den application-Aufhaenger bleibt am
+    Composition Root).
+
+    ``message`` ist IMMER eine NEUTRALE Meldung -- NIE der Token, NIE interne Details
+    (HTTP-Bodies, Stacktraces, URLs). Das ist die Sicherheitsnaht: der Adapter faengt jeden
+    Dienst-/Netz-/Parse-Fehler und ersetzt ihn durch eine fixe, harmlose Meldung.
+    """
+
+    def __init__(self, message: str) -> None:
+        self.message = message
+        super().__init__(self.message)
+
+
 # Kurzer Standard-Timeout fuer die Subprocess-Aufrufe -- ein haengender dig/traceroute
 # darf den Request nicht unbegrenzt blockieren. ``traceroute`` ist von Natur aus langsam
 # (mehrere Hops a mehrere Probes), darum grosszuegiger als dig.
@@ -99,6 +130,12 @@ _BANNER_READ_TIMEOUT_SECS = 3.0
 # Maximale Rohbytes, die beim passiven Lauschen gelesen werden -- die Begruessung ist kurz;
 # die Domaene (``sanitize_banner``) kuerzt ohnehin auf die erste Zeile + Maximallaenge.
 _BANNER_READ_MAX_BYTES = 1024
+# Externer cpnetcheck-Check (2b): getrennte Connect-/Read-Timeouts. Der Connect soll
+# schnell scheitern (Dienst nicht erreichbar), das Lesen aber grosszuegig sein -- ein
+# Port-Check beim Dienst kann mehrere Sekunden je Port dauern. 35s Read passt zum
+# Dienst-Gesamtdeckel (10 Ports a wenige Sekunden + Reserve).
+_CPNETCHECK_CONNECT_TIMEOUT_SECS = 5.0
+_CPNETCHECK_READ_TIMEOUT_SECS = 35.0
 
 
 # ── DNS-Parser (rein, testbar) ────────────────────────────────────────────────
@@ -489,3 +526,161 @@ def _run_traceroute(target: str, privileged: bool) -> str:
             return partial.decode(errors="replace")
         return partial or ""
     return completed.stdout
+
+
+# ── Block 2b: externer cpnetcheck-Check (httpx-AsyncClient, Token nie geleakt) ─
+
+# Neutrale Fehlermeldungen -- NIE der Token, NIE interne Details (HTTP-Body, URL,
+# Stacktrace). Eine feste, harmlose Meldung je Fehlerklasse: 401 (Auth) bekommt eine
+# eigene, alles andere die generische. Das ist die Sicherheitsnaht (ADR 0014 Block 2b).
+_CPNETCHECK_AUTH_FAILED_MSG = "Authentifizierung am externen Dienst fehlgeschlagen."
+_CPNETCHECK_GENERIC_MSG = "Der externe Erreichbarkeits-Dienst ist nicht erreichbar."
+
+# Erlaubte Port-States des Diensts -- defensive Whitelist beim Parsen (ein unbekannter
+# state ist ein Parsefehler, kein erfundener Default).
+_ALLOWED_PORT_STATES: frozenset[str] = frozenset({"open", "closed", "filtered"})
+
+
+def _parse_external_ip(payload: Any, ip_key: str = "ip") -> ExternalIpResult:
+    """Parst eine IP-tragende Dienst-Antwort robust zu ``ExternalIpResult`` -- rein.
+
+    Der IP-Feldname unterscheidet sich je Route: ``/v1/myip`` liefert ``{"ip": ..., ...}``,
+    ``/v1/portcheck`` liefert ``{"checked_ip": ..., ...}`` -- ``ip_key`` waehlt das Feld.
+    Fehlt/leer/falscher Typ (IP oder ``family``) -> ``ExternalCheckFailed`` (neutral), KEIN
+    erfundener Wert. Rein: kein I/O.
+    """
+    if not isinstance(payload, dict):
+        raise ExternalCheckFailed(_CPNETCHECK_GENERIC_MSG)
+    ip = payload.get(ip_key)
+    family = payload.get("family")
+    if not isinstance(ip, str) or not ip or not isinstance(family, str) or not family:
+        raise ExternalCheckFailed(_CPNETCHECK_GENERIC_MSG)
+    return ExternalIpResult(ip=ip, family=family)
+
+
+def _parse_port_results(payload: Any) -> tuple[ExternalPortResult, ...]:
+    """Parst die ``results``-Liste der ``/v1/portcheck``-Antwort -> Port-Ergebnisse -- rein.
+
+    Jeder Eintrag ist ``{"port": <int>, "reachable": <bool>, "state": "open"|...}``. Ein
+    fehlender/typfremder Eintrag oder ein unbekannter ``state`` -> ``ExternalCheckFailed``
+    (neutral, kein erfundener Wert). Rein: kein I/O.
+    """
+    if not isinstance(payload, list):
+        raise ExternalCheckFailed(_CPNETCHECK_GENERIC_MSG)
+    results: list[ExternalPortResult] = []
+    for entry in payload:
+        if not isinstance(entry, dict):
+            raise ExternalCheckFailed(_CPNETCHECK_GENERIC_MSG)
+        port = entry.get("port")
+        reachable = entry.get("reachable")
+        state = entry.get("state")
+        if (
+            not isinstance(port, int)
+            or isinstance(port, bool)  # bool ist int-Subtyp -- ausdruecklich ausschliessen
+            or not isinstance(reachable, bool)
+            or not isinstance(state, str)
+            or state not in _ALLOWED_PORT_STATES
+        ):
+            raise ExternalCheckFailed(_CPNETCHECK_GENERIC_MSG)
+        # state ist hier nachweislich aus _ALLOWED_PORT_STATES -- der Literal-Cast ist
+        # durch die Whitelist-Pruefung oben gedeckt (mypy sieht die Verengung nicht).
+        results.append(
+            ExternalPortResult(port=port, reachable=reachable, state=state)  # type: ignore[arg-type]
+        )
+    return tuple(results)
+
+
+class HttpxReachabilityProvider:
+    """Erfuellt das ``ExternalReachabilityProvider``-Protocol (2b) ueber ``httpx.AsyncClient``.
+
+    Ruft einen cpnetcheck-konformen Dienst als CLIENT: ``GET /v1/myip`` (oeffentliche IP)
+    und ``POST /v1/portcheck`` (Port-Erreichbarkeit), beide mit ``Authorization: Bearer
+    <token>``. HTTPS-Cert-Pflicht: KEIN ``verify=False`` -- ein gehaerteter Dienst hat ein
+    echtes Zertifikat (Sicherheitsnaht). Getrennte Connect-/Read-Timeouts (Connect kurz,
+    Read grosszuegig fuer den Port-Check).
+
+    SICHERHEITSNAHT: jeder Fehler (HTTP >=400, httpx-Netzfehler, Timeout, JSON-Parsefehler,
+    Schema-Abweichung) wird zu ``ExternalCheckFailed`` mit NEUTRALER Meldung -- der Token
+    wird NIE geloggt/zurueckgegeben, interne Details (Body/URL/Stacktrace) leaken NIE. 401
+    vom Dienst -> eigene "Authentifizierung fehlgeschlagen"-Meldung, alles andere generisch.
+
+    ``transport`` ist NUR fuer Tests gedacht (``httpx.MockTransport``): ist es ``None``
+    (Produktiv-Default, wie ``HttpxReachabilityProvider()`` in app.py), baut der Adapter
+    einen echten Client OHNE ``verify``-Abschaltung (HTTPS-Cert-Pflicht). Ein injizierter
+    Transport ersetzt das Netz im Test, ohne dass die Cert-/Timeout-Naht verbogen wird.
+    """
+
+    def __init__(self, transport: httpx.AsyncBaseTransport | None = None) -> None:
+        self._transport = transport
+
+    def _timeout(self) -> httpx.Timeout:
+        # Getrennte Connect-/Read-Timeouts; write/pool grosszuegig am Read orientiert.
+        return httpx.Timeout(
+            connect=_CPNETCHECK_CONNECT_TIMEOUT_SECS,
+            read=_CPNETCHECK_READ_TIMEOUT_SECS,
+            write=_CPNETCHECK_READ_TIMEOUT_SECS,
+            pool=_CPNETCHECK_READ_TIMEOUT_SECS,
+        )
+
+    def _headers(self, token: str) -> dict[str, str]:
+        # Bearer-Header -- der Token verlaesst diese Methode nie (nicht geloggt).
+        return {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+
+    async def get_external_ip(self, base_url: str, token: str) -> ExternalIpResult:
+        """``GET <base_url>/v1/myip`` -> ``ExternalIpResult`` (Token nie geleakt)."""
+        payload = await self._request("GET", base_url, "/v1/myip", token, json_body=None)
+        return _parse_external_ip(payload)
+
+    async def check_ports(
+        self, base_url: str, token: str, ports: Sequence[int]
+    ) -> tuple[ExternalIpResult, tuple[ExternalPortResult, ...]]:
+        """``POST <base_url>/v1/portcheck`` -> (IP, Port-Ergebnisse) (Token nie geleakt)."""
+        body = {"ports": list(ports), "protocol": "tcp"}
+        payload = await self._request("POST", base_url, "/v1/portcheck", token, json_body=body)
+        if not isinstance(payload, dict):
+            raise ExternalCheckFailed(_CPNETCHECK_GENERIC_MSG)
+        # /v1/portcheck liefert die IP unter ``checked_ip`` (nicht ``ip`` wie /v1/myip).
+        ip = _parse_external_ip(payload, ip_key="checked_ip")
+        port_results = _parse_port_results(payload.get("results"))
+        return ip, port_results
+
+    async def _request(
+        self,
+        method: str,
+        base_url: str,
+        path: str,
+        token: str,
+        json_body: dict[str, Any] | None,
+    ) -> Any:
+        """Fuehrt EINEN HTTPS-Aufruf aus und liefert den geparsten JSON-Body.
+
+        SICHERHEITSNAHT: jeder Fehlschlag (>=400, Netzfehler, Timeout, JSON-Parsefehler)
+        wird zu ``ExternalCheckFailed`` mit NEUTRALER Meldung. 401 -> Auth-Meldung, sonst
+        generisch. Der Token steckt nur im Header (nie in einer Meldung/Log). ``base_url``
+        wird mit ``/`` zusammengefuegt (doppelte Slashes vermieden); HTTPS-Cert-Pflicht
+        durch httpx-Default (``verify=True``, NICHT abgeschaltet).
+        """
+        url = base_url.rstrip("/") + path
+        try:
+            # transport=None -> echter Client (HTTPS-Cert-Pflicht, kein verify-Disable);
+            # ein injizierter MockTransport (nur Tests) ersetzt das Netz, ohne die Naht zu
+            # verbiegen. httpx schluckt transport=None genau wie ein weggelassenes Argument.
+            async with httpx.AsyncClient(
+                timeout=self._timeout(), transport=self._transport
+            ) as client:
+                response = await client.request(
+                    method, url, headers=self._headers(token), json=json_body
+                )
+        except httpx.HTTPError:
+            # Netzfehler/Timeout/Verbindungs-/TLS-Fehler -- neutral, keine Details.
+            raise ExternalCheckFailed(_CPNETCHECK_GENERIC_MSG) from None
+        if response.status_code == 401:
+            raise ExternalCheckFailed(_CPNETCHECK_AUTH_FAILED_MSG)
+        if response.status_code >= 400:
+            # 403/422/429/503/... -- neutral, der Dienst-Body wird NICHT durchgereicht.
+            raise ExternalCheckFailed(_CPNETCHECK_GENERIC_MSG)
+        try:
+            return response.json()
+        except ValueError:
+            # Kaputtes/kein JSON -- neutral (der Rohbody leakt nicht).
+            raise ExternalCheckFailed(_CPNETCHECK_GENERIC_MSG) from None

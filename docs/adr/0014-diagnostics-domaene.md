@@ -1,4 +1,4 @@
-# ADR 0014 — diagnostics-Domäne: Frage-Antwort-Werkzeuge (Block 1a: DNS + traceroute; Block 1b: Tool-/Paketmanager-Erkennung)
+# ADR 0014 — diagnostics-Domäne: Frage-Antwort-Werkzeuge (Block 1a: DNS + traceroute; Block 1b: Tool-/Paketmanager-Erkennung; Block 2a: Banner-Grabbing; Block 2b: externer IP/Port-Check via cpnetcheck)
 
 - **Status:** Akzeptiert
 - **Datum:** 2026-06-11
@@ -116,3 +116,35 @@ Banner-Grabbing ergänzt die aktiven Frage-Antwort-Werkzeuge um „**was begrü�
 - **Kein neuer import-linter-Contract nötig** — gleiche Domäne `diagnostics`, der `independence`-Contract für `domain.diagnostics` aus 1a deckt 2a mit ab.
 - Die zwei heiklen Stellen (Methoden-Wahl, Bereinigung) liegen rein im domain-Ring, ohne Netz testbar; das Socket-I/O ist in **einem** Adapter gekapselt (Sprach-Wechsel bleibt lokal).
 - **Grenze:** TLS-Dienste liefern in 2a kein Banner (ehrlich `no_banner`) — ein echter TLS-Handshake (Zertifikat/ALPN als „Banner") wäre ein späterer, bewusster Schnitt, kein stiller Fallback.
+
+## Block 2b: externer IP/Port-Check via cpnetcheck (Modell D)
+
+- **Status:** Akzeptiert
+- **Datum:** 2026-06-11
+- **Bezug:** baut auf 2a (Banner-Grabbing fragt lokal — 2b fragt einen externen Dienst); ADR 0001 (keine stillen Fallbacks, `configured=False` ist explizit + benannt); ADR 0002 (domain bleibt rein — kein HTTP); Settings-/Secret-Naht aus settings (`SECRET_KEYS`/`redact`) + agent (`secret_store.get(...) or ""`)
+
+### Kontext
+
+2a beantwortet „was begrüßt mich auf diesem **lokalen** Port?". 2b ergänzt die Außensicht: „**welche öffentliche IP hat CERNIS, und sind meine Ports von außen erreichbar?**". Das lässt sich nicht lokal beantworten — es braucht einen Dienst **außerhalb** des eigenen Netzes, der zurückschaut. CERNIS ruft dafür einen **cpnetcheck-konformen Dienst als CLIENT** (eigener/Karls Dienst, künftig austauschbar gegen einen Drittanbieter über das `cpnetcheck_url`-Setting).
+
+Der Vertrag des externen Diensts: `GET /v1/myip` (→ `{ip, family}`) und `POST /v1/portcheck` (`{ports, protocol}` → `{checked_ip, family, results:[{port, reachable, state}]}`), beide mit `Authorization: Bearer <token>`. Dienst-Fehler: 401 (Token), 422 (ungültige Ports/Whitelist), 403 (private IP), 429 (Rate-Limit), 503.
+
+### Entscheidung
+
+1. **Modell D — Feature nur aktiv, wenn URL UND Token konfiguriert sind.** Fehlt eines, liefert der Use-Case ehrlich `ExternalCheckResult(configured=False, …)` mit neutralem Hinweis und ruft **nichts** nach außen (ADR 0001, kein stiller Fallback). **KEIN C1-Auto-Fallback** auf öffentliche what-is-my-ip-Dienste — das ist eine bewusste spätere Option, kein stiller Ersatz. **KEINE Speicherung** des Ergebnisses.
+
+2. **Token als Secret `cpnetcheck_token` (`SECRET_KEYS`).** Allein durch den Eintrag in `domain.settings.SECRET_KEYS` wird er automatisch redigiert (`GetSettings`/`redact` → `[REDACTED]`) und ausschließlich über `UpdateSecret` setzbar; `UpdateSetting` lehnt ihn via `is_secret()` ab — **keine** Änderung an `UpdateSecret`/`UpdateSetting` nötig (verifiziert über einen Test). Die **URL `cpnetcheck_url`** ist ein **NICHT-geheimes** normales Setting; settings hat keinen Default-Mechanismus, also liest der diagnostics-Use-Case sie über das `SettingsRepository` und fällt bei Abwesenheit auf die Konstante `DEFAULT_CPNETCHECK_URL = "https://cpnetcheck.bach.world"` zurück. Die **Default-Konstante lebt in der diagnostics-Schicht** (application), NICHT in settings.
+
+3. **Client-seitige Port-Validierung im domain-Ring (`validate_requested_ports`).** Dedup, Bereich 1..65535, max 10 — spiegelt die Dienst-Grenzen, damit offensichtlich Ungültiges gar nicht erst rausgeht. **KEINE Whitelist-Doppelung** (die setzt der Dienst durch; der Client darf großzügiger sein). Rein, deterministisch, mutationsproben-tauglich.
+
+4. **`ExternalReachabilityProvider`-Port (async, HTTP-I/O); der configured-Zustand wird im Use-Case entschieden, nicht im Port.** Der Port ist reine Mechanik (`base_url`/`token` als Parameter). Eine Use-Case-Methode mit **optionaler Portliste** (`ports=None` → reiner IP-Check; Liste → IP + Port-Check) bedient die zwei api-Routen `GET /external/ip` und `GET /external/ports`.
+
+5. **HTTPS-Cert-PFLICHT — kein `verify=False`.** Ein gehärteter Dienst hat ein echtes Zertifikat (Sicherheitsnaht). Der Adapter (`HttpxReachabilityProvider`, `httpx.AsyncClient`) setzt getrennte Connect-/Read-Timeouts (5 s / 35 s — der Port-Check kann beim Dienst dauern).
+
+6. **Dienst-Fehler → 502 über das `DiagnosticsToolMissing`-Vorbild.** Jeder Fehler (HTTP ≥400, Netzfehler, Timeout, JSON-Parsefehler) wird im Adapter zu einer **infra-eigenen** `ExternalCheckFailed` mit **NEUTRALER** Meldung — der **Token wird NIE geloggt/zurückgegeben**, interne Details (Body/URL/Stacktrace) leaken NIE. 401 → eigene „Authentifizierung am externen Dienst fehlgeschlagen"-Meldung, alles andere generisch. Der Composition Root mappt `ExternalCheckFailed` über einen globalen `exception_handler` auf **502** (Bad Gateway — externer Dienst), genau wie `DiagnosticsToolMissing` → 503. `application/diagnostics/errors.py` führt `ExternalCheckError` als domänen-konformen Aufhänger (api-Ring bleibt clean). Der Use-Case **verschluckt** Dienstfehler nicht — Durchwurf zum api-Rand.
+
+### Konsequenzen
+
+- **Kein neuer import-linter-Contract nötig** — gleiche Domäne `diagnostics`; der `independence`-Contract für `domain.diagnostics` aus 1a deckt 2b mit ab. Der Use-Case importiert `ports.settings` (`SettingsRepository`/`SecretStore`) — das ist `application → ports` (erlaubt) und **genau das Muster, das `application.agent` für den `SecretStore` schon nutzt**; kein domain↔domain- und kein Ring-Verstoß.
+- Die heiklen Stellen (Modell-D-Gate, Port-Validierung, Token-Redaction) liegen testbar im domain-/application-Ring; das HTTP-I/O ist in **einem** Adapter gekapselt (gegen `httpx.MockTransport` ohne Netz testbar, Sprach-Wechsel bleibt lokal).
+- **Grenze:** der externe Dienst ist eine Abhängigkeit — fällt er aus, ist das ein ehrlicher 502 (kein stiller Fallback auf einen anderen Dienst). Die Austauschbarkeit über `cpnetcheck_url` hält den Anbieter offen.

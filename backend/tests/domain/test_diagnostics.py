@@ -14,6 +14,9 @@ from domain.diagnostics import (
     BannerResult,
     DnsRecord,
     DnsResult,
+    ExternalCheckResult,
+    ExternalIpResult,
+    ExternalPortResult,
     ToolReport,
     ToolStatus,
     TracerouteHop,
@@ -23,6 +26,7 @@ from domain.diagnostics import (
     dedup_records,
     probe_for_port,
     sanitize_banner,
+    validate_requested_ports,
 )
 
 # ── Wertobjekte (frozen + ehrliche None-Naht) ─────────────────────────────────
@@ -317,3 +321,94 @@ def test_banner_result_no_banner_is_honest_none() -> None:
     )
     assert result.banner is None
     assert result.state == "no_banner"
+
+
+# ── Block 2b: validate_requested_ports (rein, mutationsproben-tauglich) ───────
+
+
+def test_validate_ports_empty_list_is_empty_tuple() -> None:
+    # Leere Eingabe -> leeres Tupel (der Aufrufer entscheidet: reiner IP-Check).
+    assert validate_requested_ports([]) == ()
+
+
+def test_validate_ports_keeps_valid_in_order() -> None:
+    # Gueltige Ports bleiben in Eingabe-Reihenfolge erhalten.
+    assert validate_requested_ports([443, 80, 22]) == (443, 80, 22)
+
+
+def test_validate_ports_dedup_first_occurrence_wins() -> None:
+    # Dedup: doppelte Ports werden auf das erste Vorkommen reduziert.
+    assert validate_requested_ports([80, 80, 443, 80]) == (80, 443)
+
+
+def test_validate_ports_out_of_range_dropped() -> None:
+    # Bereich 1..65535: 0 und >65535 werden verworfen (nicht korrigiert).
+    assert validate_requested_ports([0, 80, 65536, 70000, 443]) == (80, 443)
+
+
+def test_validate_ports_boundary_values_kept() -> None:
+    # Die Grenzen 1 und 65535 sind gueltig.
+    assert validate_requested_ports([1, 65535]) == (1, 65535)
+
+
+def test_validate_ports_max_ten_truncates() -> None:
+    # Max 10: die ersten 10 gueltigen (in Reihenfolge), Rest abgeschnitten.
+    result = validate_requested_ports(list(range(1, 21)))
+    assert result == tuple(range(1, 11))
+    assert len(result) == 10
+
+
+def test_validate_ports_mutation_probe_max_limit() -> None:
+    # Mutationsprobe: NIMMT man die max-Grenze raus, kaeme >10 zurueck -> dieser Test rot.
+    assert len(validate_requested_ports(list(range(1, 51)))) == 10
+
+
+def test_validate_ports_mutation_probe_dedup() -> None:
+    # Mutationsprobe: NIMMT man den dedup raus, kaemen die Duplikate durch -> dieser Test rot.
+    assert validate_requested_ports([5, 5, 5, 5]) == (5,)
+
+
+# ── Block 2b: Wertobjekte (frozen + ehrliche None-/configured-Semantik) ───────
+
+
+def test_external_ip_result_is_frozen() -> None:
+    result = ExternalIpResult(ip="203.0.113.7", family="ipv4")
+    with pytest.raises(AttributeError):
+        result.ip = "anders"  # type: ignore[misc]
+
+
+def test_external_port_result_is_frozen() -> None:
+    result = ExternalPortResult(port=443, reachable=True, state="open")
+    with pytest.raises(AttributeError):
+        result.reachable = False  # type: ignore[misc]
+
+
+def test_external_check_result_not_configured() -> None:
+    # configured=False -> ip/family None, ports leer, error traegt den Hinweis.
+    result = ExternalCheckResult(
+        configured=False,
+        checked_ip=None,
+        family=None,
+        ports=(),
+        error="nicht konfiguriert",
+    )
+    assert result.configured is False
+    assert result.checked_ip is None
+    assert result.family is None
+    assert result.ports == ()
+    assert result.error == "nicht konfiguriert"
+
+
+def test_external_check_result_configured_with_ports() -> None:
+    # configured=True -> IP + Port-Ergebnisse, error None bei Erfolg.
+    result = ExternalCheckResult(
+        configured=True,
+        checked_ip="203.0.113.7",
+        family="ipv4",
+        ports=(ExternalPortResult(port=80, reachable=False, state="filtered"),),
+        error=None,
+    )
+    assert result.configured is True
+    assert result.checked_ip == "203.0.113.7"
+    assert result.ports[0].state == "filtered"
+    assert result.error is None
