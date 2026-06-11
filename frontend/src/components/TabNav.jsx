@@ -1,5 +1,7 @@
 // Reiterleiste (CERNIS PRO 2.0)
-// Vier Gruppen mit lucide-Icons. Aktiver Reiter türkis unterstrichen.
+// Vier Gruppen mit lucide-Icons. Nackte Reiter; der aktive trägt als einziges
+// Markierungselement die "Wanne": eine an beiden Enden nach oben gebogene,
+// spitz auslaufende Unterlinie in Akzentfarbe (gefüllter SVG-Pfad).
 // Bekommt aktiven Reiter + onChange als Props.
 
 import { Activity, FileOutput, LayoutDashboard, Search } from "lucide-react";
@@ -32,6 +34,13 @@ export default function TabNav({ active, onChange }) {
           >
             <Icon size={18} />
             <span>{t(`nav.${id}`)}</span>
+            {istAktiv && (
+              <span className="tab-nav__wanne" aria-hidden="true">
+                <svg viewBox="0 0 200 11" preserveAspectRatio="none">
+                  <path d="M2,0 C2,7 5,9 12,9.6 L188,9.6 C195,9 198,7 198,0 C197.2,6.4 194.4,8.2 188,8.4 L12,8.4 C5.6,8.2 2.8,6.4 2,0 Z" />
+                </svg>
+              </span>
+            )}
           </button>
         );
       })}

@@ -6,7 +6,8 @@
   justify-content: space-between;
   padding: 10px 20px;
   background: var(--color-bar);
-  border-bottom: 1px solid var(--color-border);
+  /* Dünne Akzentlinie als untere Kante — Markenton dezent präsent. */
+  border-bottom: 1px solid var(--color-accent-border);
 }
 
 .app-header__brand {
@@ -26,7 +27,8 @@
   gap: 6px;
   font-size: 18px;
   font-weight: 500;
-  color: var(--color-text);
+  /* Wortmarke trägt den Markenton; "v2.0" bleibt dezent (siehe --version). */
+  color: var(--color-accent);
 }
 
 .app-header__version {

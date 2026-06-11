@@ -7,6 +7,9 @@ import { useTranslation } from "react-i18next";
 
 import AppHeader from "./components/AppHeader.jsx";
 import TabNav, { REITER } from "./components/TabNav.jsx";
+import ExportView from "./views/ExportView.jsx";
+import InvestigateView from "./views/InvestigateView.jsx";
+import ObserveView from "./views/ObserveView.jsx";
 import OverviewView from "./views/OverviewView.jsx";
 import "./App.css";
 
@@ -24,7 +27,7 @@ function ermittleStartSprache() {
 }
 
 export default function App() {
-  const { t, i18n } = useTranslation();
+  const { i18n } = useTranslation();
 
   const [activeTab, setActiveTab] = useState(REITER[0].id);
   const [theme, setTheme] = useState(ermittleStartTheme);
@@ -55,14 +58,10 @@ export default function App() {
       <TabNav active={activeTab} onChange={setActiveTab} />
 
       <main className="app__content">
-        {activeTab === "overview" ? (
-          <OverviewView />
-        ) : (
-          <section className="app__placeholder">
-            <h1>{t(`nav.${activeTab}`)}</h1>
-            <p className="app__placeholder-note">{t("placeholder.inProgress")}</p>
-          </section>
-        )}
+        {activeTab === "overview" && <OverviewView />}
+        {activeTab === "observe" && <ObserveView />}
+        {activeTab === "investigate" && <InvestigateView />}
+        {activeTab === "export" && <ExportView />}
       </main>
     </div>
   );

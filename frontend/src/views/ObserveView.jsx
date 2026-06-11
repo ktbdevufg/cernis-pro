@@ -1,0 +1,90 @@
+// Beobachten-Ansicht (CERNIS PRO 2.0)
+// Zeigt zuerst eine Kachel-Übersicht der Funktionen. Klick auf eine aktive
+// Kachel öffnet die zugehörige Funktion in derselben Fläche, mit Zurück-Weg.
+//
+// Funktionen:
+//   "scan"     Netzwerk-Scan (aktiv) -> bestehende Scan-Tabelle
+//   "traffic"  Per-App-Verkehr (gesperrt bis Beobachtung läuft)
+//   "processes" Prozesse (gesperrt bis Beobachtung läuft)
+//
+// Datenquelle der Tabelle ist ausschließlich der Import aus mockData/scanMock.
+// Die View weiß nicht, ob die Daten echt oder Platzhalter sind. Bei echter
+// Anbindung wird nur dieser Import ausgetauscht.
+
+import { ListTree, Radar, Repeat } from "lucide-react";
+import { useState } from "react";
+import { useTranslation } from "react-i18next";
+
+import { CardGrid, FunctionShell } from "../components/AreaShell.jsx";
+import FunctionCard from "../components/FunctionCard.jsx";
+import ScanTable from "../components/ScanTable.jsx";
+import scanMock from "../mockData/scanMock.js";
+import "./ObserveView.css";
+
+// Kachel-Definition: Schlüssel, Icon, Sperrstatus. Reihenfolge ist verbindlich.
+const FUNKTIONEN = [
+  { id: "scan", icon: Radar, locked: false },
+  { id: "traffic", icon: Repeat, locked: true },
+  { id: "processes", icon: ListTree, locked: true },
+];
+
+// Scan-Inhalt: Kopf-Leiste (Anzahl + "Scan starten") über der Tabelle.
+function ScanInhalt() {
+  const { t } = useTranslation();
+  const { geraete } = scanMock;
+
+  // Platzhalter — späteres Detail-Panel hängt sich an diesen Handler.
+  const handleSelect = (geraet) => {
+    // Bewusst ohne Funktion (Schritt B liefert das Detail-Panel).
+    void geraet;
+  };
+
+  return (
+    <div className="observe__scan">
+      <div className="observe__toolbar">
+        <span className="observe__count">
+          {t("beobachten.scan.deviceCount", { count: geraete.length })}
+        </span>
+        {/* Button löst vorerst nichts aus (Platzhalter, kein API-Call). */}
+        <button type="button" className="observe__scan-button">
+          {t("beobachten.scan.startScan")}
+        </button>
+      </div>
+
+      <ScanTable geraete={geraete} onSelect={handleSelect} />
+    </div>
+  );
+}
+
+export default function ObserveView() {
+  const { t } = useTranslation();
+  // null -> Kachel-Übersicht; sonst die geöffnete Funktion.
+  const [openFunction, setOpenFunction] = useState(null);
+
+  if (openFunction === "scan") {
+    return (
+      <FunctionShell
+        title={t("beobachten.cards.scan.title")}
+        onBack={() => setOpenFunction(null)}
+      >
+        <ScanInhalt />
+      </FunctionShell>
+    );
+  }
+
+  return (
+    <CardGrid>
+      {FUNKTIONEN.map(({ id, icon, locked }) => (
+        <FunctionCard
+          key={id}
+          icon={icon}
+          title={t(`beobachten.cards.${id}.title`)}
+          subtitle={t(`beobachten.cards.${id}.subtitle`)}
+          locked={locked}
+          lockedReason={locked ? t(`beobachten.cards.${id}.locked`) : undefined}
+          onOpen={() => setOpenFunction(id)}
+        />
+      ))}
+    </CardGrid>
+  );
+}

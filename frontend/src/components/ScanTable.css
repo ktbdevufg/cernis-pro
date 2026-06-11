@@ -1,0 +1,198 @@
+/* Scan-Tabelle: dicht, technisch, mit stickyem Kopf */
+
+.scan-table {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+}
+
+.scan-table__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+/* Monospace für IP/MAC/Ports/Ping — System-Monospace als Fallback. */
+.scan-table__mono {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+/* Kopfzeile bleibt beim Scrollen sichtbar. */
+.scan-table__head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.scan-table__th {
+  position: sticky;
+  top: 0;
+  padding: 9px 12px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-tert);
+  background: var(--color-bar);
+  border-bottom: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+.scan-table__th--status {
+  width: 28px;
+  padding-right: 0;
+}
+
+.scan-table__th--ping {
+  text-align: right;
+}
+
+/* Visuell verborgen, für Screenreader erhalten. */
+.scan-table__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Zwischenüberschrift als volle Zeile. */
+.scan-table__section-heading {
+  padding: 14px 12px 6px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-sec);
+  background: var(--color-bg);
+}
+
+.scan-table__row {
+  border-bottom: 1px solid var(--color-border);
+  cursor: pointer;
+}
+
+/* Gehoverte Zeile: leichte Akzentfläche statt neutralem Grau. */
+.scan-table__row:hover {
+  background: var(--color-accent-bg);
+}
+
+.scan-table__cell {
+  padding: 9px 12px;
+  color: var(--color-text);
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.scan-table__cell--status {
+  padding-right: 0;
+}
+
+.scan-table__cell--os {
+  color: var(--color-text-sec);
+}
+
+.scan-table__cell--ping {
+  text-align: right;
+  color: var(--color-text-sec);
+}
+
+/* Statuspunkt: dezent getönt nach Auffälligkeit. */
+.scan-table__dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--sev-low-bd);
+}
+
+.scan-table__dot--bekannt {
+  background: var(--color-accent);
+}
+
+.scan-table__dot--auffaellig {
+  background: var(--sev-med-bd);
+}
+
+.scan-table__dot--neu {
+  background: var(--sev-med-bd);
+  box-shadow: 0 0 0 3px var(--sev-med-bg);
+}
+
+/* Vendor mit Geräte-Icon. */
+.scan-table__vendor {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.scan-table__vendor-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--color-text-tert);
+}
+
+/* Hostname mit optionalem Hinweis-Pill. */
+.scan-table__hostname {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.scan-table__pill {
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.scan-table__pill--neu {
+  color: var(--sev-med-text);
+  background: var(--sev-med-bg);
+  border-color: var(--sev-med-bd);
+}
+
+.scan-table__pill--auffaellig {
+  color: var(--sev-low-text);
+  background: var(--sev-low-bg);
+  border-color: var(--sev-low-bd);
+}
+
+/* Port-Chips. */
+.scan-table__ports {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+/* Port-Chips: sehr dezent getönt im Markenton, ruhig nicht grell. */
+.scan-table__chip {
+  padding: 1px 6px;
+  font-size: 11px;
+  color: var(--color-accent);
+  background: var(--color-accent-bg);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+}
+
+.scan-table__chip--mehr {
+  color: var(--color-text-tert);
+  background: transparent;
+  border-color: var(--color-border);
+}
+
+.scan-table__ports-leer {
+  color: var(--color-text-tert);
+}

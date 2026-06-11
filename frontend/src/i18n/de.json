@@ -14,6 +14,11 @@
   "placeholder": {
     "inProgress": "in Arbeit"
   },
+  "cards": {
+    "open": "Öffnen",
+    "back": "Zurück",
+    "infoLabel": "Mehr Informationen"
+  },
   "overview": {
     "empty": {
       "title": "Noch nichts beobachtet",
@@ -44,6 +49,77 @@
       "label": "Anzeige (temporär)",
       "empty": "leer",
       "data": "Daten"
+    }
+  },
+  "beobachten": {
+    "cards": {
+      "scan": {
+        "title": "Netzwerk-Scan",
+        "subtitle": "Das lokale Netz aufnehmen: Geräte, IPv4, MAC, offene Ports.",
+        "locked": ""
+      },
+      "traffic": {
+        "title": "Per-App-Verkehr",
+        "subtitle": "Welche Anwendung wohin verbindet, aufgeschlüsselt je App.",
+        "locked": "erst nach Start der Beobachtung"
+      },
+      "processes": {
+        "title": "Prozesse",
+        "subtitle": "Laufende Prozesse mit ihren Netzverbindungen.",
+        "locked": "erst nach Start der Beobachtung"
+      }
+    },
+    "scan": {
+      "deviceCount_one": "1 Gerät",
+      "deviceCount_other": "{{count}} Geräte",
+      "startScan": "Scan starten",
+      "columns": {
+        "status": "Status",
+        "ip": "IPv4",
+        "mac": "MAC",
+        "vendor": "Hersteller",
+        "hostname": "Hostname",
+        "ports": "Ports",
+        "os": "OS",
+        "ping": "Ping"
+      },
+      "sections": {
+        "notable": "Neu oder auffällig",
+        "known": "Bekannte Geräte"
+      },
+      "newPill": "neu",
+      "notablePill": "auffällig",
+      "morePorts": "+{{count}}",
+      "morePortsTitle_one": "1 weiterer Port",
+      "morePortsTitle_other": "{{count}} weitere Ports"
+    }
+  },
+  "untersuchen": {
+    "cards": {
+      "analysis": {
+        "title": "Analyse",
+        "subtitle": "Muster und Zusammenhänge aus den gesammelten Beobachtungen.",
+        "locked": "braucht gesammelte Daten"
+      },
+      "diagnose": {
+        "title": "Diagnose",
+        "subtitle": "Erreichbarkeit, DNS und DHCP gezielt prüfen.",
+        "locked": ""
+      },
+      "cve": {
+        "title": "CVE-Abgleich",
+        "subtitle": "Erkannte Dienste gegen bekannte CVE-Einträge abgleichen.",
+        "locked": ""
+      }
+    }
+  },
+  "export": {
+    "cards": {
+      "report": {
+        "title": "Bericht erstellen",
+        "subtitle": "Beobachtungen und Befunde als Bericht zusammenstellen.",
+        "locked": ""
+      }
     }
   },
   "theme": {

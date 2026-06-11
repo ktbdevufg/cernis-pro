@@ -14,6 +14,11 @@
   "placeholder": {
     "inProgress": "in progress"
   },
+  "cards": {
+    "open": "Open",
+    "back": "Back",
+    "infoLabel": "More information"
+  },
   "overview": {
     "empty": {
       "title": "Nothing observed yet",
@@ -44,6 +49,77 @@
       "label": "Display (temporary)",
       "empty": "empty",
       "data": "Data"
+    }
+  },
+  "beobachten": {
+    "cards": {
+      "scan": {
+        "title": "Network scan",
+        "subtitle": "Capture the local network: devices, IPv4, MAC, open ports.",
+        "locked": ""
+      },
+      "traffic": {
+        "title": "Per-app traffic",
+        "subtitle": "Which application connects where, broken down by app.",
+        "locked": "available once observation has started"
+      },
+      "processes": {
+        "title": "Processes",
+        "subtitle": "Running processes with their network connections.",
+        "locked": "available once observation has started"
+      }
+    },
+    "scan": {
+      "deviceCount_one": "1 device",
+      "deviceCount_other": "{{count}} devices",
+      "startScan": "Start scan",
+      "columns": {
+        "status": "Status",
+        "ip": "IPv4",
+        "mac": "MAC",
+        "vendor": "Vendor",
+        "hostname": "Hostname",
+        "ports": "Ports",
+        "os": "OS",
+        "ping": "Ping"
+      },
+      "sections": {
+        "notable": "New or notable",
+        "known": "Known devices"
+      },
+      "newPill": "new",
+      "notablePill": "notable",
+      "morePorts": "+{{count}}",
+      "morePortsTitle_one": "1 more port",
+      "morePortsTitle_other": "{{count}} more ports"
+    }
+  },
+  "untersuchen": {
+    "cards": {
+      "analysis": {
+        "title": "Analysis",
+        "subtitle": "Patterns and relations across the collected observations.",
+        "locked": "needs collected data"
+      },
+      "diagnose": {
+        "title": "Diagnostics",
+        "subtitle": "Check reachability, DNS and DHCP on demand.",
+        "locked": ""
+      },
+      "cve": {
+        "title": "CVE matching",
+        "subtitle": "Match detected services against known CVE entries.",
+        "locked": ""
+      }
+    }
+  },
+  "export": {
+    "cards": {
+      "report": {
+        "title": "Create report",
+        "subtitle": "Compile observations and findings into a report.",
+        "locked": ""
+      }
     }
   },
   "theme": {

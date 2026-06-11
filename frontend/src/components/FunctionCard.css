@@ -1,0 +1,98 @@
+/* Funktions-Kachel: Bereichs-Übersicht */
+
+.function-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 18px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+
+/* Aktive Karte: anklickbar, Hover hebt Rahmen + Tönung. */
+.function-card[role="button"] {
+  cursor: pointer;
+}
+
+.function-card[role="button"]:hover {
+  border-color: var(--color-accent-border);
+  background: var(--color-accent-bg);
+}
+
+.function-card:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Gesperrte Karte: ausgegraut, nicht interaktiv. */
+.function-card--locked {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.function-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.function-card__icon {
+  display: inline-flex;
+  color: var(--color-accent);
+}
+
+.function-card__info {
+  display: inline-flex;
+  padding: 2px;
+  color: var(--color-text-tert);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.function-card__info:hover {
+  color: var(--color-text-sec);
+}
+
+.function-card__info:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.function-card__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.function-card__subtitle {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--color-text-sec);
+}
+
+/* "Öffnen"-Hinweis unten: dezenter Akzent mit Pfeil. */
+.function-card__open-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-accent);
+}
+
+/* Sperrgrund unten: Schloss + neutraler Text. */
+.function-card__locked-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--color-text-tert);
+}

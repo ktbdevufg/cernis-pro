@@ -22,8 +22,12 @@
   --color-border: rgba(0, 0, 0, 0.12);
   --color-card: #f7f6f2;
 
-  --color-accent: #0F6E56;
-  --color-accent-bg: #E1F5EE;
+  /* Logo-Türkis (Kernton 2090B0), als ruhiger Akzent abgeleitet. */
+  --color-accent: #107E9C;
+  --color-accent-strong: #0B6A84;
+  --color-accent-bg: #E0EFF4;
+  --color-accent-bg-strong: #CEE7EE;
+  --color-accent-border: #84C2D4;
 
   --sev-high-text: #A32D2D;
   --sev-high-bd: #E24B4A;
@@ -50,8 +54,12 @@
   --color-border: rgba(255, 255, 255, 0.14);
   --color-card: #222220;
 
-  --color-accent: #5DCAA5;
-  --color-accent-bg: #085041;
+  /* Logo-Türkis im Dunkelmodus: heller, klar, weiterhin Akzent. */
+  --color-accent: #12B8D4;
+  --color-accent-strong: #5AD4E8;
+  --color-accent-bg: #0C3743;
+  --color-accent-bg-strong: #104858;
+  --color-accent-border: #16657B;
 
   --sev-high-text: #F09595;
   --sev-high-bd: #A32D2D;
