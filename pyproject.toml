@@ -236,6 +236,7 @@ modules = [
     "domain.analysis",
     "domain.diagnostics",
     "domain.export",
+    "domain.resolver",
 ]
 
 # Die neuen Ringe duerfen den Altcode (modules/) NIE importieren. Der Legacy-Bezug

@@ -106,6 +106,8 @@ from api.monitoring import (
 from api.monitoring import router as monitoring_router
 from api.process import provide_check_process_permission, provide_list_processes
 from api.process import router as process_router
+from api.resolver import provide_resolve_endpoint
+from api.resolver import router as resolver_router
 from api.scanning import (
     provide_get_arp_table,
     provide_get_scan_detail,
@@ -202,6 +204,7 @@ from application.monitoring import (
     UpdateSchedule,
 )
 from application.process import CheckProcessPermission, ListProcesses
+from application.resolver import ResolveEndpoint
 from application.scanning import (
     GetArpTable,
     GetScanDetail,
@@ -281,6 +284,14 @@ from infrastructure.monitoring import (
 )
 from infrastructure.process_linux import PsutilProcessAdapter
 from infrastructure.process_permission import ProcessPermissionAdapter
+from infrastructure.resolver import (
+    CsvGeoAsnDb,
+    DigDnsPtrResolver,
+    RdapClient,
+    ResolverDataMissing,
+    ResolverToolMissing,
+    TlsCertReader,
+)
 from infrastructure.scanning.arp_table import ArpTableAdapter
 from infrastructure.scanning.fritz_hosts import FritzAuthError, FritzHostsAdapter
 from infrastructure.scanning.host_discovery import HostDiscoveryAdapter
@@ -1321,6 +1332,49 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # Composition Root, der api-Ring bleibt clean. Die Meldung ist die Rechte-Begruendung.
         logger.error("rogue_dhcp_permission_denied")
         return JSONResponse(status_code=403, content={"detail": exc.message})
+
+    # ── resolver-Domaene v2 verdrahten (Teilschritt 3, Regel 5: ports<->infra nur hier) ──
+    # Vier Quell-Adapter: PTR/Forward-DNS (dig), RDAP (httpx), TLS-Cert (stdlib ssl) sind
+    # zustandslos und werden pro Request frisch gewickelt. Die Geo/ASN-DB (CsvGeoAsnDb) ist
+    # die EINE Ausnahme: ihr Konstruktor LAEDT die vier CSVs in sortierte Listen -- darum
+    # EINMAL beim App-Bau (lru_cache, Muster wie scan_history_repository), NICHT pro Request.
+    # Fehlt eine CSV, wirft sie beim ERSTEN Lookup-Bau ResolverDataMissing -> 503 (Handler
+    # unten); der Bau selbst ist lazy (erst beim ersten /api/resolve, nicht beim App-Bau --
+    # so faellt ein Test ohne Daten-CSVs nicht schon beim create_app um).
+    @lru_cache(maxsize=1)
+    def geo_asn_db() -> CsvGeoAsnDb:
+        return CsvGeoAsnDb()
+
+    # Runner: reicht ip/port an den ResolveEndpoint-Use-Case durch und gibt das
+    # RemoteEndpointFacts als Any zurueck (der api-Ring serialisiert, kennt keine domain-
+    # Typen). Die drei zustandslosen Adapter pro Aufruf frisch; die Geo-DB geteilt (geladen).
+    async def _resolve_endpoint(ip: str, port: int | None) -> Any:
+        return await ResolveEndpoint(
+            DigDnsPtrResolver(), RdapClient(), geo_asn_db(), TlsCertReader()
+        ).resolve(ip, port)
+
+    app.include_router(resolver_router)
+    app.dependency_overrides[provide_resolve_endpoint] = lambda: _resolve_endpoint
+
+    @app.exception_handler(ResolverToolMissing)
+    async def _on_resolver_tool_missing(
+        _request: Request, exc: ResolverToolMissing
+    ) -> JSONResponse:
+        # Fehlendes System-Binary (dig) ist ein Fehler, kein stiller Fallback (ADR 0001).
+        # Vorbild DiagnosticsToolMissing -> 503: infra-Exception, am Composition Root
+        # gemappt. Die neutrale Meldung benennt das fehlende Programm.
+        logger.error("resolver_tool_missing", tool=exc.tool)
+        return JSONResponse(status_code=503, content={"detail": exc.message})
+
+    @app.exception_handler(ResolverDataMissing)
+    async def _on_resolver_data_missing(
+        _request: Request, exc: ResolverDataMissing
+    ) -> JSONResponse:
+        # Fehlende Geo/ASN-CSV ist ein echter Konfigurationsfehler, kein stiller Leer-
+        # Fallback (S3). Gleiches Muster wie ResolverToolMissing -> 503: infra-Exception,
+        # am Composition Root gemappt. Die Meldung benennt die fehlende Datei.
+        logger.error("resolver_data_missing", path=exc.path)
+        return JSONResponse(status_code=503, content={"detail": exc.message})
 
     # ── export-Domaene v2 verdrahten (Block 1: gespeicherter Scan -> CSV/JSON/PDF, ADR 0015) ──
     # Der ExportScan-Use-Case kennt KEINE scanning-Domaene: er bekommt den Scan ueber ein

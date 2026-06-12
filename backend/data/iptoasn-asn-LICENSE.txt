@@ -1,0 +1,19 @@
+ASN-Datenbank (iptoasn-asn) — Lizenz-Dokumentation
+==================================================
+
+Quelle:        https://github.com/sapics/ip-location-db
+Verzeichnis:   iptoasn-asn
+Dateien:       iptoasn-asn-ipv4.csv, iptoasn-asn-ipv6.csv
+Lizenz:        Public Domain Dedication and License v1.0 (PDDL, attributionsfrei)
+Daten-Urquelle: iptoasn.com (Public Domain)
+Abrufdatum:    2026-06-12
+
+Format pro Zeile (real, wie geladen — 4 Spalten):
+  ip_range_start,ip_range_end,autonomous_system_number,autonomous_system_name
+  (Beispiel: 1.0.0.0,1.0.0.255,13335,CLOUDFLARENET)
+
+Bewusst NICHT verwendet wurde das Verzeichnis "asn" derselben Quelle: dieses ist
+CC BY (Attributionspflicht). iptoasn-asn ist attributionsfrei und damit fuer das
+Repo-Tracking ohne Namensnennungs-Auflage geeignet.
+
+Die CSVs werden 1:1 wie geladen ins Repo getrackt (keine Umparsung).
