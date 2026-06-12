@@ -309,6 +309,13 @@
   color: var(--color-text-tert);
 }
 
+/* Verbindungsliste: Abschnitte (Auffällig / Bekannte Ziele) untereinander. */
+.traffic-detail__connlist {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
 .traffic-detail__conns {
   display: flex;
   flex-direction: column;
@@ -318,6 +325,7 @@
   list-style: none;
 }
 
+/* Eine gebündelte Ziel-Zeile: Ziel-Zeile oben, Dienst/Zustand gedämpft darunter. */
 .traffic-detail__conn {
   display: flex;
   flex-direction: column;
@@ -334,17 +342,77 @@
 .traffic-detail__conn-line {
   display: flex;
   align-items: baseline;
+  justify-content: space-between;
   gap: 10px;
 }
 
-.traffic-detail__conn-remote {
+/* Ziel: host prominent, IP klein/gedämpft daneben (bzw. nur IP ohne PTR). */
+.traffic-detail__conn-target {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.traffic-detail__conn-host {
   color: var(--color-text);
+  word-break: break-all;
+}
+
+.traffic-detail__conn-ip {
+  color: var(--color-text-tert);
+  font-size: 12px;
+}
+
+.traffic-detail__conn-noptr {
+  color: var(--color-text-tert);
+  font-size: 12px;
+  font-style: italic;
+}
+
+/* Rechte Seite der Ziel-Zeile: ×N-Pill + Port. */
+.traffic-detail__conn-meta {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* ×N-Pill: neutraler card-Ton (kein Status-Signal). */
+.traffic-detail__conn-bundle {
+  align-self: center;
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 999px;
+  color: var(--color-text-sec);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+.traffic-detail__conn-port {
+  color: var(--color-text-tert);
+  font-size: 12px;
+}
+
+/* Untere Zeile: Dienst + Zustand gedämpft, ggf. nachschlagen-Link rechts. */
+.traffic-detail__conn-sub {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
 }
 
 .traffic-detail__conn-service {
   color: var(--color-text-sec);
   font-size: 11px;
   letter-spacing: 0.03em;
+}
+
+.traffic-detail__conn-state {
+  color: var(--color-text-tert);
+  font-size: 12px;
 }
 
 /* Nachschlagen-Link: dezent, am rechten Rand (wie Scan-Detail). */
@@ -368,7 +436,24 @@
   border-radius: 2px;
 }
 
-.traffic-detail__conn-state {
-  color: var(--color-text-tert);
+/* Ein-/Ausklappen der bekannten Ziele: dezenter Akzent-Link. */
+.traffic-detail__toggle {
+  align-self: flex-start;
+  margin-top: 4px;
+  padding: 0;
   font-size: 12px;
+  color: var(--color-accent);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.traffic-detail__toggle:hover {
+  text-decoration: underline;
+}
+
+.traffic-detail__toggle:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 2px;
 }

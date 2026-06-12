@@ -136,6 +136,161 @@ function AppListe({ apps, onSelect, selectedName }) {
   );
 }
 
+// Bündelt Verbindungen nach Ziel: gleicher host (bzw. gleiche remote-IP, wenn
+// host=null) UND gleicher port werden zu EINEM Bündel zusammengefasst. Behält
+// die übrigen Felder der ersten Verbindung des Bündels und zählt die Menge.
+// Bewusst als reine Hilfsfunktion: später auch im Scan-Detail (Ports) nutzbar.
+function buendeleVerbindungen(conns) {
+  const buendel = new Map();
+  for (const conn of conns) {
+    const ziel = conn.host ?? conn.remote;
+    const schluessel = `${ziel}|${conn.port}`;
+    const vorhanden = buendel.get(schluessel);
+    if (vorhanden) {
+      vorhanden.count += 1;
+    } else {
+      buendel.set(schluessel, { ...conn, count: 1 });
+    }
+  }
+  return [...buendel.values()];
+}
+
+// Eine gebündelte Ziel-Zeile. host prominent + IP gedämpft; ohne host nur IP
+// (mono) plus Hinweis "kein PTR-Record". Rechts ×N-Pill (falls N>1) und Port.
+// Bei notable zusätzlich der "nachschlagen"-Link.
+// Wiederverwendbar gehalten (siehe ConnectionList): keine traffic-spezifische
+// Annahme außer den Verbindungs-Feldern selbst.
+function BuendelZeile({ buendel, onLookup }) {
+  const { t } = useTranslation();
+
+  return (
+    <li className="traffic-detail__conn">
+      <div className="traffic-detail__conn-line">
+        <span className="traffic-detail__conn-target">
+          {buendel.host ? (
+            <>
+              <span className="traffic-detail__conn-host">{buendel.host}</span>
+              <span className="traffic-detail__conn-ip traffic-mono">
+                {buendel.remote}
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="traffic-detail__conn-ip traffic-mono">
+                {buendel.remote}
+              </span>
+              <span className="traffic-detail__conn-noptr">
+                {t("beobachten.traffic.noPtr")}
+              </span>
+            </>
+          )}
+        </span>
+
+        <span className="traffic-detail__conn-meta">
+          {buendel.count > 1 && (
+            <span className="traffic-detail__conn-bundle">
+              {t("beobachten.traffic.bundlePill", { count: buendel.count })}
+            </span>
+          )}
+          <span className="traffic-detail__conn-port traffic-mono">
+            {t("beobachten.traffic.port", { value: buendel.port })}
+          </span>
+        </span>
+      </div>
+
+      <div className="traffic-detail__conn-sub">
+        <span className="traffic-detail__conn-service">{buendel.service}</span>
+        <span className="traffic-detail__conn-state">
+          {t("beobachten.traffic.state", { value: buendel.state })}
+        </span>
+        {buendel.notable && (
+          <button
+            type="button"
+            className="traffic-detail__lookup"
+            onClick={() => onLookup(buendel)}
+          >
+            {t("beobachten.traffic.lookup")}
+          </button>
+        )}
+      </div>
+    </li>
+  );
+}
+
+// Wiederverwendbare Verbindungs-/Ziel-Liste: bündelt nach Ziel+Port, trennt
+// "Auffällig" (immer offen) von "Bekannte Ziele" (erste paar offen, Rest hinter
+// einem Toggle). Bewusst eigenständig gehalten, damit das Scan-Detail-Panel
+// dieselbe Bündel-/Klapp-Logik für offene Ports nutzen kann.
+const STANDARD_OFFEN = 3; // bekannte Ziele anfangs offen sichtbar
+
+function ConnectionList({ conns, onLookup }) {
+  const { t } = useTranslation();
+  const [erweitert, setErweitert] = useState(false);
+
+  const buendel = buendeleVerbindungen(conns);
+  const auffaellig = buendel.filter((b) => b.notable);
+  // Bekannte Ziele nach Anzahl (×N) absteigend.
+  const bekannt = buendel
+    .filter((b) => !b.notable)
+    .sort((a, b) => b.count - a.count);
+
+  // Bei wenigen Verbindungen (<=4 gesamt) alles offen, kein Toggle.
+  const wenig = conns.length <= 4;
+  const sichtbarBekannt =
+    wenig || erweitert ? bekannt : bekannt.slice(0, STANDARD_OFFEN);
+  const versteckt = bekannt.length - sichtbarBekannt.length;
+  const toggleSinnvoll = !wenig && (versteckt > 0 || erweitert);
+
+  return (
+    <div className="traffic-detail__connlist">
+      {auffaellig.length > 0 && (
+        <section className="traffic-detail__section">
+          <h4 className="traffic-detail__section-heading">
+            {t("beobachten.traffic.sections.notable")}
+          </h4>
+          <ul className="traffic-detail__conns">
+            {auffaellig.map((b) => (
+              <BuendelZeile
+                key={`${b.host ?? b.remote}|${b.port}`}
+                buendel={b}
+                onLookup={onLookup}
+              />
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {bekannt.length > 0 && (
+        <section className="traffic-detail__section">
+          <h4 className="traffic-detail__section-heading">
+            {t("beobachten.traffic.sections.known")}
+          </h4>
+          <ul className="traffic-detail__conns">
+            {sichtbarBekannt.map((b) => (
+              <BuendelZeile
+                key={`${b.host ?? b.remote}|${b.port}`}
+                buendel={b}
+                onLookup={onLookup}
+              />
+            ))}
+          </ul>
+          {toggleSinnvoll && (
+            <button
+              type="button"
+              className="traffic-detail__toggle"
+              onClick={() => setErweitert((v) => !v)}
+            >
+              {erweitert
+                ? t("beobachten.traffic.showLess")
+                : t("beobachten.traffic.showMore", { count: versteckt })}
+            </button>
+          )}
+        </section>
+      )}
+    </div>
+  );
+}
+
 // Rechte Spalte: Verbindungs-Detail der gewählten App.
 function AppDetailPanel({ app, onClose }) {
   const { t } = useTranslation();
@@ -163,6 +318,10 @@ function AppDetailPanel({ app, onClose }) {
               })}
               {" · "}
               {t("beobachten.traffic.up", { value: formatRate(t, app.up) })}
+              {" "}
+              {t("beobachten.traffic.connCount", {
+                count: app.conns.length,
+              })}
             </span>
           </div>
         </div>
@@ -184,40 +343,7 @@ function AppDetailPanel({ app, onClose }) {
           </p>
         )}
 
-        <section className="traffic-detail__section">
-          <h4 className="traffic-detail__section-heading">
-            {t("beobachten.traffic.connections", {
-              count: app.conns.length,
-            })}
-          </h4>
-
-          <ul className="traffic-detail__conns">
-            {app.conns.map((conn) => (
-              <li key={conn.remote} className="traffic-detail__conn">
-                <div className="traffic-detail__conn-line">
-                  <span className="traffic-detail__conn-remote traffic-mono">
-                    {conn.remote}
-                  </span>
-                  <span className="traffic-detail__conn-service">
-                    {conn.service}
-                  </span>
-                  {conn.notable && (
-                    <button
-                      type="button"
-                      className="traffic-detail__lookup"
-                      onClick={() => handleNachschlagen(conn)}
-                    >
-                      {t("beobachten.traffic.lookup")}
-                    </button>
-                  )}
-                </div>
-                <span className="traffic-detail__conn-state">
-                  {t("beobachten.traffic.state", { value: conn.state })}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </section>
+        <ConnectionList conns={app.conns} onLookup={handleNachschlagen} />
       </div>
     </aside>
   );

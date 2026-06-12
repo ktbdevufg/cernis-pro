@@ -136,6 +136,18 @@
       "unknownTarget": "Connects to an unknown target",
       "connections_one": "Connections (1)",
       "connections_other": "Connections ({{count}})",
+      "connCount_one": "· 1 connection",
+      "connCount_other": "· {{count}} connections",
+      "sections": {
+        "notable": "Notable",
+        "known": "Known targets"
+      },
+      "noPtr": "no PTR record",
+      "bundlePill": "×{{count}}",
+      "port": "Port {{value}}",
+      "showMore_one": "+ show 1 more target",
+      "showMore_other": "+ show {{count}} more targets",
+      "showLess": "show less",
       "state": "State: {{value}}",
       "lookup": "look up",
       "close": "Close"
