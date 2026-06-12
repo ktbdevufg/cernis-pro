@@ -20,6 +20,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import trafficMock from "../mockData/trafficMock.js";
+import LookupPanel from "./LookupPanel.jsx";
 import "./TrafficView.css";
 
 // Abbildung der Mock-Icon-Schlüssel auf lucide-Komponenten.
@@ -291,17 +292,12 @@ function ConnectionList({ conns, onLookup }) {
   );
 }
 
-// Rechte Spalte: Verbindungs-Detail der gewählten App.
-function AppDetailPanel({ app, onClose }) {
+// Rechte Spalte: Verbindungs-Detail der gewählten App. Der 'nachschlagen'-Link
+// einer Verbindung meldet deren Ziel über onLookup nach oben — dort öffnet
+// TrafficView die Gegenstellen-Ansicht (LookupPanel) in dieser Spalte.
+function AppDetailPanel({ app, onClose, onLookup }) {
   const { t } = useTranslation();
   const Icon = APP_ICONS[app.icon] ?? HelpCircle;
-
-  // TEMP: 'nachschlagen' fuehrt spaeter zur Gegenstellen-Ansicht (Fakten +
-  // externe Links, diagnostics/cpnetcheck) — noch nicht gebaut.
-  const handleNachschlagen = (conn) => {
-    // Bewusst ohne Funktion (Platzhalter, kein Ziel).
-    void conn;
-  };
 
   return (
     <aside className="traffic-detail">
@@ -343,7 +339,7 @@ function AppDetailPanel({ app, onClose }) {
           </p>
         )}
 
-        <ConnectionList conns={app.conns} onLookup={handleNachschlagen} />
+        <ConnectionList conns={app.conns} onLookup={onLookup} />
       </div>
     </aside>
   );
@@ -355,11 +351,24 @@ export default function TrafficView() {
   // Gewählte App über den Namen (eindeutiger Schlüssel im Mock); null = keine.
   const [gewaehlterName, setGewaehlterName] = useState(null);
 
+  // Nachzuschlagende Gegenstelle ({ ip, port }) oder null. Ist sie gesetzt,
+  // tritt die Gegenstellen-Ansicht in der rechten Spalte an die Stelle des
+  // Verbindungs-Details; Schließen kehrt zur App-Ansicht zurück.
+  const [lookupZiel, setLookupZiel] = useState(null);
+
   // Klick auf eine Zeile: wählt die App; erneuter Klick auf dieselbe löscht.
+  // Ein Wechsel schließt eine offene Gegenstellen-Ansicht (gehört zur alten App).
   const handleSelect = (app) => {
+    setLookupZiel(null);
     setGewaehlterName((aktuell) =>
       aktuell === app.name ? null : app.name,
     );
+  };
+
+  // 'nachschlagen' einer Verbindung: deren Ziel (IP + Port) merken; die rechte
+  // Spalte zeigt daraufhin die Gegenstellen-Ansicht.
+  const handleLookup = (conn) => {
+    setLookupZiel({ ip: conn.remote, port: conn.port });
   };
 
   const gewaehlteApp =
@@ -372,13 +381,22 @@ export default function TrafficView() {
         onSelect={handleSelect}
         selectedName={gewaehlterName}
       />
-      {gewaehlteApp && (
-        <AppDetailPanel
-          key={gewaehlteApp.name}
-          app={gewaehlteApp}
-          onClose={() => setGewaehlterName(null)}
-        />
-      )}
+      {gewaehlteApp &&
+        (lookupZiel ? (
+          <LookupPanel
+            key={`${lookupZiel.ip}:${lookupZiel.port}`}
+            ip={lookupZiel.ip}
+            port={lookupZiel.port}
+            onClose={() => setLookupZiel(null)}
+          />
+        ) : (
+          <AppDetailPanel
+            key={gewaehlteApp.name}
+            app={gewaehlteApp}
+            onClose={() => setGewaehlterName(null)}
+            onLookup={handleLookup}
+          />
+        ))}
     </div>
   );
 }

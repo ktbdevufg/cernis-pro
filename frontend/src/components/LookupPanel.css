@@ -1,0 +1,358 @@
+/* Gegenstellen-Ansicht: seitliches Panel rechts, eigener vertikaler Scroll.
+   Gleiche Breite/Designsprache wie Scan-Detail- und Verbindungs-Detail-Panel. */
+
+.lookup {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 380px;
+  width: 380px;
+  min-height: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+  overflow: hidden;
+}
+
+/* Monospace für IP/PTR/TLS/DynDNS/ASN — System-Monospace als Fallback. */
+.lookup__mono {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+/* Kopf: Icon + Titel + ip:port links, Schließen rechts. */
+.lookup__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 14px 12px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bar);
+  flex-shrink: 0;
+}
+
+.lookup__heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.lookup__icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--color-text-sec);
+}
+
+.lookup__title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.lookup__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text);
+  word-break: break-word;
+}
+
+.lookup__subtitle {
+  font-size: 13px;
+  color: var(--color-text-sec);
+}
+
+.lookup__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  color: var(--color-text-sec);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.lookup__close:hover {
+  color: var(--color-accent);
+  border-color: var(--color-accent-border);
+  background: var(--color-accent-bg);
+}
+
+.lookup__close:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Körper: scrollt unabhängig, eigene Spalte. */
+.lookup__body {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 14px 18px;
+}
+
+/* Neutraler Hinweis: ruhiger ok-Ton (Fakten, kein Urteil). */
+.lookup__notice {
+  margin: 0;
+  padding: 9px 11px;
+  font-size: 12px;
+  line-height: 1.45;
+  border-radius: var(--radius-md);
+  color: var(--color-ok-text);
+  background: var(--color-ok-bg);
+  border: 1px solid transparent;
+}
+
+/* Länder-Widerspruch: getönt in sev-med (wie übrige Warn-Hinweise). */
+.lookup__conflict {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 0;
+  padding: 9px 11px;
+  font-size: 12px;
+  line-height: 1.45;
+  border-radius: var(--radius-md);
+  color: var(--sev-med-text);
+  background: var(--sev-med-bg);
+  border: 1px solid var(--sev-med-bd);
+}
+
+.lookup__conflict > svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.lookup__conflict-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.lookup__conflict-label {
+  font-weight: 600;
+}
+
+.lookup__section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.lookup__section-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-tert);
+}
+
+/* --- Feld-Zeilen (Namensauflösung, Betreiber & Standort) --- */
+.lookup__fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.lookup__field {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 0;
+  font-size: 13px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.lookup__field:last-child {
+  border-bottom: none;
+}
+
+.lookup__field-label {
+  color: var(--color-text-sec);
+  flex-shrink: 0;
+}
+
+/* Rechte Seite der Zeile: Wert + dezentes Quellen-Badge, rechtsbündig. */
+.lookup__field-right {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.lookup__field-value {
+  color: var(--color-text);
+  text-align: right;
+  word-break: break-word;
+}
+
+/* Fehlender Wert: kursiv, gedämpft. */
+.lookup__field-value--missing {
+  color: var(--color-text-tert);
+  font-style: italic;
+}
+
+/* Quellen-Kürzel: kleines, umrandetes Badge in gedämpfter Tertiärfarbe. */
+.lookup__source {
+  flex-shrink: 0;
+  align-self: center;
+  padding: 1px 5px;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  color: var(--color-text-tert);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* --- TLS-Zertifikat: anklickbare Zeile mit aufklappbarem Detailbereich --- */
+.lookup__tls {
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.lookup__tls:last-child {
+  border-bottom: none;
+}
+
+/* Die Umschalt-Zeile sieht aus wie eine Feld-Zeile, ist aber ein Button. */
+.lookup__tls-toggle {
+  width: 100%;
+  margin: 0;
+  background: transparent;
+  border: none;
+  border-bottom: none;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+.lookup__tls-toggle:hover .lookup__field-value {
+  color: var(--color-accent);
+}
+
+.lookup__tls-toggle:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-md);
+}
+
+/* Aufklapp-Indikator: dreht sich beim Öffnen. */
+.lookup__chevron {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  align-self: center;
+  color: var(--color-text-tert);
+  transition: transform 0.15s ease;
+}
+
+.lookup__chevron--open {
+  transform: rotate(180deg);
+}
+
+/* Aufgeklappter Detailbereich unter der Zeile, dezent abgesetzt. */
+.lookup__tls-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 4px 0 8px;
+  padding: 4px 10px;
+  border-left: 2px solid var(--color-border);
+}
+
+/* SAN-Liste und Fingerprint dürfen umbrechen. */
+.lookup__tls-san,
+.lookup__tls-fp {
+  word-break: break-all;
+}
+
+/* Selbstsigniert: reine Feststellung, gedämpft — kein Warn-Ton. */
+.lookup__tls-selfsigned {
+  margin: 8px 0 0;
+  font-size: 12px;
+  font-style: italic;
+  color: var(--color-text-tert);
+}
+
+/* --- Dienst am Port --- */
+.lookup__service {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--color-text);
+}
+
+/* --- Selbst weiterprüfen: externe Link-Zeilen --- */
+.lookup__externs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lookup__extern {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 9px 11px;
+  text-align: left;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.lookup__extern:hover {
+  border-color: var(--color-accent-border);
+  background: var(--color-accent-bg);
+}
+
+.lookup__extern:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.lookup__extern-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.lookup__extern-label {
+  font-size: 13px;
+  color: var(--color-text);
+}
+
+.lookup__extern-hint {
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+.lookup__extern-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--color-link);
+}

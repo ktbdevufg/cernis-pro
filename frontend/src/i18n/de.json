@@ -151,6 +151,66 @@
       "state": "Zustand: {{value}}",
       "lookup": "nachschlagen",
       "close": "Schließen"
+    },
+    "lookup": {
+      "title": "Gegenstelle nachschlagen",
+      "close": "Schließen",
+      "notFound": "nicht gefunden",
+      "sourceLabel": "Quelle",
+      "notice": "Reine Fakten aus mehreren Quellen. Wo Quellen sich unterscheiden, steht beides — CERNIS bewertet nicht.",
+      "conflict": {
+        "label": "Länder-Angaben weichen ab"
+      },
+      "resolution": {
+        "heading": "Namensauflösung",
+        "ptr": "Reverse-DNS (PTR)",
+        "forward": "Forward-Bestätigung",
+        "tls": "TLS-Zertifikat",
+        "tlsSubject": "Subject (CN)",
+        "tlsSan": "SAN",
+        "tlsIssuer": "Aussteller (Issuer)",
+        "tlsValidFrom": "Gültig von",
+        "tlsValidUntil": "Gültig bis",
+        "tlsSerial": "Seriennummer",
+        "tlsFingerprint": "SHA-256-Fingerprint",
+        "tlsSelfSigned": "selbstsigniert",
+        "dyndns": "DynDNS-Datenbank"
+      },
+      "operator": {
+        "heading": "Betreiber & Netz",
+        "org": "Betreiber",
+        "netname": "Netz-Name",
+        "netRange": "Netz-Bereich",
+        "asn": "ASN",
+        "asnOrg": "Betreiber des AS",
+        "abuse": "Abuse-Kontakt"
+      },
+      "location": {
+        "heading": "Standort",
+        "rdapNet": "Land laut RDAP-Netz",
+        "orgAddress": "Land laut Org-Adresse",
+        "geoDb": "Land laut Geo-DB"
+      },
+      "service": {
+        "heading": "Dienst am Port",
+        "hint": "Port-Einordnung",
+        "banner": "Banner"
+      },
+      "external": {
+        "heading": "Selbst weiterprüfen",
+        "whois": {
+          "label": "WHOIS beim Betreiber",
+          "hint": "Registrierung und Kontakt des Netzes nachschlagen"
+        },
+        "reputation": {
+          "label": "Reputation prüfen",
+          "hint": "Die IP in öffentlichen Reputationsquellen abfragen"
+        },
+        "geo": {
+          "label": "Standort & Netz",
+          "hint": "Geografische Zuordnung und ASN ansehen"
+        }
+      }
     }
   },
   "untersuchen": {

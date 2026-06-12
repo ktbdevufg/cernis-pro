@@ -151,6 +151,66 @@
       "state": "State: {{value}}",
       "lookup": "look up",
       "close": "Close"
+    },
+    "lookup": {
+      "title": "Look up remote endpoint",
+      "close": "Close",
+      "notFound": "not found",
+      "sourceLabel": "Source",
+      "notice": "Plain facts from several sources. Where sources differ, both are shown — CERNIS does not judge.",
+      "conflict": {
+        "label": "Country information differs"
+      },
+      "resolution": {
+        "heading": "Name resolution",
+        "ptr": "Reverse-DNS (PTR)",
+        "forward": "Forward confirmation",
+        "tls": "TLS certificate",
+        "tlsSubject": "Subject (CN)",
+        "tlsSan": "SAN",
+        "tlsIssuer": "Issuer",
+        "tlsValidFrom": "Valid from",
+        "tlsValidUntil": "Valid until",
+        "tlsSerial": "Serial number",
+        "tlsFingerprint": "SHA-256 fingerprint",
+        "tlsSelfSigned": "self-signed",
+        "dyndns": "DynDNS database"
+      },
+      "operator": {
+        "heading": "Operator & network",
+        "org": "Operator",
+        "netname": "Network name",
+        "netRange": "Network range",
+        "asn": "ASN",
+        "asnOrg": "AS operator",
+        "abuse": "Abuse contact"
+      },
+      "location": {
+        "heading": "Location",
+        "rdapNet": "Country per RDAP network",
+        "orgAddress": "Country per org address",
+        "geoDb": "Country per Geo-DB"
+      },
+      "service": {
+        "heading": "Service on port",
+        "hint": "Port classification",
+        "banner": "Banner"
+      },
+      "external": {
+        "heading": "Investigate yourself",
+        "whois": {
+          "label": "WHOIS at the operator",
+          "hint": "Look up the network's registration and contact"
+        },
+        "reputation": {
+          "label": "Check reputation",
+          "hint": "Query the IP in public reputation sources"
+        },
+        "geo": {
+          "label": "Location & network",
+          "hint": "View geographic assignment and ASN"
+        }
+      }
     }
   },
   "untersuchen": {
