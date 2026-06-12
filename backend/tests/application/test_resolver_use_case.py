@@ -63,14 +63,20 @@ class FakeGeoAsnDb:
 
 
 class FakeTlsCertReader:
-    """Liefert kontrollierte Cert-Details ODER None -- kein TLS-Handshake."""
+    """Liefert kontrollierte Cert-Details ODER None -- kein TLS-Handshake.
+
+    Haelt jeden Aufruf samt durchgereichtem ``hostname`` (SNI) fest, damit Tests die
+    PTR-als-SNI-Weitergabe pruefen koennen.
+    """
 
     def __init__(self, cert: TlsCertDetails | None) -> None:
         self._cert = cert
-        self.calls: list[tuple[str, int]] = []
+        self.calls: list[tuple[str, int, str | None]] = []
 
-    async def fetch_cert(self, ip: str, port: int) -> TlsCertDetails | None:
-        self.calls.append((ip, port))
+    async def fetch_cert(
+        self, ip: str, port: int, hostname: str | None = None
+    ) -> TlsCertDetails | None:
+        self.calls.append((ip, port, hostname))
         return self._cert
 
 
@@ -215,7 +221,8 @@ def test_tls_fehlschlag_none() -> None:
     facts = asyncio.run(uc.resolve("1.2.3.4", 8443))
 
     assert facts.tls_cert.value is None
-    assert tls.calls == [("1.2.3.4", 8443)]  # mit Port WIRD fetch_cert gerufen
+    # mit Port WIRD fetch_cert gerufen; PTR-Name als SNI-hostname durchgereicht.
+    assert tls.calls == [("1.2.3.4", 8443, "host.example.com")]
     assert facts.service_hint.value == "https-alt"
 
 
@@ -248,3 +255,33 @@ def test_dyndns_aus_ptr_abgeleitet() -> None:
 
     assert facts.dyndns.value == "box.myfritz.net"
     assert facts.dyndns.source is SourceTag.DNS
+
+
+def test_ptr_name_wird_als_sni_hostname_durchgereicht() -> None:
+    """PTR-Name vorhanden + Port -> fetch_cert bekommt diesen Namen als hostname (SNI)."""
+    tls = FakeTlsCertReader(_full_cert())
+    uc = ResolveEndpoint(
+        FakePtrResolver(ptr="host.example.com", forward=("1.2.3.4",)),
+        FakeRdapClient(RdapRawFacts()),
+        FakeGeoAsnDb(GeoAsnRecord()),
+        tls,
+    )
+
+    asyncio.run(uc.resolve("1.2.3.4", 443))
+
+    assert tls.calls == [("1.2.3.4", 443, "host.example.com")]
+
+
+def test_ohne_ptr_name_kein_sni_hostname() -> None:
+    """Kein PTR-Name, aber Port -> fetch_cert wird gerufen, hostname ist None (kein SNI)."""
+    tls = FakeTlsCertReader(None)
+    uc = ResolveEndpoint(
+        FakePtrResolver(ptr="", forward=()),
+        FakeRdapClient(RdapRawFacts()),
+        FakeGeoAsnDb(GeoAsnRecord()),
+        tls,
+    )
+
+    asyncio.run(uc.resolve("1.2.3.4", 443))
+
+    assert tls.calls == [("1.2.3.4", 443, None)]  # leerer PTR -> hostname None

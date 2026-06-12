@@ -17,6 +17,14 @@ Bewusst dokumentiert (Vorbild ``security/tls.py``): ``ctx.check_hostname = False
 ``CERT_OPTIONAL`` -- damit auch self-signed/abgelaufene Zertifikate auslesbar sind (das
 Auslesen ist der Zweck; das Einordnen bleibt spaeteren Ringen ueberlassen).
 
+SNI: ``server_hostname`` ist der durchgereichte ``hostname`` (der PTR-Name) falls
+vorhanden, sonst ``None`` -- dann sendet Python GAR KEIN SNI. Eine IP ist kein
+gueltiges SNI; SNI-strikte Server (viele CDNs) liefern darauf ein Dummy-Cert
+(CN=invalid2.invalid). Mit dem PTR-Namen als SNI kommt das echte Cert; ohne Namen ist
+kein SNI besser als eine IP-als-SNI. WICHTIG: das aktiviert KEINE Hostname-Pruefung --
+``check_hostname`` bleibt False, ``CERT_OPTIONAL`` bleibt, der Adapter bleibt
+wertneutral (liest auch unpassende/self-signed Certs aus, urteilt nicht).
+
 STRENG FEHLERTOLERANT laut Port-Vertrag: bei JEGLICHEM Fehlschlag (Timeout,
 ConnectionRefused, kein TLS, SSLError ohne ``.reason``, Parse-Fehler, beliebige
 Exception) -> ``None``. NIE werfen, NIE ueber das feste Timeout hinaus blockieren.
@@ -117,24 +125,29 @@ def _parse_cert(cert_dict: dict[str, Any], der_bytes: bytes | None) -> TlsCertDe
 class TlsCertReader:
     """Erfuellt das ``TlsCertPort``-Protocol -- wertneutraler TLS-Cert-Abruf (stdlib)."""
 
-    async def fetch_cert(self, ip: str, port: int) -> TlsCertDetails | None:
+    async def fetch_cert(
+        self, ip: str, port: int, hostname: str | None = None
+    ) -> TlsCertDetails | None:
         """Liefert die Zertifikatsdetails zu ``ip``/``port`` oder ``None`` (Fehlschlag).
 
+        ``hostname`` ist der optionale SNI-Servername (PTR-Name); ``None`` -> kein SNI.
         Blockierendes Handshake-I/O -> ``asyncio.to_thread`` (Loop bleibt frei). STRENG
         fehlertolerant laut Port-Vertrag: JEDER Fehlschlag (Timeout, kein TLS,
         Handshake-Fehler, Parse-Fehler, beliebige Exception) -> ``None``; NIE werfen, NIE
         ueber das feste Timeout hinaus blockieren.
         """
-        return await asyncio.to_thread(self._fetch_cert_sync, ip, port)
+        return await asyncio.to_thread(self._fetch_cert_sync, ip, port, hostname)
 
-    def _fetch_cert_sync(self, ip: str, port: int) -> TlsCertDetails | None:
+    def _fetch_cert_sync(self, ip: str, port: int, hostname: str | None) -> TlsCertDetails | None:
         """Synchroner Handshake-Kern (laeuft im Thread). Orchestriert nur, faengt ALLES.
 
-        Verbindet direkt zu ``ip``:``port`` (``server_hostname=ip``, ``check_hostname =
-        False``, ``CERT_OPTIONAL`` -- damit auch self-signed/abgelaufene Zertifikate
-        auslesbar sind). Klappt der Handshake, liefert aber kein Zertifikat (CERT_OPTIONAL,
-        Gegenstelle ohne Cert), gilt das als Fehlschlag -> ``None`` (kein erfundenes
-        leeres ``TlsCertDetails``). Jegliche Exception -> ``None``.
+        Verbindet direkt zu ``ip``:``port``. SNI: ``server_hostname = hostname or None``
+        -- mit PTR-Name als SNI (echtes Cert SNI-strikter Server), ohne Namen GAR KEIN
+        SNI statt einer IP-als-SNI (die ein Dummy-Cert ausloesen wuerde). ``check_hostname
+        = False`` + ``CERT_OPTIONAL`` bleiben -- auch self-signed/abgelaufene Zertifikate
+        sind auslesbar, der Adapter urteilt nicht. Klappt der Handshake, liefert aber kein
+        Zertifikat (CERT_OPTIONAL, Gegenstelle ohne Cert), gilt das als Fehlschlag ->
+        ``None`` (kein erfundenes leeres ``TlsCertDetails``). Jegliche Exception -> ``None``.
         """
         try:
             ctx = ssl.create_default_context()
@@ -143,7 +156,7 @@ class TlsCertReader:
 
             with (
                 socket.create_connection((ip, port), timeout=_HANDSHAKE_TIMEOUT_SECS) as sock,
-                ctx.wrap_socket(sock, server_hostname=ip) as ssock,
+                ctx.wrap_socket(sock, server_hostname=hostname or None) as ssock,
             ):
                 cert_dict = ssock.getpeercert()
                 if not cert_dict:

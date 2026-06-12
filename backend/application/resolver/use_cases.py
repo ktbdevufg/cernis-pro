@@ -13,12 +13,17 @@ ist resolver-eigen). Er URTEILT nicht: Widersprueche (z. B. RDAP-Land vs. GeoDB-
 bleiben als getrennte Felder sichtbar; das einzige abgeleitete Flag ist ``country_
 conflict`` (reiner Vergleich, kein Fact).
 
-Nebenlaeufig wo sinnvoll (``asyncio.gather``): die vier Quellen sind unabhaengig -- PTR/
-RDAP/TLS reden ueber das Netz, der Geo/ASN-Lookup ist SYNCHRON und wird ueber
-``asyncio.to_thread`` aus dem Loop gehoben (der Port ist bewusst sync, damit der lokale
-DB-Lookup nicht zum Coroutine-Zwang wird). Der Forward-Confirmed-Abgleich haengt am PTR
-und laeuft daher INNERHALB der PTR-Kette (zweiter DNS-Schritt erst, wenn ein PTR-Name da
-ist) -- diese eine Sequenz ist ehrlich abhaengig, der Rest laeuft parallel dazu.
+Nebenlaeufig wo sinnvoll (``asyncio.gather``): RDAP und der Geo/ASN-Lookup sind
+unabhaengig und laufen parallel -- RDAP redet ueber das Netz, der Geo/ASN-Lookup ist
+SYNCHRON und wird ueber ``asyncio.to_thread`` aus dem Loop gehoben (der Port ist bewusst
+sync, damit der lokale DB-Lookup nicht zum Coroutine-Zwang wird).
+
+PTR und TLS sind dagegen GEKOPPELT (nicht mehr voll parallel): der TLS-Abruf braucht den
+PTR-Namen als SNI-Servername -- eine IP ist kein gueltiges SNI, SNI-strikte Server
+liefern darauf nur ein Dummy-Cert. Also laeuft erst die PTR-Kette (PTR + bei Treffer
+Forward-Abgleich, zweiter DNS-Schritt erst wenn ein PTR-Name da ist), danach -- nur bei
+gegebenem Port -- der TLS-Abruf mit dem PTR-Namen als SNI. Diese eine Sequenz ist ehrlich
+abhaengig; sie laeuft als Ganzes parallel zu RDAP/Geo.
 """
 
 import asyncio
@@ -62,24 +67,20 @@ class ResolveEndpoint:
     async def resolve(self, ip: str, port: int | None) -> RemoteEndpointFacts:
         """Holt PTR/Forward, RDAP, Geo/ASN und (bei gegebenem Port) TLS und buendelt sie.
 
-        Die vier Quell-Zweige laufen nebenlaeufig (``asyncio.gather``): die PTR-Kette
-        (PTR + bei Treffer Forward-Abgleich), der RDAP-Lookup, der Geo/ASN-Lookup (sync ->
-        ``to_thread``) und -- nur wenn ``port`` gegeben ist -- der TLS-Cert-Abruf. Aus den
-        Rohfakten baut der Use-Case das Aggregat: jedes Feld als ``ResolverFact`` mit
-        korrektem ``SourceTag``, ``country_conflict`` als abgeleitetes Flag.
+        Drei Zweige laufen nebenlaeufig (``asyncio.gather``): die PTR-und-TLS-Kette (erst
+        PTR + bei Treffer Forward-Abgleich, danach -- bei gegebenem Port -- der TLS-Abruf
+        mit dem PTR-Namen als SNI), der RDAP-Lookup und der Geo/ASN-Lookup (sync ->
+        ``to_thread``). TLS ist an den PTR gekoppelt, weil der Handshake den Namen als SNI
+        braucht; RDAP/Geo bleiben unabhaengig. Aus den Rohfakten baut der Use-Case das
+        Aggregat: jedes Feld als ``ResolverFact`` mit korrektem ``SourceTag``,
+        ``country_conflict`` als abgeleitetes Flag.
         """
-        # PTR-Kette ist in sich abhaengig (Forward braucht den PTR-Namen) -> EINE Coroutine.
-        # Diese laeuft parallel zu RDAP/Geo/TLS.
-        ptr_task = self._resolve_ptr_chain(ip)
+        ptr_tls_task = self._resolve_ptr_then_tls(ip, port)
         rdap_task = self._rdap_client.lookup(ip)
         geo_task = asyncio.to_thread(self._geo_asn_db.lookup, ip)
-        # TLS nur, wenn ein Port gegeben ist (sonst kein TLS-Fakt). fetch_cert ist streng
-        # fehlertolerant (None bei Fehlschlag) -- wir geben den None-Pfad als fertige
-        # Coroutine in dasselbe gather, damit die Form gleich bleibt.
-        tls_task = self._tls_cert.fetch_cert(ip, port) if port is not None else _none_cert()
 
-        (ptr_value, forward_ok), rdap, geo, tls = await asyncio.gather(
-            ptr_task, rdap_task, geo_task, tls_task
+        (ptr_value, forward_ok, tls), rdap, geo = await asyncio.gather(
+            ptr_tls_task, rdap_task, geo_task
         )
 
         return self._assemble(
@@ -90,6 +91,24 @@ class ResolveEndpoint:
             tls=tls,
             port=port,
         )
+
+    async def _resolve_ptr_then_tls(
+        self, ip: str, port: int | None
+    ) -> tuple[str, bool, TlsCertDetails | None]:
+        """PTR-Kette und -- daran gekoppelt -- den TLS-Abruf mit PTR-Namen als SNI.
+
+        Erst die PTR-Kette (``_resolve_ptr_chain``), die ``(ptr_name, forward_ok)``
+        liefert. Danach der TLS-Abruf, aber NUR wenn ein ``port`` gegeben ist (sonst kein
+        TLS-Fakt -> ``None``). Der PTR-Name wird als ``hostname`` (SNI-Servername)
+        durchgereicht -- derselbe Name, der schon den Forward-Confirm traegt; ein leerer
+        PTR (``""``) wird zu ``None`` und ergibt damit kein SNI. ``fetch_cert`` ist streng
+        fehlertolerant (``None`` bei jeglichem Fehlschlag).
+        """
+        ptr_name, forward_ok = await self._resolve_ptr_chain(ip)
+        if port is None:
+            return ptr_name, forward_ok, None
+        tls = await self._tls_cert.fetch_cert(ip, port, hostname=ptr_name or None)
+        return ptr_name, forward_ok, tls
 
     async def _resolve_ptr_chain(self, ip: str) -> tuple[str, bool]:
         """PTR holen; bei Treffer vorwaerts aufloesen und Forward-Confirmed pruefen.
@@ -158,12 +177,3 @@ class ResolveEndpoint:
             # Vergleich weg -- effektiv RDAP-Land vs. GeoDB-Land.
             country_conflict=flag_country_conflict(rdap.country, None, geo.country),
         )
-
-
-async def _none_cert() -> TlsCertDetails | None:
-    """Fertige Coroutine, die ``None`` liefert -- der kein-Port-Pfad fuer das TLS-gather.
-
-    Haelt die ``gather``-Form unveraendert (vier Awaitables), auch wenn kein Port gegeben
-    ist: ohne Port wird KEIN TLS-Abruf gemacht, das Feld ist ehrlich ``None``.
-    """
-    return None

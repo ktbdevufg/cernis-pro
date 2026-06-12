@@ -78,6 +78,15 @@ class TlsCertPort(Protocol):
     erreichbare/nicht-TLS-Gegenstelle ein gueltiger Leer-Zustand statt eines Fehlers.
     """
 
-    async def fetch_cert(self, ip: str, port: int) -> TlsCertDetails | None:
-        """Liefert die Zertifikatsdetails zu ``ip``/``port`` oder ``None`` (Fehlschlag)."""
+    async def fetch_cert(
+        self, ip: str, port: int, hostname: str | None = None
+    ) -> TlsCertDetails | None:
+        """Liefert die Zertifikatsdetails zu ``ip``/``port`` oder ``None`` (Fehlschlag).
+
+        ``hostname`` ist der optionale SNI-Servername (der PTR-Name, den der Use-Case
+        ohnehin ermittelt). Ist er gesetzt -> SNI mit diesem Namen; ist er ``None`` ->
+        GAR KEIN SNI (besser als eine IP als SNI, die SNI-strikte Server mit einem
+        Dummy-Cert quittieren). Weiterhin streng fehlertolerant: ``None`` bei jeglichem
+        Fehlschlag.
+        """
         ...

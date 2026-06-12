@@ -139,8 +139,11 @@ class _FakeContext:
         self.check_hostname = True
         self.verify_mode = 0
         self._ssock = ssock
+        # Haelt das durchgereichte SNI fest (``None`` = noch nicht gerufen / kein SNI).
+        self.captured_server_hostname: str | None = None
 
-    def wrap_socket(self, sock: Any, server_hostname: str = "") -> _FakeSSLSocket:
+    def wrap_socket(self, sock: Any, server_hostname: str | None = None) -> _FakeSSLSocket:
+        self.captured_server_hostname = server_hostname
         return self._ssock
 
 
@@ -152,9 +155,16 @@ class _FakePlainSocket:
         return None
 
 
-def _patch(monkeypatch: pytest.MonkeyPatch, ssock: _FakeSSLSocket) -> None:
+def _patch(monkeypatch: pytest.MonkeyPatch, ssock: _FakeSSLSocket) -> _FakeContext:
+    """Patcht socket/ssl auf die Fakes und liefert den ``_FakeContext`` zurueck.
+
+    Der zurueckgegebene Context haelt nach dem Aufruf das durchgereichte ``server_hostname``
+    fest (``captured_server_hostname``), damit Tests die SNI-Weitergabe pruefen koennen.
+    """
+    ctx = _FakeContext(ssock)
     monkeypatch.setattr(socket, "create_connection", lambda addr, timeout=5.0: _FakePlainSocket())
-    monkeypatch.setattr(ssl, "create_default_context", lambda: _FakeContext(ssock))
+    monkeypatch.setattr(ssl, "create_default_context", lambda: ctx)
+    return ctx
 
 
 def test_fetch_cert_full_parse(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -220,3 +230,34 @@ def test_fetch_cert_connection_refused_is_none(monkeypatch: pytest.MonkeyPatch) 
 
     monkeypatch.setattr(socket, "create_connection", _boom)
     assert asyncio.run(TlsCertReader().fetch_cert("203.0.113.16", 443)) is None
+
+
+# ── SNI: hostname wird als server_hostname durchgereicht ──────────────────────
+
+
+def test_fetch_cert_passes_hostname_as_sni(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Mit hostname -> server_hostname ist genau dieser PTR-Name (echtes Cert SNI-strikter
+    # Server). NICHT die IP.
+    ctx = _patch(monkeypatch, _FakeSSLSocket(_cert_dict(), _KNOWN_DER))
+    result = asyncio.run(
+        TlsCertReader().fetch_cert("203.0.113.10", 443, hostname="host.example.com")
+    )
+    assert result is not None
+    assert ctx.captured_server_hostname == "host.example.com"
+
+
+def test_fetch_cert_no_hostname_means_no_sni(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Ohne hostname (Default None) -> server_hostname None: GAR KEIN SNI (besser als
+    # IP-als-SNI). ``hostname or None`` macht aus leerem/None-Namen None.
+    ctx = _patch(monkeypatch, _FakeSSLSocket(_cert_dict(), _KNOWN_DER))
+    result = asyncio.run(TlsCertReader().fetch_cert("203.0.113.10", 443))
+    assert result is not None
+    assert ctx.captured_server_hostname is None
+
+
+def test_fetch_cert_empty_hostname_means_no_sni(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Leerer PTR-Name ("") -> ``hostname or None`` -> None -> kein SNI (kein "" als SNI).
+    ctx = _patch(monkeypatch, _FakeSSLSocket(_cert_dict(), _KNOWN_DER))
+    result = asyncio.run(TlsCertReader().fetch_cert("203.0.113.10", 443, hostname=""))
+    assert result is not None
+    assert ctx.captured_server_hostname is None
