@@ -33,7 +33,13 @@ function SettingsSektion({ title, children }) {
   );
 }
 
-export default function SettingsView({ lang, onLangChange, onClose }) {
+export default function SettingsView({
+  lang,
+  onLangChange,
+  refreshInterval,
+  onRefreshIntervalChange,
+  onClose,
+}) {
   const { t } = useTranslation();
 
   return (
@@ -50,6 +56,24 @@ export default function SettingsView({ lang, onLangChange, onClose }) {
             >
               <option value="de">Deutsch</option>
               <option value="en">English</option>
+            </select>
+          </SettingsZeile>
+        </SettingsSektion>
+
+        {/* Eigene Sektion, da traffic-spezifisch. Werte als Zahl (0 = aus). */}
+        <SettingsSektion title={t("settings.sectionTraffic")}>
+          <SettingsZeile label={t("settings.autoRefresh")}>
+            <select
+              className="settings__select"
+              value={refreshInterval}
+              onChange={(e) => onRefreshIntervalChange(Number(e.target.value))}
+            >
+              <option value={0}>{t("settings.refreshOff")}</option>
+              {/* Sekunden-Labels sind sprachneutral, daher direkt im Markup. */}
+              <option value={5}>5 s</option>
+              <option value={10}>10 s</option>
+              <option value={30}>30 s</option>
+              <option value={60}>60 s</option>
             </select>
           </SettingsZeile>
         </SettingsSektion>

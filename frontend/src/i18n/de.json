@@ -9,7 +9,10 @@
   "settings": {
     "title": "Einstellungen",
     "sectionGeneral": "Allgemein",
-    "language": "Sprache"
+    "language": "Sprache",
+    "sectionTraffic": "Verkehr",
+    "autoRefresh": "Automatisch aktualisieren",
+    "refreshOff": "Aus"
   },
   "nav": {
     "overview": "Überblick",
@@ -163,11 +166,14 @@
       "showLess": "weniger anzeigen",
       "state": "Zustand: {{value}}",
       "lookup": "nachschlagen",
+      "refresh": "Aktualisieren",
       "close": "Schließen"
     },
     "lookup": {
       "title": "Gegenstelle nachschlagen",
       "close": "Schließen",
+      "copyIp": "IP kopieren",
+      "copied": "kopiert",
       "notFound": "nicht gefunden",
       "sourceLabel": "Quelle",
       "loading": "Wird aufgelöst …",

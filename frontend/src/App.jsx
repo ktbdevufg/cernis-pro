@@ -16,6 +16,10 @@ import "./App.css";
 
 const THEME_KEY = "cernis_theme";
 const LANG_KEY = "cernis_lang";
+const REFRESH_KEY = "cernis_traffic_refresh";
+
+// Erlaubte Auto-Refresh-Intervalle in Sekunden (0 = aus).
+const REFRESH_WERTE = [0, 5, 10, 30, 60];
 
 function ermittleStartTheme() {
   const gespeichert = localStorage.getItem(THEME_KEY);
@@ -27,12 +31,20 @@ function ermittleStartSprache() {
   return gespeichert === "de" || gespeichert === "en" ? gespeichert : "de";
 }
 
+// Auto-Refresh-Intervall aus localStorage; nur erlaubte Werte, sonst 0 (aus).
+function ermittleStartRefresh() {
+  const gespeichert = Number(localStorage.getItem(REFRESH_KEY));
+  return REFRESH_WERTE.includes(gespeichert) ? gespeichert : 0;
+}
+
 export default function App() {
   const { i18n } = useTranslation();
 
   const [activeTab, setActiveTab] = useState(REITER[0].id);
   const [theme, setTheme] = useState(ermittleStartTheme);
   const [lang, setLang] = useState(ermittleStartSprache);
+  // Auto-Refresh-Intervall für den Per-App-Verkehr (Sekunden; 0 = aus).
+  const [refreshInterval, setRefreshInterval] = useState(ermittleStartRefresh);
   // Einstellungs-Bereich ist ein eigener Modus (kein Reiter): überlagert den
   // View-Bereich. Schließen kehrt zum vorher aktiven Reiter zurück.
   const [settingsOffen, setSettingsOffen] = useState(false);
@@ -51,6 +63,11 @@ export default function App() {
     localStorage.setItem(LANG_KEY, lang);
   }, [lang, i18n]);
 
+  // Auto-Refresh-Intervall persistieren (gleiches Muster wie Theme/Sprache).
+  useEffect(() => {
+    localStorage.setItem(REFRESH_KEY, String(refreshInterval));
+  }, [refreshInterval]);
+
   return (
     <div className="app">
       <AppHeader
@@ -67,12 +84,16 @@ export default function App() {
           <SettingsView
             lang={lang}
             onLangChange={setLang}
+            refreshInterval={refreshInterval}
+            onRefreshIntervalChange={setRefreshInterval}
             onClose={() => setSettingsOffen(false)}
           />
         ) : (
           <>
             {activeTab === "overview" && <OverviewView />}
-            {activeTab === "observe" && <ObserveView />}
+            {activeTab === "observe" && (
+              <ObserveView refreshInterval={refreshInterval} />
+            )}
             {activeTab === "investigate" && <InvestigateView />}
             {activeTab === "export" && <ExportView />}
           </>

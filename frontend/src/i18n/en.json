@@ -9,7 +9,10 @@
   "settings": {
     "title": "Settings",
     "sectionGeneral": "General",
-    "language": "Language"
+    "language": "Language",
+    "sectionTraffic": "Traffic",
+    "autoRefresh": "Auto-refresh",
+    "refreshOff": "Off"
   },
   "nav": {
     "overview": "Overview",
@@ -163,11 +166,14 @@
       "showLess": "show less",
       "state": "State: {{value}}",
       "lookup": "look up",
+      "refresh": "Refresh",
       "close": "Close"
     },
     "lookup": {
       "title": "Look up remote endpoint",
       "close": "Close",
+      "copyIp": "Copy IP",
+      "copied": "copied",
       "notFound": "not found",
       "sourceLabel": "Source",
       "loading": "Resolving …",

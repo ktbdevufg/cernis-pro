@@ -17,7 +17,9 @@
 
 import {
   Building2,
+  Check,
   ChevronDown,
+  Copy,
   ExternalLink,
   Globe,
   MapPin,
@@ -192,6 +194,22 @@ export default function LookupPanel({ ip, port, onClose }) {
   const [status, setStatus] = useState("laedt");
   const [fakten, setFakten] = useState(null);
 
+  // Kurzes visuelles Feedback nach dem Kopieren der IP: das Icon wechselt für
+  // ~1.5 s zum Haken. Lokaler State, kein externer Helfer.
+  const [kopiert, setKopiert] = useState(false);
+
+  // Kopiert NUR die IP (ohne Port) in die Zwischenablage. clipboard kann
+  // fehlschlagen (kein Secure-Context o. ä.) — dann still bleiben (kein Crash).
+  const handleKopiereIp = async () => {
+    try {
+      await navigator.clipboard.writeText(ip);
+      setKopiert(true);
+      setTimeout(() => setKopiert(false), 1500);
+    } catch {
+      // Bewusst still: kein Alert, kein Statuswechsel.
+    }
+  };
+
   useEffect(() => {
     // Bei Wechsel von ip/port die alte (evtl. noch laufende) Antwort verwerfen,
     // damit sie nicht den State der neuen Anfrage überschreibt.
@@ -231,8 +249,27 @@ export default function LookupPanel({ ip, port, onClose }) {
           </span>
           <div className="lookup__title-group">
             <h3 className="lookup__title">{t("beobachten.lookup.title")}</h3>
-            <span className="lookup__subtitle lookup__mono">
-              {ip}:{port}
+            <span className="lookup__subtitle-row">
+              <span className="lookup__subtitle lookup__mono">
+                {ip}:{port}
+              </span>
+              <button
+                type="button"
+                className="lookup__copy"
+                onClick={handleKopiereIp}
+                aria-label={
+                  kopiert
+                    ? t("beobachten.lookup.copied")
+                    : t("beobachten.lookup.copyIp")
+                }
+                title={
+                  kopiert
+                    ? t("beobachten.lookup.copied")
+                    : t("beobachten.lookup.copyIp")
+                }
+              >
+                {kopiert ? <Check size={14} /> : <Copy size={14} />}
+              </button>
             </span>
           </div>
         </div>

@@ -16,11 +16,12 @@ import {
   Mail,
   MonitorSmartphone,
   Music,
+  RefreshCw,
   Server,
   Sparkles,
   X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { fetchTraffic, fetchTrafficPermission } from "../api/traffic.js";
@@ -134,7 +135,7 @@ function AppZeile({ app, onSelect, selected, anteil }) {
 // Linke Spalte: Kopfzeile mit Titel + Live-Indikator, darunter die App-Liste.
 // Sortierung: connectionCount absteigend; die None-Gruppe (name===null) IMMER
 // ans Ende, egal wie viele Verbindungen (ehrliche None-Gruppe unten).
-function AppListe({ apps, onSelect, selectedName }) {
+function AppListe({ apps, onSelect, selectedName, onRefresh, refreshing }) {
   const { t } = useTranslation();
   const max = maxDown(apps);
 
@@ -150,9 +151,27 @@ function AppListe({ apps, onSelect, selectedName }) {
         <span className="traffic-list__title">
           {t("beobachten.traffic.title")}
         </span>
-        <span className="traffic-list__live">
-          <span className="traffic-list__live-dot" aria-hidden="true" />
-          {t("beobachten.traffic.live")}
+        <span className="traffic-list__header-right">
+          <span className="traffic-list__live">
+            <span className="traffic-list__live-dot" aria-hidden="true" />
+            {t("beobachten.traffic.live")}
+          </span>
+          {/* Immer sichtbar, unabhängig vom Auto-Intervall. Dezenter Lade-
+              Zustand am Button (dreht/disabled); die Liste bleibt stehen. */}
+          <button
+            type="button"
+            className={
+              refreshing
+                ? "traffic-list__refresh traffic-list__refresh--busy"
+                : "traffic-list__refresh"
+            }
+            onClick={onRefresh}
+            disabled={refreshing}
+            aria-label={t("beobachten.traffic.refresh")}
+            title={t("beobachten.traffic.refresh")}
+          >
+            <RefreshCw size={15} />
+          </button>
         </span>
       </div>
 
@@ -419,7 +438,7 @@ function PermissionHinweis({ text }) {
   );
 }
 
-export default function TrafficView() {
+export default function TrafficView({ refreshInterval = 0 }) {
   const { t } = useTranslation();
 
   // Drei Zustände wie LookupPanel: "laedt" / "ok" / "fehler".
@@ -435,39 +454,73 @@ export default function TrafficView() {
   // Nachzuschlagende Gegenstelle ({ ip, port }) oder null.
   const [lookupZiel, setLookupZiel] = useState(null);
 
-  useEffect(() => {
-    let ignorieren = false;
-    setStatus("laedt");
+  // Dezenter Lade-Zustand am Refresh-Button (dreht/disabled), OHNE den
+  // "laedt"-Vollzustand auszulösen — die Liste bleibt beim Reload stehen.
+  const [refreshing, setRefreshing] = useState(false);
 
-    fetchTraffic()
-      .then((ergebnis) => {
-        if (!ignorieren) {
-          setApps(ergebnis);
-          setStatus("ok");
-        }
-      })
-      .catch(() => {
-        if (!ignorieren) {
-          setStatus("fehler");
-        }
-      });
+  // Verhindert überlappende Reloads (Klick während Auto-Intervall o. ä.).
+  const ladeLaeuft = useRef(false);
+
+  // Eine Ladelogik für initiales Laden, manuellen Refresh und Auto-Intervall.
+  // initial=true zeigt den Voll-"laedt"-Zustand (erstes Laden); sonst still:
+  // NUR apps/permission aktualisieren, gewaehlterName/lookupZiel bleiben (kein
+  // Sprung der Auswahl / des offenen Panels). Fällt die gewählte App nach dem
+  // Reload weg, ergibt apps.find unten sauber null (kein Absturz).
+  const ladeTraffic = useCallback(async (initial = false) => {
+    if (ladeLaeuft.current) {
+      return;
+    }
+    ladeLaeuft.current = true;
+    if (initial) {
+      setStatus("laedt");
+    } else {
+      setRefreshing(true);
+    }
+
+    try {
+      const ergebnis = await fetchTraffic();
+      setApps(ergebnis);
+      setStatus("ok");
+    } catch {
+      // Beim initialen Laden den Fehlerzustand zeigen; bei einem stillen Reload
+      // die bestehende Liste stehen lassen (kein Kippen wegen einem Aussetzer).
+      if (initial) {
+        setStatus("fehler");
+      }
+    }
 
     // Rechte-Naht separat: ihr Fehlschlag soll die Liste nicht kippen.
-    fetchTrafficPermission()
-      .then((ergebnis) => {
-        if (!ignorieren) {
-          setPermission(ergebnis);
-        }
-      })
-      .catch(() => {
-        // Stiller Verzicht NUR für den optionalen Hinweis-Streifen: ohne
-        // Rechte-Antwort einfach keinen Hinweis zeigen (kein falscher Alarm).
-      });
+    try {
+      const rechte = await fetchTrafficPermission();
+      setPermission(rechte);
+    } catch {
+      // Stiller Verzicht NUR für den optionalen Hinweis-Streifen: ohne
+      // Rechte-Antwort einfach keinen Hinweis zeigen (kein falscher Alarm).
+    }
 
-    return () => {
-      ignorieren = true;
-    };
+    if (!initial) {
+      setRefreshing(false);
+    }
+    ladeLaeuft.current = false;
   }, []);
+
+  // Initiales Laden (mit Voll-"laedt"-Zustand).
+  useEffect(() => {
+    ladeTraffic(true);
+  }, [ladeTraffic]);
+
+  // Auto-Refresh-Intervall (Teil C): nur bei refreshInterval > 0. Ruft still
+  // ladeTraffic() (kein "laedt"-Wechsel, Auswahl bleibt). Bei Änderung des
+  // Intervalls / Unmount altes Intervall sauber clearen.
+  useEffect(() => {
+    if (!refreshInterval || refreshInterval <= 0) {
+      return undefined;
+    }
+    const id = setInterval(() => {
+      ladeTraffic(false);
+    }, refreshInterval * 1000);
+    return () => clearInterval(id);
+  }, [refreshInterval, ladeTraffic]);
 
   // Klick auf eine Zeile: wählt die App (name kann null sein -> Sentinel).
   const handleSelect = (app) => {
@@ -512,6 +565,8 @@ export default function TrafficView() {
             apps={apps}
             onSelect={handleSelect}
             selectedName={gewaehlterName}
+            onRefresh={() => ladeTraffic(false)}
+            refreshing={refreshing}
           />
           {gewaehlteApp &&
             (lookupZiel ? (
