@@ -1,15 +1,15 @@
 // Kopfzeile (CERNIS PRO 2.0)
 // Auf jeder Seite identisch. Links Logo + Version, rechts Bedienelemente.
-// Bekommt theme/lang nebst Settern als Props.
+// Bekommt theme nebst Setter als Props; das Zahnrad meldet sich über
+// onOpenSettings. Die Sprach-Auswahl wohnt jetzt im Einstellungs-Bereich.
 
-import { BookOpen } from "lucide-react";
+import { BookOpen, Settings } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import LanguageToggle from "./LanguageToggle.jsx";
 import ThemeToggle from "./ThemeToggle.jsx";
 import "./AppHeader.css";
 
-export default function AppHeader({ theme, onThemeChange, lang, onLangChange }) {
+export default function AppHeader({ theme, onThemeChange, onOpenSettings }) {
   const { t } = useTranslation();
 
   return (
@@ -28,11 +28,19 @@ export default function AppHeader({ theme, onThemeChange, lang, onLangChange }) 
       </div>
 
       <div className="app-header__controls">
-        <LanguageToggle lang={lang} onChange={onLangChange} />
         <ThemeToggle theme={theme} onChange={onThemeChange} />
         <button type="button" className="control-button">
           <BookOpen size={16} />
           <span>{t("header.manual")}</span>
+        </button>
+        <button
+          type="button"
+          className="icon-button"
+          onClick={onOpenSettings}
+          aria-label={t("header.settings")}
+          title={t("header.settings")}
+        >
+          <Settings size={22} />
         </button>
       </div>
     </header>

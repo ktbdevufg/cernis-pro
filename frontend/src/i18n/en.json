@@ -3,7 +3,13 @@
     "version": "v2.0"
   },
   "header": {
-    "manual": "Manual"
+    "manual": "Manual",
+    "settings": "Settings"
+  },
+  "settings": {
+    "title": "Settings",
+    "sectionGeneral": "General",
+    "language": "Language"
   },
   "nav": {
     "overview": "Overview",

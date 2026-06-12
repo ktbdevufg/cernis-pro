@@ -3,7 +3,13 @@
     "version": "v2.0"
   },
   "header": {
-    "manual": "Handbuch"
+    "manual": "Handbuch",
+    "settings": "Einstellungen"
+  },
+  "settings": {
+    "title": "Einstellungen",
+    "sectionGeneral": "Allgemein",
+    "language": "Sprache"
   },
   "nav": {
     "overview": "Überblick",

@@ -42,3 +42,26 @@
   align-items: center;
   gap: 10px;
 }
+
+/* Reines Icon-Bedienelement (Zahnrad): kein Rahmen, kein Kasten, Logo-Türkis. */
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  color: var(--color-accent);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.icon-button:hover {
+  color: var(--color-accent-strong);
+}
+
+.icon-button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}

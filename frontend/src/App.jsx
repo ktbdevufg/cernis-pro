@@ -11,6 +11,7 @@ import ExportView from "./views/ExportView.jsx";
 import InvestigateView from "./views/InvestigateView.jsx";
 import ObserveView from "./views/ObserveView.jsx";
 import OverviewView from "./views/OverviewView.jsx";
+import SettingsView from "./views/SettingsView.jsx";
 import "./App.css";
 
 const THEME_KEY = "cernis_theme";
@@ -32,6 +33,9 @@ export default function App() {
   const [activeTab, setActiveTab] = useState(REITER[0].id);
   const [theme, setTheme] = useState(ermittleStartTheme);
   const [lang, setLang] = useState(ermittleStartSprache);
+  // Einstellungs-Bereich ist ein eigener Modus (kein Reiter): überlagert den
+  // View-Bereich. Schließen kehrt zum vorher aktiven Reiter zurück.
+  const [settingsOffen, setSettingsOffen] = useState(false);
 
   // Theme am <html> setzen und persistieren.
   useEffect(() => {
@@ -52,16 +56,27 @@ export default function App() {
       <AppHeader
         theme={theme}
         onThemeChange={setTheme}
-        lang={lang}
-        onLangChange={setLang}
+        onOpenSettings={() => setSettingsOffen(true)}
       />
-      <TabNav active={activeTab} onChange={setActiveTab} />
+      {/* Einstellungen ist kein Reiter: bei offenem Modus bleibt kein Reiter
+          aktiv markiert, daher blenden wir die Reiterleiste aus. */}
+      {!settingsOffen && <TabNav active={activeTab} onChange={setActiveTab} />}
 
       <main className="app__content">
-        {activeTab === "overview" && <OverviewView />}
-        {activeTab === "observe" && <ObserveView />}
-        {activeTab === "investigate" && <InvestigateView />}
-        {activeTab === "export" && <ExportView />}
+        {settingsOffen ? (
+          <SettingsView
+            lang={lang}
+            onLangChange={setLang}
+            onClose={() => setSettingsOffen(false)}
+          />
+        ) : (
+          <>
+            {activeTab === "overview" && <OverviewView />}
+            {activeTab === "observe" && <ObserveView />}
+            {activeTab === "investigate" && <InvestigateView />}
+            {activeTab === "export" && <ExportView />}
+          </>
+        )}
       </main>
     </div>
   );
