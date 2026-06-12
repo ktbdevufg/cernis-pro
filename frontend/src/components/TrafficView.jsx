@@ -158,16 +158,34 @@ function buendeleVerbindungen(conns) {
 
 // Eine gebündelte Ziel-Zeile. host prominent + IP gedämpft; ohne host nur IP
 // (mono) plus Hinweis "kein PTR-Record". Rechts ×N-Pill (falls N>1) und Port.
-// Bei notable zusätzlich der "nachschlagen"-Link.
+// Das Ziel selbst (Name bzw. IP) ist der Lookup-Trigger — für JEDE Verbindung,
+// nicht nur notable; Klick (oder Enter/Space) öffnet die Gegenstellen-Ansicht.
 // Wiederverwendbar gehalten (siehe ConnectionList): keine traffic-spezifische
 // Annahme außer den Verbindungs-Feldern selbst.
 function BuendelZeile({ buendel, onLookup }) {
   const { t } = useTranslation();
 
+  // Tastatur-Bedienbarkeit des als Button agierenden Ziel-Spans: Enter/Space
+  // lösen das Nachschlagen aus (Space ohne Seiten-Scroll).
+  const handleZielKey = (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onLookup(buendel);
+    }
+  };
+
   return (
     <li className="traffic-detail__conn">
       <div className="traffic-detail__conn-line">
-        <span className="traffic-detail__conn-target">
+        <span
+          className="traffic-detail__conn-target"
+          role="button"
+          tabIndex={0}
+          onClick={() => onLookup(buendel)}
+          onKeyDown={handleZielKey}
+          aria-label={t("beobachten.traffic.lookup")}
+          title={t("beobachten.traffic.lookup")}
+        >
           {buendel.host ? (
             <>
               <span className="traffic-detail__conn-host">{buendel.host}</span>
@@ -204,15 +222,6 @@ function BuendelZeile({ buendel, onLookup }) {
         <span className="traffic-detail__conn-state">
           {t("beobachten.traffic.state", { value: buendel.state })}
         </span>
-        {buendel.notable && (
-          <button
-            type="button"
-            className="traffic-detail__lookup"
-            onClick={() => onLookup(buendel)}
-          >
-            {t("beobachten.traffic.lookup")}
-          </button>
-        )}
       </div>
     </li>
   );

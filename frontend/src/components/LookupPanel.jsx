@@ -7,8 +7,8 @@
 // hervorgehoben.
 //
 // Die Komponente kennt nur ihre Props (ip, port, onClose). Die Fakten zieht sie
-// aus mockData/lookupMock; bei echter Anbindung wird nur dieser Import auf die
-// Resolver-Domäne umgestellt. Gleiche Breite/Designsprache wie die übrigen
+// über die Resolver-Domäne aus der echten API (api/resolver.js); früher kamen
+// sie aus einem lokalen Mock. Gleiche Breite/Designsprache wie die übrigen
 // Detail-Panels, eigener vertikaler Scroll.
 //
 // Faktenfelder kommen als { value, source } (oder null = nicht gefunden). Das
@@ -26,10 +26,10 @@ import {
   TriangleAlert,
   X,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { lookupGegenstelle } from "../mockData/lookupMock.js";
+import { fetchLookup } from "../api/resolver.js";
 import "./LookupPanel.css";
 
 // Eine Feld-Zeile: Label links, Wert rechts mit dezentem Quellen-Badge,
@@ -187,7 +187,35 @@ function ExternZeile({ label, hint, onClick }) {
 export default function LookupPanel({ ip, port, onClose }) {
   const { t } = useTranslation();
 
-  const fakten = lookupGegenstelle(ip, port);
+  // Drei Zustände: "laedt" (Request läuft), "ok" (Fakten da), "fehler"
+  // (Auflösung nicht erreichbar). Der Header zeigt immer ip:port aus den Props.
+  const [status, setStatus] = useState("laedt");
+  const [fakten, setFakten] = useState(null);
+
+  useEffect(() => {
+    // Bei Wechsel von ip/port die alte (evtl. noch laufende) Antwort verwerfen,
+    // damit sie nicht den State der neuen Anfrage überschreibt.
+    let ignorieren = false;
+    setStatus("laedt");
+    setFakten(null);
+
+    fetchLookup(ip, port)
+      .then((ergebnis) => {
+        if (!ignorieren) {
+          setFakten(ergebnis);
+          setStatus("ok");
+        }
+      })
+      .catch(() => {
+        if (!ignorieren) {
+          setStatus("fehler");
+        }
+      });
+
+    return () => {
+      ignorieren = true;
+    };
+  }, [ip, port]);
 
   // TEMP: externe Ziel-URLs werden mit echter Anbindung gesetzt (Datenhoheit/cpnetcheck).
   const handleExtern = () => {
@@ -204,7 +232,7 @@ export default function LookupPanel({ ip, port, onClose }) {
           <div className="lookup__title-group">
             <h3 className="lookup__title">{t("beobachten.lookup.title")}</h3>
             <span className="lookup__subtitle lookup__mono">
-              {fakten.ip}:{fakten.port}
+              {ip}:{port}
             </span>
           </div>
         </div>
@@ -219,6 +247,19 @@ export default function LookupPanel({ ip, port, onClose }) {
         </button>
       </div>
 
+      {status === "laedt" && (
+        <div className="lookup__body">
+          <p className="lookup__notice">{t("beobachten.lookup.loading")}</p>
+        </div>
+      )}
+
+      {status === "fehler" && (
+        <div className="lookup__body">
+          <p className="lookup__notice">{t("beobachten.lookup.error")}</p>
+        </div>
+      )}
+
+      {status === "ok" && fakten && (
       <div className="lookup__body">
         {/* Neutraler Hinweis: reine Fakten, kein Urteil. */}
         <p className="lookup__notice">{t("beobachten.lookup.notice")}</p>
@@ -368,6 +409,7 @@ export default function LookupPanel({ ip, port, onClose }) {
           </div>
         </section>
       </div>
+      )}
     </aside>
   );
 }

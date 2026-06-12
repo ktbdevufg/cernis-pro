@@ -157,6 +157,8 @@
       "close": "Close",
       "notFound": "not found",
       "sourceLabel": "Source",
+      "loading": "Resolving …",
+      "error": "Resolution unavailable.",
       "notice": "Plain facts from several sources. Where sources differ, both are shown — CERNIS does not judge.",
       "conflict": {
         "label": "Country information differs"

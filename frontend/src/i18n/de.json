@@ -157,6 +157,8 @@
       "close": "Schließen",
       "notFound": "nicht gefunden",
       "sourceLabel": "Quelle",
+      "loading": "Wird aufgelöst …",
+      "error": "Auflösung nicht erreichbar.",
       "notice": "Reine Fakten aus mehreren Quellen. Wo Quellen sich unterscheiden, steht beides — CERNIS bewertet nicht.",
       "conflict": {
         "label": "Länder-Angaben weichen ab"
