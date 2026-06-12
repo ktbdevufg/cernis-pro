@@ -9,6 +9,21 @@
   min-height: 0;
 }
 
+/* Zwei-Spalten-Layout: Tabelle links (flexibel), Panel rechts (feste Breite).
+   Beide Spalten füllen die Resthöhe und scrollen unabhängig voneinander. */
+.observe__split {
+  display: flex;
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Die Tabelle nimmt den verbleibenden Platz; sie scrollt intern selbst. */
+.observe__split > .scan-table {
+  flex: 1;
+  min-width: 0;
+}
+
 .observe__toolbar {
   display: flex;
   align-items: center;

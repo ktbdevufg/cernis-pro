@@ -91,7 +91,39 @@
       "notablePill": "auffällig",
       "morePorts": "+{{count}}",
       "morePortsTitle_one": "1 weiterer Port",
-      "morePortsTitle_other": "{{count}} weitere Ports"
+      "morePortsTitle_other": "{{count}} weitere Ports",
+      "detail": {
+        "close": "Schließen",
+        "identity": {
+          "heading": "Identität",
+          "hostname": "Hostname",
+          "ip": "IPv4",
+          "mac": "MAC",
+          "vendor": "Hersteller",
+          "os": "OS",
+          "ping": "Ping",
+          "pingUnit": "{{value}} ms",
+          "statusNew": "Erstmals in diesem Netz gesehen",
+          "statusKnown": "Seit dem ersten Scan bekannt",
+          "notable": "Anderweitig auffällig"
+        },
+        "ports": {
+          "heading": "Offene Ports",
+          "lookup": "nachschlagen",
+          "empty": "Keine offenen Ports gefunden"
+        },
+        "notes": {
+          "heading": "Gerätenotizen",
+          "label": "Label",
+          "labelPlaceholder": "Frei vergebener Name",
+          "tags": "Tags",
+          "tagsPlaceholder": "Schlagworte, durch Komma getrennt",
+          "notes": "Notizen",
+          "notesPlaceholder": "Freie Notiz zu diesem Gerät",
+          "save": "Speichern",
+          "saveHint": "Speichern folgt mit der Datenanbindung."
+        }
+      }
     }
   },
   "untersuchen": {

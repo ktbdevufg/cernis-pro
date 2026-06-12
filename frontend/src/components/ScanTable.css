@@ -84,6 +84,44 @@
   background: var(--color-accent-bg);
 }
 
+/* Gewählte Zeile: getönt, zeigt das Gerät im Panel. position: relative trägt
+   die absolute Wanne; die linke Markierung liefert die Wanne (kein Rand mehr). */
+.scan-table__row--aktiv,
+.scan-table__row--aktiv:hover {
+  position: relative;
+  background: var(--color-accent-bg);
+}
+
+/* Etwas Luft links in der ersten Zelle, damit die Wanne den Inhalt nicht
+   überlappt. */
+.scan-table__row--aktiv .scan-table__cell--status {
+  position: relative;
+  padding-left: 14px;
+}
+
+/* Die "Wanne" als Aktiv-Marker: vertikal, in der Mitte gleichmäßig, an den
+   Enden spitz auslaufend, Wölbung nach innen. Gefüllter SVG-Pfad in
+   Akzentfarbe (analog zur Reiter-Wanne, um 90° gedreht). */
+.scan-row__wanne {
+  position: absolute;
+  left: 1px;
+  top: 3px;
+  bottom: 3px;
+  width: 10px;
+  pointer-events: none;
+}
+
+.scan-row__wanne svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.scan-row__wanne path {
+  fill: var(--color-accent);
+  stroke: none;
+}
+
 .scan-table__cell {
   padding: 9px 12px;
   color: var(--color-text);

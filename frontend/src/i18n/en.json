@@ -91,7 +91,39 @@
       "notablePill": "notable",
       "morePorts": "+{{count}}",
       "morePortsTitle_one": "1 more port",
-      "morePortsTitle_other": "{{count}} more ports"
+      "morePortsTitle_other": "{{count}} more ports",
+      "detail": {
+        "close": "Close",
+        "identity": {
+          "heading": "Identity",
+          "hostname": "Hostname",
+          "ip": "IPv4",
+          "mac": "MAC",
+          "vendor": "Vendor",
+          "os": "OS",
+          "ping": "Ping",
+          "pingUnit": "{{value}} ms",
+          "statusNew": "Seen on this network for the first time",
+          "statusKnown": "Known since the first scan",
+          "notable": "Notable in some way"
+        },
+        "ports": {
+          "heading": "Open ports",
+          "lookup": "look up",
+          "empty": "No open ports found"
+        },
+        "notes": {
+          "heading": "Device notes",
+          "label": "Label",
+          "labelPlaceholder": "Freely chosen name",
+          "tags": "Tags",
+          "tagsPlaceholder": "Keywords, comma-separated",
+          "notes": "Notes",
+          "notesPlaceholder": "Free note about this device",
+          "save": "Save",
+          "saveHint": "Saving follows with the data integration."
+        }
+      }
     }
   },
   "untersuchen": {

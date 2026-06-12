@@ -5,9 +5,9 @@
 // dezenten Zwischenüberschrift, darunter die bekannten Geräte. Innerhalb je
 // Abschnitt nach IPv4 sortiert.
 //
-// Die Komponente kennt nur ihre Props (geraete, onSelect). Sie löst keine API
-// auf und hält keinen eigenen Zustand. Klick auf eine Zeile ruft onSelect(geraet)
-// — das seitliche Detail-Panel kommt in einem separaten Schritt.
+// Die Komponente kennt nur ihre Props (geraete, onSelect, selectedMac). Sie
+// löst keine API auf und hält keinen eigenen Zustand. Klick auf eine Zeile ruft
+// onSelect(geraet); selectedMac markiert die zum Detail-Panel gehörende Zeile.
 
 import {
   Camera,
@@ -91,7 +91,8 @@ function PortChips({ ports }) {
 }
 
 // Eine Geräte-Zeile. Klickbar; Klick meldet das Gerät an onSelect.
-function GeraetZeile({ geraet, onSelect }) {
+// selected hebt die zum offenen Detail-Panel gehörende Zeile hervor.
+function GeraetZeile({ geraet, onSelect, selected }) {
   const { t } = useTranslation();
   const Icon = DEVICE_ICONS[geraet.icon] ?? HelpCircle;
 
@@ -102,9 +103,22 @@ function GeraetZeile({ geraet, onSelect }) {
       ? "scan-table__dot scan-table__dot--auffaellig"
       : "scan-table__dot scan-table__dot--bekannt";
 
+  const rowKlasse = selected
+    ? "scan-table__row scan-table__row--aktiv"
+    : "scan-table__row";
+
   return (
-    <tr className="scan-table__row" onClick={() => onSelect(geraet)}>
+    <tr className={rowKlasse} onClick={() => onSelect(geraet)}>
       <td className="scan-table__cell scan-table__cell--status">
+        {selected && (
+          // "Wanne" als Aktiv-Marker: vertikal, Wölbung nach innen zur Zeile
+          // (analog zur Reiter-Wanne in TabNav, um 90° gedreht).
+          <span className="scan-row__wanne" aria-hidden="true">
+            <svg viewBox="0 0 10 100" preserveAspectRatio="none">
+              <path d="M10,1 C5,1 3.5,5 3,13 L3,87 C3.5,95 5,99 10,99 C6,97 4.3,93 4,87 L4,13 C4.3,7 6,3 10,1 Z" />
+            </svg>
+          </span>
+        )}
         <span className={statusKlasse} aria-hidden="true" />
       </td>
       <td className="scan-table__cell scan-table__cell--ip scan-table__mono">
@@ -149,7 +163,7 @@ function GeraetZeile({ geraet, onSelect }) {
   );
 }
 
-export default function ScanTable({ geraete, onSelect }) {
+export default function ScanTable({ geraete, onSelect, selectedMac }) {
   const { t } = useTranslation();
 
   // "Auffälliges zuerst": zwei Gruppen, je nach IPv4 sortiert.
@@ -173,7 +187,12 @@ export default function ScanTable({ geraete, onSelect }) {
           </th>
         </tr>
         {liste.map((geraet) => (
-          <GeraetZeile key={geraet.mac} geraet={geraet} onSelect={onSelect} />
+          <GeraetZeile
+            key={geraet.mac}
+            geraet={geraet}
+            onSelect={onSelect}
+            selected={geraet.mac === selectedMac}
+          />
         ))}
       </>
     );

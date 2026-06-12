@@ -17,6 +17,7 @@ import { useTranslation } from "react-i18next";
 
 import { CardGrid, FunctionShell } from "../components/AreaShell.jsx";
 import FunctionCard from "../components/FunctionCard.jsx";
+import ScanDetailPanel from "../components/ScanDetailPanel.jsx";
 import ScanTable from "../components/ScanTable.jsx";
 import scanMock from "../mockData/scanMock.js";
 import "./ObserveView.css";
@@ -29,15 +30,24 @@ const FUNKTIONEN = [
 ];
 
 // Scan-Inhalt: Kopf-Leiste (Anzahl + "Scan starten") über der Tabelle.
+// Hält die Auswahl (welches Gerät) und zeigt rechts das Detail-Panel an,
+// sobald eine Zeile gewählt ist.
 function ScanInhalt() {
   const { t } = useTranslation();
   const { geraete } = scanMock;
 
-  // Platzhalter — späteres Detail-Panel hängt sich an diesen Handler.
+  // Gewähltes Gerät über die MAC (eindeutiger Schlüssel im Mock); null = keins.
+  const [gewaehlteMac, setGewaehlteMac] = useState(null);
+
+  // Klick auf eine Zeile: wählt das Gerät; erneuter Klick auf dieselbe löscht.
   const handleSelect = (geraet) => {
-    // Bewusst ohne Funktion (Schritt B liefert das Detail-Panel).
-    void geraet;
+    setGewaehlteMac((aktuell) =>
+      aktuell === geraet.mac ? null : geraet.mac,
+    );
   };
+
+  const gewaehltesGeraet =
+    geraete.find((g) => g.mac === gewaehlteMac) ?? null;
 
   return (
     <div className="observe__scan">
@@ -51,7 +61,21 @@ function ScanInhalt() {
         </button>
       </div>
 
-      <ScanTable geraete={geraete} onSelect={handleSelect} />
+      {/* Zwei-Spalten-Layout: Tabelle links, Panel rechts (nur bei Auswahl). */}
+      <div className="observe__split">
+        <ScanTable
+          geraete={geraete}
+          onSelect={handleSelect}
+          selectedMac={gewaehlteMac}
+        />
+        {gewaehltesGeraet && (
+          <ScanDetailPanel
+            key={gewaehltesGeraet.mac}
+            geraet={gewaehltesGeraet}
+            onClose={() => setGewaehlteMac(null)}
+          />
+        )}
+      </div>
     </div>
   );
 }

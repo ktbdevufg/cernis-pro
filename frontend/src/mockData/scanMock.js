@@ -18,6 +18,9 @@
 //   pingMs    Zahl|null — Antwortzeit in ms (null = keine Antwort)
 //   isNew     Bool     — bisher unbekanntes Gerät
 //   notable   Bool     — anderweitig auffällig
+//   label     String?  — frei vergebener Name (Detail-Panel, kann fehlen)
+//   tags      Array?   — frei vergebene Schlagworte (Detail-Panel, kann fehlen)
+//   notes     String?  — freie Notiz (Detail-Panel, kann fehlen)
 
 export const geraete = [
   {
@@ -36,6 +39,9 @@ export const geraete = [
     pingMs: 1,
     isNew: false,
     notable: false,
+    label: "Router (Hauptanschluss)",
+    tags: ["Infrastruktur", "Gateway"],
+    notes: "Zentraler Internetzugang. Portfreigaben regelmäßig prüfen.",
   },
   {
     icon: "nas",
@@ -56,6 +62,9 @@ export const geraete = [
     pingMs: 2,
     isNew: false,
     notable: false,
+    label: "NAS Diskstation",
+    tags: ["Speicher", "Backup"],
+    notes: "Nächtliches Backup-Ziel.",
   },
   {
     icon: "printer",
@@ -173,6 +182,9 @@ export const geraete = [
     pingMs: 12,
     isNew: false,
     notable: true,
+    label: "Türkamera Eingang",
+    tags: ["Kamera"],
+    notes: "Offene Ports beobachten.",
   },
   {
     icon: "thermostat",
