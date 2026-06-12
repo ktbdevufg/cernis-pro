@@ -12,7 +12,8 @@
     "language": "Sprache",
     "sectionTraffic": "Verkehr",
     "autoRefresh": "Automatisch aktualisieren",
-    "refreshOff": "Aus"
+    "refreshOff": "Aus",
+    "saved": "Gespeichert"
   },
   "nav": {
     "overview": "Überblick",
@@ -137,6 +138,7 @@
     "traffic": {
       "title": "Per-App-Verkehr",
       "live": "live",
+      "liveInterval": "live · {{secs}} s",
       "notablePill": "auffällig",
       "down": "↓ {{value}}",
       "up": "↑ {{value}}",
@@ -167,6 +169,8 @@
       "state": "Zustand: {{value}}",
       "lookup": "nachschlagen",
       "refresh": "Aktualisieren",
+      "refreshIntervalLabel": "Automatisch aktualisieren",
+      "refreshOff": "Aus",
       "close": "Schließen"
     },
     "lookup": {

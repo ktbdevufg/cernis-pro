@@ -12,7 +12,8 @@
     "language": "Language",
     "sectionTraffic": "Traffic",
     "autoRefresh": "Auto-refresh",
-    "refreshOff": "Off"
+    "refreshOff": "Off",
+    "saved": "Saved"
   },
   "nav": {
     "overview": "Overview",
@@ -137,6 +138,7 @@
     "traffic": {
       "title": "Per-app traffic",
       "live": "live",
+      "liveInterval": "live · {{secs}} s",
       "notablePill": "notable",
       "down": "↓ {{value}}",
       "up": "↑ {{value}}",
@@ -167,6 +169,8 @@
       "state": "State: {{value}}",
       "lookup": "look up",
       "refresh": "Refresh",
+      "refreshIntervalLabel": "Auto-refresh",
+      "refreshOff": "Off",
       "close": "Close"
     },
     "lookup": {

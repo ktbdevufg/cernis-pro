@@ -81,7 +81,10 @@ function ScanInhalt() {
   );
 }
 
-export default function ObserveView({ refreshInterval = 0 }) {
+export default function ObserveView({
+  refreshInterval = 0,
+  onRefreshIntervalChange,
+}) {
   const { t } = useTranslation();
   // null -> Kachel-Übersicht; sonst die geöffnete Funktion.
   const [openFunction, setOpenFunction] = useState(null);
@@ -103,7 +106,10 @@ export default function ObserveView({ refreshInterval = 0 }) {
         title={t("beobachten.cards.traffic.title")}
         onBack={() => setOpenFunction(null)}
       >
-        <TrafficView refreshInterval={refreshInterval} />
+        <TrafficView
+          refreshInterval={refreshInterval}
+          onRefreshIntervalChange={onRefreshIntervalChange}
+        />
       </FunctionShell>
     );
   }

@@ -84,15 +84,16 @@ export default function App() {
           <SettingsView
             lang={lang}
             onLangChange={setLang}
-            refreshInterval={refreshInterval}
-            onRefreshIntervalChange={setRefreshInterval}
             onClose={() => setSettingsOffen(false)}
           />
         ) : (
           <>
             {activeTab === "overview" && <OverviewView />}
             {activeTab === "observe" && (
-              <ObserveView refreshInterval={refreshInterval} />
+              <ObserveView
+                refreshInterval={refreshInterval}
+                onRefreshIntervalChange={setRefreshInterval}
+              />
             )}
             {activeTab === "investigate" && <InvestigateView />}
             {activeTab === "export" && <ExportView />}

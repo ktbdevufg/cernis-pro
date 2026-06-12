@@ -8,6 +8,7 @@
 // kommt als Prop (lang) und wird über onLangChange zurückgemeldet — die
 // Persistenz bleibt in App.jsx (single source of truth).
 
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { FunctionShell } from "../components/AreaShell.jsx";
@@ -33,18 +34,48 @@ function SettingsSektion({ title, children }) {
   );
 }
 
-export default function SettingsView({
-  lang,
-  onLangChange,
-  refreshInterval,
-  onRefreshIntervalChange,
-  onClose,
-}) {
+export default function SettingsView({ lang, onLangChange, onClose }) {
   const { t } = useTranslation();
+
+  // Dezentes "Gespeichert"-Feedback (rein visuell). Die Persistenz selbst bleibt
+  // in App.jsx; hier wird nach jeder Änderung kurz eine Bestätigung gezeigt, die
+  // nach ~1,5 s wieder verschwindet (Muster wie der Copy-Haken im LookupPanel).
+  const [gespeichert, setGespeichert] = useState(false);
+  const speicherTimeout = useRef(null);
+
+  const zeigeGespeichert = () => {
+    setGespeichert(true);
+    if (speicherTimeout.current !== null) {
+      clearTimeout(speicherTimeout.current);
+    }
+    speicherTimeout.current = setTimeout(() => {
+      setGespeichert(false);
+      speicherTimeout.current = null;
+    }, 1500);
+  };
+
+  // Wrapper um die echten Handler: erst persistieren (App.jsx), dann Feedback.
+  const handleLang = (wert) => {
+    onLangChange(wert);
+    zeigeGespeichert();
+  };
 
   return (
     <FunctionShell title={t("settings.title")} onBack={onClose}>
       <div className="settings">
+        {/* Dezente Bestätigungszeile; aria-live für Screenreader. Reserviert
+            keinen festen Platz — sie erscheint nur kurz nach einer Änderung. */}
+        <span
+          className={
+            gespeichert
+              ? "settings__saved settings__saved--shown"
+              : "settings__saved"
+          }
+          role="status"
+          aria-live="polite"
+        >
+          {gespeichert ? t("settings.saved") : ""}
+        </span>
         <SettingsSektion title={t("settings.sectionGeneral")}>
           <SettingsZeile label={t("settings.language")}>
             {/* Sprachnamen in ihrer eigenen Schreibweise — Konvention bei
@@ -52,28 +83,10 @@ export default function SettingsView({
             <select
               className="settings__select"
               value={lang}
-              onChange={(e) => onLangChange(e.target.value)}
+              onChange={(e) => handleLang(e.target.value)}
             >
               <option value="de">Deutsch</option>
               <option value="en">English</option>
-            </select>
-          </SettingsZeile>
-        </SettingsSektion>
-
-        {/* Eigene Sektion, da traffic-spezifisch. Werte als Zahl (0 = aus). */}
-        <SettingsSektion title={t("settings.sectionTraffic")}>
-          <SettingsZeile label={t("settings.autoRefresh")}>
-            <select
-              className="settings__select"
-              value={refreshInterval}
-              onChange={(e) => onRefreshIntervalChange(Number(e.target.value))}
-            >
-              <option value={0}>{t("settings.refreshOff")}</option>
-              {/* Sekunden-Labels sind sprachneutral, daher direkt im Markup. */}
-              <option value={5}>5 s</option>
-              <option value={10}>10 s</option>
-              <option value={30}>30 s</option>
-              <option value={60}>60 s</option>
             </select>
           </SettingsZeile>
         </SettingsSektion>

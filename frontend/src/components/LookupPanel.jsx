@@ -119,16 +119,26 @@ function TlsZeile({ label, feld, details }) {
             feld={{ value: details.subjectCN, source: "TLS" }}
             mono
           />
-          <div className="lookup__field">
-            <span className="lookup__field-label">
-              {t("beobachten.lookup.resolution.tlsSan")}
-            </span>
-            <span className="lookup__field-right">
-              <span className="lookup__field-value lookup__mono lookup__tls-san">
-                {details.subjectAltNames.join(", ")}
+          {/* SAN als kleine, umbrechende Chips: bei mehreren Domains auf einer
+              IP bleibt jeder Name klar getrennt lesbar. Bei genau einem Eintrag
+              wirkt es wie eine schlichte Zeile. Leere Liste -> keine Chips. */}
+          {details.subjectAltNames.length > 0 && (
+            <div className="lookup__field lookup__tls-san-row">
+              <span className="lookup__field-label">
+                {t("beobachten.lookup.resolution.tlsSan")}
               </span>
-            </span>
-          </div>
+              <span className="lookup__field-right lookup__tls-san-list">
+                {details.subjectAltNames.map((name) => (
+                  <span
+                    key={name}
+                    className="lookup__field-value lookup__mono lookup__tls-san"
+                  >
+                    {name}
+                  </span>
+                ))}
+              </span>
+            </div>
+          )}
           <FeldZeile
             label={t("beobachten.lookup.resolution.tlsIssuer")}
             feld={{ value: details.issuer, source: "TLS" }}

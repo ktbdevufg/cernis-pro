@@ -27,9 +27,29 @@
   display: flex;
   flex-direction: column;
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
+  /* Dezenter linker Akzentstreifen, der jede Rubrik klar als eigenen Block
+     ausweist. Design-System-Regel: einseitiger Akzent-Border -> keine runden
+     Ecken auf dieser Seite, sonst sitzt der Streifen unsauber. */
+  border-left: 3px solid var(--color-accent);
+  border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
   background: var(--color-card);
   overflow: hidden;
+}
+
+/* Dezentes "Gespeichert"-Feedback: ruhiger ok-Ton, blendet kurz ein. Reserviert
+   über min-height keinen Dauerplatz, der Layout-Sprung beim Ein-/Ausblenden
+   bleibt aus, weil die Höhe der Zeile konstant ist. */
+.settings__saved {
+  min-height: 16px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-ok-text);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.settings__saved--shown {
+  opacity: 1;
 }
 
 /* Eine Zeile: Label links, Bedienelement rechts. */

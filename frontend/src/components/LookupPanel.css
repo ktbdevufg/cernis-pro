@@ -314,9 +314,30 @@
   border-left: 2px solid var(--color-border);
 }
 
-/* SAN-Liste und Fingerprint dürfen umbrechen. */
-.lookup__tls-san,
+/* Fingerprint darf umbrechen. */
 .lookup__tls-fp {
+  word-break: break-all;
+}
+
+/* SAN-Zeile: bei mehreren Namen oben ausrichten, damit das Label neben dem
+   ersten Chip steht und nicht an der Mitte der umbrechenden Liste klebt. */
+.lookup__tls-san-row {
+  align-items: flex-start;
+}
+
+/* SAN-Namen als kleine, umbrechende Chips — rechtsbündig, mit etwas Abstand. */
+.lookup__tls-san-list {
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.lookup__tls-san {
+  padding: 1px 6px;
+  font-size: 12px;
+  color: var(--color-text-sec);
+  background: var(--color-accent-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
   word-break: break-all;
 }
 

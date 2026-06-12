@@ -44,6 +44,11 @@ const APP_ICONS = {
   unattributed: HelpCircle,
 };
 
+// Auswählbare Auto-Refresh-Intervalle (Sekunden) für das Kopf-Dropdown. Muss zu
+// den in App.jsx erlaubten REFRESH_WERTE passen (dort die single source of
+// truth für State/Persistenz); 0 = aus. Die Sekunden-Labels sind sprachneutral.
+const REFRESH_OPTIONEN = [5, 10, 30, 60];
+
 // Höchste vorhandene down-Rate für die Balken-Normierung (nur echte Raten
 // zählen; null/—-Apps tragen nicht bei). Mindestens 1, damit nie durch 0.
 function maxDown(apps) {
@@ -135,7 +140,17 @@ function AppZeile({ app, onSelect, selected, anteil }) {
 // Linke Spalte: Kopfzeile mit Titel + Live-Indikator, darunter die App-Liste.
 // Sortierung: connectionCount absteigend; die None-Gruppe (name===null) IMMER
 // ans Ende, egal wie viele Verbindungen (ehrliche None-Gruppe unten).
-function AppListe({ apps, onSelect, selectedName, onRefresh, refreshing }) {
+// Der Live-Indikator erscheint NUR bei aktivem Auto-Refresh (refreshInterval > 0);
+// der Refresh-Button bleibt davon unberührt immer sichtbar.
+function AppListe({
+  apps,
+  onSelect,
+  selectedName,
+  onRefresh,
+  refreshing,
+  refreshInterval,
+  onRefreshIntervalChange,
+}) {
   const { t } = useTranslation();
   const max = maxDown(apps);
 
@@ -152,10 +167,30 @@ function AppListe({ apps, onSelect, selectedName, onRefresh, refreshing }) {
           {t("beobachten.traffic.title")}
         </span>
         <span className="traffic-list__header-right">
-          <span className="traffic-list__live">
-            <span className="traffic-list__live-dot" aria-hidden="true" />
-            {t("beobachten.traffic.live")}
-          </span>
+          {/* Live-Indikator nur bei aktivem Auto-Refresh; schlichtes "live"
+              (das Intervall zeigt das Dropdown direkt daneben). */}
+          {refreshInterval > 0 && (
+            <span className="traffic-list__live">
+              <span className="traffic-list__live-dot" aria-hidden="true" />
+              {t("beobachten.traffic.live")}
+            </span>
+          )}
+          {/* Kompaktes Intervall-Dropdown: zog aus den Einstellungen hierher um.
+              value/Persistenz bleiben in App.jsx; hier nur die Bedienung. */}
+          <select
+            className="traffic-list__interval"
+            value={refreshInterval}
+            onChange={(e) => onRefreshIntervalChange(Number(e.target.value))}
+            aria-label={t("beobachten.traffic.refreshIntervalLabel")}
+            title={t("beobachten.traffic.refreshIntervalLabel")}
+          >
+            <option value={0}>{t("beobachten.traffic.refreshOff")}</option>
+            {REFRESH_OPTIONEN.map((secs) => (
+              <option key={secs} value={secs}>
+                {`${secs} s`}
+              </option>
+            ))}
+          </select>
           {/* Immer sichtbar, unabhängig vom Auto-Intervall. Dezenter Lade-
               Zustand am Button (dreht/disabled); die Liste bleibt stehen. */}
           <button
@@ -323,7 +358,7 @@ function ZiellosZeile({ buendel }) {
 // Liste (keine Auffällig/Bekannt-Trennung — notable hat keine Datengrundlage).
 // Echte Ziele zuerst (nach count absteigend), ziel-lose ans Ende. Die Klapp-
 // Logik "erste N + mehr" bleibt für die echten Ziele (sinnvoll bei vielen).
-const STANDARD_OFFEN = 3; // echte Ziele anfangs offen sichtbar
+const STANDARD_OFFEN = 10; // echte Ziele anfangs offen sichtbar
 
 function ConnectionList({ conns, onLookup }) {
   const { t } = useTranslation();
@@ -337,8 +372,10 @@ function ConnectionList({ conns, onLookup }) {
     (b) => b.remote === null || b.remote === undefined,
   );
 
-  // Bei wenigen echten Zielen (<=4) alles offen, kein Toggle.
-  const wenig = echteZiele.length <= 4;
+  // Bei wenigen echten Zielen (bis STANDARD_OFFEN) alles offen, kein Toggle.
+  // An STANDARD_OFFEN gekoppelt, damit der "alles offen"-Fall und die anfangs
+  // sichtbare Menge konsistent bleiben (kein Toggle, der nichts verbirgt).
+  const wenig = echteZiele.length <= STANDARD_OFFEN;
   const sichtbar =
     wenig || erweitert ? echteZiele : echteZiele.slice(0, STANDARD_OFFEN);
   const versteckt = echteZiele.length - sichtbar.length;
@@ -438,7 +475,10 @@ function PermissionHinweis({ text }) {
   );
 }
 
-export default function TrafficView({ refreshInterval = 0 }) {
+export default function TrafficView({
+  refreshInterval = 0,
+  onRefreshIntervalChange,
+}) {
   const { t } = useTranslation();
 
   // Drei Zustände wie LookupPanel: "laedt" / "ok" / "fehler".
@@ -567,6 +607,8 @@ export default function TrafficView({ refreshInterval = 0 }) {
             selectedName={gewaehlterName}
             onRefresh={() => ladeTraffic(false)}
             refreshing={refreshing}
+            refreshInterval={refreshInterval}
+            onRefreshIntervalChange={onRefreshIntervalChange}
           />
           {gewaehlteApp &&
             (lookupZiel ? (
