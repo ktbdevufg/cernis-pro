@@ -3,55 +3,70 @@
 // Verbindungs-Detail der gewählten App. Gleiche Designsprache, gleiche Wannen-
 // Markierung der gewählten Zeile, gleiches Split-Verhalten.
 //
-// Datenquelle ist ausschließlich der Import aus mockData/trafficMock. Die
-// Komponente weiß nicht, ob die Daten echt oder Platzhalter sind. Bei echter
-// Anbindung wird nur dieser Import ausgetauscht.
+// Datenquelle ist die echte API (api/traffic.js): GET /api/traffic für die Apps
+// + GET /api/traffic/permission für den Rechte-Status. Drei-Zustände-Muster
+// (laedt/ok/fehler) wie LookupPanel. Früher kam alles aus einem lokalen Mock.
 
 import {
+  ArrowLeftRight,
+  Database,
   Globe,
+  Hexagon,
   HelpCircle,
   Mail,
+  MonitorSmartphone,
   Music,
-  RefreshCw,
-  TerminalSquare,
+  Server,
+  Sparkles,
   X,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import trafficMock from "../mockData/trafficMock.js";
+import { fetchTraffic, fetchTrafficPermission } from "../api/traffic.js";
 import LookupPanel from "./LookupPanel.jsx";
 import "./TrafficView.css";
 
-// Abbildung der Mock-Icon-Schlüssel auf lucide-Komponenten.
-// Hält den Mock frei von Komponenten-Referenzen.
+// Abbildung der Icon-Schlüssel (aus api/traffic.js iconAusName) auf lucide-
+// Komponenten. Reine Icon-Anker in der Logo-Akzentfarbe — keine Aussage.
 const APP_ICONS = {
   browser: Globe,
-  music: Music,
+  remote: MonitorSmartphone,
+  ai: Sparkles,
+  transfer: ArrowLeftRight,
+  node: Hexagon,
+  server: Server,
   mail: Mail,
-  terminal: TerminalSquare,
-  refresh: RefreshCw,
+  music: Music,
+  db: Database,
   unknown: HelpCircle,
+  unattributed: HelpCircle,
 };
 
-// Schwelle für die Balken-Normierung; der breiteste Balken entspricht der
-// höchsten down-Rate der Liste (ruhiger Anteil, kein flackerndes Diagramm).
+// Höchste vorhandene down-Rate für die Balken-Normierung (nur echte Raten
+// zählen; null/—-Apps tragen nicht bei). Mindestens 1, damit nie durch 0.
 function maxDown(apps) {
-  return apps.reduce((max, app) => (app.down > max ? app.down : max), 1);
+  return apps.reduce(
+    (max, app) => (app.down !== null && app.down > max ? app.down : max),
+    1,
+  );
 }
 
-// Datenraten-Formatierung: ab 1000 KB/s als "x.x MB/s", sonst "<n> KB/s".
-function formatRate(t, kbPerSec) {
-  if (kbPerSec >= 1000) {
-    return t("beobachten.traffic.rateMb", {
-      value: (kbPerSec / 1000).toFixed(1),
-    });
-  }
-  return t("beobachten.traffic.rateKb", { value: kbPerSec });
+// Rohrate (bps) schlicht lesbar machen. Die echte Umrechnung kommt erst mit dem
+// Poller; vorerst nur die Roh-Bits/s als ehrliche Zahl. null wird hier nie
+// übergeben (Aufrufer prüft vorher und zeigt sonst "—").
+function formatRate(t, bps) {
+  return t("beobachten.traffic.rateBps", { value: bps });
+}
+
+// App-Anzeigename: echter Name oder das ehrliche None-Gruppen-Label.
+function appLabel(t, app) {
+  return app.name ?? t("beobachten.traffic.unattributed");
 }
 
 // Eine App-Zeile in der linken Liste. Klickbar; Klick meldet die App an
 // onSelect. selected hebt die zum offenen Detail-Panel gehörende Zeile hervor.
+// Ohne echte Rate (down===null): ruhiges "—" statt Balken; mit Rate: Balken.
 function AppZeile({ app, onSelect, selected, anteil }) {
   const { t } = useTranslation();
   const Icon = APP_ICONS[app.icon] ?? HelpCircle;
@@ -59,6 +74,8 @@ function AppZeile({ app, onSelect, selected, anteil }) {
   const rowKlasse = selected
     ? "traffic-app traffic-app--aktiv"
     : "traffic-app";
+
+  const hatRate = app.down !== null;
 
   return (
     <button type="button" className={rowKlasse} onClick={() => onSelect(app)}>
@@ -78,26 +95,35 @@ function AppZeile({ app, onSelect, selected, anteil }) {
 
       <span className="traffic-app__body">
         <span className="traffic-app__head">
-          <span className="traffic-app__name traffic-mono">{app.name}</span>
-          {app.notable && (
-            <span className="traffic-app__pill">
-              {t("beobachten.traffic.notablePill")}
-            </span>
-          )}
+          <span className="traffic-app__name traffic-mono">
+            {appLabel(t, app)}
+          </span>
         </span>
 
-        {/* Ruhige Datenraten-Zeile: dünner Balken (Anteil down/max) + Zahl. */}
+        {/* Datenraten-Zeile: Balken nur bei echter Rate, sonst ruhiges "—".
+            Daneben/dahinter die Verbindungsanzahl. */}
         <span className="traffic-app__rate">
-          <span className="traffic-app__bar" aria-hidden="true">
-            <span
-              className="traffic-app__bar-fill"
-              style={{ width: `${anteil}%` }}
-            />
-          </span>
-          <span className="traffic-app__rate-value traffic-mono">
-            {t("beobachten.traffic.down", {
-              value: formatRate(t, app.down),
-            })}
+          {hatRate ? (
+            <>
+              <span className="traffic-app__bar" aria-hidden="true">
+                <span
+                  className="traffic-app__bar-fill"
+                  style={{ width: `${anteil}%` }}
+                />
+              </span>
+              <span className="traffic-app__rate-value traffic-mono">
+                {t("beobachten.traffic.down", {
+                  value: formatRate(t, app.down),
+                })}
+              </span>
+            </>
+          ) : (
+            <span className="traffic-app__rate-none" aria-hidden="true">
+              —
+            </span>
+          )}
+          <span className="traffic-app__conncount">
+            {t("beobachten.traffic.connCount", { count: app.connectionCount })}
           </span>
         </span>
       </span>
@@ -106,9 +132,17 @@ function AppZeile({ app, onSelect, selected, anteil }) {
 }
 
 // Linke Spalte: Kopfzeile mit Titel + Live-Indikator, darunter die App-Liste.
+// Sortierung: connectionCount absteigend; die None-Gruppe (name===null) IMMER
+// ans Ende, egal wie viele Verbindungen (ehrliche None-Gruppe unten).
 function AppListe({ apps, onSelect, selectedName }) {
   const { t } = useTranslation();
   const max = maxDown(apps);
+
+  const sortiert = [...apps].sort((a, b) => {
+    if (a.name === null && b.name !== null) return 1;
+    if (b.name === null && a.name !== null) return -1;
+    return b.connectionCount - a.connectionCount;
+  });
 
   return (
     <div className="traffic-list">
@@ -123,13 +157,13 @@ function AppListe({ apps, onSelect, selectedName }) {
       </div>
 
       <div className="traffic-list__rows">
-        {apps.map((app) => (
+        {sortiert.map((app) => (
           <AppZeile
-            key={app.name}
+            key={app.name ?? "__unattributed__"}
             app={app}
             onSelect={onSelect}
             selected={app.name === selectedName}
-            anteil={Math.round((app.down / max) * 100)}
+            anteil={app.down !== null ? Math.round((app.down / max) * 100) : 0}
           />
         ))}
       </div>
@@ -137,15 +171,25 @@ function AppListe({ apps, onSelect, selectedName }) {
   );
 }
 
-// Bündelt Verbindungen nach Ziel: gleicher host (bzw. gleiche remote-IP, wenn
-// host=null) UND gleicher port werden zu EINEM Bündel zusammengefasst. Behält
-// die übrigen Felder der ersten Verbindung des Bündels und zählt die Menge.
-// Bewusst als reine Hilfsfunktion: später auch im Scan-Detail (Ports) nutzbar.
+// Bündelschlüssel einer Verbindung: echtes Ziel (remote-IP) + Port, sonst —
+// bei ziel-losen Verbindungen — die lokale Seite (local-ip:port), damit gleich-
+// artige ziel-lose Verbindungen sinnvoll zusammenfallen und nichts bei
+// remote===null abstürzt. Ziel-lose Bündel werden NIE anklickbar (kein Lookup).
+function buendelSchluessel(conn) {
+  if (conn.remote !== null && conn.remote !== undefined) {
+    return `r|${conn.remote}|${conn.port}`;
+  }
+  const lokal = conn.local ? `${conn.local.ip}:${conn.local.port}` : "?";
+  return `l|${lokal}|${conn.l4 ?? "?"}|${conn.port ?? "?"}`;
+}
+
+// Bündelt Verbindungen nach Ziel+Port (bzw. lokaler Seite bei ziel-losen).
+// Behält die übrigen Felder der ersten Verbindung des Bündels und zählt die
+// Menge. Defensiv gegen remote===null (siehe buendelSchluessel).
 function buendeleVerbindungen(conns) {
   const buendel = new Map();
   for (const conn of conns) {
-    const ziel = conn.host ?? conn.remote;
-    const schluessel = `${ziel}|${conn.port}`;
+    const schluessel = buendelSchluessel(conn);
     const vorhanden = buendel.get(schluessel);
     if (vorhanden) {
       vorhanden.count += 1;
@@ -156,12 +200,10 @@ function buendeleVerbindungen(conns) {
   return [...buendel.values()];
 }
 
-// Eine gebündelte Ziel-Zeile. host prominent + IP gedämpft; ohne host nur IP
-// (mono) plus Hinweis "kein PTR-Record". Rechts ×N-Pill (falls N>1) und Port.
-// Das Ziel selbst (Name bzw. IP) ist der Lookup-Trigger — für JEDE Verbindung,
-// nicht nur notable; Klick (oder Enter/Space) öffnet die Gegenstellen-Ansicht.
-// Wiederverwendbar gehalten (siehe ConnectionList): keine traffic-spezifische
-// Annahme außer den Verbindungs-Feldern selbst.
+// Eine gebündelte Ziel-Zeile MIT echtem Ziel. Die IP (mono) ist der Lookup-
+// Trigger — für JEDE Verbindung (F3-Klick-Trigger): Klick (oder Enter/Space)
+// öffnet die Gegenstellen-Ansicht. host ist in der Liste immer null (der
+// aufgelöste Name kommt erst im LookupPanel), daher nur die IP.
 function BuendelZeile({ buendel, onLookup }) {
   const { t } = useTranslation();
 
@@ -186,23 +228,9 @@ function BuendelZeile({ buendel, onLookup }) {
           aria-label={t("beobachten.traffic.lookup")}
           title={t("beobachten.traffic.lookup")}
         >
-          {buendel.host ? (
-            <>
-              <span className="traffic-detail__conn-host">{buendel.host}</span>
-              <span className="traffic-detail__conn-ip traffic-mono">
-                {buendel.remote}
-              </span>
-            </>
-          ) : (
-            <>
-              <span className="traffic-detail__conn-ip traffic-mono">
-                {buendel.remote}
-              </span>
-              <span className="traffic-detail__conn-noptr">
-                {t("beobachten.traffic.noPtr")}
-              </span>
-            </>
-          )}
+          <span className="traffic-detail__conn-ip traffic-mono">
+            {buendel.remote}
+          </span>
         </span>
 
         <span className="traffic-detail__conn-meta">
@@ -218,7 +246,11 @@ function BuendelZeile({ buendel, onLookup }) {
       </div>
 
       <div className="traffic-detail__conn-sub">
-        <span className="traffic-detail__conn-service">{buendel.service}</span>
+        {buendel.service && (
+          <span className="traffic-detail__conn-service">
+            {buendel.service}
+          </span>
+        )}
         <span className="traffic-detail__conn-state">
           {t("beobachten.traffic.state", { value: buendel.state })}
         </span>
@@ -227,86 +259,113 @@ function BuendelZeile({ buendel, onLookup }) {
   );
 }
 
-// Wiederverwendbare Verbindungs-/Ziel-Liste: bündelt nach Ziel+Port, trennt
-// "Auffällig" (immer offen) von "Bekannte Ziele" (erste paar offen, Rest hinter
-// einem Toggle). Bewusst eigenständig gehalten, damit das Scan-Detail-Panel
-// dieselbe Bündel-/Klapp-Logik für offene Ports nutzen kann.
-const STANDARD_OFFEN = 3; // bekannte Ziele anfangs offen sichtbar
+// Eine ziel-lose Zeile (remote===null, z. B. mDNS/Multicast/UDP "none"): reiner
+// Text, ausgegraut, NICHT anklickbar (kein role=button, kein onClick). Bei
+// l4==="udp" und Port 5353 zusätzlich der mDNS-Hinweis. Steht am Ende der Liste.
+function ZiellosZeile({ buendel }) {
+  const { t } = useTranslation();
+  const istMdns = buendel.l4 === "udp" && buendel.port === 5353;
+
+  return (
+    <li className="traffic-detail__conn traffic-detail__conn--ziellos">
+      <div className="traffic-detail__conn-line">
+        <span className="traffic-detail__conn-notarget">
+          {t("beobachten.traffic.noTarget")}
+          {istMdns && (
+            <span className="traffic-detail__conn-mdns">
+              {" · "}
+              {t("beobachten.traffic.mdns")}
+            </span>
+          )}
+        </span>
+        <span className="traffic-detail__conn-meta">
+          {buendel.count > 1 && (
+            <span className="traffic-detail__conn-bundle">
+              {t("beobachten.traffic.bundlePill", { count: buendel.count })}
+            </span>
+          )}
+          {buendel.port !== null && (
+            <span className="traffic-detail__conn-port traffic-mono">
+              {t("beobachten.traffic.port", { value: buendel.port })}
+            </span>
+          )}
+        </span>
+      </div>
+      <div className="traffic-detail__conn-sub">
+        <span className="traffic-detail__conn-state">
+          {t("beobachten.traffic.state", { value: buendel.state })}
+        </span>
+      </div>
+    </li>
+  );
+}
+
+// Wiederverwendbare Verbindungsliste: bündelt nach Ziel+Port. EINE schlichte
+// Liste (keine Auffällig/Bekannt-Trennung — notable hat keine Datengrundlage).
+// Echte Ziele zuerst (nach count absteigend), ziel-lose ans Ende. Die Klapp-
+// Logik "erste N + mehr" bleibt für die echten Ziele (sinnvoll bei vielen).
+const STANDARD_OFFEN = 3; // echte Ziele anfangs offen sichtbar
 
 function ConnectionList({ conns, onLookup }) {
   const { t } = useTranslation();
   const [erweitert, setErweitert] = useState(false);
 
   const buendel = buendeleVerbindungen(conns);
-  const auffaellig = buendel.filter((b) => b.notable);
-  // Bekannte Ziele nach Anzahl (×N) absteigend.
-  const bekannt = buendel
-    .filter((b) => !b.notable)
+  const echteZiele = buendel
+    .filter((b) => b.remote !== null && b.remote !== undefined)
     .sort((a, b) => b.count - a.count);
+  const ziellos = buendel.filter(
+    (b) => b.remote === null || b.remote === undefined,
+  );
 
-  // Bei wenigen Verbindungen (<=4 gesamt) alles offen, kein Toggle.
-  const wenig = conns.length <= 4;
-  const sichtbarBekannt =
-    wenig || erweitert ? bekannt : bekannt.slice(0, STANDARD_OFFEN);
-  const versteckt = bekannt.length - sichtbarBekannt.length;
+  // Bei wenigen echten Zielen (<=4) alles offen, kein Toggle.
+  const wenig = echteZiele.length <= 4;
+  const sichtbar =
+    wenig || erweitert ? echteZiele : echteZiele.slice(0, STANDARD_OFFEN);
+  const versteckt = echteZiele.length - sichtbar.length;
   const toggleSinnvoll = !wenig && (versteckt > 0 || erweitert);
 
   return (
     <div className="traffic-detail__connlist">
-      {auffaellig.length > 0 && (
-        <section className="traffic-detail__section">
-          <h4 className="traffic-detail__section-heading">
-            {t("beobachten.traffic.sections.notable")}
-          </h4>
-          <ul className="traffic-detail__conns">
-            {auffaellig.map((b) => (
-              <BuendelZeile
-                key={`${b.host ?? b.remote}|${b.port}`}
-                buendel={b}
-                onLookup={onLookup}
-              />
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {bekannt.length > 0 && (
-        <section className="traffic-detail__section">
-          <h4 className="traffic-detail__section-heading">
-            {t("beobachten.traffic.sections.known")}
-          </h4>
-          <ul className="traffic-detail__conns">
-            {sichtbarBekannt.map((b) => (
-              <BuendelZeile
-                key={`${b.host ?? b.remote}|${b.port}`}
-                buendel={b}
-                onLookup={onLookup}
-              />
-            ))}
-          </ul>
-          {toggleSinnvoll && (
-            <button
-              type="button"
-              className="traffic-detail__toggle"
-              onClick={() => setErweitert((v) => !v)}
-            >
-              {erweitert
-                ? t("beobachten.traffic.showLess")
-                : t("beobachten.traffic.showMore", { count: versteckt })}
-            </button>
-          )}
-        </section>
+      <ul className="traffic-detail__conns">
+        {sichtbar.map((b) => (
+          <BuendelZeile
+            key={`${b.remote}|${b.port}`}
+            buendel={b}
+            onLookup={onLookup}
+          />
+        ))}
+        {/* Ziel-lose Verbindungen ans Ende, klar markiert und nicht anklickbar. */}
+        {ziellos.map((b) => (
+          <ZiellosZeile key={buendelSchluessel(b)} buendel={b} />
+        ))}
+      </ul>
+      {toggleSinnvoll && (
+        <button
+          type="button"
+          className="traffic-detail__toggle"
+          onClick={() => setErweitert((v) => !v)}
+        >
+          {erweitert
+            ? t("beobachten.traffic.showLess")
+            : t("beobachten.traffic.showMore", { count: versteckt })}
+        </button>
       )}
     </div>
   );
 }
 
-// Rechte Spalte: Verbindungs-Detail der gewählten App. Der 'nachschlagen'-Link
-// einer Verbindung meldet deren Ziel über onLookup nach oben — dort öffnet
-// TrafficView die Gegenstellen-Ansicht (LookupPanel) in dieser Spalte.
+// Rechte Spalte: Verbindungs-Detail der gewählten App. Der Lookup einer
+// Verbindung meldet deren Ziel über onLookup nach oben — dort öffnet TrafficView
+// die Gegenstellen-Ansicht (LookupPanel) in dieser Spalte.
 function AppDetailPanel({ app, onClose, onLookup }) {
   const { t } = useTranslation();
   const Icon = APP_ICONS[app.icon] ?? HelpCircle;
+
+  // Raten-Zeile im Detail: echte Werte oder ehrliches "—" je Richtung.
+  const downText =
+    app.down !== null ? formatRate(t, app.down) : "—";
+  const upText = app.up !== null ? formatRate(t, app.up) : "—";
 
   return (
     <aside className="traffic-detail">
@@ -316,17 +375,15 @@ function AppDetailPanel({ app, onClose, onLookup }) {
             <Icon size={18} />
           </span>
           <div className="traffic-detail__title-group">
-            <h3 className="traffic-detail__title traffic-mono">{app.name}</h3>
+            <h3 className="traffic-detail__title traffic-mono">
+              {appLabel(t, app)}
+            </h3>
             <span className="traffic-detail__rates traffic-mono">
-              {t("beobachten.traffic.down", {
-                value: formatRate(t, app.down),
-              })}
+              {t("beobachten.traffic.down", { value: downText })}
               {" · "}
-              {t("beobachten.traffic.up", { value: formatRate(t, app.up) })}
+              {t("beobachten.traffic.up", { value: upText })}
               {" "}
-              {t("beobachten.traffic.connCount", {
-                count: app.conns.length,
-              })}
+              {t("beobachten.traffic.connCount", { count: app.connectionCount })}
             </span>
           </div>
         </div>
@@ -342,70 +399,138 @@ function AppDetailPanel({ app, onClose, onLookup }) {
       </div>
 
       <div className="traffic-detail__body">
-        {app.notable && (
-          <p className="traffic-detail__notice">
-            {t("beobachten.traffic.unknownTarget")}
-          </p>
-        )}
-
         <ConnectionList conns={app.conns} onLookup={onLookup} />
       </div>
     </aside>
   );
 }
 
+// Ruhiger Hinweis-Streifen: zeigt den Backend-error-Text der Rechte-Naht
+// ({ ok:false }). Reine Anzeige, kein Button, keine Eskalation.
+function PermissionHinweis({ text }) {
+  const { t } = useTranslation();
+  return (
+    <div className="traffic-permission" role="note">
+      <span className="traffic-permission__title">
+        {t("beobachten.traffic.permissionTitle")}
+      </span>
+      <span className="traffic-permission__text">{text}</span>
+    </div>
+  );
+}
+
 export default function TrafficView() {
-  const { apps } = trafficMock;
+  const { t } = useTranslation();
 
-  // Gewählte App über den Namen (eindeutiger Schlüssel im Mock); null = keine.
-  const [gewaehlterName, setGewaehlterName] = useState(null);
+  // Drei Zustände wie LookupPanel: "laedt" / "ok" / "fehler".
+  const [status, setStatus] = useState("laedt");
+  const [apps, setApps] = useState([]);
+  // Rechte-Naht: null = noch unbekannt; sonst { ok, error }.
+  const [permission, setPermission] = useState(null);
 
-  // Nachzuschlagende Gegenstelle ({ ip, port }) oder null. Ist sie gesetzt,
-  // tritt die Gegenstellen-Ansicht in der rechten Spalte an die Stelle des
-  // Verbindungs-Details; Schließen kehrt zur App-Ansicht zurück.
+  // Gewählte App über den Namen; null = keine. Die None-Gruppe (name===null)
+  // wird über einen eigenen Sentinel adressiert, damit sie wählbar bleibt.
+  const [gewaehlterName, setGewaehlterName] = useState(undefined);
+
+  // Nachzuschlagende Gegenstelle ({ ip, port }) oder null.
   const [lookupZiel, setLookupZiel] = useState(null);
 
-  // Klick auf eine Zeile: wählt die App; erneuter Klick auf dieselbe löscht.
-  // Ein Wechsel schließt eine offene Gegenstellen-Ansicht (gehört zur alten App).
+  useEffect(() => {
+    let ignorieren = false;
+    setStatus("laedt");
+
+    fetchTraffic()
+      .then((ergebnis) => {
+        if (!ignorieren) {
+          setApps(ergebnis);
+          setStatus("ok");
+        }
+      })
+      .catch(() => {
+        if (!ignorieren) {
+          setStatus("fehler");
+        }
+      });
+
+    // Rechte-Naht separat: ihr Fehlschlag soll die Liste nicht kippen.
+    fetchTrafficPermission()
+      .then((ergebnis) => {
+        if (!ignorieren) {
+          setPermission(ergebnis);
+        }
+      })
+      .catch(() => {
+        // Stiller Verzicht NUR für den optionalen Hinweis-Streifen: ohne
+        // Rechte-Antwort einfach keinen Hinweis zeigen (kein falscher Alarm).
+      });
+
+    return () => {
+      ignorieren = true;
+    };
+  }, []);
+
+  // Klick auf eine Zeile: wählt die App (name kann null sein -> Sentinel).
   const handleSelect = (app) => {
     setLookupZiel(null);
     setGewaehlterName((aktuell) =>
-      aktuell === app.name ? null : app.name,
+      aktuell === app.name ? undefined : app.name,
     );
   };
 
-  // 'nachschlagen' einer Verbindung: deren Ziel (IP + Port) merken; die rechte
-  // Spalte zeigt daraufhin die Gegenstellen-Ansicht.
+  // Lookup einer Verbindung: deren Ziel (IP + Port) merken.
   const handleLookup = (conn) => {
     setLookupZiel({ ip: conn.remote, port: conn.port });
   };
 
   const gewaehlteApp =
-    apps.find((app) => app.name === gewaehlterName) ?? null;
+    gewaehlterName === undefined
+      ? null
+      : apps.find((app) => app.name === gewaehlterName) ?? null;
+
+  const zeigePermission =
+    permission !== null && permission.ok === false && permission.error;
 
   return (
-    <div className="observe__split">
-      <AppListe
-        apps={apps}
-        onSelect={handleSelect}
-        selectedName={gewaehlterName}
-      />
-      {gewaehlteApp &&
-        (lookupZiel ? (
-          <LookupPanel
-            key={`${lookupZiel.ip}:${lookupZiel.port}`}
-            ip={lookupZiel.ip}
-            port={lookupZiel.port}
-            onClose={() => setLookupZiel(null)}
+    <div className="traffic">
+      {zeigePermission && <PermissionHinweis text={permission.error} />}
+
+      {status === "laedt" && (
+        <p className="traffic-state-notice">
+          {t("beobachten.traffic.loading")}
+        </p>
+      )}
+
+      {status === "fehler" && (
+        <p className="traffic-state-notice traffic-state-notice--error">
+          {t("beobachten.traffic.error")}
+        </p>
+      )}
+
+      {status === "ok" && (
+        <div className="observe__split">
+          <AppListe
+            apps={apps}
+            onSelect={handleSelect}
+            selectedName={gewaehlterName}
           />
-        ) : (
-          <AppDetailPanel
-            key={gewaehlteApp.name}
-            app={gewaehlteApp}
-            onClose={() => setGewaehlterName(null)}
-            onLookup={handleLookup}
-          />
-        ))}
+          {gewaehlteApp &&
+            (lookupZiel ? (
+              <LookupPanel
+                key={`${lookupZiel.ip}:${lookupZiel.port}`}
+                ip={lookupZiel.ip}
+                port={lookupZiel.port}
+                onClose={() => setLookupZiel(null)}
+              />
+            ) : (
+              <AppDetailPanel
+                key={gewaehlteApp.name ?? "__unattributed__"}
+                app={gewaehlteApp}
+                onClose={() => setGewaehlterName(undefined)}
+                onLookup={handleLookup}
+              />
+            ))}
+        </div>
+      )}
     </div>
   );
 }

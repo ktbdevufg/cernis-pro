@@ -7,6 +7,57 @@
     "Liberation Mono", monospace;
 }
 
+/* Äußerer Rahmen der Traffic-Ansicht: Hinweis-Streifen/Zustände über dem Split. */
+.traffic {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Ruhiger Lade-/Fehler-Hinweis (Drei-Zustände, Muster LookupPanel-notice). */
+.traffic-state-notice {
+  margin: 0;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--color-text-sec);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.traffic-state-notice--error {
+  color: var(--sev-med-text);
+  background: var(--sev-med-bg);
+  border-color: var(--sev-med-bd);
+}
+
+/* Rechte-Naht: ruhiger, dezenter Info-Streifen (nicht alarmistisch). Trägt den
+   Backend-error-Text unverändert. Neutraler card-Ton, kein Status-Signal. */
+.traffic-permission {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 9px 12px;
+  font-size: 12px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.traffic-permission__title {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-tert);
+}
+
+.traffic-permission__text {
+  color: var(--color-text-sec);
+}
+
 /* --- Linke Spalte: App-Liste --- */
 .traffic-list {
   display: flex;
@@ -118,11 +169,12 @@
   stroke: none;
 }
 
+/* App-Icons als reine Anker in der Logo-Akzentfarbe (kein Status). */
 .traffic-app__icon {
   display: inline-flex;
   align-items: center;
   flex-shrink: 0;
-  color: var(--color-text-tert);
+  color: var(--color-accent);
 }
 
 .traffic-app__body {
@@ -190,6 +242,21 @@
   color: var(--color-text-sec);
 }
 
+/* Ehrliches "—" statt Balken, wenn keine echte Rate vorliegt (kein Poller). */
+.traffic-app__rate-none {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+/* Verbindungsanzahl als ruhiger Zusatz neben Rate/—. */
+.traffic-app__conncount {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
 /* --- Rechte Spalte: Verbindungs-Detail --- */
 .traffic-detail {
   display: flex;
@@ -225,7 +292,7 @@
   display: inline-flex;
   align-items: center;
   flex-shrink: 0;
-  color: var(--color-text-sec);
+  color: var(--color-accent);
 }
 
 .traffic-detail__title-group {
@@ -445,7 +512,20 @@
   font-size: 12px;
 }
 
-/* Ein-/Ausklappen der bekannten Ziele: dezenter Akzent-Link. */
+/* Ziel-lose Verbindung (remote===null, z. B. mDNS/Multicast): reiner Text,
+   ausgegraut, nicht anklickbar. Steht am Ende der Liste. */
+.traffic-detail__conn--ziellos .traffic-detail__conn-notarget {
+  color: var(--color-text-tert);
+  font-style: italic;
+  font-size: 13px;
+}
+
+.traffic-detail__conn-mdns {
+  font-style: normal;
+  color: var(--color-text-tert);
+}
+
+/* Ein-/Ausklappen der Ziele: dezenter Akzent-Link. */
 .traffic-detail__toggle {
   align-self: flex-start;
   margin-top: 4px;
