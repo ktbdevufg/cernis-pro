@@ -124,6 +124,21 @@
           "saveHint": "Speichern folgt mit der Datenanbindung."
         }
       }
+    },
+    "traffic": {
+      "title": "Per-App-Verkehr",
+      "live": "live",
+      "notablePill": "auffällig",
+      "down": "↓ {{value}}",
+      "up": "↑ {{value}}",
+      "rateKb": "{{value}} KB/s",
+      "rateMb": "{{value}} MB/s",
+      "unknownTarget": "Spricht ein unbekanntes Ziel an",
+      "connections_one": "Verbindungen (1)",
+      "connections_other": "Verbindungen ({{count}})",
+      "state": "Zustand: {{value}}",
+      "lookup": "nachschlagen",
+      "close": "Schließen"
     }
   },
   "untersuchen": {

@@ -4,7 +4,7 @@
 //
 // Funktionen:
 //   "scan"     Netzwerk-Scan (aktiv) -> bestehende Scan-Tabelle
-//   "traffic"  Per-App-Verkehr (gesperrt bis Beobachtung läuft)
+//   "traffic"  Per-App-Verkehr (aktiv) -> App-Liste + Verbindungs-Detail
 //   "processes" Prozesse (gesperrt bis Beobachtung läuft)
 //
 // Datenquelle der Tabelle ist ausschließlich der Import aus mockData/scanMock.
@@ -19,13 +19,14 @@ import { CardGrid, FunctionShell } from "../components/AreaShell.jsx";
 import FunctionCard from "../components/FunctionCard.jsx";
 import ScanDetailPanel from "../components/ScanDetailPanel.jsx";
 import ScanTable from "../components/ScanTable.jsx";
+import TrafficView from "../components/TrafficView.jsx";
 import scanMock from "../mockData/scanMock.js";
 import "./ObserveView.css";
 
 // Kachel-Definition: Schlüssel, Icon, Sperrstatus. Reihenfolge ist verbindlich.
 const FUNKTIONEN = [
   { id: "scan", icon: Radar, locked: false },
-  { id: "traffic", icon: Repeat, locked: true },
+  { id: "traffic", icon: Repeat, locked: false },
   { id: "processes", icon: ListTree, locked: true },
 ];
 
@@ -92,6 +93,17 @@ export default function ObserveView() {
         onBack={() => setOpenFunction(null)}
       >
         <ScanInhalt />
+      </FunctionShell>
+    );
+  }
+
+  if (openFunction === "traffic") {
+    return (
+      <FunctionShell
+        title={t("beobachten.cards.traffic.title")}
+        onBack={() => setOpenFunction(null)}
+      >
+        <TrafficView />
       </FunctionShell>
     );
   }

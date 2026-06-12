@@ -124,6 +124,21 @@
           "saveHint": "Saving follows with the data integration."
         }
       }
+    },
+    "traffic": {
+      "title": "Per-app traffic",
+      "live": "live",
+      "notablePill": "notable",
+      "down": "↓ {{value}}",
+      "up": "↑ {{value}}",
+      "rateKb": "{{value}} KB/s",
+      "rateMb": "{{value}} MB/s",
+      "unknownTarget": "Connects to an unknown target",
+      "connections_one": "Connections (1)",
+      "connections_other": "Connections ({{count}})",
+      "state": "State: {{value}}",
+      "lookup": "look up",
+      "close": "Close"
     }
   },
   "untersuchen": {

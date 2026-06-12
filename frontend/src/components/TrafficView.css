@@ -1,0 +1,374 @@
+/* Per-App-Verkehr: App-Liste links + Verbindungs-Detail rechts.
+   Gleiche Designsprache wie Scan-Tabelle/Detail-Panel, gleiche Tokens. */
+
+/* Monospace für App-Namen/IP:Port — System-Monospace als Fallback. */
+.traffic-mono {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+/* --- Linke Spalte: App-Liste --- */
+.traffic-list {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+}
+
+/* Kopfzeile: Titel + dezenter Live-Indikator. Bleibt beim Scrollen sichtbar. */
+.traffic-list__header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 12px;
+  background: var(--color-bar);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.traffic-list__title {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-tert);
+}
+
+.traffic-list__live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-text-sec);
+}
+
+/* Live-Indikator: dezenter Punkt im Akzentton mit weichem Halo. Das
+   Designsystem kennt keinen eigenen grünen Status-Token; statt einer festen
+   Farbe (Token-Regel) trägt der Akzent das "lebendig/aktiv"-Signal. */
+.traffic-list__live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-bg);
+}
+
+.traffic-list__rows {
+  display: flex;
+  flex-direction: column;
+}
+
+/* --- App-Zeile --- */
+.traffic-app {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--color-border);
+  cursor: pointer;
+}
+
+.traffic-app:hover {
+  background: var(--color-accent-bg);
+}
+
+/* Gewählte Zeile: getönt; die linke Markierung liefert die Wanne. */
+.traffic-app--aktiv,
+.traffic-app--aktiv:hover {
+  background: var(--color-accent-bg);
+  padding-left: 26px;
+}
+
+.traffic-app:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+/* Die "Wanne" als Aktiv-Marker: gleicher Pfad/Stil wie in ScanTable. */
+.traffic-app__wanne {
+  position: absolute;
+  left: 1px;
+  top: 3px;
+  bottom: 3px;
+  width: 10px;
+  pointer-events: none;
+}
+
+.traffic-app__wanne svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.traffic-app__wanne path {
+  fill: var(--color-accent);
+  stroke: none;
+}
+
+.traffic-app__icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--color-text-tert);
+}
+
+.traffic-app__body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+
+.traffic-app__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.traffic-app__name {
+  font-size: 13px;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* "auffällig"-Pill in dezenten sev-med-Tönen (wie Scan-Tabelle). */
+.traffic-app__pill {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 999px;
+  color: var(--sev-med-text);
+  background: var(--sev-med-bg);
+  border: 1px solid var(--sev-med-bd);
+  white-space: nowrap;
+}
+
+/* Ruhige Datenraten-Zeile: dünner Balken + Zahl. */
+.traffic-app__rate {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.traffic-app__bar {
+  flex: 1;
+  min-width: 0;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--color-border);
+  overflow: hidden;
+}
+
+.traffic-app__bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--color-accent);
+}
+
+.traffic-app__rate-value {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--color-text-sec);
+}
+
+/* --- Rechte Spalte: Verbindungs-Detail --- */
+.traffic-detail {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 380px;
+  width: 380px;
+  min-height: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+  overflow: hidden;
+}
+
+.traffic-detail__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 14px 12px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bar);
+  flex-shrink: 0;
+}
+
+.traffic-detail__heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.traffic-detail__icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--color-text-sec);
+}
+
+.traffic-detail__title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.traffic-detail__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text);
+  word-break: break-word;
+}
+
+.traffic-detail__rates {
+  font-size: 13px;
+  color: var(--color-text-sec);
+}
+
+.traffic-detail__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  color: var(--color-text-sec);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.traffic-detail__close:hover {
+  color: var(--color-accent);
+  border-color: var(--color-accent-border);
+  background: var(--color-accent-bg);
+}
+
+.traffic-detail__close:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.traffic-detail__body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 14px 18px;
+}
+
+/* Hinweis bei auffälliger App: getönt in sev-med (wie Scan-Detail-Status). */
+.traffic-detail__notice {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 12px;
+  border-radius: var(--radius-md);
+  color: var(--sev-med-text);
+  background: var(--sev-med-bg);
+  border: 1px solid var(--sev-med-bd);
+}
+
+.traffic-detail__section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.traffic-detail__section-heading {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-tert);
+}
+
+.traffic-detail__conns {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.traffic-detail__conn {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 0;
+  font-size: 13px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.traffic-detail__conn:last-child {
+  border-bottom: none;
+}
+
+.traffic-detail__conn-line {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.traffic-detail__conn-remote {
+  color: var(--color-text);
+}
+
+.traffic-detail__conn-service {
+  color: var(--color-text-sec);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+}
+
+/* Nachschlagen-Link: dezent, am rechten Rand (wie Scan-Detail). */
+.traffic-detail__lookup {
+  margin-left: auto;
+  padding: 0;
+  font-size: 12px;
+  color: var(--color-link);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.traffic-detail__lookup:hover {
+  text-decoration: underline;
+}
+
+.traffic-detail__lookup:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.traffic-detail__conn-state {
+  color: var(--color-text-tert);
+  font-size: 12px;
+}
