@@ -45,6 +45,16 @@ Vier wiederkehrende Spannungen, die dieses ADR auflöst:
 
 8. **Schichtung über fünf Ringe.** Der Use-Case `ResolveEndpoint` kennt nur `domain` + `ports`, die **vier Ports per Constructor-Injection** (Protocol-Typ, nie ein konkreter Adapter); er ist die **einzige** Stelle, die die Rohfakten zusammenstellt und jedem Feld seinen korrekten `SourceTag` gibt (keine Projektion nötig — das Aggregat ist resolver-eigen). Die vier unabhängigen Quellen laufen nebenläufig (`asyncio.gather`); der synchrone Geo/ASN-Lookup wird über `asyncio.to_thread` aus dem Loop gehoben, die PTR-Kette (PTR → bei Treffer Forward-Abgleich) ist die **eine** ehrlich abhängige Sequenz. `api` ruft nur `application`. `CsvGeoAsnDb` lädt die vier CSVs **einmal beim App-Bau** (`lru_cache`, Muster `scan_history_repository`), nicht pro Request.
 
+## Batch-PTR-Endpunkt für die Verkehrsliste (Paket 5)
+
+Die Verkehrsliste zeigt pro Verbindung eine Gegenstellen-IP — und braucht dort **nur den reverse-DNS-Namen**, nicht die reiche Faktensicht. Würde sie pro Zeile `GET /api/resolve` rufen, liefe je Zeile die teure Mehrfach-Auflösung (RDAP über das Netz, TLS-Handshake, Geo/ASN) — für eine bloße Namensspalte unvertretbar. Darum ein **eigener, schlanker Endpunkt**:
+
+- **`POST /api/resolve/ptr`**, Body `{"ips": [...]}` → Map `{"1.2.3.4": "name", "5.6.7.8": null}`. Bewusst **getrennt** vom reichen `GET /api/resolve`: nur der billige, lokale PTR-Lookup, **kein** RDAP/TLS/Geo. Ein leerer PTR (Port liefert `""`) wird ehrlich zu `null` projiziert; **jede** angefragte IP erscheint als Schlüssel (Vollständigkeit).
+- **Wiederverwendung statt Doppelung:** derselbe `PtrResolverPort` (→ `DigDnsPtrResolver`), der schon `ResolveEndpoint` trägt — **keine** neue PTR-/DNS-Logik. Der neue Use-Case `ResolvePtrBatch` nimmt den Port per Constructor-Injection, dedupliziert die IPs intern (gleiche IP nur einmal aufgelöst) und löst die eindeutigen IPs **nebenläufig** (`asyncio.gather`) auf. Der Composition Root reicht **dieselbe** `DigDnsPtrResolver`-Instanz an beide Use-Cases.
+- **TTL-Cache (3600 s):** ein prozesslokaler, dict-basierter Cache mit `time.monotonic()`-Ablauf lebt im **application-Ring**, gekapselt im Use-Case-Objekt — er ist Use-Case-**Zustand**, kein Domänen-Wissen und kein Infra-Adapter (kein bestehendes Cache-Muster im Repo, das hier zu folgen wäre). Damit der Cache über Requests greift, hält der Composition Root **eine** langlebige `ResolvePtrBatch`-Instanz. Ein Cache-Treffer überspringt den DNS-Lookup. PTR-Namen ändern sich selten; die Verkehrsliste fragt dieselben IPs in kurzer Folge wiederholt.
+- **Validierungsgrenzen (sonst 422):** der Body ist ein api-eigenes pydantic-DTO — `ips` mit `min_length=1`/`max_length=256` (eine /24-Verkehrsliste passt, die Nebenläufigkeit ist gedeckelt), und ein `field_validator` prüft jeden Eintrag über stdlib `ipaddress` auf ein gültiges IP-Literal. Reine Eingabevalidierung im api-Ring, **kein** domain-Import.
+- **Kein neuer Domänentyp:** `dict[str, str | None]` genügt; die `"" → None`-Projektion ist dieselbe `or None`-Zeile wie in `ResolveEndpoint` (keine künstliche Domänenfunktion). Die Tool-fehlt-Naht (`dig` fehlt → `ResolverToolMissing` → 503) gilt unverändert über denselben globalen Handler.
+
 ## Konsequenzen
 
 **Positiv**

@@ -21,10 +21,12 @@ wie ``DiagnosticsToolMissing``. Der api-Ring importiert diese Exceptions bewusst
 (api -> nur application); das Mapping bleibt am Composition Root.
 """
 
+import ipaddress
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel, Field, field_validator
 
 router = APIRouter(prefix="/api", tags=["resolver"])
 
@@ -107,3 +109,68 @@ async def resolve_endpoint(
     """
     facts = await resolve(ip, port)
     return _facts_to_dict(facts)
+
+
+# ── Batch-PTR (Paket 5): nur der reverse-DNS-Name zu MEHREREN IPs ──────────────
+# Eine schlanke, lokale Sicht fuer die Verkehrsliste -- NUR der PTR-Name pro IP, ohne die
+# teure Mehrfach-Aufloesung (RDAP/TLS/Geo) von GET /api/resolve. Eigener Runner, eigener
+# Marker (Muster oben): der Use-Case kommt per FastAPI-Dependency herein, im Composition
+# Root verdrahtet. KEIN domain-/infrastructure-Import im api-Ring.
+
+# Obergrenze IPs pro Batch-Call: die teure Mehrfach-Aufloesung entfaellt zwar, aber ein
+# Batch loest je IP einen DNS-Lookup aus -- 256 deckt eine /24-Verkehrsliste ab und
+# deckelt die Nebenlaeufigkeit. Mehr -> 422 (Validierung unten).
+_MAX_BATCH_IPS = 256
+
+# Runner: nimmt das Tuple der angefragten IPs und liefert die {ip: name_or_none}-Map
+# (``Any``-Werte sind hier ``str | None``; der api-Ring kennt keine domain-Typen, aber die
+# Map ist ein reiner dict -> direkt JSON-serialisierbar, keine Projektion noetig).
+type ResolvePtrBatchRunner = Callable[[tuple[str, ...]], Awaitable[dict[str, str | None]]]
+
+
+# Dependency-Marker: im Composition Root (app.py) per dependency_overrides mit dem echten
+# Use-Case verdrahtet. Ohne Verdrahtung bewusst ein lauter Fehler (Muster oben).
+def provide_resolve_ptr_batch() -> ResolvePtrBatchRunner:
+    raise NotImplementedError("ResolvePtrBatchRunner wird in app.py verdrahtet")
+
+
+class ResolvePtrBatchBody(BaseModel):
+    """POST /api/resolve/ptr -- die angefragten IPs als schmales Request-DTO.
+
+    Validierung (Auftrag, ungueltige Eingabe -> 422 ueber pydantic):
+
+    * ``ips``: mindestens 1, hoechstens ``_MAX_BATCH_IPS`` Eintraege
+      (``Field(min_length/max_length)``, Muster ``Field`` im api-Ring wie diagnostics).
+    * jeder Eintrag muss eine gueltige IP-Adresse sein -- ueber stdlib ``ipaddress`` im
+      ``field_validator`` geprueft (reine Eingabevalidierung im api-Ring, KEIN
+      domain-Import). Ein ungueltiges Literal loest einen ValueError -> 422 aus.
+    """
+
+    ips: list[str] = Field(min_length=1, max_length=_MAX_BATCH_IPS)
+
+    @field_validator("ips")
+    @classmethod
+    def _alle_ips_gueltig(cls, ips: list[str]) -> list[str]:
+        for candidate in ips:
+            try:
+                ipaddress.ip_address(candidate)
+            except ValueError as exc:
+                raise ValueError(f"ungueltige IP-Adresse: {candidate!r}") from exc
+        return ips
+
+
+@router.post("/resolve/ptr")
+async def resolve_ptr_batch(
+    body: ResolvePtrBatchBody,
+    resolve_ptr: Annotated[ResolvePtrBatchRunner, Depends(provide_resolve_ptr_batch)],
+) -> dict[str, str | None]:
+    """Batch-Reverse-DNS: liefert ``{ip: ptr_name_or_null}`` fuer die angefragten IPs.
+
+    Schlanke, lokale Sicht fuer die Verkehrsliste -- NUR der PTR-Name, nicht die reiche
+    Faktensicht von ``GET /api/resolve``. Der Body validiert die IPs (1..``_MAX_BATCH_IPS``,
+    jede ein gueltiges IP-Literal -> sonst 422). Jede angefragte IP erscheint als
+    Schluessel; ein leerer PTR (kein Name) ist ehrlich ``null``. Der Use-Case dedupliziert,
+    cacht (TTL) und loest nebenlaeufig auf. Fehlt ``dig`` -> 503 (globaler Handler im
+    Composition Root, derselbe wie bei ``GET /api/resolve``).
+    """
+    return await resolve_ptr(tuple(body.ips))

@@ -106,7 +106,7 @@ from api.monitoring import (
 from api.monitoring import router as monitoring_router
 from api.process import provide_check_process_permission, provide_list_processes
 from api.process import router as process_router
-from api.resolver import provide_resolve_endpoint
+from api.resolver import provide_resolve_endpoint, provide_resolve_ptr_batch
 from api.resolver import router as resolver_router
 from api.scanning import (
     provide_get_arp_table,
@@ -204,7 +204,7 @@ from application.monitoring import (
     UpdateSchedule,
 )
 from application.process import CheckProcessPermission, ListProcesses
-from application.resolver import ResolveEndpoint
+from application.resolver import ResolveEndpoint, ResolvePtrBatch
 from application.scanning import (
     GetArpTable,
     GetScanDetail,
@@ -1345,16 +1345,30 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     def geo_asn_db() -> CsvGeoAsnDb:
         return CsvGeoAsnDb()
 
+    # PTR/Forward-DNS-Adapter (dig) EINMAL gebaut und geteilt: er ist zustandslos, und
+    # GENAU DIESELBE Instanz traegt sowohl den reichen ResolveEndpoint als auch den
+    # schlanken Batch-PTR-Use-Case (Paket 5, Auftrag: eine Instanz wiederverwenden, nicht
+    # neu bauen). Kein lru_cache noetig -- der Adapter haelt keinen Zustand.
+    ptr_resolver = DigDnsPtrResolver()
+
     # Runner: reicht ip/port an den ResolveEndpoint-Use-Case durch und gibt das
     # RemoteEndpointFacts als Any zurueck (der api-Ring serialisiert, kennt keine domain-
-    # Typen). Die drei zustandslosen Adapter pro Aufruf frisch; die Geo-DB geteilt (geladen).
+    # Typen). Die zwei zustandslosen Adapter (RDAP/TLS) pro Aufruf frisch; die Geo-DB und
+    # der PTR-Adapter geteilt.
     async def _resolve_endpoint(ip: str, port: int | None) -> Any:
         return await ResolveEndpoint(
-            DigDnsPtrResolver(), RdapClient(), geo_asn_db(), TlsCertReader()
+            ptr_resolver, RdapClient(), geo_asn_db(), TlsCertReader()
         ).resolve(ip, port)
+
+    # Batch-PTR (Paket 5): EINE langlebige ResolvePtrBatch-Instanz pro App -- ihr
+    # prozesslokaler TTL-Cache lebt am Use-Case-Objekt und soll ueber Requests hinweg
+    # greifen (eine frische Instanz pro Request haette einen stets leeren Cache). Nutzt
+    # DENSELBEN ptr_resolver wie ResolveEndpoint. Der Marker liefert immer diese Instanz.
+    resolve_ptr_batch_uc = ResolvePtrBatch(ptr_resolver)
 
     app.include_router(resolver_router)
     app.dependency_overrides[provide_resolve_endpoint] = lambda: _resolve_endpoint
+    app.dependency_overrides[provide_resolve_ptr_batch] = lambda: resolve_ptr_batch_uc
 
     @app.exception_handler(ResolverToolMissing)
     async def _on_resolver_tool_missing(

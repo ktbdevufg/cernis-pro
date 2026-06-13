@@ -15,7 +15,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api.resolver import provide_resolve_endpoint
+from api.resolver import provide_resolve_endpoint, provide_resolve_ptr_batch
 from app import create_app
 from domain.resolver import (
     RemoteEndpointFacts,
@@ -147,3 +147,51 @@ def test_resolve_data_missing_503(app: FastAPI) -> None:
 
     assert response.status_code == 503
     assert "asn-country-ipv4.csv" in response.json()["detail"]
+
+
+# ── Batch-PTR (Paket 5): POST /api/resolve/ptr ────────────────────────────────
+
+
+def test_resolve_ptr_batch_happy_path(app: FastAPI) -> None:
+    """Gueltiger Body -> 200 + erwartete {ip: name_or_null}-Map; Runner bekommt das Tuple."""
+
+    captured: dict[str, Any] = {}
+
+    async def _fake_runner(ips: tuple[str, ...]) -> dict[str, str | None]:
+        captured["ips"] = ips
+        return {"1.2.3.4": "host.example.com", "5.6.7.8": None}
+
+    app.dependency_overrides[provide_resolve_ptr_batch] = lambda: _fake_runner
+
+    with TestClient(app) as client:
+        response = client.post("/api/resolve/ptr", json={"ips": ["1.2.3.4", "5.6.7.8"]})
+
+    assert response.status_code == 200
+    assert captured["ips"] == ("1.2.3.4", "5.6.7.8")
+    assert response.json() == {"1.2.3.4": "host.example.com", "5.6.7.8": None}
+
+
+def test_resolve_ptr_batch_leere_liste_422(app: FastAPI) -> None:
+    """Leere IP-Liste -> 422 (min_length=1)."""
+    with TestClient(app) as client:
+        response = client.post("/api/resolve/ptr", json={"ips": []})
+
+    assert response.status_code == 422
+
+
+def test_resolve_ptr_batch_zu_viele_ips_422(app: FastAPI) -> None:
+    """Mehr als 256 IPs -> 422 (max_length=256)."""
+    too_many = [f"10.0.{i // 256}.{i % 256}" for i in range(257)]
+
+    with TestClient(app) as client:
+        response = client.post("/api/resolve/ptr", json={"ips": too_many})
+
+    assert response.status_code == 422
+
+
+def test_resolve_ptr_batch_ungueltige_ip_422(app: FastAPI) -> None:
+    """Eine ungueltige IP-Adresse im Body -> 422 (field_validator ueber stdlib ipaddress)."""
+    with TestClient(app) as client:
+        response = client.post("/api/resolve/ptr", json={"ips": ["1.2.3.4", "nicht-ip"]})
+
+    assert response.status_code == 422

@@ -27,6 +27,7 @@ abhaengig; sie laeuft als Ganzes parallel zu RDAP/Geo.
 """
 
 import asyncio
+import time
 
 from domain.resolver import (
     GeoAsnRecord,
@@ -177,3 +178,78 @@ class ResolveEndpoint:
             # Vergleich weg -- effektiv RDAP-Land vs. GeoDB-Land.
             country_conflict=flag_country_conflict(rdap.country, None, geo.country),
         )
+
+
+# TTL des prozesslokalen PTR-Caches in Sekunden (Auftrag Paket 5). 3600s = 1h: ein
+# PTR-Name aendert sich selten, und die Verkehrsliste fragt dieselben IPs in kurzer
+# Folge immer wieder -- der Cache haelt den billigen Lookup vom Loop fern.
+_PTR_CACHE_TTL_SECS = 3600.0
+
+
+class ResolvePtrBatch:
+    """Loest zu MEHREREN IPs NUR den PTR-Namen auf -- billig, lokal, fuer die Verkehrsliste.
+
+    Bewusst SCHLANK und getrennt vom reichen ``ResolveEndpoint`` (Paket 5): die
+    Verkehrsliste braucht pro Zeile nur den reverse-DNS-Namen, NICHT die teure
+    Mehrfach-Aufloesung (RDAP/TLS/Geo). Darum ein eigener Use-Case, der allein den
+    ``PtrResolverPort`` nutzt -- denselben Adapter, der schon ``ResolveEndpoint`` traegt
+    (Constructor-Injection als Protocol-Typ, nie ein konkreter Adapter, Muster
+    ``ResolveEndpoint``).
+
+    Drei Eigenschaften (Auftrag):
+
+    * **Nebenlaeufig:** die eindeutigen IPs werden ueber ``asyncio.gather`` parallel
+      aufgeloest (jeder ``resolve_ptr`` redet ueber das Netz -- seriell waere langsam).
+    * **Dedupliziert:** gleiche IP nur einmal aufloesen, aber JEDE angefragte IP
+      erscheint als Schluessel in der Ergebnis-Map (Reihenfolge/Vollstaendigkeit-Garantie).
+    * **TTL-Cache:** ein prozesslokaler, dict-basierter Cache mit Zeit-Ablauf
+      (``time.monotonic()``, TTL ``_PTR_CACHE_TTL_SECS``). Ein Cache-Treffer ueberspringt
+      den DNS-Lookup. Der Cache ist Use-Case-ZUSTAND (kein Domaenen-Wissen, kein
+      Infra-Adapter) und lebt darum hier im application-Ring, gekapselt im Use-Case-Objekt
+      -- nicht prozessglobal, sondern an die im Composition Root geteilte Instanz gebunden.
+
+    ``""`` (Port liefert "kein Eintrag") wird in der Ergebnis-Map ehrlich zu ``None``
+    projiziert ("kein Name") -- dieselbe ``or None``-Projektion wie in ``ResolveEndpoint``,
+    keine neue Domaenenfunktion noetig (dict[str, str | None] genuegt).
+    """
+
+    def __init__(self, ptr_resolver: PtrResolverPort) -> None:
+        self._ptr_resolver = ptr_resolver
+        # Prozesslokaler TTL-Cache: ip -> (ptr_name_or_none, monotone Ablaufzeit). Liegt
+        # am Use-Case-Objekt -- die im Composition Root geteilte ResolvePtrBatch-Instanz
+        # haelt ihn ueber Requests hinweg (Constructor-Injection bleibt der einzige
+        # Zustand, der hier lebt; der Port ist zustandslos).
+        self._cache: dict[str, tuple[str | None, float]] = {}
+
+    async def __call__(self, ips: tuple[str, ...]) -> dict[str, str | None]:
+        """Liefert ``{ip: ptr_name_or_none}`` -- jede angefragte IP als Schluessel.
+
+        Dedupliziert (gleiche IP nur einmal aufgeloest), nutzt den TTL-Cache (Treffer
+        ueberspringen den Lookup) und loest die verbleibenden eindeutigen IPs nebenlaeufig
+        (``asyncio.gather``). ``""`` -> ``None`` in der Map.
+        """
+        now = time.monotonic()
+        unique_ips = tuple(dict.fromkeys(ips))  # dedupliziert, Reihenfolge stabil
+
+        # 1) Cache-Treffer (noch gueltig) einsammeln; nur die uebrigen muessen aufloesen.
+        resolved: dict[str, str | None] = {}
+        to_resolve: list[str] = []
+        for ip in unique_ips:
+            cached = self._cache.get(ip)
+            if cached is not None and cached[1] > now:
+                resolved[ip] = cached[0]
+            else:
+                to_resolve.append(ip)
+
+        # 2) Die uebrigen eindeutigen IPs NEBENLAEUFIG aufloesen (jeder Port-Aufruf ist
+        #    Netz-I/O). "" -> None projizieren, Ergebnis cachen (Ablauf jetzt + TTL).
+        if to_resolve:
+            names = await asyncio.gather(*(self._ptr_resolver.resolve_ptr(ip) for ip in to_resolve))
+            expiry = now + _PTR_CACHE_TTL_SECS
+            for ip, name in zip(to_resolve, names, strict=True):
+                value = name or None
+                self._cache[ip] = (value, expiry)
+                resolved[ip] = value
+
+        # 3) Fuer JEDE angefragte IP einen Schluessel liefern (auch bei Duplikaten in ips).
+        return {ip: resolved[ip] for ip in ips}
