@@ -24,7 +24,11 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { fetchTraffic, fetchTrafficPermission } from "../api/traffic.js";
+import {
+  fetchPtrNames,
+  fetchTraffic,
+  fetchTrafficPermission,
+} from "../api/traffic.js";
 import LookupPanel from "./LookupPanel.jsx";
 import "./TrafficView.css";
 
@@ -48,6 +52,37 @@ const APP_ICONS = {
 // den in App.jsx erlaubten REFRESH_WERTE passen (dort die single source of
 // truth für State/Persistenz); 0 = aus. Die Sekunden-Labels sind sprachneutral.
 const REFRESH_OPTIONEN = [5, 10, 30, 60];
+
+// Sammelt die eindeutigen echten Remote-IPs aller Verbindungen aller Apps
+// (remote !== null). Grundlage für die lazy PTR-Anreicherung.
+function sammleRemoteIps(apps) {
+  const ips = new Set();
+  for (const app of apps) {
+    for (const conn of app.conns ?? []) {
+      if (conn.remote !== null && conn.remote !== undefined) {
+        ips.add(conn.remote);
+      }
+    }
+  }
+  return [...ips];
+}
+
+// Schreibt aufgelöste PTR-Namen (cache: ip->name|null) in den host-Wert der
+// betroffenen Verbindungen. Reine Funktion: liefert eine neue apps-Struktur,
+// berührt vorhandene Objekte nicht. Nur IPs mit Cache-Eintrag und echtem Namen
+// (nicht null) werden gesetzt; alles andere bleibt host:null (= nur IP).
+function reichereHostsAn(apps, cache) {
+  return apps.map((app) => ({
+    ...app,
+    conns: (app.conns ?? []).map((conn) => {
+      const name =
+        conn.remote !== null && conn.remote !== undefined
+          ? cache.get(conn.remote)
+          : undefined;
+      return name ? { ...conn, host: name } : conn;
+    }),
+  }));
+}
 
 // Höchste vorhandene down-Rate für die Balken-Normierung (nur echte Raten
 // zählen; null/—-Apps tragen nicht bei). Mindestens 1, damit nie durch 0.
@@ -254,10 +289,12 @@ function buendeleVerbindungen(conns) {
   return [...buendel.values()];
 }
 
-// Eine gebündelte Ziel-Zeile MIT echtem Ziel. Die IP (mono) ist der Lookup-
-// Trigger — für JEDE Verbindung (F3-Klick-Trigger): Klick (oder Enter/Space)
-// öffnet die Gegenstellen-Ansicht. host ist in der Liste immer null (der
-// aufgelöste Name kommt erst im LookupPanel), daher nur die IP.
+// Eine gebündelte Ziel-Zeile MIT echtem Ziel. Der Zieltext (mono) ist der
+// Lookup-Trigger — für JEDE Verbindung (F3-Klick-Trigger): Klick (oder
+// Enter/Space) öffnet die Gegenstellen-Ansicht. Ist ein PTR-Name (host) lazy
+// nachgereicht, steht der NAME prominent oben und die IP klein/gedämpft darunter;
+// fehlt er (host null), steht schlicht die IP — KEIN "kein PTR"-Text (der gehört
+// nur ins LookupPanel).
 function BuendelZeile({ buendel, onLookup }) {
   const { t } = useTranslation();
 
@@ -282,9 +319,20 @@ function BuendelZeile({ buendel, onLookup }) {
           aria-label={t("beobachten.traffic.lookup")}
           title={t("beobachten.traffic.lookup")}
         >
-          <span className="traffic-detail__conn-ip traffic-mono">
-            {buendel.remote}
-          </span>
+          {buendel.host ? (
+            <>
+              <span className="traffic-detail__conn-host traffic-mono">
+                {buendel.host}
+              </span>
+              <span className="traffic-detail__conn-ip traffic-mono">
+                {buendel.remote}
+              </span>
+            </>
+          ) : (
+            <span className="traffic-detail__conn-ip traffic-mono">
+              {buendel.remote}
+            </span>
+          )}
         </span>
 
         <span className="traffic-detail__conn-meta">
@@ -501,6 +549,33 @@ export default function TrafficView({
   // Verhindert überlappende Reloads (Klick während Auto-Intervall o. ä.).
   const ladeLaeuft = useRef(false);
 
+  // Client-Cache der PTR-Namen über Refreshes hinweg: ip -> name|null. Hält
+  // bereits aufgelöste IPs fest (auch null = "kein PTR", damit nicht erneut
+  // gefragt wird) und überlebt Auto-Refreshes. Bewusst useRef (kein State): die
+  // Anreicherung steckt das Ergebnis selbst per setApps in die Liste.
+  const ptrCache = useRef(new Map());
+
+  // Lazy, nicht-blockierende PTR-Anreicherung NACH dem Listen-Render: fragt nur
+  // IPs OHNE Cache-Eintrag neu an, mischt das Ergebnis in den Cache und reichert
+  // die bereits gerenderte Liste an (setApps mit reiner Map -> kein Neuladen,
+  // kein Sprung der Auswahl). Schlägt der Call fehl, bleiben die IPs als IPs
+  // stehen (fetchPtrNames toleriert das bereits blockweise).
+  const reichereTrafficAn = useCallback(async (geladeneApps) => {
+    const sichtbare = sammleRemoteIps(geladeneApps);
+    const offen = sichtbare.filter((ip) => !ptrCache.current.has(ip));
+
+    if (offen.length > 0) {
+      const aufgeloest = await fetchPtrNames(offen);
+      for (const [ip, name] of Object.entries(aufgeloest)) {
+        ptrCache.current.set(ip, name);
+      }
+    }
+
+    // Auch ohne neuen Call anreichern: ein früherer Refresh kann den Namen schon
+    // im Cache haben, während diese frisch geladene Liste noch host:null trägt.
+    setApps((aktuelle) => reichereHostsAn(aktuelle, ptrCache.current));
+  }, []);
+
   // Eine Ladelogik für initiales Laden, manuellen Refresh und Auto-Intervall.
   // initial=true zeigt den Voll-"laedt"-Zustand (erstes Laden); sonst still:
   // NUR apps/permission aktualisieren, gewaehlterName/lookupZiel bleiben (kein
@@ -521,6 +596,10 @@ export default function TrafficView({
       const ergebnis = await fetchTraffic();
       setApps(ergebnis);
       setStatus("ok");
+      // PTR-Namen lazy nachschieben — NICHT awaiten: die Liste ist schon
+      // gezeigt, die Namen reichern sie im Hintergrund an. Eigene Fehler-
+      // toleranz in fetchPtrNames; ein Patzer hier darf die Liste nicht kippen.
+      reichereTrafficAn(ergebnis).catch(() => {});
     } catch {
       // Beim initialen Laden den Fehlerzustand zeigen; bei einem stillen Reload
       // die bestehende Liste stehen lassen (kein Kippen wegen einem Aussetzer).
@@ -542,7 +621,7 @@ export default function TrafficView({
       setRefreshing(false);
     }
     ladeLaeuft.current = false;
-  }, []);
+  }, [reichereTrafficAn]);
 
   // Initiales Laden (mit Voll-"laedt"-Zustand).
   useEffect(() => {

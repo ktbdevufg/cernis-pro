@@ -15,7 +15,11 @@
 //          send_rate_bps, recv_rate_bps }
 //   GET /api/traffic/permission: { ok (bool), error (string|null) }
 
-import { apiGet } from "./client.js";
+import { apiGet, apiPost } from "./client.js";
+
+// Maximale IP-Anzahl pro PTR-Call (Backend POST /api/resolve/ptr: >256 -> 422).
+// Sichtbare IPs werden in Blöcken zu höchstens so vielen gesendet.
+const PTR_BLOCKGROESSE = 256;
 
 // Kleine, bewusst kurz gehaltene Portkarte: leitet aus dem PORT einen
 // Dienst-HINWEIS ab (NICHT gemessen, analog resolver service_hint). Unbekannter
@@ -116,4 +120,38 @@ export async function fetchTrafficPermission() {
   return { ok: Boolean(backend.ok), error: backend.error ?? null };
 }
 
-export default { fetchTraffic, fetchTrafficPermission };
+// Löst PTR-Namen für eine Menge von Remote-IPs nachträglich auf (lazy, nicht-
+// blockierende Anreicherung der Verkehrsliste). Ruft POST /api/resolve/ptr.
+//
+// Eingabe: beliebige Sammlung von IPs; leere/ungültige Werte werden verworfen
+// und vor dem Senden dedupliziert. >256 IPs werden in Blöcken gesendet (mehrere
+// Calls) und die Ergebnisse zu EINEM Plain-Object IP->name|null zusammengeführt.
+//
+// Rückgabe: Plain-Object { ip: name|null }. Jede erfolgreich angefragte IP ist
+// als Schlüssel enthalten (null = kein PTR-Name). Schlägt ein Block-Call fehl,
+// werden dessen IPs einfach NICHT ins Ergebnis aufgenommen — die Anreicherung
+// ist Beiwerk, kein Pflichtpfad (der Aufrufer behält dann die IP als IP).
+export async function fetchPtrNames(ips) {
+  const eindeutig = [
+    ...new Set(
+      [...(ips ?? [])].filter(
+        (ip) => typeof ip === "string" && ip.length > 0,
+      ),
+    ),
+  ];
+
+  const ergebnis = {};
+  for (let i = 0; i < eindeutig.length; i += PTR_BLOCKGROESSE) {
+    const block = eindeutig.slice(i, i + PTR_BLOCKGROESSE);
+    try {
+      const antwort = await apiPost("/api/resolve/ptr", { ips: block });
+      Object.assign(ergebnis, antwort);
+    } catch {
+      // Block-Fehler tolerieren: diese IPs bleiben unaufgelöst (als IP stehen),
+      // statt die ganze Anreicherung zu verwerfen.
+    }
+  }
+  return ergebnis;
+}
+
+export default { fetchTraffic, fetchTrafficPermission, fetchPtrNames };
