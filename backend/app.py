@@ -131,6 +131,14 @@ from api.settings import (
     provide_update_setting,
 )
 from api.settings import router as settings_router
+from api.sni import (
+    provide_get_observed_sni,
+    provide_sni_running,
+    provide_start_sni,
+    provide_start_sni_uc,
+    provide_stop_sni,
+)
+from api.sni import router as sni_router
 from api.system import (
     provide_system_info,
     provide_url_opener,
@@ -222,6 +230,7 @@ from application.security import (
     RunArpScan,
 )
 from application.settings import GetSettings, UpdateSecret, UpdateSetting
+from application.sni import GetObservedSni, RunSniCapture, StartSniCapture
 from application.traffic import CheckTrafficPermission, ListAppTraffic, PollThroughput
 from domain.analysis import ObservedConnection, ObservedHost, ObservedProcess, Rule, Snapshot
 from domain.export import (
@@ -310,6 +319,8 @@ from infrastructure.security import (
     TlsInspectorAdapter,
 )
 from infrastructure.settings_repository import SqliteSettingsRepository
+from infrastructure.sni.errors import SniError
+from infrastructure.sni.sni_sniffer import ScapySniSniffer
 from infrastructure.traffic_linux import PsutilTrafficAdapter
 from infrastructure.traffic_permission import TrafficPermissionAdapter
 
@@ -624,6 +635,15 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 poll_task.cancel()
                 with suppress(asyncio.CancelledError):
                     await poll_task
+            # sni-Sniff (ADR 0017): laeuft NUR, wenn ueber POST /api/sni/start gestartet
+            # (kein startup-Autostart, MANUELL). Anders als der capture-/poll-Loop gibt
+            # es KEINE Coroutine/keinen asyncio.Task -- der Adapter haelt die beiden
+            # Hintergrund-THREADS (scapy-AsyncSniffer + psutil-Poller). Daher kein
+            # task.cancel(): der lifespan-Shutdown stoppt+joint die Threads ueber
+            # RunSniCapture.stop() (idempotent), falls ein Sniff lief.
+            run_sni_uc = getattr(_app.state, "run_sni", None)
+            if run_sni_uc is not None:
+                run_sni_uc.stop()
             job_scheduler().stop()
         logger.info("shutdown", service=APP_NAME)
 
@@ -1206,6 +1226,53 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     )
     app.dependency_overrides[provide_start_poll] = lambda: _start_poll
     app.dependency_overrides[provide_stop_poll] = lambda: _stop_poll
+
+    # ── sni-Domaene v2 verdrahten (ADR 0017, passiver SNI-Mitschnitt) ────────────
+    # EIN langlebiger Adapter-Singleton (lru_cache, Muster run_capture/_traffic_adapter):
+    # der Sniffer haelt die beiden Hintergrund-Threads (scapy-AsyncSniffer + psutil-
+    # Poller) + den internen Ringpuffer (deque maxlen). RunSniCapture/GetObservedSni/
+    # StartSniCapture teilen DENSELBEN Adapter -- EINE Erfassung pro App. KEIN Autostart
+    # (anders als monitor/poll-AUTO): der Sniff startet on-demand ueber POST /api/sni/start.
+    @lru_cache(maxsize=1)
+    def sni_sniffer() -> ScapySniSniffer:
+        return ScapySniSniffer()
+
+    @lru_cache(maxsize=1)
+    def run_sni() -> RunSniCapture:
+        return RunSniCapture(sni_sniffer())
+
+    # StartSni-Composition-Callable (Muster _start_capture): prueft (StartSniCapture)
+    # und startet bei ok=True den Sniff. Anders als capture KEIN asyncio.create_task --
+    # der Sniff laeuft in den Adapter-Threads, nicht in einer Coroutine. Der Callable
+    # legt den Use-Case auf app.state, damit der lifespan-Shutdown ihn stoppen kann.
+    # Ein echter Start-Fehler (Rechte/Geraet) wirft SniError -> globaler 503-Handler;
+    # der regulaere Permission-Fall geht ueber die {ok,error}-Naht -> 403 VOR dem Start.
+    def _start_sni(interface: str | None) -> dict[str, Any]:
+        result = StartSniCapture(sni_sniffer())()
+        if not result["ok"]:
+            return result
+        run_sni_uc = run_sni()
+        app.state.run_sni = run_sni_uc
+        run_sni_uc.start(interface)  # idempotent gegen einen bereits laufenden Sniff
+        return result
+
+    def _stop_sni() -> None:
+        run_sni().stop()
+
+    app.include_router(sni_router)
+    app.dependency_overrides[provide_start_sni] = lambda: _start_sni
+    app.dependency_overrides[provide_stop_sni] = lambda: _stop_sni
+    app.dependency_overrides[provide_start_sni_uc] = lambda: StartSniCapture(sni_sniffer())
+    app.dependency_overrides[provide_sni_running] = lambda: run_sni().is_running
+    app.dependency_overrides[provide_get_observed_sni] = lambda: GetObservedSni(sni_sniffer())
+
+    @app.exception_handler(SniError)
+    async def _on_sni_error(_request: Request, exc: SniError) -> JSONResponse:
+        # Ein echter Sniff-Start-Fehler (toter Sniffer-Thread/Geraet/scapy) ist ein
+        # FEHLER, kein stiller Fallback (ADR 0001/S3). Muster DiagnosticsToolMissing/
+        # ResolverToolMissing -> 503: infra-Exception, am Composition Root gemappt.
+        logger.error("sni_error", error=str(exc))
+        return JSONResponse(status_code=503, content={"detail": str(exc)})
 
     # ── process-Domaene v2 verdrahten (P.3, reine Lese-Sicht aus /proc) ──────────
     # Zustandslose Adapter direkt instanziiert (Muster interfaces). Kein Poller, kein
