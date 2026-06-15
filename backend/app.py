@@ -816,9 +816,29 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     def _build_record_seen() -> Any:
         return host_history_repository().record_seen
 
+    # Baseline-Anreicherung des host_detail-Frames (ADR 0019): zwei zusaetzliche
+    # Lese-Pfade, die der WS-Handler pro angereichertem Host konsultiert.
+    # get_device liefert die kuratierten devices-Felder (label/tags/notes) -- gleicher
+    # Use-Case wie der api-Provider provide_get_device, pro Verbindung frisch gebaut
+    # (Muster _build_record_scanned_host). is_known liefert den VORZUSTAND der Host-
+    # Historie (gelesen VOR record_seen) -- analog _build_record_seen, nur die Lese-
+    # statt der Schreib-Methode desselben Repos (spaete Namensaufloesung von
+    # host_history_repository, das erst im analysis-Block definiert ist).
+    def _build_get_device() -> GetDevice:
+        return GetDevice(device_repository())
+
+    def _build_is_known() -> Any:
+        return host_history_repository().is_known
+
     app.add_api_websocket_route(
         "/ws/scan",
-        make_ws_scan(_build_run_network_scan, _build_record_scanned_host, _build_record_seen),
+        make_ws_scan(
+            _build_run_network_scan,
+            _build_record_scanned_host,
+            _build_record_seen,
+            _build_get_device,
+            _build_is_known,
+        ),
     )
 
     # ── fritz-Detailansicht verdrahten (read-only, Regel 5: ports<->infra nur hier) ──

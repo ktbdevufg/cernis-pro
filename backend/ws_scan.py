@@ -52,6 +52,7 @@ from typing import Any, assert_never
 import structlog
 from fastapi import WebSocket
 
+from application.devices.errors import DeviceNotFoundError
 from domain.devices import ScannedHost
 from domain.scanning import (
     EnrichedHost,
@@ -87,6 +88,19 @@ RecordHostFactory = Callable[[], Any]
 # Funktion, die ein ``record_seen``-Callable ``(mac) -> None`` zurueckgibt (aus dem
 # SqliteHostHistoryRepository). Pro Verbindung einmal geholt -- wie record_host.
 RecordSeenFactory = Callable[[], Any]
+
+# Factory-Typ fuer den GetDevice-Use-Case (Baseline-Anreicherung). app.py liefert eine
+# Funktion, die ihn frisch baut (mit DeviceRepository) -- pro Verbindung einmal. Liest
+# die kuratierten Felder (label/tags/notes), mit denen das host_detail-Frame angereichert
+# wird (die devices-DB ist die Wahrheit fuer kuratierte Felder; der Scan traegt sie leer).
+GetDeviceFactory = Callable[[], Any]
+
+# Factory-Typ fuer die ``is_known``-Lese-Naht (Baseline-Anreicherung). app.py liefert eine
+# Funktion, die ein ``is_known``-Callable ``(mac) -> bool`` aus dem
+# SqliteHostHistoryRepository zurueckgibt (analog zu RecordSeenFactory). Liefert den
+# VORZUSTAND der Historie -- pro HostEnriched VOR record_seen gelesen, sonst waere jeder
+# Host sofort "bekannt".
+IsKnownFactory = Callable[[], Any]
 
 
 def _project(host: EnrichedHost) -> ScannedHost:
@@ -196,6 +210,15 @@ def _host_detail_frame(host: Any) -> dict[str, Any]:
         "label": host.label,
         "tags": list(host.tags),
         "notes": host.notes,
+        # is_known-Default True ("bekannt, sofern nicht anders angereichert"). Der
+        # ECHTE Wert wird im Loop aus dem VORZUSTAND der Host-Historie bestimmt
+        # (baseline_known, gelesen VOR record_seen) und ueberschreibt diesen Default.
+        # Hier bewusst KEIN Historie-Zugriff: _host_detail_frame ist eine reine
+        # Projektion ohne I/O; die Anreicherung braucht die Historie und gehoert in
+        # den Loop. Der Default haelt das Frame-Schema konsistent -- is_known ist
+        # IMMER vorhanden, auch falls die Anreicherung mal uebersprungen wird
+        # (MAC-lose/nicht ermittelbare Hosts gelten als bekannt).
+        "is_known": True,
         # source (ping/arp/fritzbox) auch am persistenten Host (S.7f): die Quelle
         # haengt jetzt durchgaengig am gespeicherten Host, nicht nur am fluechtigen
         # host_found-Frame. host_detail hat damit 21 Keys (vorher 20).
@@ -234,6 +257,8 @@ def make_ws_scan(
     run_scan_factory: RunScanFactory,
     record_host_factory: RecordHostFactory,
     record_seen_factory: RecordSeenFactory,
+    get_device_factory: GetDeviceFactory,
+    is_known_factory: IsKnownFactory,
 ) -> Callable[[WebSocket], Awaitable[None]]:
     """Baut den ``/ws/scan``-Handler mit injizierter ``RunNetworkScan``-Factory.
 
@@ -247,6 +272,15 @@ def make_ws_scan(
     ein und bildet so die BASELINE fuer die analysis-Regel ``new_host_seen``: der
     erste Scan macht alle Hosts "bekannt", "neu" feuert erst ab dem zweiten Scan fuer
     echte Neuzugaenge (Scan schreibt, GET /api/analysis liest -- siehe ADR 0013).
+
+    ``get_device_factory()`` liefert den ``GetDevice``-Use-Case und ``is_known_factory()``
+    das ``is_known``-Callable der Host-Historie -- beide pro Verbindung einmal geholt, fuer
+    die Baseline-Anreicherung des ``host_detail``-Frames (ADR 0019): das Frame traegt
+    kuenftig die gespeicherten kuratierten Felder (label/tags/notes aus der devices-DB)
+    und ein echtes ``is_known`` aus dem VORZUSTAND der Historie (gelesen VOR record_seen,
+    sonst waere jeder Host sofort "bekannt"). Beide Lese-Pfade sind best-effort: ein Fehler
+    laesst die Anreicherung aus (im Zweifel "bekannt"/keine Kuratierung), der Scan laeuft
+    weiter.
     """
 
     async def ws_scan(websocket: WebSocket) -> None:
@@ -270,18 +304,39 @@ def make_ws_scan(
         use_case = run_scan_factory()
         record_host = record_host_factory()
         record_seen = record_seen_factory()
+        get_device = get_device_factory()
+        is_known = is_known_factory()
         try:
             async for event in use_case.run(config):
-                # devices-Projektion (S.7d): pro angereichertem Host VOR dem Frame
-                # persistieren (Altcode-Reihenfolge: erst devices-DB, dann senden).
-                # analysis-Host-Historie (C.2): pro Host NEBEN der devices-Projektion
-                # die MAC in die Historie eintragen -- die Baseline fuer new_host_seen.
-                # Beide Naehte sind best-effort und unabhaengig; die Reihenfolge ist
-                # unkritisch (keine schreibt der anderen Daten vor).
                 if isinstance(event, HostEnriched):
+                    # Baseline-Anreicherung (ADR 0019): der VORZUSTAND der Historie
+                    # MUSS VOR record_seen gelesen werden -- sonst ist jeder Host
+                    # sofort "bekannt" (record_seen traegt ihn ja gerade ein). Leere
+                    # MAC -> is_known True (MAC-lose Hosts sind nie "neu").
+                    baseline_known = _is_known_safe(is_known, event.host.mac)
+                    # devices-Projektion (S.7d): pro angereichertem Host VOR dem Frame
+                    # persistieren (Altcode-Reihenfolge: erst devices-DB, dann senden).
+                    # analysis-Host-Historie (C.2): pro Host NEBEN der devices-Projektion
+                    # die MAC in die Historie eintragen -- die Baseline fuer new_host_seen.
+                    # Beide Naehte sind best-effort und unabhaengig; die Reihenfolge ist
+                    # unkritisch (keine schreibt der anderen Daten vor).
                     _record_host(record_host, event.host)
                     _record_seen_host(record_seen, event.host)
-                await websocket.send_json(_event_to_frame(event))
+                    # Kuratierte Felder aus der devices-DB (label/tags/notes) lesen --
+                    # die DB ist die Wahrheit, der frische Scan traegt sie leer.
+                    kuratiert = _lese_kuratierung(get_device, event.host.mac)
+                    frame = _host_detail_frame(event.host)
+                    frame["is_known"] = baseline_known
+                    if kuratiert is not None:
+                        frame["label"] = kuratiert["label"]
+                        frame["tags"] = kuratiert["tags"]
+                        frame["notes"] = kuratiert["notes"]
+                    await websocket.send_json(frame)
+                else:
+                    # Alle anderen Events unveraendert (insb. host_found bleibt ohne
+                    # Anreicherung -- keine kuratierten Felder, kein verlaessliches
+                    # is_known; erst host_detail traegt die Baseline).
+                    await websocket.send_json(_event_to_frame(event))
         except _ADAPTER_ERRORS as exc:
             await websocket.send_json({"type": "error", "message": str(exc)})
 
@@ -328,3 +383,41 @@ def _record_seen_host(record_seen: Any, host: EnrichedHost) -> None:
         record_seen(host.mac)
     except Exception as exc:
         logger.warning("record_seen_host_failed", ip=host.ip, mac=host.mac, error=str(exc))
+
+
+def _is_known_safe(is_known: Any, mac: str) -> bool:
+    """Liest den Historie-Vorzustand best-effort (ADR 0019): bekannt? (mac) -> bool.
+
+    Reiner Lesevorgang. Wirft das Callable (z.B. gesperrte DB), wird der Fehler
+    gefangen + geloggt und ``True`` zurueckgegeben -- im Zweifel "bekannt", lieber
+    kein faelschliches "neu". Das ist konsistent mit der Leere-MAC-Linie des
+    Repositories (leere MAC -> is_known True). Kein Scan-Abbruch.
+    """
+    try:
+        return bool(is_known(mac))
+    except Exception as exc:
+        logger.warning("host_is_known_failed", mac=mac, error=str(exc))
+        return True
+
+
+def _lese_kuratierung(get_device: Any, mac: str) -> dict[str, Any] | None:
+    """Liest die kuratierten devices-Felder best-effort (ADR 0019) -> dict | None.
+
+    Leere MAC -> ``None`` (kein Geraet ohne stabile Identitaet). ``GetDevice`` gibt
+    ein ``DeviceWithHistory`` zurueck -- die kuratierten Felder liegen auf
+    ``.device`` (label/tags/notes). Unbekannte MAC (``DeviceNotFoundError``) -> ``None``
+    (Host noch nie als device gespeichert, keine Kuratierung). Jeder ANDERE Fehler
+    (z.B. gesperrte DB) wird gefangen + geloggt -> ``None`` (best-effort, kein
+    Scan-Abbruch). Mit Warn-Log kein stiller S3-Fallback.
+    """
+    if not mac:
+        return None
+    try:
+        result = get_device(mac)
+    except DeviceNotFoundError:
+        return None
+    except Exception as exc:
+        logger.warning("host_get_device_failed", mac=mac, error=str(exc))
+        return None
+    device = result.device
+    return {"label": device.label, "tags": list(device.tags), "notes": device.notes}

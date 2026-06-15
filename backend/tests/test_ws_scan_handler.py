@@ -17,6 +17,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import ws_scan
+from application.devices.errors import DeviceNotFoundError
 from domain.devices import ScannedHost
 from domain.scanning import (
     EnrichedHost,
@@ -82,14 +83,86 @@ class _FakeRecordSeen:
         self.seen.append(mac)
 
 
+class _FakeStoredDevice:
+    """Minimal-Stand-in fuer ein gespeichertes ``Device`` (kuratierte Felder)."""
+
+    def __init__(self, label: str, tags: tuple[str, ...], notes: str) -> None:
+        self.label = label
+        self.tags = tags
+        self.notes = notes
+
+
+class _FakeDeviceWithHistory:
+    """Stand-in fuer das ``GetDevice``-Ergebnis: kuratierte Felder auf ``.device``."""
+
+    def __init__(self, device: _FakeStoredDevice) -> None:
+        self.device = device
+
+
+class _FakeGetDevice:
+    """Faengt die GetDevice-Lese-Naht (Baseline-Anreicherung, ADR 0019).
+
+    Ist ``stored`` gesetzt, liefert der Aufruf ein ``DeviceWithHistory``-Stand-in mit
+    den kuratierten Feldern. Sonst -> ``DeviceNotFoundError`` (Host noch nie als device
+    gespeichert). ``raise_exc`` erzwingt einen echten Fehler (best-effort-Pfad).
+    """
+
+    def __init__(
+        self,
+        stored: _FakeStoredDevice | None = None,
+        raise_exc: Exception | None = None,
+    ) -> None:
+        self._stored = stored
+        self._raise_exc = raise_exc
+        self.asked: list[str] = []
+
+    def __call__(self, mac: str) -> _FakeDeviceWithHistory:
+        self.asked.append(mac)
+        if self._raise_exc is not None:
+            raise self._raise_exc
+        if self._stored is None:
+            raise DeviceNotFoundError(mac)
+        return _FakeDeviceWithHistory(self._stored)
+
+
+class _FakeIsKnown:
+    """Faengt die is_known-Lese-Naht (Baseline-Anreicherung, ADR 0019).
+
+    Liefert den VORZUSTAND der Historie: ``known`` enthaelt die MACs, die VOR diesem
+    Scan schon bekannt waren. ``asked`` protokolliert die Abfragen (Timing-Pruefung).
+    ``raise_exc`` erzwingt einen Fehler (best-effort -> True). Leere MAC -> True.
+    """
+
+    def __init__(
+        self,
+        known: set[str] | None = None,
+        raise_exc: Exception | None = None,
+    ) -> None:
+        self._known = known or set()
+        self._raise_exc = raise_exc
+        self.asked: list[str] = []
+
+    def __call__(self, mac: str) -> bool:
+        self.asked.append(mac)
+        if self._raise_exc is not None:
+            raise self._raise_exc
+        if not mac:
+            return True
+        return mac in self._known
+
+
 def _client(
     events: list[ScanEvent],
     raise_at_end: Exception | None = None,
     recorder: _FakeRecordScannedHost | None = None,
     seen_recorder: _FakeRecordSeen | None = None,
+    get_device: _FakeGetDevice | None = None,
+    is_known: _FakeIsKnown | None = None,
 ) -> TestClient:
     record = recorder or _FakeRecordScannedHost()
     record_seen = seen_recorder or _FakeRecordSeen()
+    device_reader = get_device or _FakeGetDevice()
+    known_reader = is_known or _FakeIsKnown()
     app = FastAPI()
     app.add_api_websocket_route(
         "/ws/scan",
@@ -97,6 +170,8 @@ def _client(
             lambda: _FakeRunNetworkScan(events, raise_at_end),
             lambda: record,
             lambda: record_seen,
+            lambda: device_reader,
+            lambda: known_reader,
         ),
     )
     return TestClient(app)
@@ -168,7 +243,7 @@ def test_full_frame_sequence_matches_s1_contract() -> None:
     assert frames[8] == {"type": "scan_complete", "total_found": 1}
 
 
-def test_host_detail_frame_has_22_keys_incl_source_and_additional_ips() -> None:
+def test_host_detail_frame_has_23_keys_incl_source_additional_ips_and_is_known() -> None:
     host = EnrichedHost(
         ip="10.0.0.5",
         mac="AA:BB:CC:DD:EE:02",
@@ -182,7 +257,8 @@ def test_host_detail_frame_has_22_keys_incl_source_and_additional_ips() -> None:
         frame = ws.receive_json()
 
     assert frame["type"] == "host_detail"
-    # 22 Keys: die 20 S.1-Contract-Keys + source (S.7f) + additional_ips (MAC-Gruppierung).
+    # 23 Keys: die 20 S.1-Contract-Keys + source (S.7f) + additional_ips (MAC-Gruppierung)
+    # + is_known (Baseline-Anreicherung, ADR 0019).
     assert set(frame.keys()) == {
         "type",
         "ip",
@@ -206,6 +282,7 @@ def test_host_detail_frame_has_22_keys_incl_source_and_additional_ips() -> None:
         "notes",
         "source",
         "additional_ips",
+        "is_known",
     }
     assert frame["ports"] == [{"port": 22, "state": "open", "service": "ssh"}]
     assert frame["category"] == "server"
@@ -365,3 +442,150 @@ def test_record_seen_failure_is_best_effort_scan_continues(
     assert len(logged) == 1
     assert logged[0][0] == "record_seen_host_failed"
     assert logged[0][1]["mac"] == "AA:BB:CC:DD:EE:21"
+
+
+# ── Baseline-Anreicherung des host_detail-Frames (ADR 0019) ────────────────────
+
+
+def test_host_detail_is_known_default_true_for_known_host() -> None:
+    """Host, dessen MAC im Vorzustand der Historie steht -> Frame is_known=true."""
+    host = EnrichedHost(ip="192.168.1.30", mac="AA:BB:CC:DD:EE:30", category="server")
+    is_known = _FakeIsKnown(known={"AA:BB:CC:DD:EE:30"})
+    with _client([HostEnriched(host=host)], is_known=is_known).websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "192.168.1.0/24"})
+        frame = ws.receive_json()
+
+    assert frame["type"] == "host_detail"
+    assert frame["is_known"] is True
+
+
+def test_host_detail_is_known_false_for_host_not_in_history() -> None:
+    """Host, dessen MAC NICHT in der Historie ist -> Frame is_known=false (neu)."""
+    host = EnrichedHost(ip="192.168.1.31", mac="AA:BB:CC:DD:EE:31", category="server")
+    is_known = _FakeIsKnown(known=set())  # leere Historie -> unbekannt
+    with _client([HostEnriched(host=host)], is_known=is_known).websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "192.168.1.0/24"})
+        frame = ws.receive_json()
+
+    assert frame["is_known"] is False
+
+
+def test_host_detail_is_known_read_before_record_seen() -> None:
+    """Timing: is_known wird VOR record_seen gelesen.
+
+    Ein Host, der im selben Scan ERSTMALS gesehen wird (leere Historie), ist im Frame
+    is_known=false -- obwohl record_seen ihn im selben Durchlauf eintraegt. Der Fake-
+    is_known liefert den Vorzustand (leer), der Fake-record_seen sammelt parallel.
+    """
+    host = EnrichedHost(ip="192.168.1.32", mac="AA:BB:CC:DD:EE:32", category="server")
+    is_known = _FakeIsKnown(known=set())
+    seen = _FakeRecordSeen()
+    client = _client([HostEnriched(host=host)], seen_recorder=seen, is_known=is_known)
+    with client.websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "192.168.1.0/24"})
+        frame = ws.receive_json()
+
+    # Vorzustand war leer -> neu, obwohl record_seen die MAC eingetragen hat.
+    assert frame["is_known"] is False
+    assert is_known.asked == ["AA:BB:CC:DD:EE:32"]
+    assert seen.seen == ["AA:BB:CC:DD:EE:32"]
+
+
+def test_host_detail_enriched_with_stored_curated_fields() -> None:
+    """Gespeichertes device -> Frame traegt dessen label/tags/notes, nicht Scan-Defaults."""
+    # Der Scan traegt label/tags/notes LEER; die devices-DB ist die Wahrheit.
+    host = EnrichedHost(ip="192.168.1.33", mac="AA:BB:CC:DD:EE:33", category="server")
+    stored = _FakeStoredDevice(label="NAS", tags=("infra", "storage"), notes="im Keller")
+    get_device = _FakeGetDevice(stored=stored)
+    client = _client([HostEnriched(host=host)], get_device=get_device)
+    with client.websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "192.168.1.0/24"})
+        frame = ws.receive_json()
+
+    assert frame["label"] == "NAS"
+    assert frame["tags"] == ["infra", "storage"]
+    assert frame["notes"] == "im Keller"
+    assert get_device.asked == ["AA:BB:CC:DD:EE:33"]
+
+
+def test_host_detail_keeps_scan_defaults_when_device_not_found() -> None:
+    """Kein gespeichertes device (DeviceNotFoundError) -> Frame behaelt Scan-Defaults."""
+    host = EnrichedHost(
+        ip="192.168.1.34",
+        mac="AA:BB:CC:DD:EE:34",
+        label="vom-scan",
+        tags=("scan-tag",),
+        notes="scan-notiz",
+    )
+    get_device = _FakeGetDevice(stored=None)  # -> DeviceNotFoundError
+    client = _client([HostEnriched(host=host)], get_device=get_device)
+    with client.websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "192.168.1.0/24"})
+        frame = ws.receive_json()
+
+    # Keine Kuratierung -> die (hier nicht-leeren) Scan-Werte bleiben unveraendert.
+    assert frame["label"] == "vom-scan"
+    assert frame["tags"] == ["scan-tag"]
+    assert frame["notes"] == "scan-notiz"
+
+
+def test_is_known_failure_is_best_effort_defaults_true(monkeypatch: pytest.MonkeyPatch) -> None:
+    """is_known wirft -> Frame is_known=true (im Zweifel bekannt), Scan laeuft weiter."""
+    logged: list[tuple[str, dict[str, Any]]] = []
+    monkeypatch.setattr(ws_scan.logger, "warning", lambda event, **kw: logged.append((event, kw)))
+
+    host = EnrichedHost(ip="10.0.0.40", mac="AA:BB:CC:DD:EE:40", category="server")
+    is_known = _FakeIsKnown(raise_exc=RuntimeError("database is locked"))
+    events: list[ScanEvent] = [HostEnriched(host=host), ScanCompleted(total_found=1)]
+    client = _client(events, is_known=is_known)
+    with client.websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "10.0.0.0/24"})
+        frames = [ws.receive_json() for _ in range(2)]
+
+    assert [f["type"] for f in frames] == ["host_detail", "scan_complete"]
+    assert frames[0]["is_known"] is True  # im Zweifel bekannt
+    assert any(e == "host_is_known_failed" for e, _ in logged)
+
+
+def test_get_device_real_error_is_best_effort_no_curation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """get_device wirft (echter Fehler, kein DeviceNotFound) -> keine Kuratierung, Scan laeuft."""
+    logged: list[tuple[str, dict[str, Any]]] = []
+    monkeypatch.setattr(ws_scan.logger, "warning", lambda event, **kw: logged.append((event, kw)))
+
+    host = EnrichedHost(
+        ip="10.0.0.41",
+        mac="AA:BB:CC:DD:EE:41",
+        label="vom-scan",
+        notes="scan-notiz",
+    )
+    get_device = _FakeGetDevice(raise_exc=RuntimeError("database is locked"))
+    events: list[ScanEvent] = [HostEnriched(host=host), ScanCompleted(total_found=1)]
+    client = _client(events, get_device=get_device)
+    with client.websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "10.0.0.0/24"})
+        frames = [ws.receive_json() for _ in range(2)]
+
+    assert [f["type"] for f in frames] == ["host_detail", "scan_complete"]
+    # Keine Kuratierung -> Scan-Defaults bleiben, Scan nicht abgebrochen.
+    assert frames[0]["label"] == "vom-scan"
+    assert frames[0]["notes"] == "scan-notiz"
+    assert any(e == "host_get_device_failed" for e, _ in logged)
+
+
+def test_host_without_mac_is_known_true_and_no_curation() -> None:
+    """Host ohne MAC: is_known=true (nie neu), keine Kuratierung, Frame gesendet."""
+    host = EnrichedHost(ip="192.168.1.42", mac="", category="unknown")
+    get_device = _FakeGetDevice(stored=_FakeStoredDevice("X", ("t",), "n"))
+    is_known = _FakeIsKnown(known=set())
+    client = _client([HostEnriched(host=host)], get_device=get_device, is_known=is_known)
+    with client.websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "192.168.1.0/24"})
+        frame = ws.receive_json()
+
+    assert frame["type"] == "host_detail"
+    assert frame["is_known"] is True  # MAC-los -> nie neu
+    # get_device wird fuer leere MAC gar nicht erst gefragt (Kuratierung uebersprungen).
+    assert get_device.asked == []
+    assert frame["label"] == ""  # Scan-Default, keine Kuratierung
