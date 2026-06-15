@@ -13,7 +13,21 @@
     "sectionTraffic": "Verkehr",
     "autoRefresh": "Automatisch aktualisieren",
     "refreshOff": "Aus",
-    "saved": "Gespeichert"
+    "saved": "Gespeichert",
+    "fritzbox": {
+      "title": "FRITZ!Box",
+      "host": "Adresse",
+      "hostPlaceholder": "fritz.box",
+      "user": "Benutzer (optional)",
+      "userPlaceholder": "z. B. admin",
+      "password": "Passwort",
+      "passwordIsSet": "Passwort gespeichert – leer lassen, um es zu behalten.",
+      "passwordRemove": "Passwort entfernen",
+      "save": "Speichern",
+      "loading": "Lädt …",
+      "loadError": "Einstellungen konnten nicht geladen werden.",
+      "saveError": "Speichern fehlgeschlagen."
+    }
   },
   "nav": {
     "overview": "Überblick",

@@ -13,7 +13,21 @@
     "sectionTraffic": "Traffic",
     "autoRefresh": "Auto-refresh",
     "refreshOff": "Off",
-    "saved": "Saved"
+    "saved": "Saved",
+    "fritzbox": {
+      "title": "FRITZ!Box",
+      "host": "Address",
+      "hostPlaceholder": "fritz.box",
+      "user": "User (optional)",
+      "userPlaceholder": "e.g. admin",
+      "password": "Password",
+      "passwordIsSet": "Password saved – leave empty to keep it.",
+      "passwordRemove": "Remove password",
+      "save": "Save",
+      "loading": "Loading …",
+      "loadError": "Could not load settings.",
+      "saveError": "Saving failed."
+    }
   },
   "nav": {
     "overview": "Overview",
