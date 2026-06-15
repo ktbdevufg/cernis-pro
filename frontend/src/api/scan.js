@@ -100,6 +100,9 @@ export function mappeHost(host) {
     label: host.label ?? undefined,
     tags: host.tags ?? undefined,
     notes: host.notes ?? undefined,
+    // Weitere IPs derselben MAC (MAC-Gruppierung): Proxy-ARP/Spoofing-Info,
+    // leer im Normalfall. Das Detail-Panel zeigt sie als ruhige Zusatzinfo.
+    additionalIps: host.additional_ips ?? [],
   };
 }
 

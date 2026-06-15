@@ -200,6 +200,9 @@ def _host_detail_frame(host: Any) -> dict[str, Any]:
         # haengt jetzt durchgaengig am gespeicherten Host, nicht nur am fluechtigen
         # host_found-Frame. host_detail hat damit 21 Keys (vorher 20).
         "source": host.source,
+        # Weitere IPs derselben MAC (MAC-Gruppierung): Proxy-ARP/Spoofing-Info,
+        # verlustfrei am primaeren Host -- leere Liste im Normalfall.
+        "additional_ips": list(host.additional_ips),
     }
 
 

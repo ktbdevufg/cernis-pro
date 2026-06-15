@@ -131,6 +131,10 @@ class EnrichedHost:
     # bricht. Wird seit S.7f aus ``DiscoveredHost.source`` durchgereicht, sodass
     # die Quelle die Enrich-Phase ueberlebt und in ScanHistory/host_detail landet.
     source: str = "ping"
+    # Weitere IPs, die dieselbe MAC im Discovery beantwortet hat (MAC-Gruppierung):
+    # leer im Normalfall, gefuellt bei Proxy-ARP der FRITZ!Box ODER ARP-Spoofing.
+    # Default leeres Tuple, damit bestehende Konstruktionen unveraendert valide bleiben.
+    additional_ips: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

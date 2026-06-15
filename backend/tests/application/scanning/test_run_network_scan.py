@@ -19,6 +19,7 @@ from collections.abc import AsyncIterator, Sequence
 import pytest
 
 from application.scanning import RunNetworkScan
+from application.scanning.use_cases import _group_by_mac
 from domain.scanning import (
     DiscoveredHost,
     DiscoveryEvent,
@@ -348,18 +349,20 @@ def test_arp_merge_adds_only_ping_silent_hosts() -> None:
     assert disc_done.alive_count == 2
 
 
-def test_arp_merge_skips_phantom_duplicate_of_living_host() -> None:
-    """ARP-Eintrag mit MAC eines lebenden Ping-Hosts ist ein Alias -- kein neues Geraet."""
+def test_arp_duplicate_of_living_host_becomes_additional_ip() -> None:
+    """ARP-Eintrag mit MAC eines lebenden Ping-Hosts wird zur additional_ip gruppiert."""
     # Realfall: FritzBox per Ping (mac), ARP-Cache haengt eine zweite IP mit
-    # DERSELBEN MAC dran (anderer Gross-/Kleinschreibung) -- ein Cache-Artefakt.
+    # DERSELBEN MAC dran (anderer Gross-/Kleinschreibung) -- ein Proxy-ARP-Duplikat.
+    # Kein MAC-Vorfilter mehr: das Duplikat landet in discovered und wird von der
+    # MAC-Gruppierung als additional_ip des primaeren Hosts eingesammelt (verlustfrei).
     ping_host = DiscoveredHost(ip="192.168.0.1", mac="AA:BB:CC:DD:EE:FF", rtt_ms=1.0)
     discovery = _FakeDiscovery({"192.168.0.0/24": [ping_host]})
     arp = _FakeArpTable(
         {
-            "192.168.0.202": "aa:bb:cc:dd:ee:ff",  # gleiche MAC, andere IP -> Phantom, skip
+            "192.168.0.202": "aa:bb:cc:dd:ee:ff",  # gleiche MAC, andere IP -> additional_ip
         }
     )
-    use_case, _, _ = _make_use_case(discovery=discovery, arp_table=arp)
+    use_case, _, history = _make_use_case(discovery=discovery, arp_table=arp)
 
     config = ScanConfig(
         cidrs=("192.168.0.0/24",),
@@ -370,18 +373,27 @@ def test_arp_merge_skips_phantom_duplicate_of_living_host() -> None:
     )
     events = _run(use_case, config)
 
-    found = [e for e in events if isinstance(e, HostFound)]
-    # Nur der Ping-Host -- das Phantom-Duplikat erscheint NICHT.
-    assert {f.ip for f in found} == {"192.168.0.1"}
-    assert "192.168.0.202" not in {f.ip for f in found}
+    # Genau EIN enriched Host (der Ping-Host mit der niedrigsten rtt); die ARP-IP
+    # landet als additional_ip, KEIN separater Host fuer .0.202.
+    enriched = [e for e in events if isinstance(e, HostEnriched)]
+    assert len(enriched) == 1
+    primary = enriched[0].host
+    assert primary.ip == "192.168.0.1"
+    assert primary.additional_ips == ("192.168.0.202",)
 
-    # alive_count enthaelt das Phantom NICHT.
+    # alive_count zaehlt die gruppierte Sicht (ein Geraet).
     disc_done = next(
         e
         for e in events
         if isinstance(e, PhaseChanged) and e.phase == "discovery" and e.status == "done"
     )
     assert disc_done.alive_count == 1
+
+    # Der gespeicherte Scan enthaelt genau den einen primaeren Host mit der Zusatz-IP.
+    assert history.saved is not None
+    assert len(history.saved[1]) == 1
+    assert history.saved[1][0].ip == "192.168.0.1"
+    assert history.saved[1][0].additional_ips == ("192.168.0.202",)
 
 
 def test_arp_host_runs_through_enrich() -> None:
@@ -685,3 +697,95 @@ def test_multiple_cidrs_aggregated() -> None:
     assert events[-1] == ScanCompleted(total_found=2)
     assert history.saved is not None
     assert history.saved[0] == "10.0.0.0/30,10.0.1.0/30"
+
+
+# ── MAC-Gruppierung: eine MAC = ein Geraet (Proxy-ARP/Spoofing) ─────────────
+
+
+def test_group_by_mac_picks_lowest_rtt_and_collects_additional_ips() -> None:
+    """Drei IPs mit DERSELBEN MAC -> ein primaerer Host (niedrigster rtt) + additional_ips."""
+    a = DiscoveredHost(ip="172.18.0.1", mac="AA:BB:CC:DD:EE:01", rtt_ms=1.0)
+    b = DiscoveredHost(ip="172.18.2.1", mac="AA:BB:CC:DD:EE:01", rtt_ms=700.0)
+    c = DiscoveredHost(ip="172.18.2.2", mac="aa:bb:cc:dd:ee:01", rtt_ms=90.0)
+    grouped, extra = _group_by_mac([a, b, c])
+
+    # Genau ein Host fuer diese MAC: der mit dem niedrigsten rtt (172.18.0.1).
+    assert len(grouped) == 1
+    assert grouped[0].ip == "172.18.0.1"
+    # Die weiteren IPs (sortiert) als additional_ips unter mac.lower().
+    assert extra["aa:bb:cc:dd:ee:01"] == ("172.18.2.1", "172.18.2.2")
+
+
+def test_group_by_mac_none_rtt_is_worst() -> None:
+    """rtt_ms=None zaehlt als schlechtester Wert -> nie primaer, wenn ein echter rtt existiert."""
+    a = DiscoveredHost(ip="10.0.0.1", mac="AA:00:00:00:00:01", rtt_ms=None)
+    b = DiscoveredHost(ip="10.0.0.2", mac="AA:00:00:00:00:01", rtt_ms=5.0)
+    grouped, extra = _group_by_mac([a, b])
+
+    assert len(grouped) == 1
+    assert grouped[0].ip == "10.0.0.2"  # echter rtt schlaegt None
+    assert extra["aa:00:00:00:00:01"] == ("10.0.0.1",)
+
+
+def test_group_by_mac_empty_macs_stay_separate() -> None:
+    """Hosts mit LEERER MAC werden NICHT zusammengefasst -- jeder bleibt eigenstaendig."""
+    a = DiscoveredHost(ip="10.0.0.5", mac="", rtt_ms=1.0)
+    b = DiscoveredHost(ip="10.0.0.6", mac="", rtt_ms=2.0)
+    grouped, extra = _group_by_mac([a, b])
+
+    assert {h.ip for h in grouped} == {"10.0.0.5", "10.0.0.6"}
+    assert extra == {}  # leere MAC ist keine Identitaet -> keine Gruppe
+
+
+def test_group_by_mac_keeps_stable_order() -> None:
+    """Reihenfolge stabil am ersten Vorkommen der MAC; kein Umsortieren der Tabelle."""
+    a = DiscoveredHost(ip="10.0.0.1", mac="AA", rtt_ms=10.0)
+    b = DiscoveredHost(ip="10.0.0.2", mac="BB", rtt_ms=1.0)
+    c = DiscoveredHost(ip="10.0.0.3", mac="AA", rtt_ms=1.0)  # niedrigster rtt der AA-Gruppe
+    grouped, _ = _group_by_mac([a, b, c])
+
+    # AA erscheint zuerst (Position von a), obwohl c der primaere Host ist.
+    assert [h.ip for h in grouped] == ["10.0.0.3", "10.0.0.2"]
+
+
+def test_proxy_arp_macs_collapse_to_one_host_with_additional_ips() -> None:
+    """Voller Lauf: drei Ping-Hosts mit gleicher MAC -> ein enriched Host + additional_ips."""
+    # Realfall FRITZ!Box Proxy-ARP: dieselbe MAC antwortet auf mehrere IPs.
+    hosts = [
+        DiscoveredHost(ip="172.18.0.1", mac="AA:BB:CC:DD:EE:01", rtt_ms=1.0),
+        DiscoveredHost(ip="172.18.2.1", mac="AA:BB:CC:DD:EE:01", rtt_ms=700.0),
+        DiscoveredHost(ip="172.18.2.2", mac="AA:BB:CC:DD:EE:01", rtt_ms=90.0),
+    ]
+    discovery = _FakeDiscovery({"172.18.0.0/16": hosts})
+    use_case, _, history = _make_use_case(discovery=discovery)
+
+    config = ScanConfig(
+        cidrs=("172.18.0.0/16",),
+        port_scan=False,
+        mdns_scan=False,
+        ssdp_scan=False,
+        resolve_hostnames=False,
+    )
+    events = _run(use_case, config)
+
+    # Genau EIN enriched Host fuer die MAC, mit der niedrigsten-rtt-IP.
+    enriched = [e for e in events if isinstance(e, HostEnriched)]
+    assert len(enriched) == 1
+    primary = enriched[0].host
+    assert primary.ip == "172.18.0.1"
+    assert primary.additional_ips == ("172.18.2.1", "172.18.2.2")
+
+    # discovery-done + scan_complete zaehlen die gruppierte Sicht (ein Geraet).
+    disc_done = next(
+        e
+        for e in events
+        if isinstance(e, PhaseChanged) and e.phase == "discovery" and e.status == "done"
+    )
+    assert disc_done.alive_count == 1
+    assert events[-1] == ScanCompleted(total_found=1)
+
+    # Der gespeicherte Scan enthaelt genau den einen primaeren Host.
+    assert history.saved is not None
+    assert len(history.saved[1]) == 1
+    assert history.saved[1][0].ip == "172.18.0.1"
+    assert history.saved[1][0].additional_ips == ("172.18.2.1", "172.18.2.2")

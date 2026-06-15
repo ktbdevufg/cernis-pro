@@ -113,6 +113,9 @@ def _host_to_dict(host: Any) -> dict[str, Any]:
         # source (ping/arp/fritzbox) auch ueber die REST-History (S.7f): die Quelle
         # ist ueber JEDEN Lese-Pfad konsistent sichtbar (WS-host_detail + hier).
         "source": host.source,
+        # Weitere IPs derselben MAC (MAC-Gruppierung): Proxy-ARP/Spoofing-Info,
+        # verlustfrei am primaeren Host -- leere Liste im Normalfall.
+        "additional_ips": list(host.additional_ips),
     }
 
 

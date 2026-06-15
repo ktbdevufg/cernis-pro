@@ -131,7 +131,8 @@
           "pingUnit": "{{value}} ms",
           "statusNew": "Seen on this network for the first time",
           "statusKnown": "Known since the first scan",
-          "notable": "Notable in some way"
+          "notable": "Notable in some way",
+          "additionalIps": "Additional addresses (same MAC)"
         },
         "ports": {
           "heading": "Open ports",

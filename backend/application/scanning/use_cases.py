@@ -203,6 +203,70 @@ def _group_by_ip[T: (MdnsService, SsdpService)](services: list[T]) -> dict[str, 
     return {ip: tuple(items) for ip, items in grouped.items()}
 
 
+def _group_by_mac(
+    hosts: list[DiscoveredHost],
+) -> tuple[list[DiscoveredHost], dict[str, tuple[str, ...]]]:
+    """Gruppiert die Discovery-Hosts nach MAC -- eine MAC = ein Layer-2-Geraet.
+
+    Hintergrund: Proxy-ARP der FRITZ!Box beantwortet viele IPs mit IHRER MAC; v2
+    findet diese Antworten zuverlaessig und wuerde sie sonst als separate Geraete
+    listen. Netzwerktechnisch ist eine MAC EIN Geraet -- also je MAC einen
+    primaeren Host fuehren, die weiteren IPs verlustfrei als Attribut mitfuehren
+    (mehrere IPs auf einer MAC = Proxy-ARP ODER ARP-Spoofing; die Info darf nicht
+    verloren gehen).
+
+    Logik:
+    * Hosts mit LEERER MAC ("") werden NICHT gruppiert -- eine leere MAC ist keine
+      Identitaet; jeder bleibt unveraendert ein eigener Host.
+    * Hosts mit echter MAC nach ``mac.lower()`` gruppieren.
+    * Primaerer Host je Gruppe: der mit dem NIEDRIGSTEN ``rtt_ms`` (None zaehlt als
+      schlechtester, also ganz hinten). Bei Gleichstand der erste in
+      Discovery-Reihenfolge (i.d.R. der echte Ping-Host vor den ARP-Hosts).
+    * Die IPs der NICHT-primaeren Hosts der Gruppe (sortiert) werden zu
+      ``additional_ips`` des primaeren Hosts.
+
+    Rueckgabe: (Liste der primaeren + ungruppierten Hosts in stabiler Reihenfolge
+    -- an der ersten Vorkommens-Position der jeweiligen MAC bzw. des Hosts, also
+    KEIN Umsortieren der Tabelle -, dict ``mac.lower() -> tuple(additional_ips)``).
+    """
+
+    # ``rtt_ms is None`` zaehlt als schlechtester Wert -> mit (None-Flag, rtt)
+    # sortieren, sodass None ganz hinten landet; bei Gleichstand entscheidet der
+    # stabile ``sorted`` ueber den Discovery-Index (erstes Vorkommen gewinnt).
+    def _rtt_key(host: DiscoveredHost) -> tuple[bool, float]:
+        rtt = host.rtt_ms
+        return (rtt is None, rtt if rtt is not None else 0.0)
+
+    # Ergebnisliste in stabiler Reihenfolge aufbauen: pro Host an seiner Position
+    # entweder der Host selbst (leere MAC) oder ein Platzhalter beim ERSTEN
+    # Vorkommen seiner MAC; spaetere Vorkommen derselben MAC erzeugen keinen
+    # neuen Eintrag (None markiert die spaeter zu fuellende Stelle).
+    result: list[DiscoveredHost | None] = []
+    pos_of_first: dict[str, int] = {}
+    groups: dict[str, list[DiscoveredHost]] = {}
+
+    for host in hosts:
+        if not host.mac:
+            result.append(host)
+            continue
+        key = host.mac.lower()
+        if key not in groups:
+            pos_of_first[key] = len(result)
+            result.append(None)
+        groups.setdefault(key, []).append(host)
+
+    # Pro MAC-Gruppe den primaeren Host bestimmen und an der reservierten Position
+    # einsetzen; die uebrigen IPs (sortiert) als additional_ips ins dict.
+    extra: dict[str, tuple[str, ...]] = {}
+    for key, members in groups.items():
+        primary = min(members, key=_rtt_key)
+        result[pos_of_first[key]] = primary
+        extra[key] = tuple(sorted(h.ip for h in members if h is not primary))
+
+    # Alle Platzhalter sind jetzt gefuellt (jede Gruppe hat >=1 Mitglied).
+    return [h for h in result if h is not None], extra
+
+
 class RunNetworkScan:
     """Orchestriert einen Netzwerk-Scan und yieldet typisierte ``ScanEvent``."""
 
@@ -334,23 +398,13 @@ class RunNetworkScan:
         # Vertrag durchzureichen waere ein grosser Eingriff fuer eine Mikro-
         # Optimierung. Nur ARP-ONLY-Hosts werden angehaengt; Ping-Hosts haben ihre
         # MAC schon -- kein Doppel, kein MAC-Nachtrag (Altcode-treu).
-        # MACs aller bereits gefundenen LEBENDEN Hosts (Ping/Fritz -- alles ausser
-        # ARP-Merge selbst). Eine MAC = ein physisches Geraet: ein ARP-Eintrag,
-        # dessen MAC schon einem per Ping gefundenen Host gehoert, ist ein
-        # Cache-Artefakt/Alias (z.B. FritzBox-IP + zweite IP mit derselben MAC im
-        # Neighbor-Cache) -- kein neues Geraet. Case-insensitiv, da ARP-Cache und
-        # Discovery die MAC unterschiedlich gross schreiben koennen.
-        belegte_macs = {
-            host.mac.lower() for host in discovered if host.mac and host.source != "arp"
-        }
+        # ARP-only-Hosts werden angehaengt; die MAC-Gruppierung weiter unten fasst
+        # Proxy-ARP-Duplikate (gleiche MAC, mehrere IPs) zu einem Geraet mit
+        # additional_ips zusammen -- daher hier KEIN MAC-Vorfilter.
         for arp_ip, arp_mac in (await self._arp_table.get_arp_table()).items():
             if arp_ip in discovered_ips:
                 continue
             if not _in_any_cidr(arp_ip, config.cidrs):
-                continue
-            # Phantom-Duplikat: MAC gehoert schon einem lebenden Ping/Fritz-Host.
-            # Leere ARP-MAC ist kein Match (``arp_mac and`` deckt das ab).
-            if arp_mac and arp_mac.lower() in belegte_macs:
                 continue
             # Bewusste Abweichung vom Altcode (Entscheidung 4A): KEIN Zweit-Ping zum
             # RTT-Messen. Ein ARP-only-Host hat per Definition gerade NICHT auf Ping
@@ -373,7 +427,18 @@ class RunNetworkScan:
                 source=arp_host.source,
             )
 
-        # alive_count zaehlt die ARP-Hosts mit (Altcode: len(discovered) NACH dem Merge).
+        # ── MAC-Gruppierung: eine MAC = ein Geraet (Proxy-ARP/Spoofing) ──────
+        # NACH dem kompletten Discovery (Ping + Fritz + ARP): die discovered-Liste
+        # nach MAC gruppieren. Proxy-ARP der FRITZ!Box beantwortet viele IPs mit
+        # IHRER MAC -- ohne Gruppierung waeren das ebenso viele Phantom-Geraete.
+        # Die Gruppierung ist die alleinige, generische Loesung fuer Proxy-ARP-
+        # Duplikate: ein durchgekommener Proxy-Ping-Host wird hier gruppiert. Die
+        # gruppierte Liste ERSETZT discovered -- Enrich laeuft nur noch ueber die primaeren
+        # Hosts; die Geister-IPs werden NICHT mehr angereichert, leben aber als
+        # additional_ips am primaeren Host weiter (verlustfrei, sicherheitsrelevant).
+        discovered, mac_extra = _group_by_mac(discovered)
+
+        # alive_count zaehlt die gruppierten Hosts (eine MAC = ein Geraet).
         yield PhaseChanged(phase="discovery", status="done", alive_count=len(discovered))
 
         # ── mDNS/SSDP einsammeln + per IP gruppieren (group_by_ip-Aequivalent) ──
@@ -392,6 +457,7 @@ class RunNetworkScan:
                 config,
                 mdns_by_ip.get(host.ip, ()),
                 ssdp_by_ip.get(host.ip, ()),
+                mac_extra.get(host.mac.lower(), ()) if host.mac else (),
             )
             enriched_hosts.append(enriched)
             yield HostEnriched(host=enriched)
@@ -411,11 +477,13 @@ class RunNetworkScan:
         config: ScanConfig,
         mdns_services: tuple[MdnsService, ...],
         ssdp_services: tuple[SsdpService, ...],
+        additional_ips: tuple[str, ...],
     ) -> EnrichedHost:
         """Reichert einen einzelnen Host an (Hostname/SMB/Ports/Dienste/Klassifikation).
 
         ``mdns_services``/``ssdp_services`` sind die dem Host (per IP) zugeordneten
-        Dienste -- leer, wenn keine fuer diese IP gefunden wurden.
+        Dienste -- leer, wenn keine fuer diese IP gefunden wurden. ``additional_ips``
+        sind die weiteren IPs derselben MAC (MAC-Gruppierung) -- leer im Normalfall.
         """
         vendor = self._vendor_lookup.lookup(host.mac) if host.mac else ""
 
@@ -468,6 +536,9 @@ class RunNetworkScan:
             # dem DiscoveredHost durchgereicht, damit sie in host_detail +
             # ScanHistory landet, nicht nur im fluechtigen host_found-Frame.
             source=host.source,
+            # Weitere IPs derselben MAC (MAC-Gruppierung): die Geister-IPs der
+            # Proxy-ARP-Antworten leben hier verlustfrei am primaeren Host weiter.
+            additional_ips=additional_ips,
         )
 
 

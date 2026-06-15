@@ -119,6 +119,13 @@ export default function ScanDetailPanel({ geraet, onClose }) {
               }
               mono
             />
+            {geraet.additionalIps && geraet.additionalIps.length > 0 && (
+              <FeldZeile
+                label={t("beobachten.scan.detail.identity.additionalIps")}
+                wert={geraet.additionalIps.join(", ")}
+                mono
+              />
+            )}
           </div>
 
           <p className={statusKlasse}>{statusText}</p>

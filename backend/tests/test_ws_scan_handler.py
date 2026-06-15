@@ -168,20 +168,21 @@ def test_full_frame_sequence_matches_s1_contract() -> None:
     assert frames[8] == {"type": "scan_complete", "total_found": 1}
 
 
-def test_host_detail_frame_has_21_keys_incl_source() -> None:
+def test_host_detail_frame_has_22_keys_incl_source_and_additional_ips() -> None:
     host = EnrichedHost(
         ip="10.0.0.5",
         mac="AA:BB:CC:DD:EE:02",
         ports=(PortInfo(port=22, state="open", service="ssh"),),
         category="server",
         source="arp",  # nicht-Default -> beweist source-Durchstich bis host_detail
+        additional_ips=("10.0.0.6", "10.0.0.7"),  # MAC-Gruppierung -> Durchstich
     )
     with _client([HostEnriched(host=host)]).websocket_connect("/ws/scan") as ws:
         ws.send_json({"cidr": "10.0.0.0/30"})
         frame = ws.receive_json()
 
     assert frame["type"] == "host_detail"
-    # 21 Keys: die 20 S.1-Contract-Keys + source (S.7f-Durchstich).
+    # 22 Keys: die 20 S.1-Contract-Keys + source (S.7f) + additional_ips (MAC-Gruppierung).
     assert set(frame.keys()) == {
         "type",
         "ip",
@@ -204,9 +205,11 @@ def test_host_detail_frame_has_21_keys_incl_source() -> None:
         "tags",
         "notes",
         "source",
+        "additional_ips",
     }
     assert frame["ports"] == [{"port": 22, "state": "open", "service": "ssh"}]
     assert frame["category"] == "server"
+    assert frame["additional_ips"] == ["10.0.0.6", "10.0.0.7"]
     assert frame["source"] == "arp"  # Quelle haengt am persistenten Host (S.7f)
 
 
