@@ -1,14 +1,15 @@
 // Scan-Tabelle (CERNIS PRO 2.0)
 // Dichte, technische Geräteliste. Bewusst kompakt — die Zielgruppe liest Tabellen.
 //
-// Prinzip "Auffälliges zuerst": Geräte mit isNew||notable stehen oben unter einer
-// dezenten Zwischenüberschrift, darunter die bekannten Geräte. Innerhalb je
-// Abschnitt nach IPv4 sortiert.
+// EINE schlichte Geräteliste, nach aktueller Sortierung geordnet (Start: IPv4).
+// Eine Aufteilung in "neu/auffällig" vs "bekannt" gibt es nicht mehr: es existiert
+// derzeit keine verlässliche Baseline-Quelle im Scan-Wire, isNew/notable sind
+// stets false.
 //
-// Die Komponente kennt nur ihre Props (geraete, onSelect, selectedMac,
+// Die Komponente kennt nur ihre Props (geraete, onSelect, selectedSchluessel,
 // sichtbareSpalten). Sie löst keine API auf und hält keinen Persistenz-Zustand.
-// Klick auf eine Zeile ruft onSelect(geraet); selectedMac markiert die zum
-// Detail-Panel gehörende Zeile.
+// Klick auf eine Zeile ruft onSelect(geraet); selectedSchluessel markiert die zum
+// Detail-Panel gehörende Zeile (Schlüssel = MAC oder, ohne MAC, IP).
 //
 // Spalten sind datengetrieben: eine Definitionsliste (baueSpalten) liefert
 // Kopf UND Zellen. Fixe Spalten (status, ip) sind immer sichtbar; umschaltbare
@@ -103,11 +104,10 @@ function baueSpalten() {
       thClass: "scan-table__th--status",
       tdClass: "scan-table__cell--status",
       render: (geraet, { t: _t, selected }) => {
-        const statusKlasse = geraet.isNew
-          ? "scan-table__dot scan-table__dot--neu"
-          : geraet.notable
-            ? "scan-table__dot scan-table__dot--auffaellig"
-            : "scan-table__dot scan-table__dot--bekannt";
+        // Neutraler Statuspunkt für ALLE Zeilen: es gibt derzeit kein
+        // verlässliches "neu/auffällig"-Signal im Wire, daher keine aus
+        // isNew/notable abgeleitete Farbe (sonst wären alle gleich gefärbt).
+        const statusKlasse = "scan-table__dot scan-table__dot--bekannt";
         return (
           <>
             {selected && (
@@ -158,20 +158,10 @@ function baueSpalten() {
     {
       id: "hostname",
       sortKey: "hostname",
-      render: (geraet, { t }) => (
-        <span className="scan-table__hostname">
-          {geraet.hostname || "—"}
-          {geraet.isNew && (
-            <span className="scan-table__pill scan-table__pill--neu">
-              {t("beobachten.scan.newPill")}
-            </span>
-          )}
-          {!geraet.isNew && geraet.notable && (
-            <span className="scan-table__pill scan-table__pill--auffaellig">
-              {t("beobachten.scan.notablePill")}
-            </span>
-          )}
-        </span>
+      // Kein "neu"/"auffällig"-Pill mehr: isNew/notable sind stets false,
+      // solange keine verlässliche Baseline-Quelle im Wire existiert.
+      render: (geraet) => (
+        <span className="scan-table__hostname">{geraet.hostname || "—"}</span>
       ),
     },
     {
@@ -350,7 +340,7 @@ function SpaltenKopf({ spalte, sortKey, sortDir, sortiereNach, beiTaste, t }) {
 export default function ScanTable({
   geraete,
   onSelect,
-  selectedMac,
+  selectedSchluessel,
   sichtbareSpalten,
 }) {
   const { t } = useTranslation();
@@ -395,34 +385,8 @@ export default function ScanTable({
     return liste.slice().sort(nachAlpha(ALPHA_FELD[sortKey], sortDir));
   };
 
-  // "Auffälliges zuerst": zwei Gruppen, je nach aktiver Sortierung geordnet.
-  const auffaellig = sortiere(geraete.filter((g) => g.isNew || g.notable));
-  const bekannt = sortiere(geraete.filter((g) => !g.isNew && !g.notable));
-
-  // Eine Tabellen-Sektion mit Zwischenüberschrift (als volle Zeile).
-  const renderSektion = (titel, liste) => {
-    if (liste.length === 0) {
-      return null;
-    }
-    return (
-      <>
-        <tr className="scan-table__section">
-          <th colSpan={spalten.length} className="scan-table__section-heading">
-            {titel}
-          </th>
-        </tr>
-        {liste.map((geraet) => (
-          <GeraetZeile
-            key={geraet.mac}
-            geraet={geraet}
-            onSelect={onSelect}
-            selected={geraet.mac === selectedMac}
-            spalten={spalten}
-          />
-        ))}
-      </>
-    );
-  };
+  // EINE schlichte Geräteliste in aktueller Sortierung (keine Sektionen mehr).
+  const sortierteGeraete = sortiere(geraete);
 
   return (
     <div className="scan-table">
@@ -443,8 +407,15 @@ export default function ScanTable({
           </tr>
         </thead>
         <tbody>
-          {renderSektion(t("beobachten.scan.sections.notable"), auffaellig)}
-          {renderSektion(t("beobachten.scan.sections.known"), bekannt)}
+          {sortierteGeraete.map((geraet) => (
+            <GeraetZeile
+              key={geraet.schluessel}
+              geraet={geraet}
+              onSelect={onSelect}
+              selected={geraet.schluessel === selectedSchluessel}
+              spalten={spalten}
+            />
+          ))}
         </tbody>
       </table>
     </div>

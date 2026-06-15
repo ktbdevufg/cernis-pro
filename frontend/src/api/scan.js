@@ -91,15 +91,23 @@ export function mappeHost(host) {
     ipv6: host.ipv6 ?? "",
     ipv6All: host.ipv6_all ?? [],
     mac: host.mac,
+    // Stabiler Anzeige-/Auswahl-Schlüssel: MAC bevorzugt, fällt auf IP zurück,
+    // wenn keine MAC vorhanden ist. Verhindert Schlüssel-Kollisionen bei Hosts
+    // ohne MAC (Netzadresse .0, Gateway-Phantome, ARP-Reste).
+    schluessel: host.mac || host.ip,
     vendor: host.vendor ?? "",
     hostname: host.hostname ?? "",
     osGuess: host.os_guess ?? "",
     ports,
     pingMs: typeof host.rtt_ms === "number" ? Math.round(host.rtt_ms) : null,
-    isNew: Boolean(host.is_unknown),
-    // notable vorerst gleichgesetzt mit isNew — eine echte notable-Quelle gibt
-    // es (noch) nicht (kein Frontend-erfundenes Auffälligkeitssignal).
-    notable: Boolean(host.is_unknown),
+    // Es gibt derzeit keine verlässliche "neu/auffällig"-Quelle im Scan-Wire
+    // (is_unknown bedeutet backendseitig "per MAC identifiziert", NICHT "neu im
+    // Netz"). isNew/notable bleiben false, bis ein echtes Baseline-Signal
+    // (Abgleich gegen die devices-DB, first_seen/is_known) im Wire vorhanden ist.
+    // Die Felder bleiben im View-Objekt erhalten, damit ein späterer Baseline-
+    // Abgleich sie nur noch füllen muss.
+    isNew: false,
+    notable: false,
     label: host.label ?? undefined,
     tags: host.tags ?? undefined,
     notes: host.notes ?? undefined,
@@ -121,17 +129,38 @@ export function mappeHostFound(frame) {
     ipv6: "",
     ipv6All: [],
     mac: frame.mac,
+    // Stabiler Anzeige-/Auswahl-Schlüssel: MAC bevorzugt, fällt auf IP zurück,
+    // wenn keine MAC vorhanden ist. Verhindert Schlüssel-Kollisionen bei Hosts
+    // ohne MAC (Netzadresse .0, Gateway-Phantome, ARP-Reste).
+    schluessel: frame.mac || frame.ip,
     vendor: frame.vendor ?? "",
     hostname: "",
     osGuess: "",
     ports: [],
     pingMs: typeof frame.rtt_ms === "number" ? Math.round(frame.rtt_ms) : null,
-    isNew: Boolean(frame.is_unknown),
-    notable: Boolean(frame.is_unknown),
+    // Es gibt derzeit keine verlässliche "neu/auffällig"-Quelle im Scan-Wire
+    // (is_unknown bedeutet backendseitig "per MAC identifiziert", NICHT "neu im
+    // Netz"). isNew/notable bleiben false, bis ein echtes Baseline-Signal
+    // (Abgleich gegen die devices-DB, first_seen/is_known) im Wire vorhanden ist.
+    // Die Felder bleiben im View-Objekt erhalten, damit ein späterer Baseline-
+    // Abgleich sie nur noch füllen muss.
+    isNew: false,
+    notable: false,
     label: undefined,
     tags: undefined,
     notes: undefined,
   };
+}
+
+// Filtert Phantom-Einträge ohne jede Geräte-Identität heraus. Ein Phantom hat
+// KEINE MAC, keine offenen Ports UND keinen Hostname (z. B. Netzadresse .0,
+// Gateway-Phantome, ARP-Reste). Sobald EINES dieser Merkmale vorhanden ist,
+// bleibt der Eintrag ein echtes Gerät und wird angezeigt.
+export function istEchtesGeraet(g) {
+  const hatMac = Boolean(g.mac);
+  const hatPorts = Array.isArray(g.ports) && g.ports.length > 0;
+  const hatHostname = Boolean(g.hostname);
+  return hatMac || hatPorts || hatHostname;
 }
 
 // Ruft GET /api/history und übersetzt die Liste in die View-Form. snake_case ->
@@ -166,4 +195,5 @@ export default {
   mappeHost,
   mappeHostFound,
   iconAusGeraet,
+  istEchtesGeraet,
 };

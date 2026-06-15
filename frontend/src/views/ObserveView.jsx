@@ -16,7 +16,11 @@ import { memo, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { fetchInterfaces, primaeresInterface } from "../api/interfaces.js";
-import { fetchScanDetail, fetchScanHistory } from "../api/scan.js";
+import {
+  fetchScanDetail,
+  fetchScanHistory,
+  istEchtesGeraet,
+} from "../api/scan.js";
 import { starteScanStream } from "../api/scanStream.js";
 import { fetchSettings, updateSetting } from "../api/settings.js";
 import { CardGrid, FunctionShell } from "../components/AreaShell.jsx";
@@ -85,8 +89,9 @@ function ScanInhalt() {
   const [scanError, setScanError] = useState(null);
   // Metadaten des zuletzt geladenen/abgeschlossenen Scans oder null.
   const [letzterScan, setLetzterScan] = useState(null);
-  // Gewähltes Gerät über die MAC (eindeutiger Schlüssel); null = keins.
-  const [gewaehlteMac, setGewaehlteMac] = useState(null);
+  // Gewähltes Gerät über seinen stabilen Schlüssel (MAC oder, ohne MAC, IP);
+  // null = keins. Der Schlüssel deckt auch Hosts ohne MAC kollisionsfrei ab.
+  const [gewaehlterSchluessel, setGewaehlterSchluessel] = useState(null);
 
   // Erkannte Netzwerk-Schnittstellen (aus GET /api/interfaces).
   const [interfaces, setInterfaces] = useState([]);
@@ -124,9 +129,12 @@ function ScanInhalt() {
           return;
         }
         // Merge-Puffer (Ref) mit dem vorgeladenen Scan füllen, damit ein
-        // späteres Notizen-Speichern (handleGespeichert) das Gerät nach MAC
-        // findet — auch ohne laufenden Live-Scan.
-        geraeteRef.current = new Map(detail.geraete.map((g) => [g.mac, g]));
+        // späteres Notizen-Speichern (handleGespeichert) das Gerät nach seinem
+        // Schlüssel findet — auch ohne laufenden Live-Scan. Schlüssel (MAC oder
+        // IP) statt nackter MAC: deckt auch Hosts ohne MAC kollisionsfrei ab.
+        geraeteRef.current = new Map(
+          detail.geraete.map((g) => [g.schluessel, g]),
+        );
         setGeraete(detail.geraete);
         setLetzterScan({
           scannedAt: detail.scannedAt,
@@ -240,24 +248,26 @@ function ScanInhalt() {
 
     streamRef.current = starteScanStream({
       cidr: zielCidr,
-      // host_found: nur setzen, wenn die MAC noch fehlt ODER der bestehende
-      // Eintrag noch kein host_detail war (Detail gewinnt, wird nicht überschrieben).
+      // host_found: nur setzen, wenn der Schlüssel noch fehlt ODER der
+      // bestehende Eintrag noch kein host_detail war (Detail gewinnt, wird nicht
+      // überschrieben). Schlüssel (MAC oder IP) statt nackter MAC: so geht auch
+      // ein Host ohne MAC verlustfrei in den Merge-Puffer.
       onHostFound: (g) => {
-        if (!g.mac) {
+        if (!g.schluessel) {
           return;
         }
-        const vorhanden = geraeteRef.current.get(g.mac);
+        const vorhanden = geraeteRef.current.get(g.schluessel);
         if (!vorhanden || !vorhanden.__detail) {
-          geraeteRef.current.set(g.mac, g);
+          geraeteRef.current.set(g.schluessel, g);
           setGeraete([...geraeteRef.current.values()]);
         }
       },
-      // host_detail gewinnt IMMER über host_found (gleicher mac-Schlüssel).
+      // host_detail gewinnt IMMER über host_found (gleicher Schlüssel).
       onHostDetail: (g) => {
-        if (!g.mac) {
+        if (!g.schluessel) {
           return;
         }
-        geraeteRef.current.set(g.mac, { ...g, __detail: true });
+        geraeteRef.current.set(g.schluessel, { ...g, __detail: true });
         setGeraete([...geraeteRef.current.values()]);
       },
       onProgress: (f) => {
@@ -301,20 +311,30 @@ function ScanInhalt() {
   };
 
   // Klick auf eine Zeile: wählt das Gerät; erneuter Klick auf dieselbe löscht.
+  // Auswahl über den stabilen Schlüssel (MAC oder IP), nicht die nackte MAC.
   const handleSelect = (geraet) => {
-    setGewaehlteMac((aktuell) =>
-      aktuell === geraet.mac ? null : geraet.mac,
+    setGewaehlterSchluessel((aktuell) =>
+      aktuell === geraet.schluessel ? null : geraet.schluessel,
     );
   };
 
+  const gewaehltesGeraet =
+    geraete.find((g) => g.schluessel === gewaehlterSchluessel) ?? null;
+
   // Naht nach dem Speichern der Notizen (ScanDetailPanel -> onGespeichert):
   // patcht NUR die kuratierten Felder (label/tags/notes/isKnown) in das
-  // bestehende Listen-Gerät gleicher MAC. Die Scan-Felder (ports, pingMs,
-  // additionalIps, icon …) der Liste bleiben erhalten — kein Komplett-Ersatz.
-  // Auch der Merge-Puffer (Ref) wird mitgezogen, damit ein späteres
+  // bestehende Listen-Gerät. Die Scan-Felder (ports, pingMs, additionalIps,
+  // icon …) der Liste bleiben erhalten — kein Komplett-Ersatz. Gepatcht wird
+  // über den Schlüssel des GEWÄHLTEN Geräts (nicht über aktualisiert.mac, das
+  // bei Hosts ohne MAC leer/kollidierend wäre) — so trifft der Patch genau EIN
+  // Gerät. Auch der Merge-Puffer (Ref) wird mitgezogen, damit ein späteres
   // setGeraete aus der Ref die Patches nicht überschreibt.
   const handleGespeichert = (aktualisiert) => {
-    const vorhanden = geraeteRef.current.get(aktualisiert.mac);
+    if (!gewaehltesGeraet) {
+      return;
+    }
+    const schluessel = gewaehltesGeraet.schluessel;
+    const vorhanden = geraeteRef.current.get(schluessel);
     if (!vorhanden) {
       return;
     }
@@ -325,12 +345,9 @@ function ScanInhalt() {
       notes: aktualisiert.notes,
       isKnown: aktualisiert.isKnown,
     };
-    geraeteRef.current.set(aktualisiert.mac, gepatcht);
+    geraeteRef.current.set(schluessel, gepatcht);
     setGeraete([...geraeteRef.current.values()]);
   };
-
-  const gewaehltesGeraet =
-    geraete.find((g) => g.mac === gewaehlteMac) ?? null;
 
   // Leer-Hinweis nur im echten Leerlauf (kein Scan, kein Fehler, keine Geräte).
   const zeigeLeer =
@@ -478,19 +495,22 @@ function ScanInhalt() {
            Tabelle. Der Sweep wird nur während eines laufenden Scans gerendert. */
         <div className="observe__scan-area">
           {scanLaeuft && <ScanSweep />}
-          {/* Zwei-Spalten-Layout: Tabelle links, Panel rechts (nur bei Auswahl). */}
+          {/* Zwei-Spalten-Layout: Tabelle links, Panel rechts (nur bei Auswahl).
+              Nur die ANZEIGE wird gefiltert (Phantome ohne jede Identität raus);
+              der Merge-Puffer (geraeteRef) behält alles — keine Daten gehen
+              verloren. */}
           <div className="observe__split">
             <ScanTable
-              geraete={geraete}
+              geraete={geraete.filter(istEchtesGeraet)}
               onSelect={handleSelect}
-              selectedMac={gewaehlteMac}
+              selectedSchluessel={gewaehlterSchluessel}
               sichtbareSpalten={sichtbareSpalten}
             />
             {gewaehltesGeraet && (
               <ScanDetailPanel
-                key={gewaehltesGeraet.mac}
+                key={gewaehltesGeraet.schluessel}
                 geraet={gewaehltesGeraet}
-                onClose={() => setGewaehlteMac(null)}
+                onClose={() => setGewaehlterSchluessel(null)}
                 onGespeichert={handleGespeichert}
               />
             )}
