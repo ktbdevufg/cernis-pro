@@ -18,10 +18,14 @@ import { useTranslation } from "react-i18next";
 import { fetchInterfaces, primaeresInterface } from "../api/interfaces.js";
 import { fetchScanDetail, fetchScanHistory } from "../api/scan.js";
 import { starteScanStream } from "../api/scanStream.js";
+import { fetchSettings, updateSetting } from "../api/settings.js";
 import { CardGrid, FunctionShell } from "../components/AreaShell.jsx";
+import ColumnManager from "../components/ColumnManager.jsx";
 import FunctionCard from "../components/FunctionCard.jsx";
 import ScanDetailPanel from "../components/ScanDetailPanel.jsx";
-import ScanTable from "../components/ScanTable.jsx";
+import ScanTable, {
+  DEFAULT_SICHTBARE_SPALTEN,
+} from "../components/ScanTable.jsx";
 import TrafficView from "../components/TrafficView.jsx";
 import "./ObserveView.css";
 
@@ -39,6 +43,10 @@ function mappePhase(roh) {
 
 // Reihenfolge der Anzeige-Phasen unter der Toolbar (links nach rechts).
 const PHASEN_REIHENFOLGE = ["discovery", "mdns", "enrich"];
+
+// Settings-Key, unter dem die sichtbaren umschaltbaren Scan-Spalten persistiert
+// werden (JSON-Array der IDs; fixe Spalten stehen NICHT drin).
+const SCAN_COLUMNS_KEY = "scan_columns";
 
 // Kachel-Definition: Schlüssel, Icon, Sperrstatus. Reihenfolge ist verbindlich.
 const FUNKTIONEN = [
@@ -88,6 +96,12 @@ function ScanInhalt() {
   const [cidr, setCidr] = useState("");
   // Aktive Anzeige-Phase während des Scans ("discovery"|"mdns"|"enrich"|null).
   const [phase, setPhase] = useState(null);
+
+  // Sichtbare umschaltbare Spalten der Scan-Tabelle (Array der IDs). Default:
+  // alle umschaltbaren außer ipv6 — wird beim Öffnen aus den Settings überschrieben.
+  const [sichtbareSpalten, setSichtbareSpalten] = useState(
+    DEFAULT_SICHTBARE_SPALTEN,
+  );
 
   // Aktives Scan-Handle ({ stop() }) — zum sauberen Schließen bei Unmount.
   const streamRef = useRef(null);
@@ -161,6 +175,39 @@ function ScanInhalt() {
       streamRef.current = null;
     };
   }, []);
+
+  // Beim Öffnen die persistierte Spaltenauswahl laden. Nur ein valides Array
+  // (Strings) übernimmt die Sicht; sonst bleibt der Default. Fehler werden
+  // toleriert (Default-Spalten, kein Hinweis).
+  useEffect(() => {
+    let abgebrochen = false;
+    (async () => {
+      try {
+        const settings = await fetchSettings();
+        if (abgebrochen) {
+          return;
+        }
+        const roh = settings?.[SCAN_COLUMNS_KEY];
+        if (Array.isArray(roh) && roh.every((id) => typeof id === "string")) {
+          setSichtbareSpalten(roh);
+        }
+      } catch {
+        // Settings nicht erreichbar: Default-Spalten bleiben aktiv.
+      }
+    })();
+    return () => {
+      abgebrochen = true;
+    };
+  }, []);
+
+  // Spaltenauswahl ändern: Zustand sofort setzen (Tabelle reagiert live) und
+  // persistieren (feuern und vergessen; Fehler nur loggen, UI nicht blockieren).
+  const handleSpaltenWechsel = (neueSpalten) => {
+    setSichtbareSpalten(neueSpalten);
+    updateSetting(SCAN_COLUMNS_KEY, neueSpalten).catch((fehler) => {
+      console.error("scan_columns speichern fehlgeschlagen", fehler);
+    });
+  };
 
   // Interface-Wechsel (Variante A): CIDR FOLGT der Auswahl. Auch wenn der
   // Nutzer das CIDR vorher manuell editiert hatte — ein Interface-Wechsel ist
@@ -363,6 +410,10 @@ function ScanInhalt() {
               </span>
             </span>
           )}
+          <ColumnManager
+            sichtbar={sichtbareSpalten}
+            onChange={handleSpaltenWechsel}
+          />
           <button
             type="button"
             className="observe__scan-button"
@@ -433,6 +484,7 @@ function ScanInhalt() {
               geraete={geraete}
               onSelect={handleSelect}
               selectedMac={gewaehlteMac}
+              sichtbareSpalten={sichtbareSpalten}
             />
             {gewaehltesGeraet && (
               <ScanDetailPanel

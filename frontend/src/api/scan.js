@@ -87,6 +87,9 @@ export function mappeHost(host) {
   return {
     icon: iconAusGeraet(host.vendor, host.os_guess, host.ports),
     ip: host.ip,
+    // Primäre IPv6 (leer, wenn keine). ipv6All ergänzt die weiteren IPv6.
+    ipv6: host.ipv6 ?? "",
+    ipv6All: host.ipv6_all ?? [],
     mac: host.mac,
     vendor: host.vendor ?? "",
     hostname: host.hostname ?? "",
@@ -113,6 +116,10 @@ export function mappeHostFound(frame) {
   return {
     icon: iconAusGeraet(frame.vendor, "", []),
     ip: frame.ip,
+    // host_found kennt keine IPv6; leer als Default (ein späteres host_detail
+    // ergänzt sie).
+    ipv6: "",
+    ipv6All: [],
     mac: frame.mac,
     vendor: frame.vendor ?? "",
     hostname: "",

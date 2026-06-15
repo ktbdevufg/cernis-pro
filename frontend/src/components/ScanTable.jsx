@@ -5,9 +5,15 @@
 // dezenten Zwischenüberschrift, darunter die bekannten Geräte. Innerhalb je
 // Abschnitt nach IPv4 sortiert.
 //
-// Die Komponente kennt nur ihre Props (geraete, onSelect, selectedMac). Sie
-// löst keine API auf und hält keinen eigenen Zustand. Klick auf eine Zeile ruft
-// onSelect(geraet); selectedMac markiert die zum Detail-Panel gehörende Zeile.
+// Die Komponente kennt nur ihre Props (geraete, onSelect, selectedMac,
+// sichtbareSpalten). Sie löst keine API auf und hält keinen Persistenz-Zustand.
+// Klick auf eine Zeile ruft onSelect(geraet); selectedMac markiert die zum
+// Detail-Panel gehörende Zeile.
+//
+// Spalten sind datengetrieben: eine Definitionsliste (baueSpalten) liefert
+// Kopf UND Zellen. Fixe Spalten (status, ip) sind immer sichtbar; umschaltbare
+// folgen der Prop sichtbareSpalten (Set/Array der sichtbaren IDs). Reihenfolge
+// ist fest durch die Definitionsreihenfolge.
 
 import {
   Camera,
@@ -54,6 +60,146 @@ const ALPHA_FELD = {
   hostname: "hostname",
   os: "osGuess",
 };
+
+// Umschaltbare Spalten-IDs in fester Anzeige-Reihenfolge. ipv6 ist NEU und
+// standardmäßig AUS — der Default unten lässt es bewusst weg.
+const UMSCHALTBARE_SPALTEN = [
+  "ipv6",
+  "mac",
+  "vendor",
+  "hostname",
+  "ports",
+  "os",
+  "ping",
+];
+
+// Default-Sichtbarkeit: alle umschaltbaren Spalten AUSSER ipv6.
+export const DEFAULT_SICHTBARE_SPALTEN = UMSCHALTBARE_SPALTEN.filter(
+  (id) => id !== "ipv6",
+);
+
+// Formatiert den Ping-Wert (ms) für die Anzeige. Unverändert aus der bisherigen
+// Zellenlogik gezogen, damit die Spalten-Definition sie nutzen kann.
+function formatPing(geraet, t) {
+  if (geraet.pingMs === null || geraet.pingMs === undefined) {
+    return "—";
+  }
+  if (geraet.pingMs === 0) {
+    return t("beobachten.scan.pingSubMs");
+  }
+  return t("beobachten.scan.pingUnit", { value: geraet.pingMs });
+}
+
+// Spalten-Definition (Reihenfolge = Anzeige-Reihenfolge). Jede Spalte:
+//   { id, fix?, sortKey?, thClass?, tdClass?, render(geraet, ctx) }
+// ctx = { t, selected, Icon }. Optik/Logik der Zellen sind 1:1 die bisherigen;
+// nur die Struktur ist jetzt datengetrieben. IPv6 ist direkt nach IP einsortiert.
+function baueSpalten() {
+  return [
+    {
+      id: "status",
+      fix: true,
+      sortKey: null,
+      thClass: "scan-table__th--status",
+      tdClass: "scan-table__cell--status",
+      render: (geraet, { t: _t, selected }) => {
+        const statusKlasse = geraet.isNew
+          ? "scan-table__dot scan-table__dot--neu"
+          : geraet.notable
+            ? "scan-table__dot scan-table__dot--auffaellig"
+            : "scan-table__dot scan-table__dot--bekannt";
+        return (
+          <>
+            {selected && (
+              // "Wanne" als Aktiv-Marker: vertikal, Wölbung nach innen zur Zeile
+              // (analog zur Reiter-Wanne in TabNav, um 90° gedreht).
+              <span className="scan-row__wanne" aria-hidden="true">
+                <svg viewBox="0 0 10 100" preserveAspectRatio="none">
+                  <path d="M10,1 C5,1 3.5,5 3,13 L3,87 C3.5,95 5,99 10,99 C6,97 4.3,93 4,87 L4,13 C4.3,7 6,3 10,1 Z" />
+                </svg>
+              </span>
+            )}
+            <span className={statusKlasse} aria-hidden="true" />
+          </>
+        );
+      },
+    },
+    {
+      id: "ip",
+      fix: true,
+      sortKey: "ip",
+      tdClass: "scan-table__cell--ip scan-table__mono",
+      render: (geraet) => geraet.ip,
+    },
+    {
+      id: "ipv6",
+      sortKey: null,
+      tdClass: "scan-table__mono",
+      render: (geraet) => geraet.ipv6 || "—",
+    },
+    {
+      id: "mac",
+      sortKey: null,
+      tdClass: "scan-table__mono",
+      render: (geraet) => geraet.mac,
+    },
+    {
+      id: "vendor",
+      sortKey: "vendor",
+      render: (geraet, { Icon }) => (
+        <span className="scan-table__vendor">
+          <span className="scan-table__vendor-icon" aria-hidden="true">
+            <Icon size={15} />
+          </span>
+          <span className="scan-table__vendor-text">{geraet.vendor || "—"}</span>
+        </span>
+      ),
+    },
+    {
+      id: "hostname",
+      sortKey: "hostname",
+      render: (geraet, { t }) => (
+        <span className="scan-table__hostname">
+          {geraet.hostname || "—"}
+          {geraet.isNew && (
+            <span className="scan-table__pill scan-table__pill--neu">
+              {t("beobachten.scan.newPill")}
+            </span>
+          )}
+          {!geraet.isNew && geraet.notable && (
+            <span className="scan-table__pill scan-table__pill--auffaellig">
+              {t("beobachten.scan.notablePill")}
+            </span>
+          )}
+        </span>
+      ),
+    },
+    {
+      id: "ports",
+      sortKey: null,
+      render: (geraet) => <PortChips ports={geraet.ports} />,
+    },
+    {
+      id: "os",
+      sortKey: "os",
+      tdClass: "scan-table__cell--os",
+      render: (geraet) => geraet.osGuess || "—",
+    },
+    {
+      id: "ping",
+      sortKey: null,
+      thClass: "scan-table__th--ping",
+      tdClass: "scan-table__cell--ping scan-table__mono",
+      render: (geraet, { t }) => formatPing(geraet, t),
+    },
+  ];
+}
+
+// Filtert die volle Spalten-Definition auf die sichtbaren: fixe Spalten immer,
+// umschaltbare nur, wenn ihre ID in sichtbar (Set) enthalten ist.
+function sichtbareSpaltenAuswahl(alle, sichtbar) {
+  return alle.filter((spalte) => spalte.fix || sichtbar.has(spalte.id));
+}
 
 // Sortiert nach IPv4 (numerisch je Oktett, nicht lexikografisch).
 function nachIpv4(a, b) {
@@ -131,17 +277,12 @@ function PortChips({ ports }) {
 }
 
 // Eine Geräte-Zeile. Klickbar; Klick meldet das Gerät an onSelect.
-// selected hebt die zum offenen Detail-Panel gehörende Zeile hervor.
-function GeraetZeile({ geraet, onSelect, selected }) {
+// selected hebt die zum offenen Detail-Panel gehörende Zeile hervor. Die Zellen
+// kommen aus spalten (sichtbare Spalten-Definition) via spalte.render.
+function GeraetZeile({ geraet, onSelect, selected, spalten }) {
   const { t } = useTranslation();
   const Icon = DEVICE_ICONS[geraet.icon] ?? HelpCircle;
-
-  // Statuspunkt: tönt nach Auffälligkeit, ohne laute Ampel.
-  const statusKlasse = geraet.isNew
-    ? "scan-table__dot scan-table__dot--neu"
-    : geraet.notable
-      ? "scan-table__dot scan-table__dot--auffaellig"
-      : "scan-table__dot scan-table__dot--bekannt";
+  const ctx = { t, selected, Icon };
 
   const rowKlasse = selected
     ? "scan-table__row scan-table__row--aktiv"
@@ -149,66 +290,75 @@ function GeraetZeile({ geraet, onSelect, selected }) {
 
   return (
     <tr className={rowKlasse} onClick={() => onSelect(geraet)}>
-      <td className="scan-table__cell scan-table__cell--status">
-        {selected && (
-          // "Wanne" als Aktiv-Marker: vertikal, Wölbung nach innen zur Zeile
-          // (analog zur Reiter-Wanne in TabNav, um 90° gedreht).
-          <span className="scan-row__wanne" aria-hidden="true">
-            <svg viewBox="0 0 10 100" preserveAspectRatio="none">
-              <path d="M10,1 C5,1 3.5,5 3,13 L3,87 C3.5,95 5,99 10,99 C6,97 4.3,93 4,87 L4,13 C4.3,7 6,3 10,1 Z" />
-            </svg>
-          </span>
-        )}
-        <span className={statusKlasse} aria-hidden="true" />
-      </td>
-      <td className="scan-table__cell scan-table__cell--ip scan-table__mono">
-        {geraet.ip}
-      </td>
-      <td className="scan-table__cell scan-table__mono">{geraet.mac}</td>
-      <td className="scan-table__cell">
-        <span className="scan-table__vendor">
-          <span className="scan-table__vendor-icon" aria-hidden="true">
-            <Icon size={15} />
-          </span>
-          <span className="scan-table__vendor-text">
-            {geraet.vendor || "—"}
-          </span>
-        </span>
-      </td>
-      <td className="scan-table__cell">
-        <span className="scan-table__hostname">
-          {geraet.hostname || "—"}
-          {geraet.isNew && (
-            <span className="scan-table__pill scan-table__pill--neu">
-              {t("beobachten.scan.newPill")}
-            </span>
-          )}
-          {!geraet.isNew && geraet.notable && (
-            <span className="scan-table__pill scan-table__pill--auffaellig">
-              {t("beobachten.scan.notablePill")}
-            </span>
-          )}
-        </span>
-      </td>
-      <td className="scan-table__cell">
-        <PortChips ports={geraet.ports} />
-      </td>
-      <td className="scan-table__cell scan-table__cell--os">
-        {geraet.osGuess || "—"}
-      </td>
-      <td className="scan-table__cell scan-table__cell--ping scan-table__mono">
-        {geraet.pingMs === null || geraet.pingMs === undefined
-          ? "—"
-          : geraet.pingMs === 0
-            ? t("beobachten.scan.pingSubMs")
-            : t("beobachten.scan.pingUnit", { value: geraet.pingMs })}
-      </td>
+      {spalten.map((spalte) => (
+        <td
+          key={spalte.id}
+          className={
+            spalte.tdClass
+              ? `scan-table__cell ${spalte.tdClass}`
+              : "scan-table__cell"
+          }
+        >
+          {spalte.render(geraet, ctx)}
+        </td>
+      ))}
     </tr>
   );
 }
 
-export default function ScanTable({ geraete, onSelect, selectedMac }) {
+// Ein Spaltenkopf. Sortierbare Köpfe (sortKey != null) behalten das bestehende
+// Verhalten (role=button, tabIndex, aria-sort, Pfeil). Status-Kopf bleibt rein
+// visuell (Screenreader-Label); übrige nicht-sortierbare Köpfe sind schlicht.
+function SpaltenKopf({ spalte, sortKey, sortDir, sortiereNach, beiTaste, t }) {
+  const basisKlasse = spalte.thClass
+    ? `scan-table__th ${spalte.thClass}`
+    : "scan-table__th";
+  const label = t(`beobachten.scan.columns.${spalte.id}`);
+
+  if (spalte.id === "status") {
+    return (
+      <th className={basisKlasse}>
+        <span className="scan-table__sr">{label}</span>
+      </th>
+    );
+  }
+
+  if (!spalte.sortKey) {
+    return <th className={basisKlasse}>{label}</th>;
+  }
+
+  const aktiv = sortKey === spalte.sortKey;
+  return (
+    <th
+      className={`${basisKlasse} scan-table__th--sortierbar`}
+      role="button"
+      tabIndex={0}
+      aria-sort={aktiv ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
+      onClick={() => sortiereNach(spalte.sortKey)}
+      onKeyDown={(event) => beiTaste(event, spalte.sortKey)}
+    >
+      {label}
+      {aktiv && (
+        <span className="scan-table__sort-pfeil" aria-hidden="true">
+          {sortDir === "asc" ? "↑" : "↓"}
+        </span>
+      )}
+    </th>
+  );
+}
+
+export default function ScanTable({
+  geraete,
+  onSelect,
+  selectedMac,
+  sichtbareSpalten,
+}) {
   const { t } = useTranslation();
+
+  // Sichtbare umschaltbare Spalten als Set (fixe Spalten kommen immer dazu).
+  // Fehlt die Prop, gilt der Default (alle umschaltbaren außer ipv6).
+  const sichtbarSet = new Set(sichtbareSpalten ?? DEFAULT_SICHTBARE_SPALTEN);
+  const spalten = sichtbareSpaltenAuswahl(baueSpalten(), sichtbarSet);
 
   // Aktive Spaltensortierung. Wirkt INNERHALB jeder Sektion, nicht über sie
   // hinweg. Start: IP aufsteigend.
@@ -257,7 +407,7 @@ export default function ScanTable({ geraete, onSelect, selectedMac }) {
     return (
       <>
         <tr className="scan-table__section">
-          <th colSpan={8} className="scan-table__section-heading">
+          <th colSpan={spalten.length} className="scan-table__section-heading">
             {titel}
           </th>
         </tr>
@@ -267,6 +417,7 @@ export default function ScanTable({ geraete, onSelect, selectedMac }) {
             geraet={geraet}
             onSelect={onSelect}
             selected={geraet.mac === selectedMac}
+            spalten={spalten}
           />
         ))}
       </>
@@ -278,102 +429,17 @@ export default function ScanTable({ geraete, onSelect, selectedMac }) {
       <table className="scan-table__table">
         <thead className="scan-table__head">
           <tr>
-            <th className="scan-table__th scan-table__th--status">
-              <span className="scan-table__sr">
-                {t("beobachten.scan.columns.status")}
-              </span>
-            </th>
-            <th
-              className="scan-table__th scan-table__th--sortierbar"
-              role="button"
-              tabIndex={0}
-              aria-sort={
-                sortKey === "ip"
-                  ? sortDir === "asc"
-                    ? "ascending"
-                    : "descending"
-                  : "none"
-              }
-              onClick={() => sortiereNach("ip")}
-              onKeyDown={(event) => beiTaste(event, "ip")}
-            >
-              {t("beobachten.scan.columns.ip")}
-              {sortKey === "ip" && (
-                <span className="scan-table__sort-pfeil" aria-hidden="true">
-                  {sortDir === "asc" ? "↑" : "↓"}
-                </span>
-              )}
-            </th>
-            <th className="scan-table__th">{t("beobachten.scan.columns.mac")}</th>
-            <th
-              className="scan-table__th scan-table__th--sortierbar"
-              role="button"
-              tabIndex={0}
-              aria-sort={
-                sortKey === "vendor"
-                  ? sortDir === "asc"
-                    ? "ascending"
-                    : "descending"
-                  : "none"
-              }
-              onClick={() => sortiereNach("vendor")}
-              onKeyDown={(event) => beiTaste(event, "vendor")}
-            >
-              {t("beobachten.scan.columns.vendor")}
-              {sortKey === "vendor" && (
-                <span className="scan-table__sort-pfeil" aria-hidden="true">
-                  {sortDir === "asc" ? "↑" : "↓"}
-                </span>
-              )}
-            </th>
-            <th
-              className="scan-table__th scan-table__th--sortierbar"
-              role="button"
-              tabIndex={0}
-              aria-sort={
-                sortKey === "hostname"
-                  ? sortDir === "asc"
-                    ? "ascending"
-                    : "descending"
-                  : "none"
-              }
-              onClick={() => sortiereNach("hostname")}
-              onKeyDown={(event) => beiTaste(event, "hostname")}
-            >
-              {t("beobachten.scan.columns.hostname")}
-              {sortKey === "hostname" && (
-                <span className="scan-table__sort-pfeil" aria-hidden="true">
-                  {sortDir === "asc" ? "↑" : "↓"}
-                </span>
-              )}
-            </th>
-            <th className="scan-table__th">
-              {t("beobachten.scan.columns.ports")}
-            </th>
-            <th
-              className="scan-table__th scan-table__th--sortierbar"
-              role="button"
-              tabIndex={0}
-              aria-sort={
-                sortKey === "os"
-                  ? sortDir === "asc"
-                    ? "ascending"
-                    : "descending"
-                  : "none"
-              }
-              onClick={() => sortiereNach("os")}
-              onKeyDown={(event) => beiTaste(event, "os")}
-            >
-              {t("beobachten.scan.columns.os")}
-              {sortKey === "os" && (
-                <span className="scan-table__sort-pfeil" aria-hidden="true">
-                  {sortDir === "asc" ? "↑" : "↓"}
-                </span>
-              )}
-            </th>
-            <th className="scan-table__th scan-table__th--ping">
-              {t("beobachten.scan.columns.ping")}
-            </th>
+            {spalten.map((spalte) => (
+              <SpaltenKopf
+                key={spalte.id}
+                spalte={spalte}
+                sortKey={sortKey}
+                sortDir={sortDir}
+                sortiereNach={sortiereNach}
+                beiTaste={beiTaste}
+                t={t}
+              />
+            ))}
           </tr>
         </thead>
         <tbody>

@@ -101,12 +101,17 @@
       "columns": {
         "status": "Status",
         "ip": "IPv4",
+        "ipv6": "IPv6",
         "mac": "MAC",
         "vendor": "Vendor",
         "hostname": "Hostname",
         "ports": "Ports",
         "os": "OS",
         "ping": "Ping"
+      },
+      "columnManager": {
+        "button": "Columns",
+        "title": "Choose columns"
       },
       "sections": {
         "notable": "New or notable",

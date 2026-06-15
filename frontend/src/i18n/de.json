@@ -101,12 +101,17 @@
       "columns": {
         "status": "Status",
         "ip": "IPv4",
+        "ipv6": "IPv6",
         "mac": "MAC",
         "vendor": "Hersteller",
         "hostname": "Hostname",
         "ports": "Ports",
         "os": "OS",
         "ping": "Ping"
+      },
+      "columnManager": {
+        "button": "Spalten",
+        "title": "Spalten wählen"
       },
       "sections": {
         "notable": "Neu oder auffällig",
