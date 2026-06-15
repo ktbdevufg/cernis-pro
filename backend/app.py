@@ -87,6 +87,8 @@ from api.diagnostics import (
 from api.diagnostics import router as diagnostics_router
 from api.export import provide_export_analysis, provide_export_scan
 from api.export import router as export_router
+from api.fritz import provide_get_fritz_detail
+from api.fritz import router as fritz_router
 from api.interfaces import provide_list_interfaces
 from api.interfaces import router as interfaces_router
 from api.metrics import provide_export_metrics
@@ -197,6 +199,7 @@ from application.diagnostics import (
     RunTraceroute,
 )
 from application.export import ExportAnalysis, ExportScan, ScanNotFoundError
+from application.fritz_detail import FritzDetailAuthError, GetFritzDetail
 from application.interfaces import ListInterfaces
 from application.metrics import ExportMetrics
 from application.monitoring import (
@@ -302,6 +305,7 @@ from infrastructure.resolver import (
     TlsCertReader,
 )
 from infrastructure.scanning.arp_table import ArpTableAdapter
+from infrastructure.scanning.fritz_detail import FritzDetailAdapter
 from infrastructure.scanning.fritz_hosts import FritzAuthError, FritzHostsAdapter
 from infrastructure.scanning.host_discovery import HostDiscoveryAdapter
 from infrastructure.scanning.hostname_resolver import HostnameResolverAdapter
@@ -416,6 +420,32 @@ class _FritzHostsWiring:
             # best-effort: Auth-Fehler killt den Scan nicht -- aber GELOGGT (kein S3).
             logger.warning("fritz_auth_failed", host=exc.host)
             return []
+
+
+class _FritzDetailWiring:
+    """Verdrahtungs-Wrapper um den ``FritzDetailAdapter`` -- erfuellt ``FritzDetailPort``.
+
+    Uebersetzt die ``infrastructure``-``FritzAuthError`` des echten Adapters in den
+    application-eigenen ``FritzDetailAuthError`` (Muster wie ``_FritzHostsWiring``:
+    eine kleine Verdrahtungs-Klasse, die einen Port strukturell erfuellt). Diese
+    Uebersetzung MUSS im Composition Root passieren -- er ist von den import-linter-
+    Contracts ausgenommen und darf beide Typen kennen; so kann der api-Ring den
+    Auth-Fehler als reinen application-Typ fangen, ohne ``infrastructure`` zu
+    importieren.
+
+    Anders als ``_FritzHostsWiring`` wird der Auth-Fehler hier NICHT verschluckt:
+    der Detail-Endpunkt ist ein expliziter Lese-Pfad (REST), kein best-effort-Merge
+    -- der Fehler propagiert (als application-Typ) bis in den Router (502).
+    """
+
+    def __init__(self, host: str, user: str, password: str) -> None:
+        self._adapter = FritzDetailAdapter(host=host, user=user, password=password)
+
+    async def get_detail(self) -> Any:
+        try:
+            return await self._adapter.get_detail()
+        except FritzAuthError as exc:
+            raise FritzDetailAuthError(exc.host) from exc
 
 
 class _CompositeRuleProvider:
@@ -790,6 +820,32 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         "/ws/scan",
         make_ws_scan(_build_run_network_scan, _build_record_scanned_host, _build_record_seen),
     )
+
+    # ── fritz-Detailansicht verdrahten (read-only, Regel 5: ports<->infra nur hier) ──
+    # GET /api/fritz/detail liefert den vollen TR-064-Schnappschuss (WAN/DSL/WLAN/
+    # Clients/Log/Portfreigaben) ueber GetFritzDetail -> FritzDetailAdapter. Der
+    # Adapter wird PRO REQUEST frisch mit den aktuellen Credentials gebaut (Aenderung
+    # in den Settings wirkt ohne App-Neustart -- Muster wie _build_run_network_scan):
+    # host/user aus dem Settings-Repository (Rohwerte), das Passwort als Klartext
+    # DIREKT aus dem SecretStore. Anders als beim best-effort-Scan-Merge (_FritzHosts-
+    # Wiring) wird hier KEIN Auth-Fehler verschluckt: der Detail-Endpunkt ist ein
+    # expliziter Lese-Pfad -> FritzAuthError schlaegt bis in den Router durch (502).
+    # Nicht erreichbar/nicht konfiguriert bleibt der Leer-Zustand (reachable=False).
+    # Dieser Endpunkt wird NICHT gecacht (jeder Abruf ist ein frischer Schnappschuss).
+    def _build_get_fritz_detail() -> GetFritzDetail:
+        fritz_host_setting = repository().get("fritz_host")
+        fritz_user_setting = repository().get("fritz_user")
+        fritz_host = str(fritz_host_setting.value) if fritz_host_setting is not None else ""
+        fritz_user = str(fritz_user_setting.value) if fritz_user_setting is not None else ""
+        fritz_password = secret_store().get("fritz_password") or ""
+        # Wiring-Wrapper statt nacktem Adapter: er uebersetzt die infrastructure-
+        # FritzAuthError in den application-FritzDetailAuthError, den der Router faengt.
+        return GetFritzDetail(
+            _FritzDetailWiring(host=fritz_host, user=fritz_user, password=fritz_password)
+        )
+
+    app.include_router(fritz_router)
+    app.dependency_overrides[provide_get_fritz_detail] = _build_get_fritz_detail
 
     # ── metrics-Querschnitt (M.8) ────────────────────────────────────────────
     # Der MetricsReader liest dieselbe cernis.db (devices/rtt_history/sla_samples/
