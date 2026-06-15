@@ -171,7 +171,12 @@
       "refresh": "Aktualisieren",
       "refreshIntervalLabel": "Automatisch aktualisieren",
       "refreshOff": "Aus",
-      "close": "Schließen"
+      "close": "Schließen",
+      "sniToggle": "SNI-Beobachtung",
+      "sniStarting": "wird gestartet …",
+      "sniActive": "SNI aktiv",
+      "sniHint": "Zeigt die echten von Apps angefragten Domainnamen (statt nur des Hosters). Erfordert erhöhte Rechte.",
+      "sniPermission": "SNI-Beobachtung braucht erhöhte Rechte."
     },
     "lookup": {
       "title": "Gegenstelle nachschlagen",

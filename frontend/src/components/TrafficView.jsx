@@ -17,6 +17,7 @@ import {
   MonitorSmartphone,
   Music,
   RefreshCw,
+  ScanSearch,
   Server,
   Sparkles,
   X,
@@ -24,6 +25,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { fetchSniMap, startSni, stopSni } from "../api/sni.js";
 import {
   fetchPtrNames,
   fetchTraffic,
@@ -80,6 +82,26 @@ function reichereHostsAn(apps, cache) {
           ? cache.get(conn.remote)
           : undefined;
       return name ? { ...conn, host: name } : conn;
+    }),
+  }));
+}
+
+// Überschreibt conn.host mit dem ECHTEN, von der App per TLS-ClientHello
+// angefragten SNI-Hostnamen, wenn die SNI-Map (remote_ip -> hostname) einen
+// Eintrag für conn.remote trägt. SNI SCHLÄGT PTR — diese Funktion wird daher
+// NACH reichereHostsAn angewandt und überschreibt den PTR-Namen mit dem echten
+// Domainnamen. Reine Funktion: neue apps-Struktur, vorhandene Objekte unberührt.
+// Nur überschreiben, wenn ein SNI-Wert vorliegt; sonst PTR/host unverändert.
+// sniMap ist eine echte Map (remote_ip -> hostname), überlebt Refreshes per Ref.
+function reichereSniAn(apps, sniMap) {
+  return apps.map((app) => ({
+    ...app,
+    conns: (app.conns ?? []).map((conn) => {
+      const hostname =
+        conn.remote !== null && conn.remote !== undefined
+          ? sniMap.get(conn.remote)
+          : undefined;
+      return hostname ? { ...conn, host: hostname } : conn;
     }),
   }));
 }
@@ -185,9 +207,19 @@ function AppListe({
   refreshing,
   refreshInterval,
   onRefreshIntervalChange,
+  sniAktiv,
+  sniStartet,
+  onSniStart,
+  onSniStop,
 }) {
   const { t } = useTranslation();
   const max = maxDown(apps);
+
+  // SNI-Klasse: Grundklasse + Aktiv-Modifikator (visuelle Hervorhebung, wenn die
+  // Beobachtung läuft). Klick toggelt: aktiv -> stop, sonst -> start.
+  const sniKlasse = sniAktiv
+    ? "traffic-list__sni traffic-list__sni--aktiv"
+    : "traffic-list__sni";
 
   const sortiert = [...apps].sort((a, b) => {
     if (a.name === null && b.name !== null) return 1;
@@ -202,6 +234,25 @@ function AppListe({
           {t("beobachten.traffic.title")}
         </span>
         <span className="traffic-list__header-right">
+          {/* SNI-Toggle LINKS vom Live-Indikator: startet/stoppt die passive
+              SNI-Beobachtung. Aktiv -> stop, sonst -> start. Während des Starts
+              disabled + "wird gestartet …". Erfordert erhöhte Rechte. */}
+          <button
+            type="button"
+            className={sniKlasse}
+            onClick={sniAktiv ? onSniStop : onSniStart}
+            disabled={sniStartet}
+            title={t("beobachten.traffic.sniHint")}
+          >
+            <ScanSearch size={15} />
+            <span className="traffic-list__sni-label">
+              {sniStartet
+                ? t("beobachten.traffic.sniStarting")
+                : sniAktiv
+                  ? t("beobachten.traffic.sniActive")
+                  : t("beobachten.traffic.sniToggle")}
+            </span>
+          </button>
           {/* Live-Indikator nur bei aktivem Auto-Refresh; schlichtes "live"
               (das Intervall zeigt das Dropdown direkt daneben). */}
           {refreshInterval > 0 && (
@@ -523,6 +574,21 @@ function PermissionHinweis({ text }) {
   );
 }
 
+// Ruhiger SNI-Hinweisstreifen: zeigt den SNI-Fehlertext (z. B. fehlende Rechte)
+// analog zu PermissionHinweis, hängt aber an der eigenen SNI-Naht (nicht an
+// traffic-permission). Reine Anzeige, kein Button, keine Eskalation.
+function SniHinweis({ text }) {
+  const { t } = useTranslation();
+  return (
+    <div className="traffic-permission traffic-permission--sni" role="note">
+      <span className="traffic-permission__title">
+        {t("beobachten.traffic.permissionTitle")}
+      </span>
+      <span className="traffic-permission__text">{text}</span>
+    </div>
+  );
+}
+
 export default function TrafficView({
   refreshInterval = 0,
   onRefreshIntervalChange,
@@ -555,26 +621,67 @@ export default function TrafficView({
   // Anreicherung steckt das Ergebnis selbst per setApps in die Liste.
   const ptrCache = useRef(new Map());
 
+  // SNI-Naht: manuell startbare, root-pflichtige Beobachtung der echten von Apps
+  // angefragten Domainnamen (TLS-ClientHello). sniAktiv steuert, ob der Refresh-
+  // Pfad zusätzlich SNI anreichert; sniStartet ist der flüchtige Start-Zustand;
+  // sniError trägt einen ruhigen Hinweis (z. B. fehlende Rechte). sniMap hält die
+  // beobachteten remote_ip -> hostname über Refreshes hinweg (Ref, kein State:
+  // die Anreicherung steckt das Ergebnis selbst per setApps in die Liste).
+  const [sniAktiv, setSniAktiv] = useState(false);
+  const [sniStartet, setSniStartet] = useState(false);
+  const [sniError, setSniError] = useState(null);
+  const sniMap = useRef(new Map());
+
+  // Spiegelt sniAktiv in eine Ref, damit der stabile Anreicherungs-Pfad
+  // (reichereTrafficAn, useCallback []) den Live-Wert lesen kann, OHNE
+  // ladeTraffic neu zu erzeugen — sonst würde das initiale Laden beim Toggle
+  // erneut feuern (Lade-Flackern, Auswahl-Reset). Der eigentliche Reload nach
+  // dem Toggle wird explizit über ladeTraffic(false) angestoßen.
+  const sniAktivRef = useRef(false);
+
   // Lazy, nicht-blockierende PTR-Anreicherung NACH dem Listen-Render: fragt nur
   // IPs OHNE Cache-Eintrag neu an, mischt das Ergebnis in den Cache und reichert
   // die bereits gerenderte Liste an (setApps mit reiner Map -> kein Neuladen,
   // kein Sprung der Auswahl). Schlägt der Call fehl, bleiben die IPs als IPs
   // stehen (fetchPtrNames toleriert das bereits blockweise).
-  const reichereTrafficAn = useCallback(async (geladeneApps) => {
-    const sichtbare = sammleRemoteIps(geladeneApps);
-    const offen = sichtbare.filter((ip) => !ptrCache.current.has(ip));
+  const reichereTrafficAn = useCallback(
+    async (geladeneApps) => {
+      const sichtbare = sammleRemoteIps(geladeneApps);
+      const offen = sichtbare.filter((ip) => !ptrCache.current.has(ip));
 
-    if (offen.length > 0) {
-      const aufgeloest = await fetchPtrNames(offen);
-      for (const [ip, name] of Object.entries(aufgeloest)) {
-        ptrCache.current.set(ip, name);
+      if (offen.length > 0) {
+        const aufgeloest = await fetchPtrNames(offen);
+        for (const [ip, name] of Object.entries(aufgeloest)) {
+          ptrCache.current.set(ip, name);
+        }
       }
-    }
 
-    // Auch ohne neuen Call anreichern: ein früherer Refresh kann den Namen schon
-    // im Cache haben, während diese frisch geladene Liste noch host:null trägt.
-    setApps((aktuelle) => reichereHostsAn(aktuelle, ptrCache.current));
-  }, []);
+      // Bei aktiver SNI-Beobachtung zusätzlich die beobachteten Hostnamen holen
+      // und in sniMap mergen. SNI ist Beiwerk (fetchSniMap wirft nie, gibt {} bei
+      // Fehler) — ein Patzer hier darf die PTR-Anreicherung nicht verhindern.
+      if (sniAktivRef.current) {
+        const beobachtet = await fetchSniMap();
+        for (const [ip, hostname] of Object.entries(beobachtet)) {
+          sniMap.current.set(ip, hostname);
+        }
+        // Erst PTR, dann SNI darüber: SNI schlägt PTR (echter Domainname statt
+        // Hoster). reichereSniAn überschreibt nur, wo ein SNI-Wert vorliegt.
+        setApps((aktuelle) =>
+          reichereSniAn(
+            reichereHostsAn(aktuelle, ptrCache.current),
+            sniMap.current,
+          ),
+        );
+        return;
+      }
+
+      // Ohne SNI nur PTR wie bisher. Auch ohne neuen Call anreichern: ein früherer
+      // Refresh kann den Namen schon im Cache haben, während diese frisch geladene
+      // Liste noch host:null trägt.
+      setApps((aktuelle) => reichereHostsAn(aktuelle, ptrCache.current));
+    },
+    [],
+  );
 
   // Eine Ladelogik für initiales Laden, manuellen Refresh und Auto-Intervall.
   // initial=true zeigt den Voll-"laedt"-Zustand (erstes Laden); sonst still:
@@ -641,6 +748,42 @@ export default function TrafficView({
     return () => clearInterval(id);
   }, [refreshInterval, ladeTraffic]);
 
+  // SNI-Start: startet die Beobachtung. Bei Erfolg aktiv schalten, Fehler löschen
+  // und sofort einen Reload anstoßen (damit die SNI-Namen direkt einreichern).
+  // Bei Misserfolg den Fehlertext zeigen und inaktiv bleiben. setSniStartet wird
+  // IMMER am Ende zurückgesetzt (auch im Fehlerfall).
+  const handleSniStart = useCallback(async () => {
+    setSniStartet(true);
+    try {
+      const ergebnis = await startSni();
+      if (ergebnis.ok) {
+        setSniAktiv(true);
+        sniAktivRef.current = true; // VOR dem Reload setzen, damit er anreichert.
+        setSniError(null);
+        // Reload nicht awaiten: der Effekt-Pfad reichert im Hintergrund an.
+        ladeTraffic(false);
+      } else {
+        setSniError(ergebnis.error);
+        setSniAktiv(false);
+        sniAktivRef.current = false;
+      }
+    } finally {
+      setSniStartet(false);
+    }
+  }, [ladeTraffic]);
+
+  // SNI-Stop: best-effort stoppen (Fehler ignorieren), inaktiv schalten, die
+  // beobachtete Map leeren und einen Reload anstoßen — so verschwinden die
+  // SNI-Namen aus der Anzeige und fallen zurück auf PTR/IP.
+  const handleSniStop = useCallback(async () => {
+    await stopSni();
+    setSniAktiv(false);
+    sniAktivRef.current = false; // VOR dem Reload, damit er NICHT mehr anreichert.
+    sniMap.current = new Map();
+    setSniError(null);
+    ladeTraffic(false);
+  }, [ladeTraffic]);
+
   // Klick auf eine Zeile: wählt die App (name kann null sein -> Sentinel).
   const handleSelect = (app) => {
     setLookupZiel(null);
@@ -665,6 +808,7 @@ export default function TrafficView({
   return (
     <div className="traffic">
       {zeigePermission && <PermissionHinweis text={permission.error} />}
+      {sniError && <SniHinweis text={sniError} />}
 
       {status === "laedt" && (
         <p className="traffic-state-notice">
@@ -688,6 +832,10 @@ export default function TrafficView({
             refreshing={refreshing}
             refreshInterval={refreshInterval}
             onRefreshIntervalChange={onRefreshIntervalChange}
+            sniAktiv={sniAktiv}
+            sniStartet={sniStartet}
+            onSniStart={handleSniStart}
+            onSniStop={handleSniStop}
           />
           {gewaehlteApp &&
             (lookupZiel ? (

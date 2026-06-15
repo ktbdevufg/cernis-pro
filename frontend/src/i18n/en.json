@@ -171,7 +171,12 @@
       "refresh": "Refresh",
       "refreshIntervalLabel": "Auto-refresh",
       "refreshOff": "Off",
-      "close": "Close"
+      "close": "Close",
+      "sniToggle": "SNI observation",
+      "sniStarting": "starting …",
+      "sniActive": "SNI active",
+      "sniHint": "Shows the real domain names apps request (instead of just the host). Requires elevated privileges.",
+      "sniPermission": "SNI observation requires elevated privileges."
     },
     "lookup": {
       "title": "Look up remote endpoint",
