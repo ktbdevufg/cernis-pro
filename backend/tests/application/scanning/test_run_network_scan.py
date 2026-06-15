@@ -348,6 +348,42 @@ def test_arp_merge_adds_only_ping_silent_hosts() -> None:
     assert disc_done.alive_count == 2
 
 
+def test_arp_merge_skips_phantom_duplicate_of_living_host() -> None:
+    """ARP-Eintrag mit MAC eines lebenden Ping-Hosts ist ein Alias -- kein neues Geraet."""
+    # Realfall: FritzBox per Ping (mac), ARP-Cache haengt eine zweite IP mit
+    # DERSELBEN MAC dran (anderer Gross-/Kleinschreibung) -- ein Cache-Artefakt.
+    ping_host = DiscoveredHost(ip="192.168.0.1", mac="AA:BB:CC:DD:EE:FF", rtt_ms=1.0)
+    discovery = _FakeDiscovery({"192.168.0.0/24": [ping_host]})
+    arp = _FakeArpTable(
+        {
+            "192.168.0.202": "aa:bb:cc:dd:ee:ff",  # gleiche MAC, andere IP -> Phantom, skip
+        }
+    )
+    use_case, _, _ = _make_use_case(discovery=discovery, arp_table=arp)
+
+    config = ScanConfig(
+        cidrs=("192.168.0.0/24",),
+        port_scan=False,
+        mdns_scan=False,
+        ssdp_scan=False,
+        resolve_hostnames=False,
+    )
+    events = _run(use_case, config)
+
+    found = [e for e in events if isinstance(e, HostFound)]
+    # Nur der Ping-Host -- das Phantom-Duplikat erscheint NICHT.
+    assert {f.ip for f in found} == {"192.168.0.1"}
+    assert "192.168.0.202" not in {f.ip for f in found}
+
+    # alive_count enthaelt das Phantom NICHT.
+    disc_done = next(
+        e
+        for e in events
+        if isinstance(e, PhaseChanged) and e.phase == "discovery" and e.status == "done"
+    )
+    assert disc_done.alive_count == 1
+
+
 def test_arp_host_runs_through_enrich() -> None:
     """Der ARP-only-Host laeuft wie ein Ping-Host durch die Enrich-Phase."""
     discovery = _FakeDiscovery({"10.0.0.0/24": []})  # kein Ping-Host

@@ -334,10 +334,23 @@ class RunNetworkScan:
         # Vertrag durchzureichen waere ein grosser Eingriff fuer eine Mikro-
         # Optimierung. Nur ARP-ONLY-Hosts werden angehaengt; Ping-Hosts haben ihre
         # MAC schon -- kein Doppel, kein MAC-Nachtrag (Altcode-treu).
+        # MACs aller bereits gefundenen LEBENDEN Hosts (Ping/Fritz -- alles ausser
+        # ARP-Merge selbst). Eine MAC = ein physisches Geraet: ein ARP-Eintrag,
+        # dessen MAC schon einem per Ping gefundenen Host gehoert, ist ein
+        # Cache-Artefakt/Alias (z.B. FritzBox-IP + zweite IP mit derselben MAC im
+        # Neighbor-Cache) -- kein neues Geraet. Case-insensitiv, da ARP-Cache und
+        # Discovery die MAC unterschiedlich gross schreiben koennen.
+        belegte_macs = {
+            host.mac.lower() for host in discovered if host.mac and host.source != "arp"
+        }
         for arp_ip, arp_mac in (await self._arp_table.get_arp_table()).items():
             if arp_ip in discovered_ips:
                 continue
             if not _in_any_cidr(arp_ip, config.cidrs):
+                continue
+            # Phantom-Duplikat: MAC gehoert schon einem lebenden Ping/Fritz-Host.
+            # Leere ARP-MAC ist kein Match (``arp_mac and`` deckt das ab).
+            if arp_mac and arp_mac.lower() in belegte_macs:
                 continue
             # Bewusste Abweichung vom Altcode (Entscheidung 4A): KEIN Zweit-Ping zum
             # RTT-Messen. Ein ARP-only-Host hat per Definition gerade NICHT auf Ping
