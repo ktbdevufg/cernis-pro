@@ -3,14 +3,17 @@
 // gewählten Geräts in drei Abschnitten — das Wichtigste zuerst: Identität,
 // offene Ports, Gerätenotizen.
 //
-// Die Komponente kennt nur ihre Props (geraet, onClose). Sie hält keinen
-// echten Zustand: die Notizfelder sind optisch vollständig, ihre Werte sind
-// vorerst Platzhalter aus dem Mock. Speichern und Port-Nachschlagen rufen
-// reine Platzhalter-Handler.
+// Die Komponente kennt ihre Props (geraet, onClose, onGespeichert). Die drei
+// Notizfelder (label/tags/notes) sind controlled und werden per
+// PUT /api/devices/{mac} gespeichert; bei Erfolg meldet onGespeichert das
+// aktualisierte View-Gerät nach oben. Identität, Ports und Port-Nachschlagen
+// bleiben unverändert (Nachschlagen weiter Platzhalter).
 
 import { Fingerprint, Network, StickyNote, X } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { tagsAusText, updateDeviceMeta } from "../api/devices.js";
 import "./ScanDetailPanel.css";
 
 // Eine Feld-Zeile: Label links, Wert rechts. mono tönt den Wert monospace.
@@ -31,11 +34,30 @@ function FeldZeile({ label, wert, mono }) {
   );
 }
 
-export default function ScanDetailPanel({ geraet, onClose }) {
+export default function ScanDetailPanel({ geraet, onClose, onGespeichert }) {
   const { t } = useTranslation();
 
   // Kopf: Gerätename/Hostname, fällt auf IP zurück, wenn kein Hostname.
   const titel = geraet.hostname || geraet.ip;
+
+  // Controlled Notizfelder. tagsWert ist der ROHE kommagetrennte Text (erst beim
+  // Speichern in ein Array zerlegt). Initial aus dem gewählten Gerät.
+  const [labelWert, setLabelWert] = useState(geraet.label || "");
+  const [tagsWert, setTagsWert] = useState((geraet.tags || []).join(", "));
+  const [notesWert, setNotesWert] = useState(geraet.notes || "");
+  // Speicher-Status: "idle" | "speichert" | "ok" | "fehler".
+  const [status, setStatus] = useState("idle");
+
+  // Gerätewechsel: alle drei Felder neu aus dem Gerät setzen (sonst bleiben
+  // alte Eingaben stehen). Status zurück auf idle.
+  useEffect(() => {
+    setLabelWert(geraet.label || "");
+    setTagsWert((geraet.tags || []).join(", "));
+    setNotesWert(geraet.notes || "");
+    setStatus("idle");
+    // Abhängig allein von der MAC: ein anderes Gerät heißt neue Initialwerte.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [geraet.mac]);
 
   // Statuszeile in Sprache (nicht Ampel): neu vs. bekannt, notable dezent.
   const statusKlasse = geraet.isNew
@@ -51,9 +73,25 @@ export default function ScanDetailPanel({ geraet, onClose }) {
     void port;
   };
 
-  // TEMP: Speichern ist Platzhalter — wird mit echter API verdrahtet.
-  const handleSpeichern = () => {
-    // Bewusst ohne Funktion.
+  // Speichert die drei Notizfelder per PUT /api/devices/{mac}. tagsWert wird
+  // erst hier in ein Array zerlegt. Bei Erfolg meldet onGespeichert das
+  // aktualisierte View-Gerät nach oben; Fehler werden nicht verschluckt.
+  const handleSpeichern = async () => {
+    setStatus("speichert");
+    try {
+      const aktualisiert = await updateDeviceMeta(geraet.mac, {
+        label: labelWert,
+        tags: tagsAusText(tagsWert),
+        notes: notesWert,
+      });
+      setStatus("ok");
+      if (onGespeichert) {
+        onGespeichert(aktualisiert);
+      }
+    } catch (fehler) {
+      setStatus("fehler");
+      console.error("Speichern der Gerätenotizen fehlgeschlagen:", fehler);
+    }
   };
 
   return (
@@ -191,7 +229,8 @@ export default function ScanDetailPanel({ geraet, onClose }) {
               <input
                 type="text"
                 className="scan-detail__input"
-                defaultValue={geraet.label || ""}
+                value={labelWert}
+                onChange={(e) => setLabelWert(e.target.value)}
                 placeholder={t(
                   "beobachten.scan.detail.notes.labelPlaceholder",
                 )}
@@ -205,7 +244,8 @@ export default function ScanDetailPanel({ geraet, onClose }) {
               <input
                 type="text"
                 className="scan-detail__input"
-                defaultValue={(geraet.tags || []).join(", ")}
+                value={tagsWert}
+                onChange={(e) => setTagsWert(e.target.value)}
                 placeholder={t("beobachten.scan.detail.notes.tagsPlaceholder")}
               />
             </label>
@@ -217,21 +257,26 @@ export default function ScanDetailPanel({ geraet, onClose }) {
               <textarea
                 className="scan-detail__textarea"
                 rows={4}
-                defaultValue={geraet.notes || ""}
+                value={notesWert}
+                onChange={(e) => setNotesWert(e.target.value)}
                 placeholder={t("beobachten.scan.detail.notes.notesPlaceholder")}
               />
             </label>
 
-            {/* TEMP: Speichern ist Platzhalter — wird mit echter API verdrahtet. */}
             <button
               type="button"
               className="scan-detail__save"
               onClick={handleSpeichern}
+              disabled={status === "speichert"}
             >
               {t("beobachten.scan.detail.notes.save")}
             </button>
             <p className="scan-detail__save-hint">
-              {t("beobachten.scan.detail.notes.saveHint")}
+              {status === "ok"
+                ? t("beobachten.scan.detail.notes.saveOk")
+                : status === "fehler"
+                  ? t("beobachten.scan.detail.notes.saveError")
+                  : t("beobachten.scan.detail.notes.saveHint")}
             </p>
           </div>
         </section>

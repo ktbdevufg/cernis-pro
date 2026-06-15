@@ -148,7 +148,9 @@
           "notes": "Notes",
           "notesPlaceholder": "Free note about this device",
           "save": "Save",
-          "saveHint": "Saving follows with the data integration."
+          "saveHint": "Saving follows with the data integration.",
+          "saveOk": "Saved.",
+          "saveError": "Save failed."
         }
       }
     },

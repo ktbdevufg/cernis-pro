@@ -86,3 +86,33 @@ export async function apiPost(path, body) {
 
   return response.json();
 }
+
+// PUT auf einen relativen API-Pfad mit JSON-Body. Gleiche Fehler-Form wie
+// apiPost (ApiError mit status/message). body wird als JSON serialisiert und mit
+// Content-Type application/json gesendet. Bei !response.ok ODER Netzfehler ->
+// ApiError; bei ok -> das geparste JSON.
+export async function apiPut(path, body) {
+  let response;
+  try {
+    response = await fetch(path, {
+      method: "PUT",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+  } catch (ursache) {
+    // Netzfehler (Server nicht erreichbar, DNS, Abbruch o. Ä.): kein HTTP-Status.
+    throw new ApiError(ursache?.message ?? "Netzwerkfehler", null);
+  }
+
+  if (!response.ok) {
+    throw new ApiError(
+      `Unerwarteter HTTP-Status ${response.status}`,
+      response.status,
+    );
+  }
+
+  return response.json();
+}

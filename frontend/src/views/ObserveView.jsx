@@ -109,6 +109,10 @@ function ScanInhalt() {
         if (abgebrochen) {
           return;
         }
+        // Merge-Puffer (Ref) mit dem vorgeladenen Scan füllen, damit ein
+        // späteres Notizen-Speichern (handleGespeichert) das Gerät nach MAC
+        // findet — auch ohne laufenden Live-Scan.
+        geraeteRef.current = new Map(detail.geraete.map((g) => [g.mac, g]));
         setGeraete(detail.geraete);
         setLetzterScan({
           scannedAt: detail.scannedAt,
@@ -254,6 +258,28 @@ function ScanInhalt() {
     setGewaehlteMac((aktuell) =>
       aktuell === geraet.mac ? null : geraet.mac,
     );
+  };
+
+  // Naht nach dem Speichern der Notizen (ScanDetailPanel -> onGespeichert):
+  // patcht NUR die kuratierten Felder (label/tags/notes/isKnown) in das
+  // bestehende Listen-Gerät gleicher MAC. Die Scan-Felder (ports, pingMs,
+  // additionalIps, icon …) der Liste bleiben erhalten — kein Komplett-Ersatz.
+  // Auch der Merge-Puffer (Ref) wird mitgezogen, damit ein späteres
+  // setGeraete aus der Ref die Patches nicht überschreibt.
+  const handleGespeichert = (aktualisiert) => {
+    const vorhanden = geraeteRef.current.get(aktualisiert.mac);
+    if (!vorhanden) {
+      return;
+    }
+    const gepatcht = {
+      ...vorhanden,
+      label: aktualisiert.label,
+      tags: aktualisiert.tags,
+      notes: aktualisiert.notes,
+      isKnown: aktualisiert.isKnown,
+    };
+    geraeteRef.current.set(aktualisiert.mac, gepatcht);
+    setGeraete([...geraeteRef.current.values()]);
   };
 
   const gewaehltesGeraet =
@@ -413,6 +439,7 @@ function ScanInhalt() {
                 key={gewaehltesGeraet.mac}
                 geraet={gewaehltesGeraet}
                 onClose={() => setGewaehlteMac(null)}
+                onGespeichert={handleGespeichert}
               />
             )}
           </div>

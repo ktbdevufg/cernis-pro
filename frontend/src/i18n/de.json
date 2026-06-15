@@ -148,7 +148,9 @@
           "notes": "Notizen",
           "notesPlaceholder": "Freie Notiz zu diesem Gerät",
           "save": "Speichern",
-          "saveHint": "Speichern folgt mit der Datenanbindung."
+          "saveHint": "Speichern folgt mit der Datenanbindung.",
+          "saveOk": "Gespeichert.",
+          "saveError": "Speichern fehlgeschlagen."
         }
       }
     },
