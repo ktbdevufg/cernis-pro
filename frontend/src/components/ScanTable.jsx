@@ -23,6 +23,7 @@ import {
   Speaker,
   Thermometer,
 } from "lucide-react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import "./ScanTable.css";
@@ -47,6 +48,13 @@ const DEVICE_ICONS = {
 // Wie viele Port-Chips voll angezeigt werden, bevor "+N" angehängt wird.
 const MAX_PORT_CHIPS = 5;
 
+// Abbildung sortKey -> Feld am Geräte-Objekt für die alphabetischen Spalten.
+const ALPHA_FELD = {
+  vendor: "vendor",
+  hostname: "hostname",
+  os: "osGuess",
+};
+
 // Sortiert nach IPv4 (numerisch je Oktett, nicht lexikografisch).
 function nachIpv4(a, b) {
   const oktette = (ip) => ip.split(".").map((teil) => Number.parseInt(teil, 10));
@@ -58,6 +66,38 @@ function nachIpv4(a, b) {
     }
   }
   return 0;
+}
+
+// Ist der Wert leer (null/undefined/leerer String)? Leerwerte sortieren immer
+// ans Ende, unabhängig von der Richtung.
+function istLeer(wert) {
+  return wert === null || wert === undefined || wert === "";
+}
+
+// Alphabetischer, lokaleunabhängig stabiler Vergleich für vendor/hostname/os.
+// Leerwerte landen stets unten; desc kehrt nur die Reihenfolge der nicht-leeren
+// Werte um.
+function nachAlpha(feld, sortDir) {
+  return (a, b) => {
+    const links = a[feld];
+    const rechts = b[feld];
+    const linksLeer = istLeer(links);
+    const rechtsLeer = istLeer(rechts);
+    if (linksLeer && rechtsLeer) {
+      return 0;
+    }
+    if (linksLeer) {
+      return 1;
+    }
+    if (rechtsLeer) {
+      return -1;
+    }
+    const cmp = String(links ?? "").localeCompare(String(rechts ?? ""), undefined, {
+      sensitivity: "base",
+      numeric: true,
+    });
+    return sortDir === "desc" ? -cmp : cmp;
+  };
 }
 
 // Port-Chips: bis MAX_PORT_CHIPS einzeln, Rest als "+N" zusammengefasst.
@@ -170,13 +210,44 @@ function GeraetZeile({ geraet, onSelect, selected }) {
 export default function ScanTable({ geraete, onSelect, selectedMac }) {
   const { t } = useTranslation();
 
-  // "Auffälliges zuerst": zwei Gruppen, je nach IPv4 sortiert.
-  const auffaellig = geraete
-    .filter((g) => g.isNew || g.notable)
-    .sort(nachIpv4);
-  const bekannt = geraete
-    .filter((g) => !g.isNew && !g.notable)
-    .sort(nachIpv4);
+  // Aktive Spaltensortierung. Wirkt INNERHALB jeder Sektion, nicht über sie
+  // hinweg. Start: IP aufsteigend.
+  const [sortKey, setSortKey] = useState("ip");
+  const [sortDir, setSortDir] = useState("asc");
+
+  // Klick/Tastatur auf einem sortierbaren Spaltenkopf: aktive Spalte kehrt die
+  // Richtung um, inaktive Spalte wird aktiv und startet aufsteigend.
+  const sortiereNach = (key) => {
+    if (key === sortKey) {
+      setSortDir((dir) => (dir === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+  };
+
+  // Tastaturbedienung: Enter/Space lösen denselben Sort aus wie ein Klick.
+  const beiTaste = (event, key) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      sortiereNach(key);
+    }
+  };
+
+  // Zentrale Sortierung nach aktuellem sortKey/sortDir. .slice() schützt vor
+  // In-Place-Mutation der Prop. IP nutzt weiterhin nachIpv4 (desc kehrt um).
+  const sortiere = (liste) => {
+    if (sortKey === "ip") {
+      return liste
+        .slice()
+        .sort((a, b) => (sortDir === "desc" ? -nachIpv4(a, b) : nachIpv4(a, b)));
+    }
+    return liste.slice().sort(nachAlpha(ALPHA_FELD[sortKey], sortDir));
+  };
+
+  // "Auffälliges zuerst": zwei Gruppen, je nach aktiver Sortierung geordnet.
+  const auffaellig = sortiere(geraete.filter((g) => g.isNew || g.notable));
+  const bekannt = sortiere(geraete.filter((g) => !g.isNew && !g.notable));
 
   // Eine Tabellen-Sektion mit Zwischenüberschrift (als volle Zeile).
   const renderSektion = (titel, liste) => {
@@ -212,18 +283,94 @@ export default function ScanTable({ geraete, onSelect, selectedMac }) {
                 {t("beobachten.scan.columns.status")}
               </span>
             </th>
-            <th className="scan-table__th">{t("beobachten.scan.columns.ip")}</th>
-            <th className="scan-table__th">{t("beobachten.scan.columns.mac")}</th>
-            <th className="scan-table__th">
-              {t("beobachten.scan.columns.vendor")}
+            <th
+              className="scan-table__th scan-table__th--sortierbar"
+              role="button"
+              tabIndex={0}
+              aria-sort={
+                sortKey === "ip"
+                  ? sortDir === "asc"
+                    ? "ascending"
+                    : "descending"
+                  : "none"
+              }
+              onClick={() => sortiereNach("ip")}
+              onKeyDown={(event) => beiTaste(event, "ip")}
+            >
+              {t("beobachten.scan.columns.ip")}
+              {sortKey === "ip" && (
+                <span className="scan-table__sort-pfeil" aria-hidden="true">
+                  {sortDir === "asc" ? "↑" : "↓"}
+                </span>
+              )}
             </th>
-            <th className="scan-table__th">
+            <th className="scan-table__th">{t("beobachten.scan.columns.mac")}</th>
+            <th
+              className="scan-table__th scan-table__th--sortierbar"
+              role="button"
+              tabIndex={0}
+              aria-sort={
+                sortKey === "vendor"
+                  ? sortDir === "asc"
+                    ? "ascending"
+                    : "descending"
+                  : "none"
+              }
+              onClick={() => sortiereNach("vendor")}
+              onKeyDown={(event) => beiTaste(event, "vendor")}
+            >
+              {t("beobachten.scan.columns.vendor")}
+              {sortKey === "vendor" && (
+                <span className="scan-table__sort-pfeil" aria-hidden="true">
+                  {sortDir === "asc" ? "↑" : "↓"}
+                </span>
+              )}
+            </th>
+            <th
+              className="scan-table__th scan-table__th--sortierbar"
+              role="button"
+              tabIndex={0}
+              aria-sort={
+                sortKey === "hostname"
+                  ? sortDir === "asc"
+                    ? "ascending"
+                    : "descending"
+                  : "none"
+              }
+              onClick={() => sortiereNach("hostname")}
+              onKeyDown={(event) => beiTaste(event, "hostname")}
+            >
               {t("beobachten.scan.columns.hostname")}
+              {sortKey === "hostname" && (
+                <span className="scan-table__sort-pfeil" aria-hidden="true">
+                  {sortDir === "asc" ? "↑" : "↓"}
+                </span>
+              )}
             </th>
             <th className="scan-table__th">
               {t("beobachten.scan.columns.ports")}
             </th>
-            <th className="scan-table__th">{t("beobachten.scan.columns.os")}</th>
+            <th
+              className="scan-table__th scan-table__th--sortierbar"
+              role="button"
+              tabIndex={0}
+              aria-sort={
+                sortKey === "os"
+                  ? sortDir === "asc"
+                    ? "ascending"
+                    : "descending"
+                  : "none"
+              }
+              onClick={() => sortiereNach("os")}
+              onKeyDown={(event) => beiTaste(event, "os")}
+            >
+              {t("beobachten.scan.columns.os")}
+              {sortKey === "os" && (
+                <span className="scan-table__sort-pfeil" aria-hidden="true">
+                  {sortDir === "asc" ? "↑" : "↓"}
+                </span>
+              )}
+            </th>
             <th className="scan-table__th scan-table__th--ping">
               {t("beobachten.scan.columns.ping")}
             </th>

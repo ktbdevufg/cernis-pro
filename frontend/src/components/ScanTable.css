@@ -234,3 +234,25 @@
 .scan-table__ports-leer {
   color: var(--color-text-tert);
 }
+
+/* Sortierbare Spaltenköpfe (IP, Hersteller, Hostname, OS). */
+.scan-table__th--sortierbar {
+  cursor: pointer;
+  user-select: none;
+}
+
+.scan-table__th--sortierbar:hover {
+  color: var(--color-accent);
+}
+
+.scan-table__th--sortierbar:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
+}
+
+/* Dezenter Richtungs-Indikator hinter dem Spaltentext. */
+.scan-table__sort-pfeil {
+  margin-left: 0.35em;
+  opacity: 0.7;
+  font-size: 0.85em;
+}
