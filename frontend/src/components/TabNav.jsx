@@ -4,7 +4,7 @@
 // spitz auslaufende Unterlinie in Akzentfarbe (gefüllter SVG-Pfad).
 // Bekommt aktiven Reiter + onChange als Props.
 
-import { Activity, FileOutput, LayoutDashboard, Search } from "lucide-react";
+import { Activity, FileOutput, LayoutDashboard, Router, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import "./TabNav.css";
@@ -15,6 +15,7 @@ export const REITER = [
   { id: "observe", icon: Activity },
   { id: "investigate", icon: Search },
   { id: "export", icon: FileOutput },
+  { id: "devices", icon: Router },
 ];
 
 export default function TabNav({ active, onChange }) {

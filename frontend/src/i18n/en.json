@@ -33,7 +33,8 @@
     "overview": "Overview",
     "observe": "Observe",
     "investigate": "Investigate",
-    "export": "Export"
+    "export": "Export",
+    "devices": "Devices"
   },
   "placeholder": {
     "inProgress": "in progress"
@@ -301,6 +302,107 @@
         "title": "Create report",
         "subtitle": "Compile observations and findings into a report.",
         "locked": ""
+      }
+    }
+  },
+  "geraete": {
+    "cards": {
+      "fritzbox": {
+        "title": "FRITZ!Box",
+        "subtitle": "WAN, Wi-Fi, connected devices and events of the FRITZ!Box."
+      }
+    },
+    "fritzbox": {
+      "connectTitle": "Connect to FRITZ!Box",
+      "connectIntro": "Signing in requires a FRITZ!Box user with TR-064 access.",
+      "addressLabel": "Address",
+      "userLabel": "User (optional)",
+      "passwordLabel": "Password",
+      "passwordIsSet": "Password stored – leave empty to keep it.",
+      "connectButton": "Connect",
+      "connectHint": "Many FRITZ!Box models allow local access without a password. When using a FRITZ!Box user account, TR-064 must be enabled there.",
+      "authHint": "Sign-in failed. Please check user/password and TR-064 access.",
+      "notConnected": "No FRITZ!Box is currently connected.",
+      "refresh": "Refresh",
+      "edit": "Edit",
+      "logout": "Disconnect",
+      "loading": "Loading …",
+      "loadError": "FRITZ!Box data could not be loaded.",
+      "unitMbit": "{{value}} Mbit/s",
+      "tabs": {
+        "overview": "Overview",
+        "wlanClients": "Wi-Fi devices",
+        "log": "Events",
+        "portForwardings": "Port forwardings"
+      },
+      "wan": {
+        "title": "WAN / Internet",
+        "status": "Status",
+        "connected": "Connected",
+        "disconnected": "Disconnected",
+        "ipExternal": "External IPv4",
+        "ipExternalV6": "External IPv6",
+        "uptime": "Uptime",
+        "sent": "Sent",
+        "recv": "Received"
+      },
+      "link": {
+        "title": "Fiber link",
+        "downstream": "Downstream",
+        "upstream": "Upstream"
+      },
+      "dsl": {
+        "title": "DSL",
+        "sync": "Sync",
+        "syncYes": "In sync",
+        "syncNo": "No sync",
+        "downstream": "Downstream",
+        "upstream": "Upstream",
+        "snr": "SNR (D/U)",
+        "snrValue": "{{down}} / {{up}} dB",
+        "attn": "Attenuation (D/U)",
+        "attnValue": "{{down}} / {{up}} dB"
+      },
+      "wlan": {
+        "title24": "Wi-Fi 2.4 GHz",
+        "title5": "Wi-Fi 5 GHz",
+        "status": "Status",
+        "on": "Active",
+        "off": "Off",
+        "ssid": "SSID",
+        "channel": "Channel",
+        "clients": "Devices"
+      },
+      "device": {
+        "title": "Device",
+        "model": "Model",
+        "firmware": "Firmware",
+        "totalHosts": "Known hosts",
+        "wlanClients": "Wi-Fi devices total"
+      },
+      "clients": {
+        "hostname": "Hostname",
+        "ip": "IP",
+        "mac": "MAC",
+        "band": "Band",
+        "signal": "Signal (dBm)",
+        "speed": "Speed (Mbit/s)",
+        "empty": "No Wi-Fi devices connected."
+      },
+      "log": {
+        "timestamp": "Time",
+        "message": "Event",
+        "empty": "No events available."
+      },
+      "forwardings": {
+        "enabled": "Status",
+        "on": "Active",
+        "off": "Off",
+        "description": "Description",
+        "protocol": "Protocol",
+        "external": "External",
+        "internal": "Internal",
+        "empty": "No port forwardings configured."
       }
     }
   },

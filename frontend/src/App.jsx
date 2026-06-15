@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 
 import AppHeader from "./components/AppHeader.jsx";
 import TabNav, { REITER } from "./components/TabNav.jsx";
+import DevicesView from "./views/DevicesView.jsx";
 import ExportView from "./views/ExportView.jsx";
 import InvestigateView from "./views/InvestigateView.jsx";
 import ObserveView from "./views/ObserveView.jsx";
@@ -97,6 +98,7 @@ export default function App() {
             )}
             {activeTab === "investigate" && <InvestigateView />}
             {activeTab === "export" && <ExportView />}
+            {activeTab === "devices" && <DevicesView />}
           </>
         )}
       </main>
