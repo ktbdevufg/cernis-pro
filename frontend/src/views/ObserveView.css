@@ -56,3 +56,268 @@
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
+
+/* Während eines laufenden Scans: Button gedämpft + nicht klickbar. */
+.observe__scan-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Rechte Seite der Toolbar: Fortschritt + Button nebeneinander. */
+.observe__toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Dezenter Fortschritt: Text + schmaler Balken im Stil der traffic-Bar. */
+.observe__progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.observe__progress-text {
+  font-size: 13px;
+  color: var(--color-text-sec);
+}
+
+.observe__progress-bar {
+  width: 80px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--color-border);
+  overflow: hidden;
+}
+
+.observe__progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--color-accent);
+}
+
+/* Ruhiger Hinweis-Streifen (Scan-Fehler): neutraler Ton, kein Alarm.
+   Stil wie traffic-permission, eigene Naht. */
+.observe__hinweis {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex-shrink: 0;
+  padding: 9px 12px;
+  font-size: 12px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.observe__hinweis-title {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-tert);
+}
+
+.observe__hinweis-text {
+  color: var(--color-text-sec);
+}
+
+/* Dezente Anzeige des zuletzt geladenen/abgeschlossenen Scans. */
+.observe__lastscan {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+/* Ruhiger Leer-Hinweis, wenn (noch) kein Scan vorliegt. */
+.observe__leer {
+  margin: 0;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--color-text-sec);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* Linke Seite der Toolbar: Interface-Auswahl + CIDR-Feld + Geräteanzahl. */
+.observe__toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* Interface-Dropdown: ruhige Card-Fläche im bestehenden Toolbar-Stil. */
+.observe__iface-select {
+  padding: 6px 10px;
+  font-size: 13px;
+  color: var(--color-text);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  max-width: 280px;
+}
+
+.observe__iface-select:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.observe__iface-select:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* CIDR-Eingabe: monospace, damit das Netz klar lesbar bleibt. */
+.observe__cidr-input {
+  width: 160px;
+  padding: 6px 10px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+  font-size: 13px;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.observe__cidr-input:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.observe__cidr-input:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Phasen-Zeile unter der Toolbar: drei Punkte+Labels, nur während des Scans. */
+.observe__phases {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-shrink: 0;
+  padding: 4px 2px;
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--color-text-tert);
+}
+
+.observe__phase {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.observe__phase-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--color-border);
+  flex-shrink: 0;
+}
+
+/* Aktive Phase: hervorgehoben im Akzentton, der Punkt pulsiert dezent. */
+.observe__phase--aktiv {
+  color: var(--color-accent);
+}
+
+.observe__phase--aktiv .observe__phase-dot {
+  background: var(--color-accent);
+  box-shadow: 0 0 6px var(--color-accent);
+  animation: observe-phase-puls 1.4s ease-in-out infinite;
+}
+
+/* Erledigte Phase: gedimmt-grün. */
+.observe__phase--fertig {
+  color: var(--color-ok-text);
+}
+
+.observe__phase--fertig .observe__phase-dot {
+  background: var(--color-ok-text);
+}
+
+@keyframes observe-phase-puls {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* Scan-Bereich: Bezugsrahmen (position relative) für das Sweep-Overlay. */
+.observe__scan-area {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.observe__scan-area > .observe__split {
+  flex: 1;
+}
+
+/* Scan-Sweep: exakte v1-Lösung (Tag v1.0.0-final). Der Strich koppelt seine
+   Bewegung an die Viewport-Höhe (translateY bis 200vh), NICHT an die wachsende
+   Tabellenhöhe -- darum springt nichts, wenn während des Scans neue Geräte
+   aufpoppen. Rein visuell, fängt keine Klicks ab.
+
+   .scan-overlay liegt über dem Datenbereich (Tabelle) und klippt den Strich.
+   .scan-line ist der eigentliche 1px-Strich, animiert wird nur transform. */
+.scan-overlay {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 50;
+}
+
+.scan-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--color-accent),
+    transparent
+  );
+  opacity: 0.3;
+  animation: scan-line 3s ease-in-out infinite;
+  will-change: transform;
+}
+
+/* Vier Stops exakt nach v1; die 200vh-Strecke ist entscheidend. */
+@keyframes scan-line {
+  0% {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  90% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(200vh);
+    opacity: 0;
+  }
+}
+
+/* Bewegungsreduktion respektieren: kein Lauf, kein Puls. */
+@media (prefers-reduced-motion: reduce) {
+  .scan-line {
+    animation: none;
+  }
+  .observe__phase--aktiv .observe__phase-dot {
+    animation: none;
+  }
+}

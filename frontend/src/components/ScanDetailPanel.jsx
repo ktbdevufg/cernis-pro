@@ -111,9 +111,11 @@ export default function ScanDetailPanel({ geraet, onClose }) {
               wert={
                 geraet.pingMs === null || geraet.pingMs === undefined
                   ? "—"
-                  : t("beobachten.scan.detail.identity.pingUnit", {
-                      value: geraet.pingMs,
-                    })
+                  : geraet.pingMs === 0
+                    ? t("beobachten.scan.pingSubMs")
+                    : t("beobachten.scan.detail.identity.pingUnit", {
+                        value: geraet.pingMs,
+                      })
               }
               mono
             />

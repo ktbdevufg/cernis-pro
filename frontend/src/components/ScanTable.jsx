@@ -157,7 +157,11 @@ function GeraetZeile({ geraet, onSelect, selected }) {
         {geraet.osGuess || "—"}
       </td>
       <td className="scan-table__cell scan-table__cell--ping scan-table__mono">
-        {geraet.pingMs === null ? "—" : geraet.pingMs}
+        {geraet.pingMs === null || geraet.pingMs === undefined
+          ? "—"
+          : geraet.pingMs === 0
+            ? t("beobachten.scan.pingSubMs")
+            : t("beobachten.scan.pingUnit", { value: geraet.pingMs })}
       </td>
     </tr>
   );
