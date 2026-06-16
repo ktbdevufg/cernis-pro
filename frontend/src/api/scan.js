@@ -99,6 +99,11 @@ export function mappeHost(host) {
     hostname: host.hostname ?? "",
     osGuess: host.os_guess ?? "",
     ports,
+    // mDNS-Dienst-Typen (roh, z.B. "_googlecast._tcp.local."). Die Anzeige kürzt
+    // sie lesbar. Leere Liste, wenn keine mDNS-Dienste erkannt.
+    mdnsServices: (host.mdns_services ?? []).map((s) => s.type).filter(Boolean),
+    // NDI-Videostream-Quelle (eigenes Signal, eigenes Badge in der Anzeige).
+    isNdi: host.is_ndi === true,
     pingMs: typeof host.rtt_ms === "number" ? Math.round(host.rtt_ms) : null,
     // isNew aus der Baseline: das Backend liefert is_known (Vorzustand VOR record_seen).
     // is_known === false -> echter Neuzugang in diesem Scan. Beim Folgescan ist die MAC
@@ -143,6 +148,8 @@ export function mappeHostFound(frame) {
     hostname: "",
     osGuess: "",
     ports: [],
+    mdnsServices: [],
+    isNdi: false,
     pingMs: typeof frame.rtt_ms === "number" ? Math.round(frame.rtt_ms) : null,
     // Es gibt derzeit keine verlässliche "neu/auffällig"-Quelle im Scan-Wire
     // (is_unknown bedeutet backendseitig "per MAC identifiziert", NICHT "neu im

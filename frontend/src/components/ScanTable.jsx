@@ -64,19 +64,20 @@ const ALPHA_FELD = {
 
 // Umschaltbare Spalten-IDs in fester Anzeige-Reihenfolge. ipv6 ist NEU und
 // standardmäßig AUS — der Default unten lässt es bewusst weg.
-const UMSCHALTBARE_SPALTEN = [
+export const UMSCHALTBARE_SPALTEN = [
   "ipv6",
   "mac",
   "vendor",
   "hostname",
   "ports",
+  "mdns",
   "os",
   "ping",
 ];
 
-// Default-Sichtbarkeit: alle umschaltbaren Spalten AUSSER ipv6.
+// Default-Sichtbarkeit: alle umschaltbaren Spalten AUSSER ipv6 und mdns.
 export const DEFAULT_SICHTBARE_SPALTEN = UMSCHALTBARE_SPALTEN.filter(
-  (id) => id !== "ipv6",
+  (id) => id !== "ipv6" && id !== "mdns",
 );
 
 // Formatiert den Ping-Wert (ms) für die Anzeige. Unverändert aus der bisherigen
@@ -184,6 +185,13 @@ function baueSpalten() {
       render: (geraet) => <PortChips ports={geraet.ports} />,
     },
     {
+      id: "mdns",
+      sortKey: null,
+      render: (geraet) => (
+        <MdnsChips services={geraet.mdnsServices} isNdi={geraet.isNdi} />
+      ),
+    },
+    {
       id: "os",
       sortKey: "os",
       tdClass: "scan-table__cell--os",
@@ -266,6 +274,50 @@ function PortChips({ ports }) {
       {sichtbar.map((port) => (
         <span key={`${port.num}/${port.proto}`} className="scan-table__chip">
           {port.num}
+        </span>
+      ))}
+      {rest > 0 && (
+        <span
+          className="scan-table__chip scan-table__chip--mehr"
+          title={t("beobachten.scan.morePortsTitle", { count: rest })}
+        >
+          {t("beobachten.scan.morePorts", { count: rest })}
+        </span>
+      )}
+    </span>
+  );
+}
+
+// Kürzt einen mDNS-Service-Typ auf das lesbare Kernwort:
+// "_googlecast._tcp.local." -> "googlecast", "_pdl-datastream._tcp.local."
+// -> "pdl-datastream". Führenden Unterstrich entfernen, am ersten Punkt
+// abschneiden. Leere/untypische Werte fallen unverändert durch.
+function kuerzeMdnsTyp(typ) {
+  if (!typ) return typ;
+  const ohneUnterstrich = typ.startsWith("_") ? typ.slice(1) : typ;
+  const ersterPunkt = ohneUnterstrich.indexOf(".");
+  return ersterPunkt > 0 ? ohneUnterstrich.slice(0, ersterPunkt) : ohneUnterstrich;
+}
+
+// mDNS/NDI-Zelle: optionales NDI-Badge (hervorgehoben) gefolgt von gekürzten
+// mDNS-Dienst-Chips. Leer -> "—". Begrenzung wie Ports (MAX_PORT_CHIPS) mit
+// "+N"-Rest.
+function MdnsChips({ services, isNdi }) {
+  const { t } = useTranslation();
+  const hatNichts = (!services || services.length === 0) && !isNdi;
+  if (hatNichts) {
+    return <span className="scan-table__ports-leer">—</span>;
+  }
+  const sichtbar = (services ?? []).slice(0, MAX_PORT_CHIPS);
+  const rest = (services ?? []).length - sichtbar.length;
+  return (
+    <span className="scan-table__ports">
+      {isNdi && (
+        <span className="scan-table__chip scan-table__chip--ndi">NDI</span>
+      )}
+      {sichtbar.map((typ) => (
+        <span key={typ} className="scan-table__chip scan-table__chip--mdns">
+          {kuerzeMdnsTyp(typ)}
         </span>
       ))}
       {rest > 0 && (

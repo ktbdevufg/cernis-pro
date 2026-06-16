@@ -106,6 +106,7 @@
         "vendor": "Hersteller",
         "hostname": "Hostname",
         "ports": "Ports",
+        "mdns": "mDNS / NDI",
         "os": "OS",
         "ping": "Ping"
       },

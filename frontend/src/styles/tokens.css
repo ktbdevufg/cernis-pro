@@ -46,6 +46,14 @@
   /* Status-Böppel: satter, leuchtender Grünton (aktiv) bzw. dunkel/gedämpft (inaktiv). */
   --status-aktiv: #16A34A;
   --status-inaktiv: #1F4D32;
+
+  /* mDNS-Chips (lila) und NDI-Badge (orange) — auf Weiß kräftiger für Kontrast. */
+  --chip-mdns-text: #7C3AED;
+  --chip-mdns-bg: rgba(124, 58, 237, 0.08);
+  --chip-mdns-border: rgba(124, 58, 237, 0.25);
+  --chip-ndi-text: #D9531E;
+  --chip-ndi-bg: rgba(255, 107, 53, 0.12);
+  --chip-ndi-border: rgba(255, 107, 53, 0.3);
 }
 
 /* Dunkel */
@@ -82,4 +90,12 @@
   /* Status-Böppel: sattes v1-Grün (aktiv) bzw. sehr dunkel/entsättigt (inaktiv). */
   --status-aktiv: #22C55E;
   --status-inaktiv: #1E3D2A;
+
+  /* mDNS-Chips (v1-Lila) und NDI-Badge (v1-Orange) — Werte 1:1 aus dem alten Frontend. */
+  --chip-mdns-text: #bb86fc;
+  --chip-mdns-bg: rgba(187, 134, 252, 0.1);
+  --chip-mdns-border: rgba(187, 134, 252, 0.3);
+  --chip-ndi-text: #ff6b35;
+  --chip-ndi-bg: rgba(255, 107, 53, 0.15);
+  --chip-ndi-border: rgba(255, 107, 53, 0.3);
 }

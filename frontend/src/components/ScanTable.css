@@ -250,6 +250,19 @@
   border-color: var(--color-border);
 }
 
+.scan-table__chip--ndi {
+  color: var(--chip-ndi-text);
+  background: var(--chip-ndi-bg);
+  border-color: var(--chip-ndi-border);
+  font-weight: 500;
+}
+
+.scan-table__chip--mdns {
+  color: var(--chip-mdns-text);
+  background: var(--chip-mdns-bg);
+  border-color: var(--chip-mdns-border);
+}
+
 .scan-table__ports-leer {
   color: var(--color-text-tert);
 }

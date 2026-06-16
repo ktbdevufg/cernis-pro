@@ -6,25 +6,14 @@
 //
 // Die Komponente ist stateless bzgl. Persistenz: sichtbar (Array der sichtbaren
 // umschaltbaren IDs) kommt als Prop, jede Änderung geht als vollständiges neues
-// Array zurück. Reihenfolge im zurückgegebenen Array folgt SPALTEN_REIHENFOLGE.
+// Array zurück. Reihenfolge im zurückgegebenen Array folgt UMSCHALTBARE_SPALTEN.
 
 import { Columns3 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import "./ColumnManager.css";
-
-// Umschaltbare Spalten in fester Reihenfolge (deckungsgleich mit der Definition
-// in ScanTable). Die Labels kommen aus i18n columns.*.
-const SPALTEN_REIHENFOLGE = [
-  "ipv6",
-  "mac",
-  "vendor",
-  "hostname",
-  "ports",
-  "os",
-  "ping",
-];
+import { UMSCHALTBARE_SPALTEN } from "./ScanTable.jsx";
 
 export default function ColumnManager({ sichtbar, onChange }) {
   const { t } = useTranslation();
@@ -53,7 +42,7 @@ export default function ColumnManager({ sichtbar, onChange }) {
     const neu = sichtbarSet.has(id)
       ? sichtbar.filter((s) => s !== id)
       : [...sichtbar, id];
-    const geordnet = SPALTEN_REIHENFOLGE.filter((s) => neu.includes(s));
+    const geordnet = UMSCHALTBARE_SPALTEN.filter((s) => neu.includes(s));
     onChange(geordnet);
   };
 
@@ -76,7 +65,7 @@ export default function ColumnManager({ sichtbar, onChange }) {
             {t("beobachten.scan.columnManager.title")}
           </span>
           <ul className="column-manager__list">
-            {SPALTEN_REIHENFOLGE.map((id) => (
+            {UMSCHALTBARE_SPALTEN.map((id) => (
               <li key={id} className="column-manager__item">
                 <label className="column-manager__label">
                   <input
