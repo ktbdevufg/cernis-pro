@@ -37,6 +37,14 @@ zurueckgesetzt -- der Test faengt den jeweiligen kritischen Vertrag also wirklic
   (``if not host.is_known or not host.ip:`` statt ``if host.is_known or not host.ip:``,
   sodass BEKANNTE Hosts treffen) -> ``test_rule_b3_bekannter_host_trifft_nicht`` ROT
   (der bekannte Host schlaegt faelschlich an). Zurueckgesetzt.
+* (b2b) host_many_high_ports: in ``_eval_host_port_count`` den Schwellen-Vergleich von
+  ``<=`` auf ``<`` verfaelscht (Off-by-one, ``>=`` statt ``>``) ->
+  ``test_rule_b2b_genau_10_hohe_ports_trifft_nicht`` ROT (genau 10 Ports wuerden
+  faelschlich treffen). Zurueckgesetzt.
+* (b2b) host_many_high_ports: in ``_eval_host_port_count`` die ``port_floor``-Filterung
+  entfernt (``high_ports = set(host.open_ports)`` statt nur ``port > rule.port_floor``)
+  -> ``test_rule_b2b_nur_niedrige_ports_trifft_nicht`` ROT (11 niedrige Ports wuerden
+  faelschlich treffen). Zurueckgesetzt.
 """
 
 import pytest
@@ -331,6 +339,76 @@ def test_rule_b2_host_ohne_ip_wird_uebersprungen() -> None:
     # Leere ip -> kein sinnvolles subject -> uebersprungen, trotz offenem Fernzugriffs-Port.
     snap = Snapshot(hosts=(_host("", open_ports=frozenset({22})),))
     assert evaluate(snap, DEFAULT_RULES) == []
+
+
+# ── (b2b) host_many_high_ports (Host haelt viele hohe Ports offen) ────────────
+
+
+def test_rule_b2b_genau_10_hohe_ports_trifft_nicht() -> None:
+    """Host mit genau 10 hohen Ports (>1024) -> KEIN Treffer (strikt groesser, 10 ist nicht >10).
+
+    MUTATIONSPROBE (durchgefuehrt, ROT bestaetigt, zurueckgesetzt): in
+    ``_eval_host_port_count`` den Schwellen-Vergleich von ``<=`` auf ``<`` verfaelscht
+    (Off-by-one, ``>=`` statt ``>``) -> dieser Test ROT (genau 10 Ports wuerden
+    faelschlich treffen). Zurueckgesetzt.
+    """
+    ports = frozenset(range(2000, 2010))  # 10 hohe Ports
+    snap = Snapshot(hosts=(_host("10.0.1.5", open_ports=ports),))
+    assert evaluate(snap, DEFAULT_RULES) == []
+
+
+def test_rule_b2b_elf_hohe_ports_trifft() -> None:
+    """Host mit 11 hohen Ports (>1024) -> genau EINE Observation, value == "11"."""
+    ports = frozenset(range(2000, 2011))  # 11 hohe Ports
+    snap = Snapshot(hosts=(_host("10.0.1.6", open_ports=ports),))
+    obs = evaluate(snap, DEFAULT_RULES)
+    assert len(obs) == 1
+    assert obs[0].rule_id == "host_many_high_ports"
+    assert obs[0].help_kind == "many_high_ports"
+    assert obs[0].kind == "host_port_count"
+    assert obs[0].severity == "notable"
+    assert obs[0].subject == "10.0.1.6"
+    assert (
+        obs[0].detail == "Host 10.0.1.6 haelt 11 Ports oberhalb 1024 offen -- ungewoehnlich viele."
+    )
+
+
+def test_rule_b2b_nur_niedrige_ports_trifft_nicht() -> None:
+    """Host mit 11 NIEDRIGEN Ports (<=1024) -> KEIN Treffer (port_floor greift).
+
+    MUTATIONSPROBE (durchgefuehrt, ROT bestaetigt, zurueckgesetzt): in
+    ``_eval_host_port_count`` die ``port_floor``-Filterung entfernt
+    (``high_ports = set(host.open_ports)``) -> dieser Test ROT (11 niedrige Ports wuerden
+    faelschlich treffen). Zurueckgesetzt.
+    """
+    ports = frozenset(range(1010, 1021))  # 11 Ports, alle <= 1024
+    snap = Snapshot(hosts=(_host("10.0.1.7", open_ports=ports),))
+    assert evaluate(snap, DEFAULT_RULES) == []
+
+
+def test_rule_b2b_mischung_zaehlt_nur_hohe_ports() -> None:
+    """Host mit 5 niedrigen + 11 hohen Ports -> Treffer, value == "11" (nur hohe zaehlen)."""
+    ports = frozenset(range(100, 105)) | frozenset(range(2000, 2011))  # 5 niedrig + 11 hoch
+    snap = Snapshot(hosts=(_host("10.0.1.8", open_ports=ports),))
+    obs = evaluate(snap, DEFAULT_RULES)
+    assert len(obs) == 1
+    assert obs[0].rule_id == "host_many_high_ports"
+    assert obs[0].subject == "10.0.1.8"
+    assert "11" in obs[0].detail
+
+
+def test_rule_b2b_host_ohne_ip_wird_uebersprungen() -> None:
+    # Leere ip -> kein sinnvolles subject -> uebersprungen, trotz vieler hoher Ports.
+    snap = Snapshot(hosts=(_host("", open_ports=frozenset(range(2000, 2011))),))
+    assert evaluate(snap, DEFAULT_RULES) == []
+
+
+def test_rule_b2b_ein_host_genau_eine_beobachtung() -> None:
+    # Buendelung/Determinismus: ein Host mit vielen hohen Ports -> genau EINE Beobachtung.
+    snap = Snapshot(hosts=(_host("10.0.1.9", open_ports=frozenset(range(2000, 2020))),))
+    obs = [o for o in evaluate(snap, DEFAULT_RULES) if o.rule_id == "host_many_high_ports"]
+    assert len(obs) == 1
+    assert obs[0].subject == "10.0.1.9"
 
 
 # ── (b3) new_host_seen (Geraet taucht erstmals im Netz auf) ───────────────────

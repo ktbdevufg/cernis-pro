@@ -55,6 +55,8 @@ def _apply_rule(rule: Rule, snapshot: Snapshot) -> list[Observation]:
             return _eval_host_remote_port(rule, snapshot)
         case "host_new":
             return _eval_host_new(rule, snapshot)
+        case "host_port_count":
+            return _eval_host_port_count(rule, snapshot)
 
 
 def _eval_process_temp_path(rule: Rule, snapshot: Snapshot) -> list[Observation]:
@@ -195,6 +197,47 @@ def _eval_host_remote_port(rule: Rule, snapshot: Snapshot) -> list[Observation]:
         if not matched:
             continue
         value = ", ".join(str(port) for port in sorted(matched))
+        subject = host.ip
+        out.append(
+            Observation(
+                rule_id=rule.id,
+                severity=rule.severity,
+                title=rule.title,
+                detail=rule.detail_template.format(subject=subject, value=value),
+                help_kind=rule.help_kind,
+                subject=subject,
+                kind=rule.kind,
+            )
+        )
+    return out
+
+
+def _eval_host_port_count(rule: Rule, snapshot: Snapshot) -> list[Observation]:
+    """Treffer je HOST, der ungewoehnlich viele HOHE Ports offen haelt.
+
+    Geraeteseitige Auswertung wie ``_eval_host_remote_port``, aber statt einer festen
+    Portmenge wird hier GEZAEHLT: nur Ports STRIKT GROESSER als ``rule.port_floor``
+    zaehlen (``high_ports = {p for p in host.open_ports if p > rule.port_floor}``), und ein
+    Treffer entsteht nur, wenn deren Anzahl die Schwelle ``rule.threshold`` STRIKT
+    ueberschreitet (Anzahl > threshold, analog ``_eval_pid_connection_count``).
+
+    BUENDELUNG: pro Host genau EINE Beobachtung -- nicht eine je Port. ``value`` ist die
+    ANZAHL der hohen Ports (``str(len(high_ports))``), NICHT die Portliste, passend zur
+    ``detail_template``-Formulierung "{value} Ports oberhalb 1024". ``subject`` ist die
+    Host-ip.
+
+    Hosts ohne ip (leerer String) werden uebersprungen (kein sinnvolles subject).
+    Deterministisch: Hosts in Snapshot-Reihenfolge; die Engine sortiert am Ende ohnehin
+    global nach ``(severity, rule_id, subject)``.
+    """
+    out: list[Observation] = []
+    for host in snapshot.hosts:
+        if not host.ip:
+            continue
+        high_ports = {port for port in host.open_ports if port > rule.port_floor}
+        if len(high_ports) <= rule.threshold:
+            continue
+        value = str(len(high_ports))
         subject = host.ip
         out.append(
             Observation(

@@ -33,6 +33,7 @@ type HelpKind = Literal[
     "remote_access_port",
     "high_connection_count",
     "new_host",
+    "many_high_ports",
 ]
 
 # Drei Stufen der Auffaelligkeit -- analysis urteilt nie. "info" = reine Einordnung,
@@ -53,6 +54,7 @@ type RuleKind = Literal[
     "pid_connection_count",
     "host_remote_port",
     "host_new",
+    "host_port_count",
 ]
 
 
@@ -91,7 +93,14 @@ class Rule:
       Fernzugriffs-Ports). Genutzt von ``kind="connection_remote_port"``.
     * ``threshold`` -- Schwelle fuer die Anzahl aktiver Verbindungen je pid. Genutzt von
       ``kind="pid_connection_count"`` (Treffer, wenn die Anzahl die Schwelle
-      UEBERSCHREITET, also strikt groesser ist).
+      UEBERSCHREITET, also strikt groesser ist). Ebenfalls genutzt von
+      ``kind="host_port_count"`` als Schwelle fuer die Anzahl offener hoher Ports je Host
+      (Treffer bei strikt groesser).
+    * ``port_floor`` -- Port-Untergrenze: nur Ports STRIKT GROESSER als dieser Wert
+      zaehlen; zusammen mit ``threshold`` genutzt von ``kind="host_port_count"`` (Treffer,
+      wenn die Anzahl der Ports > ``port_floor`` die Schwelle ``threshold`` STRIKT
+      ueberschreitet). Default 0 = keine Untergrenze (additiv, bestehende Regeln
+      unberuehrt).
 
     ``title``/``detail_template`` liefern den menschenlesbaren Text der erzeugten
     ``Observation``. ``detail_template`` darf die Platzhalter ``{subject}`` und
@@ -108,6 +117,7 @@ class Rule:
     path_prefixes: tuple[str, ...] = ()
     ports: frozenset[int] = field(default_factory=frozenset)
     threshold: int = 0
+    port_floor: int = 0
 
 
 # Die Start-Regeln als Daten. Schwellen/Portlisten/Pfad-Praefixe sind hier
@@ -167,6 +177,27 @@ DEFAULT_RULES: tuple[Rule, ...] = (
         title="Host hat einen Fernzugriffs-Port offen",
         detail_template="Host {subject} hat einen typischen Fernzugriffs-Port offen ({value}).",
         ports=frozenset({22, 3389, 5800, 5900}),
+    ),
+    # (b2b) Ein HOST, der ungewoehnlich viele HOHE Ports (oberhalb 1024) offen haelt.
+    # Thematisch direkt hinter (b2) gruppiert: beide sehen ein GERAET anhand seiner
+    # offenen Ports (Stand letzter Scan) -- (b2) prueft eine feste Portmenge
+    # (Fernzugriff), diese Regel ZAEHLT die hohen Ports. Fachlogik: NAS/IoT halten legitim
+    # 2-4 hohe Ports offen; >10 wird ungewoehnlich. Eine Regel "alle Ports >1024" waere zu
+    # laut (jedes normale Geraet hat ein paar) -- der ANZAHL-Ansatz faengt das Signal ohne
+    # Laerm. Die Schwelle 10 ist ein LEISER Default mit Sicherheitsabstand zu den 2-4
+    # realer Geraete; spaeter per UI-Dropdown aenderbar (eigener Schnitt). Eigener
+    # ``help_kind`` "many_high_ports" -- viele hohe Ports sind ein eigenes Thema, kein
+    # Fernzugriff.
+    Rule(
+        id="host_many_high_ports",
+        severity="notable",
+        help_kind="many_high_ports",
+        kind="host_port_count",
+        title="Host haelt ungewoehnlich viele hohe Ports offen",
+        detail_template="Host {subject} haelt {value} Ports oberhalb 1024 offen "
+        "-- ungewoehnlich viele.",
+        threshold=10,
+        port_floor=1024,
     ),
     # (b3) Ein HOST, der im Netz ERSTMALS auftaucht ("seit deinem letzten Scan neu
     # dazugekommen"). analysis' erstes GEDAECHTNIS: das "schon gesehen?" kommt als FAKTUM

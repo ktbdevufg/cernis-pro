@@ -43,11 +43,11 @@ def test_builtin_rule_provider_returns_default_rules() -> None:
 
 
 def test_static_help_resolver_covers_all_help_kinds() -> None:
-    """Jeder der fuenf aktuellen HelpKinds -> nicht-leere https-URL (Tabelle deckt GENAU sie ab).
+    """Jeder aktuelle HelpKind -> nicht-leere https-URL (Tabelle deckt GENAU sie ab).
 
     ``HelpKind`` ist eine geschlossene Literal-Union; ein nicht modellierter Wert ist nicht
     testbar. Stattdessen pruefen wir gegen die echten Literal-Werte, dass die Tabelle GENAU
-    diese fuenf abdeckt -- waechst die Union, faellt dieser Test (gewollt: neuer Kind braucht
+    diese abdeckt -- waechst die Union, faellt dieser Test (gewollt: neuer Kind braucht
     eine neue URL).
     """
     resolver = StaticHelpLinkResolver()
@@ -58,6 +58,7 @@ def test_static_help_resolver_covers_all_help_kinds() -> None:
         "remote_access_port",
         "high_connection_count",
         "new_host",
+        "many_high_ports",
     }
     for kind in kinds:
         url = resolver.resolve(kind)

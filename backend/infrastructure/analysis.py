@@ -53,6 +53,7 @@ class StaticHelpLinkResolver:
         "remote_access_port": "https://de.wikipedia.org/wiki/Liste_der_standardisierten_Ports",
         "high_connection_count": "https://de.wikipedia.org/wiki/Netzwerk-Socket",
         "new_host": "https://de.wikipedia.org/wiki/Address_Resolution_Protocol",
+        "many_high_ports": "https://de.wikipedia.org/wiki/Port_(Protokoll)",
     }
 
     def resolve(self, help_kind: HelpKind) -> str:
