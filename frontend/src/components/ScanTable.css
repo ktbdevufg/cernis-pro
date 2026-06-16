@@ -188,6 +188,13 @@
   gap: 8px;
 }
 
+/* IP-Zelle: IP (mono) + "neu"-Pille sauber nebeneinander. */
+.scan-table__ip-zelle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .scan-table__pill {
   padding: 1px 7px;
   font-size: 11px;
@@ -195,12 +202,14 @@
   border-radius: 999px;
   border: 1px solid transparent;
   white-space: nowrap;
+  /* Pille nicht mono: sie sitzt in der mono IP-Zelle, soll aber Sans tragen. */
+  font-family: sans-serif;
 }
 
 .scan-table__pill--neu {
-  color: var(--sev-med-text);
-  background: var(--sev-med-bg);
-  border-color: var(--sev-med-bd);
+  color: var(--color-accent);
+  background: var(--color-accent-bg);
+  border-color: var(--color-accent-border);
 }
 
 .scan-table__pill--auffaellig {

@@ -132,7 +132,16 @@ function baueSpalten() {
       fix: true,
       sortKey: "ip",
       tdClass: "scan-table__cell--ip scan-table__mono",
-      render: (geraet) => geraet.ip,
+      render: (geraet, { t }) => (
+        <span className="scan-table__ip-zelle">
+          <span>{geraet.ip}</span>
+          {geraet.isNew && (
+            <span className="scan-table__pill scan-table__pill--neu">
+              {t("beobachten.scan.newPill")}
+            </span>
+          )}
+        </span>
+      ),
     },
     {
       id: "ipv6",
@@ -161,15 +170,8 @@ function baueSpalten() {
     {
       id: "hostname",
       sortKey: "hostname",
-      render: (geraet, { t }) => (
-        <span className="scan-table__hostname">
-          {geraet.hostname || "—"}
-          {geraet.isNew && (
-            <span className="scan-table__pill scan-table__pill--neu">
-              {t("beobachten.scan.newPill")}
-            </span>
-          )}
-        </span>
+      render: (geraet) => (
+        <span className="scan-table__hostname">{geraet.hostname || "—"}</span>
       ),
     },
     {
