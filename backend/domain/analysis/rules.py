@@ -5,10 +5,12 @@ kein Framework. PEP-695-``type``-Aliase fuer die Literal-Unions wie im uebrigen
 domain-Ring (process/traffic/scanning).
 
 ROTE LINIE -- analysis urteilt NIE. Eine ``Observation`` ist eine wertneutrale
-Beobachtung MIT Kontext, OHNE Urteil. Darum hat ``Severity`` BEWUSST nur zwei neutrale
-Stufen: "info" und "notable" ("faellt auf") -- KEIN "gefaehrlich"/"sicher". ``help_kind``
-ist ein stabiler Schluessel auf einen Hilfe-Typ, KEINE URL (die URL ist spaeter
-Infrastruktur).
+Beobachtung MIT Kontext, OHNE Urteil. ``Severity`` hat drei Stufen der Auffaelligkeit:
+"info" (reine Einordnung), "notable" ("faellt auf") und "critical" (staerkste Stufe fuer
+die Auffaelligkeits-Engine) -- KEIN "gefaehrlich"/"sicher", "critical" ist die staerkste
+Auffaelligkeit, kein moralisches Urteil. Reihenfolge der Staerke: critical > notable >
+info. ``help_kind`` ist ein stabiler Schluessel auf einen Hilfe-Typ, KEINE URL (die URL
+ist spaeter Infrastruktur).
 
 REGELN ALS DATEN -- jede Regel ist ein ``Rule``-Datenobjekt mit einem deklarativen
 ``kind``-Feld plus Parametern (Portmengen, Schwellen, Pfad-Praefixe). Die Bedingung
@@ -33,9 +35,12 @@ type HelpKind = Literal[
     "new_host",
 ]
 
-# BEWUSST nur zwei neutrale Stufen -- analysis urteilt nie. "info" = reine Einordnung,
-# "notable" = "faellt auf" (NICHT "gefaehrlich"). Kein "sicher"/"unsicher".
-type Severity = Literal["info", "notable"]
+# Drei Stufen der Auffaelligkeit -- analysis urteilt nie. "info" = reine Einordnung,
+# "notable" = "faellt auf", "critical" = staerkste Stufe (bewertend, fuer die
+# Auffaelligkeits-Engine). KEIN "sicher"/"unsicher": "critical" ist die staerkste
+# Auffaelligkeit, kein moralisches Urteil. Reihenfolge der Staerke: critical > notable
+# > info. Die Stufe wird hier nur EINGEFUEHRT -- keine Built-in-Regel setzt sie aktuell.
+type Severity = Literal["info", "notable", "critical"]
 
 # Das deklarative Praedikat einer Regel -- WELCHE Art Pruefung die Engine anwendet.
 # Eine neue ``kind`` ist die einzige Stelle, die einen neuen Dispatch-Zweig in

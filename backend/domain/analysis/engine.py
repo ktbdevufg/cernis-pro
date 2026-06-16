@@ -15,9 +15,10 @@ from collections.abc import Sequence
 from domain.analysis.models import Snapshot
 from domain.analysis.rules import Observation, Rule, Severity
 
-# Sortier-Rang der Severity: "notable" (faellt auf) vor "info". KEINE Wertung -- nur
-# eine stabile, dokumentierte Ordnung, damit die Ausgabe deterministisch ist.
-_SEVERITY_RANK: dict[Severity, int] = {"notable": 0, "info": 1}
+# Sortier-Rang der Severity: "critical" (staerkste) vor "notable" (faellt auf) vor
+# "info". Kleinerer Rang sortiert zuerst. KEINE Wertung -- nur eine stabile, dokumentierte
+# Ordnung, damit die Ausgabe deterministisch ist.
+_SEVERITY_RANK: dict[Severity, int] = {"critical": 0, "notable": 1, "info": 2}
 
 
 def evaluate(snapshot: Snapshot, rules: Sequence[Rule]) -> list[Observation]:

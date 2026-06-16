@@ -46,6 +46,7 @@ from domain.analysis import (
     ObservedConnection,
     ObservedHost,
     ObservedProcess,
+    Rule,
     Snapshot,
     evaluate,
 )
@@ -440,6 +441,37 @@ def test_sortierung_notable_vor_info_dann_rule_id_dann_subject() -> None:
     ]
     severities = [o.severity for o in obs]
     assert severities == ["notable", "notable", "info"]
+
+
+def test_sortierung_critical_vor_notable_vor_info() -> None:
+    # Severity-Rang: critical sortiert VOR notable VOR info. critical kommt aktuell aus
+    # keiner Built-in-Regel (additiv eingefuehrt, ADR 0022) -- darum wird hier eine
+    # ad-hoc Regel mit severity="critical" auf einem eigenen Port (4444, NICHT in den
+    # Default-Fernzugriffs-Ports) zu DEFAULT_RULES gestellt. Daneben eine Default-notable
+    # (remote_access_port auf 5900) und eine Default-info (high_connection_count).
+    many_conns = tuple(_conn(pid=42, remote_ip="9.9.9.9", remote_port=80) for _ in range(51))
+    snap = Snapshot(
+        connections=(
+            _conn(remote_ip="6.6.6.6", remote_port=4444),
+            _conn(remote_ip="7.7.7.7", remote_port=5900),
+            *many_conns,
+        ),
+    )
+    critical_rule = Rule(
+        id="critical_test_port",
+        severity="critical",
+        help_kind="remote_access_port",
+        kind="connection_remote_port",
+        title="Kritischer Port",
+        detail_template="Verbindung zu {subject} nutzt einen kritischen Port ({value}).",
+        ports=frozenset({4444}),
+    )
+    obs = evaluate(snap, (*DEFAULT_RULES, critical_rule))
+    severities = [o.severity for o in obs]
+    # critical zuerst, dann notable, dann info -- die starke Stufe gewinnt die Ordnung.
+    assert severities == ["critical", "notable", "info"]
+    assert obs[0].rule_id == "critical_test_port"
+    assert obs[0].subject == "6.6.6.6:4444"
 
 
 def test_sortierung_subject_innerhalb_gleicher_rule() -> None:

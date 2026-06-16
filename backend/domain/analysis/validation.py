@@ -8,8 +8,8 @@ selbst eine Quelle: der bekannte Regel-Bestand kommt als PARAMETER herein
 
 ZWEI GETRENNTE SEVERITY-KONZEPTE, BEWUSST NICHT VERMISCHT:
 
-* ``Severity`` (in ``rules.py``: "info"/"notable") bewertet eine BEOBACHTUNG -- wie
-  sehr ein beobachtetes Objekt auffaellt. Wertneutral, analysis urteilt nie.
+* ``Severity`` (in ``rules.py``: "info"/"notable"/"critical") bewertet eine BEOBACHTUNG
+  -- wie sehr ein beobachtetes Objekt auffaellt. Wertneutral, analysis urteilt nie.
 * ``IssueSeverity`` (hier: "error"/"warning") bewertet die REGEL SELBST -- ob sie
   objektiv kaputt ("error", kann nie sinnvoll feuern) oder nur redundant ("warning",
   funktioniert, ist nur unschoen) ist.
@@ -29,8 +29,9 @@ from typing import Literal
 from domain.analysis.rules import Rule
 
 # Bewertet die REGEL (kaputt/redundant), NICHT eine Beobachtung. BEWUSST getrennt von
-# ``Severity`` ("info"/"notable") aus rules.py: error/warning sagt etwas ueber die Regel,
-# info/notable sagt etwas ueber ein beobachtetes Objekt. Die zwei werden nie vermischt.
+# ``Severity`` ("info"/"notable"/"critical") aus rules.py: error/warning sagt etwas ueber
+# die Regel, info/notable/critical sagt etwas ueber ein beobachtetes Objekt. Die zwei
+# werden nie vermischt.
 type IssueSeverity = Literal["error", "warning"]
 
 
