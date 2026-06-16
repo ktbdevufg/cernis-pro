@@ -16,6 +16,9 @@ VERWALTUNG EIGENER REGELN (A.2) -- ``/api/analysis/rules`` (GET/POST/DELETE):
 * ``GET    /api/analysis/rules``           -- listet die GESPEICHERTEN eigenen Regeln (NICHT
   die Defaults) ueber ``ListUserRules``; dieser Rand serialisiert die rohen ``Rule``-Objekte
   per Attribut-Zugriff (Typ ``Any``, kein domain-Import).
+* ``GET    /api/analysis/rules/all``       -- listet ALLE aktuell aktiven Regeln (Built-in +
+  User) NACH der 5a-Injektion, aber VOR dem Deaktivierungs-Filter, je Regel mit dem Feld
+  ``disabled: bool`` (ADR 0028). Quelle der UI fuer den Block "Regel-An/Aus".
 * ``POST   /api/analysis/rules``           -- nimmt eine Liste schmaler Request-DTOs
   (``UserRuleBody``, ein api-eigenes pydantic-Modell -- NICHT die ``domain.Rule``). Der
   api-Ring bleibt domain-frei: das Bauen der ``domain.Rule`` + der Aufruf von ``AddUserRules``
@@ -99,6 +102,13 @@ type DeleteUserRuleRunner = Callable[[str], None]
 # Objekte (``list[Any]``); dieser Rand serialisiert sie per Attribut-Zugriff.
 type ListUserRulesRunner = Callable[[], list[Any]]
 
+# Composition-Root-Callable (ADR 0028): liefert ALLE aktuell aktiven Regeln (Built-in +
+# User) NACH der 5a-Injektion (Schwelle/Portlisten), aber VOR dem Deaktivierungs-Filter
+# -- denn die UI muss auch abgeschaltete Regeln sehen, um sie wieder einschalten zu
+# koennen. Je Regel ein ``(Rule, disabled: bool)``-Paar (Rule als ``Any``, kein domain-
+# Import); ``disabled`` ergibt sich aus der Settings-Liste ``analysis_disabled_rules``.
+type ListAllRulesRunner = Callable[[], list[tuple[Any, bool]]]
+
 
 def provide_add_user_rules() -> AddUserRulesRunner:
     raise NotImplementedError("AddUserRulesRunner wird in app.py verdrahtet")
@@ -106,6 +116,10 @@ def provide_add_user_rules() -> AddUserRulesRunner:
 
 def provide_list_user_rules() -> ListUserRulesRunner:
     raise NotImplementedError("ListUserRulesRunner wird in app.py verdrahtet")
+
+
+def provide_list_all_rules() -> ListAllRulesRunner:
+    raise NotImplementedError("ListAllRulesRunner wird in app.py verdrahtet")
 
 
 def provide_delete_user_rule() -> DeleteUserRuleRunner:
@@ -195,6 +209,26 @@ def list_user_rules(
     Der Runner liefert die rohen ``Rule``-Objekte; dieser Rand serialisiert sie.
     """
     return [_rule_to_dict(rule) for rule in list_rules()]
+
+
+@router.get("/analysis/rules/all")
+def list_all_rules(
+    list_rules: Annotated[ListAllRulesRunner, Depends(provide_list_all_rules)],
+) -> list[dict[str, Any]]:
+    """Listet ALLE aktuell aktiven Regeln (Built-in + User) mit Toggle-Status (ADR 0028).
+
+    Gegenstueck zu ``GET /api/analysis/rules`` (nur eigene Regeln): die Einstellungs-UI
+    (Block "Regel-An/Aus") braucht GENAU die Regeln, die die Engine auswertet -- inkl. der
+    eingebauten Defaults und inkl. der per Settings DEAKTIVIERTEN Regeln, sonst koennte man
+    eine abgeschaltete Regel nicht wieder einschalten. Quelle ist derselbe konfigurierte
+    Provider-Stack wie die Engine NACH der 5a-Injektion (Schwelle/Portlisten), aber VOR dem
+    Deaktivierungs-Filter.
+
+    Der Runner liefert ``(Rule, disabled)``-Paare; dieser Rand serialisiert jede Regel ueber
+    das vorhandene ``_rule_to_dict`` und ergaenzt das Feld ``disabled`` (KEIN zweites
+    Wire-Format). Eine leere Lage -> ``[]`` (kein Fehler).
+    """
+    return [{**_rule_to_dict(rule), "disabled": disabled} for rule, disabled in list_rules()]
 
 
 @router.post("/analysis/rules")

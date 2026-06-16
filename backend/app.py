@@ -51,6 +51,7 @@ from api.analysis import (
     provide_add_user_rules,
     provide_analyze,
     provide_delete_user_rule,
+    provide_list_all_rules,
     provide_list_user_rules,
     provide_service_lookup,
 )
@@ -486,6 +487,38 @@ class _CompositeRuleProvider:
 _DISABLED_RULES_KEY = "analysis_disabled_rules"
 
 
+def _read_disabled_rule_ids(settings: SettingsRepository) -> frozenset[str]:
+    """Liest die Menge deaktivierter rule_ids defensiv aus den Settings.
+
+    Eine freie Funktion, weil zwei Stellen im Composition Root die EXAKT gleiche
+    disabled-Semantik brauchen: der ``_FilteredRuleProvider`` (filtert die Regeln fuer
+    die Engine heraus) und der ``/api/analysis/rules/all``-Runner (ADR 0028, der die
+    deaktivierten Regeln gerade NICHT filtert, sondern sie mit ``disabled: true``
+    markiert, damit die UI sie wieder einschalten kann). Eine gemeinsame Quelle
+    garantiert, dass beide dieselbe Menge sehen.
+
+    Defensiver Leer-Zustand (S3-konform): fehlender Key ODER Nicht-Listen-Wert ->
+    ``frozenset()`` ("nichts deaktiviert"). Kaputtes JSON (``CorruptSettingError``) ->
+    GELOGGTE Warnung + derselbe fail-safe-Rueckfall "nichts deaktiviert" -- eine kaputte
+    Komfort-Einstellung darf NICHT den Scan faellen und niemanden heimlich abschalten;
+    der Fehler wird benannt/geloggt, nicht still verschluckt. Nicht-String-Eintraege
+    werden uebersprungen.
+    """
+    try:
+        setting = settings.get(_DISABLED_RULES_KEY)
+    except CorruptSettingError:
+        # Kaputter JSON-Wert: GELOGGT (kein stiller Fallback, S3) und fail-safe
+        # auf "nichts deaktiviert" zurueck -- der Filter darf den Scan nicht faellen.
+        logger.warning("analysis_disabled_rules_corrupt", key=_DISABLED_RULES_KEY)
+        return frozenset()
+    if setting is None or not isinstance(setting.value, list):
+        # Fehlender Key (frische DB ist normal -> kein Log) oder Nicht-Listen-Wert:
+        # gueltiger Leer-Zustand "nichts deaktiviert".
+        return frozenset()
+    # Nur String-Eintraege als rule_id; kaputte Nicht-String-Eintraege ueberspringen.
+    return frozenset(x for x in setting.value if isinstance(x, str))
+
+
 class _FilteredRuleProvider:
     """Filtert deaktivierte Regel-IDs aus einem inneren ``RuleProvider`` heraus.
 
@@ -512,28 +545,9 @@ class _FilteredRuleProvider:
         self._inner = inner
         self._settings = settings
 
-    def _disabled_rule_ids(self) -> frozenset[str]:
-        """Liest die Menge deaktivierter rule_ids defensiv aus den Settings.
-
-        Muster wie ``_load_custom_targets``, aber zusaetzlich mit Fang von
-        ``CorruptSettingError`` (kaputtes JSON beim ``.get()``).
-        """
-        try:
-            setting = self._settings.get(_DISABLED_RULES_KEY)
-        except CorruptSettingError:
-            # Kaputter JSON-Wert: GELOGGT (kein stiller Fallback, S3) und fail-safe
-            # auf "alle Regeln an" zurueck -- der Filter darf den Scan nicht faellen.
-            logger.warning("analysis_disabled_rules_corrupt", key=_DISABLED_RULES_KEY)
-            return frozenset()
-        if setting is None or not isinstance(setting.value, list):
-            # Fehlender Key (frische DB ist normal -> kein Log) oder Nicht-Listen-Wert:
-            # gueltiger Leer-Zustand "nichts deaktiviert".
-            return frozenset()
-        # Nur String-Eintraege als rule_id; kaputte Nicht-String-Eintraege ueberspringen.
-        return frozenset(x for x in setting.value if isinstance(x, str))
-
     def get_rules(self) -> tuple[Rule, ...]:
-        disabled = self._disabled_rule_ids()
+        # Gemeinsame defensive Lese-Quelle mit dem /rules/all-Runner (ADR 0028).
+        disabled = _read_disabled_rule_ids(self._settings)
         return tuple(rule for rule in self._inner.get_rules() if rule.id not in disabled)
 
 
@@ -1986,6 +2000,22 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     def _list_user_rules() -> list[Any]:
         return list(ListUserRules(analysis_rule_repository())())
 
+    def _list_all_rules() -> list[tuple[Any, bool]]:
+        # ADR 0028: ALLE aktuell aktiven Regeln (Built-in + User) fuer den UI-Block
+        # "Regel-An/Aus". Quelle ist DERSELBE Provider-Stack wie die Engine, aber bewusst
+        # nur bis ``configured`` (NACH der 5a-Injektion von Schwelle/Portlisten) -- der
+        # ``_FilteredRuleProvider`` wird hier NICHT angewandt, denn die UI muss auch die
+        # deaktivierten Regeln sehen, um sie wieder einschalten zu koennen. Das
+        # ``disabled``-Flag pro Regel kommt aus DERSELBEN defensiven Lese-Quelle wie der
+        # Filter (``_read_disabled_rule_ids``) -- so sehen Engine-Filter und UI-Liste
+        # garantiert dieselbe Menge. Kaputtes/fehlendes Setting -> leere disabled-Menge
+        # (fail-safe: die UI zeigt im Zweifel alles als aktiv, niemand wird heimlich
+        # abgeschaltet; S3-konform geloggt in der freien Funktion).
+        composite = _CompositeRuleProvider(BuiltinRuleProvider(), analysis_rule_repository())
+        configured = _ConfiguredRuleProvider(composite, repository())
+        disabled = _read_disabled_rule_ids(repository())
+        return [(rule, rule.id in disabled) for rule in configured.get_rules()]
+
     def _delete_user_rule(rule_id: str) -> None:
         analysis_rule_repository().delete_rule(rule_id)
 
@@ -1997,6 +2027,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.dependency_overrides[provide_service_lookup] = lambda: service_for_port
     app.dependency_overrides[provide_add_user_rules] = lambda: _add_user_rules
     app.dependency_overrides[provide_list_user_rules] = lambda: _list_user_rules
+    app.dependency_overrides[provide_list_all_rules] = lambda: _list_all_rules
     app.dependency_overrides[provide_delete_user_rule] = lambda: _delete_user_rule
 
     # ── Frontend-Serving ── MUSS als LETZTES registriert werden ──────────────────
