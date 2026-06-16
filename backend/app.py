@@ -322,7 +322,7 @@ from infrastructure.security import (
     SqliteArpGuardRepository,
     TlsInspectorAdapter,
 )
-from infrastructure.settings_repository import SqliteSettingsRepository
+from infrastructure.settings_repository import CorruptSettingError, SqliteSettingsRepository
 from infrastructure.sni.errors import SniError
 from infrastructure.sni.sni_sniffer import ScapySniSniffer
 from infrastructure.traffic_linux import PsutilTrafficAdapter
@@ -470,6 +470,61 @@ class _CompositeRuleProvider:
 
     def get_rules(self) -> tuple[Rule, ...]:
         return tuple(rule for provider in self._providers for rule in provider.get_rules())
+
+
+# Settings-Key fuer die Deaktivierungs-Liste (JSON-Array von rule_id-Strings).
+_DISABLED_RULES_KEY = "analysis_disabled_rules"
+
+
+class _FilteredRuleProvider:
+    """Filtert deaktivierte Regel-IDs aus einem inneren ``RuleProvider`` heraus.
+
+    ADR 0023: Built-in- und User-Regeln sollen per Settings abschaltbar sein, OHNE die
+    Regeln im Code anzufassen (Konfiguration = reine Daten). Die Deaktivierungs-Liste
+    liegt als Settings-Wert (``analysis_disabled_rules``, JSON-Array von ``rule_id``-
+    Strings) und wird ueber den ``SettingsRepository``-Port gelesen. Dieser Wrapper lebt
+    -- wie ``_CompositeRuleProvider`` -- HIER im Composition Root und erfuellt selbst
+    strukturell ``ports.analysis.RuleProvider`` (``get_rules() -> tuple[Rule, ...]``).
+
+    Defensiver Leer-Zustand: fehlender Key ODER Nicht-Listen-Wert -> ``frozenset()``
+    ("nichts deaktiviert, alle Regeln an"). Kaputtes JSON (``CorruptSettingError``)
+    -> geloggte Warnung + derselbe fail-safe-Rueckfall "alle Regeln an" -- der Filter
+    ist ein Nebenpfad in der Analyse, eine kaputte Komfort-Einstellung darf NICHT den
+    ganzen Scan faellen. Die fail-safe-Richtung ist "mehr zeigen, nichts heimlich
+    unterdruecken"; der Fehler wird benannt/geloggt, nicht still verschluckt (S3-konform).
+    """
+
+    def __init__(
+        self,
+        inner: _CompositeRuleProvider,
+        settings: SqliteSettingsRepository,
+    ) -> None:
+        self._inner = inner
+        self._settings = settings
+
+    def _disabled_rule_ids(self) -> frozenset[str]:
+        """Liest die Menge deaktivierter rule_ids defensiv aus den Settings.
+
+        Muster wie ``_load_custom_targets``, aber zusaetzlich mit Fang von
+        ``CorruptSettingError`` (kaputtes JSON beim ``.get()``).
+        """
+        try:
+            setting = self._settings.get(_DISABLED_RULES_KEY)
+        except CorruptSettingError:
+            # Kaputter JSON-Wert: GELOGGT (kein stiller Fallback, S3) und fail-safe
+            # auf "alle Regeln an" zurueck -- der Filter darf den Scan nicht faellen.
+            logger.warning("analysis_disabled_rules_corrupt", key=_DISABLED_RULES_KEY)
+            return frozenset()
+        if setting is None or not isinstance(setting.value, list):
+            # Fehlender Key (frische DB ist normal -> kein Log) oder Nicht-Listen-Wert:
+            # gueltiger Leer-Zustand "nichts deaktiviert".
+            return frozenset()
+        # Nur String-Eintraege als rule_id; kaputte Nicht-String-Eintraege ueberspringen.
+        return frozenset(x for x in setting.value if isinstance(x, str))
+
+    def get_rules(self) -> tuple[Rule, ...]:
+        disabled = self._disabled_rule_ids()
+        return tuple(rule for rule in self._inner.get_rules() if rule.id not in disabled)
 
 
 # ── monitoring -> alerting-Trigger-Naht (A.7a) ────────────────────────────────
@@ -1726,7 +1781,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # ADDITIV (A.2): die Engine sieht die eingebauten Defaults UND die gespeicherten
         # eigenen Regeln -- ueber den CompositeRuleProvider (Defaults zuerst, dann DB).
         # NUR diese eine Zeile der AN.3-Verdrahtung aendert sich; der Rest bleibt.
-        rule_provider = _CompositeRuleProvider(BuiltinRuleProvider(), analysis_rule_repository())
+        # ADR 0023: der Composite-Provider wird zusaetzlich umschlossen, damit per
+        # Settings (``analysis_disabled_rules``) abgeschaltete Regel-IDs herausgefiltert
+        # werden. Default (kein Key) = alle Regeln aktiv -- rein additiv.
+        composite = _CompositeRuleProvider(BuiltinRuleProvider(), analysis_rule_repository())
+        rule_provider = _FilteredRuleProvider(composite, repository())
         return AnalyzeSnapshot(rule_provider, StaticHelpLinkResolver())(snapshot)
 
     # ── export-Domaene Block 2 verdrahten (Analyse-Befunde -> CSV/JSON/PDF, ADR 0015) ──
