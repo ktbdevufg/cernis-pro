@@ -45,6 +45,12 @@ zurueckgesetzt -- der Test faengt den jeweiligen kritischen Vertrag also wirklic
   entfernt (``high_ports = set(host.open_ports)`` statt nur ``port > rule.port_floor``)
   -> ``test_rule_b2b_nur_niedrige_ports_trifft_nicht`` ROT (11 niedrige Ports wuerden
   faelschlich treffen). Zurueckgesetzt.
+* (b2c) host_backdoor_port: die severity der Regel in ``DEFAULT_RULES`` faelschlich von
+  ``"critical"`` auf ``"notable"`` gesetzt -> ``test_rule_b2c_koexistenz_critical_vor_notable``
+  ROT (die Backdoor-Observation sortiert dann nicht mehr garantiert VOR der
+  Fernzugriffs-Observation -- gleiche severity, dann entscheidet die rule_id, und
+  "host_backdoor_port" < "host_remote_access_port" bliebe nur zufaellig vorn; der Test
+  prueft die severity beider explizit). Zurueckgesetzt.
 """
 
 import pytest
@@ -409,6 +415,77 @@ def test_rule_b2b_ein_host_genau_eine_beobachtung() -> None:
     obs = [o for o in evaluate(snap, DEFAULT_RULES) if o.rule_id == "host_many_high_ports"]
     assert len(obs) == 1
     assert obs[0].subject == "10.0.1.9"
+
+
+# ── (b2c) host_backdoor_port (Host haelt einen Backdoor-Port offen, critical) ─
+
+
+def test_rule_b2c_einzelner_backdoor_port_trifft_critical() -> None:
+    """Host mit genau einem Backdoor-Port (31337) -> genau EINE critical-Observation.
+
+    Erster echter ``critical``-Setzer (ADR 0022): nutzt den bestehenden
+    ``kind="host_remote_port"`` mit eigener Portmenge und eigenem ``help_kind``.
+    """
+    snap = Snapshot(hosts=(_host("10.0.2.5", open_ports=frozenset({31337})),))
+    obs = evaluate(snap, DEFAULT_RULES)
+    assert len(obs) == 1
+    assert obs[0].rule_id == "host_backdoor_port"
+    assert obs[0].help_kind == "backdoor_port"
+    assert obs[0].kind == "host_remote_port"
+    assert obs[0].severity == "critical"
+    assert obs[0].subject == "10.0.2.5"
+    assert "31337" in obs[0].detail
+
+
+def test_rule_b2c_mehrere_backdoor_ports_eine_gebuendelte_observation() -> None:
+    """Host mit 31337 UND 12345 offen -> genau EINE Observation, beide Ports aufsteigend.
+
+    Buendelung pro Host (eine rote Markierung je Geraet): die getroffenen Ports
+    aufsteigend sortiert, kommagetrennt im value ("12345, 31337").
+    """
+    snap = Snapshot(hosts=(_host("10.0.2.6", open_ports=frozenset({31337, 12345})),))
+    obs = evaluate(snap, DEFAULT_RULES)
+    assert len(obs) == 1
+    assert obs[0].rule_id == "host_backdoor_port"
+    assert obs[0].subject == "10.0.2.6"
+    assert "12345, 31337" in obs[0].detail
+
+
+def test_rule_b2c_kein_backdoor_port_trifft_nicht() -> None:
+    # Host mit nur gewoehnlichen Ports (80, 443) -> kein Backdoor-Treffer.
+    snap = Snapshot(hosts=(_host("10.0.2.7", open_ports=frozenset({80, 443})),))
+    obs = [o for o in evaluate(snap, DEFAULT_RULES) if o.rule_id == "host_backdoor_port"]
+    assert obs == []
+
+
+def test_rule_b2c_host_ohne_ip_wird_uebersprungen() -> None:
+    # Leere ip -> kein sinnvolles subject -> uebersprungen, trotz offenem Backdoor-Port.
+    snap = Snapshot(hosts=(_host("", open_ports=frozenset({31337})),))
+    assert evaluate(snap, DEFAULT_RULES) == []
+
+
+def test_rule_b2c_koexistenz_critical_vor_notable() -> None:
+    """Zwei-Achsen: Host mit 22 (Fernzugriff, notable) UND 31337 (Backdoor, critical).
+
+    Beide host_remote_port-Regeln koexistieren auf demselben Geraet -> ZWEI unabhaengige
+    Observations. Die globale Sortierung (_SEVERITY_RANK) stellt die critical-Backdoor-
+    Observation VOR die notable-Fernzugriffs-Observation.
+
+    MUTATIONSPROBE (durchgefuehrt, ROT bestaetigt, zurueckgesetzt): severity der Regel
+    ``host_backdoor_port`` in ``DEFAULT_RULES`` von ``"critical"`` auf ``"notable"``
+    verfaelscht -> dieser Test ROT (beide severities waeren dann "notable"). Zurueckgesetzt.
+    """
+    snap = Snapshot(hosts=(_host("10.0.2.8", open_ports=frozenset({22, 31337})),))
+    obs = [
+        o
+        for o in evaluate(snap, DEFAULT_RULES)
+        if o.rule_id in {"host_backdoor_port", "host_remote_access_port"}
+    ]
+    assert len(obs) == 2
+    assert obs[0].rule_id == "host_backdoor_port"
+    assert obs[0].severity == "critical"
+    assert obs[1].rule_id == "host_remote_access_port"
+    assert obs[1].severity == "notable"
 
 
 # ── (b3) new_host_seen (Geraet taucht erstmals im Netz auf) ───────────────────

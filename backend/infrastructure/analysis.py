@@ -54,6 +54,7 @@ class StaticHelpLinkResolver:
         "high_connection_count": "https://de.wikipedia.org/wiki/Netzwerk-Socket",
         "new_host": "https://de.wikipedia.org/wiki/Address_Resolution_Protocol",
         "many_high_ports": "https://de.wikipedia.org/wiki/Port_(Protokoll)",
+        "backdoor_port": "https://de.wikipedia.org/wiki/Backdoor",
     }
 
     def resolve(self, help_kind: HelpKind) -> str:

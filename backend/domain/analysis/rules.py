@@ -34,6 +34,7 @@ type HelpKind = Literal[
     "high_connection_count",
     "new_host",
     "many_high_ports",
+    "backdoor_port",
 ]
 
 # Drei Stufen der Auffaelligkeit -- analysis urteilt nie. "info" = reine Einordnung,
@@ -198,6 +199,54 @@ DEFAULT_RULES: tuple[Rule, ...] = (
         "-- ungewoehnlich viele.",
         threshold=10,
         port_floor=1024,
+    ),
+    # (b2c) ERSTER echter ``critical``-Setzer (Bezug ADR 0022): ein HOST, der einen
+    # klassischen Backdoor-/Trojaner-Port offen haelt. Thematisch direkt hinter (b2)/(b2b)
+    # gruppiert -- alle drei werten ein GERAET anhand seiner offenen Ports aus (Stand
+    # letzter Scan); (b2) prueft eine Fernzugriffs-Portmenge, (b2b) zaehlt hohe Ports,
+    # diese prueft eine kuratierte Backdoor-Portmenge. Kuratierte Klassiker-Backdoor-Ports
+    # (Back Orifice / NetBus / SubSeven / Deep Throat / Trinoo u.a.). EHRLICHE Einordnung
+    # (Konzept §5): historisch, faengt MODERNE Malware kaum (die nutzt 443/DNS/dynamische
+    # Ports) -- ein Treffer ist ein klares Signal, aber KEIN vollstaendiger Malware-Scan;
+    # der detail/Hilfetext haelt das ehrlich. "critical" = staerkste Auffaelligkeit, KEIN
+    # moralisches Urteil (rote Linie ADR 0012/0022). Nutzt bewusst den bestehenden
+    # ``kind="host_remote_port"`` (kein neuer Dispatch noetig -- die Engine iteriert pro
+    # Regel; zwei host_remote_port-Regeln mit verschiedenen Portmengen/Severitys
+    # koexistieren problemlos). Ein Host, der z.B. 22 UND 31337 offen haelt, erhaelt ZWEI
+    # unabhaengige Befunde (notable Fernzugriff + critical Backdoor) -- die globale
+    # Sortierung stellt critical nach vorn (Zwei-Achsen-Gedanke des Konzepts).
+    Rule(
+        id="host_backdoor_port",
+        severity="critical",
+        help_kind="backdoor_port",
+        kind="host_remote_port",
+        title="Host hat einen bekannten Backdoor-Port offen",
+        detail_template="Host {subject} haelt einen bekannten Backdoor-/Trojaner-Port "
+        "offen ({value}) -- klassischer Trojaner-Port, bitte pruefen.",
+        ports=frozenset(
+            {
+                31337,
+                31338,  # Back Orifice
+                12345,
+                12346,
+                20034,  # NetBus / NetBus Pro
+                1243,
+                6711,
+                6712,
+                6713,
+                27374,
+                54283,  # SubSeven
+                6670,
+                6771,  # Deep Throat
+                27444,
+                27665,
+                31335,  # Trinoo / DDoS-Klassiker
+                1337,
+                30303,
+                32768,
+                65000,  # weitere Klassiker
+            }
+        ),
     ),
     # (b3) Ein HOST, der im Netz ERSTMALS auftaucht ("seit deinem letzten Scan neu
     # dazugekommen"). analysis' erstes GEDAECHTNIS: das "schon gesehen?" kommt als FAKTUM

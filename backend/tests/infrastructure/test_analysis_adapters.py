@@ -5,7 +5,7 @@ Belegt fuer die zwei zustandslosen Adapter:
 * ``BuiltinRuleProvider`` liefert exakt die eingebauten ``DEFAULT_RULES`` und erfuellt
   ``ports.analysis.RuleProvider`` (Konformitaet rein statisch ueber mypy, Muster
   ``test_analysis_ports.py``).
-* ``StaticHelpLinkResolver`` deckt GENAU die fuenf aktuellen HelpKinds mit nicht-leeren
+* ``StaticHelpLinkResolver`` deckt GENAU die aktuellen HelpKinds mit nicht-leeren
   https-URLs ab und erfuellt ``ports.analysis.HelpLinkResolver`` (ebenfalls statisch).
 
 KEIN ``@runtime_checkable`` an den Ports -> bewusst KEIN ``isinstance``-Check; die
@@ -59,6 +59,7 @@ def test_static_help_resolver_covers_all_help_kinds() -> None:
         "high_connection_count",
         "new_host",
         "many_high_ports",
+        "backdoor_port",
     }
     for kind in kinds:
         url = resolver.resolve(kind)
