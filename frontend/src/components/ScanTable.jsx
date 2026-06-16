@@ -2,9 +2,9 @@
 // Dichte, technische Geräteliste. Bewusst kompakt — die Zielgruppe liest Tabellen.
 //
 // EINE schlichte Geräteliste, nach aktueller Sortierung geordnet (Start: IPv4).
-// Eine Aufteilung in "neu/auffällig" vs "bekannt" gibt es nicht mehr: es existiert
-// derzeit keine verlässliche Baseline-Quelle im Scan-Wire, isNew/notable sind
-// stets false.
+// "neu" (isNew) kommt aus der Baseline (is_known) und wird über Statuspunkt-Farbe +
+// Pille markiert — keine getrennten Sektionen. notable ist derzeit stets false
+// (eigene Auffälligkeits-Quelle folgt in einem späteren Schnitt).
 //
 // Die Komponente kennt nur ihre Props (geraete, onSelect, selectedSchluessel,
 // sichtbareSpalten). Sie löst keine API auf und hält keinen Persistenz-Zustand.
@@ -104,10 +104,11 @@ function baueSpalten() {
       thClass: "scan-table__th--status",
       tdClass: "scan-table__cell--status",
       render: (geraet, { t: _t, selected }) => {
-        // Neutraler Statuspunkt für ALLE Zeilen: es gibt derzeit kein
-        // verlässliches "neu/auffällig"-Signal im Wire, daher keine aus
-        // isNew/notable abgeleitete Farbe (sonst wären alle gleich gefärbt).
-        const statusKlasse = "scan-table__dot scan-table__dot--bekannt";
+        // Statuspunkt: CERNIS-Farbe für echte Neuzugänge (isNew aus der Baseline),
+        // sonst neutral. "auffällig" folgt in einem späteren Schnitt.
+        const statusKlasse = geraet.isNew
+          ? "scan-table__dot scan-table__dot--neu"
+          : "scan-table__dot scan-table__dot--bekannt";
         return (
           <>
             {selected && (
@@ -158,10 +159,15 @@ function baueSpalten() {
     {
       id: "hostname",
       sortKey: "hostname",
-      // Kein "neu"/"auffällig"-Pill mehr: isNew/notable sind stets false,
-      // solange keine verlässliche Baseline-Quelle im Wire existiert.
-      render: (geraet) => (
-        <span className="scan-table__hostname">{geraet.hostname || "—"}</span>
+      render: (geraet, { t }) => (
+        <span className="scan-table__hostname">
+          {geraet.hostname || "—"}
+          {geraet.isNew && (
+            <span className="scan-table__pill scan-table__pill--neu">
+              {t("beobachten.scan.newPill")}
+            </span>
+          )}
+        </span>
       ),
     },
     {

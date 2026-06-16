@@ -100,13 +100,12 @@ export function mappeHost(host) {
     osGuess: host.os_guess ?? "",
     ports,
     pingMs: typeof host.rtt_ms === "number" ? Math.round(host.rtt_ms) : null,
-    // Es gibt derzeit keine verlässliche "neu/auffällig"-Quelle im Scan-Wire
-    // (is_unknown bedeutet backendseitig "per MAC identifiziert", NICHT "neu im
-    // Netz"). isNew/notable bleiben false, bis ein echtes Baseline-Signal
-    // (Abgleich gegen die devices-DB, first_seen/is_known) im Wire vorhanden ist.
-    // Die Felder bleiben im View-Objekt erhalten, damit ein späterer Baseline-
-    // Abgleich sie nur noch füllen muss.
-    isNew: false,
+    // isNew aus der Baseline: das Backend liefert is_known (Vorzustand VOR record_seen).
+    // is_known === false -> echter Neuzugang in diesem Scan. Beim Folgescan ist die MAC
+    // bekannt -> is_known:true -> Flag fällt automatisch weg. Hosts ohne MAC liefern
+    // is_known:true -> nie "neu" (korrekt). notable bleibt false (eigene Quelle folgt
+    // in einem späteren Schnitt).
+    isNew: host.is_known === false,
     notable: false,
     label: host.label ?? undefined,
     tags: host.tags ?? undefined,
