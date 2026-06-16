@@ -151,17 +151,20 @@
   background: var(--sev-low-bd);
 }
 
-.scan-table__dot--bekannt {
-  background: var(--color-accent);
-}
-
+/* Für späteren Gebrauch reserviert, aktuell nicht am Böppel verwendet. */
 .scan-table__dot--auffaellig {
   background: var(--sev-med-bd);
 }
 
-.scan-table__dot--neu {
-  background: var(--sev-med-bd);
-  box-shadow: 0 0 0 3px var(--sev-med-bg);
+/* Aktiv (source === "ping"): sattes Grün + weiche Aura (zarter Schein, kein Ring). */
+.scan-table__dot--aktiv {
+  background: var(--status-aktiv);
+  box-shadow: 0 0 5px 1px color-mix(in srgb, var(--status-aktiv) 60%, transparent);
+}
+
+/* Inaktiver Import (source != "ping"): gefülltes, dunkles Grün, kein Schatten. */
+.scan-table__dot--inaktiv {
+  background: var(--status-inaktiv);
 }
 
 /* Vendor mit Geräte-Icon. */

@@ -113,6 +113,9 @@ export function mappeHost(host) {
     // Weitere IPs derselben MAC (MAC-Gruppierung): Proxy-ARP/Spoofing-Info,
     // leer im Normalfall. Das Detail-Panel zeigt sie als ruhige Zusatzinfo.
     additionalIps: host.additional_ips ?? [],
+    // Quelle des Hosts: "ping" (aktiv im Netz geantwortet) vs. "fritzbox"
+    // (DHCP-Import, ping-still). Steuert den matten Status-Böppel in der Tabelle.
+    source: host.source ?? null,
   };
 }
 
@@ -148,6 +151,9 @@ export function mappeHostFound(frame) {
     label: undefined,
     tags: undefined,
     notes: undefined,
+    // Quelle des Hosts: "ping" (aktiv) vs. "fritzbox" (Import). Steuert den
+    // matten Status-Böppel in der Tabelle.
+    source: frame.source ?? null,
   };
 }
 

@@ -104,11 +104,13 @@ function baueSpalten() {
       thClass: "scan-table__th--status",
       tdClass: "scan-table__cell--status",
       render: (geraet, { t: _t, selected }) => {
-        // Statuspunkt: CERNIS-Farbe für echte Neuzugänge (isNew aus der Baseline),
-        // sonst neutral. "auffällig" folgt in einem späteren Schnitt.
-        const statusKlasse = geraet.isNew
-          ? "scan-table__dot scan-table__dot--neu"
-          : "scan-table__dot scan-table__dot--bekannt";
+        // Böppel = reiner Aktiv-Status: leuchtend grün bei aktiver Antwort
+        // (source === "ping"), blass dunkelgrün bei inaktiven Importen (FritzBox).
+        // "neu"/"auffällig" laufen NICHT über den Böppel (eigene Pillen).
+        const istAktiv = geraet.source === "ping";
+        const statusKlasse = istAktiv
+          ? "scan-table__dot scan-table__dot--aktiv"
+          : "scan-table__dot scan-table__dot--inaktiv";
         return (
           <>
             {selected && (
