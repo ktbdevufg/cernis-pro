@@ -164,20 +164,46 @@ DEFAULT_RULES: tuple[Rule, ...] = (
         "Fernzugriffs-Port ({value}).",
         ports=frozenset({22, 3389, 5800, 5900}),
     ),
-    # (b2) Geraeteseitiges Gegenstueck zu (b): ein HOST, der einen typischen
-    # Fernzugriffs-Port OFFEN haelt. Waehrend (b) eine VERBINDUNG zu so einem Port sieht
-    # (live, aus traffic), sieht diese Regel ein GERAET, das so einen Port offen anbietet
-    # (Stand letzter Scan, aus den gespeicherten Hosts). Dieselbe Portmenge wie (b)
-    # (konsistent) und derselbe ``help_kind`` "remote_access_port" -- ein Hilfe-Link fuer
-    # beide. Thematisch direkt hinter (b) gruppiert.
+    # (b2) Geraeteseitiges Gegenstueck zu (b): ein HOST, der einen AUFFAELLIGEN Port OFFEN
+    # haelt. Waehrend (b) eine VERBINDUNG zu so einem Port sieht (live, aus traffic), sieht
+    # diese Regel ein GERAET, das so einen Port offen anbietet (Stand letzter Scan, aus den
+    # gespeicherten Hosts). ADR 0027: frueher pruefte sie NUR vier reine Fernzugriffs-Ports
+    # (22/3389/5800/5900) -- laut Konzept §7 "zu grob". Sie ist jetzt die datengetriebene
+    # AUFFAELLIG-Regel mit einer breiteren, kuratierten Default-Portmenge (Datenbanken,
+    # Fileshares, Web-Admin u.a.); SSH 22 ist BEWUSST NICHT dabei (zu alltaeglich, sonst nur
+    # Laerm). ``id`` UNVERAENDERT (``host_remote_access_port``) -- der Deaktivierungs-Filter
+    # (ADR 0023) und die spaetere Acknowledge-Historie referenzieren sie. ``kind`` und
+    # ``severity`` bleiben ebenfalls (host_remote_port / notable). Die Default-Ports sind
+    # per Setting (``analysis_suspicious_ports``) ueberschreibbar -- die Injektion lebt im
+    # Composition Root (dataclasses.replace), die Built-in-Regel hier bleibt unangetastet.
+    # Derselbe ``help_kind`` "remote_access_port" wie (b) -- ein Hilfe-Link fuer beide.
     Rule(
         id="host_remote_access_port",
         severity="notable",
         help_kind="remote_access_port",
         kind="host_remote_port",
-        title="Host hat einen Fernzugriffs-Port offen",
-        detail_template="Host {subject} hat einen typischen Fernzugriffs-Port offen ({value}).",
-        ports=frozenset({22, 3389, 5800, 5900}),
+        title="Host hat einen auffaelligen Port offen",
+        detail_template="Host {subject} haelt einen auffaelligen Port offen ({value}).",
+        ports=frozenset(
+            {
+                21,  # ftp
+                23,  # telnet
+                139,  # netbios-ssn
+                445,  # microsoft-ds (smb)
+                2049,  # nfs
+                3306,  # mysql
+                3389,  # rdp
+                5432,  # postgresql
+                5800,  # vnc-http
+                5900,  # vnc
+                5984,  # couchdb
+                6379,  # redis
+                8080,  # http-proxy
+                8443,  # https-alt
+                9200,  # elasticsearch
+                27017,  # mongodb
+            }
+        ),
     ),
     # (b2b) Ein HOST, der ungewoehnlich viele HOHE Ports (oberhalb 1024) offen haelt.
     # Thematisch direkt hinter (b2) gruppiert: beide sehen ein GERAET anhand seiner

@@ -108,3 +108,39 @@ def test_analysis_empty_is_empty_list(app: FastAPI) -> None:
 
     assert response.status_code == 200
     assert response.json() == []
+
+
+# ── GET /api/analysis/service (Stueck 1, ADR 0027) ────────────────────────────
+# Der Service-Lookup ist im Composition Root real verdrahtet (service_for_port als
+# ServiceLookupRunner) -- diese Tests laufen gegen die echte Verdrahtung, KEIN Fake.
+
+
+def test_service_lookup_bekannter_port(app: FastAPI) -> None:
+    """Gueltiger, gelisteter Port -> {"port": N, "service": "<name>"}."""
+    with TestClient(app) as client:
+        response = client.get("/api/analysis/service", params={"port": 3306})
+    assert response.status_code == 200
+    assert response.json() == {"port": 3306, "service": "mysql"}
+
+
+def test_service_lookup_unbekannter_port_service_none(app: FastAPI) -> None:
+    """Gueltiger, aber nicht gelisteter Port -> service null (Leer-Zustand, kein Fehler)."""
+    with TestClient(app) as client:
+        response = client.get("/api/analysis/service", params={"port": 49152})
+    assert response.status_code == 200
+    assert response.json() == {"port": 49152, "service": None}
+
+
+@pytest.mark.parametrize("port", [0, 65536, 99999, -1])
+def test_service_lookup_ungueltiger_port_422(app: FastAPI, port: int) -> None:
+    """Port ausserhalb 1-65535 -> HTTP 422 (FastAPI-Query-Constraint, KEIN stiller Fallback)."""
+    with TestClient(app) as client:
+        response = client.get("/api/analysis/service", params={"port": port})
+    assert response.status_code == 422
+
+
+def test_service_lookup_fehlender_port_422(app: FastAPI) -> None:
+    """Fehlender ``port``-Query -> HTTP 422 (Pflicht-Query ohne Default)."""
+    with TestClient(app) as client:
+        response = client.get("/api/analysis/service")
+    assert response.status_code == 422

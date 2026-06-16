@@ -13,6 +13,7 @@ import asyncio
 import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
+from dataclasses import replace
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
@@ -51,6 +52,7 @@ from api.analysis import (
     provide_analyze,
     provide_delete_user_rule,
     provide_list_user_rules,
+    provide_service_lookup,
 )
 from api.analysis import router as analysis_router
 from api.capture import (
@@ -235,7 +237,14 @@ from application.security import (
 from application.settings import GetSettings, UpdateSecret, UpdateSetting
 from application.sni import GetObservedSni, RunSniCapture, StartSniCapture
 from application.traffic import CheckTrafficPermission, ListAppTraffic, PollThroughput
-from domain.analysis import ObservedConnection, ObservedHost, ObservedProcess, Rule, Snapshot
+from domain.analysis import (
+    ObservedConnection,
+    ObservedHost,
+    ObservedProcess,
+    Rule,
+    Snapshot,
+    service_for_port,
+)
 from domain.export import (
     ExportableAnalysis,
     ExportableFinding,
@@ -338,6 +347,7 @@ from infrastructure.traffic_permission import TrafficPermissionAdapter
 from modules.alerting import init_alerts_db
 from modules.devices_db import init_devices_db
 from modules.storage import init_db
+from ports.settings import SettingsRepository
 from ws_monitor import make_ws_monitor
 from ws_pcap import make_ws_pcap
 from ws_scan import make_ws_scan
@@ -496,7 +506,7 @@ class _FilteredRuleProvider:
 
     def __init__(
         self,
-        inner: _CompositeRuleProvider,
+        inner: "_CompositeRuleProvider | _ConfiguredRuleProvider",
         settings: SqliteSettingsRepository,
     ) -> None:
         self._inner = inner
@@ -525,6 +535,111 @@ class _FilteredRuleProvider:
     def get_rules(self) -> tuple[Rule, ...]:
         disabled = self._disabled_rule_ids()
         return tuple(rule for rule in self._inner.get_rules() if rule.id not in disabled)
+
+
+# Settings-Keys fuer die per-Setting konfigurierbaren Regel-Parameter (ADR 0027).
+# Schwelle (Integer) + zwei Portlisten (JSON-Array von Integern). Die Built-in-Defaults
+# leben unveraendert in ``domain.analysis.rules``; ein gesetzter, wohlgeformter Wert
+# UEBERSCHREIBT den jeweiligen Regel-Parameter (dataclasses.replace), sonst greift der
+# Built-in-Default.
+_PORT_COUNT_THRESHOLD_KEY = "analysis_port_count_threshold"
+_SUSPICIOUS_PORTS_KEY = "analysis_suspicious_ports"
+_CRITICAL_PORTS_KEY = "analysis_critical_ports"
+
+# Default-Schwelle der ``host_many_high_ports``-Regel (gespiegelt aus rules.py als
+# fail-safe-Rueckfall, wenn das Setting fehlt/kaputt ist). Bewusst hier als benannte
+# Konstante: der Composition Root liest defensiv, die Domaene bleibt die Quelle der
+# eigentlichen Built-in-Regel.
+_PORT_COUNT_THRESHOLD_DEFAULT = 10
+
+# Built-in-Regel-IDs, deren Parameter konfigurierbar sind (ADR 0027). Stabil -- der
+# Deaktivierungs-Filter und spaetere Acknowledge-Historie referenzieren diese IDs.
+_PORT_COUNT_RULE_ID = "host_many_high_ports"
+_SUSPICIOUS_RULE_ID = "host_remote_access_port"
+_CRITICAL_RULE_ID = "host_backdoor_port"
+
+
+class _ConfiguredRuleProvider:
+    """Ueberschreibt konfigurierbare Built-in-Regel-Parameter aus den Settings (ADR 0027).
+
+    Drei Parameter sind per Setting aenderbar, OHNE die Built-in-Regeln im Code anzufassen
+    (Konfiguration = reine Daten, gleiche Linie wie ADR 0023):
+
+    * ``analysis_port_count_threshold`` (Integer) -> ``threshold`` der Regel
+      ``host_many_high_ports``.
+    * ``analysis_suspicious_ports`` (JSON-Array von Integern) -> ``ports`` der Regel
+      ``host_remote_access_port`` (datengetriebene auffaellig-Regel).
+    * ``analysis_critical_ports`` (JSON-Array von Integern) -> ``ports`` der Regel
+      ``host_backdoor_port`` (kritisch).
+
+    Wie ``_CompositeRuleProvider``/``_FilteredRuleProvider`` ein kleiner Wrapper-Provider
+    HIER im Composition Root, der strukturell ``ports.analysis.RuleProvider`` erfuellt
+    (``get_rules() -> tuple[Rule, ...]``). Er aendert KEINE Domaene und KEINE Engine: er
+    erzeugt per ``dataclasses.replace`` eine Kopie der betroffenen Default-Regel mit
+    ueberschriebenem Parameter und reicht alle anderen Regeln unveraendert durch -- ein
+    leeres Override-Set laesst jede Regel exakt wie gebaut.
+
+    Defensiver Leer-Zustand (S3-konform, gleiche Linie wie ``_disabled_rule_ids``):
+    fehlender Key / falscher Typ -> Built-in-Default (kein Log, frische DB ist normal);
+    kaputtes JSON (``CorruptSettingError``) -> GELOGGTE Warnung + Built-in-Default. Eine
+    kaputte Komfort-Einstellung darf den Scan NICHT faellen. Ein leeres Array ist ein
+    GUELTIGER Wert (= "diese Regel trifft nichts"), kein Rueckfall auf den Default.
+    """
+
+    def __init__(
+        self,
+        inner: _CompositeRuleProvider,
+        settings: SettingsRepository,
+    ) -> None:
+        self._inner = inner
+        self._settings = settings
+
+    def _port_count_threshold(self) -> int:
+        """Liest die Schwelle defensiv (fehlt/falscher Typ -> Default; kaputt -> Log+Default)."""
+        try:
+            setting = self._settings.get(_PORT_COUNT_THRESHOLD_KEY)
+        except CorruptSettingError:
+            logger.warning("analysis_port_count_threshold_corrupt", key=_PORT_COUNT_THRESHOLD_KEY)
+            return _PORT_COUNT_THRESHOLD_DEFAULT
+        # bool ist Subtyp von int -- ``True``/``False`` waeren ein versehentlicher
+        # Schwellenwert; explizit ausschliessen (nur echte Integer zaehlen).
+        if setting is None or not isinstance(setting.value, int) or isinstance(setting.value, bool):
+            return _PORT_COUNT_THRESHOLD_DEFAULT
+        return setting.value
+
+    def _ports_override(self, key: str) -> frozenset[int] | None:
+        """Liest eine Portliste defensiv. ``None`` = kein Override (Built-in-Default greift).
+
+        Vorhanden + Liste (auch leer) -> ``frozenset`` der Integer-Eintraege (ein leeres
+        Array ergibt ``frozenset()`` = gueltiger "trifft nichts"-Zustand). Fehlt / falscher
+        Typ -> ``None`` (Built-in-Default). Kaputtes JSON -> geloggte Warnung + ``None``.
+        Nicht-Integer-Eintraege (inkl. ``bool``) werden uebersprungen, wie der
+        Deaktivierungs-Filter kaputte rule_id-Eintraege ueberspringt.
+        """
+        try:
+            setting = self._settings.get(key)
+        except CorruptSettingError:
+            logger.warning("analysis_ports_setting_corrupt", key=key)
+            return None
+        if setting is None or not isinstance(setting.value, list):
+            return None
+        return frozenset(x for x in setting.value if isinstance(x, int) and not isinstance(x, bool))
+
+    def get_rules(self) -> tuple[Rule, ...]:
+        threshold = self._port_count_threshold()
+        suspicious = self._ports_override(_SUSPICIOUS_PORTS_KEY)
+        critical = self._ports_override(_CRITICAL_PORTS_KEY)
+        configured: list[Rule] = []
+        for rule in self._inner.get_rules():
+            if rule.id == _PORT_COUNT_RULE_ID:
+                configured.append(replace(rule, threshold=threshold))
+            elif rule.id == _SUSPICIOUS_RULE_ID and suspicious is not None:
+                configured.append(replace(rule, ports=suspicious))
+            elif rule.id == _CRITICAL_RULE_ID and critical is not None:
+                configured.append(replace(rule, ports=critical))
+            else:
+                configured.append(rule)
+        return tuple(configured)
 
 
 # ── monitoring -> alerting-Trigger-Naht (A.7a) ────────────────────────────────
@@ -1784,8 +1899,14 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # ADR 0023: der Composite-Provider wird zusaetzlich umschlossen, damit per
         # Settings (``analysis_disabled_rules``) abgeschaltete Regel-IDs herausgefiltert
         # werden. Default (kein Key) = alle Regeln aktiv -- rein additiv.
+        # ADR 0027: zwischen Composite und Filter sitzt der _ConfiguredRuleProvider, der
+        # die per Setting konfigurierbaren Built-in-Regel-Parameter (Schwelle der
+        # host_many_high_ports-Regel + die Portlisten von host_remote_access_port/
+        # host_backdoor_port) defensiv aus den Settings liest und per dataclasses.replace
+        # ueberschreibt. Default (kein/kaputter Key) = die Built-in-Werte aus rules.py.
         composite = _CompositeRuleProvider(BuiltinRuleProvider(), analysis_rule_repository())
-        rule_provider = _FilteredRuleProvider(composite, repository())
+        configured = _ConfiguredRuleProvider(composite, repository())
+        rule_provider = _FilteredRuleProvider(configured, repository())
         return AnalyzeSnapshot(rule_provider, StaticHelpLinkResolver())(snapshot)
 
     # ── export-Domaene Block 2 verdrahten (Analyse-Befunde -> CSV/JSON/PDF, ADR 0015) ──
@@ -1870,6 +1991,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     app.include_router(analysis_router)
     app.dependency_overrides[provide_analyze] = lambda: _analyze_snapshot
+    # Service-Lookup (Stueck 1): der reine domain-Lookup ``service_for_port`` wird hier
+    # als ServiceLookupRunner herausgereicht -- der api-Ring bleibt domain-frei, die
+    # Kopplung an die Domaene lebt im Composition Root.
+    app.dependency_overrides[provide_service_lookup] = lambda: service_for_port
     app.dependency_overrides[provide_add_user_rules] = lambda: _add_user_rules
     app.dependency_overrides[provide_list_user_rules] = lambda: _list_user_rules
     app.dependency_overrides[provide_delete_user_rule] = lambda: _delete_user_rule

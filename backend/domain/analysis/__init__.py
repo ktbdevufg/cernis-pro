@@ -21,6 +21,7 @@ from domain.analysis.rules import (
     RuleKind,
     Severity,
 )
+from domain.analysis.services import SERVICE_BY_PORT, service_for_port
 from domain.analysis.validation import (
     IssueSeverity,
     RuleIssue,
@@ -29,6 +30,7 @@ from domain.analysis.validation import (
 
 __all__ = [
     "DEFAULT_RULES",
+    "SERVICE_BY_PORT",
     "HelpKind",
     "IssueSeverity",
     "Observation",
@@ -41,5 +43,6 @@ __all__ = [
     "Severity",
     "Snapshot",
     "evaluate",
+    "service_for_port",
     "validate_rules",
 ]

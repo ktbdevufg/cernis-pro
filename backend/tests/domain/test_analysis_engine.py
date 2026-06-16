@@ -279,13 +279,14 @@ def test_rule_b_ohne_ip_nutzt_port_als_subject() -> None:
 # ── (b2) host_remote_access_port (Geraet haelt Fernzugriffs-Port offen) ───────
 
 
-def test_rule_b2_host_mit_offenem_port_22_trifft() -> None:
-    """Host mit offenem Port 22 -> genau EINE Observation der host-Regel.
+def test_rule_b2_host_mit_offenem_port_3389_trifft() -> None:
+    """Host mit offenem Port 3389 (rdp) -> genau EINE Observation der host-Regel.
 
-    Geraeteseitiges Gegenstueck zu (b): nicht eine Verbindung ZU Port 22, sondern ein
-    Geraet, das Port 22 OFFEN haelt. subject ist die Host-ip, der Port steht im detail.
+    ADR 0027: die Regel ist jetzt datengetrieben auffaellig (16er-Default-Liste, SSH 22
+    BEWUSST NICHT dabei). 3389 (rdp) ist Teil der Default-Liste. subject ist die Host-ip,
+    der Port steht im detail.
     """
-    snap = Snapshot(hosts=(_host("10.0.0.5", open_ports=frozenset({22})),))
+    snap = Snapshot(hosts=(_host("10.0.0.5", open_ports=frozenset({3389})),))
     obs = evaluate(snap, DEFAULT_RULES)
     assert len(obs) == 1
     assert obs[0].rule_id == "host_remote_access_port"
@@ -293,25 +294,35 @@ def test_rule_b2_host_mit_offenem_port_22_trifft() -> None:
     assert obs[0].kind == "host_remote_port"
     assert obs[0].severity == "notable"
     assert obs[0].subject == "10.0.0.5"
-    assert "22" in obs[0].detail
+    assert "3389" in obs[0].detail
 
 
-def test_rule_b2_mehrere_fernzugriffs_ports_eine_gebuendelte_observation() -> None:
-    """Host mit 22 UND 3389 offen -> genau EINE Observation, beide Ports gebuendelt.
+def test_rule_b2_ssh_22_ist_bewusst_kein_treffer() -> None:
+    """Host mit NUR offenem Port 22 -> KEINE host_remote_access_port-Observation.
+
+    ADR 0027: SSH 22 ist bewusst NICHT in der auffaellig-Default-Liste (zu alltaeglich,
+    sonst nur Laerm). Belegt die bewusste Auslassung der 22.
+    """
+    snap = Snapshot(hosts=(_host("10.0.0.55", open_ports=frozenset({22})),))
+    assert evaluate(snap, DEFAULT_RULES) == []
+
+
+def test_rule_b2_mehrere_auffaellige_ports_eine_gebuendelte_observation() -> None:
+    """Host mit 3306 UND 3389 offen -> genau EINE Observation, beide Ports gebuendelt.
 
     Die Buendelung verhindert Mehrfach-Meldung desselben Geraets: pro Host eine
-    Beobachtung, die getroffenen Ports aufsteigend sortiert im value ("22, 3389").
+    Beobachtung, die getroffenen Ports aufsteigend sortiert im value ("3306, 3389").
     """
-    snap = Snapshot(hosts=(_host("10.0.0.6", open_ports=frozenset({3389, 22})),))
+    snap = Snapshot(hosts=(_host("10.0.0.6", open_ports=frozenset({3389, 3306})),))
     obs = evaluate(snap, DEFAULT_RULES)
     assert len(obs) == 1
     assert obs[0].rule_id == "host_remote_access_port"
     assert obs[0].subject == "10.0.0.6"
-    assert "22, 3389" in obs[0].detail
+    assert "3306, 3389" in obs[0].detail
 
 
 def test_rule_b2_nur_gewoehnliche_ports_trifft_nicht() -> None:
-    """Host mit nur 80/443 offen -> KEINE host-Observation (kein Fernzugriffs-Port).
+    """Host mit nur 80/443 offen -> KEINE host-Observation (kein auffaelliger Port).
 
     MUTATIONSPROBE (durchgefuehrt, ROT bestaetigt, zurueckgesetzt): in
     ``_eval_host_remote_port`` die Schnittmengen-Pruefung verfaelscht
@@ -328,12 +339,12 @@ def test_rule_b2_host_ohne_offene_ports_trifft_nicht() -> None:
     assert evaluate(snap, DEFAULT_RULES) == []
 
 
-def test_rule_b2_zwei_hosts_je_port_22_nach_subject_sortiert() -> None:
-    # Zwei Hosts mit je offenem 22 -> zwei Observations, nach subject (ip) sortiert.
+def test_rule_b2_zwei_hosts_je_port_3389_nach_subject_sortiert() -> None:
+    # Zwei Hosts mit je offenem 3389 -> zwei Observations, nach subject (ip) sortiert.
     snap = Snapshot(
         hosts=(
-            _host("10.0.0.20", open_ports=frozenset({22})),
-            _host("10.0.0.10", open_ports=frozenset({22})),
+            _host("10.0.0.20", open_ports=frozenset({3389})),
+            _host("10.0.0.10", open_ports=frozenset({3389})),
         )
     )
     obs = [o for o in evaluate(snap, DEFAULT_RULES) if o.rule_id == "host_remote_access_port"]
@@ -342,8 +353,8 @@ def test_rule_b2_zwei_hosts_je_port_22_nach_subject_sortiert() -> None:
 
 
 def test_rule_b2_host_ohne_ip_wird_uebersprungen() -> None:
-    # Leere ip -> kein sinnvolles subject -> uebersprungen, trotz offenem Fernzugriffs-Port.
-    snap = Snapshot(hosts=(_host("", open_ports=frozenset({22})),))
+    # Leere ip -> kein sinnvolles subject -> uebersprungen, trotz offenem auffaelligen Port.
+    snap = Snapshot(hosts=(_host("", open_ports=frozenset({3389})),))
     assert evaluate(snap, DEFAULT_RULES) == []
 
 
@@ -465,17 +476,18 @@ def test_rule_b2c_host_ohne_ip_wird_uebersprungen() -> None:
 
 
 def test_rule_b2c_koexistenz_critical_vor_notable() -> None:
-    """Zwei-Achsen: Host mit 22 (Fernzugriff, notable) UND 31337 (Backdoor, critical).
+    """Zwei-Achsen: Host mit 3389 (auffaellig, notable) UND 31337 (Backdoor, critical).
 
     Beide host_remote_port-Regeln koexistieren auf demselben Geraet -> ZWEI unabhaengige
     Observations. Die globale Sortierung (_SEVERITY_RANK) stellt die critical-Backdoor-
-    Observation VOR die notable-Fernzugriffs-Observation.
+    Observation VOR die notable-auffaellig-Observation. (ADR 0027: SSH 22 ist kein
+    notable-Treffer mehr -- darum hier 3389/rdp aus der auffaellig-Default-Liste.)
 
     MUTATIONSPROBE (durchgefuehrt, ROT bestaetigt, zurueckgesetzt): severity der Regel
     ``host_backdoor_port`` in ``DEFAULT_RULES`` von ``"critical"`` auf ``"notable"``
     verfaelscht -> dieser Test ROT (beide severities waeren dann "notable"). Zurueckgesetzt.
     """
-    snap = Snapshot(hosts=(_host("10.0.2.8", open_ports=frozenset({22, 31337})),))
+    snap = Snapshot(hosts=(_host("10.0.2.8", open_ports=frozenset({3389, 31337})),))
     obs = [
         o
         for o in evaluate(snap, DEFAULT_RULES)

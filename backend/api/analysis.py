@@ -30,7 +30,7 @@ VERWALTUNG EIGENER REGELN (A.2) -- ``/api/analysis/rules`` (GET/POST/DELETE):
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -48,6 +48,17 @@ type AnalyzeRunner = Callable[[], Awaitable[list[Any]]]
 # provide_list_processes).
 def provide_analyze() -> AnalyzeRunner:
     raise NotImplementedError("AnalyzeRunner wird in app.py verdrahtet")
+
+
+# Composition-Root-Callable fuer den Service-Lookup: Port -> gaengiger Service-Name (oder
+# None). Der api-Ring kennt das domain-Mapping (``domain.analysis.service_for_port``) NICHT
+# direkt (api -> nur application); das Callable wird im Composition Root verdrahtet und
+# reicht den reinen Lookup herein. Synchron (reiner In-Memory-Lookup).
+type ServiceLookupRunner = Callable[[int], str | None]
+
+
+def provide_service_lookup() -> ServiceLookupRunner:
+    raise NotImplementedError("ServiceLookupRunner wird in app.py verdrahtet")
 
 
 # ── Verwaltung eigener Regeln (A.2) ───────────────────────────────────────────
@@ -156,6 +167,22 @@ async def get_analysis(
     """
     items = await analyze()
     return [_resolved_to_dict(r) for r in items]
+
+
+@router.get("/analysis/service")
+def get_service_for_port(
+    lookup: Annotated[ServiceLookupRunner, Depends(provide_service_lookup)],
+    port: Annotated[int, Query(ge=1, le=65535)],
+) -> dict[str, Any]:
+    """Reiner Lookup: Port -> gaengiger Service-Name (KEIN Setting).
+
+    Die Einstellungs-UI (spaeterer Schnitt) zeigt zu einem eingegebenen Port sofort den
+    Service-Namen. Port-Range 1-65535 wird per FastAPI-``Query``-Constraint erzwungen --
+    ein Port ausserhalb -> HTTP 422 (KEIN stiller Fallback, S3). Ein gueltiger, aber nicht
+    gelisteter Port -> ``{"port": N, "service": null}`` (legitimer Leer-Zustand, kein
+    Fehler). Der Runner reicht den domain-Lookup herein; dieser Rand bleibt domain-frei.
+    """
+    return {"port": port, "service": lookup(port)}
 
 
 @router.get("/analysis/rules")

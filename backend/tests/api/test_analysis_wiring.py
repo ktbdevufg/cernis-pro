@@ -142,7 +142,11 @@ def test_corrupt_latest_scan_skips_hosts_without_crash(monkeypatch: pytest.Monke
 
 
 def test_intact_latest_scan_yields_host_observation(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Happy Path (B-Stand): intakter Scan mit offenem Port 22 -> host_remote_access_port."""
+    """Happy Path (B-Stand): intakter Scan mit offenem Port 3389 -> host_remote_access_port.
+
+    ADR 0027: SSH 22 ist kein auffaellig-Default-Treffer mehr -- der Scan haelt darum 3389
+    (rdp) offen, das in der auffaellig-Default-Liste liegt.
+    """
 
     class _IntactScanHistoryRepo:
         def __init__(self, *args: Any, **kwargs: Any) -> None: ...
@@ -159,7 +163,7 @@ def test_intact_latest_scan_yields_host_observation(monkeypatch: pytest.MonkeyPa
                         ip="192.168.1.50",
                         mac="AA:BB:CC:00:00:01",
                         hostname="nas",
-                        ports=(PortInfo(port=22, state="open"),),
+                        ports=(PortInfo(port=3389, state="open"),),
                     ),
                 ),
             )
