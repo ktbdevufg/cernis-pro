@@ -88,6 +88,8 @@ class _FakeStoredDevice:
 
     ``last_ip`` ist die VORZUSTANDS-IP aus der devices-DB (ADR 0020); Default ``None``
     (frisch angelegt / keine IP). Aus ihr leitet der Loop ``is_changed`` ab.
+    ``open_ports`` ist der VORZUSTANDS-Portstand aus der devices-DB (ADR 0026); Default
+    leeres Tupel (kein Vorzustand). Aus ihm leitet der Loop ``new_ports`` ab.
     """
 
     def __init__(
@@ -96,11 +98,13 @@ class _FakeStoredDevice:
         tags: tuple[str, ...],
         notes: str,
         last_ip: str | None = None,
+        open_ports: tuple[int, ...] = (),
     ) -> None:
         self.label = label
         self.tags = tags
         self.notes = notes
         self.last_ip = last_ip
+        self.open_ports = open_ports
 
 
 class _FakeDeviceWithHistory:
@@ -254,7 +258,7 @@ def test_full_frame_sequence_matches_s1_contract() -> None:
     assert frames[8] == {"type": "scan_complete", "total_found": 1}
 
 
-def test_host_detail_frame_has_24_keys_incl_source_additional_ips_is_known_is_changed() -> None:
+def test_host_detail_frame_has_25_keys_incl_new_ports() -> None:
     host = EnrichedHost(
         ip="10.0.0.5",
         mac="AA:BB:CC:DD:EE:02",
@@ -268,8 +272,9 @@ def test_host_detail_frame_has_24_keys_incl_source_additional_ips_is_known_is_ch
         frame = ws.receive_json()
 
     assert frame["type"] == "host_detail"
-    # 24 Keys: die 20 S.1-Contract-Keys + source (S.7f) + additional_ips (MAC-Gruppierung)
-    # + is_known (Baseline-Anreicherung, ADR 0019) + is_changed (DHCP-Wechsel, ADR 0020).
+    # 25 Keys: die 20 S.1-Contract-Keys + source (S.7f) + additional_ips (MAC-Gruppierung)
+    # + is_known (Baseline-Anreicherung, ADR 0019) + is_changed (DHCP-Wechsel, ADR 0020)
+    # + new_ports (Port-History Achse A, ADR 0026).
     assert set(frame.keys()) == {
         "type",
         "ip",
@@ -295,6 +300,7 @@ def test_host_detail_frame_has_24_keys_incl_source_additional_ips_is_known_is_ch
         "additional_ips",
         "is_known",
         "is_changed",
+        "new_ports",
     }
     assert frame["ports"] == [{"port": 22, "state": "open", "service": "ssh"}]
     assert frame["category"] == "server"
@@ -682,3 +688,143 @@ def test_host_detail_is_changed_read_from_prestate_before_devices_upsert() -> No
     assert get_device.asked == ["AA:BB:CC:DD:EE:60"]
     # Der devices-Upsert lief trotzdem (mit der neuen IP) -- der Vorzustand wurde davor gelesen.
     assert recorder.recorded[0].ip == "192.168.1.61"
+
+
+# ── new_ports: neuer Port seit letztem Scan (Achse A, Port-History, ADR 0026) ──
+
+
+def test_host_detail_new_ports_lists_only_added_port() -> None:
+    """Bekannter Host, Vorzustand {22}, Scan {22, 3389} -> new_ports == [3389]."""
+    host = EnrichedHost(
+        ip="192.168.1.70",
+        mac="AA:BB:CC:DD:EE:70",
+        ports=(
+            PortInfo(port=22, state="open", service="ssh"),
+            PortInfo(port=3389, state="open", service="ms-wbt-server"),
+        ),
+        category="server",
+    )
+    stored = _FakeStoredDevice(label="", tags=(), notes="", open_ports=(22,))
+    get_device = _FakeGetDevice(stored=stored)
+    client = _client([HostEnriched(host=host)], get_device=get_device)
+    with client.websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "192.168.1.0/24"})
+        frame = ws.receive_json()
+
+    assert frame["type"] == "host_detail"
+    assert frame["new_ports"] == [3389]
+
+
+def test_host_detail_new_ports_ignores_removed_port() -> None:
+    """Bekannter Host, Vorzustand {22, 3389}, Scan {22} -> new_ports == [] (Zugaenge zaehlen)."""
+    host = EnrichedHost(
+        ip="192.168.1.71",
+        mac="AA:BB:CC:DD:EE:71",
+        ports=(PortInfo(port=22, state="open", service="ssh"),),
+        category="server",
+    )
+    stored = _FakeStoredDevice(label="", tags=(), notes="", open_ports=(22, 3389))
+    get_device = _FakeGetDevice(stored=stored)
+    client = _client([HostEnriched(host=host)], get_device=get_device)
+    with client.websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "192.168.1.0/24"})
+        frame = ws.receive_json()
+
+    # Ein WEGGEFALLENER Port ist KEIN "neuer Port" -- nur Zugaenge.
+    assert frame["new_ports"] == []
+
+
+def test_host_detail_new_ports_empty_when_unchanged() -> None:
+    """Bekannter Host, Vorzustand {22}, Scan {22} -> new_ports == [] (unveraendert)."""
+    host = EnrichedHost(
+        ip="192.168.1.72",
+        mac="AA:BB:CC:DD:EE:72",
+        ports=(PortInfo(port=22, state="open", service="ssh"),),
+        category="server",
+    )
+    stored = _FakeStoredDevice(label="", tags=(), notes="", open_ports=(22,))
+    get_device = _FakeGetDevice(stored=stored)
+    client = _client([HostEnriched(host=host)], get_device=get_device)
+    with client.websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "192.168.1.0/24"})
+        frame = ws.receive_json()
+
+    assert frame["new_ports"] == []
+
+
+def test_host_detail_new_ports_empty_for_new_device() -> None:
+    """Neues Geraet (DeviceNotFoundError), Scan {22, 3389} -> new_ports == [].
+
+    Kein devices-Vorzustand -> kein Signal, disjunkt zu is_changed: ein neues Geraet
+    hat per Definition keine "neuen Ports seit letztem Scan" (es war nie da).
+    """
+    host = EnrichedHost(
+        ip="192.168.1.73",
+        mac="AA:BB:CC:DD:EE:73",
+        ports=(
+            PortInfo(port=22, state="open", service="ssh"),
+            PortInfo(port=3389, state="open", service="ms-wbt-server"),
+        ),
+        category="server",
+    )
+    get_device = _FakeGetDevice(stored=None)  # -> DeviceNotFoundError
+    client = _client([HostEnriched(host=host)], get_device=get_device)
+    with client.websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "192.168.1.0/24"})
+        frame = ws.receive_json()
+
+    assert frame["new_ports"] == []
+
+
+def test_host_detail_new_ports_sorted_ascending() -> None:
+    """Mehrere neue Ports, Vorzustand {22}, Scan {22, 80, 443} -> [80, 443] (sortiert)."""
+    host = EnrichedHost(
+        ip="192.168.1.74",
+        mac="AA:BB:CC:DD:EE:74",
+        ports=(
+            # bewusst unsortierte Reihenfolge -> beweist die aufsteigende Sortierung.
+            PortInfo(port=443, state="open", service="https"),
+            PortInfo(port=22, state="open", service="ssh"),
+            PortInfo(port=80, state="open", service="http"),
+        ),
+        category="server",
+    )
+    stored = _FakeStoredDevice(label="", tags=(), notes="", open_ports=(22,))
+    get_device = _FakeGetDevice(stored=stored)
+    client = _client([HostEnriched(host=host)], get_device=get_device)
+    with client.websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "192.168.1.0/24"})
+        frame = ws.receive_json()
+
+    assert frame["new_ports"] == [80, 443]
+
+
+def test_host_detail_new_ports_read_from_prestate_before_devices_upsert() -> None:
+    """Timing/Symmetrie zu is_changed (ADR 0026): open_ports wird VOR dem Upsert gelesen.
+
+    Wuerde die Kuratierung NACH _record_host laufen, traege open_ports schon den neuen
+    Scan-Portstand {22, 3389} -> new_ports waere faelschlich []. Der Fake-GetDevice
+    liefert den Vorzustand {22}, der Scan bringt {22, 3389} -> new_ports muss [3389]
+    sein, get_device genau einmal gefragt, der Upsert lief trotzdem mit dem neuen Stand.
+    """
+    host = EnrichedHost(
+        ip="192.168.1.75",
+        mac="AA:BB:CC:DD:EE:75",
+        ports=(
+            PortInfo(port=22, state="open", service="ssh"),
+            PortInfo(port=3389, state="open", service="ms-wbt-server"),
+        ),
+        category="server",
+    )
+    stored = _FakeStoredDevice(label="", tags=(), notes="", open_ports=(22,))
+    get_device = _FakeGetDevice(stored=stored)
+    recorder = _FakeRecordScannedHost()
+    client = _client([HostEnriched(host=host)], recorder=recorder, get_device=get_device)
+    with client.websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "192.168.1.0/24"})
+        frame = ws.receive_json()
+
+    assert frame["new_ports"] == [3389]
+    assert get_device.asked == ["AA:BB:CC:DD:EE:75"]
+    # Der devices-Upsert lief trotzdem (mit dem neuen Portstand) -- Vorzustand davor gelesen.
+    assert recorder.recorded[0].open_ports == (22, 3389)

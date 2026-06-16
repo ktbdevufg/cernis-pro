@@ -223,6 +223,14 @@ def _host_detail_frame(host: Any) -> dict[str, Any]:
         # Der Composition-Root-Loop ueberschreibt mit dem echten Wert (Vorzustand-IP
         # vs. Scan-IP, gelesen VOR record_seen). Haelt das Frame-Schema konsistent.
         "is_changed": False,
+        # new_ports-Default [] ("keine neuen Ports, sofern nicht angereichert", ADR 0026).
+        # Der Composition-Root-Loop ueberschreibt mit dem echten Wert (Vorzustand-Ports
+        # vs. Scan-Ports, gelesen VOR record_seen/record_host). Haelt das Frame-Schema
+        # konsistent -- new_ports IMMER vorhanden, auch falls die Anreicherung mal
+        # uebersprungen wird (neue/MAC-lose Hosts haben keinen Vorzustand -> keine
+        # "neuen Ports seit letztem Scan"). _host_detail_frame bleibt reine Projektion
+        # ohne I/O; die Anreicherung braucht den Vorzustand und gehoert in den Loop.
+        "new_ports": [],
         # source (ping/arp/fritzbox) auch am persistenten Host (S.7f): die Quelle
         # haengt jetzt durchgaengig am gespeicherten Host, nicht nur am fluechtigen
         # host_found-Frame.
@@ -350,6 +358,16 @@ def make_ws_scan(
                         alte_ip = kuratiert.get("last_ip")
                         if alte_ip is not None and alte_ip != event.host.ip:
                             is_changed = True
+                        # new_ports (ADR 0026): seit dem letzten Scan NEU offene Ports.
+                        # Aktueller Portstand IDENTISCH zur _project-Projektion gebildet
+                        # (alle host.ports-Nummern, KEIN state-Filter), sonst vergleichen
+                        # wir Ungleiches. Vorzustand aus der devices-DB (open_ports, VOR
+                        # dem Upsert gelesen). NUR Zugaenge zaehlen (Mengen-Differenz),
+                        # weggefallene Ports sind kein "neuer Port". Disjunkt zu "neues
+                        # Geraet": kein kuratiert -> kein Vorzustand -> new_ports bleibt [].
+                        aktuelle_ports = {p.port for p in event.host.ports}
+                        alte_ports = set(kuratiert.get("open_ports") or [])
+                        frame["new_ports"] = sorted(aktuelle_ports - alte_ports)
                     frame["is_changed"] = is_changed
                     await websocket.send_json(frame)
                 else:
@@ -444,9 +462,14 @@ def _lese_kuratierung(get_device: Any, mac: str) -> dict[str, Any] | None:
     # is_changed-Vergleich (DHCP-Lease-Wechsel). Der Aufrufer liest diese Kuratierung
     # VOR dem devices-Upsert (RecordScannedHost), sonst traegt last_ip schon die neue
     # Scan-IP. Additiv zu label/tags/notes -- ein Lesevorgang, kein zweiter DB-Zugriff.
+    # open_ports = VORZUSTANDS-Portstand aus der devices-DB (ADR 0026): Grundlage fuer
+    # den neue-Ports-Vergleich (Achse A, Port-History). GENAUSO wie last_ip vom Aufrufer
+    # VOR dem devices-Upsert gelesen (merge_scan ueberschreibt open_ports UNBEDINGT mit
+    # dem neuen Scan-Stand). Additiv -- derselbe eine Lesevorgang.
     return {
         "label": device.label,
         "tags": list(device.tags),
         "notes": device.notes,
         "last_ip": device.last_ip,
+        "open_ports": list(device.open_ports),
     }
