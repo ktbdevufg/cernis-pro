@@ -118,6 +118,7 @@
         "known": "Known devices"
       },
       "newPill": "new",
+      "changedPill": "changed",
       "notablePill": "notable",
       "pingUnit": "{{value}} ms",
       "pingSubMs": ">0 ms",

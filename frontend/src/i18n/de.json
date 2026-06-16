@@ -118,6 +118,7 @@
         "known": "Bekannte Geräte"
       },
       "newPill": "neu",
+      "changedPill": "geändert",
       "notablePill": "auffällig",
       "pingUnit": "{{value}} ms",
       "pingSubMs": ">0 ms",

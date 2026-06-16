@@ -106,6 +106,10 @@ export function mappeHost(host) {
     // is_known:true -> nie "neu" (korrekt). notable bleibt false (eigene Quelle folgt
     // in einem späteren Schnitt).
     isNew: host.is_known === false,
+    // isChanged aus der Baseline (ADR 0020): bekanntes Gerät mit IP-Wechsel
+    // (DHCP). Disjunkt zu isNew (neu = unbekannt). Beim Folgescan ist die neue IP
+    // die Baseline -> Flag fällt automatisch weg.
+    isChanged: host.is_changed === true,
     notable: false,
     label: host.label ?? undefined,
     tags: host.tags ?? undefined,
@@ -147,6 +151,9 @@ export function mappeHostFound(frame) {
     // Die Felder bleiben im View-Objekt erhalten, damit ein späterer Baseline-
     // Abgleich sie nur noch füllen muss.
     isNew: false,
+    // isChanged bleibt im schnellen Frame false; das nachfolgende host_detail
+    // (gleicher schluessel) liefert den echten Wert.
+    isChanged: false,
     notable: false,
     label: undefined,
     tags: undefined,

@@ -212,6 +212,13 @@
   border-color: var(--color-accent-border);
 }
 
+.scan-table__pill--geaendert {
+  color: var(--color-accent);
+  background: transparent;
+  border-color: var(--color-accent-border);
+  opacity: 0.85;
+}
+
 .scan-table__pill--auffaellig {
   color: var(--sev-low-text);
   background: var(--sev-low-bg);

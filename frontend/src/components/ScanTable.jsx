@@ -135,11 +135,15 @@ function baueSpalten() {
       render: (geraet, { t }) => (
         <span className="scan-table__ip-zelle">
           <span>{geraet.ip}</span>
-          {geraet.isNew && (
+          {geraet.isNew ? (
             <span className="scan-table__pill scan-table__pill--neu">
               {t("beobachten.scan.newPill")}
             </span>
-          )}
+          ) : geraet.isChanged ? (
+            <span className="scan-table__pill scan-table__pill--geaendert">
+              {t("beobachten.scan.changedPill")}
+            </span>
+          ) : null}
         </span>
       ),
     },
