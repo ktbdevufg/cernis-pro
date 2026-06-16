@@ -35,6 +35,7 @@ class _FakeObservation:
         detail: str,
         help_kind: str,
         subject: str,
+        kind: str,
     ) -> None:
         self.rule_id = rule_id
         self.severity = severity
@@ -42,6 +43,7 @@ class _FakeObservation:
         self.detail = detail
         self.help_kind = help_kind
         self.subject = subject
+        self.kind = kind
 
 
 class _FakeResolved:
@@ -64,6 +66,7 @@ def test_analysis_wire_form(app: FastAPI) -> None:
                 detail="Verbindung zu 1.2.3.4:22 nutzt einen typischen Fernzugriffs-Port (22).",
                 help_kind="remote_access_port",
                 subject="1.2.3.4:22",
+                kind="connection_remote_port",
             ),
             help_url="https://example.test/remote-access",
         ),
@@ -86,6 +89,7 @@ def test_analysis_wire_form(app: FastAPI) -> None:
             "detail": "Verbindung zu 1.2.3.4:22 nutzt einen typischen Fernzugriffs-Port (22).",
             "help_kind": "remote_access_port",
             "subject": "1.2.3.4:22",
+            "kind": "connection_remote_port",
             "help_url": "https://example.test/remote-access",
         }
     ]

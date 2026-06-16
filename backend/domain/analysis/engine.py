@@ -80,6 +80,7 @@ def _eval_process_temp_path(rule: Rule, snapshot: Snapshot) -> list[Observation]
                 detail=rule.detail_template.format(subject=subject, value=path),
                 help_kind=rule.help_kind,
                 subject=subject,
+                kind=rule.kind,
             )
         )
     return out
@@ -139,6 +140,7 @@ def _eval_process_masquerade(rule: Rule, snapshot: Snapshot) -> list[Observation
                 detail=rule.detail_template.format(subject=subject, value=value),
                 help_kind=rule.help_kind,
                 subject=subject,
+                kind=rule.kind,
             )
         )
     return out
@@ -161,6 +163,7 @@ def _eval_connection_remote_port(rule: Rule, snapshot: Snapshot) -> list[Observa
                 detail=rule.detail_template.format(subject=subject, value=port),
                 help_kind=rule.help_kind,
                 subject=subject,
+                kind=rule.kind,
             )
         )
     return out
@@ -200,6 +203,7 @@ def _eval_host_remote_port(rule: Rule, snapshot: Snapshot) -> list[Observation]:
                 detail=rule.detail_template.format(subject=subject, value=value),
                 help_kind=rule.help_kind,
                 subject=subject,
+                kind=rule.kind,
             )
         )
     return out
@@ -235,6 +239,7 @@ def _eval_host_new(rule: Rule, snapshot: Snapshot) -> list[Observation]:
                 detail=rule.detail_template.format(subject=subject),
                 help_kind=rule.help_kind,
                 subject=subject,
+                kind=rule.kind,
             )
         )
     return out
@@ -266,6 +271,7 @@ def _eval_pid_connection_count(rule: Rule, snapshot: Snapshot) -> list[Observati
                 detail=rule.detail_template.format(subject=subject, value=count),
                 help_kind=rule.help_kind,
                 subject=subject,
+                kind=rule.kind,
             )
         )
     return out

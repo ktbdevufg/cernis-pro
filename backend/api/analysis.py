@@ -139,6 +139,7 @@ def _resolved_to_dict(r: Any) -> dict[str, Any]:
         "detail": r.observation.detail,
         "help_kind": r.observation.help_kind,
         "subject": r.observation.subject,
+        "kind": r.observation.kind,
         "help_url": r.help_url,
     }
 

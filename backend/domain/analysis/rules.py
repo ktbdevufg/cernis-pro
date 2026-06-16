@@ -66,6 +66,9 @@ class Observation:
     detail: str
     help_kind: HelpKind
     subject: str
+    # kind der erzeugenden Regel -- erlaubt Konsumenten, Host- von Verbindungs-/Prozess-
+    # Befunden zu unterscheiden, ohne rule_id-Listen zu pflegen.
+    kind: RuleKind
 
 
 @dataclass(frozen=True)

@@ -139,6 +139,7 @@ def test_rule_a_tmp_pfad_trifft() -> None:
     assert len(obs) == 1
     assert obs[0].rule_id == "process_temp_path"
     assert obs[0].help_kind == "process_suspicious_path"
+    assert obs[0].kind == "process_temp_path"
     assert obs[0].severity == "notable"
     assert obs[0].subject == "pid 7"
     assert "/tmp/evil" in obs[0].detail
@@ -170,6 +171,7 @@ def test_rule_a2_leere_cmdline_trifft_info(full_visibility: bool) -> None:
     assert len(obs) == 1
     assert obs[0].rule_id == "process_masquerade"
     assert obs[0].help_kind == "process_masquerade"
+    assert obs[0].kind == "process_masquerade"
     assert obs[0].severity == "info"
     assert obs[0].subject == "pid 50"
 
@@ -243,6 +245,7 @@ def test_rule_b_fernzugriffs_port_trifft() -> None:
     assert len(obs) == 1
     assert obs[0].rule_id == "remote_access_port"
     assert obs[0].help_kind == "remote_access_port"
+    assert obs[0].kind == "connection_remote_port"
     assert obs[0].subject == "1.2.3.4:5900"
 
 
@@ -272,6 +275,7 @@ def test_rule_b2_host_mit_offenem_port_22_trifft() -> None:
     assert len(obs) == 1
     assert obs[0].rule_id == "host_remote_access_port"
     assert obs[0].help_kind == "remote_access_port"
+    assert obs[0].kind == "host_remote_port"
     assert obs[0].severity == "notable"
     assert obs[0].subject == "10.0.0.5"
     assert "22" in obs[0].detail
@@ -342,6 +346,7 @@ def test_rule_b3_neuer_host_trifft() -> None:
     assert len(obs) == 1
     assert obs[0].rule_id == "new_host_seen"
     assert obs[0].help_kind == "new_host"
+    assert obs[0].kind == "host_new"
     assert obs[0].severity == "notable"
     assert obs[0].subject == "10.0.0.99"
 
@@ -384,6 +389,7 @@ def test_rule_c_ueber_schwelle_trifft() -> None:
     snap = Snapshot(connections=conns)
     obs = [o for o in evaluate(snap, DEFAULT_RULES) if o.rule_id == "high_connection_count"]
     assert len(obs) == 1
+    assert obs[0].kind == "pid_connection_count"
     assert obs[0].subject == "pid 42"
     assert "51" in obs[0].detail
 
