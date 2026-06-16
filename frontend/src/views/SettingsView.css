@@ -182,3 +182,231 @@
   opacity: 0.6;
   cursor: default;
 }
+
+/* ── Sektion „Was ist auffällig?" ─────────────────────────────────────────── */
+
+/* Ein Block innerhalb der Sektion (Tabellen-Paar, Schwelle, Regeln, Hinweis).
+   Blöcke sitzen untereinander, durch die Sektions-Trennlinie abgesetzt. */
+.auffaelligkeit__block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+}
+
+.auffaelligkeit__block + .auffaelligkeit__block {
+  border-top: 1px solid var(--color-border);
+}
+
+/* Badge je Tabelle/Block: trägt den severity-Akzent (auffällig/kritisch). Der
+   neutrale Variantentext nutzt den Sektions-Titel-Ton (kein severity-Akzent). */
+.auffaelligkeit__badge {
+  align-self: flex-start;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.auffaelligkeit__badge--neutral {
+  color: var(--color-text-tert);
+}
+
+/* Eine Port-Tabelle: linker Akzentstreifen in der severity-Farbe, analog zum
+   Sektions-Body, damit beide Listen optisch klar getrennt sind. */
+.auffaelligkeit__table {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-border);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  background: var(--color-bg);
+}
+
+.auffaelligkeit__table + .auffaelligkeit__table {
+  margin-top: 12px;
+}
+
+.auffaelligkeit__table--auffaellig {
+  border-left-color: var(--severity-auffaellig);
+}
+
+.auffaelligkeit__table--auffaellig .auffaelligkeit__badge {
+  color: var(--severity-auffaellig);
+}
+
+.auffaelligkeit__table--kritisch {
+  border-left-color: var(--severity-kritisch);
+}
+
+.auffaelligkeit__table--kritisch .auffaelligkeit__badge {
+  color: var(--severity-kritisch);
+}
+
+.auffaelligkeit__table-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* Die zweispaltige Port/Service-Tabelle plus schmale Aktionsspalte. */
+.auffaelligkeit__grid {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.auffaelligkeit__grid th {
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-tert);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.auffaelligkeit__grid td {
+  padding: 5px 8px;
+  color: var(--color-text);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.auffaelligkeit__grid tr:last-child td {
+  border-bottom: none;
+}
+
+.auffaelligkeit__service {
+  color: var(--color-text-sec);
+}
+
+.auffaelligkeit__empty {
+  color: var(--color-text-tert);
+  font-style: italic;
+}
+
+/* Aktionsspalte: rechtsbündiger, dezenter Lösch-Button. */
+.auffaelligkeit__cell-action {
+  width: 1%;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.auffaelligkeit__remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  color: var(--color-text-tert);
+  background: none;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.auffaelligkeit__remove:hover {
+  color: var(--color-text);
+  background: var(--color-card);
+}
+
+.auffaelligkeit__remove:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+/* „Port hinzufügen"-Zeile: schmales Zahlenfeld, Live-Service, Hinzufügen-Knopf. */
+.auffaelligkeit__add {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.auffaelligkeit__add-input {
+  min-width: 0;
+  width: 110px;
+}
+
+.auffaelligkeit__add-service {
+  flex: 1;
+  font-size: 13px;
+  color: var(--color-text-sec);
+}
+
+/* Block 2: Schwellen-Zeile (Label · Select · Einheit). */
+.auffaelligkeit__threshold {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Block 3: Regel-Liste mit An/Aus-Schaltern. */
+.auffaelligkeit__rules {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.auffaelligkeit__rule {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+}
+
+.auffaelligkeit__rule + .auffaelligkeit__rule {
+  border-top: 1px solid var(--color-border);
+}
+
+.auffaelligkeit__rule-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.auffaelligkeit__rule-title {
+  font-size: 14px;
+  color: var(--color-text);
+}
+
+/* Dezenter Severity-Punkt je Regel. */
+.auffaelligkeit__dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-text-tert);
+}
+
+.auffaelligkeit__dot--auffaellig {
+  background: var(--severity-auffaellig);
+}
+
+.auffaelligkeit__dot--kritisch {
+  background: var(--severity-kritisch);
+}
+
+.auffaelligkeit__dot--neutral {
+  background: var(--color-border);
+}
+
+.auffaelligkeit__switch {
+  flex: 0 0 auto;
+  accent-color: var(--color-accent-strong);
+  cursor: pointer;
+}
+
+/* Block 4: Hinweistext (ruhig, kein Akzent). */
+.auffaelligkeit__honesty p {
+  margin: 0;
+  line-height: 1.5;
+}

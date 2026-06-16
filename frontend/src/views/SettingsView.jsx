@@ -8,9 +8,11 @@
 // kommt als Prop (lang) und wird über onLangChange zurückgemeldet — die
 // Persistenz bleibt in App.jsx (single source of truth).
 
-import { useEffect, useRef, useState } from "react";
+import { X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { fetchAllRules, lookupService } from "../api/analysis.js";
 import {
   fetchSettings,
   updateSetting,
@@ -19,6 +21,26 @@ import {
 } from "../api/settings.js";
 import { FunctionShell } from "../components/AreaShell.jsx";
 import "./SettingsView.css";
+
+// Default-Portmengen der Auffälligkeits-Engine. SPIEGELT bewusst die Backend-
+// Defaults aus backend/domain/analysis/rules.py (Regeln host_remote_access_port
+// bzw. host_backdoor_port). Doppelquelle ist gewollt und dokumentiert: das
+// Backend liefert bei frischer DB KEINEN Setting-Wert (dann greift dort der
+// Built-in-Default), das Frontend würde sonst leere Tabellen zeigen. Hier nur die
+// Zahlen-Defaults — die Regel-Liste selbst kommt live aus GET /api/analysis/rules/all.
+const DEFAULT_AUFFAELLIGE_PORTS = [
+  21, 23, 139, 445, 2049, 3306, 3389, 5432, 5800, 5900, 5984, 6379, 8080, 8443,
+  9200, 27017,
+];
+const DEFAULT_KRITISCHE_PORTS = [
+  1243, 1337, 6670, 6711, 6712, 6713, 6771, 12345, 12346, 20034, 27374, 27444,
+  27665, 30303, 31335, 31337, 31338, 32768, 54283, 65000,
+];
+
+// Auswahlwerte des Schwellen-Dropdowns „Viele hohe Ports". Default-Anzeige 10
+// (entspricht dem Backend-Default threshold der Regel host_many_high_ports).
+const PORT_COUNT_OPTIONEN = [5, 8, 10, 12, 15, 20];
+const DEFAULT_PORT_COUNT = 10;
 
 // Eine Settings-Zeile: Label links, Bedienelement rechts.
 function SettingsZeile({ label, children }) {
@@ -211,6 +233,501 @@ function FritzBoxSektion({ onGespeichert }) {
   );
 }
 
+// Service-Name zu einem gelisteten Port: zeigt den gecachten Namen oder lädt ihn
+// einmalig per GET /api/analysis/service nach. Der Cache liegt in der Sektion
+// (über beide Tabellen geteilt), damit ein Port nur einmal aufgelöst wird. Ein
+// fehlgeschlagener Lookup oder ein unbekannter Port -> „—", kein Crash.
+function ServiceZelle({ port, serviceCache, onServiceGeladen }) {
+  const { t } = useTranslation();
+  const eintragVorhanden = Object.prototype.hasOwnProperty.call(
+    serviceCache,
+    port,
+  );
+
+  useEffect(() => {
+    if (eintragVorhanden) {
+      return undefined;
+    }
+    let aktiv = true;
+    (async () => {
+      try {
+        const name = await lookupService(port);
+        if (aktiv) {
+          onServiceGeladen(port, name);
+        }
+      } catch (ursache) {
+        console.error("Service-Lookup fehlgeschlagen:", ursache);
+        if (aktiv) {
+          onServiceGeladen(port, null);
+        }
+      }
+    })();
+    return () => {
+      aktiv = false;
+    };
+  }, [port, eintragVorhanden, onServiceGeladen]);
+
+  const service = serviceCache[port];
+  return <>{service ?? t("settings.auffaelligkeit.serviceUnknown")}</>;
+}
+
+// Eine Port→Service-Tabelle (auffällig ODER kritisch). Stateless bzgl. Persistenz:
+// die Portliste (sortierte Zahlen) kommt als Prop, jede Änderung geht als neue
+// vollständige Liste an onChange zurück; das Speichern hält die Sektion. variante
+// steuert nur die Optik ("auffaellig"|"kritisch") über die severity-Tokens. Der
+// serviceCache wird über beide Tabellen geteilt (siehe ServiceZelle).
+function PortTabelle({
+  variante,
+  titel,
+  ports,
+  onChange,
+  onReset,
+  serviceCache,
+  onServiceGeladen,
+}) {
+  const { t } = useTranslation();
+
+  const [eingabe, setEingabe] = useState("");
+  const [service, setService] = useState(null); // Auto-Lookup-Ergebnis (oder null)
+  const [fehler, setFehler] = useState(""); // dezente Inline-Meldung (i18n-Key)
+  const portSet = new Set(ports);
+
+  // Auto-Lookup beim Tippen, entprellt (~300ms). Eine leere/ungültige Eingabe
+  // löst keinen Aufruf aus; ein fehlgeschlagener Lookup ist „—", kein Crash.
+  useEffect(() => {
+    const roh = eingabe.trim();
+    if (roh === "") {
+      setService(null);
+      return undefined;
+    }
+    const port = Number(roh);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      setService(null);
+      return undefined;
+    }
+    let aktiv = true;
+    const handle = setTimeout(async () => {
+      try {
+        const name = await lookupService(port);
+        if (aktiv) {
+          setService(name);
+        }
+      } catch (ursache) {
+        // Lookup fehlgeschlagen -> Leer-Zustand „—", nicht crashen.
+        console.error("Service-Lookup fehlgeschlagen:", ursache);
+        if (aktiv) {
+          setService(null);
+        }
+      }
+    }, 300);
+    return () => {
+      aktiv = false;
+      clearTimeout(handle);
+    };
+  }, [eingabe]);
+
+  // Port hinzufügen: Range 1–65535 erzwingen (ungültig -> Inline-Meldung, kein
+  // Eintrag), Duplikate innerhalb DIESER Liste verhindern. Ein Port DARF in beiden
+  // Listen stehen — das ist Sache der jeweils anderen Tabelle, hier nicht geprüft.
+  const handleHinzufuegen = () => {
+    const port = Number(eingabe.trim());
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      setFehler("portInvalid");
+      return;
+    }
+    if (portSet.has(port)) {
+      setFehler("portDuplicate");
+      return;
+    }
+    onChange([...ports, port].sort((a, b) => a - b));
+    setEingabe("");
+    setService(null);
+    setFehler("");
+  };
+
+  const handleEingabe = (wert) => {
+    setEingabe(wert);
+    if (fehler !== "") {
+      setFehler("");
+    }
+  };
+
+  const klasse = `auffaelligkeit__table auffaelligkeit__table--${variante}`;
+
+  return (
+    <div className={klasse}>
+      <div className="auffaelligkeit__table-head">
+        <span className="auffaelligkeit__badge">{titel}</span>
+        <button
+          type="button"
+          className="settings__link-button"
+          onClick={onReset}
+        >
+          {t("settings.auffaelligkeit.reset")}
+        </button>
+      </div>
+
+      <table className="auffaelligkeit__grid">
+        <thead>
+          <tr>
+            <th>{t("settings.auffaelligkeit.colPort")}</th>
+            <th>{t("settings.auffaelligkeit.colService")}</th>
+            <th aria-hidden="true" />
+          </tr>
+        </thead>
+        <tbody>
+          {ports.length === 0 ? (
+            <tr>
+              <td colSpan={3} className="auffaelligkeit__empty">
+                {t("settings.auffaelligkeit.empty")}
+              </td>
+            </tr>
+          ) : (
+            ports.map((port) => (
+              <tr key={port}>
+                <td>{port}</td>
+                <td className="auffaelligkeit__service">
+                  <ServiceZelle
+                    port={port}
+                    serviceCache={serviceCache}
+                    onServiceGeladen={onServiceGeladen}
+                  />
+                </td>
+                <td className="auffaelligkeit__cell-action">
+                  <button
+                    type="button"
+                    className="auffaelligkeit__remove"
+                    aria-label={t("settings.auffaelligkeit.remove")}
+                    title={t("settings.auffaelligkeit.remove")}
+                    onClick={() => onChange(ports.filter((p) => p !== port))}
+                  >
+                    <X size={14} aria-hidden="true" />
+                  </button>
+                </td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
+
+      <div className="auffaelligkeit__add">
+        <input
+          className="settings__input auffaelligkeit__add-input"
+          type="number"
+          min={1}
+          max={65535}
+          inputMode="numeric"
+          value={eingabe}
+          onChange={(e) => handleEingabe(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              handleHinzufuegen();
+            }
+          }}
+          placeholder={t("settings.auffaelligkeit.addPortPlaceholder")}
+        />
+        <span className="auffaelligkeit__add-service">
+          {service ?? t("settings.auffaelligkeit.serviceUnknown")}
+        </span>
+        <button
+          type="button"
+          className="settings__button"
+          onClick={handleHinzufuegen}
+        >
+          {t("settings.auffaelligkeit.add")}
+        </button>
+      </div>
+      {fehler !== "" ? (
+        <span className="settings__hint settings__hint--error">
+          {t(`settings.auffaelligkeit.${fehler}`)}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+// Sektion „Was ist auffällig?": eigener Daten-State analog FritzBoxSektion (laden
+// beim Mount, schreiben pro Änderung gegen die Settings-/analysis-API).
+// onGespeichert ist das gemeinsame zeigeGespeichert-Feedback aus SettingsView.
+//
+// Vier Blöcke: (1) zwei Port→Service-Tabellen, (2) Schwellen-Dropdown, (3) Regel-
+// An/Aus, (4) Ehrlichkeits-Hinweis.
+function AuffaelligkeitSektion({ onGespeichert }) {
+  const { t } = useTranslation();
+
+  const [auffaelligePorts, setAuffaelligePorts] = useState([]);
+  const [kritischePorts, setKritischePorts] = useState([]);
+  const [portCount, setPortCount] = useState(DEFAULT_PORT_COUNT);
+  const [regeln, setRegeln] = useState([]); // [{ id, title, severity, disabled }]
+  const [serviceCache, setServiceCache] = useState({}); // port -> name|null
+  const [ladeStatus, setLadeStatus] = useState("laedt"); // laedt | bereit | fehler
+  const [speicherFehler, setSpeicherFehler] = useState(false);
+
+  // Cache-Schreiber für die ServiceZelle. useCallback, damit der useEffect der
+  // Zelle nicht bei jedem Render neu feuert.
+  const merkeService = useCallback((port, name) => {
+    setServiceCache((vorher) => ({ ...vorher, [port]: name }));
+  }, []);
+
+  // Einmal beim Mount laden: Settings (Portlisten/Schwelle/Deaktivierungen) und
+  // die Regel-Liste. Fehlt ein Port-Listen-Key (frische DB), greift im Backend der
+  // Built-in-Default und das Frontend sieht KEINEN Wert -> dann die Default-
+  // Konstanten zeigen. Fehler nicht verschlucken; in den Lade-Fehlerzustand gehen.
+  useEffect(() => {
+    let aktiv = true;
+    (async () => {
+      try {
+        const [settings, alleRegeln] = await Promise.all([
+          fetchSettings(),
+          fetchAllRules(),
+        ]);
+        if (!aktiv) {
+          return;
+        }
+        setAuffaelligePorts(
+          Array.isArray(settings.analysis_suspicious_ports)
+            ? [...settings.analysis_suspicious_ports].sort((a, b) => a - b)
+            : DEFAULT_AUFFAELLIGE_PORTS,
+        );
+        setKritischePorts(
+          Array.isArray(settings.analysis_critical_ports)
+            ? [...settings.analysis_critical_ports].sort((a, b) => a - b)
+            : DEFAULT_KRITISCHE_PORTS,
+        );
+        setPortCount(
+          Number.isInteger(settings.analysis_port_count_threshold)
+            ? settings.analysis_port_count_threshold
+            : DEFAULT_PORT_COUNT,
+        );
+        setRegeln(
+          alleRegeln.map((r) => ({
+            id: r.id,
+            title: r.title,
+            severity: r.severity,
+            disabled: Boolean(r.disabled),
+          })),
+        );
+        setLadeStatus("bereit");
+      } catch (fehler) {
+        if (!aktiv) {
+          return;
+        }
+        console.error("Auffälligkeits-Einstellungen laden fehlgeschlagen:", fehler);
+        setLadeStatus("fehler");
+      }
+    })();
+    return () => {
+      aktiv = false;
+    };
+  }, []);
+
+  // Block 1: eine Portliste schreiben (auffällig/kritisch). Erst lokal spiegeln,
+  // dann persistieren; bei Fehler den Speicher-Fehlerzustand setzen.
+  const schreibePortliste = async (key, setLocal, neueListe) => {
+    setSpeicherFehler(false);
+    setLocal(neueListe);
+    try {
+      await updateSetting(key, neueListe);
+      onGespeichert();
+    } catch (fehler) {
+      console.error(`${key} speichern fehlgeschlagen:`, fehler);
+      setSpeicherFehler(true);
+    }
+  };
+
+  // Block 2: die Schwelle schreiben.
+  const handlePortCount = async (wert) => {
+    const zahl = Number(wert);
+    setSpeicherFehler(false);
+    setPortCount(zahl);
+    try {
+      await updateSetting("analysis_port_count_threshold", zahl);
+      onGespeichert();
+    } catch (fehler) {
+      console.error("analysis_port_count_threshold speichern fehlgeschlagen:", fehler);
+      setSpeicherFehler(true);
+    }
+  };
+
+  // Block 3: eine Regel an-/ausschalten. Schalter aus -> id ins
+  // analysis_disabled_rules-Array; Schalter an -> id raus. Nach dem Schreiben
+  // lokal spiegeln (konsistenter Zustand ohne erneuten Roundtrip).
+  const handleRegelToggle = async (regelId, neuDisabled) => {
+    setSpeicherFehler(false);
+    const naechste = regeln.map((r) =>
+      r.id === regelId ? { ...r, disabled: neuDisabled } : r,
+    );
+    setRegeln(naechste);
+    const disabledIds = naechste.filter((r) => r.disabled).map((r) => r.id);
+    try {
+      await updateSetting("analysis_disabled_rules", disabledIds);
+      onGespeichert();
+    } catch (fehler) {
+      console.error("analysis_disabled_rules speichern fehlgeschlagen:", fehler);
+      setSpeicherFehler(true);
+    }
+  };
+
+  if (ladeStatus === "laedt") {
+    return (
+      <SettingsSektion title={t("settings.auffaelligkeit.title")}>
+        <div className="settings__row">
+          <span className="settings__hint">
+            {t("settings.auffaelligkeit.loading")}
+          </span>
+        </div>
+      </SettingsSektion>
+    );
+  }
+
+  if (ladeStatus === "fehler") {
+    return (
+      <SettingsSektion title={t("settings.auffaelligkeit.title")}>
+        <div className="settings__row">
+          <span className="settings__hint settings__hint--error">
+            {t("settings.auffaelligkeit.loadError")}
+          </span>
+        </div>
+      </SettingsSektion>
+    );
+  }
+
+  return (
+    <SettingsSektion title={t("settings.auffaelligkeit.title")}>
+      {/* Block 1 — zwei getrennte Port→Service-Tabellen. */}
+      <div className="auffaelligkeit__block">
+        <PortTabelle
+          variante="auffaellig"
+          titel={t("settings.auffaelligkeit.suspiciousTitle")}
+          ports={auffaelligePorts}
+          serviceCache={serviceCache}
+          onServiceGeladen={merkeService}
+          onChange={(neu) =>
+            schreibePortliste(
+              "analysis_suspicious_ports",
+              setAuffaelligePorts,
+              neu,
+            )
+          }
+          onReset={() =>
+            schreibePortliste(
+              "analysis_suspicious_ports",
+              setAuffaelligePorts,
+              [...DEFAULT_AUFFAELLIGE_PORTS],
+            )
+          }
+        />
+        <PortTabelle
+          variante="kritisch"
+          titel={t("settings.auffaelligkeit.criticalTitle")}
+          ports={kritischePorts}
+          serviceCache={serviceCache}
+          onServiceGeladen={merkeService}
+          onChange={(neu) =>
+            schreibePortliste("analysis_critical_ports", setKritischePorts, neu)
+          }
+          onReset={() =>
+            schreibePortliste("analysis_critical_ports", setKritischePorts, [
+              ...DEFAULT_KRITISCHE_PORTS,
+            ])
+          }
+        />
+      </div>
+
+      {/* Block 2 — Schwellen-Dropdown „Viele hohe Ports". */}
+      <div className="auffaelligkeit__block">
+        <span className="auffaelligkeit__badge auffaelligkeit__badge--neutral">
+          {t("settings.auffaelligkeit.thresholdTitle")}
+        </span>
+        <div className="auffaelligkeit__threshold">
+          <span className="settings__row-label">
+            {t("settings.auffaelligkeit.thresholdLabel")}
+          </span>
+          <select
+            className="settings__select"
+            value={portCount}
+            onChange={(e) => handlePortCount(e.target.value)}
+          >
+            {PORT_COUNT_OPTIONEN.map((wert) => (
+              <option key={wert} value={wert}>
+                {wert}
+              </option>
+            ))}
+          </select>
+          <span className="settings__row-label">
+            {t("settings.auffaelligkeit.thresholdUnit")}
+          </span>
+        </div>
+        <span className="settings__hint">
+          {t("settings.auffaelligkeit.thresholdHint")}
+        </span>
+      </div>
+
+      {/* Block 3 — Regel-An/Aus. */}
+      <div className="auffaelligkeit__block">
+        <span className="auffaelligkeit__badge auffaelligkeit__badge--neutral">
+          {t("settings.auffaelligkeit.rulesTitle")}
+        </span>
+        <span className="settings__hint">
+          {t("settings.auffaelligkeit.rulesHint")}
+        </span>
+        {regeln.length === 0 ? (
+          <span className="settings__hint">
+            {t("settings.auffaelligkeit.rulesEmpty")}
+          </span>
+        ) : (
+          <ul className="auffaelligkeit__rules">
+            {regeln.map((regel) => (
+              <li key={regel.id} className="auffaelligkeit__rule">
+                <label className="auffaelligkeit__rule-label">
+                  {regel.severity === "critical" ||
+                  regel.severity === "notable" ? (
+                    <span
+                      className={`auffaelligkeit__dot auffaelligkeit__dot--${
+                        regel.severity === "critical" ? "kritisch" : "auffaellig"
+                      }`}
+                      aria-hidden="true"
+                    />
+                  ) : (
+                    <span className="auffaelligkeit__dot auffaelligkeit__dot--neutral" aria-hidden="true" />
+                  )}
+                  <span className="auffaelligkeit__rule-title">
+                    {regel.title}
+                  </span>
+                </label>
+                <input
+                  type="checkbox"
+                  className="auffaelligkeit__switch"
+                  checked={!regel.disabled}
+                  onChange={(e) =>
+                    handleRegelToggle(regel.id, !e.target.checked)
+                  }
+                />
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {/* Block 4 — Ehrlichkeits-Hinweis. */}
+      <div className="auffaelligkeit__block auffaelligkeit__honesty">
+        <span className="auffaelligkeit__badge auffaelligkeit__badge--neutral">
+          {t("settings.auffaelligkeit.honestyTitle")}
+        </span>
+        <p className="settings__hint">
+          {t("settings.auffaelligkeit.honestyText")}
+        </p>
+      </div>
+
+      {speicherFehler ? (
+        <span className="settings__hint settings__hint--error">
+          {t("settings.auffaelligkeit.saveError")}
+        </span>
+      ) : null}
+    </SettingsSektion>
+  );
+}
+
 export default function SettingsView({ lang, onLangChange, onClose }) {
   const { t } = useTranslation();
 
@@ -268,6 +785,7 @@ export default function SettingsView({ lang, onLangChange, onClose }) {
           </SettingsZeile>
         </SettingsSektion>
         <FritzBoxSektion onGespeichert={zeigeGespeichert} />
+        <AuffaelligkeitSektion onGespeichert={zeigeGespeichert} />
       </div>
     </FunctionShell>
   );

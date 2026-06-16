@@ -47,6 +47,12 @@
   --status-aktiv: #16A34A;
   --status-inaktiv: #1F4D32;
 
+  /* Auffälligkeits-Engine (Einstellungs-UI): zwei semantische Akzente analog zu
+     --status-aktiv/-inaktiv. „auffällig" (orange) = notable-Liste, „kritisch" (rot) =
+     Backdoor-Liste. Nur für die beiden Port-Tabellen und den Severity-Punkt. */
+  --severity-auffaellig: #EA580C;
+  --severity-kritisch: #DC2626;
+
   /* mDNS-Chips (lila) und NDI-Badge (orange) — auf Weiß kräftiger für Kontrast. */
   --chip-mdns-text: #7C3AED;
   --chip-mdns-bg: rgba(124, 58, 237, 0.08);
@@ -90,6 +96,10 @@
   /* Status-Böppel: sattes v1-Grün (aktiv) bzw. sehr dunkel/entsättigt (inaktiv). */
   --status-aktiv: #22C55E;
   --status-inaktiv: #1E3D2A;
+
+  /* Auffälligkeits-Engine: im Dunkelmodus heller/klarer (analog --status-aktiv). */
+  --severity-auffaellig: #FB923C;
+  --severity-kritisch: #F87171;
 
   /* mDNS-Chips (v1-Lila) und NDI-Badge (v1-Orange) — Werte 1:1 aus dem alten Frontend. */
   --chip-mdns-text: #bb86fc;
