@@ -84,12 +84,23 @@ class _FakeRecordSeen:
 
 
 class _FakeStoredDevice:
-    """Minimal-Stand-in fuer ein gespeichertes ``Device`` (kuratierte Felder)."""
+    """Minimal-Stand-in fuer ein gespeichertes ``Device`` (kuratierte Felder + last_ip).
 
-    def __init__(self, label: str, tags: tuple[str, ...], notes: str) -> None:
+    ``last_ip`` ist die VORZUSTANDS-IP aus der devices-DB (ADR 0020); Default ``None``
+    (frisch angelegt / keine IP). Aus ihr leitet der Loop ``is_changed`` ab.
+    """
+
+    def __init__(
+        self,
+        label: str,
+        tags: tuple[str, ...],
+        notes: str,
+        last_ip: str | None = None,
+    ) -> None:
         self.label = label
         self.tags = tags
         self.notes = notes
+        self.last_ip = last_ip
 
 
 class _FakeDeviceWithHistory:
@@ -243,7 +254,7 @@ def test_full_frame_sequence_matches_s1_contract() -> None:
     assert frames[8] == {"type": "scan_complete", "total_found": 1}
 
 
-def test_host_detail_frame_has_23_keys_incl_source_additional_ips_and_is_known() -> None:
+def test_host_detail_frame_has_24_keys_incl_source_additional_ips_is_known_is_changed() -> None:
     host = EnrichedHost(
         ip="10.0.0.5",
         mac="AA:BB:CC:DD:EE:02",
@@ -257,8 +268,8 @@ def test_host_detail_frame_has_23_keys_incl_source_additional_ips_and_is_known()
         frame = ws.receive_json()
 
     assert frame["type"] == "host_detail"
-    # 23 Keys: die 20 S.1-Contract-Keys + source (S.7f) + additional_ips (MAC-Gruppierung)
-    # + is_known (Baseline-Anreicherung, ADR 0019).
+    # 24 Keys: die 20 S.1-Contract-Keys + source (S.7f) + additional_ips (MAC-Gruppierung)
+    # + is_known (Baseline-Anreicherung, ADR 0019) + is_changed (DHCP-Wechsel, ADR 0020).
     assert set(frame.keys()) == {
         "type",
         "ip",
@@ -283,6 +294,7 @@ def test_host_detail_frame_has_23_keys_incl_source_additional_ips_and_is_known()
         "source",
         "additional_ips",
         "is_known",
+        "is_changed",
     }
     assert frame["ports"] == [{"port": 22, "state": "open", "service": "ssh"}]
     assert frame["category"] == "server"
@@ -589,3 +601,84 @@ def test_host_without_mac_is_known_true_and_no_curation() -> None:
     # get_device wird fuer leere MAC gar nicht erst gefragt (Kuratierung uebersprungen).
     assert get_device.asked == []
     assert frame["label"] == ""  # Scan-Default, keine Kuratierung
+
+
+# ── is_changed: DHCP-IP-Wechsel als Baseline-Signal (ADR 0020) ─────────────────
+
+
+def test_host_detail_is_changed_true_for_known_host_with_different_ip() -> None:
+    """Bekanntes Geraet, gespeicherte last_ip weicht von der Scan-IP ab -> is_changed=true."""
+    host = EnrichedHost(ip="192.168.1.50", mac="AA:BB:CC:DD:EE:50", category="server")
+    # Vorzustand der devices-DB: dasselbe Geraet wurde zuletzt unter .49 gesehen.
+    stored = _FakeStoredDevice(label="NAS", tags=("infra",), notes="", last_ip="192.168.1.49")
+    get_device = _FakeGetDevice(stored=stored)
+    client = _client([HostEnriched(host=host)], get_device=get_device)
+    with client.websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "192.168.1.0/24"})
+        frame = ws.receive_json()
+
+    assert frame["type"] == "host_detail"
+    assert frame["is_changed"] is True
+    # Kuratierung bleibt unberuehrt vom is_changed-Pfad.
+    assert frame["label"] == "NAS"
+
+
+def test_host_detail_is_changed_false_for_same_ip() -> None:
+    """Bekanntes Geraet, gespeicherte last_ip == Scan-IP -> is_changed=false (kein Wechsel)."""
+    host = EnrichedHost(ip="192.168.1.51", mac="AA:BB:CC:DD:EE:51", category="server")
+    stored = _FakeStoredDevice(label="", tags=(), notes="", last_ip="192.168.1.51")
+    get_device = _FakeGetDevice(stored=stored)
+    client = _client([HostEnriched(host=host)], get_device=get_device)
+    with client.websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "192.168.1.0/24"})
+        frame = ws.receive_json()
+
+    assert frame["is_changed"] is False
+
+
+def test_host_detail_is_changed_false_for_new_device_without_last_ip() -> None:
+    """Frisch angelegtes Geraet (last_ip None) -> nie is_changed (disjunkt zu 'neu')."""
+    host = EnrichedHost(ip="192.168.1.52", mac="AA:BB:CC:DD:EE:52", category="server")
+    stored = _FakeStoredDevice(label="", tags=(), notes="", last_ip=None)
+    get_device = _FakeGetDevice(stored=stored)
+    client = _client([HostEnriched(host=host)], get_device=get_device)
+    with client.websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "192.168.1.0/24"})
+        frame = ws.receive_json()
+
+    assert frame["is_changed"] is False
+
+
+def test_host_detail_is_changed_false_when_device_not_found() -> None:
+    """Kein gespeichertes Geraet (DeviceNotFoundError) -> is_changed=false (kein Vorzustand)."""
+    host = EnrichedHost(ip="192.168.1.53", mac="AA:BB:CC:DD:EE:53", category="server")
+    get_device = _FakeGetDevice(stored=None)  # -> DeviceNotFoundError
+    client = _client([HostEnriched(host=host)], get_device=get_device)
+    with client.websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "192.168.1.0/24"})
+        frame = ws.receive_json()
+
+    assert frame["is_changed"] is False
+
+
+def test_host_detail_is_changed_read_from_prestate_before_devices_upsert() -> None:
+    """Timing (ADR 0020): last_ip wird VOR dem devices-Upsert gelesen.
+
+    Wuerde die Kuratierung NACH _record_host laufen, traege last_ip schon die neue
+    Scan-IP -> is_changed waere faelschlich False. Der Fake-GetDevice liefert den
+    Vorzustand (.60), die Scan-IP ist .61 -> is_changed muss True sein, und get_device
+    muss genau einmal (vor dem Upsert) gefragt worden sein.
+    """
+    host = EnrichedHost(ip="192.168.1.61", mac="AA:BB:CC:DD:EE:60", category="server")
+    stored = _FakeStoredDevice(label="", tags=(), notes="", last_ip="192.168.1.60")
+    get_device = _FakeGetDevice(stored=stored)
+    recorder = _FakeRecordScannedHost()
+    client = _client([HostEnriched(host=host)], recorder=recorder, get_device=get_device)
+    with client.websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "192.168.1.0/24"})
+        frame = ws.receive_json()
+
+    assert frame["is_changed"] is True
+    assert get_device.asked == ["AA:BB:CC:DD:EE:60"]
+    # Der devices-Upsert lief trotzdem (mit der neuen IP) -- der Vorzustand wurde davor gelesen.
+    assert recorder.recorded[0].ip == "192.168.1.61"

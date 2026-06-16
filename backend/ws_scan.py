@@ -172,7 +172,7 @@ def _event_to_frame(event: ScanEvent) -> dict[str, Any]:
 
 
 def _host_detail_frame(host: Any) -> dict[str, Any]:
-    """``EnrichedHost`` -> ``host_detail``-Frame (20 Keys, S.1-Contract).
+    """``EnrichedHost`` -> ``host_detail``-Frame (22 Keys, S.1-Contract + v2-Erweiterungen).
 
     ``host`` ist ein ``domain.EnrichedHost``; verschachtelte Domaenen-Objekte
     werden per Attribut-Zugriff serialisiert (tuple -> list).
@@ -219,9 +219,13 @@ def _host_detail_frame(host: Any) -> dict[str, Any]:
         # IMMER vorhanden, auch falls die Anreicherung mal uebersprungen wird
         # (MAC-lose/nicht ermittelbare Hosts gelten als bekannt).
         "is_known": True,
+        # is_changed-Default False ("keine IP-Aenderung, sofern nicht angereichert").
+        # Der Composition-Root-Loop ueberschreibt mit dem echten Wert (Vorzustand-IP
+        # vs. Scan-IP, gelesen VOR record_seen). Haelt das Frame-Schema konsistent.
+        "is_changed": False,
         # source (ping/arp/fritzbox) auch am persistenten Host (S.7f): die Quelle
         # haengt jetzt durchgaengig am gespeicherten Host, nicht nur am fluechtigen
-        # host_found-Frame. host_detail hat damit 21 Keys (vorher 20).
+        # host_found-Frame.
         "source": host.source,
         # Weitere IPs derselben MAC (MAC-Gruppierung): Proxy-ARP/Spoofing-Info,
         # verlustfrei am primaeren Host -- leere Liste im Normalfall.
@@ -314,6 +318,16 @@ def make_ws_scan(
                     # sofort "bekannt" (record_seen traegt ihn ja gerade ein). Leere
                     # MAC -> is_known True (MAC-lose Hosts sind nie "neu").
                     baseline_known = _is_known_safe(is_known, event.host.mac)
+                    # Kuratierte Felder + Vorzustands-IP aus der devices-DB lesen --
+                    # die DB ist die Wahrheit fuer label/tags/notes, der frische Scan
+                    # traegt sie leer. WICHTIG (ADR 0020): Dieser Lesevorgang muss VOR
+                    # dem devices-Upsert (_record_host -> RecordScannedHost -> merge_scan)
+                    # laufen, denn merge_scan ueberschreibt last_ip UNBEDINGT mit der
+                    # neuen Scan-IP. Fuer den is_changed-Vergleich (DHCP-Lease-Wechsel)
+                    # brauchen wir aber den VORZUSTAND von last_ip -- also erst lesen,
+                    # dann schreiben. Auf label/tags/notes hat der Upsert keinen Einfluss
+                    # (sie bleiben kuratiert), die Verlegung ist fuer sie folgenlos.
+                    kuratiert = _lese_kuratierung(get_device, event.host.mac)
                     # devices-Projektion (S.7d): pro angereichertem Host VOR dem Frame
                     # persistieren (Altcode-Reihenfolge: erst devices-DB, dann senden).
                     # analysis-Host-Historie (C.2): pro Host NEBEN der devices-Projektion
@@ -322,15 +336,21 @@ def make_ws_scan(
                     # unkritisch (keine schreibt der anderen Daten vor).
                     _record_host(record_host, event.host)
                     _record_seen_host(record_seen, event.host)
-                    # Kuratierte Felder aus der devices-DB (label/tags/notes) lesen --
-                    # die DB ist die Wahrheit, der frische Scan traegt sie leer.
-                    kuratiert = _lese_kuratierung(get_device, event.host.mac)
                     frame = _host_detail_frame(event.host)
                     frame["is_known"] = baseline_known
+                    # is_changed (ADR 0020): bekanntes Geraet, dessen gespeicherte IP
+                    # von der aktuellen Scan-IP abweicht (typisch DHCP-Lease-Wechsel).
+                    # Disjunkt zu "neu": ein neues Geraet hat keine Kuratierung/last_ip
+                    # (None) -> nie is_changed. last_ip stammt aus dem Vorzustand (s.o.).
+                    is_changed = False
                     if kuratiert is not None:
                         frame["label"] = kuratiert["label"]
                         frame["tags"] = kuratiert["tags"]
                         frame["notes"] = kuratiert["notes"]
+                        alte_ip = kuratiert.get("last_ip")
+                        if alte_ip is not None and alte_ip != event.host.ip:
+                            is_changed = True
+                    frame["is_changed"] = is_changed
                     await websocket.send_json(frame)
                 else:
                     # Alle anderen Events unveraendert (insb. host_found bleibt ohne
@@ -420,4 +440,13 @@ def _lese_kuratierung(get_device: Any, mac: str) -> dict[str, Any] | None:
         logger.warning("host_get_device_failed", mac=mac, error=str(exc))
         return None
     device = result.device
-    return {"label": device.label, "tags": list(device.tags), "notes": device.notes}
+    # last_ip = VORZUSTANDS-IP aus der devices-DB (ADR 0020): Grundlage fuer den
+    # is_changed-Vergleich (DHCP-Lease-Wechsel). Der Aufrufer liest diese Kuratierung
+    # VOR dem devices-Upsert (RecordScannedHost), sonst traegt last_ip schon die neue
+    # Scan-IP. Additiv zu label/tags/notes -- ein Lesevorgang, kein zweiter DB-Zugriff.
+    return {
+        "label": device.label,
+        "tags": list(device.tags),
+        "notes": device.notes,
+        "last_ip": device.last_ip,
+    }
