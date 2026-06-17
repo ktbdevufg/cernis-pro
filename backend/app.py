@@ -744,6 +744,65 @@ def _severity_for_host(
     return min(host_severities, key=lambda sev: _SEVERITY_RANK[sev])
 
 
+# Achse-B-Severity-Stufen, in denen flagged_ports gruppiert werden (ADR 0030). NUR
+# "critical"/"notable" -- "info" ist KEINE Auffaelligkeit (gleiche Linie wie
+# _severity_for_host, das info ausfiltert). Stabile, leere Default-Form des Felds: jede
+# Stufe ist IMMER vorhanden, leere Stufe = []. Diese Liste ist die EINE Quelle dafuer,
+# welche Stufen das Feld kennt -- der Frame-Default in ws_scan spiegelt sie.
+_FLAGGED_SEVERITIES: tuple[Severity, ...] = ("critical", "notable")
+
+# RuleKind der portbasierten Achse-B-Regeln (ADR 0030). NUR diese tragen zu flagged_ports
+# bei: sie halten eine konkrete ``ports``-Menge, deren Schnitt mit den offenen Host-Ports
+# die "schuldigen" Ports liefert. host_port_count (anzahlbasiert) + host_new (kein Port)
+# faerben bewusst KEINEN einzelnen Port -- sie bleiben Teil von analysis_severity, tragen
+# aber nicht zu flagged_ports bei (siehe ADR 0030).
+_PORT_BASED_KIND = "host_remote_port"
+
+
+def _empty_flagged_ports() -> dict[str, list[int]]:
+    """Leere flagged_ports-Form (ADR 0030): jede Achse-B-Stufe vorhanden, leere Liste.
+
+    EINE Quelle der Default-Form -- genutzt vom Hosts-ohne-ip-Pfad in
+    ``_flagged_ports_for_host`` UND (gespiegelt) vom Frame-Default in ws_scan. So bleibt das
+    Feld-Schema konsistent: ``{"critical": [], "notable": []}``.
+    """
+    return {sev: [] for sev in _FLAGGED_SEVERITIES}
+
+
+def _flagged_ports_for_host(host: EnrichedHost, provider: Any) -> dict[str, list[int]]:
+    """Die konkret getroffenen offenen Ports EINES Live-Hosts je Achse-B-Stufe (ADR 0030).
+
+    Zweites Achse-B-Feld neben ``analysis_severity`` (0029, Host-Maximum). Waehrend die
+    Severity das Host-MAXIMUM traegt, traegt dieses Feld die MENGE der "schuldigen" Ports
+    pro Stufe -- damit das Frontend (Schnitt 6b) die betroffenen Port-Boeppel einfaerben
+    kann. Form: ``{"critical": [...], "notable": [...]}`` (sortierte Integer-Listen, leere
+    Stufe = ``[]``).
+
+    Die getroffene Portmenge ist der MENGENSCHNITT ``open & rule.ports`` -- NICHT das Parsen
+    des Observation-detail-Strings (Format-Kopplung waere fragil). ``open`` wird mit DEMSELBEN
+    Ausdruck wie ``_observed_host`` gebildet (Ports mit ``state == "open"``), keine zweite
+    Definition von "offen". Iteriert wird ueber ``provider.get_rules()`` -- den GEFILTERTEN
+    Provider, denselben, den ``_severity_for_host`` ueber die Engine sieht (Single Source);
+    nur ``kind == "host_remote_port"``-Regeln tragen bei, nach ``rule.severity`` (Union ueber
+    mehrere Regeln gleicher Stufe) gesammelt. ``host_port_count``/``host_new`` faerben keinen
+    Port und tragen bewusst NICHT bei (siehe ADR 0030).
+
+    Host ohne ``ip`` -> leere Form (kein bewertbares Subjekt, gleiche Linie wie
+    ``_severity_for_host``). Das haelt die KONSISTENZ-Invariante zu ``analysis_severity``:
+    beide kommen aus demselben Provider und derselben "offen"-Projektion, duerfen nicht
+    auseinanderlaufen.
+    """
+    if not host.ip:
+        return _empty_flagged_ports()
+    open_ports = {p.port for p in host.ports if p.state == "open"}
+    flagged: dict[str, set[int]] = {sev: set() for sev in _FLAGGED_SEVERITIES}
+    for rule in provider.get_rules():
+        if rule.kind != _PORT_BASED_KIND or rule.severity not in flagged:
+            continue
+        flagged[rule.severity] |= open_ports & rule.ports
+    return {sev: sorted(ports) for sev, ports in flagged.items()}
+
+
 # ── monitoring -> alerting-Trigger-Naht (A.7a) ────────────────────────────────
 # Der erste echte VERHALTENS-Change der alerting-Migration: ab hier feuert RaiseAlert
 # real, wenn der monitor-Loop eine up/down-Flanke erkennt (alert_history wird
@@ -1102,20 +1161,29 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     def _build_is_known() -> Any:
         return host_history_repository().is_known
 
-    # analysis-Severity-Bewertung (Achse B, ADR 0029): der WS-Handler bewertet pro
-    # angereichertem Host den LIVE-Portstand gegen die KONFIGURIERTEN Regeln und traegt die
-    # hoechste Auffaelligkeit ("critical"/"notable") ins neue Frame-Feld analysis_severity.
-    # Die AnalyzeSnapshot-Instanz wird mit DEMSELBEN gefilterten Provider gebaut wie der
-    # REST-Pfad (_build_filtered_provider -- Single Source), pro Verbindung einmal, und in
-    # ein schlankes (host, known) -> Severity | None Callable geschlossen, das die freie
-    # Funktion _severity_for_host auf dem Live-Host aufruft (KEINE DB-Historie -- die WS-
-    # Quelle bewertet den aktuellen Scan-Host, nicht den abgeschlossenen Scan aus der DB).
-    def _build_severity() -> Any:
-        analyze = AnalyzeSnapshot(
-            _build_filtered_provider(analysis_rule_repository(), repository()),
-            StaticHelpLinkResolver(),
-        )
-        return lambda host, known: _severity_for_host(host, known, analyze)
+    # analysis-Achse-B-Bewertung (ADR 0029 + 0030): der WS-Handler bewertet pro
+    # angereichertem Host den LIVE-Portstand gegen die KONFIGURIERTEN Regeln und traegt BEIDE
+    # Achse-B-Felder ins host_detail-Frame -- analysis_severity (Host-Maximum, 0029) UND
+    # flagged_ports (die getroffenen offenen Ports je Stufe, 0030).
+    #
+    # Single Source (ADR 0030): EIN gefilterter Provider wird pro Verbindung EINMAL gebaut
+    # (DERSELBE _build_filtered_provider wie der REST-Pfad), daraus EINE AnalyzeSnapshot-
+    # Instanz. Das zurueckgegebene Callable liefert beide Felder zusammen: die Severity aus
+    # dem Engine-Lauf (_severity_for_host), die flagged_ports aus dem Mengenschnitt ueber
+    # GENAU DENSELBEN Provider (_flagged_ports_for_host) -- so koennen die beiden Achse-B-
+    # Felder nicht auseinanderlaufen (Konsistenz-Invariante). KEINE DB-Historie -- die WS-
+    # Quelle bewertet den aktuellen Scan-Host, nicht den abgeschlossenen Scan aus der DB.
+    def _build_axis_b() -> Any:
+        provider = _build_filtered_provider(analysis_rule_repository(), repository())
+        analyze = AnalyzeSnapshot(provider, StaticHelpLinkResolver())
+
+        def axis_b(host: EnrichedHost, known: bool) -> tuple[Severity | None, dict[str, list[int]]]:
+            return (
+                _severity_for_host(host, known, analyze),
+                _flagged_ports_for_host(host, provider),
+            )
+
+        return axis_b
 
     app.add_api_websocket_route(
         "/ws/scan",
@@ -1125,7 +1193,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             _build_record_seen,
             _build_get_device,
             _build_is_known,
-            _build_severity,
+            _build_axis_b,
         ),
     )
 

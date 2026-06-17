@@ -11,7 +11,7 @@ Wie die uebrigen wiring-Tests werden die privaten app-Funktionen direkt aus ``ap
 importiert.
 """
 
-from app import _observed_host, _severity_for_host
+from app import _flagged_ports_for_host, _observed_host, _severity_for_host
 from application.analysis import AnalyzeSnapshot
 from domain.analysis.rules import Rule
 from domain.scanning import EnrichedHost, PortInfo
@@ -135,3 +135,116 @@ def test_observed_host_projects_open_ports_only() -> None:
     assert observed.vendor == "ACME"
     assert observed.open_ports == frozenset({22})  # 80 ist closed -> raus
     assert observed.is_known is False
+
+
+# ── _flagged_ports_for_host (Mengenschnitt je Stufe, ADR 0030) ────────────────
+
+
+def _port_count_rule(rule_id: str, severity: str, threshold: int) -> Rule:
+    """Eine anzahlbasierte ``host_port_count``-Regel (traegt NICHT zu flagged_ports bei)."""
+    return Rule(
+        id=rule_id,
+        severity=severity,  # type: ignore[arg-type]
+        help_kind="remote_access_port",
+        kind="host_port_count",
+        title=f"Regel {rule_id}",
+        detail_template="{subject} -- {value}",
+        threshold=threshold,
+    )
+
+
+def test_flagged_ports_empty_form_without_match() -> None:
+    """Keine portbasierte Regel trifft -> leere Form, jede Stufe vorhanden."""
+    notable = _host_rule("notable_rule", "notable", frozenset({3389}))
+    host = _host("192.168.1.10", 22)  # 3389 nicht offen
+    provider = _FakeRuleProvider((notable,))
+    assert _flagged_ports_for_host(host, provider) == {"critical": [], "notable": []}
+
+
+def test_flagged_ports_intersection_notable() -> None:
+    """Auffaelliger offener Port -> notable-Schnitt, sortiert; nicht getroffene Ports raus."""
+    notable = _host_rule("notable_rule", "notable", frozenset({22, 3389}))
+    host = _host("192.168.1.10", 3389, 80)  # nur 3389 ist in der Regel-Portmenge
+    provider = _FakeRuleProvider((notable,))
+    assert _flagged_ports_for_host(host, provider) == {"critical": [], "notable": [3389]}
+
+
+def test_flagged_ports_intersection_critical() -> None:
+    """Backdoor-Port -> critical-Schnitt."""
+    critical = _host_rule("critical_rule", "critical", frozenset({4444}))
+    host = _host("192.168.1.10", 4444)
+    provider = _FakeRuleProvider((critical,))
+    assert _flagged_ports_for_host(host, provider) == {"critical": [4444], "notable": []}
+
+
+def test_flagged_ports_unions_multiple_rules_same_severity() -> None:
+    """Mehrere Regeln gleicher Stufe -> Union der Schnitte, sortiert."""
+    a = _host_rule("a", "notable", frozenset({3389}))
+    b = _host_rule("b", "notable", frozenset({5900}))
+    host = _host("192.168.1.10", 3389, 5900, 22)
+    provider = _FakeRuleProvider((a, b))
+    assert _flagged_ports_for_host(host, provider) == {"critical": [], "notable": [3389, 5900]}
+
+
+def test_flagged_ports_groups_by_severity() -> None:
+    """critical und notable getrennt gruppiert."""
+    notable = _host_rule("notable_rule", "notable", frozenset({3389}))
+    critical = _host_rule("critical_rule", "critical", frozenset({4444}))
+    host = _host("192.168.1.10", 3389, 4444)
+    provider = _FakeRuleProvider((notable, critical))
+    assert _flagged_ports_for_host(host, provider) == {
+        "critical": [4444],
+        "notable": [3389],
+    }
+
+
+def test_flagged_ports_only_open_ports_count() -> None:
+    """Nur Ports mit state=="open" zaehlen -- dieselbe "offen"-Projektion wie _observed_host."""
+    notable = _host_rule("notable_rule", "notable", frozenset({22, 80}))
+    host = EnrichedHost(
+        ip="192.168.1.10",
+        mac="AA:BB:CC:DD:EE:01",
+        ports=(
+            PortInfo(port=22, state="open", service=""),
+            PortInfo(port=80, state="closed", service=""),  # geschlossen -> nicht geflaggt
+        ),
+    )
+    provider = _FakeRuleProvider((notable,))
+    assert _flagged_ports_for_host(host, provider) == {"critical": [], "notable": [22]}
+
+
+def test_flagged_ports_port_count_rule_does_not_contribute() -> None:
+    """Eine anzahlbasierte host_port_count-Regel erzeugt KEINE flagged_ports.
+
+    Sie traegt nur zu analysis_severity bei (kein "schuldiger" Port); flagged_ports bleibt
+    leer (ADR 0030: nur host_remote_port-Regeln sind portbasiert).
+    """
+    count_rule = _port_count_rule("count_rule", "notable", threshold=1)
+    host = _host("192.168.1.10", 22, 80, 443)  # genug Ports, dass die Regel feuert
+    provider = _FakeRuleProvider((count_rule,))
+    assert _flagged_ports_for_host(host, provider) == {"critical": [], "notable": []}
+
+
+def test_flagged_ports_host_without_ip_is_empty() -> None:
+    """Host ohne ip -> leere Form (kein bewertbares Subjekt, Linie wie _severity_for_host)."""
+    critical = _host_rule("critical_rule", "critical", frozenset({4444}))
+    host = _host("", 4444)
+    provider = _FakeRuleProvider((critical,))
+    assert _flagged_ports_for_host(host, provider) == {"critical": [], "notable": []}
+
+
+def test_axis_b_consistency_critical_port_implies_critical_severity() -> None:
+    """Konsistenz-Invariante (ADR 0030): flagged_ports["critical"] nicht leer
+
+    => analysis_severity == "critical". Beide aus DEMSELBEN Provider/derselben offen-
+    Projektion gebildet -- sie duerfen nicht auseinanderlaufen. Hier mit echtem Engine-Lauf
+    (Severity) UND Mengenschnitt (flagged) ueber demselben Regel-Tuple geprueft.
+    """
+    critical = _host_rule("critical_rule", "critical", frozenset({4444}))
+    notable = _host_rule("notable_rule", "notable", frozenset({3389}))
+    host = _host("192.168.1.10", 4444, 3389)
+    provider = _FakeRuleProvider((critical, notable))
+    flagged = _flagged_ports_for_host(host, provider)
+    severity = _severity_for_host(host, True, AnalyzeSnapshot(provider, StaticHelpLinkResolver()))
+    assert flagged["critical"]  # nicht leer
+    assert severity == "critical"  # => Host-Maximum critical (Invariante haelt)

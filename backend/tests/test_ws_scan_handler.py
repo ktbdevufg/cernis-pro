@@ -167,28 +167,34 @@ class _FakeIsKnown:
 
 
 class _FakeSeverity:
-    """Faengt die analysis-Severity-Bewertung (Achse B, ADR 0029).
+    """Faengt die kombinierte Achse-B-Bewertung (ADR 0029 + 0030).
 
-    Liefert die hoechste Auffaelligkeit des Live-Hosts. ``result`` ist der feste
-    Rueckgabewert (``None``/``"notable"``/``"critical"``); ``raise_exc`` erzwingt einen
-    Fehler (best-effort -> None). ``calls`` protokolliert die (ip, is_known)-Aufrufe.
-    Das echte Pendant ist die ``_severity_for_host``-Closure aus app.py.
+    Liefert in EINEM Aufruf BEIDE Achse-B-Felder als Paar
+    ``(analysis_severity, flagged_ports)``. ``result`` ist die feste Severity
+    (``None``/``"notable"``/``"critical"``); ``flagged`` die feste flagged_ports-Form
+    (Default leere Form). ``raise_exc`` erzwingt einen Fehler (best-effort -> Defaults).
+    ``calls`` protokolliert die (ip, is_known)-Aufrufe. Das echte Pendant ist die
+    ``_build_axis_b``-Closure aus app.py.
     """
 
     def __init__(
         self,
         result: str | None = None,
+        flagged: dict[str, list[int]] | None = None,
         raise_exc: Exception | None = None,
     ) -> None:
         self._result = result
+        self._flagged = flagged if flagged is not None else {"critical": [], "notable": []}
         self._raise_exc = raise_exc
         self.calls: list[tuple[str, bool]] = []
 
-    def __call__(self, host: EnrichedHost, is_known: bool) -> str | None:
+    def __call__(
+        self, host: EnrichedHost, is_known: bool
+    ) -> tuple[str | None, dict[str, list[int]]]:
         self.calls.append((host.ip, is_known))
         if self._raise_exc is not None:
             raise self._raise_exc
-        return self._result
+        return self._result, self._flagged
 
 
 def _client(
@@ -286,7 +292,7 @@ def test_full_frame_sequence_matches_s1_contract() -> None:
     assert frames[8] == {"type": "scan_complete", "total_found": 1}
 
 
-def test_host_detail_frame_has_26_keys_incl_analysis_severity() -> None:
+def test_host_detail_frame_has_27_keys_incl_axis_b() -> None:
     host = EnrichedHost(
         ip="10.0.0.5",
         mac="AA:BB:CC:DD:EE:02",
@@ -300,10 +306,11 @@ def test_host_detail_frame_has_26_keys_incl_analysis_severity() -> None:
         frame = ws.receive_json()
 
     assert frame["type"] == "host_detail"
-    # 26 Keys: die 20 S.1-Contract-Keys + source (S.7f) + additional_ips (MAC-Gruppierung)
+    # 27 Keys: die 20 S.1-Contract-Keys + source (S.7f) + additional_ips (MAC-Gruppierung)
     # + is_known (Baseline-Anreicherung, ADR 0019) + is_changed (DHCP-Wechsel, ADR 0020)
     # + new_ports (Port-History Achse A, ADR 0026)
-    # + analysis_severity (Auffaelligkeits-Bewertung Achse B, ADR 0029).
+    # + analysis_severity (Auffaelligkeits-Bewertung Achse B, ADR 0029)
+    # + flagged_ports (getroffene Ports je Stufe, Achse B, ADR 0030).
     assert set(frame.keys()) == {
         "type",
         "ip",
@@ -331,6 +338,7 @@ def test_host_detail_frame_has_26_keys_incl_analysis_severity() -> None:
         "is_changed",
         "new_ports",
         "analysis_severity",
+        "flagged_ports",
     }
     assert frame["ports"] == [{"port": 22, "state": "open", "service": "ssh"}]
     assert frame["category"] == "server"
@@ -349,6 +357,8 @@ def test_analysis_severity_default_none_without_finding() -> None:
         frame = ws.receive_json()
 
     assert frame["analysis_severity"] is None
+    # flagged_ports default-leer mitgeliefert (Achse B, ADR 0030).
+    assert frame["flagged_ports"] == {"critical": [], "notable": []}
 
 
 def test_analysis_severity_notable_for_suspicious_port() -> None:
@@ -421,9 +431,67 @@ def test_analysis_severity_failure_is_best_effort_scan_continues() -> None:
         ws.send_json({"cidr": "192.168.1.0/24"})
         frame = ws.receive_json()
 
-    # best-effort: kein Abbruch, das Feld faellt auf None zurueck (mit Log).
+    # best-effort: kein Abbruch, BEIDE Achse-B-Felder fallen auf ihren Default zurueck
+    # (analysis_severity None, flagged_ports leer) -- mit Log.
     assert frame["type"] == "host_detail"
     assert frame["analysis_severity"] is None
+    assert frame["flagged_ports"] == {"critical": [], "notable": []}
+
+
+# ── flagged_ports (getroffene Ports je Stufe, Achse B, ADR 0030) ──────────────
+
+
+def test_flagged_ports_notable_for_suspicious_open_port() -> None:
+    """Auffaelliger offener Port -> flagged_ports["notable"] traegt ihn, critical leer."""
+    host = EnrichedHost(
+        ip="192.168.1.50",
+        mac="AA:BB:CC:DD:EE:50",
+        ports=(PortInfo(port=3389, state="open", service=""),),
+        category="server",
+    )
+    severity = _FakeSeverity(result="notable", flagged={"critical": [], "notable": [3389]})
+    with _client([HostEnriched(host=host)], severity=severity).websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "192.168.1.0/24"})
+        frame = ws.receive_json()
+
+    assert frame["flagged_ports"] == {"critical": [], "notable": [3389]}
+
+
+def test_flagged_ports_critical_for_backdoor_open_port() -> None:
+    """Backdoor-Port -> flagged_ports["critical"] traegt ihn."""
+    host = EnrichedHost(
+        ip="192.168.1.51",
+        mac="AA:BB:CC:DD:EE:51",
+        ports=(PortInfo(port=4444, state="open", service=""),),
+        category="server",
+    )
+    severity = _FakeSeverity(result="critical", flagged={"critical": [4444], "notable": []})
+    with _client([HostEnriched(host=host)], severity=severity).websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "192.168.1.0/24"})
+        frame = ws.receive_json()
+
+    assert frame["flagged_ports"] == {"critical": [4444], "notable": []}
+
+
+def test_flagged_ports_separate_from_new_ports() -> None:
+    """flagged_ports (Achse B) ist GETRENNT von new_ports (Achse A).
+
+    Ein brandneuer Host OHNE Kuratierung -> new_ports bleibt [] (kein Vorzustand),
+    flagged_ports traegt trotzdem den getroffenen Port (Achse B braucht keine Kuratierung).
+    """
+    host = EnrichedHost(
+        ip="192.168.1.52",
+        mac="AA:BB:CC:DD:EE:52",
+        ports=(PortInfo(port=4444, state="open", service=""),),
+        category="server",
+    )
+    severity = _FakeSeverity(result="critical", flagged={"critical": [4444], "notable": []})
+    with _client([HostEnriched(host=host)], severity=severity).websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "192.168.1.0/24"})
+        frame = ws.receive_json()
+
+    assert frame["new_ports"] == []  # Achse A: kein Vorzustand
+    assert frame["flagged_ports"] == {"critical": [4444], "notable": []}  # Achse B: unabhaengig
 
 
 # ── Invalid-CIDR -> error-Frame (ScanConfig.__post_init__ wirft ValueError) ──

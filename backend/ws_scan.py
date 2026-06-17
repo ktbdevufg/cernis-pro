@@ -102,13 +102,15 @@ GetDeviceFactory = Callable[[], Any]
 # Host sofort "bekannt".
 IsKnownFactory = Callable[[], Any]
 
-# Factory-Typ fuer die analysis-Severity-Bewertung (Achse B, ADR 0029). app.py liefert eine
-# Funktion, die pro Verbindung ein Callable ``(EnrichedHost, bool) -> Severity | None``
-# zurueckgibt (gebaut aus einer ``AnalyzeSnapshot``-Instanz mit dem GEFILTERTEN Provider).
-# Es bewertet den LIVE-Host gegen die konfigurierten Regeln und liefert die hoechste
-# Auffaelligkeit ("critical"/"notable") oder None -- STRIKT GETRENNT von new_ports (Achse A,
-# Port-History). Pro Verbindung einmal geholt, wie die uebrigen Factories.
-SeverityFactory = Callable[[], Any]
+# Factory-Typ fuer die analysis-Achse-B-Bewertung (ADR 0029 + 0030). app.py liefert eine
+# Funktion, die pro Verbindung EIN kombiniertes Callable
+# ``(EnrichedHost, bool) -> (Severity | None, dict[str, list[int]])`` zurueckgibt (gebaut aus
+# EINEM gefilterten Provider + EINER ``AnalyzeSnapshot``-Instanz -- Single Source). Es liefert
+# BEIDE Achse-B-Felder zusammen: die hoechste Auffaelligkeit ("critical"/"notable" oder None,
+# analysis_severity, 0029) UND die getroffenen offenen Ports je Stufe (flagged_ports, 0030).
+# STRIKT GETRENNT von new_ports (Achse A, Port-History). Ein Aufruf, ein Engine-/Provider-Lauf,
+# beide Felder konsistent (Konsistenz-Invariante 0030). Pro Verbindung einmal geholt.
+AxisBFactory = Callable[[], Any]
 
 
 def _project(host: EnrichedHost) -> ScannedHost:
@@ -180,7 +182,7 @@ def _event_to_frame(event: ScanEvent) -> dict[str, Any]:
 
 
 def _host_detail_frame(host: Any) -> dict[str, Any]:
-    """``EnrichedHost`` -> ``host_detail``-Frame (26 Keys, S.1-Contract + v2-Erweiterungen).
+    """``EnrichedHost`` -> ``host_detail``-Frame (27 Keys, S.1-Contract + v2-Erweiterungen).
 
     ``host`` ist ein ``domain.EnrichedHost``; verschachtelte Domaenen-Objekte
     werden per Attribut-Zugriff serialisiert (tuple -> list).
@@ -247,6 +249,16 @@ def _host_detail_frame(host: Any) -> dict[str, Any]:
         # uebersprungen wird (best-effort). _host_detail_frame bleibt reine Projektion ohne
         # I/O; die Bewertung braucht die injizierte Severity-Callable und gehoert in den Loop.
         "analysis_severity": None,
+        # flagged_ports-Default {"critical": [], "notable": []} (Achse B, ADR 0030): die
+        # konkret getroffenen offenen Ports je Severity-Stufe. Zweites Achse-B-Feld neben
+        # analysis_severity (Host-Maximum) -- es traegt die MENGE der "schuldigen" Ports,
+        # damit das Frontend (6b) die betroffenen Port-Boeppel einfaerben kann. Der
+        # Composition-Root-Loop ueberschreibt mit dem echten Mengenschnitt
+        # (open_ports & rule.ports der host_remote_port-Regeln); ohne Treffer bleibt jede
+        # Stufe []. Frame-Schema konsistent: flagged_ports ist IMMER vorhanden, auch falls
+        # die Bewertung mal uebersprungen wird (best-effort). Die leere Default-Form spiegelt
+        # app._empty_flagged_ports (EINE Quelle der Stufen-Menge).
+        "flagged_ports": {"critical": [], "notable": []},
         # source (ping/arp/fritzbox) auch am persistenten Host (S.7f): die Quelle
         # haengt jetzt durchgaengig am gespeicherten Host, nicht nur am fluechtigen
         # host_found-Frame.
@@ -287,7 +299,7 @@ def make_ws_scan(
     record_seen_factory: RecordSeenFactory,
     get_device_factory: GetDeviceFactory,
     is_known_factory: IsKnownFactory,
-    severity_factory: SeverityFactory,
+    axis_b_factory: AxisBFactory,
 ) -> Callable[[WebSocket], Awaitable[None]]:
     """Baut den ``/ws/scan``-Handler mit injizierter ``RunNetworkScan``-Factory.
 
@@ -311,14 +323,17 @@ def make_ws_scan(
     laesst die Anreicherung aus (im Zweifel "bekannt"/keine Kuratierung), der Scan laeuft
     weiter.
 
-    ``severity_factory()`` liefert das analysis-Severity-Callable
-    ``(EnrichedHost, bool) -> Severity | None`` (Achse B, ADR 0029) -- ebenfalls pro
-    Verbindung einmal geholt. Es bewertet den LIVE-Host gegen die konfigurierten Regeln und
-    liefert die hoechste Auffaelligkeit ("critical"/"notable") oder None ins neue Frame-Feld
-    ``analysis_severity``. STRIKT GETRENNT von new_ports (Achse A, Port-History): die
-    Bewertung haengt am aktuellen Portstand, nicht an der Differenz, und braucht KEINE
-    Kuratierung (auch ein brandneuer Host kann auffaellige Ports haben). Best-effort wie die
-    uebrigen Anreicherungen (Fehler -> None + Log, der Scan laeuft weiter).
+    ``axis_b_factory()`` liefert das kombinierte Achse-B-Callable
+    ``(EnrichedHost, bool) -> (Severity | None, dict[str, list[int]])`` (ADR 0029 + 0030) --
+    ebenfalls pro Verbindung einmal geholt. Es bewertet den LIVE-Host gegen die konfigurierten
+    Regeln und liefert in EINEM Aufruf BEIDE Achse-B-Felder: die hoechste Auffaelligkeit
+    ("critical"/"notable") oder None ins Frame-Feld ``analysis_severity`` (Host-Maximum, 0029)
+    UND die getroffenen offenen Ports je Stufe ins Frame-Feld ``flagged_ports`` (0030). Beide
+    kommen aus DEMSELBEN Provider/Engine-Lauf (Single Source, Konsistenz-Invariante). STRIKT
+    GETRENNT von new_ports (Achse A, Port-History): die Bewertung haengt am aktuellen Portstand,
+    nicht an der Differenz, und braucht KEINE Kuratierung (auch ein brandneuer Host kann
+    auffaellige Ports haben). Best-effort wie die uebrigen Anreicherungen (Fehler -> Defaults +
+    Log, der Scan laeuft weiter).
     """
 
     async def ws_scan(websocket: WebSocket) -> None:
@@ -344,7 +359,7 @@ def make_ws_scan(
         record_seen = record_seen_factory()
         get_device = get_device_factory()
         is_known = is_known_factory()
-        severity = severity_factory()
+        axis_b = axis_b_factory()
         try:
             async for event in use_case.run(config):
                 if isinstance(event, HostEnriched):
@@ -396,14 +411,17 @@ def make_ws_scan(
                         alte_ports = set(kuratiert.get("open_ports") or [])
                         frame["new_ports"] = sorted(aktuelle_ports - alte_ports)
                     frame["is_changed"] = is_changed
-                    # analysis_severity (Achse B, ADR 0029): die hoechste Auffaelligkeit des
-                    # LIVE-Hosts gegen die konfigurierten Regeln. UNABHAENGIG von ``kuratiert``
-                    # gesetzt -- Achse B braucht keine Kuratierung (auch ein brandneuer Host
-                    # kann auffaellige Ports haben) und ist STRIKT GETRENNT von new_ports
+                    # Achse B (ADR 0029 + 0030): EIN Aufruf liefert BEIDE Felder zusammen --
+                    # analysis_severity (hoechste Auffaelligkeit, Host-Maximum) UND
+                    # flagged_ports (die getroffenen offenen Ports je Stufe). Beide kommen aus
+                    # demselben Provider/Engine-Lauf (Single Source, Konsistenz-Invariante 0030)
+                    # und werden in EINEM try/except best-effort gesetzt. UNABHAENGIG von
+                    # ``kuratiert`` -- Achse B braucht keine Kuratierung (auch ein brandneuer
+                    # Host kann auffaellige Ports haben) und ist STRIKT GETRENNT von new_ports
                     # (Achse A). ``baseline_known`` (vor record_seen gelesen) ist die is_known-
-                    # Eingabe der Engine. Best-effort wie die uebrigen Anreicherungen.
-                    frame["analysis_severity"] = _severity_safe(
-                        severity, event.host, baseline_known
+                    # Eingabe der Engine.
+                    frame["analysis_severity"], frame["flagged_ports"] = _axis_b_safe(
+                        axis_b, event.host, baseline_known
                     )
                     await websocket.send_json(frame)
                 else:
@@ -474,21 +492,31 @@ def _is_known_safe(is_known: Any, mac: str) -> bool:
         return True
 
 
-def _severity_safe(severity: Any, host: EnrichedHost, is_known: bool) -> str | None:
-    """Bewertet den Live-Host best-effort (Achse B, ADR 0029) -> "critical"/"notable"/None.
+def _axis_b_safe(
+    axis_b: Any, host: EnrichedHost, is_known: bool
+) -> tuple[str | None, dict[str, list[int]]]:
+    """Bewertet beide Achse-B-Felder best-effort (ADR 0029 + 0030) in EINEM Aufruf.
 
-    Reine Bewertung des aktuellen Portstands (kein I/O, kein Historie-Schreibpfad). Wirft
-    das Severity-Callable, wird der Fehler gefangen + geloggt und ``None`` zurueckgegeben
-    -- "im Zweifel keine Auffaelligkeit". Das ist konsistent mit der best-effort-Linie der
-    uebrigen Frame-Anreicherungen (``_is_known_safe``/``_lese_kuratierung``): ein Fehler in
-    der Bewertung darf den Scan NICHT faellen. Mit Warn-Log kein stiller S3-Fallback.
+    Reine Bewertung des aktuellen Portstands (kein I/O, kein Historie-Schreibpfad). Liefert
+    das Paar ``(analysis_severity, flagged_ports)``: die hoechste Auffaelligkeit
+    ("critical"/"notable" oder None) UND die getroffenen offenen Ports je Stufe
+    (``{"critical": [...], "notable": [...]}``). Beide kommen aus DEMSELBEN Provider/Engine-
+    Lauf des kombinierten Callables (Single Source, Konsistenz-Invariante 0030) -- EIN
+    try/except deckt beide ab.
+
+    Wirft das Callable, wird der Fehler gefangen + geloggt und ``(None, leere Form)``
+    zurueckgegeben -- "im Zweifel keine Auffaelligkeit, keine geflaggten Ports". Konsistent mit
+    der best-effort-Linie der uebrigen Frame-Anreicherungen
+    (``_is_known_safe``/``_lese_kuratierung``): ein Fehler in der Bewertung darf den Scan NICHT
+    faellen. Mit Warn-Log kein stiller S3-Fallback. Die leere flagged_ports-Form spiegelt den
+    Frame-Default (jede Achse-B-Stufe vorhanden, leere Liste).
     """
     try:
-        result = severity(host, is_known)
+        severity, flagged = axis_b(host, is_known)
     except Exception as exc:
-        logger.warning("host_analysis_severity_failed", ip=host.ip, error=str(exc))
-        return None
-    return result if result is None else str(result)
+        logger.warning("host_analysis_axis_b_failed", ip=host.ip, error=str(exc))
+        return None, {"critical": [], "notable": []}
+    return (severity if severity is None else str(severity)), flagged
 
 
 def _lese_kuratierung(get_device: Any, mac: str) -> dict[str, Any] | None:
