@@ -43,9 +43,12 @@
   --color-ok-bg: #E1F5EE;
   --color-ok-text: #0F6E56;
 
-  /* Status-Böppel: satter, leuchtender Grünton (aktiv) bzw. dunkel/gedämpft (inaktiv). */
+  /* Status-Böppel: satter, leuchtender Grünton (aktiv) / dunkel-gedämpft (inaktiv) /
+     rot (offline) / orange (degraded). */
   --status-aktiv: #16A34A;
   --status-inaktiv: #1F4D32;
+  --status-offline: #DC2626;
+  --status-degraded: #EA580C;
 
   /* Auffälligkeits-Engine (Einstellungs-UI): zwei semantische Akzente analog zu
      --status-aktiv/-inaktiv. „auffällig" (orange) = notable-Liste, „kritisch" (rot) =
@@ -93,9 +96,12 @@
   --color-ok-bg: #0c2e26;
   --color-ok-text: #9FE1CB;
 
-  /* Status-Böppel: sattes v1-Grün (aktiv) bzw. sehr dunkel/entsättigt (inaktiv). */
+  /* Status-Böppel: sattes v1-Grün (aktiv) / sehr dunkel-entsättigt (inaktiv) /
+     rot (offline) / orange (degraded). */
   --status-aktiv: #22C55E;
   --status-inaktiv: #1E3D2A;
+  --status-offline: #F87171;
+  --status-degraded: #FB923C;
 
   /* Auffälligkeits-Engine: im Dunkelmodus heller/klarer (analog --status-aktiv). */
   --severity-auffaellig: #FB923C;

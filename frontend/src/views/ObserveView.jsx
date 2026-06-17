@@ -11,7 +11,7 @@
 // Die View weiß nicht, ob die Daten echt oder Platzhalter sind. Bei echter
 // Anbindung wird nur dieser Import ausgetauscht.
 
-import { ListTree, Radar, Repeat } from "lucide-react";
+import { Activity, ListTree, Radar, Repeat } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -26,6 +26,7 @@ import { fetchSettings, updateSetting } from "../api/settings.js";
 import { CardGrid, FunctionShell } from "../components/AreaShell.jsx";
 import ColumnManager from "../components/ColumnManager.jsx";
 import FunctionCard from "../components/FunctionCard.jsx";
+import MonitorView from "../components/MonitorView.jsx";
 import ScanDetailPanel from "../components/ScanDetailPanel.jsx";
 import ScanTable, {
   DEFAULT_SICHTBARE_SPALTEN,
@@ -56,6 +57,7 @@ const SCAN_COLUMNS_KEY = "scan_columns";
 const FUNKTIONEN = [
   { id: "scan", icon: Radar, locked: false },
   { id: "traffic", icon: Repeat, locked: false },
+  { id: "monitor", icon: Activity, locked: false },
   { id: "processes", icon: ListTree, locked: true },
 ];
 
@@ -550,6 +552,17 @@ export default function ObserveView({
           refreshInterval={refreshInterval}
           onRefreshIntervalChange={onRefreshIntervalChange}
         />
+      </FunctionShell>
+    );
+  }
+
+  if (openFunction === "monitor") {
+    return (
+      <FunctionShell
+        title={t("beobachten.cards.monitor.title")}
+        onBack={() => setOpenFunction(null)}
+      >
+        <MonitorView />
       </FunctionShell>
     );
   }

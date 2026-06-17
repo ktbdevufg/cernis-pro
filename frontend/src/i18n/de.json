@@ -128,6 +128,11 @@
         "subtitle": "Welche Anwendung wohin verbindet, aufgeschlüsselt je App.",
         "locked": "erst nach Start der Beobachtung"
       },
+      "monitor": {
+        "title": "Live-Monitoring",
+        "subtitle": "Erreichbarkeit und Latenz von Gateway und Internet, live.",
+        "locked": ""
+      },
       "processes": {
         "title": "Prozesse",
         "subtitle": "Laufende Prozesse mit ihren Netzverbindungen.",
@@ -265,6 +270,24 @@
       "sniActive": "SNI aktiv",
       "sniHint": "Zeigt die echten von Apps angefragten Domainnamen (statt nur des Hosters). Erfordert erhöhte Rechte.",
       "sniPermission": "SNI-Beobachtung braucht erhöhte Rechte."
+    },
+    "monitor": {
+      "zieleTitel": "Ziele",
+      "eventLogTitel": "Ereignisse",
+      "aktuelleRtt": "aktuelle Latenz",
+      "wartet": "wartet …",
+      "up": "UP",
+      "offline": "OFFLINE",
+      "eventUp": "Wieder online",
+      "eventDown": "Offline",
+      "eventDegraded": "Verzögert",
+      "label": "Bezeichnung",
+      "host": "IP / Host",
+      "hinzufuegen": "Hinzufügen",
+      "loeschen": "Ziel entfernen",
+      "logLeer": "Noch keine Ereignisse aufgezeichnet.",
+      "getrennt": "Verbindung unterbrochen, neuer Versuch …",
+      "ladeFehler": "Konnte nicht entfernt werden."
     },
     "lookup": {
       "title": "Gegenstelle nachschlagen",

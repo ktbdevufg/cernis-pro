@@ -128,6 +128,11 @@
         "subtitle": "Which application connects where, broken down by app.",
         "locked": "available once observation has started"
       },
+      "monitor": {
+        "title": "Live monitoring",
+        "subtitle": "Reachability and latency of gateway and internet, live.",
+        "locked": ""
+      },
       "processes": {
         "title": "Processes",
         "subtitle": "Running processes with their network connections.",
@@ -265,6 +270,24 @@
       "sniActive": "SNI active",
       "sniHint": "Shows the real domain names apps request (instead of just the host). Requires elevated privileges.",
       "sniPermission": "SNI observation requires elevated privileges."
+    },
+    "monitor": {
+      "zieleTitel": "Targets",
+      "eventLogTitel": "Events",
+      "aktuelleRtt": "current latency",
+      "wartet": "waiting …",
+      "up": "UP",
+      "offline": "OFFLINE",
+      "eventUp": "Back online",
+      "eventDown": "Offline",
+      "eventDegraded": "Degraded",
+      "label": "Label",
+      "host": "IP / host",
+      "hinzufuegen": "Add",
+      "loeschen": "Remove target",
+      "logLeer": "No events recorded yet.",
+      "getrennt": "Connection lost, retrying …",
+      "ladeFehler": "Could not be removed."
     },
     "lookup": {
       "title": "Look up remote endpoint",

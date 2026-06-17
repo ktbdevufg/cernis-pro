@@ -1,0 +1,280 @@
+/* Live-Monitor-Ansicht: Status-Karten + eigene Ziele + Ereignis-Log.
+   Nur Token-Variablen (tokens.css), nie feste Farben. Designsprache wie
+   ObserveView/TrafficView (Card-Flächen, ruhige Hinweisstreifen, mono für
+   Zahlen). Der RTT-Graph ist ein eigenes Stück und hier bewusst nicht enthalten. */
+
+.monitor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Monospace für Latenzen und Host-Eingaben (gleiche Schriftfamilie wie das
+   CIDR-Feld in ObserveView). */
+.monitor-mono {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+/* Dezenter "getrennt"-Hinweisstreifen oben (Reconnect läuft). Nicht aufdringlich:
+   ruhige Card-Fläche, kein Alarm. */
+.monitor__getrennt {
+  flex-shrink: 0;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--color-text-sec);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* Dezenter Fehlerhinweis (z. B. Löschen fehlgeschlagen). Warnton, kein Alarm. */
+.monitor__fehler {
+  flex-shrink: 0;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--sev-med-text);
+  background: var(--sev-med-bg);
+  border: 1px solid var(--sev-med-bd);
+  border-radius: var(--radius-md);
+}
+
+/* Abschnitts-Überschriften (Ziele / Ereignisse): ruhig, klein, getrackt. */
+.monitor__zieleTitel,
+.monitor__logTitel {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--color-text-tert);
+}
+
+/* Status-Karten oben: responsives Grid, füllt die Breite. */
+.monitor__karten {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+/* Eine Status-Karte: ruhige Card-Fläche, Böppel + Label oben, RTT mittig,
+   Zustandswort unten. */
+.monitor-karte {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.monitor-karte__kopf {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Ampel-Böppel: aktiv (grün) / offline (rot) / unbekannt (gedämpft). offline und
+   degraded nutzen eigene Status-Tokens (--status-offline/--status-degraded),
+   getrennt von den Engine-Severity-Tokens: beide dürfen
+   rot/orange sein, aber aus unterschiedlichem Grund über getrennte Tokens. */
+.monitor-karte__ampel {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.monitor-karte__ampel--aktiv {
+  background: var(--status-aktiv);
+  box-shadow: 0 0 6px var(--status-aktiv);
+}
+
+.monitor-karte__ampel--offline {
+  background: var(--status-offline);
+}
+
+.monitor-karte__ampel--unbekannt {
+  background: var(--status-inaktiv);
+}
+
+.monitor-karte__label {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Dezenter Löschen-Button (nur eigene Ziele). Ruhig, hebt sich erst beim Hover. */
+.monitor-karte__loeschen {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px;
+  color: var(--color-text-tert);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md);
+  flex-shrink: 0;
+}
+
+.monitor-karte__loeschen:hover {
+  color: var(--sev-high-text);
+}
+
+.monitor-karte__loeschen:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.monitor-karte__rtt {
+  font-size: 20px;
+  color: var(--color-text);
+}
+
+.monitor-karte__zustand {
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+
+.monitor-karte__zustand-wort--up {
+  color: var(--status-aktiv);
+}
+
+.monitor-karte__zustand-wort--down {
+  color: var(--status-offline);
+}
+
+.monitor-karte__zustand-wort--unbekannt {
+  color: var(--color-text-tert);
+}
+
+/* Eigene Ziele hinzufügen: schlichte Zeile, zwei Inputs + Akzent-Button. */
+.monitor__hinzufuegen {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.monitor__input {
+  padding: 6px 10px;
+  font-size: 13px;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.monitor__input:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+/* Hinzufügen-Button: Akzentfläche wie der Scan-Button, mit Plus-Icon. */
+.monitor__add-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-accent-strong);
+  background: var(--color-accent-bg-strong);
+  border: 1px solid var(--color-accent-strong);
+  border-radius: var(--radius-md);
+}
+
+.monitor__add-button:hover {
+  background: var(--color-accent-bg);
+}
+
+.monitor__add-button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.monitor__add-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Ruhiger Leer-Hinweis, wenn das Log noch leer ist. */
+.monitor__log-leer {
+  margin: 0;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--color-text-sec);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* Ereignis-Log: Liste, neueste zuerst. */
+.monitor__log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.monitor__log .monitor-log__zeile {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 4px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.monitor-log__zeit {
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+.monitor-log__label {
+  min-width: 0;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Zustandswort im Log: up grün, down rot, degraded Warnfarbe. */
+.monitor-log__wort {
+  font-size: 12px;
+  letter-spacing: 0.03em;
+}
+
+.monitor-log__wort--up {
+  color: var(--color-ok-text);
+}
+
+.monitor-log__wort--down {
+  color: var(--status-offline);
+}
+
+.monitor-log__wort--degraded {
+  color: var(--status-degraded);
+}
+
+.monitor-log__rtt {
+  font-size: 12px;
+  color: var(--color-text-sec);
+  text-align: right;
+}
