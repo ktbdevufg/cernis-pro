@@ -28,4 +28,55 @@ export async function fetchAllRules() {
   return (await apiGet("/api/analysis/rules/all")) ?? [];
 }
 
-export default { lookupService, fetchAllRules };
+// Reine, isoliert testbare Extraktion einer Portliste aus dem TEXT einer Datei
+// (Schnitt 7, Konzept §3.2). Wird clientseitig nach FileReader.readAsText
+// aufgerufen; NUR das Ergebnis-Array verlässt später das Frontend (über den
+// bestehenden updateSetting-Pfad) — die rohe Datei wird NIE hochgeladen.
+//
+// Das Backend prüft Portlisten-Werte NICHT gegen (verifiziert), deshalb ist diese
+// Validierung lückenlos und die einzige Schranke. Reine Zahlen-Extraktion: kein
+// eval, kein JSON.parse, keine Pfad-/Code-Auswertung.
+//
+// Trennung: pro Zeile ein Port; zusätzlich tolerant gegen Komma/Semikolon als
+// Trenner innerhalb einer Zeile. Pro Token: trimmen, alles ab '#' als Kommentar
+// abschneiden, Leer-Token überspringen (zählt NICHT als ungültig). Gültig =
+// ganzzahlig (kein Float, keine Buchstaben) UND 1 <= n <= 65535; sonst zählt das
+// Token als „ungültig" (nicht still verworfen — die Anzahl wird angezeigt).
+//
+// Rückgabe: { gueltig: number[], ungueltig: number, gesamt: number }, wobei
+// gueltig sortiert und dedupliziert ist und gesamt die Zahl der nicht-leeren
+// Token (gültig + ungültig) ist.
+export function parsePortliste(text) {
+  const roh = typeof text === "string" ? text : "";
+  const gueltigeSet = new Set();
+  let ungueltig = 0;
+  let gesamt = 0;
+
+  for (const zeile of roh.split(/\r?\n/)) {
+    for (const stueck of zeile.split(/[,;]/)) {
+      // Kommentar ab '#' abschneiden, dann trimmen.
+      const ohneKommentar = stueck.split("#")[0];
+      const token = ohneKommentar.trim();
+      if (token === "") {
+        continue; // Leer-Token (oder reine Kommentarzeile) zählt nicht.
+      }
+      gesamt += 1;
+      // Streng ganzzahlig: nur ASCII-Ziffern, keine Vorzeichen/Floats/Buchstaben.
+      if (!/^\d+$/.test(token)) {
+        ungueltig += 1;
+        continue;
+      }
+      const port = Number(token);
+      if (!Number.isInteger(port) || port < 1 || port > 65535) {
+        ungueltig += 1;
+        continue;
+      }
+      gueltigeSet.add(port);
+    }
+  }
+
+  const gueltig = [...gueltigeSet].sort((a, b) => a - b);
+  return { gueltig, ungueltig, gesamt };
+}
+
+export default { lookupService, fetchAllRules, parsePortliste };

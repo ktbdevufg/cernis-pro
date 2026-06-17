@@ -27,6 +27,21 @@
       "loading": "Loading …",
       "loadError": "Could not load settings.",
       "saveError": "Saving failed."
+    },
+    "auffaelligkeit": {
+      "upload": "Upload file",
+      "uploadHint": "A .txt with port numbers (one per line, comma/semicolon allowed, # for comments).",
+      "uploadTooLarge": "File too large (max. 1 MB).",
+      "uploadReadError": "File could not be read.",
+      "previewTitle": "Preview",
+      "previewValidCount": "{{count}} valid ports detected",
+      "previewInvalidLines": "{{count}} invalid lines ignored",
+      "previewAlreadyPresent": "{{count}} of them already in the list",
+      "previewNone": "No valid ports in the file.",
+      "previewEmptyHint": "With no valid ports there is nothing to add or replace.",
+      "previewAdd": "Add",
+      "previewReplace": "Replace",
+      "previewCancel": "Cancel"
     }
   },
   "nav": {

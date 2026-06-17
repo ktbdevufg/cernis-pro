@@ -8,11 +8,11 @@
 // kommt als Prop (lang) und wird über onLangChange zurückgemeldet — die
 // Persistenz bleibt in App.jsx (single source of truth).
 
-import { X } from "lucide-react";
+import { Upload, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { fetchAllRules, lookupService } from "../api/analysis.js";
+import { fetchAllRules, lookupService, parsePortliste } from "../api/analysis.js";
 import {
   fetchSettings,
   updateSetting,
@@ -41,6 +41,10 @@ const DEFAULT_KRITISCHE_PORTS = [
 // (entspricht dem Backend-Default threshold der Regel host_many_high_ports).
 const PORT_COUNT_OPTIONEN = [5, 8, 10, 12, 15, 20];
 const DEFAULT_PORT_COUNT = 10;
+
+// Obergrenze für den Portlisten-Upload (Schnitt 7). Eine .txt mit Portnummern
+// ist winzig; alles über 1 MB wird abgelehnt, statt den Browser zu blockieren.
+const UPLOAD_MAX_BYTES = 1024 * 1024;
 
 // Eine Settings-Zeile: Label links, Bedienelement rechts.
 function SettingsZeile({ label, children }) {
@@ -446,6 +450,206 @@ function PortTabelle({
   );
 }
 
+// Portlisten-Upload (Schnitt 7, Konzept §3.2) für EINE Liste (auffällig ODER
+// kritisch), eingebettet direkt unter der jeweiligen PortTabelle. Liest clientseitig
+// eine .txt per FileReader, parst sie über die reine parsePortliste, zeigt eine
+// inline-Vorschau (Chips mit Service-Name, ungültig-Zähler, Überschneidung mit der
+// bestehenden Liste) und schreibt erst beim Klick auf „Ergänzen"/„Ersetzen" — über
+// den GLEICHEN onChange-Pfad wie die Tabelle (schreibePortliste). Die rohe Datei
+// verlässt das Frontend NIE; nur das validierte Array geht ans Backend.
+//
+// variante steuert (wie bei PortTabelle) nur die Optik über die severity-Tokens.
+// bestehendePorts ist die aktuelle Liste (für Union beim Ergänzen + Überschneidungs-
+// Hinweis). serviceCache/onServiceGeladen werden mit den Tabellen geteilt, damit ein
+// schon bekannter Port nicht erneut nachgeschlagen wird.
+function PortUpload({
+  variante,
+  bestehendePorts,
+  onErsetzen,
+  onErgaenzen,
+  serviceCache,
+  onServiceGeladen,
+}) {
+  const { t } = useTranslation();
+  const dateiInputRef = useRef(null);
+
+  // Vorschau-Zustand: null = keine Datei gewählt. Sonst das Parse-Ergebnis plus der
+  // Dateiname (rein informativ in der Vorschau).
+  const [vorschau, setVorschau] = useState(null); // { name, gueltig, ungueltig, gesamt }
+  const [fehler, setFehler] = useState(""); // dezenter Inline-Fehler (i18n-Key) oder ""
+
+  const bestehendSet = new Set(bestehendePorts);
+
+  const handleDatei = (datei) => {
+    if (!datei) {
+      return;
+    }
+    setFehler("");
+    setVorschau(null);
+    // Größengrenze VOR dem Lesen prüfen — eine Portliste ist winzig.
+    if (datei.size > UPLOAD_MAX_BYTES) {
+      setFehler("uploadTooLarge");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = typeof reader.result === "string" ? reader.result : "";
+      const ergebnis = parsePortliste(text);
+      setVorschau({ name: datei.name, ...ergebnis });
+    };
+    reader.onerror = () => {
+      console.error("Datei lesen fehlgeschlagen:", reader.error);
+      setFehler("uploadReadError");
+    };
+    reader.readAsText(datei);
+  };
+
+  // Nach Schreiben (oder Abbrechen) die Vorschau verwerfen und das File-Input
+  // zurücksetzen, damit dieselbe Datei erneut gewählt werden kann.
+  const verwerfen = () => {
+    setVorschau(null);
+    setFehler("");
+    if (dateiInputRef.current) {
+      dateiInputRef.current.value = "";
+    }
+  };
+
+  const klasse = `auffaelligkeit__upload auffaelligkeit__upload--${variante}`;
+
+  // Vorschau-Kennzahlen.
+  const gueltig = vorschau ? vorschau.gueltig : [];
+  const bereitsVorhanden = gueltig.filter((p) => bestehendSet.has(p)).length;
+  const leer = gueltig.length === 0;
+
+  return (
+    <div className={klasse}>
+      <div className="auffaelligkeit__upload-trigger">
+        <input
+          ref={dateiInputRef}
+          type="file"
+          accept=".txt,text/plain"
+          className="auffaelligkeit__upload-input"
+          onChange={(e) => handleDatei(e.target.files?.[0] ?? null)}
+        />
+        <button
+          type="button"
+          className="settings__button auffaelligkeit__upload-button"
+          onClick={() => dateiInputRef.current?.click()}
+        >
+          <Upload size={14} aria-hidden="true" />
+          {t("settings.auffaelligkeit.upload")}
+        </button>
+        <span className="settings__hint auffaelligkeit__upload-hint">
+          {t("settings.auffaelligkeit.uploadHint")}
+        </span>
+      </div>
+
+      {fehler !== "" ? (
+        <span className="settings__hint settings__hint--error">
+          {t(`settings.auffaelligkeit.${fehler}`)}
+        </span>
+      ) : null}
+
+      {vorschau ? (
+        <div className="auffaelligkeit__preview">
+          <div className="auffaelligkeit__preview-head">
+            <span className="auffaelligkeit__badge">
+              {t("settings.auffaelligkeit.previewTitle")}
+            </span>
+            <span className="auffaelligkeit__preview-file">{vorschau.name}</span>
+          </div>
+
+          <span className="settings__hint">
+            {t("settings.auffaelligkeit.previewValidCount", {
+              count: gueltig.length,
+            })}
+          </span>
+
+          {leer ? (
+            <span className="auffaelligkeit__preview-empty">
+              {t("settings.auffaelligkeit.previewNone")}
+            </span>
+          ) : (
+            <div className="auffaelligkeit__chips">
+              {gueltig.map((port) => (
+                <span key={port} className="auffaelligkeit__chip">
+                  <span className="auffaelligkeit__chip-port">{port}</span>
+                  <span className="auffaelligkeit__chip-service">
+                    <ServiceZelle
+                      port={port}
+                      serviceCache={serviceCache}
+                      onServiceGeladen={onServiceGeladen}
+                    />
+                  </span>
+                </span>
+              ))}
+            </div>
+          )}
+
+          {vorschau.ungueltig > 0 ? (
+            <span className="settings__hint auffaelligkeit__preview-invalid">
+              {t("settings.auffaelligkeit.previewInvalidLines", {
+                count: vorschau.ungueltig,
+              })}
+            </span>
+          ) : null}
+
+          {bereitsVorhanden > 0 ? (
+            <span className="settings__hint">
+              {t("settings.auffaelligkeit.previewAlreadyPresent", {
+                count: bereitsVorhanden,
+              })}
+            </span>
+          ) : null}
+
+          <div className="auffaelligkeit__preview-actions">
+            <button
+              type="button"
+              className="settings__button"
+              disabled={leer}
+              onClick={() => {
+                // Ergänzen: Union mit der bestehenden Liste, dedupliziert + sortiert.
+                const vereint = [
+                  ...new Set([...bestehendePorts, ...gueltig]),
+                ].sort((a, b) => a - b);
+                onErgaenzen(vereint);
+                verwerfen();
+              }}
+            >
+              {t("settings.auffaelligkeit.previewAdd")}
+            </button>
+            <button
+              type="button"
+              className="settings__button"
+              disabled={leer}
+              onClick={() => {
+                // Ersetzen: die hochgeladene Liste ersetzt die bestehende komplett.
+                onErsetzen([...gueltig]);
+                verwerfen();
+              }}
+            >
+              {t("settings.auffaelligkeit.previewReplace")}
+            </button>
+            <button
+              type="button"
+              className="settings__link-button"
+              onClick={verwerfen}
+            >
+              {t("settings.auffaelligkeit.previewCancel")}
+            </button>
+          </div>
+
+          {leer ? (
+            <span className="settings__hint auffaelligkeit__preview-empty-hint">
+              {t("settings.auffaelligkeit.previewEmptyHint")}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 // Sektion „Was ist auffällig?": eigener Daten-State analog FritzBoxSektion (laden
 // beim Mount, schreiben pro Änderung gegen die Settings-/analysis-API).
 // onGespeichert ist das gemeinsame zeigeGespeichert-Feedback aus SettingsView.
@@ -594,44 +798,92 @@ function AuffaelligkeitSektion({ onGespeichert }) {
 
   return (
     <SettingsSektion title={t("settings.auffaelligkeit.title")}>
-      {/* Block 1 — zwei getrennte Port→Service-Tabellen. */}
+      {/* Block 1 — zwei getrennte Port→Service-Tabellen, je mit Upload darunter. */}
       <div className="auffaelligkeit__block">
-        <PortTabelle
-          variante="auffaellig"
-          titel={t("settings.auffaelligkeit.suspiciousTitle")}
-          ports={auffaelligePorts}
-          serviceCache={serviceCache}
-          onServiceGeladen={merkeService}
-          onChange={(neu) =>
-            schreibePortliste(
-              "analysis_suspicious_ports",
-              setAuffaelligePorts,
-              neu,
-            )
-          }
-          onReset={() =>
-            schreibePortliste(
-              "analysis_suspicious_ports",
-              setAuffaelligePorts,
-              [...DEFAULT_AUFFAELLIGE_PORTS],
-            )
-          }
-        />
-        <PortTabelle
-          variante="kritisch"
-          titel={t("settings.auffaelligkeit.criticalTitle")}
-          ports={kritischePorts}
-          serviceCache={serviceCache}
-          onServiceGeladen={merkeService}
-          onChange={(neu) =>
-            schreibePortliste("analysis_critical_ports", setKritischePorts, neu)
-          }
-          onReset={() =>
-            schreibePortliste("analysis_critical_ports", setKritischePorts, [
-              ...DEFAULT_KRITISCHE_PORTS,
-            ])
-          }
-        />
+        <div className="auffaelligkeit__listengruppe">
+          <PortTabelle
+            variante="auffaellig"
+            titel={t("settings.auffaelligkeit.suspiciousTitle")}
+            ports={auffaelligePorts}
+            serviceCache={serviceCache}
+            onServiceGeladen={merkeService}
+            onChange={(neu) =>
+              schreibePortliste(
+                "analysis_suspicious_ports",
+                setAuffaelligePorts,
+                neu,
+              )
+            }
+            onReset={() =>
+              schreibePortliste(
+                "analysis_suspicious_ports",
+                setAuffaelligePorts,
+                [...DEFAULT_AUFFAELLIGE_PORTS],
+              )
+            }
+          />
+          <PortUpload
+            variante="auffaellig"
+            bestehendePorts={auffaelligePorts}
+            serviceCache={serviceCache}
+            onServiceGeladen={merkeService}
+            onErgaenzen={(neu) =>
+              schreibePortliste(
+                "analysis_suspicious_ports",
+                setAuffaelligePorts,
+                neu,
+              )
+            }
+            onErsetzen={(neu) =>
+              schreibePortliste(
+                "analysis_suspicious_ports",
+                setAuffaelligePorts,
+                neu,
+              )
+            }
+          />
+        </div>
+        <div className="auffaelligkeit__listengruppe">
+          <PortTabelle
+            variante="kritisch"
+            titel={t("settings.auffaelligkeit.criticalTitle")}
+            ports={kritischePorts}
+            serviceCache={serviceCache}
+            onServiceGeladen={merkeService}
+            onChange={(neu) =>
+              schreibePortliste(
+                "analysis_critical_ports",
+                setKritischePorts,
+                neu,
+              )
+            }
+            onReset={() =>
+              schreibePortliste("analysis_critical_ports", setKritischePorts, [
+                ...DEFAULT_KRITISCHE_PORTS,
+              ])
+            }
+          />
+          <PortUpload
+            variante="kritisch"
+            bestehendePorts={kritischePorts}
+            serviceCache={serviceCache}
+            onServiceGeladen={merkeService}
+            onErgaenzen={(neu) =>
+              schreibePortliste(
+                "analysis_critical_ports",
+                setKritischePorts,
+                neu,
+              )
+            }
+            onErsetzen={(neu) =>
+              schreibePortliste(
+                "analysis_critical_ports",
+                setKritischePorts,
+                neu,
+              )
+            }
+          />
+        </div>
       </div>
 
       {/* Block 2 — Schwellen-Dropdown „Viele hohe Ports". */}
