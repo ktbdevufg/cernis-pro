@@ -48,6 +48,7 @@ from api.alerting import (
 from api.alerting import router as alerting_router
 from api.analysis import (
     UserRuleBody,
+    provide_acknowledge,
     provide_add_user_rules,
     provide_analyze,
     provide_delete_user_rule,
@@ -269,6 +270,7 @@ from infrastructure.alerting import (
     SqliteAlertRuleRepository,
 )
 from infrastructure.analysis import BuiltinRuleProvider, StaticHelpLinkResolver
+from infrastructure.analysis_acknowledgements_db import SqliteAcknowledgementRepository
 from infrastructure.analysis_host_history_db import SqliteHostHistoryRepository
 from infrastructure.analysis_rules_db import SqliteUserRuleRepository
 from infrastructure.capture import (
@@ -714,7 +716,10 @@ def _observed_host(host: EnrichedHost, is_known: bool) -> ObservedHost:
 
 
 def _severity_for_host(
-    host: EnrichedHost, is_known: bool, analyze: AnalyzeSnapshot
+    host: EnrichedHost,
+    is_known: bool,
+    analyze: AnalyzeSnapshot,
+    acked: frozenset[int] = frozenset(),
 ) -> Severity | None:
     """Hoechste Achse-B-Severity EINES Live-Hosts gegen die konfigurierten Regeln (ADR 0029).
 
@@ -729,10 +734,19 @@ def _severity_for_host(
     bei nur info-/keinen Host-Befunden -> ``None``. Die Rangfolge kommt aus
     ``_SEVERITY_RANK`` (``"critical"`` < ``"notable"`` < ``"info"``) -- kleinster Rang
     gewinnt. Hosts ohne ``ip`` werden uebersprungen (kein bewertbares Subjekt) -> ``None``.
+
+    ``acked`` (ADR 0031): die QUITTIERTEN Ports dieses Hosts werden VOR dem Engine-Lauf
+    aus dem bewerteten Portstand entfernt -- ein quittierter Port traegt nicht mehr zur
+    Severity bei. Die "offen"-Projektion bleibt ansonsten identisch (``_observed_host``
+    selbst unveraendert); nur die fuer die BEWERTUNG sichtbare Portmenge wird reduziert.
+    Default leer -> kein Verhaltenswechsel fuer Bestandsaufrufer.
     """
     if not host.ip:
         return None
-    snapshot = Snapshot(hosts=(_observed_host(host, is_known),))
+    observed = _observed_host(host, is_known)
+    if acked:
+        observed = replace(observed, open_ports=observed.open_ports - acked)
+    snapshot = Snapshot(hosts=(observed,))
     resolved = analyze(snapshot)
     host_severities = [
         r.observation.severity
@@ -769,7 +783,9 @@ def _empty_flagged_ports() -> dict[str, list[int]]:
     return {sev: [] for sev in _FLAGGED_SEVERITIES}
 
 
-def _flagged_ports_for_host(host: EnrichedHost, provider: Any) -> dict[str, list[int]]:
+def _flagged_ports_for_host(
+    host: EnrichedHost, provider: Any, acked: frozenset[int] = frozenset()
+) -> dict[str, list[int]]:
     """Die konkret getroffenen offenen Ports EINES Live-Hosts je Achse-B-Stufe (ADR 0030).
 
     Zweites Achse-B-Feld neben ``analysis_severity`` (0029, Host-Maximum). Waehrend die
@@ -787,6 +803,12 @@ def _flagged_ports_for_host(host: EnrichedHost, provider: Any) -> dict[str, list
     mehrere Regeln gleicher Stufe) gesammelt. ``host_port_count``/``host_new`` faerben keinen
     Port und tragen bewusst NICHT bei (siehe ADR 0030).
 
+    ``acked`` (ADR 0031): die QUITTIERTEN Ports werden VOR der Schnittbildung aus ``open``
+    entfernt -- ein quittierter Port wird nicht mehr geflaggt. SELBE Reduktion wie in
+    ``_severity_for_host`` (beide ziehen ``acked`` vom selben "offen"-Stand ab), damit die
+    KONSISTENZ-Invariante zu ``analysis_severity`` haelt. Default leer -> kein
+    Verhaltenswechsel fuer Bestandsaufrufer.
+
     Host ohne ``ip`` -> leere Form (kein bewertbares Subjekt, gleiche Linie wie
     ``_severity_for_host``). Das haelt die KONSISTENZ-Invariante zu ``analysis_severity``:
     beide kommen aus demselben Provider und derselben "offen"-Projektion, duerfen nicht
@@ -794,7 +816,7 @@ def _flagged_ports_for_host(host: EnrichedHost, provider: Any) -> dict[str, list
     """
     if not host.ip:
         return _empty_flagged_ports()
-    open_ports = {p.port for p in host.ports if p.state == "open"}
+    open_ports = {p.port for p in host.ports if p.state == "open"} - acked
     flagged: dict[str, set[int]] = {sev: set() for sev in _FLAGGED_SEVERITIES}
     for rule in provider.get_rules():
         if rule.kind != _PORT_BASED_KIND or rule.severity not in flagged:
@@ -1176,11 +1198,29 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     def _build_axis_b() -> Any:
         provider = _build_filtered_provider(analysis_rule_repository(), repository())
         analyze = AnalyzeSnapshot(provider, StaticHelpLinkResolver())
+        # acked-Lese-Naht (ADR 0031): das acknowledged_ports-Callable (mac) -> set[int] aus
+        # dem Acknowledge-Repo, EINMAL pro Verbindung geholt (spaete Namensaufloesung von
+        # acknowledgement_repository, das erst im analysis-Block weiter unten definiert ist
+        # -- Muster wie _build_is_known/host_history_repository). Die acked-Logik lebt
+        # KOMPLETT in dieser Closure (geringste Kopplung, Teil 3): ws_scan setzt nur ein
+        # weiteres Frame-Feld und braucht keine zweite Factory.
+        acknowledged_ports = acknowledgement_repository().acknowledged_ports
 
-        def axis_b(host: EnrichedHost, known: bool) -> tuple[Severity | None, dict[str, list[int]]]:
+        # Das Callable liefert ein TRIPEL (severity, flagged, acked_list): die quittierten
+        # Ports werden EINMAL je Host geholt und doppelt genutzt -- (a) die BEWERTUNG
+        # (severity + flagged) auf dem um ``acked`` reduzierten Portstand bilden (Single
+        # Source, beide aus demselben reduzierten Stand -> Konsistenz haelt), (b) als
+        # sortierte Liste ins host_detail-Frame (das Panel in 8b braucht sie). Die normale
+        # "offen"-Projektion (Frame-Feld ``ports``) bleibt UNberuehrt -- nur die Bewertung
+        # reduziert. Die Signatur (host, known) bleibt; ``acked`` wird INNEN geholt.
+        def axis_b(
+            host: EnrichedHost, known: bool
+        ) -> tuple[Severity | None, dict[str, list[int]], list[int]]:
+            acked = frozenset(acknowledged_ports(host.mac)) if host.mac else frozenset()
             return (
-                _severity_for_host(host, known, analyze),
-                _flagged_ports_for_host(host, provider),
+                _severity_for_host(host, known, analyze, acked),
+                _flagged_ports_for_host(host, provider, acked),
+                sorted(acked),
             )
 
         return axis_b
@@ -1984,6 +2024,17 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
         return SqliteHostHistoryRepository(get_db_path())
 
+    # Acknowledge-Audit-Repo (ADR 0031): das append-only Log der quittierten
+    # Achse-B-Befunde, teilt die cernis.db (lru_cache, Muster host_history_repository).
+    # Zwei Naehte greifen darauf zu: die SCHREIB-Naht am Endpunkt (POST /api/analysis/
+    # acknowledge, record) und die LESE-Naht im axis_b-Pfad (acknowledged_ports), die
+    # quittierte Ports aus der Bewertung nimmt und ins host_detail-Frame traegt.
+    @lru_cache(maxsize=1)
+    def acknowledgement_repository() -> SqliteAcknowledgementRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteAcknowledgementRepository(get_db_path())
+
     # Kein Poller, kein app.state, kein lifespan-Eingriff -- wie process. Die zwei
     # Adapter (BuiltinRuleProvider/StaticHelpLinkResolver) sind zustandslos. Die
     # SNAPSHOT-PROJEKTION aus traffic+process lebt HIER im Composition Root, NICHT im
@@ -2196,6 +2247,12 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     def _delete_user_rule(rule_id: str) -> None:
         analysis_rule_repository().delete_rule(rule_id)
 
+    # Acknowledge-Schreibnaht (ADR 0031): reicht den record-Schreibpfad des Audit-Repos
+    # als AcknowledgeRunner heraus (Pass-Through, Muster _delete_user_rule). Der api-Ring
+    # bleibt repo-frei; die Validierung (port-Range/severity/action) macht das Body-DTO.
+    def _acknowledge(mac: str, port: int, severity: str, action: str) -> None:
+        acknowledgement_repository().record(mac, port, severity, action)
+
     app.include_router(analysis_router)
     app.dependency_overrides[provide_analyze] = lambda: _analyze_snapshot
     # Service-Lookup (Stueck 1): der reine domain-Lookup ``service_for_port`` wird hier
@@ -2206,6 +2263,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.dependency_overrides[provide_list_user_rules] = lambda: _list_user_rules
     app.dependency_overrides[provide_list_all_rules] = lambda: _list_all_rules
     app.dependency_overrides[provide_delete_user_rule] = lambda: _delete_user_rule
+    app.dependency_overrides[provide_acknowledge] = lambda: _acknowledge
 
     # ── Frontend-Serving ── MUSS als LETZTES registriert werden ──────────────────
     # Der "/"-Mount faengt alle zuvor NICHT gematchten Pfade. Deshalb hier ganz am

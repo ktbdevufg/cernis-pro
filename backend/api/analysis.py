@@ -31,11 +31,11 @@ VERWALTUNG EIGENER REGELN (A.2) -- ``/api/analysis/rules`` (GET/POST/DELETE):
 """
 
 from collections.abc import Awaitable, Callable
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/api", tags=["analysis"])
 
@@ -64,6 +64,18 @@ def provide_service_lookup() -> ServiceLookupRunner:
     raise NotImplementedError("ServiceLookupRunner wird in app.py verdrahtet")
 
 
+# Composition-Root-Callable fuer das Acknowledge-Audit (ADR 0031): schreibt eine ack/unack-
+# Zeile ins append-only Log (mac, port, severity, action) -> None. Der api-Ring kennt das
+# Repository (``SqliteAcknowledgementRepository.record``) NICHT direkt (api -> nur
+# application); das Callable wird im Composition Root verdrahtet. Synchron (lokaler
+# SQLite-Schreibzugriff).
+type AcknowledgeRunner = Callable[[str, int, str, str], None]
+
+
+def provide_acknowledge() -> AcknowledgeRunner:
+    raise NotImplementedError("AcknowledgeRunner wird in app.py verdrahtet")
+
+
 # ── Verwaltung eigener Regeln (A.2) ───────────────────────────────────────────
 
 
@@ -87,6 +99,23 @@ class UserRuleBody(BaseModel):
     ports: list[int] = []
     path_prefixes: list[str] = []
     threshold: int = 0
+
+
+class AcknowledgeBody(BaseModel):
+    """POST /api/analysis/acknowledge -- ein Quittier-Befehl pro (mac, port) (ADR 0031).
+
+    ``port`` wird per ``Field``-Constraint auf 1-65535 begrenzt (wie der Service-Lookup --
+    KEIN stiller Fallback, S3). ``severity`` und ``action`` sind ``Literal``-Felder: ein
+    anderer Wert -> HTTP 422 (pydantic-Validierung), nicht ein leiser Durchlauf. ``severity``
+    haelt die Achse-B-Stufe der quittierten Auffaelligkeit ("critical"/"notable", die zwei
+    Stufen aus ``app._FLAGGED_SEVERITIES``); ``action`` ist ``ack`` (quittieren, nimmt die
+    Bewertung weg) oder ``unack`` (zuruecknehmen, stellt den Befund wieder scharf).
+    """
+
+    mac: str
+    port: Annotated[int, Field(ge=1, le=65535)]
+    severity: Literal["critical", "notable"]
+    action: Literal["ack", "unack"]
 
 
 # Composition-Root-Callable: bekommt die rohen Request-DTOs (``list[UserRuleBody]``), baut
@@ -258,4 +287,23 @@ def delete_user_rule(
 ) -> dict[str, bool]:
     """Loescht eine eigene Regel. Idempotent: eine unbekannte id ist kein Fehler."""
     delete_rule(rule_id)
+    return {"ok": True}
+
+
+@router.post("/analysis/acknowledge")
+def acknowledge(
+    body: AcknowledgeBody,
+    record: Annotated[AcknowledgeRunner, Depends(provide_acknowledge)],
+) -> dict[str, bool]:
+    """Quittiert (oder entquittiert) einen Achse-B-Befund PORT-GENAU (ADR 0031).
+
+    Schreibt EINE append-only Log-Zeile (ack/unack) ueber den Composition-Root-Runner; der
+    effektive Status eines (mac, port) ergibt sich aus dem jeweils JUENGSTEN Eintrag. ``ack``
+    nimmt die Bewertung (Pille/Faerbung) dauerhaft weg, ``unack`` stellt den Befund wieder
+    scharf -- KEIN Loeschen, die History bleibt vollstaendig. Granularitaet pro (mac, port):
+    ein quittierter Port betrifft nur ihn; ein neuer auffaelliger Port am selben Host loest
+    weiter aus. Port-Range/severity/action werden per Body-Constraints erzwungen (Muell ->
+    422). Erfolg -> 200 ``{"ok": true}``.
+    """
+    record(body.mac, body.port, body.severity, body.action)
     return {"ok": True}

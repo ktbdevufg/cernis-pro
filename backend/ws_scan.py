@@ -102,14 +102,17 @@ GetDeviceFactory = Callable[[], Any]
 # Host sofort "bekannt".
 IsKnownFactory = Callable[[], Any]
 
-# Factory-Typ fuer die analysis-Achse-B-Bewertung (ADR 0029 + 0030). app.py liefert eine
-# Funktion, die pro Verbindung EIN kombiniertes Callable
-# ``(EnrichedHost, bool) -> (Severity | None, dict[str, list[int]])`` zurueckgibt (gebaut aus
-# EINEM gefilterten Provider + EINER ``AnalyzeSnapshot``-Instanz -- Single Source). Es liefert
-# BEIDE Achse-B-Felder zusammen: die hoechste Auffaelligkeit ("critical"/"notable" oder None,
-# analysis_severity, 0029) UND die getroffenen offenen Ports je Stufe (flagged_ports, 0030).
-# STRIKT GETRENNT von new_ports (Achse A, Port-History). Ein Aufruf, ein Engine-/Provider-Lauf,
-# beide Felder konsistent (Konsistenz-Invariante 0030). Pro Verbindung einmal geholt.
+# Factory-Typ fuer die analysis-Achse-B-Bewertung (ADR 0029 + 0030 + 0031). app.py liefert
+# eine Funktion, die pro Verbindung EIN kombiniertes Callable
+# ``(EnrichedHost, bool) -> (Severity | None, dict[str, list[int]], list[int])`` zurueckgibt
+# (gebaut aus EINEM gefilterten Provider + EINER ``AnalyzeSnapshot``-Instanz + dem
+# acked-Lesepfad -- Single Source). Es liefert die drei Achse-B-Frame-Werte zusammen: die
+# hoechste Auffaelligkeit ("critical"/"notable" oder None, analysis_severity, 0029), die
+# getroffenen offenen Ports je Stufe (flagged_ports, 0030) UND die quittierten offenen Ports
+# (acknowledged_ports, 0031 -- aus der Bewertung herausgerechnet, im ``ports``-Feld aber
+# weiter offen). STRIKT GETRENNT von new_ports (Achse A, Port-History). Ein Aufruf, ein
+# Engine-/Provider-Lauf, alle Werte konsistent (Konsistenz-Invariante 0030). Pro Verbindung
+# einmal geholt.
 AxisBFactory = Callable[[], Any]
 
 
@@ -182,7 +185,7 @@ def _event_to_frame(event: ScanEvent) -> dict[str, Any]:
 
 
 def _host_detail_frame(host: Any) -> dict[str, Any]:
-    """``EnrichedHost`` -> ``host_detail``-Frame (27 Keys, S.1-Contract + v2-Erweiterungen).
+    """``EnrichedHost`` -> ``host_detail``-Frame (28 Keys, S.1-Contract + v2-Erweiterungen).
 
     ``host`` ist ein ``domain.EnrichedHost``; verschachtelte Domaenen-Objekte
     werden per Attribut-Zugriff serialisiert (tuple -> list).
@@ -259,6 +262,15 @@ def _host_detail_frame(host: Any) -> dict[str, Any]:
         # die Bewertung mal uebersprungen wird (best-effort). Die leere Default-Form spiegelt
         # app._empty_flagged_ports (EINE Quelle der Stufen-Menge).
         "flagged_ports": {"critical": [], "notable": []},
+        # acknowledged_ports-Default [] (Achse B, ADR 0031): die QUITTIERTEN offenen Ports
+        # dieses Hosts (sortierte Integer-Liste). Quittierte Ports zaehlen NICHT mehr fuer
+        # die Bewertung (analysis_severity/flagged_ports), bleiben aber im ``ports``-Feld
+        # offen gefuehrt -- dieses Feld macht dem Panel (8b) sichtbar, WELCHE Ports der
+        # Nutzer quittiert hat (zum Wieder-Scharfstellen). Der Composition-Root-Loop
+        # ueberschreibt mit der echten Liste (Quelle: acknowledged_ports(host.mac), im
+        # axis_b-Callable best-effort geholt). Frame-Schema konsistent: IMMER vorhanden,
+        # auch falls die Bewertung mal uebersprungen wird (best-effort -> []).
+        "acknowledged_ports": [],
         # source (ping/arp/fritzbox) auch am persistenten Host (S.7f): die Quelle
         # haengt jetzt durchgaengig am gespeicherten Host, nicht nur am fluechtigen
         # host_found-Frame.
@@ -324,12 +336,16 @@ def make_ws_scan(
     weiter.
 
     ``axis_b_factory()`` liefert das kombinierte Achse-B-Callable
-    ``(EnrichedHost, bool) -> (Severity | None, dict[str, list[int]])`` (ADR 0029 + 0030) --
-    ebenfalls pro Verbindung einmal geholt. Es bewertet den LIVE-Host gegen die konfigurierten
-    Regeln und liefert in EINEM Aufruf BEIDE Achse-B-Felder: die hoechste Auffaelligkeit
-    ("critical"/"notable") oder None ins Frame-Feld ``analysis_severity`` (Host-Maximum, 0029)
-    UND die getroffenen offenen Ports je Stufe ins Frame-Feld ``flagged_ports`` (0030). Beide
-    kommen aus DEMSELBEN Provider/Engine-Lauf (Single Source, Konsistenz-Invariante). STRIKT
+    ``(EnrichedHost, bool) -> (Severity | None, dict[str, list[int]], list[int])``
+    (ADR 0029 + 0030 + 0031) -- ebenfalls pro Verbindung einmal geholt. Es bewertet den
+    LIVE-Host gegen die konfigurierten Regeln und liefert in EINEM Aufruf die drei
+    Achse-B-Frame-Werte: die hoechste Auffaelligkeit ("critical"/"notable") oder None ins
+    Frame-Feld ``analysis_severity`` (Host-Maximum, 0029), die getroffenen offenen Ports je
+    Stufe ins Frame-Feld ``flagged_ports`` (0030) UND die quittierten offenen Ports ins
+    Frame-Feld ``acknowledged_ports`` (0031). Severity + flagged_ports werden auf dem um die
+    quittierten Ports REDUZIERTEN Portstand gebildet -- ein quittierter Port zaehlt nicht mehr
+    fuer die Bewertung, bleibt aber im ``ports``-Feld offen. Alle drei kommen aus DEMSELBEN
+    Provider/Engine-Lauf + EINEM acked-Lesepfad (Single Source, Konsistenz-Invariante). STRIKT
     GETRENNT von new_ports (Achse A, Port-History): die Bewertung haengt am aktuellen Portstand,
     nicht an der Differenz, und braucht KEINE Kuratierung (auch ein brandneuer Host kann
     auffaellige Ports haben). Best-effort wie die uebrigen Anreicherungen (Fehler -> Defaults +
@@ -420,9 +436,16 @@ def make_ws_scan(
                     # Host kann auffaellige Ports haben) und ist STRIKT GETRENNT von new_ports
                     # (Achse A). ``baseline_known`` (vor record_seen gelesen) ist die is_known-
                     # Eingabe der Engine.
-                    frame["analysis_severity"], frame["flagged_ports"] = _axis_b_safe(
-                        axis_b, event.host, baseline_known
-                    )
+                    # acknowledged_ports (ADR 0031): das Callable holt die quittierten Ports
+                    # EINMAL und liefert sie als drittes Tripel-Element zurueck -- quittierte
+                    # Ports sind aus severity/flagged_ports schon herausgerechnet, bleiben aber
+                    # im ``ports``-Feld offen gefuehrt. Das Frame-Feld macht dem Panel (8b)
+                    # sichtbar, welche Ports quittiert sind.
+                    (
+                        frame["analysis_severity"],
+                        frame["flagged_ports"],
+                        frame["acknowledged_ports"],
+                    ) = _axis_b_safe(axis_b, event.host, baseline_known)
                     await websocket.send_json(frame)
                 else:
                     # Alle anderen Events unveraendert (insb. host_found bleibt ohne
@@ -494,29 +517,31 @@ def _is_known_safe(is_known: Any, mac: str) -> bool:
 
 def _axis_b_safe(
     axis_b: Any, host: EnrichedHost, is_known: bool
-) -> tuple[str | None, dict[str, list[int]]]:
-    """Bewertet beide Achse-B-Felder best-effort (ADR 0029 + 0030) in EINEM Aufruf.
+) -> tuple[str | None, dict[str, list[int]], list[int]]:
+    """Bewertet beide Achse-B-Felder + die quittierten Ports best-effort in EINEM Aufruf.
 
-    Reine Bewertung des aktuellen Portstands (kein I/O, kein Historie-Schreibpfad). Liefert
-    das Paar ``(analysis_severity, flagged_ports)``: die hoechste Auffaelligkeit
-    ("critical"/"notable" oder None) UND die getroffenen offenen Ports je Stufe
-    (``{"critical": [...], "notable": [...]}``). Beide kommen aus DEMSELBEN Provider/Engine-
-    Lauf des kombinierten Callables (Single Source, Konsistenz-Invariante 0030) -- EIN
-    try/except deckt beide ab.
+    Reine Bewertung des aktuellen Portstands (kein I/O ausser dem acked-Lesepfad, kein
+    Historie-Schreibpfad). Liefert das TRIPEL ``(analysis_severity, flagged_ports,
+    acknowledged_ports)`` (ADR 0029 + 0030 + 0031): die hoechste Auffaelligkeit
+    ("critical"/"notable" oder None), die getroffenen offenen Ports je Stufe
+    (``{"critical": [...], "notable": [...]}``) UND die quittierten offenen Ports
+    (sortierte Liste). Alle drei kommen aus DEMSELBEN Aufruf des kombinierten Callables:
+    die quittierten Ports werden einmal geholt, aus der Bewertung gezogen (Single Source,
+    Konsistenz-Invariante 0030) UND als Liste zurueckgereicht -- EIN try/except deckt alles ab.
 
-    Wirft das Callable, wird der Fehler gefangen + geloggt und ``(None, leere Form)``
-    zurueckgegeben -- "im Zweifel keine Auffaelligkeit, keine geflaggten Ports". Konsistent mit
-    der best-effort-Linie der uebrigen Frame-Anreicherungen
+    Wirft das Callable, wird der Fehler gefangen + geloggt und ``(None, leere Form, [])``
+    zurueckgegeben -- "im Zweifel keine Auffaelligkeit, keine geflaggten, keine quittierten
+    Ports". Konsistent mit der best-effort-Linie der uebrigen Frame-Anreicherungen
     (``_is_known_safe``/``_lese_kuratierung``): ein Fehler in der Bewertung darf den Scan NICHT
     faellen. Mit Warn-Log kein stiller S3-Fallback. Die leere flagged_ports-Form spiegelt den
     Frame-Default (jede Achse-B-Stufe vorhanden, leere Liste).
     """
     try:
-        severity, flagged = axis_b(host, is_known)
+        severity, flagged, acked = axis_b(host, is_known)
     except Exception as exc:
         logger.warning("host_analysis_axis_b_failed", ip=host.ip, error=str(exc))
-        return None, {"critical": [], "notable": []}
-    return (severity if severity is None else str(severity)), flagged
+        return None, {"critical": [], "notable": []}, []
+    return (severity if severity is None else str(severity)), flagged, acked
 
 
 def _lese_kuratierung(get_device: Any, mac: str) -> dict[str, Any] | None:

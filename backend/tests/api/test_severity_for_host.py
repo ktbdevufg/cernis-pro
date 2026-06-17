@@ -248,3 +248,47 @@ def test_axis_b_consistency_critical_port_implies_critical_severity() -> None:
     severity = _severity_for_host(host, True, AnalyzeSnapshot(provider, StaticHelpLinkResolver()))
     assert flagged["critical"]  # nicht leer
     assert severity == "critical"  # => Host-Maximum critical (Invariante haelt)
+
+
+# ── Acknowledge-Filter (ADR 0031): quittierte Ports zaehlen nicht fuer Bewertung ──
+
+
+def test_acked_port_not_flagged() -> None:
+    """Quittierter Port faellt aus flagged_ports raus (Bewertung reduziert)."""
+    notable = _host_rule("notable_rule", "notable", frozenset({3389}))
+    host = _host("192.168.1.10", 3389)
+    provider = _FakeRuleProvider((notable,))
+    # ohne acked: 3389 ist geflaggt; mit acked={3389}: leer.
+    assert _flagged_ports_for_host(host, provider) == {"critical": [], "notable": [3389]}
+    assert _flagged_ports_for_host(host, provider, frozenset({3389})) == {
+        "critical": [],
+        "notable": [],
+    }
+
+
+def test_acked_port_does_not_raise_severity() -> None:
+    """Quittierter Port zaehlt nicht mehr fuer analysis_severity -> None."""
+    critical = _host_rule("critical_rule", "critical", frozenset({4444}))
+    host = _host("192.168.1.10", 4444)
+    analyze = _analyze(critical)
+    # ohne acked: critical; mit acked={4444}: keine Auffaelligkeit mehr.
+    assert _severity_for_host(host, True, analyze) == "critical"
+    assert _severity_for_host(host, True, analyze, frozenset({4444})) is None
+
+
+def test_unacked_suspicious_port_still_fires() -> None:
+    """Frage-1-B-Garantie (ADR 0031): ein NICHT-quittierter auffaelliger Port am selben
+
+    Host loest weiter aus -- nur der quittierte Port (3306) ist still, der neue (4444) bleibt
+    scharf. Port-genaue Granularitaet, nicht host-genau.
+    """
+    backdoor = _host_rule("backdoor", "critical", frozenset({4444}))
+    db_rule = _host_rule("db", "notable", frozenset({3306}))
+    host = _host("192.168.1.10", 3306, 4444)
+    provider = _FakeRuleProvider((backdoor, db_rule))
+    analyze = AnalyzeSnapshot(provider, StaticHelpLinkResolver())
+    acked = frozenset({3306})  # nur 3306 quittiert
+    flagged = _flagged_ports_for_host(host, provider, acked)
+    severity = _severity_for_host(host, True, analyze, acked)
+    assert flagged == {"critical": [4444], "notable": []}  # 3306 still, 4444 weiter scharf
+    assert severity == "critical"  # der neue Port loest weiter aus
