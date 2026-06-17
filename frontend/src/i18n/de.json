@@ -148,6 +148,8 @@
       "newPill": "neu",
       "changedPill": "geändert",
       "notablePill": "auffällig",
+      "auffaelligPill": "auffällig",
+      "kritischPill": "kritisch",
       "pingUnit": "{{value}} ms",
       "pingSubMs": ">0 ms",
       "morePorts": "+{{count}}",

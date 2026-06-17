@@ -219,10 +219,29 @@
   opacity: 0.85;
 }
 
+/* Achse-B-Pillen (ADR 0029+0030): Bewertung „auffällig"/„kritisch" aus den
+   Severity-Tokens. Border + Text volle Tokenfarbe, Hintergrund ~18% Alpha.
+   Beide Tokens tragen Light- und Dark-Werte. */
 .scan-table__pill--auffaellig {
-  color: var(--sev-low-text);
-  background: var(--sev-low-bg);
-  border-color: var(--sev-low-bd);
+  color: var(--severity-auffaellig);
+  background: color-mix(in srgb, var(--severity-auffaellig) 18%, transparent);
+  border-color: var(--severity-auffaellig);
+}
+
+.scan-table__pill--kritisch {
+  color: var(--severity-kritisch);
+  background: color-mix(in srgb, var(--severity-kritisch) 18%, transparent);
+  border-color: var(--severity-kritisch);
+}
+
+/* Trenner zwischen Achse B und Achse A: dünner, dezenter vertikaler Strich.
+   Wird nur gerendert, wenn beide Seiten eine Pille zeigen. */
+.scan-table__pill-trenner {
+  display: inline-block;
+  width: 1px;
+  height: 14px;
+  background: var(--color-border);
+  margin: 0 2px;
 }
 
 /* Port-Chips. */
@@ -261,6 +280,20 @@
   color: var(--chip-mdns-text);
   background: var(--chip-mdns-bg);
   border-color: var(--chip-mdns-border);
+}
+
+/* Geflaggte Ports (Achse B, Variante C): orange „auffällig" / rot „kritisch",
+   Token-Farben wie die Achse-B-Pillen (Border + Text voll, bg ~18% Alpha). */
+.scan-table__chip--auffaellig {
+  color: var(--severity-auffaellig);
+  background: color-mix(in srgb, var(--severity-auffaellig) 18%, transparent);
+  border-color: var(--severity-auffaellig);
+}
+
+.scan-table__chip--kritisch {
+  color: var(--severity-kritisch);
+  background: color-mix(in srgb, var(--severity-kritisch) 18%, transparent);
+  border-color: var(--severity-kritisch);
 }
 
 .scan-table__ports-leer {

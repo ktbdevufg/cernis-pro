@@ -133,20 +133,42 @@ function baueSpalten() {
       fix: true,
       sortKey: "ip",
       tdClass: "scan-table__cell--ip scan-table__mono",
-      render: (geraet, { t }) => (
-        <span className="scan-table__ip-zelle">
-          <span>{geraet.ip}</span>
-          {geraet.isNew ? (
-            <span className="scan-table__pill scan-table__pill--neu">
-              {t("beobachten.scan.newPill")}
-            </span>
-          ) : geraet.isChanged ? (
-            <span className="scan-table__pill scan-table__pill--geaendert">
-              {t("beobachten.scan.changedPill")}
-            </span>
-          ) : null}
-        </span>
-      ),
+      render: (geraet, { t }) => {
+        // Achse A (Fakt): neu/geändert aus der Baseline. Disjunkt — höchstens eine.
+        const hatAchseA = geraet.isNew || geraet.isChanged;
+        // Achse B (Bewertung, ADR 0029+0030): auffällig/kritisch aus dem Frame.
+        const achseB = geraet.analysisSeverity;
+        // Trenner nur, wenn BEIDE Achsen eine Pille zeigen (keine leere Lücke).
+        const zeigeTrenner = achseB !== null && hatAchseA;
+        return (
+          <span className="scan-table__ip-zelle">
+            <span>{geraet.ip}</span>
+            {/* Reihenfolge bedeutet Achse, nicht Severity: links Achse B
+                (Bewertung), Trenner, rechts Achse A (Fakt). */}
+            {achseB === "critical" ? (
+              <span className="scan-table__pill scan-table__pill--kritisch">
+                {t("beobachten.scan.kritischPill")}
+              </span>
+            ) : achseB === "notable" ? (
+              <span className="scan-table__pill scan-table__pill--auffaellig">
+                {t("beobachten.scan.auffaelligPill")}
+              </span>
+            ) : null}
+            {zeigeTrenner && (
+              <span className="scan-table__pill-trenner" aria-hidden="true" />
+            )}
+            {geraet.isNew ? (
+              <span className="scan-table__pill scan-table__pill--neu">
+                {t("beobachten.scan.newPill")}
+              </span>
+            ) : geraet.isChanged ? (
+              <span className="scan-table__pill scan-table__pill--geaendert">
+                {t("beobachten.scan.changedPill")}
+              </span>
+            ) : null}
+          </span>
+        );
+      },
     },
     {
       id: "ipv6",
@@ -182,7 +204,9 @@ function baueSpalten() {
     {
       id: "ports",
       sortKey: null,
-      render: (geraet) => <PortChips ports={geraet.ports} />,
+      render: (geraet) => (
+        <PortChips ports={geraet.ports} flaggedPorts={geraet.flaggedPorts} />
+      ),
     },
     {
       id: "mdns",
@@ -258,8 +282,27 @@ function nachAlpha(feld, sortDir) {
   };
 }
 
+// Severity eines Ports aus flaggedPorts (Achse B, Variante C): num in critical
+// -> "kritisch", sonst in notable -> "auffaellig", sonst null. critical hat
+// Vorrang, falls ein Port (theoretisch) in beiden Listen stünde. Liefert die
+// passende Chip-Modifier-Klasse oder leeren String (neutral).
+function chipSeverityKlasse(num, flaggedPorts) {
+  const kritisch = flaggedPorts?.critical ?? [];
+  const auffaellig = flaggedPorts?.notable ?? [];
+  if (kritisch.includes(num)) {
+    return " scan-table__chip--kritisch";
+  }
+  if (auffaellig.includes(num)) {
+    return " scan-table__chip--auffaellig";
+  }
+  return "";
+}
+
 // Port-Chips: bis MAX_PORT_CHIPS einzeln, Rest als "+N" zusammengefasst.
-function PortChips({ ports }) {
+// flaggedPorts (Achse B) färbt einzelne Chips orange/rot; die "+N"-
+// Zusammenfassung trägt keine Färbung (best-effort, die wichtigsten Ports
+// stehen vorne).
+function PortChips({ ports, flaggedPorts }) {
   const { t } = useTranslation();
 
   if (ports.length === 0) {
@@ -272,7 +315,10 @@ function PortChips({ ports }) {
   return (
     <span className="scan-table__ports">
       {sichtbar.map((port) => (
-        <span key={`${port.num}/${port.proto}`} className="scan-table__chip">
+        <span
+          key={`${port.num}/${port.proto}`}
+          className={`scan-table__chip${chipSeverityKlasse(port.num, flaggedPorts)}`}
+        >
           {port.num}
         </span>
       ))}

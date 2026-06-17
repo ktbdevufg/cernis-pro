@@ -108,14 +108,23 @@ export function mappeHost(host) {
     // isNew aus der Baseline: das Backend liefert is_known (Vorzustand VOR record_seen).
     // is_known === false -> echter Neuzugang in diesem Scan. Beim Folgescan ist die MAC
     // bekannt -> is_known:true -> Flag fällt automatisch weg. Hosts ohne MAC liefern
-    // is_known:true -> nie "neu" (korrekt). notable bleibt false (eigene Quelle folgt
-    // in einem späteren Schnitt).
+    // is_known:true -> nie "neu" (korrekt). Auffälligkeit (notable) läuft jetzt
+    // über analysisSeverity unten, nicht mehr über ein eigenes Feld.
     isNew: host.is_known === false,
     // isChanged aus der Baseline (ADR 0020): bekanntes Gerät mit IP-Wechsel
     // (DHCP). Disjunkt zu isNew (neu = unbekannt). Beim Folgescan ist die neue IP
     // die Baseline -> Flag fällt automatisch weg.
     isChanged: host.is_changed === true,
-    notable: false,
+    // Achse B (ADR 0029+0030): das Backend bewertet Auffälligkeit fertig im
+    // host_detail-Frame. analysisSeverity ist "critical" | "notable" | null,
+    // flaggedPorts trägt die geflaggten Portnummern je Stufe. Hier nur
+    // durchreichen — NICHT neu verrechnen. Defensive Lesung: ältere Frames ohne
+    // flagged_ports fallen auf das leere Default-Objekt zurück.
+    analysisSeverity: host.analysis_severity ?? null,
+    flaggedPorts: host.flagged_ports ?? { critical: [], notable: [] },
+    // notable bleibt als Detail-Panel-Signal erhalten, ist aber KEINE zweite
+    // Achse-B-Quelle: es leitet sich aus analysisSeverity ab (eine Wahrheit).
+    notable: (host.analysis_severity ?? null) !== null,
     label: host.label ?? undefined,
     tags: host.tags ?? undefined,
     notes: host.notes ?? undefined,
@@ -161,6 +170,11 @@ export function mappeHostFound(frame) {
     // isChanged bleibt im schnellen Frame false; das nachfolgende host_detail
     // (gleicher schluessel) liefert den echten Wert.
     isChanged: false,
+    // Achse B (ADR 0029+0030): das schnelle Frame trägt keine Auffälligkeits-
+    // Daten — wie isNew/isChanged hier schon leer sind. Das nachfolgende
+    // host_detail (gleicher schluessel) liefert die echten Werte.
+    analysisSeverity: null,
+    flaggedPorts: { critical: [], notable: [] },
     notable: false,
     label: undefined,
     tags: undefined,
