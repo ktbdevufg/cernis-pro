@@ -102,6 +102,14 @@ GetDeviceFactory = Callable[[], Any]
 # Host sofort "bekannt".
 IsKnownFactory = Callable[[], Any]
 
+# Factory-Typ fuer die analysis-Severity-Bewertung (Achse B, ADR 0029). app.py liefert eine
+# Funktion, die pro Verbindung ein Callable ``(EnrichedHost, bool) -> Severity | None``
+# zurueckgibt (gebaut aus einer ``AnalyzeSnapshot``-Instanz mit dem GEFILTERTEN Provider).
+# Es bewertet den LIVE-Host gegen die konfigurierten Regeln und liefert die hoechste
+# Auffaelligkeit ("critical"/"notable") oder None -- STRIKT GETRENNT von new_ports (Achse A,
+# Port-History). Pro Verbindung einmal geholt, wie die uebrigen Factories.
+SeverityFactory = Callable[[], Any]
+
 
 def _project(host: EnrichedHost) -> ScannedHost:
     """Projiziert einen scanning-``EnrichedHost`` auf einen devices-``ScannedHost``.
@@ -172,7 +180,7 @@ def _event_to_frame(event: ScanEvent) -> dict[str, Any]:
 
 
 def _host_detail_frame(host: Any) -> dict[str, Any]:
-    """``EnrichedHost`` -> ``host_detail``-Frame (22 Keys, S.1-Contract + v2-Erweiterungen).
+    """``EnrichedHost`` -> ``host_detail``-Frame (26 Keys, S.1-Contract + v2-Erweiterungen).
 
     ``host`` ist ein ``domain.EnrichedHost``; verschachtelte Domaenen-Objekte
     werden per Attribut-Zugriff serialisiert (tuple -> list).
@@ -231,6 +239,14 @@ def _host_detail_frame(host: Any) -> dict[str, Any]:
         # "neuen Ports seit letztem Scan"). _host_detail_frame bleibt reine Projektion
         # ohne I/O; die Anreicherung braucht den Vorzustand und gehoert in den Loop.
         "new_ports": [],
+        # analysis_severity-Default None ("keine Auffaelligkeit, sofern nicht angereichert",
+        # Achse B, ADR 0029). Der Composition-Root-Loop ueberschreibt mit der hoechsten
+        # Severity ("critical"/"notable") des Live-Hosts gegen die konfigurierten Regeln --
+        # STRIKT GETRENNT von new_ports (Achse A, Port-History). Haelt das Frame-Schema
+        # konsistent: analysis_severity ist IMMER vorhanden, auch falls die Anreicherung mal
+        # uebersprungen wird (best-effort). _host_detail_frame bleibt reine Projektion ohne
+        # I/O; die Bewertung braucht die injizierte Severity-Callable und gehoert in den Loop.
+        "analysis_severity": None,
         # source (ping/arp/fritzbox) auch am persistenten Host (S.7f): die Quelle
         # haengt jetzt durchgaengig am gespeicherten Host, nicht nur am fluechtigen
         # host_found-Frame.
@@ -271,6 +287,7 @@ def make_ws_scan(
     record_seen_factory: RecordSeenFactory,
     get_device_factory: GetDeviceFactory,
     is_known_factory: IsKnownFactory,
+    severity_factory: SeverityFactory,
 ) -> Callable[[WebSocket], Awaitable[None]]:
     """Baut den ``/ws/scan``-Handler mit injizierter ``RunNetworkScan``-Factory.
 
@@ -293,6 +310,15 @@ def make_ws_scan(
     sonst waere jeder Host sofort "bekannt"). Beide Lese-Pfade sind best-effort: ein Fehler
     laesst die Anreicherung aus (im Zweifel "bekannt"/keine Kuratierung), der Scan laeuft
     weiter.
+
+    ``severity_factory()`` liefert das analysis-Severity-Callable
+    ``(EnrichedHost, bool) -> Severity | None`` (Achse B, ADR 0029) -- ebenfalls pro
+    Verbindung einmal geholt. Es bewertet den LIVE-Host gegen die konfigurierten Regeln und
+    liefert die hoechste Auffaelligkeit ("critical"/"notable") oder None ins neue Frame-Feld
+    ``analysis_severity``. STRIKT GETRENNT von new_ports (Achse A, Port-History): die
+    Bewertung haengt am aktuellen Portstand, nicht an der Differenz, und braucht KEINE
+    Kuratierung (auch ein brandneuer Host kann auffaellige Ports haben). Best-effort wie die
+    uebrigen Anreicherungen (Fehler -> None + Log, der Scan laeuft weiter).
     """
 
     async def ws_scan(websocket: WebSocket) -> None:
@@ -318,6 +344,7 @@ def make_ws_scan(
         record_seen = record_seen_factory()
         get_device = get_device_factory()
         is_known = is_known_factory()
+        severity = severity_factory()
         try:
             async for event in use_case.run(config):
                 if isinstance(event, HostEnriched):
@@ -369,6 +396,15 @@ def make_ws_scan(
                         alte_ports = set(kuratiert.get("open_ports") or [])
                         frame["new_ports"] = sorted(aktuelle_ports - alte_ports)
                     frame["is_changed"] = is_changed
+                    # analysis_severity (Achse B, ADR 0029): die hoechste Auffaelligkeit des
+                    # LIVE-Hosts gegen die konfigurierten Regeln. UNABHAENGIG von ``kuratiert``
+                    # gesetzt -- Achse B braucht keine Kuratierung (auch ein brandneuer Host
+                    # kann auffaellige Ports haben) und ist STRIKT GETRENNT von new_ports
+                    # (Achse A). ``baseline_known`` (vor record_seen gelesen) ist die is_known-
+                    # Eingabe der Engine. Best-effort wie die uebrigen Anreicherungen.
+                    frame["analysis_severity"] = _severity_safe(
+                        severity, event.host, baseline_known
+                    )
                     await websocket.send_json(frame)
                 else:
                     # Alle anderen Events unveraendert (insb. host_found bleibt ohne
@@ -436,6 +472,23 @@ def _is_known_safe(is_known: Any, mac: str) -> bool:
     except Exception as exc:
         logger.warning("host_is_known_failed", mac=mac, error=str(exc))
         return True
+
+
+def _severity_safe(severity: Any, host: EnrichedHost, is_known: bool) -> str | None:
+    """Bewertet den Live-Host best-effort (Achse B, ADR 0029) -> "critical"/"notable"/None.
+
+    Reine Bewertung des aktuellen Portstands (kein I/O, kein Historie-Schreibpfad). Wirft
+    das Severity-Callable, wird der Fehler gefangen + geloggt und ``None`` zurueckgegeben
+    -- "im Zweifel keine Auffaelligkeit". Das ist konsistent mit der best-effort-Linie der
+    uebrigen Frame-Anreicherungen (``_is_known_safe``/``_lese_kuratierung``): ein Fehler in
+    der Bewertung darf den Scan NICHT faellen. Mit Warn-Log kein stiller S3-Fallback.
+    """
+    try:
+        result = severity(host, is_known)
+    except Exception as exc:
+        logger.warning("host_analysis_severity_failed", ip=host.ip, error=str(exc))
+        return None
+    return result if result is None else str(result)
 
 
 def _lese_kuratierung(get_device: Any, mac: str) -> dict[str, Any] | None:

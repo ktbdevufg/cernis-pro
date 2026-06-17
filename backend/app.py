@@ -243,9 +243,11 @@ from domain.analysis import (
     ObservedHost,
     ObservedProcess,
     Rule,
+    Severity,
     Snapshot,
     service_for_port,
 )
+from domain.analysis.engine import _SEVERITY_RANK
 from domain.export import (
     ExportableAnalysis,
     ExportableFinding,
@@ -255,6 +257,7 @@ from domain.export import (
 )
 from domain.monitoring import MonitorEvent, MonitorEventType
 from domain.process import classify_kind
+from domain.scanning import EnrichedHost
 from infrastructure.agent import (
     SqliteAgentRepository,
     UrllibAgentPinger,
@@ -656,6 +659,91 @@ class _ConfiguredRuleProvider:
         return tuple(configured)
 
 
+def _build_configured_provider(
+    rules: SqliteUserRuleRepository,
+    settings: SettingsRepository,
+) -> _ConfiguredRuleProvider:
+    """Baut den Provider-Stack Composite -> Configured (ADR 0029, Single Source).
+
+    Die Kette ``_CompositeRuleProvider(BuiltinRuleProvider(), <User-Regeln>)`` umschlossen
+    vom ``_ConfiguredRuleProvider`` (5a-Injektion von Schwelle/Portlisten, ADR 0027) lag
+    HEUTE zweimal inline im Composition Root (im ``_analyze_snapshot`` MIT zusaetzlichem
+    Filter, im ``/rules/all``-Runner OHNE Filter). Diese freie Funktion ist nun die EINE
+    Quelle dieser Kette -- semantisch identisch zu den beiden alten Inline-Stellen, kein
+    Verhaltenswechsel. ``rules`` ist der User-Regel-Store, ``settings`` die Settings-Quelle
+    fuer die konfigurierbaren Parameter (beide werden vom Aufrufer als frische Repo-Instanz
+    hereingereicht -- die Verdrahtung bleibt im Composition Root).
+    """
+    composite = _CompositeRuleProvider(BuiltinRuleProvider(), rules)
+    return _ConfiguredRuleProvider(composite, settings)
+
+
+def _build_filtered_provider(
+    rules: SqliteUserRuleRepository,
+    settings: SqliteSettingsRepository,
+) -> _FilteredRuleProvider:
+    """Baut den vollen Provider-Stack Composite -> Configured -> Filtered (ADR 0029).
+
+    Die gefilterte Variante (zusaetzlich der ``_FilteredRuleProvider``, der per Setting
+    abgeschaltete Regel-IDs herausnimmt, ADR 0023) -- der Stack, den die ENGINE sieht. Baut
+    auf ``_build_configured_provider`` auf, damit die gemeinsame Composite->Configured-Kette
+    Single Source bleibt. Genutzt von ``_analyze_snapshot`` (Engine-Pfad) und der WS-
+    Severity-Verdrahtung; der ``/rules/all``-Runner nutzt bewusst die UNGEFILTERTE Variante
+    (er muss deaktivierte Regeln weiter sehen, um sie wieder einschaltbar zu machen).
+    """
+    return _FilteredRuleProvider(_build_configured_provider(rules, settings), settings)
+
+
+def _observed_host(host: EnrichedHost, is_known: bool) -> ObservedHost:
+    """Projiziert einen scanning-``EnrichedHost`` auf analysis' ``ObservedHost`` (ADR 0029).
+
+    Die frueher im ``_analyze_snapshot`` inline gebaute Projektion -- jetzt EINE Quelle, von
+    der DB-Historie-Schleife (Bulk, GET /api/analysis) UND der Live-Host-Severity (WS-Loop)
+    genutzt. ``open_ports`` sind die Portnummern mit ``state == "open"`` (BEWUSST nur die
+    Nummern, kein ``PortInfo`` -- independence-Contract). ``is_known`` wird vom Aufrufer
+    bestimmt und hereingereicht (Bulk: aus dem ``known_macs``-Bulk-Read; WS: der schon vor
+    ``record_seen`` gelesene ``baseline_known``) -- die Projektion liest KEINE Historie.
+    """
+    return ObservedHost(
+        ip=host.ip,
+        hostname=host.hostname,
+        vendor=host.vendor,
+        open_ports=frozenset(p.port for p in host.ports if p.state == "open"),
+        is_known=is_known,
+    )
+
+
+def _severity_for_host(
+    host: EnrichedHost, is_known: bool, analyze: AnalyzeSnapshot
+) -> Severity | None:
+    """Hoechste Achse-B-Severity EINES Live-Hosts gegen die konfigurierten Regeln (ADR 0029).
+
+    Baut einen Ein-Host-``Snapshot`` (nur ``hosts`` belegt, ``connections``/``processes``
+    leer, ``full_process_visibility`` auf dem Snapshot-Default ``False`` -- der Host-Pfad
+    haengt nicht an der Prozess-Sicht), laesst die injizierte ``AnalyzeSnapshot`` (mit dem
+    GEFILTERTEN Provider) darueber laufen und nimmt die hoechste Severity der
+    HOST-Beobachtungen (``kind`` beginnt mit ``host_`` -- die Host-RuleKinds aus
+    ``domain.analysis.rules.RuleKind``: host_remote_port/host_new/host_port_count).
+
+    ``"info"`` ist KEINE Auffaelligkeit (Achse B kennt nur ``"critical"``/``"notable"``):
+    bei nur info-/keinen Host-Befunden -> ``None``. Die Rangfolge kommt aus
+    ``_SEVERITY_RANK`` (``"critical"`` < ``"notable"`` < ``"info"``) -- kleinster Rang
+    gewinnt. Hosts ohne ``ip`` werden uebersprungen (kein bewertbares Subjekt) -> ``None``.
+    """
+    if not host.ip:
+        return None
+    snapshot = Snapshot(hosts=(_observed_host(host, is_known),))
+    resolved = analyze(snapshot)
+    host_severities = [
+        r.observation.severity
+        for r in resolved
+        if r.observation.kind.startswith("host_") and r.observation.severity != "info"
+    ]
+    if not host_severities:
+        return None
+    return min(host_severities, key=lambda sev: _SEVERITY_RANK[sev])
+
+
 # ── monitoring -> alerting-Trigger-Naht (A.7a) ────────────────────────────────
 # Der erste echte VERHALTENS-Change der alerting-Migration: ab hier feuert RaiseAlert
 # real, wenn der monitor-Loop eine up/down-Flanke erkennt (alert_history wird
@@ -1014,6 +1102,21 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     def _build_is_known() -> Any:
         return host_history_repository().is_known
 
+    # analysis-Severity-Bewertung (Achse B, ADR 0029): der WS-Handler bewertet pro
+    # angereichertem Host den LIVE-Portstand gegen die KONFIGURIERTEN Regeln und traegt die
+    # hoechste Auffaelligkeit ("critical"/"notable") ins neue Frame-Feld analysis_severity.
+    # Die AnalyzeSnapshot-Instanz wird mit DEMSELBEN gefilterten Provider gebaut wie der
+    # REST-Pfad (_build_filtered_provider -- Single Source), pro Verbindung einmal, und in
+    # ein schlankes (host, known) -> Severity | None Callable geschlossen, das die freie
+    # Funktion _severity_for_host auf dem Live-Host aufruft (KEINE DB-Historie -- die WS-
+    # Quelle bewertet den aktuellen Scan-Host, nicht den abgeschlossenen Scan aus der DB).
+    def _build_severity() -> Any:
+        analyze = AnalyzeSnapshot(
+            _build_filtered_provider(analysis_rule_repository(), repository()),
+            StaticHelpLinkResolver(),
+        )
+        return lambda host, known: _severity_for_host(host, known, analyze)
+
     app.add_api_websocket_route(
         "/ws/scan",
         make_ws_scan(
@@ -1022,6 +1125,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             _build_record_seen,
             _build_get_device,
             _build_is_known,
+            _build_severity,
         ),
     )
 
@@ -1891,14 +1995,13 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 # sind alle gesehenen Hosts bekannt; new_host_seen feuert ab dem zweiten
                 # Scan fuer echte Neuzugaenge.
                 known = host_history_repository().known_macs()
+                # Projektion EnrichedHost -> ObservedHost ueber die freie Funktion
+                # _observed_host (ADR 0029, Single Source mit dem WS-Severity-Pfad). Das
+                # is_known wird HIER aus dem Bulk-Read bestimmt (MAC-lose Hosts -> True,
+                # gleiche Linie wie das Repository) und hereingereicht -- kein
+                # Verhaltenswechsel zur frueheren Inline-Projektion.
                 hosts_observed = tuple(
-                    ObservedHost(
-                        ip=h.ip,
-                        hostname=h.hostname,
-                        vendor=h.vendor,
-                        open_ports=frozenset(p.port for p in h.ports if p.state == "open"),
-                        is_known=(h.mac in known) if h.mac else True,
-                    )
+                    _observed_host(h, is_known=(h.mac in known) if h.mac else True)
                     for h in record.hosts
                 )
         snapshot = Snapshot(
@@ -1918,9 +2021,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # host_many_high_ports-Regel + die Portlisten von host_remote_access_port/
         # host_backdoor_port) defensiv aus den Settings liest und per dataclasses.replace
         # ueberschreibt. Default (kein/kaputter Key) = die Built-in-Werte aus rules.py.
-        composite = _CompositeRuleProvider(BuiltinRuleProvider(), analysis_rule_repository())
-        configured = _ConfiguredRuleProvider(composite, repository())
-        rule_provider = _FilteredRuleProvider(configured, repository())
+        # Provider-Stack Composite -> Configured -> Filtered als Single Source (ADR 0029):
+        # die frueher hier inline aufgebaute Kette lebt jetzt in _build_filtered_provider
+        # (dieselbe Funktion, die auch die WS-Severity-Verdrahtung nutzt). Kein
+        # Verhaltenswechsel -- die Engine sieht weiterhin den GEFILTERTEN Stack.
+        rule_provider = _build_filtered_provider(analysis_rule_repository(), repository())
         return AnalyzeSnapshot(rule_provider, StaticHelpLinkResolver())(snapshot)
 
     # ── export-Domaene Block 2 verdrahten (Analyse-Befunde -> CSV/JSON/PDF, ADR 0015) ──
@@ -2011,8 +2116,12 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # garantiert dieselbe Menge. Kaputtes/fehlendes Setting -> leere disabled-Menge
         # (fail-safe: die UI zeigt im Zweifel alles als aktiv, niemand wird heimlich
         # abgeschaltet; S3-konform geloggt in der freien Funktion).
-        composite = _CompositeRuleProvider(BuiltinRuleProvider(), analysis_rule_repository())
-        configured = _ConfiguredRuleProvider(composite, repository())
+        # UNGEFILTERTER Stack bis ``configured`` (ADR 0029, Single Source): dieselbe
+        # Composite->Configured-Kette wie der Engine-Pfad, aber OHNE den
+        # ``_FilteredRuleProvider`` -- die UI muss auch deaktivierte Regeln sehen, um sie
+        # wieder einschalten zu koennen. Das ``disabled``-Flag kommt aus DERSELBEN
+        # defensiven Lese-Quelle wie der Filter (``_read_disabled_rule_ids``).
+        configured = _build_configured_provider(analysis_rule_repository(), repository())
         disabled = _read_disabled_rule_ids(repository())
         return [(rule, rule.id in disabled) for rule in configured.get_rules()]
 

@@ -166,6 +166,31 @@ class _FakeIsKnown:
         return mac in self._known
 
 
+class _FakeSeverity:
+    """Faengt die analysis-Severity-Bewertung (Achse B, ADR 0029).
+
+    Liefert die hoechste Auffaelligkeit des Live-Hosts. ``result`` ist der feste
+    Rueckgabewert (``None``/``"notable"``/``"critical"``); ``raise_exc`` erzwingt einen
+    Fehler (best-effort -> None). ``calls`` protokolliert die (ip, is_known)-Aufrufe.
+    Das echte Pendant ist die ``_severity_for_host``-Closure aus app.py.
+    """
+
+    def __init__(
+        self,
+        result: str | None = None,
+        raise_exc: Exception | None = None,
+    ) -> None:
+        self._result = result
+        self._raise_exc = raise_exc
+        self.calls: list[tuple[str, bool]] = []
+
+    def __call__(self, host: EnrichedHost, is_known: bool) -> str | None:
+        self.calls.append((host.ip, is_known))
+        if self._raise_exc is not None:
+            raise self._raise_exc
+        return self._result
+
+
 def _client(
     events: list[ScanEvent],
     raise_at_end: Exception | None = None,
@@ -173,11 +198,13 @@ def _client(
     seen_recorder: _FakeRecordSeen | None = None,
     get_device: _FakeGetDevice | None = None,
     is_known: _FakeIsKnown | None = None,
+    severity: _FakeSeverity | None = None,
 ) -> TestClient:
     record = recorder or _FakeRecordScannedHost()
     record_seen = seen_recorder or _FakeRecordSeen()
     device_reader = get_device or _FakeGetDevice()
     known_reader = is_known or _FakeIsKnown()
+    severity_reader = severity or _FakeSeverity()
     app = FastAPI()
     app.add_api_websocket_route(
         "/ws/scan",
@@ -187,6 +214,7 @@ def _client(
             lambda: record_seen,
             lambda: device_reader,
             lambda: known_reader,
+            lambda: severity_reader,
         ),
     )
     return TestClient(app)
@@ -258,7 +286,7 @@ def test_full_frame_sequence_matches_s1_contract() -> None:
     assert frames[8] == {"type": "scan_complete", "total_found": 1}
 
 
-def test_host_detail_frame_has_25_keys_incl_new_ports() -> None:
+def test_host_detail_frame_has_26_keys_incl_analysis_severity() -> None:
     host = EnrichedHost(
         ip="10.0.0.5",
         mac="AA:BB:CC:DD:EE:02",
@@ -272,9 +300,10 @@ def test_host_detail_frame_has_25_keys_incl_new_ports() -> None:
         frame = ws.receive_json()
 
     assert frame["type"] == "host_detail"
-    # 25 Keys: die 20 S.1-Contract-Keys + source (S.7f) + additional_ips (MAC-Gruppierung)
+    # 26 Keys: die 20 S.1-Contract-Keys + source (S.7f) + additional_ips (MAC-Gruppierung)
     # + is_known (Baseline-Anreicherung, ADR 0019) + is_changed (DHCP-Wechsel, ADR 0020)
-    # + new_ports (Port-History Achse A, ADR 0026).
+    # + new_ports (Port-History Achse A, ADR 0026)
+    # + analysis_severity (Auffaelligkeits-Bewertung Achse B, ADR 0029).
     assert set(frame.keys()) == {
         "type",
         "ip",
@@ -301,11 +330,100 @@ def test_host_detail_frame_has_25_keys_incl_new_ports() -> None:
         "is_known",
         "is_changed",
         "new_ports",
+        "analysis_severity",
     }
     assert frame["ports"] == [{"port": 22, "state": "open", "service": "ssh"}]
     assert frame["category"] == "server"
     assert frame["additional_ips"] == ["10.0.0.6", "10.0.0.7"]
     assert frame["source"] == "arp"  # Quelle haengt am persistenten Host (S.7f)
+
+
+# ── analysis_severity (Auffaelligkeits-Bewertung, Achse B, ADR 0029) ──────────
+
+
+def test_analysis_severity_default_none_without_finding() -> None:
+    """Ohne Auffaelligkeit (Severity-Callable liefert None) -> Frame analysis_severity=None."""
+    host = EnrichedHost(ip="192.168.1.40", mac="AA:BB:CC:DD:EE:40", category="server")
+    with _client([HostEnriched(host=host)]).websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "192.168.1.0/24"})
+        frame = ws.receive_json()
+
+    assert frame["analysis_severity"] is None
+
+
+def test_analysis_severity_notable_for_suspicious_port() -> None:
+    """Auffaelliger Port -> Severity-Callable liefert "notable" -> Frame traegt es."""
+    host = EnrichedHost(ip="192.168.1.41", mac="AA:BB:CC:DD:EE:41", category="server")
+    severity = _FakeSeverity(result="notable")
+    with _client([HostEnriched(host=host)], severity=severity).websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "192.168.1.0/24"})
+        frame = ws.receive_json()
+
+    assert frame["analysis_severity"] == "notable"
+
+
+def test_analysis_severity_critical_for_critical_port() -> None:
+    """Kritischer Port -> Severity-Callable liefert "critical" -> Frame traegt es."""
+    host = EnrichedHost(ip="192.168.1.42", mac="AA:BB:CC:DD:EE:42", category="server")
+    severity = _FakeSeverity(result="critical")
+    with _client([HostEnriched(host=host)], severity=severity).websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "192.168.1.0/24"})
+        frame = ws.receive_json()
+
+    assert frame["analysis_severity"] == "critical"
+
+
+def test_analysis_severity_independent_from_new_ports() -> None:
+    """Achse B (analysis_severity) ist GETRENNT von Achse A (new_ports).
+
+    Ein brandneuer Host OHNE Kuratierung hat keinen Port-Vorzustand -> new_ports bleibt
+    [] (Achse A). analysis_severity wird trotzdem gesetzt (Achse B braucht keine
+    Kuratierung) -- beide Felder sind unabhaengig.
+    """
+    host = EnrichedHost(
+        ip="192.168.1.43",
+        mac="AA:BB:CC:DD:EE:43",
+        ports=(PortInfo(port=4444, state="open", service=""),),
+        category="server",
+    )
+    # Kein gespeichertes Device -> kein Vorzustand -> new_ports bleibt [].
+    severity = _FakeSeverity(result="critical")
+    with _client([HostEnriched(host=host)], severity=severity).websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "192.168.1.0/24"})
+        frame = ws.receive_json()
+
+    assert frame["new_ports"] == []  # Achse A: kein Vorzustand
+    assert frame["analysis_severity"] == "critical"  # Achse B: unabhaengig gesetzt
+
+
+def test_analysis_severity_uses_baseline_known() -> None:
+    """Die is_known-Eingabe der Bewertung ist der VOR record_seen gelesene baseline_known.
+
+    Leere Historie -> baseline_known=False; das Severity-Callable wird mit (ip, False)
+    aufgerufen (genau wie new_host_seen den Vorzustand braucht).
+    """
+    host = EnrichedHost(ip="192.168.1.44", mac="AA:BB:CC:DD:EE:44", category="server")
+    is_known = _FakeIsKnown(known=set())  # leere Historie -> unbekannt
+    severity = _FakeSeverity(result=None)
+    client = _client([HostEnriched(host=host)], is_known=is_known, severity=severity)
+    with client.websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "192.168.1.0/24"})
+        ws.receive_json()
+
+    assert severity.calls == [("192.168.1.44", False)]
+
+
+def test_analysis_severity_failure_is_best_effort_scan_continues() -> None:
+    """Wirft das Severity-Callable -> analysis_severity=None, Scan laeuft weiter."""
+    host = EnrichedHost(ip="192.168.1.45", mac="AA:BB:CC:DD:EE:45", category="server")
+    severity = _FakeSeverity(raise_exc=RuntimeError("engine kaputt"))
+    with _client([HostEnriched(host=host)], severity=severity).websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "192.168.1.0/24"})
+        frame = ws.receive_json()
+
+    # best-effort: kein Abbruch, das Feld faellt auf None zurueck (mit Log).
+    assert frame["type"] == "host_detail"
+    assert frame["analysis_severity"] is None
 
 
 # ── Invalid-CIDR -> error-Frame (ScanConfig.__post_init__ wirft ValueError) ──
