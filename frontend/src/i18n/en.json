@@ -287,7 +287,10 @@
       "loeschen": "Remove target",
       "logLeer": "No events recorded yet.",
       "getrennt": "Connection lost, retrying …",
-      "ladeFehler": "Could not be removed."
+      "ladeFehler": "Could not be removed.",
+      "verlaufTitel": "RTT history",
+      "liveFenster": "Live window",
+      "verlaufLeer": "No history data yet."
     },
     "lookup": {
       "title": "Look up remote endpoint",

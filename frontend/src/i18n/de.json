@@ -287,7 +287,10 @@
       "loeschen": "Ziel entfernen",
       "logLeer": "Noch keine Ereignisse aufgezeichnet.",
       "getrennt": "Verbindung unterbrochen, neuer Versuch …",
-      "ladeFehler": "Konnte nicht entfernt werden."
+      "ladeFehler": "Konnte nicht entfernt werden.",
+      "verlaufTitel": "RTT-Verlauf",
+      "liveFenster": "Live-Fenster",
+      "verlaufLeer": "Noch keine Verlaufsdaten."
     },
     "lookup": {
       "title": "Gegenstelle nachschlagen",

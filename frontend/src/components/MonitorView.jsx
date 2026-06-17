@@ -1,9 +1,9 @@
 // Live-Monitor-Ansicht (CERNIS PRO 2.0)
 //
 // Eigenständige "Beobachten"-Funktion: Status-Karten je Ziel (Erreichbarkeit +
-// aktuelle Latenz, live), ein Ereignis-Log (Up/Offline-Übergänge) und das
-// Verwalten eigener Ziele (hinzufügen/löschen). Der RTT-Graph ist bewusst NICHT
-// hier — der kommt als eigenes Stück danach.
+// aktuelle Latenz, live) mit Mini-Sparkline, ein großer RTT-Verlaufsgraph des
+// gewählten Ziels, ein Ereignis-Log (Up/Offline-Übergänge) und das Verwalten
+// eigener Ziele (hinzufügen/löschen).
 //
 // Datenquelle: api/monitoring.js (REST-Vorladung + Schreibpfade) und
 // api/monitorStream.js (endloser Live-Strom mit Auto-Reconnect). Muster der
@@ -20,13 +20,23 @@ import {
   deleteMonitorTarget,
   fetchMonitorEvents,
   fetchMonitorStatus,
+  fetchRttHistory,
 } from "../api/monitoring.js";
 import { starteMonitorStream } from "../api/monitorStream.js";
+import RttGraph from "./RttGraph.jsx";
+import RttSparkline from "./RttSparkline.jsx";
 import "./MonitorView.css";
 
 // Obergrenze der im State gehaltenen Log-Zeilen: das Log wächst sonst während
 // einer langen Sitzung unbegrenzt. Neueste vorne, ältere fallen hinten weg.
 const MAX_LOG_EINTRAEGE = 100;
+
+// Obergrenze der je Ziel gehaltenen RTT-Verlaufswerte (gleitendes Live-Fenster).
+// Ältester zuerst; ist die Reihe voll, fällt vorne der älteste weg.
+const MAX_VERLAUF = 120;
+
+// Präfix der id eines Gateway-Ziels (Default-Auswahl für den großen Graphen).
+const GATEWAY_PRAEFIX = "gw_";
 
 // Präfix der id, an dem ein vom Nutzer angelegtes (löschbares) Ziel erkennbar
 // ist (vergeben in api/monitoring.addMonitorTarget). Die drei festen Ziele
@@ -42,9 +52,12 @@ function formatRtt(rttMs) {
   return `${rttMs.toFixed(1)} ms`;
 }
 
-// Eine Status-Karte je Ziel. Ampel-Böppel + Label + aktuelle RTT + Zustandswort.
-// Eigene Ziele tragen einen dezenten Löschen-Button (die drei festen nicht).
-function StatusKarte({ ziel, eigen, onLoeschen }) {
+// Eine Status-Karte je Ziel. Ampel-Böppel + Label + aktuelle RTT + Sparkline +
+// Zustandswort. Eigene Ziele tragen einen dezenten Löschen-Button (die drei
+// festen nicht). Die Karte ist als Ganzes anklickbar (wählt das Ziel für den
+// großen Graphen aus); die ausgewählte Karte hebt sich durch einen Akzent-Rand
+// ab. Der Löschen-Button darf den Karten-Klick NICHT auslösen.
+function StatusKarte({ ziel, eigen, verlauf, ausgewaehlt, onWaehlen, onLoeschen }) {
   const { t } = useTranslation();
 
   // Ampel-Klasse: aktiv (alive true), offline (alive false) oder unbekannt
@@ -59,8 +72,24 @@ function StatusKarte({ ziel, eigen, onLoeschen }) {
   const zustandWort =
     ziel.alive === true ? t("beobachten.monitor.up") : t("beobachten.monitor.offline");
 
+  const karteKlasse = ausgewaehlt
+    ? "monitor-karte monitor-karte--aktivausgewaehlt"
+    : "monitor-karte";
+
   return (
-    <div className="monitor-karte">
+    <div
+      className={karteKlasse}
+      role="button"
+      tabIndex={0}
+      aria-pressed={ausgewaehlt}
+      onClick={() => onWaehlen(ziel.targetId)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onWaehlen(ziel.targetId);
+        }
+      }}
+    >
       <div className="monitor-karte__kopf">
         <span className={ampelKlasse} aria-hidden="true" />
         <span className="monitor-karte__label">{ziel.label}</span>
@@ -68,7 +97,11 @@ function StatusKarte({ ziel, eigen, onLoeschen }) {
           <button
             type="button"
             className="monitor-karte__loeschen"
-            onClick={() => onLoeschen(ziel.targetId)}
+            onClick={(event) => {
+              // Löschen darf nicht zugleich die Karte auswählen.
+              event.stopPropagation();
+              onLoeschen(ziel.targetId);
+            }}
             aria-label={t("beobachten.monitor.loeschen")}
             title={t("beobachten.monitor.loeschen")}
           >
@@ -78,6 +111,9 @@ function StatusKarte({ ziel, eigen, onLoeschen }) {
       </div>
 
       <div className="monitor-karte__rtt monitor-mono">{formatRtt(ziel.rttMs ?? null)}</div>
+
+      {/* Mini-Sparkline des jüngsten Verlaufs (rein dekorativ, unter der Zahl). */}
+      <RttSparkline werte={verlauf} farbe="var(--color-accent)" />
 
       <div className="monitor-karte__zustand">
         {ziel.alive === true ? (
@@ -142,9 +178,29 @@ export default function MonitorView() {
   const [fehler, setFehler] = useState(null);
   // Stream getrennt? onError/onClose setzen, onOpen löscht.
   const [getrennt, setGetrennt] = useState(false);
+  // RTT-Verlaufsreihen je Ziel: Map targetId -> Array der letzten Werte (ältester
+  // zuerst, auf MAX_VERLAUF begrenzt). null-Werte sind echte Lücken.
+  const [verlaeufe, setVerlaeufe] = useState(new Map());
+  // Für den großen Graphen gewähltes Ziel (targetId) oder null (Default unten).
+  const [gewaehltesZiel, setGewaehltesZiel] = useState(null);
 
   // Aktives Stream-Handle ({ stop() }) — zum sauberen Schließen bei Unmount.
   const streamRef = useRef(null);
+
+  // Hängt einen RTT-Wert hinten an die Reihe eines Ziels (immutabel) und kürzt
+  // vorne auf MAX_VERLAUF. null wird mit angehängt (ehrliche Lücke).
+  const haengeVerlaufAn = (targetId, rttMs) => {
+    setVerlaeufe((vorher) => {
+      const naechste = new Map(vorher);
+      const reihe = naechste.get(targetId) ?? [];
+      const ergaenzt = [...reihe, rttMs ?? null];
+      naechste.set(
+        targetId,
+        ergaenzt.length > MAX_VERLAUF ? ergaenzt.slice(-MAX_VERLAUF) : ergaenzt,
+      );
+      return naechste;
+    });
+  };
 
   // Setzt/aktualisiert eine einzelne Karte (immutabel: neue Map ableiten, damit
   // React rendert). Vorhandene Felder bleiben erhalten, nur die gelieferten
@@ -165,8 +221,9 @@ export default function MonitorView() {
     let abgebrochen = false;
 
     (async () => {
+      let liste = [];
       try {
-        const liste = await fetchMonitorStatus();
+        liste = await fetchMonitorStatus();
         if (!abgebrochen) {
           setKarten(
             new Map(liste.map((z) => [z.targetId, { ...z, rttMs: null }])),
@@ -174,6 +231,27 @@ export default function MonitorView() {
         }
       } catch {
         // Kein Status erreichbar: leere Karten-Liste, kein Hinweis.
+      }
+
+      // Startreihen je Ziel laden: für jedes bekannte Ziel den RTT-Verlauf holen
+      // und als Anfangsreihe (nur die rttMs, ältester zuerst) ablegen. Fehler je
+      // Ziel werden toleriert (leere Reihe, kein Absturz). Parallel, dann sammeln.
+      try {
+        const reihen = await Promise.all(
+          liste.map(async (z) => {
+            try {
+              const verlauf = await fetchRttHistory(z.targetId, MAX_VERLAUF);
+              return [z.targetId, verlauf.map((s) => s.rttMs ?? null)];
+            } catch {
+              return [z.targetId, []];
+            }
+          }),
+        );
+        if (!abgebrochen) {
+          setVerlaeufe(new Map(reihen));
+        }
+      } catch {
+        // Unerwarteter Sammelfehler: leere Verläufe, kein Hinweis.
       }
 
       try {
@@ -207,6 +285,8 @@ export default function MonitorView() {
       // eine neue Log-Zeile einfügen (Liste begrenzen).
       onUpdate: ({ targetId, label, alive, rttMs, event, datetime }) => {
         aktualisiereKarte(targetId, { label, alive, rttMs });
+        // Neuen Wert hinten an die Verlaufsreihe des Ziels anhängen (null = Lücke).
+        haengeVerlaufAn(targetId, rttMs);
         if (event !== null && event !== undefined) {
           setLog((vorher) =>
             [
@@ -273,6 +353,22 @@ export default function MonitorView() {
   const kartenListe = [...karten.values()];
   const kannHinzufuegen = neuLabel.trim() !== "" && neuHost.trim() !== "";
 
+  // Effektiv ausgewähltes Ziel für den großen Graphen. Vorrang hat die
+  // Nutzerwahl (gewaehltesZiel), sofern das Ziel noch existiert; sonst der
+  // Default: das Gateway-Ziel (id beginnt mit "gw_"), sonst das erste Ziel.
+  const nutzerwahlGueltig =
+    gewaehltesZiel !== null && karten.has(gewaehltesZiel);
+  const defaultZiel =
+    kartenListe.find((z) => String(z.targetId).startsWith(GATEWAY_PRAEFIX)) ??
+    kartenListe[0];
+  const aktivesZiel = nutzerwahlGueltig
+    ? karten.get(gewaehltesZiel)
+    : defaultZiel;
+  const aktiveTargetId = aktivesZiel?.targetId ?? null;
+  const verlaufDesGewaehlten =
+    aktiveTargetId !== null ? (verlaeufe.get(aktiveTargetId) ?? []) : [];
+  const labelDesGewaehlten = aktivesZiel?.label ?? "";
+
   return (
     <div className="monitor">
       {/* Dezenter Hinweisstreifen, wenn der Strom getrennt ist (Reconnect läuft). */}
@@ -297,6 +393,9 @@ export default function MonitorView() {
             key={ziel.targetId}
             ziel={ziel}
             eigen={String(ziel.targetId).startsWith(EIGENES_ZIEL_PRAEFIX)}
+            verlauf={verlaeufe.get(ziel.targetId) ?? []}
+            ausgewaehlt={ziel.targetId === aktiveTargetId}
+            onWaehlen={setGewaehltesZiel}
             onLoeschen={handleLoeschen}
           />
         ))}
@@ -330,6 +429,9 @@ export default function MonitorView() {
           {t("beobachten.monitor.hinzufuegen")}
         </button>
       </div>
+
+      {/* Großer RTT-Verlauf des gewählten Ziels, immer sichtbar. */}
+      <RttGraph werte={verlaufDesGewaehlten} label={labelDesGewaehlten} />
 
       {/* Ereignis-Log unter den Zielen, neueste zuerst. */}
       <div className="monitor__logTitel">
