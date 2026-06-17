@@ -121,6 +121,8 @@
       "newPill": "new",
       "changedPill": "changed",
       "notablePill": "notable",
+      "auffaelligPill": "suspicious",
+      "kritischPill": "critical",
       "pingUnit": "{{value}} ms",
       "pingSubMs": ">0 ms",
       "morePorts": "+{{count}}",
