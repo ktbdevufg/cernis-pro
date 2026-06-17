@@ -122,6 +122,10 @@ export function mappeHost(host) {
     // flagged_ports fallen auf das leere Default-Objekt zurück.
     analysisSeverity: host.analysis_severity ?? null,
     flaggedPorts: host.flagged_ports ?? { critical: [], notable: [] },
+    // Quittierte Ports (Schnitt 8a/ADR 0031): Portnummern, deren Achse-B-Bewertung
+    // der Nutzer quittiert hat. Wie flaggedPorts nur durchreichen, nicht verrechnen.
+    // Ältere Frames ohne acknowledged_ports fallen auf die leere Liste zurück.
+    acknowledgedPorts: host.acknowledged_ports ?? [],
     // notable bleibt als Detail-Panel-Signal erhalten, ist aber KEINE zweite
     // Achse-B-Quelle: es leitet sich aus analysisSeverity ab (eine Wahrheit).
     notable: (host.analysis_severity ?? null) !== null,
@@ -175,6 +179,9 @@ export function mappeHostFound(frame) {
     // host_detail (gleicher schluessel) liefert die echten Werte.
     analysisSeverity: null,
     flaggedPorts: { critical: [], notable: [] },
+    // Quittierte Ports (Schnitt 8a): das schnelle Frame trägt keine — leer, wie
+    // flaggedPorts. Das nachfolgende host_detail (gleicher schluessel) füllt sie.
+    acknowledgedPorts: [],
     notable: false,
     label: undefined,
     tags: undefined,

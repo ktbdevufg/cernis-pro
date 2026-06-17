@@ -13,6 +13,7 @@ import { Fingerprint, Network, StickyNote, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { acknowledge } from "../api/analysis.js";
 import { tagsAusText, updateDeviceMeta } from "../api/devices.js";
 import "./ScanDetailPanel.css";
 
@@ -48,6 +49,12 @@ export default function ScanDetailPanel({ geraet, onClose, onGespeichert }) {
   // Speicher-Status: "idle" | "speichert" | "ok" | "fehler".
   const [status, setStatus] = useState("idle");
 
+  // Lokaler Quittier-Status PRO Port (Schnitt 8b): portNum -> "idle" | "sending"
+  // | "acked" | "unacked" | "error". Bewusst KEINE optimistische Änderung von
+  // Pille/Färbung/acknowledgedPorts — der echte Zustand kommt erst beim nächsten
+  // Scan über das Frame. Dieser State trägt nur den dezenten Hinweis am Port.
+  const [ackStatus, setAckStatus] = useState({});
+
   // Gerätewechsel: alle drei Felder neu aus dem Gerät setzen (sonst bleiben
   // alte Eingaben stehen). Status zurück auf idle.
   useEffect(() => {
@@ -55,6 +62,9 @@ export default function ScanDetailPanel({ geraet, onClose, onGespeichert }) {
     setTagsWert((geraet.tags || []).join(", "));
     setNotesWert(geraet.notes || "");
     setStatus("idle");
+    // Quittier-Hinweise pro Port mit zurücksetzen — wie die Notizfelder gehören
+    // sie zum gewählten Gerät und dürfen nicht auf das nächste übergreifen.
+    setAckStatus({});
     // Abhängig allein von der MAC: ein anderes Gerät heißt neue Initialwerte.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [geraet.mac]);
@@ -71,6 +81,26 @@ export default function ScanDetailPanel({ geraet, onClose, onGespeichert }) {
   const handleNachschlagen = (port) => {
     // Bewusst ohne Funktion (Nachschlagen kommt mit der Datenanbindung).
     void port;
+  };
+
+  // Quittiert einen bewerteten Port bzw. nimmt die Quittierung zurück (Schnitt 8b).
+  // action ist "ack" | "unack". Sendet die NACKTE Portnummer (port.num) und die
+  // Severity (nur Audit-Metadatum). KEINE optimistische Änderung des geraet-
+  // Objekts: bei Erfolg setzen wir nur den lokalen Hinweis-State; der echte
+  // Zustand folgt beim nächsten Scan über das Frame. Bei Fehler bleibt der Knopf
+  // klickbar (Status "error"), nur ein dezenter Hinweis erscheint.
+  const handleQuittieren = async (portNum, severity, action) => {
+    setAckStatus((vorher) => ({ ...vorher, [portNum]: "sending" }));
+    try {
+      await acknowledge(geraet.mac, portNum, severity, action);
+      setAckStatus((vorher) => ({
+        ...vorher,
+        [portNum]: action === "ack" ? "acked" : "unacked",
+      }));
+    } catch (fehler) {
+      setAckStatus((vorher) => ({ ...vorher, [portNum]: "error" }));
+      console.error("Quittieren des Ports fehlgeschlagen:", fehler);
+    }
   };
 
   // Speichert die drei Notizfelder per PUT /api/devices/{mac}. tagsWert wird
@@ -187,29 +217,120 @@ export default function ScanDetailPanel({ geraet, onClose, onGespeichert }) {
             </p>
           ) : (
             <ul className="scan-detail__ports">
-              {geraet.ports.map((port) => (
-                <li
-                  key={`${port.num}/${port.proto}`}
-                  className="scan-detail__port"
-                >
-                  <span className="scan-detail__port-num scan-detail__mono">
-                    {port.num}
-                  </span>
-                  <span className="scan-detail__port-proto">{port.proto}</span>
-                  {port.service && (
-                    <span className="scan-detail__port-service">
-                      {port.service}
-                    </span>
-                  )}
-                  <button
-                    type="button"
-                    className="scan-detail__lookup"
-                    onClick={() => handleNachschlagen(port)}
-                  >
-                    {t("beobachten.scan.detail.ports.lookup")}
-                  </button>
-                </li>
-              ))}
+              {geraet.ports.map((port) => {
+                // Achse-B-Severity dieses Ports aus flaggedPorts ableiten
+                // (critical schlägt notable). null = kein Achse-B-Port -> kein
+                // Quittier-Bereich. flaggedPorts ist defensiv (Mapper-Default).
+                const flagged = geraet.flaggedPorts ?? {
+                  critical: [],
+                  notable: [],
+                };
+                const severity = flagged.critical?.includes(port.num)
+                  ? "critical"
+                  : flagged.notable?.includes(port.num)
+                    ? "notable"
+                    : null;
+                // Quittiert laut Frame (echter Zustand) vs. lokaler Klick-Status.
+                const istQuittiert = (geraet.acknowledgedPorts ?? []).includes(
+                  port.num,
+                );
+                const lokal = ackStatus[port.num] ?? "idle";
+                // Severity-Tönung der Zeile: kritisch -> rot, auffällig -> orange,
+                // quittiert -> gedämpft (überschreibt die Tönung optisch).
+                const portKlasse = [
+                  "scan-detail__port",
+                  severity === "critical"
+                    ? "scan-detail__port--kritisch"
+                    : severity === "notable"
+                      ? "scan-detail__port--auffaellig"
+                      : "",
+                  istQuittiert ? "scan-detail__port--quittiert" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ");
+                return (
+                  <li key={`${port.num}/${port.proto}`} className={portKlasse}>
+                    <div className="scan-detail__port-haupt">
+                      <span className="scan-detail__port-num scan-detail__mono">
+                        {port.num}
+                      </span>
+                      <span className="scan-detail__port-proto">
+                        {port.proto}
+                      </span>
+                      {port.service && (
+                        <span className="scan-detail__port-service">
+                          {port.service}
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        className="scan-detail__lookup"
+                        onClick={() => handleNachschlagen(port)}
+                      >
+                        {t("beobachten.scan.detail.ports.lookup")}
+                      </button>
+                    </div>
+
+                    {/* Quittier-Bereich nur für bewertete Ports (severity!=null):
+                        ohne Achse-B-Bewertung gibt es nichts zu quittieren. */}
+                    {(severity !== null || istQuittiert) &&
+                      (lokal === "acked" || lokal === "unacked" ? (
+                        // Nach erfolgreichem Klick: nur der dezente Hinweis, kein
+                        // Knopf. Der echte Zustand folgt beim nächsten Scan.
+                        <p className="scan-detail__ack-hint">
+                          {lokal === "acked"
+                            ? t("beobachten.scan.detail.ports.ackDone")
+                            : t("beobachten.scan.detail.ports.unackDone")}
+                        </p>
+                      ) : istQuittiert ? (
+                        // Bereits quittiert (laut Frame): Zurücknehmen anbieten.
+                        // severity fürs unack-Audit: "notable" als Default — die
+                        // Stufe steht beim quittierten Port nicht mehr in
+                        // flaggedPorts, und das Backend nutzt severity nur fürs
+                        // Audit; der effektive Status ist portbasiert.
+                        <div className="scan-detail__ack">
+                          <button
+                            type="button"
+                            className="scan-detail__ack-btn"
+                            disabled={lokal === "sending"}
+                            onClick={() =>
+                              handleQuittieren(port.num, "notable", "unack")
+                            }
+                          >
+                            {t("beobachten.scan.detail.ports.unacknowledge")}
+                          </button>
+                          {lokal === "error" && (
+                            <p className="scan-detail__ack-error">
+                              {t("beobachten.scan.detail.ports.ackError")}
+                            </p>
+                          )}
+                        </div>
+                      ) : (
+                        // Bewertet und nicht quittiert: Quittieren anbieten,
+                        // severity dieses Ports mitsenden.
+                        <div className="scan-detail__ack">
+                          <button
+                            type="button"
+                            className={`scan-detail__ack-btn scan-detail__ack-btn--${
+                              severity === "critical" ? "kritisch" : "auffaellig"
+                            }`}
+                            disabled={lokal === "sending"}
+                            onClick={() =>
+                              handleQuittieren(port.num, severity, "ack")
+                            }
+                          >
+                            {t("beobachten.scan.detail.ports.acknowledge")}
+                          </button>
+                          {lokal === "error" && (
+                            <p className="scan-detail__ack-error">
+                              {t("beobachten.scan.detail.ports.ackError")}
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </section>

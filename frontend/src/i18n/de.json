@@ -201,7 +201,12 @@
         "ports": {
           "heading": "Offene Ports",
           "lookup": "nachschlagen",
-          "empty": "Keine offenen Ports gefunden"
+          "empty": "Keine offenen Ports gefunden",
+          "acknowledge": "Quittieren",
+          "unacknowledge": "Wieder scharf stellen",
+          "ackDone": "Quittiert — wird beim nächsten Scan wirksam",
+          "unackDone": "Wieder scharf gestellt — wird beim nächsten Scan wirksam",
+          "ackError": "Aktion fehlgeschlagen."
         },
         "notes": {
           "heading": "Gerätenotizen",

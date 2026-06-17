@@ -201,7 +201,12 @@
         "ports": {
           "heading": "Open ports",
           "lookup": "look up",
-          "empty": "No open ports found"
+          "empty": "No open ports found",
+          "acknowledge": "Acknowledge",
+          "unacknowledge": "Re-arm",
+          "ackDone": "Acknowledged — takes effect on next scan",
+          "unackDone": "Re-armed — takes effect on next scan",
+          "ackError": "Action failed."
         },
         "notes": {
           "heading": "Device notes",

@@ -169,8 +169,8 @@
 
 .scan-detail__port {
   display: flex;
-  align-items: baseline;
-  gap: 10px;
+  flex-direction: column;
+  gap: 6px;
   padding: 6px 0;
   font-size: 13px;
   border-bottom: 1px solid var(--color-border);
@@ -178,6 +178,110 @@
 
 .scan-detail__port:last-child {
   border-bottom: none;
+}
+
+/* Hauptzeile eines Ports: Nummer, Proto, Service, Nachschlagen-Link in einer
+   Reihe (wie zuvor). Der Quittier-Bereich liegt darunter (zweite Zeile). */
+.scan-detail__port-haupt {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+/* Severity-Tönung der Port-Zeile (Achse B): dezenter farbiger Streifen links,
+   Token-Farben wie die Tabellen-Chips. Quittiert übertönt das gedämpft. */
+.scan-detail__port--auffaellig {
+  margin-left: -8px;
+  padding-left: 8px;
+  border-left: 2px solid var(--severity-auffaellig);
+}
+
+.scan-detail__port--kritisch {
+  margin-left: -8px;
+  padding-left: 8px;
+  border-left: 2px solid var(--severity-kritisch);
+}
+
+/* Quittierter Port: gedämpft, Severity-Markierung neutralisiert. Die Portnummer
+   wird leicht durchgestrichen-artig zurückgenommen (dezent, kein Lärm). */
+.scan-detail__port--quittiert {
+  border-left-color: var(--color-border);
+  opacity: 0.7;
+}
+
+.scan-detail__port--quittiert .scan-detail__port-num {
+  text-decoration: line-through;
+  color: var(--color-text-sec);
+}
+
+/* Quittier-Bereich (zweite Zeile): Knopf + ggf. Fehlerhinweis. */
+.scan-detail__ack {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Quittier-Knopf: Geometrie wie scan-detail__lookup-Umfeld, aber als Pille mit
+   dezenter Severity-Tönung. Sekundär, nicht laut. */
+.scan-detail__ack-btn {
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--color-text-sec);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.scan-detail__ack-btn:hover:not(:disabled) {
+  border-color: var(--color-accent-border);
+  background: var(--color-accent-bg);
+}
+
+.scan-detail__ack-btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.scan-detail__ack-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* Severity-getönte Quittier-Knöpfe: Rand/Text in der Tokenfarbe, ruhiger
+   Hintergrund. Spiegelt die Achse-B-Tokens der Tabelle. */
+.scan-detail__ack-btn--auffaellig {
+  color: var(--severity-auffaellig);
+  border-color: var(--severity-auffaellig);
+}
+
+.scan-detail__ack-btn--auffaellig:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--severity-auffaellig) 14%, transparent);
+}
+
+.scan-detail__ack-btn--kritisch {
+  color: var(--severity-kritisch);
+  border-color: var(--severity-kritisch);
+}
+
+.scan-detail__ack-btn--kritisch:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--severity-kritisch) 14%, transparent);
+}
+
+/* Dezenter „wird beim nächsten Scan wirksam"-Hinweis nach erfolgreichem Klick.
+   Klein/sekundär wie der Speichern-Hinweis. */
+.scan-detail__ack-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+/* Fehlerhinweis am Port: dezent, in der Fehlerfarbe (med-Token wie anderswo). */
+.scan-detail__ack-error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--sev-high-text);
 }
 
 .scan-detail__port-num {

@@ -11,8 +11,11 @@
 //   GET /api/analysis/rules/all -> Liste aller aktiven Regeln (Built-in + User)
 //        je { id, title, severity, disabled: bool, ... }. Quelle für den Block
 //        „Regel-An/Aus" (ADR 0028). Leere Lage -> [].
+//   POST /api/analysis/acknowledge { mac, port, severity, action } -> quittiert
+//        bzw. nimmt die Quittierung eines bewerteten Ports zurück (Schnitt 8a,
+//        ADR 0031). action ist "ack" | "unack". Wirkt erst beim nächsten Scan.
 
-import { apiGet } from "./client.js";
+import { apiGet, apiPost } from "./client.js";
 
 // Schlägt den gängigen Service-Namen zu einem Port nach. Liefert den Namen oder
 // null (gültiger, aber unbekannter Port). Wirft ApiError bei Netz-/HTTP-Fehler;
@@ -46,6 +49,16 @@ export async function fetchAllRules() {
 // Rückgabe: { gueltig: number[], ungueltig: number, gesamt: number }, wobei
 // gueltig sortiert und dedupliziert ist und gesamt die Zahl der nicht-leeren
 // Token (gültig + ungültig) ist.
+// Quittiert die Achse-B-Bewertung eines Ports bzw. nimmt sie zurück (ADR 0031).
+// action ist "ack" (quittieren) | "unack" (wieder scharf stellen). severity ist
+// nur Audit-Metadatum fürs Backend. Wirft ApiError bei Netz-/HTTP-Fehler; der
+// Aufrufer fängt das und zeigt den Fehlerhinweis am Port. Liefert die Wire-Antwort
+// durch — das Frontend mutiert nichts optimistisch, der Effekt kommt beim nächsten
+// Scan über das host_detail-Frame.
+export async function acknowledge(mac, port, severity, action) {
+  return apiPost("/api/analysis/acknowledge", { mac, port, severity, action });
+}
+
 export function parsePortliste(text) {
   const roh = typeof text === "string" ? text : "";
   const gueltigeSet = new Set();
@@ -79,4 +92,4 @@ export function parsePortliste(text) {
   return { gueltig, ungueltig, gesamt };
 }
 
-export default { lookupService, fetchAllRules, parsePortliste };
+export default { lookupService, fetchAllRules, acknowledge, parsePortliste };
