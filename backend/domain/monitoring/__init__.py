@@ -1,6 +1,13 @@
-"""Modelle, Uebergangs-Erkennung, SLA-Rechenlogik, Schedule-Parsing und
-Logging-Aufgaben der monitoring-Domaene."""
+"""Modelle, Uebergangs-Erkennung, SLA-Rechenlogik, Schedule-Parsing,
+Logging-Aufgaben und Schwellwert-Alarme der monitoring-Domaene."""
 
+from domain.monitoring.latency_threshold import (
+    INITIAL_STATE,
+    LatencyThreshold,
+    ThresholdCondition,
+    ThresholdState,
+    evaluate_sample,
+)
 from domain.monitoring.logging_task import (
     CaptureMode,
     InvalidTaskTransition,
@@ -42,10 +49,12 @@ from domain.monitoring.transitions import (
 
 __all__ = [
     "CUSTOM_TARGETS_KEY",
+    "INITIAL_STATE",
     "CaptureMode",
     "CronSpec",
     "IntervalSpec",
     "InvalidTaskTransition",
+    "LatencyThreshold",
     "LoggingEventRow",
     "LoggingRttSample",
     "LoggingTask",
@@ -58,10 +67,13 @@ __all__ = [
     "ScheduleSpec",
     "SlaSample",
     "TaskState",
+    "ThresholdCondition",
+    "ThresholdState",
     "build_hourly_chart",
     "classify_transition",
     "compute_sla_stats",
     "conflicts_with",
+    "evaluate_sample",
     "is_window_active",
     "parse_schedule",
     "pause",
