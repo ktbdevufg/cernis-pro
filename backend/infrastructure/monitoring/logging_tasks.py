@@ -81,6 +81,16 @@ class SqliteLoggingTaskRepository:
             if "effective_start" not in cols:
                 # Alt-Tabelle (B-I) -> Spalte nachruesten (Default NULL = None).
                 conn.execute("ALTER TABLE monitoring_log_tasks ADD COLUMN effective_start REAL")
+            if "interval_s" not in cols:
+                # Schema-Guard fuer interval_s (C-2, exakt wie effective_start): CREATE
+                # bleibt unveraendert, eine vor C-2 angelegte Tabelle bekommt die Spalte
+                # per ALTER nachgeruestet. ABWEICHUNG zu effective_start: hier DEFAULT 5
+                # (statt NULL), denn das Feld ist NICHT nullable (interval_s: int = 5) --
+                # Bestandszeilen sollen das heutige dichte Verhalten (5 s) tragen, nicht
+                # NULL (das ``_row_to_task`` nicht in ein ``int`` heben koennte).
+                conn.execute(
+                    "ALTER TABLE monitoring_log_tasks ADD COLUMN interval_s INTEGER DEFAULT 5"
+                )
 
     def save(self, task: LoggingTask) -> None:
         # INSERT OR REPLACE -> Upsert ueber PRIMARY KEY id (neuer state bei jedem
@@ -91,8 +101,8 @@ class SqliteLoggingTaskRepository:
                 INSERT OR REPLACE INTO monitoring_log_tasks (
                     id, target_id, label, purpose, capture_mode, operation_mode,
                     state, planned_start, planned_end, max_duration_s, created_at,
-                    effective_start
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    effective_start, interval_s
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     task.id,
@@ -107,6 +117,7 @@ class SqliteLoggingTaskRepository:
                     task.max_duration_s,
                     task.created_at,
                     task.effective_start,
+                    task.interval_s,
                 ),
             )
 
@@ -115,7 +126,7 @@ class SqliteLoggingTaskRepository:
             row = conn.execute(
                 "SELECT id, target_id, label, purpose, capture_mode, operation_mode, "
                 "state, planned_start, planned_end, max_duration_s, created_at, "
-                "effective_start "
+                "effective_start, interval_s "
                 "FROM monitoring_log_tasks WHERE id = ?",
                 (task_id,),
             ).fetchone()
@@ -128,7 +139,7 @@ class SqliteLoggingTaskRepository:
             rows = conn.execute(
                 "SELECT id, target_id, label, purpose, capture_mode, operation_mode, "
                 "state, planned_start, planned_end, max_duration_s, created_at, "
-                "effective_start "
+                "effective_start, interval_s "
                 "FROM monitoring_log_tasks ORDER BY created_at"
             ).fetchall()
         return [self._row_to_task(row) for row in rows]
@@ -155,4 +166,5 @@ class SqliteLoggingTaskRepository:
             max_duration_s=row["max_duration_s"],
             created_at=row["created_at"],
             effective_start=row["effective_start"],
+            interval_s=row["interval_s"],
         )

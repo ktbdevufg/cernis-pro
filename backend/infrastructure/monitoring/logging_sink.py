@@ -8,9 +8,22 @@ fluechtige Live-Monitor (rtt_history/monitor_events) bleibt voellig unberuehrt: 
 ist ein ZUSAETZLICHER best-effort-Aufruf, kein Eingriff in den bestehenden Pfad.
 
 CAPTURE-MODE-Logik (was geschrieben wird):
-* ``REACHABILITY_LATENCY`` -> JEDE Messung ein dichter RTT-Punkt (rtt_repo.save).
+* ``REACHABILITY_LATENCY`` -> dichte RTT-Punkte (rtt_repo.save), AUSGEDUENNT nach dem
+  Mess-Intervall ``task.interval_s`` (C-2): ein RTT-Punkt nur, wenn seit dem letzten
+  geschriebenen Punkt DIESES Tasks ``>= interval_s`` Sekunden vergangen sind (oder noch
+  keiner da). Eine Flanke (``event != None``) wird dabei IMMER sofort geschrieben --
+  NIE ausgeduennt (sonst verpasst man den Ausfall, den man beobachtet).
 * ``REACHABILITY`` und ``INTERFACE_STATUS`` -> NUR die Erreichbarkeits-/Status-FLANKE
   (event != None) ein event_repo.save, KEINE dichten RTT-Punkte.
+
+AUSDUENN-MECHANIK (C-2, rein im Sink, KEIN DB-Roundtrip pro Tick): ``_letzter_rtt_ts``
+haelt in-memory den letzten geschriebenen RTT-ts je ``task.id`` (``dict[str, float]``).
+Neustart-Verlust ist akzeptiert (erster Tick nach Neustart schreibt, das Intervall
+laeuft ab da -- harmlos, kein Verfaelschen). KEIN aktives Cleanup beendeter Tasks: ein
+liegengebliebener Eintrag ist ein einzelner float (minimal) und wird beim naechsten
+Neustart entfernt; ein aktives Aufraeumen wuerde die schlanke ``record``-Schleife um
+eine zweite Buchhaltung (welche Tasks NICHT bedient wurden) erweitern, ohne fachlichen
+Gewinn -- bewusst weggelassen.
 
 INTERFACE_STATUS vs. REACHABILITY (vorerst gleicher Schreibpfad -- begruendet): Fachlich
 unterscheiden sie sich (Interface-Up/Down vs. Ziel-Erreichbarkeit), aber der Live-Loop
@@ -64,6 +77,10 @@ class MonitorLoggingSink:
         self._task_repo = task_repo
         self._rtt_repo = rtt_repo
         self._event_repo = event_repo
+        # C-2: letzter geschriebener RTT-ts je task.id (in-memory, Neustart-Verlust ok).
+        # Traegt die Ausduennung der dichten RTT-Punkte nach task.interval_s -- s.
+        # Modul-Docstring (kein DB-Roundtrip, kein aktives Cleanup).
+        self._letzter_rtt_ts: dict[str, float] = {}
 
     async def record(
         self,
@@ -84,8 +101,18 @@ class MonitorLoggingSink:
                 ):
                     continue
                 if task.capture_mode is CaptureMode.REACHABILITY_LATENCY:
-                    # Dichte RTT-Punkte: JEDE Messung (Sentinel -1.0 bleibt erhalten).
-                    self._rtt_repo.save(task.id, sample.rtt_ms, sample.loss_pct, sample.alive, now)
+                    # Dichte RTT-Punkte, ausgeduennt nach task.interval_s (C-2). Eine
+                    # Flanke (event != None) wird IMMER sofort geschrieben -- nie
+                    # ausgeduennt (sonst verpasst man den beobachteten Ausfall). Sonst
+                    # nur schreiben, wenn seit dem letzten geschriebenen Punkt dieses
+                    # Tasks >= interval_s vergangen sind (oder noch keiner da). Der
+                    # Sentinel -1.0 (nicht erreichbar) bleibt erhalten.
+                    letzter = self._letzter_rtt_ts.get(task.id)
+                    if event is not None or letzter is None or (now - letzter) >= task.interval_s:
+                        self._rtt_repo.save(
+                            task.id, sample.rtt_ms, sample.loss_pct, sample.alive, now
+                        )
+                        self._letzter_rtt_ts[task.id] = now
                 elif event is not None:
                     # REACHABILITY + INTERFACE_STATUS: nur die Flanke (s. Modul-Docstring,
                     # vorerst gleicher Schreibpfad). event_type als roher str-Wert.

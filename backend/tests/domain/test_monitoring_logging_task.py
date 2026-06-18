@@ -311,3 +311,31 @@ def test_window_immediate_reference_ts_overrides_effective_start() -> None:
     # Override auf 1000 -> bei now=520 (im effective_start-Fenster, aber vor Override) False.
     assert is_window_active(task, 520.0, reference_ts=1000.0) is False
     assert is_window_active(task, 1010.0, reference_ts=1000.0) is True
+
+
+# --- interval_s (C-2, Mess-Intervall) -----------------------------------------
+
+
+def test_logging_task_interval_s_defaults_to_5() -> None:
+    # Reiner Datentraeger: ohne Angabe traegt der Task das heutige dichte Verhalten (5 s).
+    # Das _task-Helper reicht interval_s NICHT durch -> der Domaenen-Default greift.
+    assert _task().interval_s == 5
+
+
+def test_logging_task_carries_explicit_interval_s() -> None:
+    # Ein explizit gesetztes Intervall wird unveraendert getragen.
+    task = LoggingTask(
+        id="t",
+        target_id="tgt",
+        label="L",
+        purpose="P",
+        capture_mode=CaptureMode.REACHABILITY_LATENCY,
+        operation_mode=OperationMode.IMMEDIATE,
+        state=TaskState.CREATED,
+        planned_start=None,
+        planned_end=None,
+        max_duration_s=60,
+        created_at=1.0,
+        interval_s=30,
+    )
+    assert task.interval_s == 30

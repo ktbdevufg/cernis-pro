@@ -113,6 +113,14 @@ class LoggingTask:
     # MIT -- ADR 0033). Default ``None``, ans Ende einsortiert: so bleiben die
     # bestehenden positionsbasierten ``LoggingTask(...)``-Konstruktionen gueltig.
     effective_start: float | None = None
+    # Mess-Intervall in Sekunden (C-2): duennt NUR die dichten RTT-Punkte aus
+    # (capture_mode REACHABILITY_LATENCY). Flanken werden nie ausgeduennt -- die
+    # Ausduenn-Entscheidung trifft der Sink, nicht die Domaene (die Domaene haelt
+    # keine Uhr); dieses Feld ist reiner Datentraeger. Default 5 (= heutiges dichtes
+    # Verhalten, kein Bruch fuer Bestands-Aufgaben/Assistent), ans Ende einsortiert
+    # wie ``effective_start``: bestehende positionsbasierte Konstruktionen bleiben
+    # gueltig.
+    interval_s: int = 5
 
 
 @dataclass(frozen=True)

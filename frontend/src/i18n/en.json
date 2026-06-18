@@ -350,6 +350,22 @@
       },
       "startLabel": "Start",
       "endeLabel": "End",
+      "intervallLabel": "Measurement interval",
+      "intervallHinweis": "Thins out the latency samples. Larger intervals produce less data.",
+      "intervall": {
+        "5s": "5 s",
+        "15s": "15 s",
+        "30s": "30 s",
+        "60s": "1 min",
+        "300s": "5 min"
+      },
+      "intervallKarte": {
+        "5s": "every 5 s",
+        "15s": "every 15 s",
+        "30s": "every 30 s",
+        "60s": "every 1 min",
+        "300s": "every 5 min"
+      },
       "listeTitel": "Logging tasks",
       "listeLeer": "No logging tasks created yet.",
       "state": {

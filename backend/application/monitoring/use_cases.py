@@ -634,6 +634,12 @@ class CreateLoggingTask:
     NICHT (import-linter: api -> nur application). Ein nicht zum Vokabular passender
     String wirft ``ValueError`` (StrEnum-Konstruktor) -- am Router faengt das schon die
     Body-Validierung (422) vorher ab; der Cast hier ist die zweite, autoritative Linie.
+
+    ``interval_s`` (C-2, Mess-Intervall in Sekunden) hat den Default 5 -- denselben wie
+    die Domaene (``LoggingTask.interval_s: int = 5``). Der Default liegt damit an der
+    Domaene (autoritativ); dieser Use-Case-Default spiegelt ihn nur, der Router setzt
+    KEINE eigene 5, sondern reicht ``interval_s`` nur durch, wenn der Client es gesetzt
+    hat (sonst greift dieser Default). Die Stufen-Validierung macht der Router (422).
     """
 
     def __init__(self, repository: LoggingTaskRepository) -> None:
@@ -652,6 +658,7 @@ class CreateLoggingTask:
         planned_start: float | None = None,
         planned_end: float | None = None,
         max_duration_s: int | None = None,
+        interval_s: int = 5,
     ) -> LoggingTask:
         task = LoggingTask(
             id=task_id,
@@ -665,6 +672,7 @@ class CreateLoggingTask:
             planned_end=planned_end,
             max_duration_s=max_duration_s,
             created_at=created_at,
+            interval_s=interval_s,
         )
         self._repository.save(task)
         return task

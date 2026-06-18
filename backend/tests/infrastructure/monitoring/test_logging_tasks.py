@@ -227,6 +227,85 @@ def _immediate_task_with_effective_start() -> LoggingTask:
     )
 
 
+# ── interval_s (C-2, Mess-Intervall) ────────────────────────────────────────
+
+
+def test_interval_s_roundtrip(repo: SqliteLoggingTaskRepository) -> None:
+    # Ein gesetztes Intervall ueberlebt save->get (INTEGER-Round-trip).
+    task = LoggingTask(
+        id="t-iv",
+        target_id="wlan",
+        label="L",
+        purpose="P",
+        capture_mode=CaptureMode.REACHABILITY_LATENCY,
+        operation_mode=OperationMode.IMMEDIATE,
+        state=TaskState.ACTIVE,
+        planned_start=None,
+        planned_end=None,
+        max_duration_s=3600,
+        created_at=70.0,
+        interval_s=60,
+    )
+    repo.save(task)
+    loaded = repo.get("t-iv")
+    assert loaded == task
+    assert loaded is not None
+    assert loaded.interval_s == 60
+
+
+def test_interval_s_default_roundtrip(repo: SqliteLoggingTaskRepository) -> None:
+    # Ohne Angabe traegt der Task den Domaenen-Default 5 -- der ueberlebt den Round-trip.
+    repo.save(_scheduled_task("t-iv-default"))
+    loaded = repo.get("t-iv-default")
+    assert loaded is not None
+    assert loaded.interval_s == 5
+
+
+def test_schema_guard_adds_interval_s_to_legacy_table(tmp_path: Path) -> None:
+    # Migrations-Guard fuer interval_s: eine vor C-2 angelegte Tabelle (ohne die Spalte)
+    # wird beim Repo-Bau idempotent nachgeruestet -- ABWEICHUNG zu effective_start:
+    # DEFAULT 5 (nicht NULL), weil interval_s nicht nullable ist. Bestandszeilen tragen
+    # damit das heutige dichte Verhalten (5 s), nicht NULL.
+    db_path = tmp_path / "cernis.db"
+    # Alt-Tabelle OHNE interval_s (und ohne effective_start) manuell anlegen + Zeile.
+    conn = sqlite3.connect(db_path)
+    with conn:
+        conn.execute(
+            """
+            CREATE TABLE monitoring_log_tasks (
+                id             TEXT PRIMARY KEY,
+                target_id      TEXT,
+                label          TEXT,
+                purpose        TEXT,
+                capture_mode   TEXT,
+                operation_mode TEXT,
+                state          TEXT,
+                planned_start  REAL,
+                planned_end    REAL,
+                max_duration_s INTEGER,
+                created_at     REAL
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO monitoring_log_tasks (id, target_id, label, purpose, "
+            "capture_mode, operation_mode, state, planned_start, planned_end, "
+            "max_duration_s, created_at) VALUES "
+            "('alt', 'wlan', 'L', 'P', 'reachability_latency', 'scheduled', 'created', "
+            "100.0, 200.0, NULL, 50.0)"
+        )
+    conn.close()
+
+    # Repo-Bau ruestet die Spalte nach.
+    repo = SqliteLoggingTaskRepository(db_path)
+    cols = {row["name"] for row in _table_info(db_path, "monitoring_log_tasks")}
+    assert "interval_s" in cols
+    # Die Alt-Zeile ist lesbar, interval_s ist 5 (DEFAULT 5, NICHT None).
+    loaded = repo.get("alt")
+    assert loaded is not None
+    assert loaded.interval_s == 5
+
+
 def _table_info(db_path: Path, table: str) -> list[sqlite3.Row]:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row

@@ -108,6 +108,12 @@ class PatchScheduleBody(BaseModel):
 _CAPTURE_MODES = frozenset({"interface_status", "reachability", "reachability_latency"})
 _OPERATION_MODES = frozenset({"scheduled", "immediate"})
 
+# Erlaubte Mess-Intervall-Stufen in Sekunden (C-2). Wie die Modus-Mengen oben nur die
+# Frueh-Validierung am Rand (422 statt 500/stiller Drift); den Default 5 setzt NICHT
+# der Router, sondern die Domaene/der Use-Case (interval_s: int = 5) -- der Router
+# reicht ``None`` als "nicht gesetzt" durch, dann greift der Use-Case-Default.
+_INTERVAL_STUFEN = frozenset({5, 15, 30, 60, 300})
+
 
 class CreateLoggingTaskBody(BaseModel):
     """POST /api/monitor/logging -- Anlage einer Logging-Aufgabe.
@@ -129,6 +135,10 @@ class CreateLoggingTaskBody(BaseModel):
     planned_start: float | None = None
     planned_end: float | None = None
     max_duration_s: int | None = None
+    # Mess-Intervall in Sekunden (C-2): optional. ``None`` = nicht gesetzt -> der
+    # Use-Case-Default (5) greift; ein gesetzter Wert muss eine der erlaubten Stufen
+    # sein (_validate_logging_modes, 422). NUR der Erweitert-Modus der Maske sendet es.
+    interval_s: int | None = None
 
 
 class AddTargetBody(BaseModel):
@@ -276,6 +286,9 @@ def _logging_task_to_dict(task: Any) -> dict[str, Any]:
         # Wire-Form -- das Frontend (Schnitt C, Restzeit-Logik) braucht es. None
         # bis zum ersten Start nach ACTIVE, wieder None nach FINISHED.
         "effective_start": task.effective_start,
+        # Mess-Intervall in Sekunden (C-2). Immer gesetzt (Domaenen-Default 5) -- das
+        # Frontend zeigt es in der Karten-Meta bei REACHABILITY_LATENCY ("alle 30 s").
+        "interval_s": task.interval_s,
     }
 
 
@@ -454,6 +467,15 @@ def _validate_logging_modes(body: CreateLoggingTaskBody) -> None:
             422,
             detail="operation_mode 'immediate' braucht max_duration_s",
         )
+    # Mess-Intervall (C-2): wenn gesetzt, muss es eine der erlaubten Stufen sein --
+    # sonst 422 (kein stiller Fallback, Finding S3). ``None`` ist erlaubt (= nicht
+    # gesetzt -> Use-Case-Default 5).
+    if body.interval_s is not None and body.interval_s not in _INTERVAL_STUFEN:
+        raise HTTPException(
+            422,
+            detail=f"interval_s {body.interval_s!r} ist keine erlaubte Stufe "
+            f"{sorted(_INTERVAL_STUFEN)}",
+        )
 
 
 @router.post("/monitor/logging", status_code=status.HTTP_201_CREATED)
@@ -467,6 +489,12 @@ def create_logging_task(
     Feld-Konsistenz prueft ``_validate_logging_modes`` (422 bei Verstoss).
     """
     _validate_logging_modes(body)
+    # interval_s (C-2): nur durchreichen, wenn der Client es gesetzt hat -- sonst greift
+    # der Use-Case-/Domaenen-Default (5). So bleibt der Default an EINER Stelle (Domaene),
+    # der Router setzt keine eigene 5.
+    interval_kwargs: dict[str, int] = (
+        {"interval_s": body.interval_s} if body.interval_s is not None else {}
+    )
     task = create_task(
         task_id=uuid.uuid4().hex,
         target_id=body.target_id,
@@ -478,6 +506,7 @@ def create_logging_task(
         planned_start=body.planned_start,
         planned_end=body.planned_end,
         max_duration_s=body.max_duration_s,
+        **interval_kwargs,
     )
     return _logging_task_to_dict(task)
 

@@ -168,6 +168,34 @@ def test_create_missing_mandatory_field_is_422(db_path: Path) -> None:
     assert resp.status_code == 422
 
 
+# ── interval_s (C-2, Mess-Intervall) ────────────────────────────────────────
+
+
+def test_create_with_valid_interval_carries_it(db_path: Path) -> None:
+    # Ein gueltiges interval_s (eine der Stufen) landet 1:1 in der Wire-Form.
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.post("/api/monitor/logging", json=_create_body(interval_s=60))
+    assert resp.status_code == 201
+    assert resp.json()["interval_s"] == 60
+
+
+def test_create_with_invalid_interval_is_422(db_path: Path) -> None:
+    # Ein interval_s ausserhalb der erlaubten Stufen {5,15,30,60,300} -> 422 (kein
+    # stiller Fallback).
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.post("/api/monitor/logging", json=_create_body(interval_s=7))
+    assert resp.status_code == 422
+
+
+def test_create_without_interval_defaults_to_5(db_path: Path) -> None:
+    # Ohne Angabe greift der Domaenen-/Use-Case-Default 5 (heutiges dichtes Verhalten).
+    # _create_body traegt KEIN interval_s.
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.post("/api/monitor/logging", json=_create_body())
+    assert resp.status_code == 201
+    assert resp.json()["interval_s"] == 5
+
+
 # ── GET /api/monitor/logging (Liste) + Detail (404) ─────────────────────────
 
 

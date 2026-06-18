@@ -94,6 +94,12 @@
   color: var(--color-text-tert);
 }
 
+/* Dezenter Hinweis unter einem Feld (C-2: Mess-Intervall bei Latenz-Erfassung). */
+.logging-feld__hinweis {
+  font-size: 11px;
+  color: var(--color-text-tert);
+}
+
 .logging-feld__input,
 .logging-feld__select {
   padding: 7px 10px;
@@ -362,6 +368,12 @@
 
 .logging-karte__rest {
   color: var(--color-text);
+}
+
+/* Mess-Intervall in der Karten-Meta (C-2, nur bei Erreichbarkeit + Latenz). Dezent
+   per Akzentfarbe hervorgehoben -- die erste sichtbare Enterprise-Feineinstellung. */
+.logging-karte__intervall {
+  color: var(--color-accent-strong);
 }
 
 /* Fortschrittsbalken (nur aktive Aufgaben). */

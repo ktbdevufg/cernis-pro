@@ -350,6 +350,22 @@
       },
       "startLabel": "Start",
       "endeLabel": "Ende",
+      "intervallLabel": "Mess-Intervall",
+      "intervallHinweis": "Verdichtet die Latenz-Messpunkte. Größere Intervalle erzeugen weniger Daten.",
+      "intervall": {
+        "5s": "5 s",
+        "15s": "15 s",
+        "30s": "30 s",
+        "60s": "1 Min",
+        "300s": "5 Min"
+      },
+      "intervallKarte": {
+        "5s": "alle 5 s",
+        "15s": "alle 15 s",
+        "30s": "alle 30 s",
+        "60s": "alle 1 Min",
+        "300s": "alle 5 Min"
+      },
       "listeTitel": "Logging-Aufgaben",
       "listeLeer": "Noch keine Logging-Aufgaben angelegt.",
       "state": {

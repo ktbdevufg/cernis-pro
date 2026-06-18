@@ -157,6 +157,10 @@ export function mappeLoggingTask(task) {
     maxDurationS: task.max_duration_s ?? null,
     createdAt: task.created_at ?? null,
     effectiveStart: task.effective_start ?? null,
+    // Mess-Intervall in Sekunden (C-2). Backend liefert es immer (Default 5); fehlt es
+    // wider Erwarten, faellt es ehrlich auf null (kein erfundener Default im Mapper --
+    // die Karte zeigt es nur bei vorhandenem Wert).
+    intervalS: task.interval_s ?? null,
   };
 }
 
@@ -221,8 +225,9 @@ export async function createLoggingTask({
   plannedStart = null,
   plannedEnd = null,
   maxDurationS = null,
+  intervalS = null,
 }) {
-  const backend = await apiPost("/api/monitor/logging", {
+  const payload = {
     target_id: targetId,
     label,
     purpose,
@@ -231,7 +236,13 @@ export async function createLoggingTask({
     planned_start: plannedStart,
     planned_end: plannedEnd,
     max_duration_s: maxDurationS,
-  });
+  };
+  // Mess-Intervall (C-2): nur senden, wenn gesetzt -- sonst weglassen, dann greift der
+  // Backend-Default (5). Der Assistent reicht es NIE durch (still Default 5).
+  if (intervalS !== null && intervalS !== undefined) {
+    payload.interval_s = intervalS;
+  }
+  const backend = await apiPost("/api/monitor/logging", payload);
   return mappeLoggingTask(backend);
 }
 

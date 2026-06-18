@@ -54,6 +54,24 @@ const DAUER_OPTIONEN = [
   { key: "1w", sekunden: 604800 },
 ];
 
+// Waehlbare Mess-Intervall-Stufen (C-2): i18n-Schluessel -> Sekunden. Muss mit den
+// Backend-Stufen {5,15,30,60,300} uebereinstimmen (sonst 422). Reihenfolge verbindlich.
+// NUR im Erweitert-Modus sichtbar; der Assistent nutzt still den Default (5 s).
+const INTERVALL_OPTIONEN = [
+  { key: "5s", sekunden: 5 },
+  { key: "15s", sekunden: 15 },
+  { key: "30s", sekunden: 30 },
+  { key: "60s", sekunden: 60 },
+  { key: "300s", sekunden: 300 },
+];
+
+// Mess-Intervall in Sekunden -> i18n-Schluessel der Karten-Anzeige ("alle 30 s").
+// Fremde Werte -> null (keine Anzeige, kein Absturz).
+function intervallKarteKey(sekunden) {
+  const treffer = INTERVALL_OPTIONEN.find((o) => o.sekunden === sekunden);
+  return treffer ? treffer.key : null;
+}
+
 // Wandelt einen lokalen datetime-local-Eingabewert ("2026-06-18T14:30") in einen
 // Unix-ts in SEKUNDEN (Backend-Zeitbasis). Leerer Wert -> null (ehrliche Luecke).
 function lokalZuTs(wert) {
@@ -111,6 +129,14 @@ function AufgabenKarte({ task, jetzt, onAktion }) {
   const captureText = t(`beobachten.logging.captureKurz.${task.captureMode}`, {
     defaultValue: task.captureMode,
   });
+  // Mess-Intervall (C-2) NUR bei "Erreichbarkeit + Latenz" zeigen (nur dieser Modus
+  // erzeugt die dichten RTT-Punkte, die das Intervall ausduennt). Fremde/fehlende Werte
+  // -> keine Anzeige (intervallKarteKey -> null).
+  const intervallKey =
+    task.captureMode === "reachability_latency" ? intervallKarteKey(task.intervalS) : null;
+  const intervallText = intervallKey
+    ? t(`beobachten.logging.intervallKarte.${intervallKey}`)
+    : null;
 
   return (
     <div className="logging-karte">
@@ -130,6 +156,14 @@ function AufgabenKarte({ task, jetzt, onAktion }) {
           ·
         </span>
         <span className="logging-karte__capture">{captureText}</span>
+        {intervallText && (
+          <>
+            <span className="logging-karte__trenner" aria-hidden="true">
+              ·
+            </span>
+            <span className="logging-karte__intervall">{intervallText}</span>
+          </>
+        )}
         {restText && (
           <>
             <span className="logging-karte__trenner" aria-hidden="true">
@@ -215,6 +249,10 @@ const LEERE_EINGABE = {
   maxDurationS: 7200,
   plannedStart: "",
   plannedEnd: "",
+  // Mess-Intervall in Sekunden (C-2). Default 5 = heutiges dichtes Verhalten. Im
+  // Assistent-Modus unsichtbar (wird nicht in den Payload gereicht -> Backend-Default);
+  // nur der Erweitert-Modus zeigt das Feld und reicht es mit.
+  intervalS: 5,
 };
 
 export default function LoggingPanel() {
@@ -291,6 +329,11 @@ export default function LoggingPanel() {
       captureMode: eingabe.captureMode,
       operationMode: eingabe.operationMode,
     };
+    // Mess-Intervall (C-2) NUR im Erweitert-Modus mitgeben -- der Assistent laesst es
+    // weg, dann greift still der Backend-Default (5 s). "Erweitert kann mehr".
+    if (modus === "erweitert") {
+      basis.intervalS = eingabe.intervalS;
+    }
     if (eingabe.operationMode === "scheduled") {
       return {
         ...basis,
@@ -758,8 +801,40 @@ function ErweitertMaske({ eingabe, setFeld, ziele, gueltig, onAnlegen }) {
           </select>
         </label>
         <BetriebFelder eingabe={eingabe} setFeld={setFeld} />
+        <IntervallFeld eingabe={eingabe} setFeld={setFeld} />
       </div>
       <AbschlussKnoepfe gueltig={gueltig} onAnlegen={onAnlegen} />
     </div>
+  );
+}
+
+// Mess-Intervall-Feld (C-2) -- NUR im Erweitert-Modus gerendert (der Assistent zeigt
+// es nicht, nutzt still den Default 5 s). Dropdown ueber die erlaubten Stufen; der
+// Wert ist die Sekundenzahl (deckt sich mit den Backend-Stufen). Fachlich relevant ist
+// es fuer "Erreichbarkeit + Latenz" (nur dieser Modus erzeugt dichte RTT-Punkte) --
+// darum ein dezenter Hinweis, kein Verstecken (das Feld bleibt fuer alle Modi bedienbar,
+// der Backend-Sink duennt ohnehin nur reachability_latency aus).
+function IntervallFeld({ eingabe, setFeld }) {
+  const { t } = useTranslation();
+  return (
+    <label className="logging-feld">
+      <span className="logging-feld__label">{t("beobachten.logging.intervallLabel")}</span>
+      <select
+        className="logging-feld__select"
+        value={eingabe.intervalS}
+        onChange={(e) => setFeld("intervalS", Number(e.target.value))}
+      >
+        {INTERVALL_OPTIONEN.map((o) => (
+          <option key={o.key} value={o.sekunden}>
+            {t(`beobachten.logging.intervall.${o.key}`)}
+          </option>
+        ))}
+      </select>
+      {eingabe.captureMode === "reachability_latency" && (
+        <span className="logging-feld__hinweis">
+          {t("beobachten.logging.intervallHinweis")}
+        </span>
+      )}
+    </label>
   );
 }
