@@ -26,6 +26,7 @@ import { useTranslation } from "react-i18next";
 import {
   createLoggingTask,
   deleteLoggingTask,
+  fetchLoggingSla,
   fetchLoggingTasks,
   fetchMonitorStatus,
   pauseLoggingTask,
@@ -70,6 +71,19 @@ const INTERVALL_OPTIONEN = [
 function intervallKarteKey(sekunden) {
   const treffer = INTERVALL_OPTIONEN.find((o) => o.sekunden === sekunden);
   return treffer ? treffer.key : null;
+}
+
+// Rundet eine Zahl auf ``stellen`` Dezimalstellen und formatiert sie sprachabhaengig
+// (DE -> Komma, EN -> Punkt) ueber toLocaleString. ``null``/keine Zahl -> null (die
+// Anzeige laesst den Wert dann weg). ``sprache`` ist i18n.language.
+function formatiereZahl(wert, stellen, sprache) {
+  if (wert === null || wert === undefined || Number.isNaN(wert)) {
+    return null;
+  }
+  return Number(wert).toLocaleString(sprache, {
+    minimumFractionDigits: stellen,
+    maximumFractionDigits: stellen,
+  });
 }
 
 // Wandelt einen lokalen datetime-local-Eingabewert ("2026-06-18T14:30") in einen
@@ -117,8 +131,8 @@ function PlayerKnopf({ icon: Icon, label, onClick, variante }) {
 // Eine Aufgaben-Karte: Label, Ziel, Erfassungsmodus, Zustands-Pill, Restzeit, bei
 // aktiven ein Fortschrittsbalken, plus die zustandsabhaengigen Player-Knoepfe.
 // jetzt wird von oben durchgereicht (ein gemeinsamer Tick fuer alle Karten).
-function AufgabenKarte({ task, jetzt, onAktion }) {
-  const { t } = useTranslation();
+function AufgabenKarte({ task, jetzt, sla, onAktion }) {
+  const { t, i18n } = useTranslation();
 
   const rest = restSekunden(task, jetzt);
   const restText = formatiereRestzeit(rest, t, "beobachten.logging.rest");
@@ -137,6 +151,17 @@ function AufgabenKarte({ task, jetzt, onAktion }) {
   const intervallText = intervallKey
     ? t(`beobachten.logging.intervallKarte.${intervallKey}`)
     : null;
+
+  // SLA-Kennzahlen (C-3) NUR bei "Erreichbarkeit + Latenz" (nur dieser Modus erzeugt
+  // die dichten RTT-Punkte, aus denen die Verfuegbarkeit gerechnet wird). ``sla`` ist
+  // das geladene { uptimePct, downtimeMins, avgRttMs, samples } oder undefined (noch
+  // nicht geladen / Ladefehler -> Zeile still weglassen, kein Absturz). uptimePct ===
+  // null heisst "noch keine Auswertung" (zu wenig/keine Daten -> dezenter Hinweis).
+  const zeigtSla = task.captureMode === "reachability_latency" && sla !== undefined;
+  const hatAuswertung = zeigtSla && sla.uptimePct !== null;
+  const uptimeText = hatAuswertung ? formatiereZahl(sla.uptimePct, 1, i18n.language) : null;
+  const avgRttText = hatAuswertung ? formatiereZahl(sla.avgRttMs, 1, i18n.language) : null;
+  const downtimeText = hatAuswertung ? formatiereZahl(sla.downtimeMins, 1, i18n.language) : null;
 
   return (
     <div className="logging-karte">
@@ -173,6 +198,27 @@ function AufgabenKarte({ task, jetzt, onAktion }) {
           </>
         )}
       </div>
+
+      {/* SLA-Kennzahlen (C-3): Verfuegbarkeit prominent, Ø-RTT + ca.-Downtime dezent.
+          Nur bei reachability_latency mit geladenen Daten. uptimePct null -> Hinweis. */}
+      {zeigtSla &&
+        (hatAuswertung ? (
+          <div className="logging-karte__sla">
+            <span className="logging-karte__sla-uptime">
+              {t("beobachten.logging.sla.verfuegbarkeit", { wert: uptimeText })}
+            </span>
+            <span className="logging-karte__sla-detail">
+              {t("beobachten.logging.sla.avgRtt", { wert: avgRttText })}
+            </span>
+            <span className="logging-karte__sla-detail">
+              {t("beobachten.logging.sla.downtime", { wert: downtimeText })}
+            </span>
+          </div>
+        ) : (
+          <div className="logging-karte__sla logging-karte__sla--leer">
+            {t("beobachten.logging.sla.keineAuswertung")}
+          </div>
+        ))}
 
       {/* Fortschrittsbalken nur bei aktiven Aufgaben mit bestimmbarem Anteil. */}
       {task.state === ZUSTAND.ACTIVE && anteil !== null && (
@@ -269,6 +315,11 @@ export default function LoggingPanel() {
   const [ziele, setZiele] = useState([]);
   // Angelegte Aufgaben (aus fetchLoggingTasks), gemappt.
   const [aufgaben, setAufgaben] = useState([]);
+  // SLA-Kennzahlen je Task-id (C-3): { [taskId]: { uptimePct, downtimeMins, avgRttMs,
+  // samples } }. Einmalig pro Listen-Reload befuellt (KEIN Dauer-Poll) -- nur fuer
+  // reachability_latency-Tasks. Fehlt ein Eintrag (Ladefehler), zeigt die Karte keine
+  // SLA-Zeile (still weggelassen).
+  const [slaMap, setSlaMap] = useState({});
   // Dezenter Fehlerhinweis oben (Anlage/Aktion/Laden) oder null.
   const [fehler, setFehler] = useState(null);
   // Gemeinsamer Sekunden-Tick fuer die Restzeit-Anzeige aller Karten.
@@ -305,17 +356,40 @@ export default function LoggingPanel() {
     return () => clearInterval(id);
   }, []);
 
-  // Aufgaben-Liste neu laden. Fehler -> dezenter Lade-Hinweis (kein Absturz).
+  // Aufgaben-Liste neu laden. Fehler -> dezenter Lade-Hinweis (kein Absturz). Im
+  // Anschluss EINMALIG die SLA-Kennzahlen der reachability_latency-Tasks nachladen
+  // (kein Dauer-Poll -- nur beim Listen-Reload).
   const ladeAufgaben = async (abgebrochen = false) => {
     try {
       const liste = await fetchLoggingTasks();
       if (!abgebrochen) {
         setAufgaben(liste);
+        ladeSla(liste, abgebrochen);
       }
     } catch {
       if (!abgebrochen) {
         setFehler(t("beobachten.logging.ladeFehler"));
       }
+    }
+  };
+
+  // SLA-Kennzahlen je reachability_latency-Task laden (C-3). Pro Task ein einzelner
+  // fetchLoggingSla; ein Fehler an EINEM Task laesst nur dessen SLA-Zeile weg (kein
+  // Eintrag in der Map), die Liste bleibt stehen. EINMALIG pro Reload (kein Poll).
+  const ladeSla = async (liste, abgebrochen = false) => {
+    const slaTasks = liste.filter((t2) => t2.captureMode === "reachability_latency");
+    const ergebnisse = await Promise.all(
+      slaTasks.map(async (t2) => {
+        try {
+          return [t2.id, await fetchLoggingSla(t2.id)];
+        } catch {
+          // 404/Netz: kein Eintrag -> die Karte laesst die SLA-Zeile still weg.
+          return null;
+        }
+      }),
+    );
+    if (!abgebrochen) {
+      setSlaMap(Object.fromEntries(ergebnisse.filter(Boolean)));
     }
   };
 
@@ -487,6 +561,7 @@ export default function LoggingPanel() {
               key={task.id}
               task={task}
               jetzt={jetzt}
+              sla={slaMap[task.id]}
               onAktion={handleAktion}
             />
           ))}

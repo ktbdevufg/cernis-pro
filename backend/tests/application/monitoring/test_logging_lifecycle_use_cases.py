@@ -70,6 +70,9 @@ class _FakeRttRepo:
     def range(self, task_id: str, since: float, until: float) -> list:  # type: ignore[type-arg]
         raise AssertionError("range darf von CheckLogVolume nicht gerufen werden")
 
+    def all_for(self, task_id: str) -> list:  # type: ignore[type-arg]
+        raise AssertionError("all_for darf von CheckLogVolume nicht gerufen werden")
+
     def delete_older_than(self, cutoff_ts: float) -> int:
         raise AssertionError("delete_older_than darf von CheckLogVolume nicht gerufen werden")
 

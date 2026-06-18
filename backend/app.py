@@ -105,6 +105,7 @@ from api.monitoring import (
     provide_delete_monitor_target,
     provide_get_all_sla_stats,
     provide_get_logging_task_detail,
+    provide_get_logging_task_sla,
     provide_get_monitor_events,
     provide_get_rtt_history,
     provide_get_schedules,
@@ -224,6 +225,7 @@ from application.monitoring import (
     EnforceLoggingRetention,
     GetAllSlaStats,
     GetLoggingTaskDetail,
+    GetLoggingTaskSla,
     GetMonitorEvents,
     GetRttHistory,
     GetSchedules,
@@ -1502,6 +1504,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     )
     app.dependency_overrides[provide_check_log_volume] = lambda: CheckLogVolume(
         logging_rtt_repository()
+    )
+    # Logging-SLA (C-3): EIGENER SLA-Pfad neben GetSlaStats -- Task-Repo (fuer get +
+    # interval_s) UND RTT-Repo (all_for), gefuettert in die reine compute_sla_stats.
+    app.dependency_overrides[provide_get_logging_task_sla] = lambda: GetLoggingTaskSla(
+        logging_task_repository(), logging_rtt_repository()
     )
 
     app.add_api_websocket_route(

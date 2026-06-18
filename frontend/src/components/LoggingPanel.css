@@ -391,6 +391,34 @@
   transition: width 0.3s ease;
 }
 
+/* SLA-Kennzahlen (C-3, nur bei Erreichbarkeit + Latenz). Verfuegbarkeit prominent,
+   Ø-RTT + ca.-Downtime dezent daneben. */
+.logging-karte__sla {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+/* Verfuegbarkeit ist das Kernstueck -- groesser und kraeftig in Akzentfarbe. */
+.logging-karte__sla-uptime {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-accent-strong);
+}
+
+/* Ø-RTT + ca.-Downtime: dezent, sekundaer. */
+.logging-karte__sla-detail {
+  font-size: 12px;
+  color: var(--color-text-sec);
+}
+
+/* "noch keine Auswertung" (zu wenig/keine Daten): gedaempfter Hinweis. */
+.logging-karte__sla--leer {
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
 /* Zustands-Pill: aktiv gruen / pausiert lila / angelegt grau / beendet gedaempft. */
 .logging-pill {
   display: inline-flex;

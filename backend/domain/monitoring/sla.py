@@ -10,11 +10,15 @@ Eine Sample-Zeile ist ``(alive, rtt_ms, ts)`` -- genau die Spaltenreihenfolge de
 Altcode-Query ``SELECT alive, rtt_ms, ts FROM sla_samples``. ``alive`` ist im
 Altcode-Schema ein INTEGER (0/1), wird hier wie dort truthy ausgewertet.
 
-BEFUND (nicht hier fixen, fuer M.7): ``downtime_mins`` rechnet mit einer
-HARTCODIERTEN 5-Sekunden-Intervall-Annahme (``down_count * 5 / 60``). Das koppelt
-die Downtime-Schaetzung an das Monitor-Intervall, das im Altcode separat als
-``_interval`` lebt und nicht zwingend 5 ist. Charakterisierungstreu uebernommen;
-ob v2 das parametrisiert oder anders schaetzt, entscheidet M.7 -- NICHT M.2.
+BEFUND (parametrisiert in C-3): ``downtime_mins`` rechnet die Downtime-Minuten als
+``down_count * interval_s / 60``. Historisch war das Intervall HARTCODIERT 5 Sekunden
+(charakterisierungstreu aus dem Altcode, wo es separat als ``_interval`` lebte und
+nicht zwingend 5 war). Der Logging-SLA-Pfad (C-3) hat aber pro Task ein waehlbares
+``interval_s`` -- darum ist der Wert jetzt ein OPTIONALER Parameter ``interval_s: int
+= 5``: der Default 5 haelt die bestehenden Aufrufer (``GetSlaStats``/``GetAllSlaStats``
+ueber ``sla_samples``) VERHALTENSGLEICH, der Logging-SLA-Use-Case reicht das echte
+``task.interval_s`` durch. Die ``uptime_pct`` ist intervall-UNABHAENGIG (reines
+alive/total) -- nur die Downtime-Minuten-Schaetzung haengt am Intervall.
 
 WEITERER BEFUND (treu uebernommen): die avg_rtt-Filter UNTERSCHEIDEN sich zwischen
 Gesamt-Stat und Chart. In ``compute_sla_stats`` zaehlen nur RTTs lebendiger
@@ -31,14 +35,20 @@ from typing import Any
 type SlaSample = tuple[float, float, float]
 
 
-def compute_sla_stats(rows: list[SlaSample], days: int) -> dict[str, Any]:
+def compute_sla_stats(rows: list[SlaSample], days: int, interval_s: int = 5) -> dict[str, Any]:
     """Berechnet die SLA-Gesamtstatistik aus geladenen Sample-Zeilen.
 
     Reproduziert ``modules/sla.get_sla_stats`` ab dem DB-Read: leere ``rows`` ->
     Null-Stats mit ``uptime_pct=None`` (NICHT 0); sonst uptime% (3 Dez), downtime
-    in Minuten (5s-Annahme, 1 Dez), avg_rtt (2 Dez, default 0) und der Hourly-Chart.
+    in Minuten (1 Dez), avg_rtt (2 Dez, default 0) und der Hourly-Chart.
     ``target_id`` ist hier KEIN Parameter -- die Domaene kennt das DB-Schluesselfeld
     nicht; der M.7-Adapter setzt es in das Ergebnis-dict, wenn noetig.
+
+    ``interval_s`` (Default 5) steuert NUR die Downtime-Minuten-Schaetzung
+    (``down_count * interval_s / 60``): der Default haelt die bestehenden
+    ``sla_samples``-Aufrufer verhaltensgleich, der Logging-SLA-Pfad (C-3) reicht das
+    Task-Intervall durch. Die ``uptime_pct`` bleibt davon UNBERUEHRT (reines
+    alive/total).
     """
     if not rows:
         return {
@@ -56,9 +66,9 @@ def compute_sla_stats(rows: list[SlaSample], days: int) -> dict[str, Any]:
     avg_rtt = round(sum(rtts) / len(rtts), 2) if rtts else 0
     uptime_pct = round(alive_count / total * 100, 3)
 
-    # Downtime-Schaetzung in Minuten -- 5-Sekunden-Intervall-Annahme (BEFUND oben).
+    # Downtime-Schaetzung in Minuten -- parametrisiertes Intervall (BEFUND oben).
     down_count = total - alive_count
-    downtime_mins = round(down_count * 5 / 60, 1)
+    downtime_mins = round(down_count * interval_s / 60, 1)
 
     chart = build_hourly_chart(rows, days)
 

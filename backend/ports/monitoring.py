@@ -521,6 +521,20 @@ class LoggingRttRepository(Protocol):
         """
         ...
 
+    def all_for(self, task_id: str) -> list[LoggingRttSample]:
+        """ALLE Messpunkte eines Tasks, chronologisch aufsteigend (``ORDER BY ts``).
+
+        Speist den Logging-SLA-Use-Case (C-3): die SLA-Kennzahlen rechnen ueber den
+        GESAMTEN vorhandenen Task-Zeitraum, nicht ueber ein ``days``-Fenster. Anders
+        als ``range`` (halb-offenes Zeitfenster) gibt es hier BEWUSST keine ts-Grenzen
+        -- kein ``since``/``until``-Hack mit Magic-Grenzwerten: ein Logging-Task hat ein
+        klar begrenztes eigenes Fenster, und die zeit-basierte Retention
+        (``delete_older_than``, 1 Monat) begrenzt "alle" ohnehin nach oben. Reihenfolge
+        AUFSTEIGEND, damit die Hourly-Buckets der Domaene stimmen (Muster ``range``).
+        Keine Daten / unbekannter Task -> ``[]``, niemals ``None``.
+        """
+        ...
+
     def delete_older_than(self, cutoff_ts: float) -> int:
         """Loescht alle Messpunkte ALTER als ``cutoff_ts`` und gibt die Zeilenzahl zurueck.
 

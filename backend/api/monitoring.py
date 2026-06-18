@@ -61,6 +61,7 @@ from application.monitoring import (
     DeleteMonitorTarget,
     GetAllSlaStats,
     GetLoggingTaskDetail,
+    GetLoggingTaskSla,
     GetMonitorEvents,
     GetRttHistory,
     GetSchedules,
@@ -238,6 +239,10 @@ def provide_delete_logging_task() -> DeleteLoggingTask:
 
 def provide_check_log_volume() -> CheckLogVolume:
     raise NotImplementedError("CheckLogVolume wird in app.py verdrahtet")
+
+
+def provide_get_logging_task_sla() -> GetLoggingTaskSla:
+    raise NotImplementedError("GetLoggingTaskSla wird in app.py verdrahtet")
 
 
 # ── Serialisierungs-Helfer (Domaenen-Objekt -> Wire-dict am api-Rand) ─────────
@@ -539,6 +544,23 @@ def get_logging_task(
     except LoggingTaskNotFound as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return _logging_task_to_dict(task)
+
+
+@router.get("/monitor/logging/{task_id}/sla")
+def logging_task_sla(
+    task_id: str,
+    get_sla: Annotated[GetLoggingTaskSla, Depends(provide_get_logging_task_sla)],
+) -> dict[str, Any]:
+    """SLA-Kennzahlen EINER Logging-Aufgabe (uptime/avg-RTT/ca.-Downtime). 404 bei unbekannter id.
+
+    Reicht das stats-dict durch (``uptime_pct`` kann ``None`` sein -> as-is; das
+    Frontend zeigt dann "noch keine Auswertung"). EIGENER Logging-SLA-Pfad neben
+    ``/api/sla/{id}`` -- der bleibt unberuehrt.
+    """
+    try:
+        return get_sla(task_id)
+    except LoggingTaskNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @router.post("/monitor/logging/{task_id}/start")

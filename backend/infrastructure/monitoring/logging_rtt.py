@@ -92,6 +92,25 @@ class SqliteLoggingRttRepository:
             for row in rows
         ]
 
+    def all_for(self, task_id: str) -> list[LoggingRttSample]:
+        # ALLE Messpunkte eines Tasks (kein Zeitfenster), aufsteigend -- Muster wie
+        # range, nur ohne die ts-Grenzen (s. Port-Docstring: Retention begrenzt "alle").
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT rtt_ms, loss_pct, alive, ts FROM monitoring_log_rtt "
+                "WHERE task_id = ? ORDER BY ts",
+                (task_id,),
+            ).fetchall()
+        return [
+            LoggingRttSample(
+                rtt_ms=row["rtt_ms"],
+                loss_pct=row["loss_pct"],
+                alive=bool(row["alive"]),
+                ts=row["ts"],
+            )
+            for row in rows
+        ]
+
     def delete_older_than(self, cutoff_ts: float) -> int:
         # Strikt aelter (ts < cutoff_ts) -- ein Punkt GENAU auf dem Cutoff bleibt
         # (symmetrisch zur since-Inklusivitaet von range). Rueckgabe = geloeschte Zeilen.

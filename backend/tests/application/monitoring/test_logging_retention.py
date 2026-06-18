@@ -25,6 +25,9 @@ class _FakeRttRepo:
     def range(self, task_id: str, since: float, until: float) -> list:  # type: ignore[type-arg]
         raise AssertionError("range darf im Retention-Use-Case nicht gerufen werden")
 
+    def all_for(self, task_id: str) -> list:  # type: ignore[type-arg]
+        raise AssertionError("all_for darf im Retention-Use-Case nicht gerufen werden")
+
     def delete_older_than(self, cutoff_ts: float) -> int:
         self.cutoff_calls.append(cutoff_ts)
         return self._deleted

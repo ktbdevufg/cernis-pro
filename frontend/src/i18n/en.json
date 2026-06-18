@@ -396,6 +396,12 @@
         "eine": "{{erste}} left",
         "jetzt": "ending now"
       },
+      "sla": {
+        "verfuegbarkeit": "Availability {{wert}}%",
+        "avgRtt": "avg {{wert}} ms",
+        "downtime": "approx. {{wert}} min offline",
+        "keineAuswertung": "no analysis yet"
+      },
       "ladeFehler": "Logging tasks could not be loaded."
     },
     "lookup": {

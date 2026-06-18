@@ -69,6 +69,7 @@ from domain.monitoring import (
     OperationMode,
     PingSample,
     ScheduleParseError,
+    SlaSample,
     TaskState,
     classify_transition,
     compute_sla_stats,
@@ -433,6 +434,62 @@ class GetAllSlaStats:
 
     def __call__(self, days: int = 30) -> list[dict[str, Any]]:
         return [self._get_one(target_id, days) for target_id in self._repository.target_ids()]
+
+
+# ── Logging-SLA-Lese-Use-Case (C-3) ─────────────────────────────────────────
+# EIGENER SLA-Pfad NEBEN GetSlaStats/GetAllSlaStats -- nicht der bestehende: er liest
+# die dichten Logging-RTT-Messpunkte (``LoggingRttRepository``) statt der brachliegenden
+# ``sla_samples`` und fuettert dieselbe reine Domaenen-Rechnung (``compute_sla_stats``,
+# M.2). Wiederverwendung der Rechenlogik, KEINE neue SLA-Mathematik.
+
+
+class GetLoggingTaskSla:
+    """SLA-Kennzahlen EINER Logging-Aufgabe ueber ihren GESAMTEN Mess-Zeitraum (Pass-Through).
+
+    Muster ``GetSlaStats``: laedt die Sample-Zeilen und reicht sie in die reine
+    ``compute_sla_stats`` (M.2) -- aber aus dem Logging-RTT-Repo statt aus ``sla_samples``.
+    Ablauf: ``task_repo.get`` (``None`` -> ``LoggingTaskNotFound``, der bestehende
+    Fehler) -> ``rtt_repo.all_for(task_id)`` -> die ``LoggingRttSample``-Objekte am
+    Use-Case-Rand in die von der Domaene erwartete Tupel-Reihenfolge ``(alive, rtt_ms,
+    ts)`` umformen (``LoggingRttSample`` traegt ``rtt_ms``/``loss_pct``/``alive``/``ts``
+    -- die Domaene bleibt unangetastet) -> ``compute_sla_stats`` mit
+    ``interval_s=task.interval_s`` (die korrekte Downtime-Schaetzung pro Task, C-3).
+    Das Ergebnis traegt ``task_id`` (Muster ``GetSlaStats``: die Domaene setzt das
+    Schluesselfeld bewusst nicht). Leere Samples -> Null-Stats (``uptime_pct=None``).
+
+    DAYS-SEMANTIK (bewusst anders als ``GetSlaStats``): KEIN ``since``-Filter --
+    ``all_for`` gibt ALLE Messpunkte des Tasks, und die Retention (1 Monat) begrenzt
+    "alle" ohnehin. ``days`` wird nur fuer die Chart-Signatur/Stat-Konsistenz an
+    ``compute_sla_stats`` durchgereicht (das ``days``-Feld im Ergebnis), NICHT als
+    Zeitfenster: ein Logging-Task hat ein klar begrenztes EIGENES Fenster, darum wird
+    ueber den gesamten vorhandenen Task-Zeitraum gerechnet, nicht ueber ein
+    ``days``-Fenster.
+    """
+
+    def __init__(
+        self,
+        task_repo: LoggingTaskRepository,
+        rtt_repo: LoggingRttRepository,
+    ) -> None:
+        self._task_repo = task_repo
+        self._rtt_repo = rtt_repo
+
+    def __call__(self, task_id: str, days: int = 30) -> dict[str, Any]:
+        task = self._task_repo.get(task_id)
+        if task is None:
+            raise LoggingTaskNotFound(task_id)
+        samples = self._rtt_repo.all_for(task_id)
+        # LoggingRttSample (rtt_ms/loss_pct/alive/ts) -> SlaSample-Tupel (alive, rtt_ms,
+        # ts) in DIESER Reihenfolge -- das Eingabeformat von compute_sla_stats. ``alive``
+        # zu ``float`` gehoben (1.0/0.0): SlaSample ist ``tuple[float, float, float]`` und
+        # die Domaene wertet es ohnehin nur truthy aus (1.0/0.0 verhalten sich identisch
+        # zu True/False). Umformung am Use-Case-Rand, die Domaene bleibt unangetastet.
+        rows: list[SlaSample] = [
+            (float(sample.alive), sample.rtt_ms, sample.ts) for sample in samples
+        ]
+        stats = compute_sla_stats(rows, days, interval_s=task.interval_s)
+        # task_id ergaenzen (Domaene setzt es bewusst nicht) -- target_id-Muster GetSlaStats.
+        return {"task_id": task_id, **stats}
 
 
 # ── Targets-Schreibpfad (M.9-Nachzuegler) ───────────────────────────────────

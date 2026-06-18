@@ -61,6 +61,9 @@ class _RecordingRtt:
     def range(self, task_id: str, since: float, until: float) -> list[LoggingRttSample]:
         raise AssertionError("range darf vom Sink nicht gerufen werden")
 
+    def all_for(self, task_id: str) -> list[LoggingRttSample]:
+        raise AssertionError("all_for darf vom Sink nicht gerufen werden")
+
     def delete_older_than(self, cutoff_ts: float) -> int:
         raise AssertionError("delete_older_than darf vom Sink nicht gerufen werden")
 

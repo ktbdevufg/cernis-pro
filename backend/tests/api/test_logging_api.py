@@ -24,6 +24,7 @@ from api.monitoring import (
     provide_create_logging_task,
     provide_delete_logging_task,
     provide_get_logging_task_detail,
+    provide_get_logging_task_sla,
     provide_list_logging_tasks,
     provide_pause_logging_task,
     provide_resume_logging_task,
@@ -36,6 +37,7 @@ from application.monitoring import (
     CreateLoggingTask,
     DeleteLoggingTask,
     GetLoggingTaskDetail,
+    GetLoggingTaskSla,
     ListLoggingTasks,
     PauseLoggingTask,
     ResumeLoggingTask,
@@ -68,6 +70,7 @@ def _wired_app(db_path: Path) -> FastAPI:
     app.dependency_overrides[provide_stop_logging_task] = lambda: StopLoggingTask(tasks)
     app.dependency_overrides[provide_delete_logging_task] = lambda: DeleteLoggingTask(tasks)
     app.dependency_overrides[provide_check_log_volume] = lambda: CheckLogVolume(rtt)
+    app.dependency_overrides[provide_get_logging_task_sla] = lambda: GetLoggingTaskSla(tasks, rtt)
     return app
 
 
@@ -360,3 +363,43 @@ def test_volume_counts_saved_rtt_points(db_path: Path) -> None:
     with TestClient(_wired_app(db_path)) as client:
         resp = client.get("/api/monitor/logging/volume")
     assert resp.json() == {"count": 2, "over_threshold": False}
+
+
+# ── GET /api/monitor/logging/{id}/sla (C-3) ─────────────────────────────────
+
+
+def test_sla_returns_stats_for_known_task(db_path: Path) -> None:
+    # Task anlegen (id vom Router), dann RTT-Messpunkte direkt ueber das Repo ablegen
+    # -- der SLA-Endpunkt rechnet ueber all_for(task_id) die Kennzahlen.
+    with TestClient(_wired_app(db_path)) as client:
+        tid = client.post("/api/monitor/logging", json=_create_body()).json()["id"]
+    rtt = SqliteLoggingRttRepository(db_path)
+    rtt.save(tid, 4.0, 0.0, True, 1_700_000_000.0)
+    rtt.save(tid, 6.0, 0.0, True, 1_700_000_005.0)
+    rtt.save(tid, -1.0, 100.0, False, 1_700_000_010.0)  # ein down
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.get(f"/api/monitor/logging/{tid}/sla")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["task_id"] == tid
+    assert body["samples"] == 3
+    assert body["uptime_pct"] == round(2 / 3 * 100, 3)  # 2/3 alive
+    assert body["avg_rtt_ms"] == 5.0  # mean([4,6])
+
+
+def test_sla_empty_yields_null_uptime(db_path: Path) -> None:
+    # Task ohne Messpunkte -> Null-Stats (uptime_pct=None -> "noch keine Auswertung").
+    with TestClient(_wired_app(db_path)) as client:
+        tid = client.post("/api/monitor/logging", json=_create_body()).json()["id"]
+        resp = client.get(f"/api/monitor/logging/{tid}/sla")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["task_id"] == tid
+    assert body["uptime_pct"] is None
+    assert body["samples"] == 0
+
+
+def test_sla_unknown_task_returns_404(db_path: Path) -> None:
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.get("/api/monitor/logging/never-existed/sla")
+    assert resp.status_code == 404

@@ -207,6 +207,13 @@ class _FakeLoggingRttRepo:
             if tid == task_id and since <= ts < until
         ]
 
+    def all_for(self, task_id: str) -> list[LoggingRttSample]:
+        return [
+            LoggingRttSample(rtt_ms=r, loss_pct=lp, alive=a, ts=ts)
+            for (tid, r, lp, a, ts) in sorted(self.rows, key=lambda row: row[4])
+            if tid == task_id
+        ]
+
     def delete_older_than(self, cutoff_ts: float) -> int:
         before = len(self.rows)
         self.rows = [row for row in self.rows if row[4] >= cutoff_ts]

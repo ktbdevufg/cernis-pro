@@ -92,3 +92,23 @@ def test_delete_older_than_nothing_returns_zero(repo: SqliteLoggingRttRepository
 
 def test_count_empty_is_zero(repo: SqliteLoggingRttRepository) -> None:
     assert repo.count() == 0
+
+
+def test_all_for_returns_all_samples_ascending(repo: SqliteLoggingRttRepository) -> None:
+    # C-3: all_for gibt ALLE Messpunkte eines Tasks chronologisch (kein Zeitfenster).
+    for ts in (300.0, 100.0, 200.0):
+        repo.save("t1", rtt_ms=1.0, loss_pct=0.0, alive=True, ts=ts)
+    rows = repo.all_for("t1")
+    assert [s.ts for s in rows] == [100.0, 200.0, 300.0]
+
+
+def test_all_for_filters_by_task(repo: SqliteLoggingRttRepository) -> None:
+    repo.save("t1", rtt_ms=1.0, loss_pct=0.0, alive=True, ts=10.0)
+    repo.save("t2", rtt_ms=2.0, loss_pct=0.0, alive=True, ts=20.0)
+    rows = repo.all_for("t1")
+    assert len(rows) == 1
+    assert rows[0].rtt_ms == 1.0
+
+
+def test_all_for_unknown_task_empty(repo: SqliteLoggingRttRepository) -> None:
+    assert repo.all_for("nope") == []  # [], nicht None

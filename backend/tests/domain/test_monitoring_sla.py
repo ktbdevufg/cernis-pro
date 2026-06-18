@@ -35,6 +35,19 @@ def test_compute_sla_stats_full_calculation() -> None:
     assert len(stats["chart"]) == 1  # alle vier Samples in einer Stunde
 
 
+def test_compute_sla_stats_interval_scales_downtime_only() -> None:
+    # C-3: interval_s skaliert NUR die Downtime-Minuten-Schaetzung (down_count *
+    # interval_s / 60). Bei gleichen down-Samples ist downtime bei interval_s=60
+    # exakt 12x groesser als bei 5 (60/5). uptime_pct bleibt unveraendert
+    # (intervall-unabhaengig, reines alive/total).
+    stats_5 = compute_sla_stats(_ROWS, 30)  # Default 5 -> bestehendes Verhalten
+    stats_60 = compute_sla_stats(_ROWS, 30, interval_s=60)
+    assert stats_5["downtime_mins"] == 0.1  # 1 * 5 / 60 -> 0.0833 -> 0.1
+    assert stats_60["downtime_mins"] == 1.0  # 1 * 60 / 60 -> 1.0 (12x bei gleichen downs)
+    assert stats_60["uptime_pct"] == stats_5["uptime_pct"]  # intervall-unabhaengig
+    assert stats_60["avg_rtt_ms"] == stats_5["avg_rtt_ms"]  # ebenfalls unberuehrt
+
+
 def test_compute_sla_stats_empty_returns_null_stats() -> None:
     # AS-IS: leere rows -> uptime_pct None (NICHT 0), die uebrigen genullt.
     stats = compute_sla_stats([], 30)

@@ -301,6 +301,21 @@ export async function fetchLoggingVolume() {
   };
 }
 
+// GET /api/monitor/logging/{id}/sla -> SLA-Kennzahlen einer Logging-Aufgabe (C-3).
+// Gemappt: { uptimePct, downtimeMins, avgRttMs, samples }. uptimePct === null heisst
+// "noch keine Auswertung" (zu wenig/keine Daten) -- das bleibt EHRLICH null (kein
+// erfundener Default), die Karte zeigt dann den dezenten Hinweis. 404 (unbekannte id)
+// -> ApiError (die Karte laesst die SLA-Zeile dann still weg).
+export async function fetchLoggingSla(taskId) {
+  const backend = await apiGet(`/api/monitor/logging/${taskId}/sla`);
+  return {
+    uptimePct: backend?.uptime_pct ?? null,
+    downtimeMins: backend?.downtime_mins ?? null,
+    avgRttMs: backend?.avg_rtt_ms ?? null,
+    samples: backend?.samples ?? 0,
+  };
+}
+
 export default {
   fetchMonitorStatus,
   fetchMonitorEvents,
@@ -316,4 +331,5 @@ export default {
   stopLoggingTask,
   deleteLoggingTask,
   fetchLoggingVolume,
+  fetchLoggingSla,
 };
