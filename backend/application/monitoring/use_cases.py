@@ -59,21 +59,40 @@ from typing import Any, cast
 
 import structlog
 
+from application.monitoring.errors import LoggingTaskConflict, LoggingTaskNotFound
 from domain.monitoring import (
     CUSTOM_TARGETS_KEY,
+    CaptureMode,
+    LoggingTask,
     MonitorEvent,
     MonitorTarget,
+    OperationMode,
     PingSample,
     ScheduleParseError,
+    TaskState,
     classify_transition,
     compute_sla_stats,
+    conflicts_with,
     should_notify,
+)
+from domain.monitoring import (
+    pause as domain_pause,
+)
+from domain.monitoring import (
+    resume as domain_resume,
+)
+from domain.monitoring import (
+    start as domain_start,
+)
+from domain.monitoring import (
+    stop as domain_stop,
 )
 from domain.settings import Setting, SettingValue
 from ports.monitoring import (
     AlertRaiserPort,
     LoggingEventRepository,
     LoggingRttRepository,
+    LoggingTaskRepository,
     MonitorBroadcasterPort,
     MonitorEventRepository,
     MonitorNotifierPort,
@@ -549,3 +568,271 @@ class EnforceLoggingRetention:
         rtt_deleted = self._rtt_repository.delete_older_than(rtt_cutoff_ts)
         event_deleted = self._event_repository.delete_older_than(event_cutoff_ts)
         return LoggingRetentionResult(rtt_deleted=rtt_deleted, event_deleted=event_deleted)
+
+
+# ── Logging-Aufgaben-Lifecycle (B-I Schritt 3) ──────────────────────────────
+# Macht den Logging-Kern von aussen STEUERBAR: Anlegen + Lebenszyklus-Uebergaenge
+# der Task-DEFINITIONEN ueber dem ``LoggingTaskRepository``. GETRENNT vom fluechtigen
+# Live-Monitor (``RunMonitor``) -- diese Use-Cases ruehren weder Loop noch
+# ``rtt_history``/``monitor_events`` an. KEINE Uhr in den Use-Cases: wo ``now`` oder
+# eine ``id`` gebraucht wird, kommt sie als METHODEN-Parameter herein (der api-Rand
+# liefert ``time.time()`` / ``uuid4``) -- so bleiben die Use-Cases deterministisch
+# testbar (Muster: die Domaene ist zeitfrei, der Rand liefert die Zeit).
+#
+# KONFLIKT-Regel (Konzept): pro Ziel darf nur EINE Aufgabe gleichzeitig ``ACTIVE``
+# sein. Sie greift erst beim STARTEN/FORTSETZEN (nicht beim Anlegen) -- pro Ziel sind
+# beliebig viele Tasks anlegbar, der Konflikt entsteht erst, wenn ein zweiter aktiv
+# werden will. Geprueft via Domaenen-``conflicts_with`` gegen ``list_all``.
+
+
+def _find_active_conflict(candidate: LoggingTask, others: list[LoggingTask]) -> str | None:
+    """``id`` der bereits ``ACTIVE``-Aufgabe am selben Ziel -- oder ``None``.
+
+    Spiegelt die Domaenen-``conflicts_with`` (gleiches Praedikat: anderes ``id``,
+    gleiches ``target_id``, Zustand ``ACTIVE``), liefert aber die ID des Konkurrenten
+    statt nur ``bool`` -- die braucht der ``LoggingTaskConflict`` fuer die
+    Konzept-Meldung. ``conflicts_with`` bleibt die Wahrheit ueber das OB (hier nur das
+    WER), darum wird es vom Aufrufer zusaetzlich als Guard genutzt.
+    """
+    for other in others:
+        if (
+            other.id != candidate.id
+            and other.target_id == candidate.target_id
+            and other.state is TaskState.ACTIVE
+        ):
+            return other.id
+    return None
+
+
+class CreateLoggingTask:
+    """Legt eine neue Logging-Aufgabe im Zustand ``CREATED`` an (reine Anlage).
+
+    KEIN Start, KEINE Konfliktpruefung: Anlegen ist beliebig erlaubt (Konzept: pro
+    Ziel beliebig viele Tasks, Konflikt erst beim Starten). ``id`` und ``created_at``
+    kommen als Methoden-Parameter herein (der api-Rand liefert ``uuid4`` /
+    ``time.time()``) -- der Use-Case haelt keine Uhr. Die Modus-Felder
+    (``planned_start``/``planned_end`` bzw. ``max_duration_s``) reicht der Use-Case
+    durch; ihre Modus-Konsistenz prueft der Router (Schritt 3b, 422), nicht hier.
+
+    ``capture_mode``/``operation_mode`` kommen als ROHER ``str`` herein und werden HIER
+    in die Domaenen-``StrEnum`` gehoben -- so kennt der api-Rand die Domaenen-Enums
+    NICHT (import-linter: api -> nur application). Ein nicht zum Vokabular passender
+    String wirft ``ValueError`` (StrEnum-Konstruktor) -- am Router faengt das schon die
+    Body-Validierung (422) vorher ab; der Cast hier ist die zweite, autoritative Linie.
+    """
+
+    def __init__(self, repository: LoggingTaskRepository) -> None:
+        self._repository = repository
+
+    def __call__(
+        self,
+        *,
+        task_id: str,
+        target_id: str,
+        label: str,
+        purpose: str,
+        capture_mode: str,
+        operation_mode: str,
+        created_at: float,
+        planned_start: float | None = None,
+        planned_end: float | None = None,
+        max_duration_s: int | None = None,
+    ) -> LoggingTask:
+        task = LoggingTask(
+            id=task_id,
+            target_id=target_id,
+            label=label,
+            purpose=purpose,
+            capture_mode=CaptureMode(capture_mode),
+            operation_mode=OperationMode(operation_mode),
+            state=TaskState.CREATED,
+            planned_start=planned_start,
+            planned_end=planned_end,
+            max_duration_s=max_duration_s,
+            created_at=created_at,
+        )
+        self._repository.save(task)
+        return task
+
+
+class StartLoggingTask:
+    """Uebergang ``CREATED`` -> ``ACTIVE`` mit Ziel-Konfliktpruefung.
+
+    Laedt den Task (``get``; ``None`` -> ``LoggingTaskNotFound``), prueft via
+    Domaenen-``conflicts_with`` gegen ``list_all``, ob am selben Ziel bereits eine
+    ``ACTIVE``-Aufgabe laeuft -> ``LoggingTaskConflict`` (mit der ID des laufenden
+    Konkurrenten). Sonst Domaenen-``start`` (``InvalidTaskTransition`` aus falschem
+    Ausgangszustand propagiert) -> ``save``. ``now`` ist Methoden-Parameter (api-Rand),
+    auch wenn der Zustandsuebergang ihn nicht braucht -- der effektive Start fuer das
+    ``IMMEDIATE``-Fenster fuehrt erst B-II ein (kein Schema-Umbau hier).
+    """
+
+    def __init__(self, repository: LoggingTaskRepository) -> None:
+        self._repository = repository
+
+    def __call__(self, task_id: str, now: float) -> LoggingTask:
+        task = self._repository.get(task_id)
+        if task is None:
+            raise LoggingTaskNotFound(task_id)
+        others = self._repository.list_all()
+        if conflicts_with(task, others):
+            running_id = _find_active_conflict(task, others)
+            # running_id ist hier nie None (conflicts_with == True heisst: es gibt
+            # einen Konkurrenten) -- der Fallback auf task_id ist nur ein defensiver
+            # Platzhalter fuer mypy (str statt str | None).
+            raise LoggingTaskConflict(running_id or task_id, task.target_id)
+        started = domain_start(task)
+        self._repository.save(started)
+        return started
+
+
+class PauseLoggingTask:
+    """Uebergang ``ACTIVE`` -> ``PAUSED`` (Domaenen-``pause`` -> ``save``).
+
+    ``get`` (``None`` -> ``LoggingTaskNotFound``), dann Domaenen-``pause``; ein
+    ``InvalidTaskTransition`` aus falschem Ausgangszustand propagiert (der api-Rand
+    mappt ihn auf 409). KEINE Konfliktpruefung -- Pausieren entschaerft den Konflikt,
+    es erzeugt keinen.
+    """
+
+    def __init__(self, repository: LoggingTaskRepository) -> None:
+        self._repository = repository
+
+    def __call__(self, task_id: str) -> LoggingTask:
+        task = self._repository.get(task_id)
+        if task is None:
+            raise LoggingTaskNotFound(task_id)
+        paused = domain_pause(task)
+        self._repository.save(paused)
+        return paused
+
+
+class ResumeLoggingTask:
+    """Uebergang ``PAUSED`` -> ``ACTIVE`` mit Ziel-Konfliktpruefung.
+
+    Fortsetzen aus Pause ist im Sinne der Konzept-Regel ein Start (pro Ziel nur einer
+    aktiv) -- darum prueft dieser Use-Case VOR dem ``resume`` ebenfalls
+    ``conflicts_with`` gegen ``list_all`` (-> ``LoggingTaskConflict``). ``get``
+    (``None`` -> ``LoggingTaskNotFound``); ``InvalidTaskTransition`` aus falschem
+    Ausgangszustand propagiert (409 am Rand).
+    """
+
+    def __init__(self, repository: LoggingTaskRepository) -> None:
+        self._repository = repository
+
+    def __call__(self, task_id: str) -> LoggingTask:
+        task = self._repository.get(task_id)
+        if task is None:
+            raise LoggingTaskNotFound(task_id)
+        others = self._repository.list_all()
+        if conflicts_with(task, others):
+            running_id = _find_active_conflict(task, others)
+            raise LoggingTaskConflict(running_id or task_id, task.target_id)
+        resumed = domain_resume(task)
+        self._repository.save(resumed)
+        return resumed
+
+
+class StopLoggingTask:
+    """Uebergang ``{ACTIVE, PAUSED}`` -> ``FINISHED`` (Domaenen-``stop`` -> ``save``).
+
+    ``get`` (``None`` -> ``LoggingTaskNotFound``), dann Domaenen-``stop``; ein
+    ``InvalidTaskTransition`` aus falschem Ausgangszustand propagiert (409 am Rand).
+    """
+
+    def __init__(self, repository: LoggingTaskRepository) -> None:
+        self._repository = repository
+
+    def __call__(self, task_id: str) -> LoggingTask:
+        task = self._repository.get(task_id)
+        if task is None:
+            raise LoggingTaskNotFound(task_id)
+        finished = domain_stop(task)
+        self._repository.save(finished)
+        return finished
+
+
+class DeleteLoggingTask:
+    """Loescht eine Logging-Aufgaben-DEFINITION (Pass-Through, idempotent).
+
+    Reicht ``LoggingTaskRepository.delete`` durch -- idempotent (unbekannte ``id`` ist
+    kein Fehler, Muster ``ScheduleRepository.delete``). Die zugehoerigen Messdaten
+    (RTT/Events) liegen in eigenen Repos und werden hier NICHT mitgeloescht (das raeumt
+    die Retention, eigener Belang).
+    """
+
+    def __init__(self, repository: LoggingTaskRepository) -> None:
+        self._repository = repository
+
+    def __call__(self, task_id: str) -> None:
+        self._repository.delete(task_id)
+
+
+class ListLoggingTasks:
+    """Alle Logging-Aufgaben-Definitionen (Pass-Through, nur Repo).
+
+    Reicht ``LoggingTaskRepository.list_all`` roh durch (Muster ``GetSchedules``).
+    Leere Tabelle -> ``[]``. Die Wire-Form baut der api-Rand.
+    """
+
+    def __init__(self, repository: LoggingTaskRepository) -> None:
+        self._repository = repository
+
+    def __call__(self) -> list[LoggingTask]:
+        return self._repository.list_all()
+
+
+class GetLoggingTaskDetail:
+    """EINE Logging-Aufgaben-Definition anhand ihrer ``id`` (Pass-Through, nur Repo).
+
+    ``get`` (``None`` -> ``LoggingTaskNotFound``) -> roh zurueck. Die Wire-Form baut
+    der api-Rand (404-Mapping ebenfalls am Rand).
+    """
+
+    def __init__(self, repository: LoggingTaskRepository) -> None:
+        self._repository = repository
+
+    def __call__(self, task_id: str) -> LoggingTask:
+        task = self._repository.get(task_id)
+        if task is None:
+            raise LoggingTaskNotFound(task_id)
+        return task
+
+
+# Schwellwert fuer den Mengen-Befund von ``CheckLogVolume`` -- ab dieser Zahl
+# gespeicherter RTT-Messpunkte gilt das Volumen als "ueber Schwelle". Benannte
+# Policy-Konstante (kein Magic Number am Vergleich); bewusst grosszuegig (dichte
+# Logging-Messpunkte fallen schnell an, der Befund soll erst bei echter Menge feuern).
+# NUR ein Befund -- die angebotene Folge-Aktion (Aufraeumen) ist ein §9-Folgeschnitt.
+_LOG_VOLUME_THRESHOLD = 100_000
+
+
+@dataclass(frozen=True)
+class LogVolumeResult:
+    """Mengen-Befund der Logging-RTT-Messdaten: Gesamtzahl + Ueber-Schwelle-Flag.
+
+    Klein und benannt (kein nacktes Tuple): ``count`` ist die Gesamtzahl gespeicherter
+    RTT-Messpunkte, ``over_threshold`` der Vergleich gegen ``_LOG_VOLUME_THRESHOLD``.
+    Der Aufrufer (api-Rand / spaeterer §9-Schnitt) liest beide sprechend.
+    """
+
+    count: int
+    over_threshold: bool
+
+
+class CheckLogVolume:
+    """Mengen-Befund der Logging-RTT-Messdaten (NUR Abfrage, keine Aktion).
+
+    Liest ``LoggingRttRepository.count()`` und vergleicht gegen die benannte
+    ``_LOG_VOLUME_THRESHOLD``. KEINE Aktion, KEIN Loeschen -- die angebotene
+    Aufraeum-Aktion ist ein §9-Folgeschnitt. Bewusst rtt-only (s. Datei-/Abschluss-
+    Begruendung): die dichten RTT-Messpunkte sind die dominante Menge; sie ueber EINE
+    ``count()``-Abfrage zu beurteilen haelt den Befund schmal und eindeutig.
+    """
+
+    def __init__(self, rtt_repository: LoggingRttRepository) -> None:
+        self._rtt_repository = rtt_repository
+
+    def __call__(self) -> LogVolumeResult:
+        count = self._rtt_repository.count()
+        return LogVolumeResult(count=count, over_threshold=count > _LOG_VOLUME_THRESHOLD)

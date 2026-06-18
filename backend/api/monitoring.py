@@ -44,22 +44,36 @@ Root, darum als Callable hereingereicht (derselbe ``status_provider`` wie der WS
 Connect-Frame).
 """
 
+import time
+import uuid
 from collections.abc import Callable
 from datetime import datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 
 from application.monitoring import (
     AddMonitorTarget,
+    CheckLogVolume,
+    CreateLoggingTask,
+    DeleteLoggingTask,
     DeleteMonitorTarget,
     GetAllSlaStats,
+    GetLoggingTaskDetail,
     GetMonitorEvents,
     GetRttHistory,
     GetSchedules,
     GetSlaStats,
+    InvalidTaskTransition,
+    ListLoggingTasks,
+    LoggingTaskConflict,
+    LoggingTaskNotFound,
     ManageSchedules,
+    PauseLoggingTask,
+    ResumeLoggingTask,
+    StartLoggingTask,
+    StopLoggingTask,
     UpdateSchedule,
 )
 
@@ -83,6 +97,38 @@ class PatchScheduleBody(BaseModel):
 
     enabled: bool | None = None
     name: str | None = None
+
+
+# Erlaubte Modus-Strings am Router-Rand. Sie SPIEGELN bewusst das Domaenen-Vokabular
+# (``CaptureMode``/``OperationMode``-StrEnum-Values) -- der api-Ring darf ``domain``
+# NICHT importieren (import-linter), darum stehen die Werte hier als Literal-Mengen.
+# Die autoritative Hebung str -> Enum macht ``CreateLoggingTask`` (application); diese
+# Mengen sind nur die Frueh-Validierung am Rand (422 statt 500). Weicht das Vokabular
+# je ab, faengt es spaetestens der Enum-Konstruktor im Use-Case (kein stiller Drift).
+_CAPTURE_MODES = frozenset({"interface_status", "reachability", "reachability_latency"})
+_OPERATION_MODES = frozenset({"scheduled", "immediate"})
+
+
+class CreateLoggingTaskBody(BaseModel):
+    """POST /api/monitor/logging -- Anlage einer Logging-Aufgabe.
+
+    ``target_id``/``label``/``purpose``/``capture_mode``/``operation_mode`` sind
+    Pflicht (kein sinnvoller Default). Die Zeitfenster-Felder sind optional und
+    modus-abhaengig: ``SCHEDULED`` braucht ``planned_start`` + ``planned_end``,
+    ``IMMEDIATE`` braucht ``max_duration_s`` -- die Konsistenz prueft der Endpunkt
+    (422 bei Verstoss), nicht das Modell (Pydantic kann die Kreuz-Bedingung nicht
+    ausdruecken, ohne sie zu verstecken). ``id``/``created_at`` setzt der Router
+    (uuid4/time.time()), nicht der Client.
+    """
+
+    target_id: str
+    label: str
+    purpose: str
+    capture_mode: str
+    operation_mode: str
+    planned_start: float | None = None
+    planned_end: float | None = None
+    max_duration_s: int | None = None
 
 
 class AddTargetBody(BaseModel):
@@ -148,6 +194,42 @@ def provide_delete_monitor_target() -> DeleteMonitorTarget:
     raise NotImplementedError("DeleteMonitorTarget wird in app.py verdrahtet")
 
 
+def provide_create_logging_task() -> CreateLoggingTask:
+    raise NotImplementedError("CreateLoggingTask wird in app.py verdrahtet")
+
+
+def provide_list_logging_tasks() -> ListLoggingTasks:
+    raise NotImplementedError("ListLoggingTasks wird in app.py verdrahtet")
+
+
+def provide_get_logging_task_detail() -> GetLoggingTaskDetail:
+    raise NotImplementedError("GetLoggingTaskDetail wird in app.py verdrahtet")
+
+
+def provide_start_logging_task() -> StartLoggingTask:
+    raise NotImplementedError("StartLoggingTask wird in app.py verdrahtet")
+
+
+def provide_pause_logging_task() -> PauseLoggingTask:
+    raise NotImplementedError("PauseLoggingTask wird in app.py verdrahtet")
+
+
+def provide_resume_logging_task() -> ResumeLoggingTask:
+    raise NotImplementedError("ResumeLoggingTask wird in app.py verdrahtet")
+
+
+def provide_stop_logging_task() -> StopLoggingTask:
+    raise NotImplementedError("StopLoggingTask wird in app.py verdrahtet")
+
+
+def provide_delete_logging_task() -> DeleteLoggingTask:
+    raise NotImplementedError("DeleteLoggingTask wird in app.py verdrahtet")
+
+
+def provide_check_log_volume() -> CheckLogVolume:
+    raise NotImplementedError("CheckLogVolume wird in app.py verdrahtet")
+
+
 # ── Serialisierungs-Helfer (Domaenen-Objekt -> Wire-dict am api-Rand) ─────────
 
 
@@ -170,6 +252,26 @@ def _event_to_dict(event: Any) -> dict[str, Any]:
 def _rtt_to_dict(sample: Any) -> dict[str, Any]:
     """``PingSample`` -> Wire-dict ``{rtt_ms, loss_pct, ts}`` (``ts`` aus timestamp)."""
     return {"rtt_ms": sample.rtt_ms, "loss_pct": sample.loss_pct, "ts": sample.timestamp}
+
+
+def _logging_task_to_dict(task: Any) -> dict[str, Any]:
+    """``LoggingTask`` -> Wire-dict. Die StrEnums (``capture_mode``/``operation_mode``/
+    ``state``) als ihr ``str``-Wert (``str(...)`` ergibt den Vokabular-String); die
+    Zeitfelder roh durchgereicht (Unix-ts bzw. ``None``).
+    """
+    return {
+        "id": task.id,
+        "target_id": task.target_id,
+        "label": task.label,
+        "purpose": task.purpose,
+        "capture_mode": str(task.capture_mode),
+        "operation_mode": str(task.operation_mode),
+        "state": str(task.state),
+        "planned_start": task.planned_start,
+        "planned_end": task.planned_end,
+        "max_duration_s": task.max_duration_s,
+        "created_at": task.created_at,
+    }
 
 
 # ── monitor ───────────────────────────────────────────────────────────────
@@ -307,3 +409,176 @@ def remove_monitor_target(
     """Entfernt ein benutzerdefiniertes Monitor-Target nach id. Idempotent -> ``{ok: True}``."""
     delete_target(target_id)
     return {"ok": True}
+
+
+# ── monitor/logging (Logging-Aufgaben-Lifecycle, B-I Schritt 3) ─────────────
+# Steuert die Task-DEFINITIONEN (Anlegen + Lebenszyklus) + liest den Mengen-Befund.
+# GETRENNT vom Live-Monitor (status/events/rtt oben). Der Router erzeugt ``id`` (uuid4)
+# und ``created_at``/``now`` (time.time()) -- die Use-Cases bleiben uhr-/id-frei. Die
+# Lifecycle-Fehler werden HIER auf Statuscodes gemappt: ``LoggingTaskNotFound`` -> 404,
+# ``LoggingTaskConflict`` -> 409 (mit Konzept-Meldung aus Ziel + laufender Task),
+# ``InvalidTaskTransition`` -> 409.
+
+
+def _validate_logging_modes(body: CreateLoggingTaskBody) -> None:
+    """Prueft Modus-Vokabular + Modus/Feld-Konsistenz (422 bei Verstoss, keine stille Annahme).
+
+    ``capture_mode``/``operation_mode`` muessen zum Vokabular gehoeren; ``SCHEDULED``
+    braucht ``planned_start`` + ``planned_end``, ``IMMEDIATE`` braucht
+    ``max_duration_s``. Jeder Verstoss -> 422 (kein stiller Fallback, Finding S3).
+    """
+    if body.capture_mode not in _CAPTURE_MODES:
+        raise HTTPException(
+            422,
+            detail=f"Unbekannter capture_mode {body.capture_mode!r}",
+        )
+    if body.operation_mode not in _OPERATION_MODES:
+        raise HTTPException(
+            422,
+            detail=f"Unbekannter operation_mode {body.operation_mode!r}",
+        )
+    if body.operation_mode == "scheduled" and (
+        body.planned_start is None or body.planned_end is None
+    ):
+        raise HTTPException(
+            422,
+            detail="operation_mode 'scheduled' braucht planned_start und planned_end",
+        )
+    if body.operation_mode == "immediate" and body.max_duration_s is None:
+        raise HTTPException(
+            422,
+            detail="operation_mode 'immediate' braucht max_duration_s",
+        )
+
+
+@router.post("/monitor/logging", status_code=status.HTTP_201_CREATED)
+def create_logging_task(
+    create_task: Annotated[CreateLoggingTask, Depends(provide_create_logging_task)],
+    body: CreateLoggingTaskBody,
+) -> dict[str, Any]:
+    """Legt eine Logging-Aufgabe an (Zustand CREATED) -> 201 mit der Wire-Form.
+
+    Der Router erzeugt ``id`` (uuid4-hex) + ``created_at`` (time.time()); die Modus-/
+    Feld-Konsistenz prueft ``_validate_logging_modes`` (422 bei Verstoss).
+    """
+    _validate_logging_modes(body)
+    task = create_task(
+        task_id=uuid.uuid4().hex,
+        target_id=body.target_id,
+        label=body.label,
+        purpose=body.purpose,
+        capture_mode=body.capture_mode,
+        operation_mode=body.operation_mode,
+        created_at=time.time(),
+        planned_start=body.planned_start,
+        planned_end=body.planned_end,
+        max_duration_s=body.max_duration_s,
+    )
+    return _logging_task_to_dict(task)
+
+
+@router.get("/monitor/logging")
+def list_logging_tasks(
+    list_tasks: Annotated[ListLoggingTasks, Depends(provide_list_logging_tasks)],
+) -> list[dict[str, Any]]:
+    """Alle Logging-Aufgaben-Definitionen als Wire-Form. Leer -> ``[]``."""
+    return [_logging_task_to_dict(t) for t in list_tasks()]
+
+
+@router.get("/monitor/logging/volume")
+def logging_volume(
+    check_volume: Annotated[CheckLogVolume, Depends(provide_check_log_volume)],
+) -> dict[str, Any]:
+    """Mengen-Befund der Logging-RTT-Messdaten -> ``{count, over_threshold}``."""
+    result = check_volume()
+    return {"count": result.count, "over_threshold": result.over_threshold}
+
+
+@router.get("/monitor/logging/{task_id}")
+def get_logging_task(
+    task_id: str,
+    get_detail: Annotated[GetLoggingTaskDetail, Depends(provide_get_logging_task_detail)],
+) -> dict[str, Any]:
+    """EINE Logging-Aufgaben-Definition. 404 bei unbekannter id."""
+    try:
+        task = get_detail(task_id)
+    except LoggingTaskNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return _logging_task_to_dict(task)
+
+
+@router.post("/monitor/logging/{task_id}/start")
+def start_logging_task(
+    task_id: str,
+    start_task: Annotated[StartLoggingTask, Depends(provide_start_logging_task)],
+) -> dict[str, Any]:
+    """Startet eine Aufgabe (CREATED -> ACTIVE). 404/409 bei Fehler.
+
+    ``LoggingTaskConflict`` -> 409 mit der Konzept-Meldung (Ziel + laufende Task);
+    ``InvalidTaskTransition`` -> 409 (falscher Ausgangszustand).
+    """
+    try:
+        task = start_task(task_id, now=time.time())
+    except LoggingTaskNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except (LoggingTaskConflict, InvalidTaskTransition) as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return _logging_task_to_dict(task)
+
+
+@router.post("/monitor/logging/{task_id}/pause")
+def pause_logging_task(
+    task_id: str,
+    pause_task: Annotated[PauseLoggingTask, Depends(provide_pause_logging_task)],
+) -> dict[str, Any]:
+    """Pausiert eine Aufgabe (ACTIVE -> PAUSED). 404/409 (InvalidTaskTransition)."""
+    try:
+        task = pause_task(task_id)
+    except LoggingTaskNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except InvalidTaskTransition as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return _logging_task_to_dict(task)
+
+
+@router.post("/monitor/logging/{task_id}/resume")
+def resume_logging_task(
+    task_id: str,
+    resume_task: Annotated[ResumeLoggingTask, Depends(provide_resume_logging_task)],
+) -> dict[str, Any]:
+    """Setzt eine Aufgabe fort (PAUSED -> ACTIVE). 404/409 (Konflikt/Transition).
+
+    Fortsetzen aus Pause ist im Konzept ein Start (pro Ziel nur einer aktiv) -> ein
+    ``LoggingTaskConflict`` ist hier ebenso moeglich wie beim ``start``.
+    """
+    try:
+        task = resume_task(task_id)
+    except LoggingTaskNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except (LoggingTaskConflict, InvalidTaskTransition) as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return _logging_task_to_dict(task)
+
+
+@router.post("/monitor/logging/{task_id}/stop")
+def stop_logging_task(
+    task_id: str,
+    stop_task: Annotated[StopLoggingTask, Depends(provide_stop_logging_task)],
+) -> dict[str, Any]:
+    """Beendet eine Aufgabe ({ACTIVE,PAUSED} -> FINISHED). 404/409 (InvalidTaskTransition)."""
+    try:
+        task = stop_task(task_id)
+    except LoggingTaskNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except InvalidTaskTransition as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return _logging_task_to_dict(task)
+
+
+@router.delete("/monitor/logging/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_logging_task(
+    task_id: str,
+    delete_task: Annotated[DeleteLoggingTask, Depends(provide_delete_logging_task)],
+) -> None:
+    """Loescht eine Aufgaben-DEFINITION. Idempotent (unbekannte id ist kein Fehler) -> 204."""
+    delete_task(task_id)

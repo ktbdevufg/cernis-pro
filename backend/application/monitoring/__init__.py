@@ -1,33 +1,67 @@
 """Use-Cases der monitoring-Domaene und ihre Application-Exceptions."""
 
-from application.monitoring.errors import MonitoringApplicationError
+from application.monitoring.errors import (
+    LoggingTaskConflict,
+    LoggingTaskNotFound,
+    MonitoringApplicationError,
+)
 from application.monitoring.use_cases import (
     AddMonitorTarget,
+    CheckLogVolume,
+    CreateLoggingTask,
+    DeleteLoggingTask,
     DeleteMonitorTarget,
     EnforceLoggingRetention,
     GetAllSlaStats,
+    GetLoggingTaskDetail,
     GetMonitorEvents,
     GetRttHistory,
     GetSchedules,
     GetSlaStats,
+    ListLoggingTasks,
     LoggingRetentionResult,
+    LogVolumeResult,
     ManageSchedules,
+    PauseLoggingTask,
+    ResumeLoggingTask,
     RunMonitor,
+    StartLoggingTask,
+    StopLoggingTask,
     UpdateSchedule,
 )
 
+# Re-Export der Domaenen-Exception, damit der api-Rand sie fangen kann, OHNE
+# ``domain`` direkt zu importieren (import-linter: api -> nur application). Der
+# Lifecycle-Use-Case reicht ``InvalidTaskTransition`` aus der Domaene unveraendert
+# durch; der Router mappt sie auf 409 -- darum braucht er den Namen aus dieser
+# Schicht (Muster: die application-Schicht ist die einzige, die der api-Ring kennt).
+from domain.monitoring import InvalidTaskTransition
+
 __all__ = [
     "AddMonitorTarget",
+    "CheckLogVolume",
+    "CreateLoggingTask",
+    "DeleteLoggingTask",
     "DeleteMonitorTarget",
     "EnforceLoggingRetention",
     "GetAllSlaStats",
+    "GetLoggingTaskDetail",
     "GetMonitorEvents",
     "GetRttHistory",
     "GetSchedules",
     "GetSlaStats",
+    "InvalidTaskTransition",
+    "ListLoggingTasks",
+    "LogVolumeResult",
     "LoggingRetentionResult",
+    "LoggingTaskConflict",
+    "LoggingTaskNotFound",
     "ManageSchedules",
     "MonitoringApplicationError",
+    "PauseLoggingTask",
+    "ResumeLoggingTask",
     "RunMonitor",
+    "StartLoggingTask",
+    "StopLoggingTask",
     "UpdateSchedule",
 ]

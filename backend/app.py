@@ -99,14 +99,23 @@ from api.metrics import provide_export_metrics
 from api.metrics import router as metrics_router
 from api.monitoring import (
     provide_add_monitor_target,
+    provide_check_log_volume,
+    provide_create_logging_task,
+    provide_delete_logging_task,
     provide_delete_monitor_target,
     provide_get_all_sla_stats,
+    provide_get_logging_task_detail,
     provide_get_monitor_events,
     provide_get_rtt_history,
     provide_get_schedules,
     provide_get_sla_stats,
+    provide_list_logging_tasks,
     provide_manage_schedules,
     provide_monitor_status,
+    provide_pause_logging_task,
+    provide_resume_logging_task,
+    provide_start_logging_task,
+    provide_stop_logging_task,
     provide_update_schedule,
 )
 from api.monitoring import router as monitoring_router
@@ -208,14 +217,23 @@ from application.interfaces import ListInterfaces
 from application.metrics import ExportMetrics
 from application.monitoring import (
     AddMonitorTarget,
+    CheckLogVolume,
+    CreateLoggingTask,
+    DeleteLoggingTask,
     DeleteMonitorTarget,
     GetAllSlaStats,
+    GetLoggingTaskDetail,
     GetMonitorEvents,
     GetRttHistory,
     GetSchedules,
     GetSlaStats,
+    ListLoggingTasks,
     ManageSchedules,
+    PauseLoggingTask,
+    ResumeLoggingTask,
     RunMonitor,
+    StartLoggingTask,
+    StopLoggingTask,
     UpdateSchedule,
 )
 from application.process import CheckProcessPermission, ListProcesses
@@ -303,6 +321,9 @@ from infrastructure.monitoring import (
     CompositeTargetSource,
     MonitorNotifierAdapter,
     MonitorPingerAdapter,
+    SqliteLoggingEventRepository,
+    SqliteLoggingRttRepository,
+    SqliteLoggingTaskRepository,
     SqliteMonitorEventRepository,
     SqliteRttHistoryRepository,
     SqliteScheduleRepository,
@@ -1308,6 +1329,28 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
         return SqliteScheduleRepository(get_db_path())
 
+    # Langzeit-Logging-Repos (B-I): drei eigene Tabellen (``monitoring_log_*``),
+    # GETRENNT vom fluechtigen Live-Monitor (rtt_history/monitor_events). lru_cache wie
+    # die uebrigen sqlite-Repos (teilen die cernis.db). NUR Provider + Endpunkt-
+    # Verdrahtung -- KEIN Loop-/Lifespan-Eingriff (Schreibpfad + Auto-Resume = B-II).
+    @lru_cache(maxsize=1)
+    def logging_task_repository() -> SqliteLoggingTaskRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteLoggingTaskRepository(get_db_path())
+
+    @lru_cache(maxsize=1)
+    def logging_rtt_repository() -> SqliteLoggingRttRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteLoggingRttRepository(get_db_path())
+
+    @lru_cache(maxsize=1)
+    def logging_event_repository() -> SqliteLoggingEventRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteLoggingEventRepository(get_db_path())
+
     @lru_cache(maxsize=1)
     def job_scheduler() -> ApschedulerJobScheduler:
         return ApschedulerJobScheduler()
@@ -1388,6 +1431,36 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.dependency_overrides[provide_add_monitor_target] = lambda: AddMonitorTarget(repository())
     app.dependency_overrides[provide_delete_monitor_target] = lambda: DeleteMonitorTarget(
         repository()
+    )
+    # Langzeit-Logging-Lifecycle (B-I Schritt 3): Anlegen + Lebenszyklus ueber dem
+    # ``logging_task_repository()``; der Mengen-Befund ueber dem ``logging_rtt_repository()``.
+    # NUR Endpunkt-Verdrahtung -- KEIN Lifespan-/Loop-Eingriff (B-II).
+    app.dependency_overrides[provide_create_logging_task] = lambda: CreateLoggingTask(
+        logging_task_repository()
+    )
+    app.dependency_overrides[provide_list_logging_tasks] = lambda: ListLoggingTasks(
+        logging_task_repository()
+    )
+    app.dependency_overrides[provide_get_logging_task_detail] = lambda: GetLoggingTaskDetail(
+        logging_task_repository()
+    )
+    app.dependency_overrides[provide_start_logging_task] = lambda: StartLoggingTask(
+        logging_task_repository()
+    )
+    app.dependency_overrides[provide_pause_logging_task] = lambda: PauseLoggingTask(
+        logging_task_repository()
+    )
+    app.dependency_overrides[provide_resume_logging_task] = lambda: ResumeLoggingTask(
+        logging_task_repository()
+    )
+    app.dependency_overrides[provide_stop_logging_task] = lambda: StopLoggingTask(
+        logging_task_repository()
+    )
+    app.dependency_overrides[provide_delete_logging_task] = lambda: DeleteLoggingTask(
+        logging_task_repository()
+    )
+    app.dependency_overrides[provide_check_log_volume] = lambda: CheckLogVolume(
+        logging_rtt_repository()
     )
 
     app.add_api_websocket_route(
