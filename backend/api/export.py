@@ -18,19 +18,26 @@ das ``ExportResult`` (Bytes + ``media_type`` + Dateiname); der Router macht dara
   (genau wie GET /api/analysis -- "die Analyse von jetzt", ADR 0015). ASYNC -- der Runner
   awaitet den frischen Snapshot-Bau (traffic/process). Kein NotFound (die Analyse kann nicht
   fehlen). ``format`` ist wieder ein PFLICHT-Literal-Query-Param (422 bei ungueltig).
+* ``GET /api/export/logging/{task_id}?format=csv|json|pdf&since=<ts>&until=<ts>`` (Block 3) --
+  exportiert den Logging-Report einer Aufgabe ueber einen Zeitraum. ``format`` wieder
+  PFLICHT-Literal (422). ``since``/``until`` sind OPTIONALE Query-Floats (Unix-ts), Default
+  ``None`` (offener Zeitraum = der ganze Task). SYNCHRON wie der Scan-Export (sync Lese-Repos +
+  CPU-Rendern). Existiert die ``task_id`` nicht, wirft der Use-Case ``LoggingReportNotFound``
+  -> 404 (eigener globaler Handler, s.u.).
 
-SCAN-NICHT-GEFUNDEN -> HTTP: Existiert die ``scan_id`` nicht, wirft der Use-Case
-``application.export.ScanNotFoundError``. Diesen application-Zustand bildet ein GLOBALER
-``exception_handler`` im Composition Root (``app.py``) auf **404** ab (Muster der
-diagnostics-Rechte-/Dienst-Naht: das Mapping sitzt am Composition Root, der api-Ring bleibt
-domain-/infra-frei). Der api-Ring importiert die Exception bewusst NICHT zum Werfen. Der
-Analyse-Export hat keinen solchen Fall (immer frisch erzeugt).
+SCAN-/LOGGING-NICHT-GEFUNDEN -> HTTP: Existiert die ``scan_id`` bzw. ``task_id`` nicht, wirft
+der Use-Case ``application.export.ScanNotFoundError`` bzw. ``LoggingReportNotFound``. Diese
+application-Zustaende bildet je ein GLOBALER ``exception_handler`` im Composition Root
+(``app.py``) auf **404** ab (Muster der diagnostics-Rechte-/Dienst-Naht: das Mapping sitzt am
+Composition Root, der api-Ring bleibt domain-/infra-frei). Der api-Ring importiert die
+Exceptions bewusst NICHT zum Werfen. Der Analyse-Export hat keinen solchen Fall (immer frisch
+erzeugt).
 """
 
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Query, Response
 
 router = APIRouter(prefix="/api/export", tags=["export"])
 
@@ -110,6 +117,55 @@ async def export_analysis(
     Browser die Datei als Download. Kein NotFound (die Analyse kann nicht fehlen).
     """
     result = await export(format)
+    # result ist ein application.ExportResult; per Attribut-Zugriff gelesen (kein
+    # application-Typ-Import im Router -- der api-Ring kennt nur die drei Attribute).
+    return Response(
+        content=result.content,  # type: ignore[attr-defined]
+        media_type=result.media_type,  # type: ignore[attr-defined]
+        headers={
+            "Content-Disposition": f'attachment; filename="{result.filename}"'  # type: ignore[attr-defined]
+        },
+    )
+
+
+# Composition-Root-Callable (Block 3): bekommt ``task_id`` + das validierte Format-Literal +
+# den optionalen Zeitraum (``since``/``until`` als Unix-ts oder ``None``) und liefert das
+# ``ExportResult`` (Bytes + media_type + Dateiname). SYNCHRON wie der Scan-Runner (sync
+# Lese-Repos + CPU-Rendern, kein Netz-I/O) -- kein ``Awaitable``. Der api-Ring kennt den
+# ``ExportResult``-Typ NICHT als domain/infrastructure (application-Struktur, ueber die drei
+# Attribute gelesen).
+type ExportLoggingRunner = Callable[
+    [str, Literal["csv", "json", "pdf"], float | None, float | None], object
+]
+
+
+# Dependency-Marker: im Composition Root (app.py) per dependency_overrides mit dem echten
+# ExportLoggingReport-Use-Case (ueber die monitoring->export-Projektion) verdrahtet. Ohne
+# Verdrahtung bewusst ein lauter Fehler (Muster ``provide_export_scan``).
+def provide_export_logging() -> ExportLoggingRunner:
+    raise NotImplementedError("ExportLoggingRunner wird in app.py verdrahtet")
+
+
+@router.get("/logging/{task_id}")
+def export_logging(
+    task_id: str,
+    export: Annotated[ExportLoggingRunner, Depends(provide_export_logging)],
+    format: Literal["csv", "json", "pdf"],
+    since: Annotated[float | None, Query()] = None,
+    until: Annotated[float | None, Query()] = None,
+) -> Response:
+    """Exportiert den Logging-Report ``task_id`` ueber einen Zeitraum als Download.
+
+    ``format`` ist ein PFLICHT-Literal-Query-Param (``?format=csv|json|pdf``); FastAPI lehnt
+    ein fehlendes/ungueltiges ``format`` selbst mit 422 ab. ``since``/``until`` sind OPTIONALE
+    Query-Floats (Unix-ts), Default ``None`` (offener Zeitraum = der ganze Task) -- sie werden
+    unveraendert an den Runner durchgereicht (die Repos-Grenzen/SLA-Rechnung macht der
+    Composition Root). Der Runner liefert das ``ExportResult`` (Bytes + ``media_type`` +
+    Dateiname); der Router verpackt es in eine ``Response`` mit ``Content-Disposition:
+    attachment; filename="..."`` -- so laedt der Browser die Datei als Download. Existiert die
+    ``task_id`` nicht, wirft der Use-Case ``LoggingReportNotFound`` -> 404 (globaler Handler).
+    """
+    result = export(task_id, format, since, until)
     # result ist ein application.ExportResult; per Attribut-Zugriff gelesen (kein
     # application-Typ-Import im Router -- der api-Ring kennt nur die drei Attribute).
     return Response(

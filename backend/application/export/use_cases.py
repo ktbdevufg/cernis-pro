@@ -23,20 +23,31 @@ KEINE scanning-Use-Cases und KEINE scanning-Domaene -- nur das Callable + den Re
   GET /api/analysis) und serialisiert sie je Format (``analysis_to_json``/``analysis_to_csv``/
   ``build_analysis_pdf_model`` + ``renderer.render_pdf``). ASYNC -- der Snapshot-Bau ist
   async. Kein NotFound: die Analyse wird immer frisch erzeugt (kein ``analysis_id``).
+* ``ExportLoggingReport`` (Block 3) -- holt den Logging-Report einer Aufgabe ueber einen
+  Zeitraum ueber ein ``logging_report_provider``-Callable (``task_id`` + ``since``/``until``;
+  None -> ``LoggingReportNotFound``) und serialisiert ihn je Format
+  (``logging_report_to_json``/``logging_report_to_csv``/``build_logging_report_pdf_model`` +
+  ``renderer.render_pdf``). SYNCHRON wie ``ExportScan`` (die Lese-Repos sind sync, das Rendern
+  CPU-Arbeit). Eigener ``LoggingReportNotFound`` (keine ``application.monitoring``-Kopplung,
+  symmetrisch zu ``ScanNotFoundError``).
 """
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
-from application.export.errors import ScanNotFoundError
+from application.export.errors import LoggingReportNotFound, ScanNotFoundError
 from domain.export import (
     ExportableAnalysis,
+    ExportableLoggingReport,
     ExportableScan,
     ExportFormat,
     analysis_to_csv,
     analysis_to_json,
     build_analysis_pdf_model,
+    build_logging_report_pdf_model,
     build_pdf_model,
+    logging_report_to_csv,
+    logging_report_to_json,
     to_csv,
     to_json,
 )
@@ -199,6 +210,81 @@ class ExportAnalysis:
         if fmt == "csv":
             return analysis_to_csv(analysis).encode("utf-8")
         return self._renderer.render_pdf(build_analysis_pdf_model(analysis))
+
+
+# ── Block 3: Logging-Report exportieren (Reporting Schnitt 1a) ────────────────────────────
+#
+# Liefert den projizierten ``ExportableLoggingReport`` zu ``task_id`` + Zeitraum
+# (``since``/``until`` als absolute Unix-ts oder ``None`` fuer offen) -- oder ``None`` (Task
+# unbekannt). Ein schlankes Callable statt der drei Logging-Repos + ``compute_sla_stats``: so
+# bleibt der Use-Case frei von monitoring-Kopplung (die Projektion + die SLA-Rechnung leben im
+# Composition Root, Muster ``ScanProvider``). ``None`` ist ein legitimer Zustand ("Task gibt es
+# nicht"), kein Fehler -- der Use-Case uebersetzt es in ``LoggingReportNotFound`` (ADR 0001:
+# kein stiller leerer Export). SYNCHRON: die Lese-Repos sind sync (sqlite), die Projektion ist
+# reine Werte-Arbeit -- symmetrisch zu ``ScanProvider``.
+LoggingReportProvider = Callable[[str, float | None, float | None], ExportableLoggingReport | None]
+
+
+class ExportLoggingReport:
+    """Exportiert den Logging-Report einer Aufgabe ueber einen Zeitraum als CSV/JSON/PDF (Block 3).
+
+    Duenn (Muster ``ExportScan``): orchestriert die reine Domaene (``logging_report_to_json``/
+    ``logging_report_to_csv``/``build_logging_report_pdf_model``) + den ``ReportRenderer``,
+    keine Eigenlogik ausser dem Format-Switch. Der ``logging_report_provider`` + der Renderer
+    kommen per Constructor-Injection herein (Callable bzw. Protocol-Typ) -- nie ein konkreter
+    Adapter, nie ein monitoring-Import (die Projektion + SLA-Rechnung lebt im Composition
+    Root). SYNCHRON wie ``ExportScan``: die Logging-Lese-Repos sind sync, das PDF-Rendern ist
+    CPU-Arbeit ohne Netz-I/O -- es gibt kein I/O, also kein ``async``.
+    """
+
+    def __init__(self, report_provider: LoggingReportProvider, renderer: ReportRenderer) -> None:
+        self._report_provider = report_provider
+        self._renderer = renderer
+
+    def __call__(
+        self,
+        task_id: str,
+        fmt: ExportFormat,
+        since: float | None,
+        until: float | None,
+    ) -> ExportResult:
+        """Exportiert den Logging-Report ``task_id`` im Zeitraum ``[since, until)`` als ``fmt``.
+
+        Holt den projizierten Report ueber den ``logging_report_provider`` (mit ``task_id`` +
+        Zeitraum); ``None`` -> ``LoggingReportNotFound`` (ADR 0001: kein stiller leerer Export).
+        ``since``/``until`` sind absolute Unix-ts oder ``None`` (offener Zeitraum = ganzer
+        Task). Je nach ``fmt``:
+
+        * ``json`` -> ``logging_report_to_json`` (verlustfrei: Kopf + alle Punkte + Events).
+        * ``csv`` -> ``logging_report_to_csv`` (die dichte RTT-Messreihe), als UTF-8-Bytes.
+        * ``pdf`` -> ``build_logging_report_pdf_model`` + ``renderer.render_pdf`` (Bytes).
+
+        Der ``media_type`` + die Datei-Endung kommen aus ``_FORMAT_MEDIA_TYPES``; der
+        ``filename`` ist ``cernis-monitoring-<task_id>.<ext>`` (``task_id`` ist Hex,
+        dateinamen-tauglich). ``fmt`` ist bereits ein gueltiges ``ExportFormat``-Literal (der
+        api-Rand validiert via FastAPI 422).
+        """
+        report = self._report_provider(task_id, since, until)
+        if report is None:
+            raise LoggingReportNotFound(task_id)
+        content = self._render(report, fmt)
+        media_type, ext = _FORMAT_MEDIA_TYPES[fmt]
+        filename = f"cernis-monitoring-{task_id}.{ext}"
+        return ExportResult(content=content, media_type=media_type, filename=filename)
+
+    def _render(self, report: ExportableLoggingReport, fmt: ExportFormat) -> bytes:
+        """Serialisiert den projizierten Report in das Zielformat -> Bytes (Format-Switch).
+
+        CSV/JSON: die reine domain-Funktion liefert einen String, der hier UTF-8-kodiert wird
+        (deterministisch, ``ensure_ascii=False`` haelt Sonderzeichen lesbar). PDF: das reine
+        ``build_logging_report_pdf_model`` + der ``ReportRenderer`` (das Rendern ist
+        Infrastruktur, hier nur der Aufruf).
+        """
+        if fmt == "json":
+            return logging_report_to_json(report).encode("utf-8")
+        if fmt == "csv":
+            return logging_report_to_csv(report).encode("utf-8")
+        return self._renderer.render_pdf(build_logging_report_pdf_model(report))
 
 
 def _filename_stamp(generated_at: str) -> str:

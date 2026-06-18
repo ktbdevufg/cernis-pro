@@ -14,9 +14,13 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api.export import provide_export_analysis, provide_export_scan
+from api.export import (
+    provide_export_analysis,
+    provide_export_logging,
+    provide_export_scan,
+)
 from app import create_app
-from application.export import ExportResult, ScanNotFoundError
+from application.export import ExportResult, LoggingReportNotFound, ScanNotFoundError
 from infrastructure.config import AppConfig
 
 
@@ -162,3 +166,118 @@ def test_export_analysis_missing_format_is_422(app: FastAPI) -> None:
         response = client.get("/api/export/analysis")
 
     assert response.status_code == 422
+
+
+# ── Block 3: GET /api/export/logging/{task_id} (sync, task_id + since/until) ───
+
+
+def _fake_logging_runner(
+    known_id: str = "abc123",
+) -> Callable[[str, Literal["csv", "json", "pdf"], float | None, float | None], ExportResult]:
+    """Ein Fake-ExportLoggingRunner: bekannte id -> ExportResult je Format, sonst NotFound.
+
+    Merkt sich die durchgereichten since/until (fuer die Durchreich-Behauptung).
+    """
+
+    media = {
+        "csv": ("text/csv", b"ts_iso,rtt_ms,loss_pct,alive\n2026-06-11T14:00:00,12.5,0.0,true"),
+        "json": ("application/json", b'{"task_label": "X"}'),
+        "pdf": ("application/pdf", b"%PDF-FAKE"),
+    }
+
+    def _run(
+        task_id: str,
+        fmt: Literal["csv", "json", "pdf"],
+        since: float | None,
+        until: float | None,
+    ) -> ExportResult:
+        _run.calls.append((task_id, since, until))  # type: ignore[attr-defined]
+        if task_id != known_id:
+            raise LoggingReportNotFound(task_id)
+        media_type, content = media[fmt]
+        return ExportResult(
+            content=content, media_type=media_type, filename=f"cernis-monitoring-{task_id}.{fmt}"
+        )
+
+    _run.calls = []  # type: ignore[attr-defined]
+    return _run
+
+
+@pytest.mark.parametrize(
+    ("fmt", "media_type"),
+    [
+        ("csv", "text/csv"),
+        ("json", "application/json"),
+        ("pdf", "application/pdf"),
+    ],
+)
+def test_export_logging_each_format_downloads(app: FastAPI, fmt: str, media_type: str) -> None:
+    """Jedes Format: 200 + korrekter Content-Type + Content-Disposition-Download-Header."""
+    app.dependency_overrides[provide_export_logging] = lambda: _fake_logging_runner()
+
+    with TestClient(app) as client:
+        response = client.get("/api/export/logging/abc123", params={"format": fmt})
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith(media_type)
+    assert (
+        response.headers["content-disposition"]
+        == f'attachment; filename="cernis-monitoring-abc123.{fmt}"'
+    )
+    assert response.content
+
+
+def test_export_logging_passes_since_until(app: FastAPI) -> None:
+    """``since``/``until`` werden als Query-Floats an den Runner durchgereicht."""
+    runner = _fake_logging_runner()
+    app.dependency_overrides[provide_export_logging] = lambda: runner
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/export/logging/abc123",
+            params={"format": "json", "since": 100.0, "until": 200.0},
+        )
+
+    assert response.status_code == 200
+    assert runner.calls == [("abc123", 100.0, 200.0)]  # type: ignore[attr-defined]
+
+
+def test_export_logging_open_period_is_none(app: FastAPI) -> None:
+    """Ohne ``since``/``until`` reicht der Router ``None`` durch (offener Zeitraum)."""
+    runner = _fake_logging_runner()
+    app.dependency_overrides[provide_export_logging] = lambda: runner
+
+    with TestClient(app) as client:
+        response = client.get("/api/export/logging/abc123", params={"format": "csv"})
+
+    assert response.status_code == 200
+    assert runner.calls == [("abc123", None, None)]  # type: ignore[attr-defined]
+
+
+def test_export_logging_invalid_format_is_422(app: FastAPI) -> None:
+    app.dependency_overrides[provide_export_logging] = lambda: _fake_logging_runner()
+
+    with TestClient(app) as client:
+        response = client.get("/api/export/logging/abc123", params={"format": "xml"})
+
+    assert response.status_code == 422
+
+
+def test_export_logging_missing_format_is_422(app: FastAPI) -> None:
+    app.dependency_overrides[provide_export_logging] = lambda: _fake_logging_runner()
+
+    with TestClient(app) as client:
+        response = client.get("/api/export/logging/abc123")
+
+    assert response.status_code == 422
+
+
+def test_export_logging_unknown_task_id_is_404(app: FastAPI) -> None:
+    """Eine unbekannte ``task_id`` -> 404 (globaler LoggingReportNotFound-Handler)."""
+    app.dependency_overrides[provide_export_logging] = lambda: _fake_logging_runner()
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get("/api/export/logging/nope", params={"format": "json"})
+
+    assert response.status_code == 404
+    assert "nope" in response.json()["detail"]

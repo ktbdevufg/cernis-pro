@@ -15,19 +15,26 @@ die Spalten-Reihenfolge in to_csv / build_pdf_model ist Vertrag (Vertauschung ->
 import csv
 import io
 import json
+from datetime import datetime
 
 from domain.export import (
     ExportableAnalysis,
     ExportableFinding,
     ExportableHost,
+    ExportableLoggingEvent,
+    ExportableLoggingReport,
+    ExportableLoggingRtt,
     ExportablePort,
     ExportableScan,
     analysis_to_csv,
     analysis_to_json,
     build_analysis_pdf_model,
+    build_logging_report_pdf_model,
     build_pdf_model,
     format_ports,
     format_tags,
+    logging_report_to_csv,
+    logging_report_to_json,
     to_csv,
     to_json,
 )
@@ -531,3 +538,245 @@ def test_build_analysis_pdf_model_empty() -> None:
     assert model.meta[1] == ("Anzahl Befunde", "0")
     assert model.rows == ()
     assert model.columns == _EXPECTED_ANALYSIS_PDF_COLUMNS
+
+
+# ── Block 3: Logging-Report -> CSV/JSON/PDF (Reporting Schnitt 1a) ─────────────
+#
+# logging_report_to_json (verlustfrei: Kopf + ALLE rtt_points + ALLE events, sortierte Keys,
+# roher ts + lesbarer ts_iso), logging_report_to_csv (NUR die RTT-Reihe, Spalten ts_iso/rtt_ms/
+# loss_pct/alive, alive als true/false), build_logging_report_pdf_model (SLA-Kopf-meta-Paare,
+# Ereignis-Tabelle, uptime None -> "keine Auswertung", Zahlenformat f"{x:.1f}"). Mutationsproben:
+# csv-Spalten + pdf-Spalten sind Vertrag.
+#
+# Die ts->ISO-Darstellung ist zeitzonen-abhaengig (datetime.fromtimestamp, lokal) -- darum
+# vergleichen die Tests gegen ``datetime.fromtimestamp(ts).isoformat()`` (dieselbe Rechnung),
+# NICHT gegen einen hartkodierten String, damit sie auf jeder Test-Maschine gruen sind.
+
+# Feste Mess-/Flanken-Zeitstempel (Unix-ts) -- die lesbare Form wird je Test ueber
+# datetime.fromtimestamp berechnet (zeitzonen-robust, s.o.).
+_RTT_TS_A = 1_749_640_200.0
+_RTT_TS_B = 1_749_640_260.0
+_EVENT_TS = 1_749_640_230.0
+
+
+def _iso(ts: float) -> str:
+    """Spiegelt domain._ts_to_iso (lokale fromtimestamp) fuer die Erwartungswerte."""
+    return datetime.fromtimestamp(ts).isoformat()
+
+
+def _rtt(
+    ts: float = _RTT_TS_A, rtt_ms: float = 12.5, loss_pct: float = 0.0, alive: bool = True
+) -> ExportableLoggingRtt:
+    return ExportableLoggingRtt(ts=ts, rtt_ms=rtt_ms, loss_pct=loss_pct, alive=alive)
+
+
+def _event(
+    ts: float = _EVENT_TS, event_type: str = "down", rtt_ms: float = -1.0
+) -> ExportableLoggingEvent:
+    return ExportableLoggingEvent(ts=ts, event_type=event_type, rtt_ms=rtt_ms)
+
+
+def _report(
+    *,
+    rtt_points: tuple[ExportableLoggingRtt, ...] = (),
+    events: tuple[ExportableLoggingEvent, ...] = (),
+    uptime_pct: float | None = 99.5,
+    avg_rtt_ms: float = 12.5,
+    downtime_mins: float = 1.5,
+    sample_count: int = 2,
+    period_from: str = "2026-06-11T14:00:00",
+    period_to: str = "2026-06-11T15:00:00",
+) -> ExportableLoggingReport:
+    return ExportableLoggingReport(
+        task_label="WLAN-Gast",
+        task_purpose="Stabilitaet pruefen",
+        target_id="abc123",
+        generated_at="2026-06-11T15:30:00+00:00",
+        period_from=period_from,
+        period_to=period_to,
+        uptime_pct=uptime_pct,
+        avg_rtt_ms=avg_rtt_ms,
+        downtime_mins=downtime_mins,
+        sample_count=sample_count,
+        rtt_points=rtt_points,
+        events=events,
+    )
+
+
+# ── logging_report_to_json (verlustfrei, sortierte Keys, roher ts + ts_iso) ────
+
+
+def test_logging_report_to_json_is_lossless() -> None:
+    report = _report(
+        rtt_points=(_rtt(), _rtt(ts=_RTT_TS_B, rtt_ms=-1.0, loss_pct=100.0, alive=False)),
+        events=(_event(),),
+    )
+    payload = json.loads(logging_report_to_json(report))
+
+    assert payload["task_label"] == "WLAN-Gast"
+    assert payload["task_purpose"] == "Stabilitaet pruefen"
+    assert payload["target_id"] == "abc123"
+    assert payload["generated_at"] == "2026-06-11T15:30:00+00:00"
+    assert payload["period_from"] == "2026-06-11T14:00:00"
+    assert payload["period_to"] == "2026-06-11T15:00:00"
+    assert payload["uptime_pct"] == 99.5
+    assert payload["avg_rtt_ms"] == 12.5
+    assert payload["downtime_mins"] == 1.5
+    assert payload["sample_count"] == 2
+
+    # ALLE rtt_points verlustfrei, mit rohem ts UND lesbarem ts_iso.
+    assert len(payload["rtt_points"]) == 2
+    p0 = payload["rtt_points"][0]
+    assert p0 == {
+        "ts": _RTT_TS_A,
+        "ts_iso": _iso(_RTT_TS_A),
+        "rtt_ms": 12.5,
+        "loss_pct": 0.0,
+        "alive": True,
+    }
+    assert payload["rtt_points"][1]["alive"] is False
+    assert payload["rtt_points"][1]["rtt_ms"] == -1.0
+
+    # ALLE events verlustfrei.
+    assert payload["events"] == [
+        {"ts": _EVENT_TS, "ts_iso": _iso(_EVENT_TS), "event_type": "down", "rtt_ms": -1.0}
+    ]
+
+
+def test_logging_report_to_json_keys_are_sorted() -> None:
+    payload = json.loads(logging_report_to_json(_report(rtt_points=(_rtt(),), events=(_event(),))))
+    assert list(payload.keys()) == sorted(payload.keys())
+    assert list(payload["rtt_points"][0].keys()) == sorted(payload["rtt_points"][0].keys())
+    assert list(payload["events"][0].keys()) == sorted(payload["events"][0].keys())
+
+
+def test_logging_report_to_json_is_deterministic() -> None:
+    report = _report(rtt_points=(_rtt(), _rtt(ts=_RTT_TS_B)), events=(_event(),))
+    assert logging_report_to_json(report) == logging_report_to_json(report)
+
+
+def test_logging_report_to_json_uptime_none() -> None:
+    payload = json.loads(logging_report_to_json(_report(uptime_pct=None, sample_count=0)))
+    assert payload["uptime_pct"] is None
+
+
+def test_logging_report_to_json_keeps_point_order() -> None:
+    report = _report(rtt_points=(_rtt(ts=_RTT_TS_B), _rtt(ts=_RTT_TS_A)))
+    payload = json.loads(logging_report_to_json(report))
+    assert [p["ts"] for p in payload["rtt_points"]] == [_RTT_TS_B, _RTT_TS_A]
+
+
+# ── logging_report_to_csv (NUR RTT-Reihe, Spalten, alive true/false) ───────────
+
+_EXPECTED_LOGGING_CSV_HEADER = ["ts_iso", "rtt_ms", "loss_pct", "alive"]
+
+
+def test_logging_report_to_csv_header_is_defined_order() -> None:
+    rows = _parse_csv(logging_report_to_csv(_report(rtt_points=(_rtt(),))))
+    assert rows[0] == _EXPECTED_LOGGING_CSV_HEADER
+
+
+def test_logging_report_to_csv_row_values_in_column_order() -> None:
+    rows = _parse_csv(logging_report_to_csv(_report(rtt_points=(_rtt(),))))
+    assert rows[1] == [_iso(_RTT_TS_A), "12.5", "0.0", "true"]
+
+
+def test_logging_report_to_csv_alive_false_is_false() -> None:
+    rows = _parse_csv(
+        logging_report_to_csv(_report(rtt_points=(_rtt(rtt_ms=-1.0, loss_pct=100.0, alive=False),)))
+    )
+    assert rows[1][_EXPECTED_LOGGING_CSV_HEADER.index("alive")] == "false"
+
+
+def test_logging_report_to_csv_column_order_is_contract() -> None:
+    """MUTATIONSPROBE: vertauschte Erwartungs-Spalten muessen rot sein."""
+    rows = _parse_csv(logging_report_to_csv(_report(rtt_points=(_rtt(),))))
+    swapped = ["rtt_ms", "ts_iso", *_EXPECTED_LOGGING_CSV_HEADER[2:]]
+    assert rows[0] != swapped
+
+
+def test_logging_report_to_csv_excludes_events() -> None:
+    """Die CSV traegt NUR die RTT-Reihe -- die Events stehen NICHT drin (JSON/PDF haben sie)."""
+    text = logging_report_to_csv(_report(rtt_points=(_rtt(),), events=(_event(event_type="down"),)))
+    rows = _parse_csv(text)
+    # Genau Header + eine RTT-Zeile -- keine zweite (Event-)Tabelle.
+    assert len(rows) == 2
+    assert "down" not in text
+
+
+def test_logging_report_to_csv_empty_has_only_header() -> None:
+    rows = _parse_csv(logging_report_to_csv(_report()))
+    assert rows == [_EXPECTED_LOGGING_CSV_HEADER]
+
+
+# ── build_logging_report_pdf_model (SLA-Kopf, Ereignis-Tabelle, Formate) ───────
+
+_EXPECTED_LOGGING_PDF_COLUMNS = ("Zeitpunkt", "Ereignis", "RTT")
+
+
+def test_build_logging_report_pdf_model_header_fields() -> None:
+    model = build_logging_report_pdf_model(_report(events=(_event(),)))
+    assert model.title == "CERNIS PRO — Monitoring-Bericht"
+    assert model.meta == (
+        ("Aufgabe", "WLAN-Gast"),
+        ("Zweck", "Stabilitaet pruefen"),
+        ("Ziel", "abc123"),
+        ("Zeitraum", "2026-06-11T14:00:00 — 2026-06-11T15:00:00"),
+        ("Verfügbarkeit", "99.5 %"),
+        ("Ø-RTT", "12.5 ms"),
+        ("ca. Ausfallzeit", "1.5 Min"),
+        ("Messpunkte", "2"),
+    )
+
+
+def test_build_logging_report_pdf_model_uptime_none() -> None:
+    """uptime_pct None -> "keine Auswertung" (kein erfundener 0%-Wert)."""
+    model = build_logging_report_pdf_model(_report(uptime_pct=None, sample_count=0))
+    verfuegbarkeit = dict(model.meta)["Verfügbarkeit"]
+    assert verfuegbarkeit == "keine Auswertung"
+
+
+def test_build_logging_report_pdf_model_period_open() -> None:
+    """Offener Zeitraum (beide Grenzen "") -> "gesamter Zeitraum"."""
+    model = build_logging_report_pdf_model(_report(period_from="", period_to=""))
+    assert dict(model.meta)["Zeitraum"] == "gesamter Zeitraum"
+
+
+def test_build_logging_report_pdf_model_period_half_open() -> None:
+    """Nur eine Grenze gesetzt -> sprechende Halb-offen-Form."""
+    only_from = build_logging_report_pdf_model(_report(period_to=""))
+    assert dict(only_from.meta)["Zeitraum"] == "ab 2026-06-11T14:00:00"
+    only_to = build_logging_report_pdf_model(_report(period_from=""))
+    assert dict(only_to.meta)["Zeitraum"] == "bis 2026-06-11T15:00:00"
+
+
+def test_build_logging_report_pdf_model_columns_are_event_list() -> None:
+    model = build_logging_report_pdf_model(_report())
+    assert model.columns == _EXPECTED_LOGGING_PDF_COLUMNS
+
+
+def test_build_logging_report_pdf_model_event_rows() -> None:
+    model = build_logging_report_pdf_model(_report(events=(_event(rtt_ms=42.0, event_type="up"),)))
+    assert model.rows == ((_iso(_EVENT_TS), "up", "42.0"),)
+
+
+def test_build_logging_report_pdf_model_excludes_rtt_points() -> None:
+    """Die PDF-Tabelle ist die Ereignis-Liste -- die dichten RTT-Punkte sind NICHT drin."""
+    model = build_logging_report_pdf_model(
+        _report(rtt_points=(_rtt(), _rtt(ts=_RTT_TS_B)), events=(_event(),))
+    )
+    # Genau eine Zeile (das eine Event), NICHT die zwei RTT-Punkte.
+    assert len(model.rows) == 1
+
+
+def test_build_logging_report_pdf_model_columns_are_contract() -> None:
+    """MUTATIONSPROBE: eine entfernte Spalte muss rot sein."""
+    model = build_logging_report_pdf_model(_report())
+    without_rtt = _EXPECTED_LOGGING_PDF_COLUMNS[:-1]
+    assert model.columns != without_rtt
+
+
+def test_build_logging_report_pdf_model_empty() -> None:
+    model = build_logging_report_pdf_model(_report(events=(), sample_count=0, uptime_pct=None))
+    assert model.rows == ()
+    assert model.columns == _EXPECTED_LOGGING_PDF_COLUMNS

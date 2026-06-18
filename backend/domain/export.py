@@ -14,6 +14,13 @@ analysis-Muster mit seinen ``Observed*``-Typen, ADR 0015).
   ``analysis_to_csv``/``build_analysis_pdf_model`` + Helfer ``_truncate``. ``severity`` als
   ``str`` (kein ``domain.analysis.Severity``-Import). ``generated_at`` als FELD (die Domaene
   fragt keine Uhr). Nutzt DASSELBE (generalisierte) ``PdfReportModel`` wie Block 1.
+* **Block 3 (Logging-Report):** ``ExportableLogging{Rtt,Event,Report}`` +
+  ``logging_report_to_json``/``logging_report_to_csv``/``build_logging_report_pdf_model`` +
+  Helfer ``_ts_to_iso``/``_format_period``. Eine Logging-Aufgabe ueber einen Zeitraum mit ZWEI
+  Mess-Reihen (RTT-Punkte + Ereignis-Flanken) + fertig gerechnetem SLA-Kopf (``uptime_pct`` als
+  ``float | None`` -- die Domaene rechnet KEINE SLA, sie fuehrt nur den Wert). CSV = die dichte
+  RTT-Messreihe, JSON = alles verlustfrei, PDF = lesbarer Bericht (SLA-Kopf + Ereignis-Liste).
+  KEIN ``domain.monitoring``-Import (independence). Nutzt DASSELBE ``PdfReportModel``.
 
 Was diese Domaene tut, ist deterministische Serialisierung bereits projizierter Werte:
 CSV-/JSON-STRING-Erzeugung ueber die stdlib (``csv``/``json``) und der Aufbau eines reinen
@@ -48,7 +55,8 @@ import csv
 import io
 import json
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Literal
 
 # Zielformat des Exports. PEP-695-Alias wie im uebrigen domain-Ring (diagnostics/process/
@@ -532,3 +540,278 @@ def build_analysis_pdf_model(analysis: ExportableAnalysis) -> PdfReportModel:
         columns=_ANALYSIS_PDF_COLUMNS,
         rows=rows,
     )
+
+
+# ── Block 3: Logging-Report -> CSV/JSON/PDF (Reporting Schnitt 1a) ────────────────────────
+#
+# DRITTE Datenquelle der export-Domaene: eine Langzeit-Logging-Aufgabe ueber einen Zeitraum
+# [since, until). Anders als Scan (gespeicherte ``scan_id``) und Analyse (frischer Snapshot,
+# kein Stand) traegt ein Logging-Report ZWEI Mess-Reihen: die dichten RTT-Punkte (Messwerte
+# je Tick) UND die Ereignis-Flanken (up/down-Uebergaenge). Der SLA-Kopf (Verfuegbarkeit/
+# Ausfallzeit/Durchschnitts-RTT) ist die Verdichtung dieser Punkte.
+#
+# INDEPENDENCE (independence-Contract, Block-1/2-Muster): ``domain.export`` importiert NICHT
+# ``domain.monitoring``. Eigene schlanke ``Exportable*``-Typen + die Projektion (LoggingTask/
+# LoggingRttSample/LoggingEventRow -> ExportableLogging*) lebt im Composition Root, der auch
+# den SLA-Kopf ueber ``compute_sla_stats`` rechnet und ``generated_at`` aus der Uhr setzt. Die
+# Domaene fuehrt nur die bereits projizierten Werte + die Serialisierungs-Strukturwahl.
+#
+# DREI-FORMAT-SCHNITT (Auftrag): CSV = die dichten RTT-Messreihen fuer die Tabellenkalkulation
+# (der typische CSV-Zweck); die Ereignisse gehoeren BEWUSST nicht in dieselbe flache Tabelle
+# (andere Spalten -- s. ``logging_report_to_csv``). JSON = alles verlustfrei (Kopf + ALLE
+# RTT-Punkte + ALLE Events). PDF = lesbarer Bericht (SLA-Kopf + Ereignis-Liste; KEINE
+# RTT-Punkte -- zu viele Zeilen).
+
+
+@dataclass(frozen=True)
+class ExportableLoggingRtt:
+    """Ein dichter RTT-Messpunkt einer Logging-Aufgabe als reines export-Wertobjekt (frozen).
+
+    ``ts`` ist Unix-ts (roher ``float`` -- die Domaene fragt keine Uhr; die lesbare
+    Darstellung macht ``_ts_to_iso`` beim Serialisieren), ``rtt_ms`` der Messwert (Sentinel
+    ``-1.0`` = nicht erreichbar, wie in ``domain.monitoring``), ``loss_pct`` der Paketverlust,
+    ``alive`` die Erreichbarkeit. Schlank projiziert aus ``LoggingRttSample`` im Composition
+    Root (independence: ``domain.export`` kennt ``domain.monitoring`` NICHT).
+    """
+
+    ts: float
+    rtt_ms: float
+    loss_pct: float
+    alive: bool
+
+
+@dataclass(frozen=True)
+class ExportableLoggingEvent:
+    """Eine Ereignis-/Anomalie-Flanke einer Logging-Aufgabe als reines export-Wertobjekt.
+
+    ``ts`` Unix-ts (roher ``float``, s. ``ExportableLoggingRtt``), ``event_type`` der ROHE
+    Ereignis-String (kein Live-Monitor-Enum -- der Logging-Kern fuehrt sein Vokabular als
+    ``str``, wie ``LoggingEventRow``), ``rtt_ms`` der Messwert an der Flanke. Projiziert aus
+    ``LoggingEventRow`` im Composition Root.
+    """
+
+    ts: float
+    event_type: str
+    rtt_ms: float
+
+
+@dataclass(frozen=True)
+class ExportableLoggingReport:
+    """Der gebuendelte Logging-Report eines Zeitraums als reines export-Wertobjekt (frozen).
+
+    Der Kopf identifiziert die Aufgabe (``task_label``/``task_purpose``/``target_id``) und den
+    Zeitraum: ``generated_at`` der ISO-Zeitstempel des Exports (kommt als FELD von aussen --
+    die Domaene fragt keine Uhr, Muster ``ExportableAnalysis``), ``period_from``/``period_to``
+    die ISO-Strings von ``since``/``until`` (``""`` wenn die Grenze offen ist).
+
+    Die SLA-Verdichtung kommt FERTIG GERECHNET herein (``compute_sla_stats`` im Composition
+    Root -- KEINE SLA-Mathematik in der export-Domaene): ``uptime_pct`` die Verfuegbarkeit in
+    Prozent ODER ``None`` (keine Auswertung moeglich -- leere Messreihe), ``avg_rtt_ms`` die
+    Durchschnitts-RTT, ``downtime_mins`` die geschaetzte Ausfallzeit in Minuten,
+    ``sample_count`` die Zahl der Messpunkte.
+
+    ``rtt_points`` die dichten Messpunkte (fuer CSV/JSON, verlustfrei), ``events`` die Flanken
+    (fuer JSON/PDF). Beide in Eingabe-Reihenfolge (chronologisch aus den Repos -- NICHT
+    umsortiert). Default ``()`` (leerer Report ist gueltig).
+    """
+
+    task_label: str
+    task_purpose: str
+    target_id: str
+    generated_at: str
+    period_from: str
+    period_to: str
+    uptime_pct: float | None
+    avg_rtt_ms: float
+    downtime_mins: float
+    sample_count: int
+    rtt_points: tuple[ExportableLoggingRtt, ...] = ()
+    events: tuple[ExportableLoggingEvent, ...] = field(default_factory=tuple)
+
+
+# CSV-Spalten in DEFINIERTER Reihenfolge (Auftrag). Der Logging-Report hat ZWEI Datenarten
+# (RTT-Punkte + Events) mit verschiedenen Spalten -- die saubere Wahl (Auftrag): die CSV traegt
+# NUR die dichten RTT-Messpunkte. Begruendung: die CSV ist die dichte Messreihe fuer die
+# Tabellenkalkulation (der typische CSV-Zweck -- eine homogene Tabelle, ein Punkt pro Zeile);
+# die Ereignis-Flanken haben ein anderes Schema (event_type statt loss_pct/alive) und wuerden
+# eine zweite, fremde Tabelle in dieselbe Datei zwaengen. Sie bleiben verlustfrei in JSON und
+# lesbar im PDF. ``ts`` als lesbarer ISO-String (``_ts_to_iso``), NICHT der rohe float -- eine
+# Tabellenkalkulation liest den Zeitstempel so direkt. Tupel-Reihenfolge ist Vertrag
+# (mutationsproben-tauglich getestet).
+_LOGGING_RTT_CSV_COLUMNS: tuple[str, ...] = (
+    "ts_iso",
+    "rtt_ms",
+    "loss_pct",
+    "alive",
+)
+
+# PDF-Tabellen-Spalten in DEFINIERTER Reihenfolge (Auftrag): die EREIGNIS-LISTE (Flanken) --
+# ein lesbarer Bericht zeigt die Uebergaenge, NICHT die dichten RTT-Punkte (zu viele Zeilen;
+# die sind in CSV/JSON). Spalten Zeitpunkt/Ereignis/RTT. Auch dies ist Vertrag (Mutationsprobe:
+# entfernte/vertauschte Spalte -> rot).
+_LOGGING_EVENT_PDF_COLUMNS: tuple[str, ...] = (
+    "Zeitpunkt",
+    "Ereignis",
+    "RTT",
+)
+
+# Fester Berichtstitel des Monitoring-Berichts (Auftrag).
+_LOGGING_PDF_TITLE = "CERNIS PRO — Monitoring-Bericht"
+
+
+def _ts_to_iso(ts: float) -> str:
+    """Macht aus einem Unix-ts (``float``) einen lesbaren ISO-Zeitstempel -- rein, testbar.
+
+    Reine Wertumwandlung -- KEINE Domaenen-Uhr: der ``ts`` ist gegeben (er kommt aus dem
+    Messpunkt), diese Funktion liest nur seine lesbare Form. ``datetime.fromtimestamp(ts)``
+    nimmt die lokale Zeitzone (wie ``build_hourly_chart`` in der SLA-Domaene), ``isoformat()``
+    liefert den kanonischen ISO-String. Sekundengenau ist fuer einen Mess-Zeitstempel
+    ausreichend; Bruchsekunden bleiben erhalten, falls der ts welche traegt.
+
+    Rein: kein I/O, keine Uhr-Abfrage; gleiche Eingabe -> gleiches Ergebnis.
+    """
+    return datetime.fromtimestamp(ts).isoformat()
+
+
+def logging_report_to_json(report: ExportableLoggingReport) -> str:
+    """Serialisiert den Logging-Report VERLUSTFREI als JSON-String -- deterministisch.
+
+    Der komplette Report (Kopf-Felder + SLA-Verdichtung + ALLE ``rtt_points`` + ALLE
+    ``events``) wird ueber die stdlib ``json`` serialisiert. Deterministisch + reproduzierbar:
+    ``sort_keys`` (stabile Key-Reihenfolge), ``indent=2`` (lesbar), ``ensure_ascii=False``
+    (echtes UTF-8 -- Sonderzeichen bleiben lesbar). Anders als CSV (nur RTT-Reihe) ist JSON die
+    VERLUSTFREIE Form: beide Mess-Reihen vollstaendig, jeder Punkt mit dem rohen ``ts``
+    (maschinenlesbar) UND dem lesbaren ``ts_iso``. Die Reihenfolge beider Listen bleibt die der
+    Eingabe (nur Objekt-Keys werden sortiert) -- so spiegelt der Export die chronologische
+    Mess-Ordnung reproduzierbar.
+
+    Rein: kein I/O, keine Uhr; gleiche Eingabe -> gleicher String.
+    """
+    payload = {
+        "task_label": report.task_label,
+        "task_purpose": report.task_purpose,
+        "target_id": report.target_id,
+        "generated_at": report.generated_at,
+        "period_from": report.period_from,
+        "period_to": report.period_to,
+        "uptime_pct": report.uptime_pct,
+        "avg_rtt_ms": report.avg_rtt_ms,
+        "downtime_mins": report.downtime_mins,
+        "sample_count": report.sample_count,
+        "rtt_points": [
+            {
+                "ts": point.ts,
+                "ts_iso": _ts_to_iso(point.ts),
+                "rtt_ms": point.rtt_ms,
+                "loss_pct": point.loss_pct,
+                "alive": point.alive,
+            }
+            for point in report.rtt_points
+        ],
+        "events": [
+            {
+                "ts": event.ts,
+                "ts_iso": _ts_to_iso(event.ts),
+                "event_type": event.event_type,
+                "rtt_ms": event.rtt_ms,
+            }
+            for event in report.events
+        ],
+    }
+    return json.dumps(payload, sort_keys=True, indent=2, ensure_ascii=False)
+
+
+def logging_report_to_csv(report: ExportableLoggingReport) -> str:
+    """Serialisiert die RTT-MESSREIHE des Reports als CSV-String -- flach, deterministisch.
+
+    BEWUSSTE WAHL (Auftrag, s. ``_LOGGING_RTT_CSV_COLUMNS``): die CSV traegt NUR die dichten
+    RTT-Messpunkte (eine homogene Tabelle, ein Punkt pro Zeile -- der typische CSV-Zweck der
+    Tabellenkalkulation). Die Ereignis-Flanken haben ein anderes Schema und bleiben verlustfrei
+    in JSON / lesbar im PDF; sie werden NICHT in dieselbe flache Tabelle gezwaengt.
+
+    Eine Header-Zeile (``_LOGGING_RTT_CSV_COLUMNS``) + eine Zeile pro RTT-Punkt in
+    Eingabe-Reihenfolge. ``ts`` als lesbarer ISO-String (``_ts_to_iso``). ``alive`` als
+    ``"true"``/``"false"`` (lesbar + eindeutig -- ``"1"``/``"0"`` waere mit den numerischen
+    RTT-/loss-Spalten leichter zu verwechseln). Sonderzeichen werden vom stdlib ``csv``-Modul
+    korrekt escaped (hier real nicht noetig, aber konsistent zu Block 1/2). ``\\r\\n`` als
+    Zeilenende (RFC-4180-konform, plattformunabhaengig).
+
+    Rein: kein I/O (in-memory ``StringIO``), keine Uhr; gleiche Eingabe -> gleicher String.
+    """
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(_LOGGING_RTT_CSV_COLUMNS)
+    for point in report.rtt_points:
+        writer.writerow(
+            [
+                _ts_to_iso(point.ts),
+                point.rtt_ms,
+                point.loss_pct,
+                "true" if point.alive else "false",
+            ]
+        )
+    return buffer.getvalue()
+
+
+def build_logging_report_pdf_model(report: ExportableLoggingReport) -> PdfReportModel:
+    """Baut das reine (generische) ``PdfReportModel`` aus dem Logging-Report -- testbar.
+
+    Nutzt das BESTEHENDE ``PdfReportModel`` (kein neues Modell, Muster Block 2). Der Kopf
+    traegt den festen Titel (``_LOGGING_PDF_TITLE``) und die SLA-Verdichtung als generische
+    ``meta``-Paare: Aufgabe/Zweck/Ziel/Zeitraum + Verfuegbarkeit/Ø-RTT/Ausfallzeit/Messpunkte.
+    ``uptime_pct`` ``None`` -> ``"keine Auswertung"`` (kein erfundener Wert; ADR 0001 -- eine
+    leere Messreihe ist keine 0%-Verfuegbarkeit). Die Tabelle ist die EREIGNIS-LISTE
+    (``_LOGGING_EVENT_PDF_COLUMNS``: Zeitpunkt/Ereignis/RTT) -- je Event eine Zeile in
+    Eingabe-Reihenfolge; KEINE RTT-Punkte (zu viele Zeilen -- die sind in CSV/JSON).
+
+    ZAHLEN-FORMAT (Auftrag): einfach + deterministisch, server-seitig, KEINE Lokalisierung --
+    ``f"{x:.1f}"`` (ein Dezimalwert, Dezimalpunkt). ``ts`` der Events als lesbarer Zeitstempel
+    (``_ts_to_iso``).
+
+    Rein: kein I/O, keine Uhr; gleiche Eingabe -> gleiches Modell.
+    """
+    period = _format_period(report.period_from, report.period_to)
+    uptime = "keine Auswertung" if report.uptime_pct is None else f"{report.uptime_pct:.1f} %"
+    meta = (
+        ("Aufgabe", report.task_label),
+        ("Zweck", report.task_purpose),
+        ("Ziel", report.target_id),
+        ("Zeitraum", period),
+        ("Verfügbarkeit", uptime),
+        ("Ø-RTT", f"{report.avg_rtt_ms:.1f} ms"),
+        ("ca. Ausfallzeit", f"{report.downtime_mins:.1f} Min"),
+        ("Messpunkte", str(report.sample_count)),
+    )
+    rows = tuple(
+        (
+            _ts_to_iso(event.ts),
+            event.event_type,
+            f"{event.rtt_ms:.1f}",
+        )
+        for event in report.events
+    )
+    return PdfReportModel(
+        title=_LOGGING_PDF_TITLE,
+        meta=meta,
+        columns=_LOGGING_EVENT_PDF_COLUMNS,
+        rows=rows,
+    )
+
+
+def _format_period(period_from: str, period_to: str) -> str:
+    """Formt die beiden Zeitraum-Grenzen zu einer lesbaren Kopf-Zeile -- rein, testbar.
+
+    Beide Grenzen koennen offen sein (``""`` -- der Aufrufer reicht offene ``since``/``until``
+    so herein). Es gibt vier Faelle, je sprechend formuliert (kein nacktes Trenner-Em-Dash mit
+    leerer Seite): beide gesetzt -> ``"<from> — <to>"``; nur ``from`` -> ``"ab <from>"``; nur
+    ``to`` -> ``"bis <to>"``; keine Grenze -> ``"gesamter Zeitraum"`` (der offene Default, der
+    den ganzen Task meint). Trenner ist das EM DASH ``—`` (wie die Berichtstitel -- das EN DASH
+    waere ein mit ``-`` verwechselbares Zeichen).
+    """
+    if period_from and period_to:
+        return f"{period_from} — {period_to}"
+    if period_from:
+        return f"ab {period_from}"
+    if period_to:
+        return f"bis {period_to}"
+    return "gesamter Zeitraum"

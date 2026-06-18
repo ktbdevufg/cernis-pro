@@ -14,6 +14,7 @@ import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from dataclasses import replace
+from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
@@ -89,7 +90,7 @@ from api.diagnostics import (
     provide_run_traceroute,
 )
 from api.diagnostics import router as diagnostics_router
-from api.export import provide_export_analysis, provide_export_scan
+from api.export import provide_export_analysis, provide_export_logging, provide_export_scan
 from api.export import router as export_router
 from api.fritz import provide_get_fritz_detail
 from api.fritz import router as fritz_router
@@ -212,7 +213,13 @@ from application.diagnostics import (
     RogueDhcpPermissionError,
     RunTraceroute,
 )
-from application.export import ExportAnalysis, ExportScan, ScanNotFoundError
+from application.export import (
+    ExportAnalysis,
+    ExportLoggingReport,
+    ExportScan,
+    LoggingReportNotFound,
+    ScanNotFoundError,
+)
 from application.fritz_detail import FritzDetailAuthError, GetFritzDetail
 from application.interfaces import ListInterfaces
 from application.metrics import ExportMetrics
@@ -276,6 +283,9 @@ from domain.export import (
     ExportableAnalysis,
     ExportableFinding,
     ExportableHost,
+    ExportableLoggingEvent,
+    ExportableLoggingReport,
+    ExportableLoggingRtt,
     ExportablePort,
     ExportableScan,
 )
@@ -286,6 +296,7 @@ from domain.monitoring import (
     MonitorEventType,
     PingSample,
     ThresholdCondition,
+    compute_sla_stats,
 )
 from domain.process import classify_kind
 from domain.scanning import EnrichedHost
@@ -2416,6 +2427,113 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         return await ExportAnalysis(_analysis_provider, ReportlabRenderer())(fmt)
 
     app.dependency_overrides[provide_export_analysis] = lambda: _export_analysis
+
+    # ── export-Domaene Block 3 verdrahten (Logging-Report -> CSV/JSON/PDF, Schnitt 1a) ──
+    # Der ExportLoggingReport-Use-Case kennt KEINE monitoring-Domaene: er bekommt den Report
+    # ueber ein schlankes logging_report_provider-Callable (task_id + since/until -> projizierter
+    # Report | None), das HIER im Composition Root die drei Logging-Repos liest, den SLA-Kopf
+    # ueber die reine compute_sla_stats rechnet UND auf domain.export.ExportableLoggingReport
+    # PROJIZIERT (Muster _project_scan_to_exportable / _analysis_provider -- Fremd-Domaenen-
+    # Kopplung gehoert in die Verdrahtung, NICHT in domain.export, independence-Contract).
+    # Reuse der bestehenden Logging-Repos (logging_task_repository/logging_rtt_repository/
+    # logging_event_repository, lru_cache, im Logging-Block verdrahtet) + des export_clock --
+    # KEINE zweiten Instanzen. Der Renderer ist der zustandslose ReportlabRenderer.
+    #
+    # ZEITRAUM-NAHT (markierte Stelle): RTT hat ein all_for (alle Punkte eines Tasks); der
+    # LoggingEventRepository hat dagegen KEIN all_for, nur range(task_id, since, until). Statt
+    # den Port um ein all_for zu erweitern (schwergewichtig fuer einen Effekt, den range schon
+    # liefert) loesen wir den offenen Zeitraum schlank ueber range mit since=0 / until=now+Puffer
+    # (die Uhr aus export_clock, der EINEN Zeitquelle -- der Puffer faengt Mess-ts ab, die
+    # minimal nach now liegen). Bei gesetztem since/until gilt das halb-offene Fenster [since,
+    # until) beider range-Methoden direkt. RTT nutzt all_for nur im voll-offenen Fall (since UND
+    # until None) -- sonst ebenfalls range, damit RTT- und Event-Reihe denselben Ausschnitt
+    # zeigen.
+    def _project_logging_to_exportable(
+        task: LoggingTask,
+        since: float | None,
+        until: float | None,
+        generated_at: str,
+    ) -> ExportableLoggingReport:
+        # Effektive Grenzen fuer die range-Reads: offener since -> 0.0, offener until ->
+        # now+Puffer (die Uhr; Mess-ts liegen nie weit in der Zukunft). Beide range-Methoden
+        # sind halb-offen [since, until), konsistent zur Domaenen-Fenster-Semantik.
+        eff_since = since if since is not None else 0.0
+        eff_until = until if until is not None else export_clock.now().timestamp() + 86400.0
+        # RTT-Punkte: voll-offen -> all_for (alle Punkte des Tasks); sonst der range-Ausschnitt.
+        if since is None and until is None:
+            rtt_samples = logging_rtt_repository().all_for(task.id)
+        else:
+            rtt_samples = logging_rtt_repository().range(task.id, eff_since, eff_until)
+        # Events: es gibt kein all_for -- immer range (im offenen Fall mit 0/now+Puffer).
+        event_rows = logging_event_repository().range(task.id, eff_since, eff_until)
+        # SLA-Kopf ueber die reine compute_sla_stats (Muster GetLoggingTaskSla): die
+        # LoggingRttSample (rtt_ms/loss_pct/alive/ts) zu (alive, rtt_ms, ts)-Tupeln formen --
+        # das Eingabeformat der Domaenen-Rechnung. interval_s=task.interval_s (korrekte
+        # Downtime-Schaetzung pro Task). days=0: KEIN Zeitfenster (der Report rechnet ueber den
+        # geladenen Ausschnitt, nicht ueber ein days-Fenster -- GetLoggingTaskSla-Linie).
+        sla_rows = [(float(s.alive), s.rtt_ms, s.ts) for s in rtt_samples]
+        stats = compute_sla_stats(sla_rows, days=0, interval_s=task.interval_s)
+        # Projektion auf die schlanken export-Typen (independence: domain.export kennt
+        # monitoring NICHT). generated_at + period_from/to kommen als ISO-Strings herein (die
+        # Domaene fragt keine Uhr); offene Grenze -> "".
+        rtt_points = tuple(
+            ExportableLoggingRtt(ts=s.ts, rtt_ms=s.rtt_ms, loss_pct=s.loss_pct, alive=s.alive)
+            for s in rtt_samples
+        )
+        events = tuple(
+            ExportableLoggingEvent(ts=e.ts, event_type=e.event_type, rtt_ms=e.rtt_ms)
+            for e in event_rows
+        )
+        # period_from/to als lesbare ISO-Strings der since/until-Grenzen (offene Grenze ->
+        # ""). BEWUSST die LOKALE fromtimestamp (datetime.fromtimestamp ohne tz) -- konsistent
+        # zu domain._ts_to_iso, das die Mess-/Event-Zeitstempel im selben Bericht ebenfalls
+        # lokal darstellt; so passen Kopf-Zeitraum und Punkt-Zeitstempel zusammen (der
+        # generated_at-Kopf ist UTC, aber das ist der Erzeugungs-, kein Mess-Zeitstempel).
+        return ExportableLoggingReport(
+            task_label=task.label,
+            task_purpose=task.purpose,
+            target_id=task.target_id,
+            generated_at=generated_at,
+            period_from=datetime.fromtimestamp(since).isoformat() if since is not None else "",
+            period_to=datetime.fromtimestamp(until).isoformat() if until is not None else "",
+            uptime_pct=stats["uptime_pct"],
+            avg_rtt_ms=stats["avg_rtt_ms"],
+            downtime_mins=stats["downtime_mins"],
+            sample_count=stats["samples"],
+            rtt_points=rtt_points,
+            events=events,
+        )
+
+    def _logging_report_provider(
+        task_id: str, since: float | None, until: float | None
+    ) -> ExportableLoggingReport | None:
+        # logging_task_repository().get liefert den LoggingTask | None (None = task_id gibt es
+        # nicht, ein gueltiger Zustand). Nur ein gefundener Task wird projiziert; None reicht
+        # der Use-Case in seine LoggingReportNotFound -> 404 (kein stiller leerer Export).
+        task = logging_task_repository().get(task_id)
+        if task is None:
+            return None
+        generated_at = export_clock.now().isoformat()
+        return _project_logging_to_exportable(task, since, until, generated_at)
+
+    def _export_logging(
+        task_id: str, fmt: Literal["csv", "json", "pdf"], since: float | None, until: float | None
+    ) -> Any:
+        return ExportLoggingReport(_logging_report_provider, ReportlabRenderer())(
+            task_id, fmt, since, until
+        )
+
+    app.dependency_overrides[provide_export_logging] = lambda: _export_logging
+
+    @app.exception_handler(LoggingReportNotFound)
+    async def _on_logging_report_not_found(
+        _request: Request, exc: LoggingReportNotFound
+    ) -> JSONResponse:
+        # Nicht existierende task_id -> 404 (die Ressource gibt es nicht, kein leerer Export).
+        # Muster des ScanNotFoundError-Handlers: das Mapping sitzt am Composition Root, der
+        # api-Ring bleibt clean. Reiner application-Zustand (der Provider lieferte None).
+        logger.info("export_logging_not_found", task_id=exc.task_id)
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
 
     # A.2-Verwaltungs-Runner: der api-Ring bleibt domain-frei -- das Bauen der
     # domain.Rule aus dem Request-DTO + der Aufruf der Use-Cases passiert HIER im

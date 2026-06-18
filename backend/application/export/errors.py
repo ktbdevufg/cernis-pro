@@ -31,3 +31,25 @@ class ScanNotFoundError(ExportApplicationError):
     def __init__(self, scan_id: int) -> None:
         self.scan_id = scan_id
         super().__init__(f"Scan {scan_id} wurde nicht gefunden.")
+
+
+class LoggingReportNotFound(ExportApplicationError):
+    """Die angefragte ``task_id`` hat keine Logging-Aufgabe (Block 3).
+
+    Reiner APPLICATION-Zustand (Muster ``ScanNotFoundError``): der ``logging_report_provider``
+    lieferte ``None`` (kein Task zu dieser id). Der Use-Case wirft diese Exception statt eines
+    stillen leeren Exports (ADR 0001: kein stiller Fallback -- eine nicht existierende id ist
+    ein Fehler, kein leerer Bericht). Der api-Rand bildet sie auf **404** ab (eigener globaler
+    Handler im Composition Root, Muster ``ScanNotFoundError`` -> 404).
+
+    EIGENER Fehler in ``application/export`` (NICHT die bestehende
+    ``application.monitoring.LoggingTaskNotFound``): der Export-Use-Case bleibt damit frei von
+    einer Kopplung an ein anderes application-Modul -- symmetrisch zu ``ScanNotFoundError``
+    (der Scan-Export importiert auch keine scanning-Application). Die ``task_id`` ist ein
+    dateinamen-tauglicher Hex-String; sie wird im Fehler mitgefuehrt, damit er ohne
+    Kontext-Rekonstruktion sprechend ist.
+    """
+
+    def __init__(self, task_id: str) -> None:
+        self.task_id = task_id
+        super().__init__(f"Logging-Aufgabe {task_id} wurde nicht gefunden.")

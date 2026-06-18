@@ -14,8 +14,11 @@ import pytest
 from application.export import (
     AnalysisProvider,
     ExportAnalysis,
+    ExportLoggingReport,
     ExportResult,
     ExportScan,
+    LoggingReportNotFound,
+    LoggingReportProvider,
     ScanNotFoundError,
     ScanProvider,
 )
@@ -23,10 +26,14 @@ from domain.export import (
     ExportableAnalysis,
     ExportableFinding,
     ExportableHost,
+    ExportableLoggingEvent,
+    ExportableLoggingReport,
+    ExportableLoggingRtt,
     ExportablePort,
     ExportableScan,
     PdfReportModel,
     build_analysis_pdf_model,
+    build_logging_report_pdf_model,
     build_pdf_model,
 )
 
@@ -232,3 +239,112 @@ def test_export_analysis_empty_is_valid() -> None:
     payload = json.loads(result.content.decode("utf-8"))
     assert payload["finding_count"] == 0
     assert payload["findings"] == []
+
+
+# ── Block 3: ExportLoggingReport (sync, Fake-report_provider + Fake-Renderer) ──
+#
+# Alle drei Formate liefern korrekten content/media_type/filename (cernis-monitoring-<task_id>);
+# since/until werden an den Provider durchgereicht; der pdf-Pfad ruft render_pdf mit genau dem
+# aus dem Report gebauten Modell; eine unbekannte task_id -> LoggingReportNotFound (kein Render).
+
+
+def _report() -> ExportableLoggingReport:
+    return ExportableLoggingReport(
+        task_label="WLAN-Gast",
+        task_purpose="Stabilitaet pruefen",
+        target_id="abc123",
+        generated_at="2026-06-11T15:30:00+00:00",
+        period_from="2026-06-11T14:00:00",
+        period_to="2026-06-11T15:00:00",
+        uptime_pct=99.5,
+        avg_rtt_ms=12.5,
+        downtime_mins=1.5,
+        sample_count=2,
+        rtt_points=(
+            ExportableLoggingRtt(ts=1_749_640_200.0, rtt_ms=12.5, loss_pct=0.0, alive=True),
+        ),
+        events=(ExportableLoggingEvent(ts=1_749_640_230.0, event_type="down", rtt_ms=-1.0),),
+    )
+
+
+def _report_provider_for(
+    report: ExportableLoggingReport, known_id: str = "abc123"
+) -> LoggingReportProvider:
+    """Fake-Provider: bekannte task_id -> Report, sonst None. Merkt sich since/until."""
+
+    def _provider(
+        task_id: str, since: float | None, until: float | None
+    ) -> ExportableLoggingReport | None:
+        _provider.calls.append((task_id, since, until))  # type: ignore[attr-defined]
+        return report if task_id == known_id else None
+
+    _provider.calls = []  # type: ignore[attr-defined]
+    return _provider
+
+
+def test_export_logging_json() -> None:
+    use_case = ExportLoggingReport(_report_provider_for(_report()), FakeRenderer())
+
+    result = use_case("abc123", "json", None, None)
+
+    assert isinstance(result, ExportResult)
+    assert result.media_type == "application/json"
+    assert result.filename == "cernis-monitoring-abc123.json"
+    payload = json.loads(result.content.decode("utf-8"))
+    assert payload["task_label"] == "WLAN-Gast"
+    assert payload["sample_count"] == 2
+    assert len(payload["rtt_points"]) == 1
+    assert len(payload["events"]) == 1
+
+
+def test_export_logging_csv() -> None:
+    use_case = ExportLoggingReport(_report_provider_for(_report()), FakeRenderer())
+
+    result = use_case("abc123", "csv", None, None)
+
+    assert result.media_type == "text/csv"
+    assert result.filename == "cernis-monitoring-abc123.csv"
+    text = result.content.decode("utf-8")
+    assert text.splitlines()[0].startswith("ts_iso,rtt_ms,loss_pct,alive")
+    # Die CSV traegt die RTT-Reihe, nicht die Events.
+    assert "down" not in text
+
+
+def test_export_logging_pdf_calls_renderer_with_expected_model() -> None:
+    report = _report()
+    renderer = FakeRenderer()
+    use_case = ExportLoggingReport(_report_provider_for(report), renderer)
+
+    result = use_case("abc123", "pdf", None, None)
+
+    assert result.media_type == "application/pdf"
+    assert result.filename == "cernis-monitoring-abc123.pdf"
+    assert result.content == b"%PDF-FAKE"
+    assert len(renderer.calls) == 1
+    assert renderer.calls[0] == build_logging_report_pdf_model(report)
+
+
+def test_export_logging_passes_since_until_through() -> None:
+    """since/until werden unveraendert an den Provider durchgereicht."""
+    provider = _report_provider_for(_report())
+    use_case = ExportLoggingReport(provider, FakeRenderer())
+
+    use_case("abc123", "json", 100.0, 200.0)
+
+    assert provider.calls == [("abc123", 100.0, 200.0)]  # type: ignore[attr-defined]
+
+
+def test_unknown_task_id_raises_logging_report_not_found() -> None:
+    use_case = ExportLoggingReport(_report_provider_for(_report()), FakeRenderer())
+    with pytest.raises(LoggingReportNotFound) as exc_info:
+        use_case("nope", "json", None, None)
+    assert exc_info.value.task_id == "nope"
+
+
+def test_unknown_task_id_does_not_render() -> None:
+    """Bei unbekannter task_id wird der Renderer NICHT gerufen (kein leerer Export)."""
+    renderer = FakeRenderer()
+    use_case = ExportLoggingReport(_report_provider_for(_report()), renderer)
+    with pytest.raises(LoggingReportNotFound):
+        use_case("nope", "pdf", None, None)
+    assert renderer.calls == []
