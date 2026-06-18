@@ -11,7 +11,7 @@
 // Die View weiß nicht, ob die Daten echt oder Platzhalter sind. Bei echter
 // Anbindung wird nur dieser Import ausgetauscht.
 
-import { Activity, ListTree, Radar, Repeat } from "lucide-react";
+import { Activity, FileClock, ListTree, Radar, Repeat } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -26,6 +26,7 @@ import { fetchSettings, updateSetting } from "../api/settings.js";
 import { CardGrid, FunctionShell } from "../components/AreaShell.jsx";
 import ColumnManager from "../components/ColumnManager.jsx";
 import FunctionCard from "../components/FunctionCard.jsx";
+import LoggingPanel from "../components/LoggingPanel.jsx";
 import MonitorView from "../components/MonitorView.jsx";
 import ScanDetailPanel from "../components/ScanDetailPanel.jsx";
 import ScanTable, {
@@ -58,6 +59,7 @@ const FUNKTIONEN = [
   { id: "scan", icon: Radar, locked: false },
   { id: "traffic", icon: Repeat, locked: false },
   { id: "monitor", icon: Activity, locked: false },
+  { id: "logging", icon: FileClock, locked: false },
   { id: "processes", icon: ListTree, locked: true },
 ];
 
@@ -526,10 +528,24 @@ function ScanInhalt() {
 export default function ObserveView({
   refreshInterval = 0,
   onRefreshIntervalChange,
+  initialFunction = null,
+  onFunktionGeoeffnet,
 }) {
   const { t } = useTranslation();
-  // null -> Kachel-Übersicht; sonst die geöffnete Funktion.
-  const [openFunction, setOpenFunction] = useState(null);
+  // null -> Kachel-Übersicht; sonst die geöffnete Funktion. Eine von aussen
+  // gewuenschte Funktion (initialFunction, z. B. vom Kopfzeilen-Live-Pill) wird
+  // initial uebernommen.
+  const [openFunction, setOpenFunction] = useState(initialFunction);
+
+  // Wechselt initialFunction (z. B. erneuter Pill-Klick bei bereits offenem
+  // Beobachten-Bereich), die gewuenschte Funktion oeffnen und beim Eltern-State
+  // quittieren, damit der Nutzer danach frei zur Uebersicht zurueck kann.
+  useEffect(() => {
+    if (initialFunction) {
+      setOpenFunction(initialFunction);
+      onFunktionGeoeffnet?.();
+    }
+  }, [initialFunction, onFunktionGeoeffnet]);
 
   if (openFunction === "scan") {
     return (
@@ -563,6 +579,17 @@ export default function ObserveView({
         onBack={() => setOpenFunction(null)}
       >
         <MonitorView />
+      </FunctionShell>
+    );
+  }
+
+  if (openFunction === "logging") {
+    return (
+      <FunctionShell
+        title={t("beobachten.cards.logging.title")}
+        onBack={() => setOpenFunction(null)}
+      >
+        <LoggingPanel />
       </FunctionShell>
     );
   }

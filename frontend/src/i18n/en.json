@@ -4,7 +4,10 @@
   },
   "header": {
     "manual": "Manual",
-    "settings": "Settings"
+    "settings": "Settings",
+    "liveOne": "Live monitoring active",
+    "liveMany": "{{count}} monitorings active",
+    "liveZurAnsicht": "Open logging view"
   },
   "settings": {
     "title": "Settings",
@@ -131,6 +134,11 @@
       "monitor": {
         "title": "Live monitoring",
         "subtitle": "Reachability and latency of gateway and internet, live.",
+        "locked": ""
+      },
+      "logging": {
+        "title": "Logging tasks",
+        "subtitle": "Record reachability and latency over time — immediate or scheduled.",
         "locked": ""
       },
       "processes": {
@@ -291,6 +299,88 @@
       "verlaufTitel": "RTT history",
       "liveFenster": "Live window",
       "verlaufLeer": "No history data yet."
+    },
+    "logging": {
+      "modusAssistent": "Wizard",
+      "modusErweitert": "Advanced",
+      "neueAufgabe": "New logging task",
+      "schrittVon": "Step {{aktuell}} of {{gesamt}}",
+      "weiter": "Next",
+      "zurueck": "Back",
+      "anlegen": "Create",
+      "anlegenStarten": "Create & start",
+      "abbrechen": "Cancel",
+      "anlegenFehler": "Task could not be created.",
+      "schritt1Titel": "Target & purpose",
+      "schritt2Titel": "Capture",
+      "schritt3Titel": "Operation mode",
+      "zielLabel": "Target",
+      "zielPlaceholder": "Choose target …",
+      "zielLeer": "No targets available. Is monitoring running?",
+      "zweckLabel": "Purpose (optional)",
+      "zweckPlaceholder": "e.g. troubleshooting in the evening",
+      "bezeichnungLabel": "Label",
+      "bezeichnungPlaceholder": "e.g. gateway logging",
+      "captureLabel": "What is captured?",
+      "capture": {
+        "interface_status": {
+          "titel": "Interface status",
+          "text": "Only up/down per interface. Very frugal."
+        },
+        "reachability": {
+          "titel": "Reachability",
+          "text": "Whether the target responds. Little data."
+        },
+        "reachability_latency": {
+          "titel": "Reachability + latency",
+          "text": "Response and round-trip time (RTT).",
+          "mengeHinweis": "Produces the most measurement data."
+        }
+      },
+      "betriebLabel": "Operation mode",
+      "betriebSofort": "Immediate",
+      "betriebGeplant": "Scheduled",
+      "dauerLabel": "Maximum duration",
+      "dauer": {
+        "30min": "30 minutes",
+        "2h": "2 hours",
+        "6h": "6 hours",
+        "1d": "1 day",
+        "1w": "1 week"
+      },
+      "startLabel": "Start",
+      "endeLabel": "End",
+      "listeTitel": "Logging tasks",
+      "listeLeer": "No logging tasks created yet.",
+      "state": {
+        "created": "Created",
+        "active": "Active",
+        "paused": "Paused",
+        "finished": "Finished"
+      },
+      "captureKurz": {
+        "interface_status": "Interface status",
+        "reachability": "Reachability",
+        "reachability_latency": "Reachability + latency"
+      },
+      "aktion": {
+        "start": "Start",
+        "pause": "Pause",
+        "resume": "Resume",
+        "stop": "Stop",
+        "delete": "Delete"
+      },
+      "aktionFehler": "Action failed.",
+      "rest": {
+        "tage": "{{value}}d",
+        "stunden": "{{value}}h",
+        "minuten": "{{value}}m",
+        "sekunden": "{{value}}s",
+        "zwei": "{{erste}} {{zweite}} left",
+        "eine": "{{erste}} left",
+        "jetzt": "ending now"
+      },
+      "ladeFehler": "Logging tasks could not be loaded."
     },
     "lookup": {
       "title": "Look up remote endpoint",

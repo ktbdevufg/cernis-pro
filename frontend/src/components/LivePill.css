@@ -1,0 +1,59 @@
+/* Kopfzeilen-Pill "Live-Monitoring aktiv" (§7). Rotes Pill mit pulsierendem
+   Punkt. Nur Token-Variablen (tokens.css), nie feste Farben. Der rote Ton kommt
+   aus den Severity/High-Tokens (semantisch "achtung, laeuft live"). */
+
+.live-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 11px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--sev-high-text);
+  background: var(--sev-high-bg);
+  border: 1px solid var(--sev-high-bd);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.live-pill:hover {
+  background: var(--sev-high-bg);
+  border-color: var(--sev-high-text);
+}
+
+.live-pill:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Pulsierender Punkt: in der roten Pill-Farbe. */
+.live-pill__punkt {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--status-offline);
+  box-shadow: 0 0 5px var(--status-offline);
+  animation: live-pill-puls 1.4s ease-in-out infinite;
+}
+
+@keyframes live-pill-puls {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.live-pill__text {
+  white-space: nowrap;
+}
+
+/* Restzeit dezenter als der Haupttext. */
+.live-pill__rest {
+  color: var(--sev-high-text);
+  opacity: 0.8;
+  white-space: nowrap;
+}

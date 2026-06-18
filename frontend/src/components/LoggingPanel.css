@@ -1,0 +1,487 @@
+/* Logging-Aufgaben-Maske: Anlage (Assistent/Erweitert) + Uebersicht/Player.
+   Nur Token-Variablen (tokens.css), nie feste Farben. Designsprache wie
+   MonitorView/ObserveView (ruhige Card-Flaechen, Akzent dezent, mono fuer Zahlen).
+   Zustands-Pill: aktiv gruen / pausiert lila / angelegt grau / beendet gedaempft. */
+
+.logging {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Dezenter Fehlerhinweis oben (Anlage/Aktion/Laden). Warnton, kein Alarm. */
+.logging__fehler {
+  flex-shrink: 0;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--sev-med-text);
+  background: var(--sev-med-bg);
+  border: 1px solid var(--sev-med-bd);
+  border-radius: var(--radius-md);
+}
+
+/* ── Anlage-Maske ─────────────────────────────────────────────────────────── */
+
+.logging__maske {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  flex-shrink: 0;
+  padding: 16px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.logging__maske-kopf {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.logging__maske-titel {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+/* Segment-Control: Anlage-Modus. Akzent-Wanne fuer den aktiven Knopf. */
+.logging__segment {
+  display: inline-flex;
+  padding: 3px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.logging__segment-knopf {
+  padding: 5px 14px;
+  font-size: 13px;
+  color: var(--color-text-sec);
+  background: transparent;
+  border: none;
+  border-radius: calc(var(--radius-md) - 2px);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.logging__segment-knopf--aktiv {
+  color: var(--color-accent-strong);
+  background: var(--color-accent-bg-strong);
+}
+
+.logging__segment-knopf:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+/* ── Felder (in beiden Modi genutzt) ───────────────────────────────────────── */
+
+.logging-feld {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.logging-feld__label {
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+.logging-feld__input,
+.logging-feld__select {
+  padding: 7px 10px;
+  font-size: 13px;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.logging-feld__input:focus-visible,
+.logging-feld__select:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+/* Betriebsart-Radios: schlichte Zeile. */
+.logging__radiozeile {
+  display: flex;
+  gap: 18px;
+}
+
+.logging__radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.logging__radio input {
+  accent-color: var(--color-accent);
+}
+
+/* Geplant: Start/Ende nebeneinander. */
+.logging__zeitzeile {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+/* ── Assistent ─────────────────────────────────────────────────────────────── */
+
+.logging-assistent {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.logging-assistent__fortschritt {
+  height: 4px;
+  background: var(--color-bg);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.logging-assistent__fortschritt-fill {
+  height: 100%;
+  background: var(--color-accent);
+  border-radius: 999px;
+  transition: width 0.2s ease;
+}
+
+.logging-assistent__schritt-info {
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+.logging-assistent__feldgruppe {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.logging-assistent__titel {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.logging-assistent__nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+/* Erfassungs-Kacheln (Schritt 2). Drei waehlbare Kacheln, aktive mit Akzentrand. */
+.logging__kacheln {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.logging-kachel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  text-align: left;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.logging-kachel--aktiv {
+  border: 2px solid var(--color-accent);
+  background: var(--color-accent-bg);
+}
+
+.logging-kachel:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.logging-kachel__titel {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.logging-kachel__text {
+  font-size: 12px;
+  color: var(--color-text-sec);
+}
+
+/* Mengen-Hinweis (nur latency): dezenter Warnton. */
+.logging-kachel__menge {
+  font-size: 11px;
+  color: var(--sev-med-text);
+}
+
+/* ── Erweitert ─────────────────────────────────────────────────────────────── */
+
+.logging-erweitert {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.logging-erweitert__raster {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+  align-items: end;
+}
+
+/* ── Abschluss-/Allgemeine Knoepfe ─────────────────────────────────────────── */
+
+.logging__abschluss {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.logging__knopf {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.logging__knopf--primaer {
+  color: var(--color-accent-strong);
+  background: var(--color-accent-bg-strong);
+  border: 1px solid var(--color-accent-strong);
+}
+
+.logging__knopf--primaer:hover {
+  background: var(--color-accent-bg);
+}
+
+.logging__knopf--sekundaer {
+  color: var(--color-text-sec);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+}
+
+.logging__knopf--sekundaer:hover {
+  color: var(--color-text);
+}
+
+.logging__knopf:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.logging__knopf:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ── Aufgaben-Uebersicht ───────────────────────────────────────────────────── */
+
+.logging__listeTitel {
+  flex-shrink: 0;
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--color-text-tert);
+}
+
+.logging__leer {
+  margin: 0;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--color-text-sec);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.logging__liste {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+/* Eine Aufgaben-Karte: ruhige Card-Flaeche. */
+.logging-karte {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.logging-karte__kopf {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.logging-karte__label {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.logging-karte__meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--color-text-sec);
+}
+
+.logging-karte__trenner {
+  color: var(--color-text-tert);
+}
+
+.logging-karte__rest {
+  color: var(--color-text);
+}
+
+/* Fortschrittsbalken (nur aktive Aufgaben). */
+.logging-karte__balken {
+  height: 4px;
+  background: var(--color-bg);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.logging-karte__balken-fill {
+  height: 100%;
+  background: var(--status-aktiv);
+  border-radius: 999px;
+  transition: width 0.3s ease;
+}
+
+/* Zustands-Pill: aktiv gruen / pausiert lila / angelegt grau / beendet gedaempft. */
+.logging-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  padding: 2px 9px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  border-radius: 999px;
+}
+
+.logging-pill--aktiv {
+  color: var(--color-ok-text);
+  background: var(--color-ok-bg);
+}
+
+.logging-pill--pausiert {
+  color: var(--chip-mdns-text);
+  background: var(--chip-mdns-bg);
+}
+
+.logging-pill--angelegt {
+  color: var(--color-text-sec);
+  background: var(--sev-low-bg);
+}
+
+.logging-pill--beendet {
+  color: var(--color-text-tert);
+  background: var(--color-bg);
+}
+
+/* Pulsierender Punkt im aktiv-Pill. */
+.logging-pill__punkt {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--status-aktiv);
+  animation: logging-puls 1.6s ease-in-out infinite;
+}
+
+@keyframes logging-puls {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+/* ── Player ────────────────────────────────────────────────────────────────── */
+
+.logging-player {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.logging-player__knopf {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  font-size: 12px;
+  font-weight: 500;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.logging-player__knopf--start {
+  color: var(--color-accent-strong);
+  border-color: var(--color-accent-border);
+}
+
+.logging-player__knopf--start:hover {
+  background: var(--color-accent-bg);
+}
+
+.logging-player__knopf--pause {
+  color: var(--chip-mdns-text);
+}
+
+.logging-player__knopf--stop {
+  color: var(--sev-high-text);
+}
+
+.logging-player__knopf--delete {
+  color: var(--color-text-sec);
+}
+
+.logging-player__knopf:hover {
+  background: var(--color-accent-bg);
+}
+
+.logging-player__knopf:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}

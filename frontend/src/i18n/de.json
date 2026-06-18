@@ -4,7 +4,10 @@
   },
   "header": {
     "manual": "Handbuch",
-    "settings": "Einstellungen"
+    "settings": "Einstellungen",
+    "liveOne": "Live-Monitoring aktiv",
+    "liveMany": "{{count}} Monitorings aktiv",
+    "liveZurAnsicht": "Zur Logging-Ansicht"
   },
   "settings": {
     "title": "Einstellungen",
@@ -131,6 +134,11 @@
       "monitor": {
         "title": "Live-Monitoring",
         "subtitle": "Erreichbarkeit und Latenz von Gateway und Internet, live.",
+        "locked": ""
+      },
+      "logging": {
+        "title": "Logging-Aufgaben",
+        "subtitle": "Erreichbarkeit und Latenz über Zeit aufzeichnen — sofort oder geplant.",
         "locked": ""
       },
       "processes": {
@@ -291,6 +299,88 @@
       "verlaufTitel": "RTT-Verlauf",
       "liveFenster": "Live-Fenster",
       "verlaufLeer": "Noch keine Verlaufsdaten."
+    },
+    "logging": {
+      "modusAssistent": "Assistent",
+      "modusErweitert": "Erweitert",
+      "neueAufgabe": "Neue Logging-Aufgabe",
+      "schrittVon": "Schritt {{aktuell}} von {{gesamt}}",
+      "weiter": "Weiter",
+      "zurueck": "Zurück",
+      "anlegen": "Anlegen",
+      "anlegenStarten": "Anlegen & starten",
+      "abbrechen": "Abbrechen",
+      "anlegenFehler": "Aufgabe konnte nicht angelegt werden.",
+      "schritt1Titel": "Ziel & Zweck",
+      "schritt2Titel": "Erfassung",
+      "schritt3Titel": "Betriebsart",
+      "zielLabel": "Ziel",
+      "zielPlaceholder": "Ziel wählen …",
+      "zielLeer": "Keine Ziele verfügbar. Läuft das Monitoring?",
+      "zweckLabel": "Zweck (optional)",
+      "zweckPlaceholder": "z. B. Störungssuche am Abend",
+      "bezeichnungLabel": "Bezeichnung",
+      "bezeichnungPlaceholder": "z. B. Gateway-Logging",
+      "captureLabel": "Was wird erfasst?",
+      "capture": {
+        "interface_status": {
+          "titel": "Schnittstellen-Status",
+          "text": "Nur an/aus je Schnittstelle. Sehr sparsam."
+        },
+        "reachability": {
+          "titel": "Erreichbarkeit",
+          "text": "Ob das Ziel antwortet. Wenig Daten."
+        },
+        "reachability_latency": {
+          "titel": "Erreichbarkeit + Latenz",
+          "text": "Antwort und Antwortzeit (RTT).",
+          "mengeHinweis": "Erzeugt am meisten Messdaten."
+        }
+      },
+      "betriebLabel": "Betriebsart",
+      "betriebSofort": "Sofort",
+      "betriebGeplant": "Geplant",
+      "dauerLabel": "Maximale Dauer",
+      "dauer": {
+        "30min": "30 Minuten",
+        "2h": "2 Stunden",
+        "6h": "6 Stunden",
+        "1d": "1 Tag",
+        "1w": "1 Woche"
+      },
+      "startLabel": "Start",
+      "endeLabel": "Ende",
+      "listeTitel": "Logging-Aufgaben",
+      "listeLeer": "Noch keine Logging-Aufgaben angelegt.",
+      "state": {
+        "created": "Angelegt",
+        "active": "Aktiv",
+        "paused": "Pausiert",
+        "finished": "Beendet"
+      },
+      "captureKurz": {
+        "interface_status": "Schnittstellen-Status",
+        "reachability": "Erreichbarkeit",
+        "reachability_latency": "Erreichbarkeit + Latenz"
+      },
+      "aktion": {
+        "start": "Starten",
+        "pause": "Pause",
+        "resume": "Fortsetzen",
+        "stop": "Stoppen",
+        "delete": "Löschen"
+      },
+      "aktionFehler": "Aktion fehlgeschlagen.",
+      "rest": {
+        "tage": "{{value}} Tg",
+        "stunden": "{{value}} Std",
+        "minuten": "{{value}} Min",
+        "sekunden": "{{value}} Sek",
+        "zwei": "noch {{erste}} {{zweite}}",
+        "eine": "noch {{erste}}",
+        "jetzt": "endet jetzt"
+      },
+      "ladeFehler": "Logging-Aufgaben konnten nicht geladen werden."
     },
     "lookup": {
       "title": "Gegenstelle nachschlagen",

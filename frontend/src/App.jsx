@@ -49,6 +49,18 @@ export default function App() {
   // Einstellungs-Bereich ist ein eigener Modus (kein Reiter): überlagert den
   // View-Bereich. Schließen kehrt zum vorher aktiven Reiter zurück.
   const [settingsOffen, setSettingsOffen] = useState(false);
+  // Wunsch-Funktion im Beobachten-Bereich (z. B. vom Kopfzeilen-Live-Pill). Wird
+  // EINMAL als initiale Funktion an ObserveView gereicht; danach von ObserveView
+  // quittiert (onFunktionGeoeffnet -> null), damit der Nutzer dort frei navigiert.
+  const [observeFunktion, setObserveFunktion] = useState(null);
+
+  // Vom Kopfzeilen-Pill: zur Logging-Ansicht springen. Reiter auf "observe" und
+  // die logging-Funktion vormerken; ein offener Einstellungs-Modus wird verlassen.
+  const goToLogging = () => {
+    setSettingsOffen(false);
+    setActiveTab("observe");
+    setObserveFunktion("logging");
+  };
 
   // Theme am <html> setzen und persistieren.
   useEffect(() => {
@@ -75,6 +87,7 @@ export default function App() {
         theme={theme}
         onThemeChange={setTheme}
         onOpenSettings={() => setSettingsOffen(true)}
+        onGoToLogging={goToLogging}
       />
       {/* Einstellungen ist kein Reiter: bei offenem Modus bleibt kein Reiter
           aktiv markiert, daher blenden wir die Reiterleiste aus. */}
@@ -94,6 +107,8 @@ export default function App() {
               <ObserveView
                 refreshInterval={refreshInterval}
                 onRefreshIntervalChange={setRefreshInterval}
+                initialFunction={observeFunktion}
+                onFunktionGeoeffnet={() => setObserveFunktion(null)}
               />
             )}
             {activeTab === "investigate" && <InvestigateView />}

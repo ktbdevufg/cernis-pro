@@ -6,10 +6,11 @@
 import { BookOpen, Settings } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import LivePill from "./LivePill.jsx";
 import ThemeToggle from "./ThemeToggle.jsx";
 import "./AppHeader.css";
 
-export default function AppHeader({ theme, onThemeChange, onOpenSettings }) {
+export default function AppHeader({ theme, onThemeChange, onOpenSettings, onGoToLogging }) {
   const { t } = useTranslation();
 
   return (
@@ -26,6 +27,10 @@ export default function AppHeader({ theme, onThemeChange, onOpenSettings }) {
           <span className="app-header__version">{t("app.version")}</span>
         </span>
       </div>
+
+      {/* Live-Monitoring-Pill: nur sichtbar, wenn eine Logging-Aufgabe aktiv ist
+          (datengetrieben, eigener Poll). Klick fuehrt zur Logging-Ansicht. */}
+      <LivePill onOeffnen={onGoToLogging} />
 
       <div className="app-header__controls">
         <ThemeToggle theme={theme} onChange={onThemeChange} />

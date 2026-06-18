@@ -14,6 +14,17 @@
 //                                          (chronologisch aufsteigend)
 //   POST /api/monitor/targets        -> { ok: true } (liefert KEIN Target zurueck)
 //   DELETE /api/monitor/targets/{tid}-> { ok: true }
+//
+// Logging-Aufgaben (Schnitt B-Backend, verifiziert aus backend/api/monitoring.py):
+//   POST   /api/monitor/logging            -> 201 + Task-dict
+//   GET    /api/monitor/logging            -> [Task-dict, ...]
+//   GET    /api/monitor/logging/{id}       -> Task-dict (404 moeglich)
+//   POST   /api/monitor/logging/{id}/start -> Task-dict (409 Konflikt/Transition)
+//   POST   /api/monitor/logging/{id}/pause -> Task-dict (409)
+//   POST   /api/monitor/logging/{id}/resume-> Task-dict (409)
+//   POST   /api/monitor/logging/{id}/stop  -> Task-dict (409)
+//   DELETE /api/monitor/logging/{id}       -> 204 (KEIN Body)
+//   GET    /api/monitor/logging/volume     -> { count, over_threshold }
 
 import { apiGet, apiPost, ApiError } from "./client.js";
 
@@ -21,7 +32,12 @@ import { apiGet, apiPost, ApiError } from "./client.js";
 // client.js (Fundament aller Anbindungen) fuer einen einzigen Aufruf zu erweitern,
 // hier ein kleiner fetch-Helfer im EXAKTEN Stil von apiGet/apiPost — gleiche
 // ApiError-Fehler-Form (status = HTTP-Code oder null bei Netzfehler). Kein Body
-// (der Pfad-Param traegt die id), erwartet/akzeptiert JSON.
+// (der Pfad-Param traegt die id).
+//
+// Vertraegt sowohl 204 (leerer Body -- Logging-DELETE) als auch eine JSON-Antwort
+// ({ok:true} -- targets-DELETE): bei 204 oder leerem Body wird null geliefert,
+// sonst das geparste JSON. So deckt EIN Helfer beide DELETE-Pfade ab, ohne dass
+// der 204-Fall an einem fehlenden Body-Parse scheitert.
 async function apiDelete(path) {
   let response;
   try {
@@ -36,6 +52,51 @@ async function apiDelete(path) {
 
   if (!response.ok) {
     throw new ApiError(`Unerwarteter HTTP-Status ${response.status}`, response.status);
+  }
+
+  // 204 (No Content) traegt keinen Body -- response.json() wuerde werfen.
+  if (response.status === 204) {
+    return null;
+  }
+  return response.json();
+}
+
+// Lokaler POST-Helfer fuer die Lifecycle-Aktionen (start/pause/resume/stop). Wie
+// apiPost, ABER er reicht bei einem Fehler den Backend-detail-Text durch: das
+// Logging-Backend liefert bei 409 (Ziel belegt / falscher Zustand) eine sprechende
+// Konzept-Meldung im JSON-Feld "detail", die die View an der Karte anzeigt. Der
+// generische apiPost aus client.js verwirft diesen Text (feste "Unerwarteter
+// HTTP-Status"-Meldung) -- darum hier ein eigener Pfad, OHNE client.js fuer alle
+// anderen Anbindungen umzubauen. Bei ok -> geparstes JSON; bei !ok -> ApiError,
+// dessen message der detail-Text ist (Fallback: HTTP-Status), status = HTTP-Code.
+async function apiPostMitDetail(path) {
+  let response;
+  try {
+    response = await fetch(path, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+    });
+  } catch (ursache) {
+    // Netzfehler (Server nicht erreichbar, DNS, Abbruch o. Ae.): kein HTTP-Status.
+    throw new ApiError(ursache?.message ?? "Netzwerkfehler", null);
+  }
+
+  if (!response.ok) {
+    // detail aus dem Fehler-Body ziehen (FastAPI: {"detail": "..."}). Schlaegt das
+    // Parsen fehl oder fehlt detail, faellt es auf eine generische Meldung zurueck.
+    let detail = null;
+    try {
+      const body = await response.json();
+      if (body && typeof body.detail === "string") {
+        detail = body.detail;
+      }
+    } catch {
+      // Kein/kein JSON-Body: detail bleibt null -> generische Meldung.
+    }
+    throw new ApiError(detail ?? `Unerwarteter HTTP-Status ${response.status}`, response.status);
   }
 
   return response.json();
@@ -75,6 +136,27 @@ function mappeRtt(sample) {
     rttMs: sample.rtt_ms ?? null,
     lossPct: sample.loss_pct ?? null,
     ts: sample.ts,
+  };
+}
+
+// Ein Logging-Task-Wire-dict (snake_case) -> View-Objekt (camelCase). Die
+// Zeitfelder bleiben roh (Unix-ts bzw. null -- die Restzeit-Logik rechnet selbst);
+// null bleibt ehrlich null (kein erfundener Wert). Die Modus-/Zustands-Strings
+// (captureMode/operationMode/state) tragen das Backend-Vokabular unveraendert.
+export function mappeLoggingTask(task) {
+  return {
+    id: task.id,
+    targetId: task.target_id,
+    label: task.label,
+    purpose: task.purpose,
+    captureMode: task.capture_mode,
+    operationMode: task.operation_mode,
+    state: task.state,
+    plannedStart: task.planned_start ?? null,
+    plannedEnd: task.planned_end ?? null,
+    maxDurationS: task.max_duration_s ?? null,
+    createdAt: task.created_at ?? null,
+    effectiveStart: task.effective_start ?? null,
   };
 }
 
@@ -124,10 +206,103 @@ export async function deleteMonitorTarget(targetId) {
   return apiDelete(`/api/monitor/targets/${targetId}`);
 }
 
+// ── Logging-Aufgaben (Schnitt B-Backend) ─────────────────────────────────────
+
+// POST /api/monitor/logging -> 201 + angelegter Task (Zustand CREATED). Der Body
+// traegt die Modus-abhaengigen Felder: SCHEDULED braucht plannedStart+plannedEnd,
+// IMMEDIATE braucht maxDurationS (das Frontend liefert nur die jeweils gueltigen).
+// id/createdAt setzt das Backend. apiPost wirft bei 422 (Validierung) eine ApiError.
+export async function createLoggingTask({
+  targetId,
+  label,
+  purpose,
+  captureMode,
+  operationMode,
+  plannedStart = null,
+  plannedEnd = null,
+  maxDurationS = null,
+}) {
+  const backend = await apiPost("/api/monitor/logging", {
+    target_id: targetId,
+    label,
+    purpose,
+    capture_mode: captureMode,
+    operation_mode: operationMode,
+    planned_start: plannedStart,
+    planned_end: plannedEnd,
+    max_duration_s: maxDurationS,
+  });
+  return mappeLoggingTask(backend);
+}
+
+// GET /api/monitor/logging -> alle Aufgaben-Definitionen (Wire-Form -> View). Leer -> [].
+export async function fetchLoggingTasks() {
+  const backend = await apiGet("/api/monitor/logging");
+  return (backend ?? []).map(mappeLoggingTask);
+}
+
+// GET /api/monitor/logging/{id} -> EINE Aufgabe. 404 (unbekannte id) -> ApiError.
+export async function fetchLoggingTask(taskId) {
+  const backend = await apiGet(`/api/monitor/logging/${taskId}`);
+  return mappeLoggingTask(backend);
+}
+
+// POST /api/monitor/logging/{id}/start -> Aufgabe (CREATED -> ACTIVE). Bei 409
+// (Ziel belegt / falscher Zustand) wirft apiPostMitDetail eine ApiError, deren
+// message der Backend-detail-Text ist (die View zeigt ihn an der Karte).
+export async function startLoggingTask(taskId) {
+  const backend = await apiPostMitDetail(`/api/monitor/logging/${taskId}/start`);
+  return mappeLoggingTask(backend);
+}
+
+// POST /api/monitor/logging/{id}/pause -> Aufgabe (ACTIVE -> PAUSED). 409 -> ApiError.
+export async function pauseLoggingTask(taskId) {
+  const backend = await apiPostMitDetail(`/api/monitor/logging/${taskId}/pause`);
+  return mappeLoggingTask(backend);
+}
+
+// POST /api/monitor/logging/{id}/resume -> Aufgabe (PAUSED -> ACTIVE). 409 (Ziel
+// belegt / falscher Zustand) -> ApiError mit dem Backend-detail-Text.
+export async function resumeLoggingTask(taskId) {
+  const backend = await apiPostMitDetail(`/api/monitor/logging/${taskId}/resume`);
+  return mappeLoggingTask(backend);
+}
+
+// POST /api/monitor/logging/{id}/stop -> Aufgabe ({ACTIVE,PAUSED} -> FINISHED). 409 -> ApiError.
+export async function stopLoggingTask(taskId) {
+  const backend = await apiPostMitDetail(`/api/monitor/logging/${taskId}/stop`);
+  return mappeLoggingTask(backend);
+}
+
+// DELETE /api/monitor/logging/{id} -> 204 (kein Body). Idempotent im Backend
+// (unbekannte id ist kein Fehler). Liefert null (kein Wert zurueck).
+export async function deleteLoggingTask(taskId) {
+  return apiDelete(`/api/monitor/logging/${taskId}`);
+}
+
+// GET /api/monitor/logging/volume -> Mengen-Befund der RTT-Messdaten. Roh
+// gemappt: { count, overThreshold }. count fehlt -> 0, overThreshold -> false.
+export async function fetchLoggingVolume() {
+  const backend = await apiGet("/api/monitor/logging/volume");
+  return {
+    count: backend?.count ?? 0,
+    overThreshold: Boolean(backend?.over_threshold),
+  };
+}
+
 export default {
   fetchMonitorStatus,
   fetchMonitorEvents,
   fetchRttHistory,
   addMonitorTarget,
   deleteMonitorTarget,
+  createLoggingTask,
+  fetchLoggingTasks,
+  fetchLoggingTask,
+  startLoggingTask,
+  pauseLoggingTask,
+  resumeLoggingTask,
+  stopLoggingTask,
+  deleteLoggingTask,
+  fetchLoggingVolume,
 };

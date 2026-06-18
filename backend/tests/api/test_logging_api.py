@@ -101,6 +101,9 @@ def test_create_returns_201_with_created_state(db_path: Path) -> None:
     # Router erzeugt id + created_at.
     assert isinstance(body["id"], str) and body["id"]
     assert isinstance(body["created_at"], float)
+    # effective_start (ADR 0033) ist vor dem ersten Start None -- als Schluessel
+    # aber vorhanden (das Frontend leitet daraus die IMMEDIATE-Restzeit ab).
+    assert body["effective_start"] is None
 
 
 def test_create_scheduled_with_window(db_path: Path) -> None:
@@ -206,6 +209,17 @@ def test_start_transitions_to_active(db_path: Path) -> None:
         resp = client.post(f"/api/monitor/logging/{tid}/start")
     assert resp.status_code == 200
     assert resp.json()["state"] == "active"
+
+
+def test_start_sets_effective_start(db_path: Path) -> None:
+    # effective_start (ADR 0033) ist None bei CREATED und wird beim ersten Start
+    # auf den Start-ts gesetzt -- der Bezugs-ts der IMMEDIATE-Restzeit im Frontend.
+    with TestClient(_wired_app(db_path)) as client:
+        created = client.post("/api/monitor/logging", json=_create_body()).json()
+        assert created["effective_start"] is None
+        started = client.post(f"/api/monitor/logging/{created['id']}/start").json()
+    assert isinstance(started["effective_start"], float)
+    assert started["effective_start"] > 0
 
 
 def test_start_unknown_is_404(db_path: Path) -> None:

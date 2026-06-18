@@ -271,6 +271,11 @@ def _logging_task_to_dict(task: Any) -> dict[str, Any]:
         "planned_end": task.planned_end,
         "max_duration_s": task.max_duration_s,
         "created_at": task.created_at,
+        # effective_start (ADR 0033): der Bezugs-ts der IMMEDIATE-Restzeit. B-II
+        # fuehrte das Feld in Domaene + Persistenz ein, liess es aber aus der
+        # Wire-Form -- das Frontend (Schnitt C, Restzeit-Logik) braucht es. None
+        # bis zum ersten Start nach ACTIVE, wieder None nach FINISHED.
+        "effective_start": task.effective_start,
     }
 
 
