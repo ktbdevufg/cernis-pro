@@ -364,6 +364,31 @@ export async function fetchLoggingSla(taskId, since = null, until = null) {
   };
 }
 
+// GET /api/monitor/logging/{id}/events -> Ereignis-/Anomalie-Flanken einer Logging-
+// Aufgabe (Schnitt 1b-events). Speist die Event-Liste der Detailansicht. Jede Zeile
+// snake->camel gemappt: { eventType, rttMs, ts }. Leer -> [].
+//
+// since/until (Unix-ts, optional, Default null): schraenken den Zeitraum auf
+// [since, until) ein -- nur gesetzte Grenzen werden als Query-Param angehaengt
+// (?since=...&until=...). Beide null -> alle Flanken des Tasks (Backend-Default).
+// Muster wie fetchLoggingSla: die gesetzten Params als Objekt. 404 (unbekannte id)
+// -> ApiError.
+export async function fetchLoggingEvents(taskId, since = null, until = null) {
+  const params = {};
+  if (since !== null && since !== undefined) {
+    params.since = since;
+  }
+  if (until !== null && until !== undefined) {
+    params.until = until;
+  }
+  const backend = await apiGet(`/api/monitor/logging/${taskId}/events`, params);
+  return (backend ?? []).map((row) => ({
+    eventType: row.event_type,
+    rttMs: row.rtt_ms ?? null,
+    ts: row.ts,
+  }));
+}
+
 export default {
   fetchMonitorStatus,
   fetchMonitorEvents,
@@ -380,4 +405,5 @@ export default {
   deleteLoggingTask,
   fetchLoggingVolume,
   fetchLoggingSla,
+  fetchLoggingEvents,
 };

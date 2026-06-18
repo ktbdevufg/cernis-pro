@@ -24,6 +24,7 @@ from api.monitoring import (
     provide_create_logging_task,
     provide_delete_logging_task,
     provide_get_logging_task_detail,
+    provide_get_logging_task_events,
     provide_get_logging_task_sla,
     provide_list_logging_tasks,
     provide_pause_logging_task,
@@ -37,6 +38,7 @@ from application.monitoring import (
     CreateLoggingTask,
     DeleteLoggingTask,
     GetLoggingTaskDetail,
+    GetLoggingTaskEvents,
     GetLoggingTaskSla,
     ListLoggingTasks,
     PauseLoggingTask,
@@ -46,6 +48,7 @@ from application.monitoring import (
 )
 from infrastructure.config import AppConfig
 from infrastructure.monitoring import (
+    SqliteLoggingEventRepository,
     SqliteLoggingRttRepository,
     SqliteLoggingTaskRepository,
 )
@@ -59,6 +62,7 @@ def db_path(tmp_path: Path) -> Path:
 def _wired_app(db_path: Path) -> FastAPI:
     tasks = SqliteLoggingTaskRepository(db_path)
     rtt = SqliteLoggingRttRepository(db_path)
+    events = SqliteLoggingEventRepository(db_path)
 
     app = create_app(AppConfig())
     app.dependency_overrides[provide_create_logging_task] = lambda: CreateLoggingTask(tasks)
@@ -71,6 +75,9 @@ def _wired_app(db_path: Path) -> FastAPI:
     app.dependency_overrides[provide_delete_logging_task] = lambda: DeleteLoggingTask(tasks)
     app.dependency_overrides[provide_check_log_volume] = lambda: CheckLogVolume(rtt)
     app.dependency_overrides[provide_get_logging_task_sla] = lambda: GetLoggingTaskSla(tasks, rtt)
+    app.dependency_overrides[provide_get_logging_task_events] = lambda: GetLoggingTaskEvents(
+        tasks, events
+    )
     return app
 
 
@@ -605,5 +612,87 @@ def test_sla_without_query_passes_none_through() -> None:
     spy = _SpyGetSla()
     with TestClient(_app_with_sla_spy(spy)) as client:
         resp = client.get("/api/monitor/logging/t1/sla")
+    assert resp.status_code == 200
+    assert spy.calls == [{"task_id": "t1", "since": None, "until": None}]
+
+
+# ── GET /api/monitor/logging/{id}/events (Schnitt 1b-events) ─────────────────
+
+
+def test_events_returns_wire_list_for_known_task(db_path: Path) -> None:
+    # Task anlegen (id vom Router), dann Event-Flanken direkt ueber das Repo ablegen --
+    # der Endpunkt projiziert je Zeile in das Wire-dict {event_type, rtt_ms, ts}.
+    with TestClient(_wired_app(db_path)) as client:
+        tid = client.post("/api/monitor/logging", json=_create_body()).json()["id"]
+    events = SqliteLoggingEventRepository(db_path)
+    events.save(tid, "down", -1.0, 1_700_000_000.0)
+    events.save(tid, "up", 5.0, 1_700_000_010.0)
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.get(f"/api/monitor/logging/{tid}/events")
+    assert resp.status_code == 200
+    assert resp.json() == [
+        {"event_type": "down", "rtt_ms": -1.0, "ts": 1_700_000_000.0},
+        {"event_type": "up", "rtt_ms": 5.0, "ts": 1_700_000_010.0},
+    ]
+
+
+def test_events_empty_is_empty_list(db_path: Path) -> None:
+    # Task ohne Flanken -> leere Liste (kein 404, der Task existiert ja).
+    with TestClient(_wired_app(db_path)) as client:
+        tid = client.post("/api/monitor/logging", json=_create_body()).json()["id"]
+        resp = client.get(f"/api/monitor/logging/{tid}/events")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_events_unknown_task_returns_404(db_path: Path) -> None:
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.get("/api/monitor/logging/never-existed/events")
+    assert resp.status_code == 404
+
+
+# ── since/until-Durchreichung am Events-Rand (Schnitt 1b-events) ─────────────
+# Belegt analog zur SLA-Naht, dass der Endpunkt die optionalen Query-Floats
+# unveraendert an den Use-Case durchreicht (Spy-Use-Case statt echter Repos).
+
+
+class _SpyGetEvents:
+    """Ersetzt ``GetLoggingTaskEvents`` und zeichnet die ``since``/``until``-kwargs auf.
+
+    Gibt eine leere Liste zurueck (der Endpunkt projiziert sie nur); die Signatur
+    spiegelt ``GetLoggingTaskEvents.__call__`` (since/until als kwargs, kein ``days``).
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    def __call__(
+        self,
+        task_id: str,
+        since: float | None = None,
+        until: float | None = None,
+    ) -> list[Any]:
+        self.calls.append({"task_id": task_id, "since": since, "until": until})
+        return []
+
+
+def _app_with_events_spy(spy: _SpyGetEvents) -> FastAPI:
+    app = create_app(AppConfig())
+    app.dependency_overrides[provide_get_logging_task_events] = lambda: spy
+    return app
+
+
+def test_events_passes_since_and_until_through_to_use_case() -> None:
+    spy = _SpyGetEvents()
+    with TestClient(_app_with_events_spy(spy)) as client:
+        resp = client.get("/api/monitor/logging/t1/events?since=100.5&until=200.5")
+    assert resp.status_code == 200
+    assert spy.calls == [{"task_id": "t1", "since": 100.5, "until": 200.5}]
+
+
+def test_events_without_query_passes_none_through() -> None:
+    spy = _SpyGetEvents()
+    with TestClient(_app_with_events_spy(spy)) as client:
+        resp = client.get("/api/monitor/logging/t1/events")
     assert resp.status_code == 200
     assert spy.calls == [{"task_id": "t1", "since": None, "until": None}]

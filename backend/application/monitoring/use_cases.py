@@ -64,6 +64,7 @@ from domain.monitoring import (
     CUSTOM_TARGETS_KEY,
     CaptureMode,
     LatencyThreshold,
+    LoggingEventRow,
     LoggingTask,
     MonitorEvent,
     MonitorTarget,
@@ -530,6 +531,53 @@ class GetLoggingTaskSla:
         stats = compute_sla_stats(rows, days, interval_s=task.interval_s)
         # task_id ergaenzen (Domaene setzt es bewusst nicht) -- target_id-Muster GetSlaStats.
         return {"task_id": task_id, **stats}
+
+
+class GetLoggingTaskEvents:
+    """Ereignis-/Anomalie-Flanken EINER Logging-Aufgabe -- optionaler Ausschnitt (Pass-Through).
+
+    Muster ``GetLoggingTaskSla``: ``task_repo.get`` (``None`` -> ``LoggingTaskNotFound``,
+    der bestehende Fehler) -> die Flanken ueber den Event-Port laden -> roh zurueck. Gibt
+    die ROHEN ``LoggingEventRow``-Domaenenobjekte heraus, NICHT ein dict: die Wire-
+    Projektion einer LISTE macht im Haus der api-Rand, nicht der Use-Case (Muster
+    ``GetMonitorEvents``/``ListLoggingTasks`` -- der Router projiziert je Zeile). Anders
+    als ``GetLoggingTaskSla``, das ein dict zurueckgibt, weil es eine Domaenen-RECHNUNG
+    (``compute_sla_stats``) durchreicht; hier gibt es keine Rechnung, nur die Zeilen.
+
+    ZEITRAUM (``since``/``until``, Schnitt 1b-events): OPTIONALER Ausschnitt ``[since,
+    until)`` -- since/until-Logik EXAKT wie ``GetLoggingTaskSla``, mit EINEM Unterschied:
+    der Event-Port hat KEIN ``all_for`` (anders als ``LoggingRttRepository``). Darum nutzt
+    dieser Use-Case IMMER ``range`` -- auch im voll-offenen Fall (beide ``None``) mit
+    ``range(task_id, 0.0, _OPEN_UNTIL_CUTOFF)`` statt eines ``all_for``-Zweigs. Der feste
+    ``_OPEN_UNTIL_CUTOFF`` (Jahr 2286) faengt im halb-offenen ``range`` praktisch alle
+    Punkte, UHRFREI (wiederverwendete Cutoff-Konstante, kein ``time.time()`` -- so bleibt
+    der Use-Case deterministisch testbar, Muster ``GetLoggingTaskSla``).
+    """
+
+    def __init__(
+        self,
+        task_repo: LoggingTaskRepository,
+        event_repo: LoggingEventRepository,
+    ) -> None:
+        self._task_repo = task_repo
+        self._event_repo = event_repo
+
+    def __call__(
+        self,
+        task_id: str,
+        since: float | None = None,
+        until: float | None = None,
+    ) -> list[LoggingEventRow]:
+        task = self._task_repo.get(task_id)
+        if task is None:
+            raise LoggingTaskNotFound(task_id)
+        # IMMER range (kein all_for im Event-Port, anders als bei SLA): eff_since=0.0 fuer
+        # eine offene Untergrenze, eff_until=_OPEN_UNTIL_CUTOFF fuer eine offene Obergrenze
+        # (kein time.time() -- der Use-Case bleibt uhrfrei, s. Klassen-Docstring). Beide
+        # None -> der voll-offene range(0.0, CUTOFF) = alle Flanken des Tasks.
+        eff_since = since if since is not None else 0.0
+        eff_until = until if until is not None else _OPEN_UNTIL_CUTOFF
+        return self._event_repo.range(task_id, eff_since, eff_until)
 
 
 # ── Targets-Schreibpfad (M.9-Nachzuegler) ───────────────────────────────────

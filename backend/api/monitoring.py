@@ -61,6 +61,7 @@ from application.monitoring import (
     DeleteMonitorTarget,
     GetAllSlaStats,
     GetLoggingTaskDetail,
+    GetLoggingTaskEvents,
     GetLoggingTaskSla,
     GetMonitorEvents,
     GetRttHistory,
@@ -274,6 +275,10 @@ def provide_get_logging_task_sla() -> GetLoggingTaskSla:
     raise NotImplementedError("GetLoggingTaskSla wird in app.py verdrahtet")
 
 
+def provide_get_logging_task_events() -> GetLoggingTaskEvents:
+    raise NotImplementedError("GetLoggingTaskEvents wird in app.py verdrahtet")
+
+
 # ── Serialisierungs-Helfer (Domaenen-Objekt -> Wire-dict am api-Rand) ─────────
 
 
@@ -296,6 +301,17 @@ def _event_to_dict(event: Any) -> dict[str, Any]:
 def _rtt_to_dict(sample: Any) -> dict[str, Any]:
     """``PingSample`` -> Wire-dict ``{rtt_ms, loss_pct, ts}`` (``ts`` aus timestamp)."""
     return {"rtt_ms": sample.rtt_ms, "loss_pct": sample.loss_pct, "ts": sample.timestamp}
+
+
+def _logging_event_to_dict(row: Any) -> dict[str, Any]:
+    """``LoggingEventRow`` -> Wire-dict ``{event_type, rtt_ms, ts}`` (Felder roh durchgereicht).
+
+    Schlanke Inline-Projektion (Muster ``_rtt_to_dict``): ``LoggingEventRow`` traegt
+    bereits einen rohen ``event_type``-``str`` (kein StrEnum -- der Logging-Kern ist vom
+    Live-Monitor getrennt), ``rtt_ms`` (Sentinel ``-1.0`` erlaubt) und ``ts`` (Unix-ts) --
+    keine Formatierung/Hebung noetig.
+    """
+    return {"event_type": row.event_type, "rtt_ms": row.rtt_ms, "ts": row.ts}
 
 
 def _logging_task_to_dict(task: Any) -> dict[str, Any]:
@@ -668,6 +684,29 @@ def logging_task_sla(
         return get_sla(task_id, since=since, until=until)
     except LoggingTaskNotFound as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@router.get("/monitor/logging/{task_id}/events")
+def logging_task_events(
+    task_id: str,
+    get_events: Annotated[GetLoggingTaskEvents, Depends(provide_get_logging_task_events)],
+    since: Annotated[float | None, Query()] = None,
+    until: Annotated[float | None, Query()] = None,
+) -> list[dict[str, Any]]:
+    """Ereignis-/Anomalie-Flanken EINER Logging-Aufgabe als Liste. 404 bei unbekannter id.
+
+    Speist die Event-Liste der Detailansicht. Signatur exakt wie ``logging_task_sla``:
+    ``since``/``until`` sind OPTIONALE Query-Floats (Unix-ts), Default ``None`` (offener
+    Zeitraum = alle Flanken des Tasks). Der Use-Case gibt rohe ``LoggingEventRow``-Objekte,
+    dieser Rand projiziert je Zeile in das Wire-dict ``{event_type, rtt_ms, ts}`` (Muster
+    ``monitor_events``: der Use-Case liefert Domaenen-Daten, der Router die Wire-Form).
+    Keine Flanken -> ``[]``.
+    """
+    try:
+        rows = get_events(task_id, since=since, until=until)
+    except LoggingTaskNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return [_logging_event_to_dict(row) for row in rows]
 
 
 @router.post("/monitor/logging/{task_id}/start")
