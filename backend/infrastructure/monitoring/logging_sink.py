@@ -45,17 +45,21 @@ geworfen -- der Loop darf nie wegen Logging sterben (Muster ``MonitorNotifierAda
 import structlog
 
 from domain.monitoring import (
+    INITIAL_STATE,
     CaptureMode,
     MonitorEventType,
     MonitorTarget,
     PingSample,
     TaskState,
+    ThresholdState,
+    evaluate_sample,
     is_window_active,
 )
 from ports.monitoring import (
     LoggingEventRepository,
     LoggingRttRepository,
     LoggingTaskRepository,
+    ThresholdNotifierPort,
 )
 
 _logger = structlog.get_logger(__name__)
@@ -73,14 +77,25 @@ class MonitorLoggingSink:
         task_repo: LoggingTaskRepository,
         rtt_repo: LoggingRttRepository,
         event_repo: LoggingEventRepository,
+        threshold_notifier: ThresholdNotifierPort | None = None,
     ) -> None:
         self._task_repo = task_repo
         self._rtt_repo = rtt_repo
         self._event_repo = event_repo
+        # 3a: Schwellwert-Notifier OPTIONAL -- ohne ihn (Bestands-Tests, Feature aus)
+        # bleibt der Sink baubar; die Auswertung laeuft dann, nur der Notify entfaellt.
+        self._threshold_notifier = threshold_notifier
         # C-2: letzter geschriebener RTT-ts je task.id (in-memory, Neustart-Verlust ok).
         # Traegt die Ausduennung der dichten RTT-Punkte nach task.interval_s -- s.
         # Modul-Docstring (kein DB-Roundtrip, kein aktives Cleanup).
         self._letzter_rtt_ts: dict[str, float] = {}
+        # 3a: laufender Hysterese-Zustand der Schwellwert-Auswertung je task.id
+        # (in-memory, exakt nach dem _letzter_rtt_ts-Vorbild). Neustart-Verlust ist
+        # akzeptiert: die Hysterese beginnt nach einem Neustart neu zu zaehlen --
+        # harmlos (hoechstens eine zusaetzliche, spaeter feuernde Serie). KEIN aktives
+        # Cleanup beendeter Tasks (ein liegengebliebener ThresholdState ist winzig und
+        # faellt beim naechsten Neustart weg -- gleiche Begruendung wie _letzter_rtt_ts).
+        self._threshold_states: dict[str, ThresholdState] = {}
 
     async def record(
         self,
@@ -117,6 +132,25 @@ class MonitorLoggingSink:
                     # REACHABILITY + INTERFACE_STATUS: nur die Flanke (s. Modul-Docstring,
                     # vorerst gleicher Schreibpfad). event_type als roher str-Wert.
                     self._event_repo.save(task.id, str(event), sample.rtt_ms, now)
+
+                # 3a: Schwellwert-Auswertung -- BEWUSST nach dem capture-mode-Block und
+                # UNABHAENGIG von ihm. Sie laeuft bei JEDEM Tick (nicht ausgeduennt wie
+                # die dichten RTT-Punkte): die Hysterese braucht JEDE Messung, sonst
+                # zaehlt sie verworfene Ticks nicht und feuert verschoben/falsch. Auch
+                # nicht an den capture_mode gebunden -- ein Schwellwert ist keine
+                # REACHABILITY_LATENCY-Sache: auch ein REACHABILITY-Task kann auf
+                # UNREACHABLE (alive=False) alarmieren. Der Zustand ueberlebt zwischen
+                # record-Aufrufen via self._threshold_states (Vorbild _letzter_rtt_ts).
+                if task.threshold is not None:
+                    state = self._threshold_states.get(task.id, INITIAL_STATE)
+                    new_state, fired = evaluate_sample(
+                        task.threshold, state, sample.rtt_ms, sample.alive
+                    )
+                    self._threshold_states[task.id] = new_state
+                    if fired and self._threshold_notifier is not None:
+                        await self._threshold_notifier.notify_threshold(
+                            task, task.threshold, sample, now
+                        )
         except Exception as exc:
             # Best-effort: Logging-Fehler werden geloggt, NIE nach oben geworfen --
             # der Live-Loop darf nie wegen Logging sterben (Port-Vertrag).

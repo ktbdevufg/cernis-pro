@@ -16,6 +16,7 @@ import asyncio
 
 from domain.monitoring import (
     CaptureMode,
+    LatencyThreshold,
     LoggingEventRow,
     LoggingRttSample,
     LoggingTask,
@@ -24,6 +25,7 @@ from domain.monitoring import (
     OperationMode,
     PingSample,
     TaskState,
+    ThresholdCondition,
 )
 from infrastructure.monitoring.logging_sink import MonitorLoggingSink
 
@@ -85,6 +87,22 @@ class _RecordingEvents:
         raise AssertionError("delete_older_than darf vom Sink nicht gerufen werden")
 
 
+class _RecordingNotifier:
+    """``ThresholdNotifierPort``-Fake -- sammelt die notify_threshold-Aufrufe (3a)."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[LoggingTask, LatencyThreshold, PingSample, float]] = []
+
+    async def notify_threshold(
+        self,
+        task: LoggingTask,
+        threshold: LatencyThreshold,
+        sample: PingSample,
+        now: float,
+    ) -> None:
+        self.calls.append((task, threshold, sample, now))
+
+
 def _task(
     *,
     task_id: str = "task-1",
@@ -94,6 +112,7 @@ def _task(
     effective_start: float | None = 500.0,
     max_duration_s: int | None = 60,
     interval_s: int = 5,
+    threshold: LatencyThreshold | None = None,
 ) -> LoggingTask:
     return LoggingTask(
         id=task_id,
@@ -109,6 +128,7 @@ def _task(
         created_at=1.0,
         effective_start=effective_start,
         interval_s=interval_s,
+        threshold=threshold,
     )
 
 
@@ -134,6 +154,19 @@ def _build(tasks: list[LoggingTask]) -> tuple[MonitorLoggingSink, _RecordingRtt,
     events = _RecordingEvents()
     sink = MonitorLoggingSink(_FakeTaskRepo(tasks), rtt, events)
     return sink, rtt, events
+
+
+def _build_with_notifier(
+    tasks: list[LoggingTask],
+) -> tuple[MonitorLoggingSink, _RecordingNotifier]:
+    notifier = _RecordingNotifier()
+    sink = MonitorLoggingSink(
+        _FakeTaskRepo(tasks),
+        _RecordingRtt(),
+        _RecordingEvents(),
+        notifier,
+    )
+    return sink, notifier
 
 
 # ── REACHABILITY_LATENCY: jede Messung ein RTT-Punkt ────────────────────────
@@ -319,3 +352,148 @@ def test_record_is_best_effort_on_repo_failure() -> None:
 
     # Wirft NICHT -- der Fehler wird geschluckt+geloggt (Loop darf nicht sterben).
     asyncio.run(sink.record(_target(), _sample(), None, now=520.0))
+
+
+# ── Schwellwert-Auswertung (3a): Notify an der Alarm-Flanke ──────────────────
+
+
+def test_threshold_fires_once_above_limit_n1() -> None:
+    # LATENCY_ABOVE, consecutive_n=1: ein Tick ueber Limit -> genau ein Notify.
+    th = LatencyThreshold(
+        condition=ThresholdCondition.LATENCY_ABOVE, limit_ms=10.0, consecutive_n=1
+    )
+    sink, notifier = _build_with_notifier(
+        [_task(effective_start=0.0, max_duration_s=100000, threshold=th)]
+    )
+
+    asyncio.run(sink.record(_target(), _sample(rtt_ms=20.0), None, now=1000.0))
+
+    assert len(notifier.calls) == 1
+    task, threshold, sample, now = notifier.calls[0]
+    assert task.id == "task-1"
+    assert threshold is th
+    assert sample.rtt_ms == 20.0
+    assert now == 1000.0
+
+
+def test_threshold_no_notify_below_limit() -> None:
+    # Ein Tick unter Limit -> keine Verletzung, kein Notify.
+    th = LatencyThreshold(
+        condition=ThresholdCondition.LATENCY_ABOVE, limit_ms=10.0, consecutive_n=1
+    )
+    sink, notifier = _build_with_notifier(
+        [_task(effective_start=0.0, max_duration_s=100000, threshold=th)]
+    )
+
+    asyncio.run(sink.record(_target(), _sample(rtt_ms=5.0), None, now=1000.0))
+
+    assert notifier.calls == []
+
+
+def test_threshold_hysteresis_fires_on_third_violating_tick() -> None:
+    # consecutive_n=3: feuert erst beim DRITTEN verletzenden Tick. Der Hysterese-Zustand
+    # ueberlebt zwischen den record-Aufrufen via self._threshold_states.
+    th = LatencyThreshold(
+        condition=ThresholdCondition.LATENCY_ABOVE, limit_ms=10.0, consecutive_n=3
+    )
+    sink, notifier = _build_with_notifier(
+        [_task(effective_start=0.0, max_duration_s=100000, threshold=th)]
+    )
+
+    asyncio.run(sink.record(_target(), _sample(rtt_ms=20.0), None, now=1000.0))
+    assert notifier.calls == []  # 1. Verletzung
+    asyncio.run(sink.record(_target(), _sample(rtt_ms=20.0), None, now=1001.0))
+    assert notifier.calls == []  # 2. Verletzung
+    asyncio.run(sink.record(_target(), _sample(rtt_ms=20.0), None, now=1002.0))
+    assert len(notifier.calls) == 1  # 3. Verletzung -> Flanke
+
+
+def test_threshold_flank_holds_then_refires_after_relaxation() -> None:
+    # Flanke haelt: ein weiterer verletzender Tick nach dem Feuern -> KEIN zweiter Notify.
+    # Entspannung und dann erneute Serie -> feuert wieder.
+    th = LatencyThreshold(
+        condition=ThresholdCondition.LATENCY_ABOVE, limit_ms=10.0, consecutive_n=2
+    )
+    sink, notifier = _build_with_notifier(
+        [_task(effective_start=0.0, max_duration_s=100000, threshold=th)]
+    )
+
+    asyncio.run(sink.record(_target(), _sample(rtt_ms=20.0), None, now=1000.0))  # 1. Verletzung
+    asyncio.run(sink.record(_target(), _sample(rtt_ms=20.0), None, now=1001.0))  # 2. -> feuert
+    assert len(notifier.calls) == 1
+    asyncio.run(sink.record(_target(), _sample(rtt_ms=20.0), None, now=1002.0))  # haelt -> kein
+    assert len(notifier.calls) == 1
+
+    # Entspannung: ein Tick unter Limit setzt die Flanke scharf.
+    asyncio.run(sink.record(_target(), _sample(rtt_ms=5.0), None, now=1003.0))
+    assert len(notifier.calls) == 1
+    # Erneute Serie -> feuert wieder.
+    asyncio.run(sink.record(_target(), _sample(rtt_ms=20.0), None, now=1004.0))  # 1. Verletzung
+    asyncio.run(sink.record(_target(), _sample(rtt_ms=20.0), None, now=1005.0))  # 2. -> feuert
+    assert len(notifier.calls) == 2
+
+
+def test_task_without_threshold_never_notifies() -> None:
+    # Aufgabe OHNE threshold (None) -> nie ein Notify, auch bei klarer Verletzung.
+    sink, notifier = _build_with_notifier(
+        [_task(effective_start=0.0, max_duration_s=100000, threshold=None)]
+    )
+    asyncio.run(sink.record(_target(), _sample(alive=False, rtt_ms=-1.0), None, now=1000.0))
+    assert notifier.calls == []
+
+
+def test_threshold_without_notifier_does_not_crash() -> None:
+    # threshold_notifier nicht injiziert (None) -> kein Crash; die Auswertung laeuft
+    # (der Zustand wird fortgeschrieben), nur der Notify entfaellt.
+    th = LatencyThreshold(
+        condition=ThresholdCondition.LATENCY_ABOVE, limit_ms=10.0, consecutive_n=1
+    )
+    sink, _rtt, _events = _build([_task(effective_start=0.0, max_duration_s=100000, threshold=th)])
+
+    # Wirft nicht.
+    asyncio.run(sink.record(_target(), _sample(rtt_ms=20.0), None, now=1000.0))
+    # Der Hysterese-Zustand ist fortgeschrieben (im Alarm), obwohl nicht benachrichtigt.
+    assert sink._threshold_states["task-1"].in_alarm is True
+
+
+def test_threshold_notify_is_best_effort_on_notifier_failure() -> None:
+    # best-effort: ein Notifier, der in notify_threshold wirft, darf record NICHT
+    # hochwerfen (der bestehende try/except faengt) -- record kehrt ruhig zurueck.
+    class _ThrowingNotifier:
+        async def notify_threshold(self, *args: object, **kwargs: object) -> None:
+            raise RuntimeError("notify kaputt")
+
+    th = LatencyThreshold(
+        condition=ThresholdCondition.LATENCY_ABOVE, limit_ms=10.0, consecutive_n=1
+    )
+    sink = MonitorLoggingSink(
+        _FakeTaskRepo([_task(effective_start=0.0, max_duration_s=100000, threshold=th)]),
+        _RecordingRtt(),
+        _RecordingEvents(),
+        _ThrowingNotifier(),
+    )
+
+    # Wirft NICHT -- der Fehler wird geschluckt+geloggt.
+    asyncio.run(sink.record(_target(), _sample(rtt_ms=20.0), None, now=1000.0))
+
+
+def test_threshold_independent_of_capture_mode_reachability_unreachable() -> None:
+    # Schwellwert-Auswertung ist unabhaengig vom capture_mode: eine REACHABILITY-Aufgabe
+    # (nicht _LATENCY) mit UNREACHABLE-threshold feuert bei alive=False.
+    th = LatencyThreshold(condition=ThresholdCondition.UNREACHABLE, limit_ms=0.0, consecutive_n=1)
+    sink, notifier = _build_with_notifier(
+        [
+            _task(
+                capture_mode=CaptureMode.REACHABILITY,
+                effective_start=0.0,
+                max_duration_s=100000,
+                threshold=th,
+            )
+        ]
+    )
+
+    asyncio.run(
+        sink.record(_target(), _sample(alive=False, rtt_ms=-1.0), MonitorEventType.DOWN, now=1000.0)
+    )
+
+    assert len(notifier.calls) == 1

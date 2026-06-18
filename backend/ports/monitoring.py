@@ -37,6 +37,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 
 from domain.monitoring import (
+    LatencyThreshold,
     LoggingEventRow,
     LoggingRttSample,
     LoggingTask,
@@ -192,6 +193,54 @@ class AlertRaiserPort(Protocol):
         verschlucken (beide Konsequenzen sind dadurch gegenseitig isoliert, ohne dass
         der Use-Case ein try/except braucht). Matcht keine Regel -> no-op (kein
         Fehler), wie der vom Port vorgesehene Ruhezustand.
+        """
+        ...
+
+
+class ThresholdNotifierPort(Protocol):
+    """Benachrichtigt ueber eine Schwellwert-Alarm-FLANKE einer Logging-Aufgabe (3a).
+
+    Die VIERTE best-effort-Konsequenz der monitoring-Domaene -- aber an einer EIGENEN
+    Naht: nicht am Live-Loop (wie ``MonitorNotifierPort``/``AlertRaiserPort``, die an
+    den up/down-Flanken des fluechtigen Monitors haengen), sondern im Logging-Sink, der
+    pro Tick je aktiver Logging-Aufgabe ihren ``threshold`` per ``evaluate_sample``
+    (Hysterese) auswertet. Darum BEWUSST GETRENNT vom ``AlertRaiserPort``: ein
+    Schwellwert ist eine Logging-Task-Sache (eigene Regel, eigener Hysterese-Zustand
+    je Task), nicht der regelbasierte Alert des Live-Monitors. So bleiben die beiden
+    Konsequenz-Naehte unabhaengig -- der Schwellwert-Port traegt seinen eigenen Vertrag,
+    statt den AlertRaiser mit einem fremden Belang zu ueberladen.
+
+    BEST-EFFORT-Vertrag, EXAKT wie ``MonitorNotifierPort.notify`` / ``AlertRaiserPort``:
+    ``notify_threshold`` wirft NIE (der Adapter faengt+loggt jeden Fehler selbst). Ein
+    fehlgeschlagener Notify ist KEIN Loop-Fehler -- der Sink-``record`` (und damit der
+    Live-Loop) darf niemals wegen einer Schwellwert-Benachrichtigung sterben.
+
+    Der Port nennt NICHTS aus der alerting-Domaene (independence, CI-hart -- symmetrisch
+    zur ``AlertRaiserPort``-Naht): er fuehrt NUR monitoring-Domaenen-Typen
+    (``LoggingTask``, ``LatencyThreshold``, ``PingSample``) + stdlib. Das Mapping auf den
+    echten alerting-Notifier (macos/email + ``SmtpConfig`` je ``threshold.notify_desktop``/
+    ``notify_email``) lebt im Composition Root (3b, ``app.py``), NICHT hier.
+    """
+
+    async def notify_threshold(
+        self,
+        task: LoggingTask,
+        threshold: LatencyThreshold,
+        sample: PingSample,
+        now: float,
+    ) -> None:
+        """Loest die Benachrichtigung fuer eine frisch gefeuerte Schwellwert-Flanke aus.
+
+        Wird vom Sink GENAU dann gerufen, wenn ``evaluate_sample`` eine Alarm-FLANKE
+        meldet (``fired=True``) -- nicht waehrend ein Alarm anhaelt (Flanken-Semantik
+        der Domaene). ``task``/``threshold`` liefern den Kontext der Nachricht (Label,
+        Bedingung, Limit, welche Kanaele laut ``threshold.notify_desktop``/
+        ``notify_email``); ``sample`` die Messwerte (alive/rtt_ms/loss_pct), die die
+        Flanke ausgeloest haben; ``now`` den Bezugs-ts (der bereits gemessene
+        ``sample.timestamp`` -- KEINE neue Uhr im Sink).
+
+        Best-effort -- wirft NIE. Auf Plattformen/Konfigurationen ohne aktiven Kanal
+        ist die Methode ein no-op (vertraglich erlaubt, kein Fehler).
         """
         ...
 
