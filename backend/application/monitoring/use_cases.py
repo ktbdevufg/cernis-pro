@@ -63,6 +63,7 @@ from application.monitoring.errors import LoggingTaskConflict, LoggingTaskNotFou
 from domain.monitoring import (
     CUSTOM_TARGETS_KEY,
     CaptureMode,
+    LatencyThreshold,
     LoggingTask,
     MonitorEvent,
     MonitorTarget,
@@ -71,6 +72,7 @@ from domain.monitoring import (
     ScheduleParseError,
     SlaSample,
     TaskState,
+    ThresholdCondition,
     classify_transition,
     compute_sla_stats,
     conflicts_with,
@@ -697,6 +699,18 @@ class CreateLoggingTask:
     Domaene (autoritativ); dieser Use-Case-Default spiegelt ihn nur, der Router setzt
     KEINE eigene 5, sondern reicht ``interval_s`` nur durch, wenn der Client es gesetzt
     hat (sonst greift dieser Default). Die Stufen-Validierung macht der Router (422).
+
+    SCHWELLWERT (Schnitt 4): der optionale ``LatencyThreshold`` der Aufgabe wird HIER
+    aus rohen Wire-Feldern (``threshold_condition`` als ``str`` + die uebrigen Felder)
+    gebaut -- EXAKT das ``capture_mode``/``operation_mode``-Muster: der api-Rand reicht
+    nur rohe Strings durch, die autoritative ``str`` -> ``ThresholdCondition``-Hebung und
+    der ``LatencyThreshold``-Bau passieren im Use-Case. So importiert der api-Ring KEINE
+    Domaenen-Typen (import-linter: api -> nur application, kein ``domain``) -- ein
+    fertiges ``LatencyThreshold``-Objekt am Router-Rand zu bauen wuerde diesen CI-harten
+    Contract brechen. ``threshold_condition is None`` = kein Schwellwert (Default), dann
+    bleibt ``task.threshold`` ``None``. Die rohe Wert-Validierung (condition-Vokabular,
+    ``consecutive_n >= 1``, ``limit_ms >= 0``) macht der Router (422); die Hebung hier ist
+    die zweite, autoritative Linie (ein ``ThresholdCondition``-Fehlwert wirft ``ValueError``).
     """
 
     def __init__(self, repository: LoggingTaskRepository) -> None:
@@ -716,7 +730,26 @@ class CreateLoggingTask:
         planned_end: float | None = None,
         max_duration_s: int | None = None,
         interval_s: int = 5,
+        threshold_condition: str | None = None,
+        threshold_limit_ms: float = 0.0,
+        threshold_consecutive_n: int = 3,
+        threshold_notify_desktop: bool = True,
+        threshold_notify_email: bool = False,
     ) -> LoggingTask:
+        # Schwellwert nur bauen, wenn der Client eine condition gesendet hat -- sonst
+        # bleibt der Task ohne Schwellwert (Domaenen-Default ``threshold=None``). Die
+        # ``str`` -> Enum-Hebung ist autoritativ HIER (Muster ``CaptureMode(...)``).
+        threshold = (
+            LatencyThreshold(
+                condition=ThresholdCondition(threshold_condition),
+                limit_ms=threshold_limit_ms,
+                consecutive_n=threshold_consecutive_n,
+                notify_desktop=threshold_notify_desktop,
+                notify_email=threshold_notify_email,
+            )
+            if threshold_condition is not None
+            else None
+        )
         task = LoggingTask(
             id=task_id,
             target_id=target_id,
@@ -730,6 +763,7 @@ class CreateLoggingTask:
             max_duration_s=max_duration_s,
             created_at=created_at,
             interval_s=interval_s,
+            threshold=threshold,
         )
         self._repository.save(task)
         return task

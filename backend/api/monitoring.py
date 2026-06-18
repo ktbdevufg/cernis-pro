@@ -115,6 +115,31 @@ _OPERATION_MODES = frozenset({"scheduled", "immediate"})
 # reicht ``None`` als "nicht gesetzt" durch, dann greift der Use-Case-Default.
 _INTERVAL_STUFEN = frozenset({5, 15, 30, 60, 300})
 
+# Erlaubte Schwellwert-Bedingungen am Router-Rand (Schnitt 4). Wie die Modus-Mengen
+# oben SPIEGELN sie bewusst das Domaenen-Vokabular (``ThresholdCondition``-StrEnum-
+# Values) -- der api-Ring darf ``domain`` NICHT importieren (import-linter), darum als
+# Literal-Menge hier. Die autoritative str -> Enum-Hebung + der LatencyThreshold-Bau
+# machen ``CreateLoggingTask`` (application); diese Menge ist nur die Frueh-Validierung
+# am Rand (422 statt 500), exakt wie _CAPTURE_MODES/_OPERATION_MODES.
+_THRESHOLD_CONDITIONS = frozenset({"latency_above", "unreachable"})
+
+
+class ThresholdBody(BaseModel):
+    """Verschachteltes Schwellwert-Objekt im CreateLoggingTaskBody (Schnitt 4).
+
+    Spiegelt die ``LatencyThreshold``-Domaenenfelder als Wire-Form. ``condition`` ist
+    ein roher ``str`` ("latency_above"/"unreachable") -- die str -> ``ThresholdCondition``-
+    Hebung macht der Use-Case (Muster ``capture_mode``), der Router validiert nur das
+    Vokabular gegen ``_THRESHOLD_CONDITIONS`` (422). Die uebrigen Felder tragen die
+    Domaenen-Defaults (``consecutive_n=3``, ``notify_desktop=True``, ``notify_email=False``).
+    """
+
+    condition: str
+    limit_ms: float = 0.0
+    consecutive_n: int = 3
+    notify_desktop: bool = True
+    notify_email: bool = False
+
 
 class CreateLoggingTaskBody(BaseModel):
     """POST /api/monitor/logging -- Anlage einer Logging-Aufgabe.
@@ -140,6 +165,10 @@ class CreateLoggingTaskBody(BaseModel):
     # Use-Case-Default (5) greift; ein gesetzter Wert muss eine der erlaubten Stufen
     # sein (_validate_logging_modes, 422). NUR der Erweitert-Modus der Maske sendet es.
     interval_s: int | None = None
+    # Optionaler Schwellwert-Alarm der Aufgabe (Schnitt 4): ``None`` = kein Schwellwert.
+    # NUR der Erweitert-Modus der Maske sendet ihn; der Use-Case baut daraus den
+    # ``LatencyThreshold`` (str -> Enum-Hebung), der Router validiert nur die rohen Werte.
+    threshold: ThresholdBody | None = None
 
 
 class AddTargetBody(BaseModel):
@@ -294,6 +323,27 @@ def _logging_task_to_dict(task: Any) -> dict[str, Any]:
         # Mess-Intervall in Sekunden (C-2). Immer gesetzt (Domaenen-Default 5) -- das
         # Frontend zeigt es in der Karten-Meta bei REACHABILITY_LATENCY ("alle 30 s").
         "interval_s": task.interval_s,
+        # Schwellwert-Alarm (Schnitt 4): verschachteltes dict oder ``null``, wenn kein
+        # Schwellwert konfiguriert ist. ``condition`` als StrEnum-Wert (``str(...)``),
+        # die bools als echte Wire-bools (nicht 0/1).
+        "threshold": _threshold_to_dict(task.threshold),
+    }
+
+
+def _threshold_to_dict(threshold: Any) -> dict[str, Any] | None:
+    """``LatencyThreshold`` -> Wire-dict, oder ``None`` wenn kein Schwellwert gesetzt.
+
+    ``condition`` als ``str``-Wert (StrEnum), die uebrigen Felder roh durchgereicht
+    (``limit_ms`` float, ``consecutive_n`` int, die notify-Flags als echte bools).
+    """
+    if threshold is None:
+        return None
+    return {
+        "condition": str(threshold.condition),
+        "limit_ms": threshold.limit_ms,
+        "consecutive_n": threshold.consecutive_n,
+        "notify_desktop": threshold.notify_desktop,
+        "notify_email": threshold.notify_email,
     }
 
 
@@ -481,6 +531,37 @@ def _validate_logging_modes(body: CreateLoggingTaskBody) -> None:
             detail=f"interval_s {body.interval_s!r} ist keine erlaubte Stufe "
             f"{sorted(_INTERVAL_STUFEN)}",
         )
+    # Schwellwert (Schnitt 4): nur pruefen, wenn der Client einen gesendet hat.
+    if body.threshold is not None:
+        _validate_threshold(body.threshold)
+
+
+def _validate_threshold(threshold: ThresholdBody) -> None:
+    """Prueft die rohen Schwellwert-Werte am Router-Rand (422 bei Verstoss, kein 500/Drift).
+
+    Reine Wert-Validierung des Wire-Objekts (Stil wie die interval_s-Pruefung): das
+    ``condition``-Vokabular gegen ``_THRESHOLD_CONDITIONS``, ``consecutive_n >= 1``
+    (Hysterese braucht mindestens eine Messung), ``limit_ms >= 0`` (kein negativer
+    Grenzwert). Die autoritative str -> ``ThresholdCondition``-Hebung + der
+    ``LatencyThreshold``-Bau passieren NICHT hier, sondern im Use-Case (Muster
+    ``capture_mode``); diese Pruefung ist nur die Frueh-Validierung (422 statt 500).
+    """
+    if threshold.condition not in _THRESHOLD_CONDITIONS:
+        raise HTTPException(
+            422,
+            detail=f"Unbekannte threshold.condition {threshold.condition!r} "
+            f"(erlaubt: {sorted(_THRESHOLD_CONDITIONS)})",
+        )
+    if threshold.consecutive_n < 1:
+        raise HTTPException(
+            422,
+            detail="threshold.consecutive_n muss >= 1 sein",
+        )
+    if threshold.limit_ms < 0:
+        raise HTTPException(
+            422,
+            detail="threshold.limit_ms muss >= 0 sein",
+        )
 
 
 @router.post("/monitor/logging", status_code=status.HTTP_201_CREATED)
@@ -500,6 +581,15 @@ def create_logging_task(
     interval_kwargs: dict[str, int] = (
         {"interval_s": body.interval_s} if body.interval_s is not None else {}
     )
+    # Schwellwert (Schnitt 4): die ROHEN Wire-Felder durchreichen -- der Use-Case hebt
+    # ``condition`` zu ``ThresholdCondition`` und baut den ``LatencyThreshold`` (Muster
+    # ``capture_mode``; der api-Ring importiert KEINE Domaenen-Typen). ``threshold_condition``
+    # ist das EINE "kein Schwellwert"-Signal: bei ``None`` baut der Use-Case keinen
+    # Threshold (Default ``threshold=None``) und ignoriert die uebrigen threshold-Felder.
+    # Anders als interval_s daher KEIN bedingtes kwargs-Dict -- ein gemischt typisiertes
+    # ``**dict`` liesse sich nicht typsicher unpacken; die explizite Durchreichung mit
+    # condition als None-Anker ist hier sauberer.
+    threshold_condition = body.threshold.condition if body.threshold is not None else None
     task = create_task(
         task_id=uuid.uuid4().hex,
         target_id=body.target_id,
@@ -511,6 +601,15 @@ def create_logging_task(
         planned_start=body.planned_start,
         planned_end=body.planned_end,
         max_duration_s=body.max_duration_s,
+        threshold_condition=threshold_condition,
+        threshold_limit_ms=body.threshold.limit_ms if body.threshold is not None else 0.0,
+        threshold_consecutive_n=(body.threshold.consecutive_n if body.threshold is not None else 3),
+        threshold_notify_desktop=(
+            body.threshold.notify_desktop if body.threshold is not None else True
+        ),
+        threshold_notify_email=(
+            body.threshold.notify_email if body.threshold is not None else False
+        ),
         **interval_kwargs,
     )
     return _logging_task_to_dict(task)

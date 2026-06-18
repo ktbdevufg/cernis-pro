@@ -199,6 +199,160 @@ def test_create_without_interval_defaults_to_5(db_path: Path) -> None:
     assert resp.json()["interval_s"] == 5
 
 
+# ── Schwellwert-Alarm (Schnitt 4) ───────────────────────────────────────────
+
+
+def test_create_without_threshold_is_null(db_path: Path) -> None:
+    # Ohne threshold-Feld traegt die Wire-Form "threshold": null.
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.post("/api/monitor/logging", json=_create_body())
+    assert resp.status_code == 201
+    assert resp.json()["threshold"] is None
+
+
+def test_create_with_latency_threshold_carries_it(db_path: Path) -> None:
+    # Gueltiger LATENCY_ABOVE-Schwellwert -> 201, vollstaendige Wire-Form (echter
+    # DB-Round-trip: Router -> Use-Case (str->Enum) -> Persistenz -> Wire).
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.post(
+            "/api/monitor/logging",
+            json=_create_body(
+                threshold={
+                    "condition": "latency_above",
+                    "limit_ms": 150.0,
+                    "consecutive_n": 5,
+                    "notify_desktop": True,
+                    "notify_email": True,
+                }
+            ),
+        )
+    assert resp.status_code == 201
+    assert resp.json()["threshold"] == {
+        "condition": "latency_above",
+        "limit_ms": 150.0,
+        "consecutive_n": 5,
+        "notify_desktop": True,
+        "notify_email": True,
+    }
+
+
+def test_create_with_unreachable_threshold_uses_defaults(db_path: Path) -> None:
+    # UNREACHABLE mit nur condition -> die uebrigen Felder tragen die Wire-/Domaenen-
+    # Defaults (limit_ms 0.0, consecutive_n 3, notify_desktop True, notify_email False).
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.post(
+            "/api/monitor/logging",
+            json=_create_body(threshold={"condition": "unreachable"}),
+        )
+    assert resp.status_code == 201
+    assert resp.json()["threshold"] == {
+        "condition": "unreachable",
+        "limit_ms": 0.0,
+        "consecutive_n": 3,
+        "notify_desktop": True,
+        "notify_email": False,
+    }
+
+
+def test_create_with_unknown_condition_is_422(db_path: Path) -> None:
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.post(
+            "/api/monitor/logging",
+            json=_create_body(threshold={"condition": "bogus"}),
+        )
+    assert resp.status_code == 422
+
+
+def test_create_with_consecutive_n_zero_is_422(db_path: Path) -> None:
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.post(
+            "/api/monitor/logging",
+            json=_create_body(threshold={"condition": "latency_above", "consecutive_n": 0}),
+        )
+    assert resp.status_code == 422
+
+
+def test_create_with_negative_limit_is_422(db_path: Path) -> None:
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.post(
+            "/api/monitor/logging",
+            json=_create_body(threshold={"condition": "latency_above", "limit_ms": -1.0}),
+        )
+    assert resp.status_code == 422
+
+
+def test_threshold_reaches_use_case_as_raw_fields(db_path: Path) -> None:
+    """Spy: der Router reicht die ROHEN Schwellwert-Felder an den Use-Case durch.
+
+    Ersetzt den ``CreateLoggingTask``-Use-Case durch einen aufzeichnenden Spy (statt
+    des echten DB-Use-Case), um die Schichtgrenze zu belegen: der Router uebergibt
+    ``threshold_condition`` als ``str`` + die uebrigen rohen Felder (NICHT ein fertiges
+    LatencyThreshold-Objekt) -- die str->Enum-Hebung ist Use-Case-Sache.
+    """
+    captured: dict[str, Any] = {}
+
+    class _SpyCreate:
+        def __call__(self, **kwargs: Any) -> Any:
+            captured.update(kwargs)
+
+            class _Task:
+                # Minimal-Stub fuer _logging_task_to_dict (Attribut-Zugriff am Rand).
+                id = "spy"
+                target_id = "wlan"
+                label = "L"
+                purpose = "P"
+                capture_mode = "reachability_latency"
+                operation_mode = "immediate"
+                state = "created"
+                planned_start = None
+                planned_end = None
+                max_duration_s = 3600
+                created_at = 0.0
+                effective_start = None
+                interval_s = 5
+                threshold = None
+
+            return _Task()
+
+    app = create_app(AppConfig())
+    app.dependency_overrides[provide_create_logging_task] = lambda: _SpyCreate()
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/monitor/logging",
+            json=_create_body(
+                threshold={
+                    "condition": "latency_above",
+                    "limit_ms": 42.0,
+                    "consecutive_n": 2,
+                    "notify_desktop": False,
+                    "notify_email": True,
+                }
+            ),
+        )
+    assert resp.status_code == 201
+    assert captured["threshold_condition"] == "latency_above"
+    assert captured["threshold_limit_ms"] == 42.0
+    assert captured["threshold_consecutive_n"] == 2
+    assert captured["threshold_notify_desktop"] is False
+    assert captured["threshold_notify_email"] is True
+
+
+def test_threshold_appears_in_list_and_detail(db_path: Path) -> None:
+    # Ein Task mit Schwellwert erscheint korrekt in list UND detail (Wire-Form).
+    with TestClient(_wired_app(db_path)) as client:
+        tid = client.post(
+            "/api/monitor/logging",
+            json=_create_body(threshold={"condition": "unreachable", "consecutive_n": 4}),
+        ).json()["id"]
+        listed = client.get("/api/monitor/logging").json()
+        detail = client.get(f"/api/monitor/logging/{tid}").json()
+    row = next(r for r in listed if r["id"] == tid)
+    assert row["threshold"]["condition"] == "unreachable"
+    assert row["threshold"]["consecutive_n"] == 4
+    assert detail["threshold"]["condition"] == "unreachable"
+    assert detail["threshold"]["consecutive_n"] == 4
+
+
 # ── GET /api/monitor/logging (Liste) + Detail (404) ─────────────────────────
 
 
