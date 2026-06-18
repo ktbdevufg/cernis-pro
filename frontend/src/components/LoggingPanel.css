@@ -250,6 +250,59 @@
   align-items: end;
 }
 
+/* ── Schwellwert-Alarm (Schnitt 5, nur Erweitert) ──────────────────────────── */
+
+/* Container des Schwellwert-Blocks: ruhige abgesetzte Flaeche unter dem Raster. */
+.logging-schwellwert {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* An/Aus-Schalter "Schwellwert-Alarm". */
+.logging-schwellwert__schalter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.logging-schwellwert__schalter input {
+  accent-color: var(--color-accent);
+}
+
+.logging-schwellwert__schalter-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+/* Detailfelder (nur sichtbar, wenn der Schalter an ist): kompaktes Raster wie das
+   Erweitert-Raster, aber etwas enger. */
+.logging-schwellwert__felder {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  align-items: end;
+  margin-top: 4px;
+}
+
+/* Desktop-/E-Mail-Checkboxen nebeneinander. */
+.logging-schwellwert__benachrichtigung {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  align-items: center;
+}
+
+.logging-schwellwert__benachrichtigung input {
+  accent-color: var(--color-accent);
+}
+
 /* ── Abschluss-/Allgemeine Knoepfe ─────────────────────────────────────────── */
 
 .logging__abschluss {
@@ -374,6 +427,12 @@
    per Akzentfarbe hervorgehoben -- die erste sichtbare Enterprise-Feineinstellung. */
 .logging-karte__intervall {
   color: var(--color-accent-strong);
+}
+
+/* Schwellwert-Alarm in der Karten-Meta (Schnitt 5). Dezenter Warnton -- signalisiert
+   die scharfgestellte Alarm-Bedingung, ohne als Fehler zu schreien. */
+.logging-karte__schwellwert {
+  color: var(--sev-med-text);
 }
 
 /* Fortschrittsbalken (nur aktive Aufgaben). */

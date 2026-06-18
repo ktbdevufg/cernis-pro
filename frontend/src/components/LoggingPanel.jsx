@@ -152,6 +152,22 @@ function AufgabenKarte({ task, jetzt, sla, onAktion }) {
     ? t(`beobachten.logging.intervallKarte.${intervallKey}`)
     : null;
 
+  // Schwellwert-Alarm (Schnitt 5): bei gesetztem threshold (nicht null) eine dezente
+  // Meta-Zeile. Zwei Varianten je condition -- "latency_above" zeigt Grenzwert + N,
+  // "unreachable" nur N. i18n-Text mit Platzhaltern (keine zusammengebauten Strings);
+  // fremde condition -> keine Anzeige (kein Absturz).
+  const thr = task.threshold;
+  const schwellwertText = !thr
+    ? null
+    : thr.condition === "latency_above"
+      ? t("beobachten.logging.schwellwertKarte.latency", {
+          limit: thr.limitMs,
+          n: thr.consecutiveN,
+        })
+      : thr.condition === "unreachable"
+        ? t("beobachten.logging.schwellwertKarte.unreachable", { n: thr.consecutiveN })
+        : null;
+
   // SLA-Kennzahlen (C-3) NUR bei "Erreichbarkeit + Latenz" (nur dieser Modus erzeugt
   // die dichten RTT-Punkte, aus denen die Verfuegbarkeit gerechnet wird). ``sla`` ist
   // das geladene { uptimePct, downtimeMins, avgRttMs, samples } oder undefined (noch
@@ -187,6 +203,14 @@ function AufgabenKarte({ task, jetzt, sla, onAktion }) {
               ·
             </span>
             <span className="logging-karte__intervall">{intervallText}</span>
+          </>
+        )}
+        {schwellwertText && (
+          <>
+            <span className="logging-karte__trenner" aria-hidden="true">
+              ·
+            </span>
+            <span className="logging-karte__schwellwert">{schwellwertText}</span>
           </>
         )}
         {restText && (
@@ -299,6 +323,18 @@ const LEERE_EINGABE = {
   // Assistent-Modus unsichtbar (wird nicht in den Payload gereicht -> Backend-Default);
   // nur der Erweitert-Modus zeigt das Feld und reicht es mit.
   intervalS: 5,
+  // Schwellwert-Alarm (Schnitt 5). Verschachteltes Objekt mit eigenem aktiv-Flag:
+  // aktiv=false bedeutet KEIN Schwellwert (nichts in den Payload). Die Default-Werte
+  // sind sinnvoll vorbelegt (Latenz > 100 ms, 3 Messungen in Folge, Desktop an,
+  // E-Mail aus -- passend zu den Domaenen-Defaults). NUR im Erweitert-Modus sichtbar.
+  threshold: {
+    aktiv: false,
+    condition: "latency_above",
+    limitMs: 100,
+    consecutiveN: 3,
+    notifyDesktop: true,
+    notifyEmail: false,
+  },
 };
 
 export default function LoggingPanel() {
@@ -327,6 +363,12 @@ export default function LoggingPanel() {
 
   // Ein Feld der Eingabe setzen (immutabel).
   const setFeld = (feld, wert) => setEingabe((v) => ({ ...v, [feld]: wert }));
+
+  // Ein Feld INNERHALB des verschachtelten threshold-Objekts setzen (immutabel, Schnitt
+  // 5). Analog setFeld, aber tief: schreibt in eingabe.threshold[feld] ohne die uebrigen
+  // Schwellwert-Felder zu verlieren.
+  const setThresholdFeld = (feld, wert) =>
+    setEingabe((v) => ({ ...v, threshold: { ...v.threshold, [feld]: wert } }));
 
   // Beim Mount: Ziele (fuer die Auswahl) und vorhandene Aufgaben laden. Fehler
   // werden toleriert (leere Liste, dezenter Hinweis erst bei Aktionsfehlern).
@@ -407,6 +449,20 @@ export default function LoggingPanel() {
     // weg, dann greift still der Backend-Default (5 s). "Erweitert kann mehr".
     if (modus === "erweitert") {
       basis.intervalS = eingabe.intervalS;
+    }
+    // Schwellwert-Alarm (Schnitt 5) NUR im Erweitert-Modus und NUR wenn aktiv. Das
+    // aktiv-Flag ist reine UI und wandert NICHT in den Payload. Bei "unreachable" spielt
+    // der Grenzwert keine Rolle -> wir senden limitMs konsistent als 0 (das Backend
+    // ignoriert ihn dort, 0 ist erlaubt) statt einen UI-Restwert mitzuschleppen.
+    if (modus === "erweitert" && eingabe.threshold.aktiv) {
+      const t = eingabe.threshold;
+      basis.threshold = {
+        condition: t.condition,
+        limitMs: t.condition === "latency_above" ? t.limitMs : 0,
+        consecutiveN: t.consecutiveN,
+        notifyDesktop: t.notifyDesktop,
+        notifyEmail: t.notifyEmail,
+      };
     }
     if (eingabe.operationMode === "scheduled") {
       return {
@@ -543,6 +599,7 @@ export default function LoggingPanel() {
           <ErweitertMaske
             eingabe={eingabe}
             setFeld={setFeld}
+            setThresholdFeld={setThresholdFeld}
             ziele={ziele}
             gueltig={gueltig}
             onAnlegen={handleAnlegen}
@@ -833,7 +890,7 @@ function AssistentMaske({
 }
 
 // ── Erweitert: dieselben Felder kompakt auf EINEM Schirm ────────────────────
-function ErweitertMaske({ eingabe, setFeld, ziele, gueltig, onAnlegen }) {
+function ErweitertMaske({ eingabe, setFeld, setThresholdFeld, ziele, gueltig, onAnlegen }) {
   const { t } = useTranslation();
   return (
     <div className="logging-erweitert">
@@ -878,6 +935,7 @@ function ErweitertMaske({ eingabe, setFeld, ziele, gueltig, onAnlegen }) {
         <BetriebFelder eingabe={eingabe} setFeld={setFeld} />
         <IntervallFeld eingabe={eingabe} setFeld={setFeld} />
       </div>
+      <SchwellwertFeld eingabe={eingabe} setThresholdFeld={setThresholdFeld} />
       <AbschlussKnoepfe gueltig={gueltig} onAnlegen={onAnlegen} />
     </div>
   );
@@ -911,5 +969,105 @@ function IntervallFeld({ eingabe, setFeld }) {
         </span>
       )}
     </label>
+  );
+}
+
+// Schwellwert-Alarm-Feld (Schnitt 5) -- NUR im Erweitert-Modus gerendert (der Assistent
+// zeigt es nicht: "Erweitert kann mehr"). Ein An/Aus-Schalter blendet die Detailfelder
+// ein. Bei "unreachable" entfaellt der Grenzwert (spielt fachlich keine Rolle). Schreibt
+// ueber setThresholdFeld tief in eingabe.threshold; das aktiv-Flag ist reine UI (nur
+// bauePayload entscheidet, ob ueberhaupt ein threshold gesendet wird).
+function SchwellwertFeld({ eingabe, setThresholdFeld }) {
+  const { t } = useTranslation();
+  const thr = eingabe.threshold;
+  return (
+    <div className="logging-schwellwert">
+      <label className="logging-schwellwert__schalter">
+        <input
+          type="checkbox"
+          checked={thr.aktiv}
+          onChange={(e) => setThresholdFeld("aktiv", e.target.checked)}
+        />
+        <span className="logging-schwellwert__schalter-label">
+          {t("beobachten.logging.schwellwertLabel")}
+        </span>
+      </label>
+      <span className="logging-feld__hinweis">
+        {t("beobachten.logging.schwellwertHinweis")}
+      </span>
+
+      {thr.aktiv && (
+        <div className="logging-schwellwert__felder">
+          <label className="logging-feld">
+            <span className="logging-feld__label">
+              {t("beobachten.logging.schwellwertBedingungLabel")}
+            </span>
+            <select
+              className="logging-feld__select"
+              value={thr.condition}
+              onChange={(e) => setThresholdFeld("condition", e.target.value)}
+            >
+              <option value="latency_above">
+                {t("beobachten.logging.schwellwertBedingung.latency_above")}
+              </option>
+              <option value="unreachable">
+                {t("beobachten.logging.schwellwertBedingung.unreachable")}
+              </option>
+            </select>
+          </label>
+
+          {/* Grenzwert nur bei "latency_above" -- bei "unreachable" ohne Bedeutung. */}
+          {thr.condition === "latency_above" && (
+            <label className="logging-feld">
+              <span className="logging-feld__label">
+                {t("beobachten.logging.schwellwertGrenzwertLabel")}
+              </span>
+              <input
+                type="number"
+                min="0"
+                className="logging-feld__input"
+                value={thr.limitMs}
+                onChange={(e) => setThresholdFeld("limitMs", Number(e.target.value))}
+              />
+            </label>
+          )}
+
+          <label className="logging-feld">
+            <span className="logging-feld__label">
+              {t("beobachten.logging.schwellwertEmpfindlichkeitLabel")}
+            </span>
+            <input
+              type="number"
+              min="1"
+              className="logging-feld__input"
+              value={thr.consecutiveN}
+              onChange={(e) => setThresholdFeld("consecutiveN", Number(e.target.value))}
+            />
+            <span className="logging-feld__hinweis">
+              {t("beobachten.logging.schwellwertEmpfindlichkeitHinweis")}
+            </span>
+          </label>
+
+          <div className="logging-schwellwert__benachrichtigung">
+            <label className="logging__radio">
+              <input
+                type="checkbox"
+                checked={thr.notifyDesktop}
+                onChange={(e) => setThresholdFeld("notifyDesktop", e.target.checked)}
+              />
+              {t("beobachten.logging.schwellwertDesktop")}
+            </label>
+            <label className="logging__radio">
+              <input
+                type="checkbox"
+                checked={thr.notifyEmail}
+                onChange={(e) => setThresholdFeld("notifyEmail", e.target.checked)}
+              />
+              {t("beobachten.logging.schwellwertEmail")}
+            </label>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

@@ -366,6 +366,22 @@
         "60s": "alle 1 Min",
         "300s": "alle 5 Min"
       },
+      "schwellwertLabel": "Schwellwert-Alarm",
+      "schwellwertHinweis": "Schlägt Alarm, wenn das Ziel eine festgelegte Bedingung über mehrere Messungen hinweg erfüllt.",
+      "schwellwertBedingungLabel": "Bedingung",
+      "schwellwertBedingung": {
+        "latency_above": "Latenz über Grenzwert",
+        "unreachable": "Ziel nicht erreichbar"
+      },
+      "schwellwertGrenzwertLabel": "Grenzwert (ms)",
+      "schwellwertEmpfindlichkeitLabel": "Empfindlichkeit N",
+      "schwellwertEmpfindlichkeitHinweis": "Alarm erst nach N Messungen in Folge.",
+      "schwellwertDesktop": "Desktop-Benachrichtigung",
+      "schwellwertEmail": "E-Mail",
+      "schwellwertKarte": {
+        "latency": "Alarm: Latenz > {{limit}} ms ({{n}}×)",
+        "unreachable": "Alarm: Ausfall ({{n}}×)"
+      },
       "listeTitel": "Logging-Aufgaben",
       "listeLeer": "Noch keine Logging-Aufgaben angelegt.",
       "state": {

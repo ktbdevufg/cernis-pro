@@ -161,6 +161,18 @@ export function mappeLoggingTask(task) {
     // wider Erwarten, faellt es ehrlich auf null (kein erfundener Default im Mapper --
     // die Karte zeigt es nur bei vorhandenem Wert).
     intervalS: task.interval_s ?? null,
+    // Schwellwert-Alarm (Schnitt 5). Optional: das Backend liefert ein verschachteltes
+    // threshold-dict (snake_case) ODER null (kein Schwellwert). null bleibt ehrlich null
+    // (Muster intervalS) -- die Karte zeigt die Alarm-Zeile nur bei vorhandenem Objekt.
+    threshold: task.threshold
+      ? {
+          condition: task.threshold.condition,
+          limitMs: task.threshold.limit_ms,
+          consecutiveN: task.threshold.consecutive_n,
+          notifyDesktop: task.threshold.notify_desktop,
+          notifyEmail: task.threshold.notify_email,
+        }
+      : null,
   };
 }
 
@@ -226,6 +238,7 @@ export async function createLoggingTask({
   plannedEnd = null,
   maxDurationS = null,
   intervalS = null,
+  threshold = null,
 }) {
   const payload = {
     target_id: targetId,
@@ -241,6 +254,18 @@ export async function createLoggingTask({
   // Backend-Default (5). Der Assistent reicht es NIE durch (still Default 5).
   if (intervalS !== null && intervalS !== undefined) {
     payload.interval_s = intervalS;
+  }
+  // Schwellwert-Alarm (Schnitt 5): nur senden, wenn gesetzt -- sonst weglassen, dann
+  // legt das Backend die Aufgabe ohne Alarm an. Als snake_case-dict (Muster interval_s).
+  // Der Assistent reicht es NIE durch (kein Schwellwert im gefuehrten Modus).
+  if (threshold !== null && threshold !== undefined) {
+    payload.threshold = {
+      condition: threshold.condition,
+      limit_ms: threshold.limitMs,
+      consecutive_n: threshold.consecutiveN,
+      notify_desktop: threshold.notifyDesktop,
+      notify_email: threshold.notifyEmail,
+    };
   }
   const backend = await apiPost("/api/monitor/logging", payload);
   return mappeLoggingTask(backend);

@@ -366,6 +366,22 @@
         "60s": "every 1 min",
         "300s": "every 5 min"
       },
+      "schwellwertLabel": "Threshold alert",
+      "schwellwertHinweis": "Raises an alert when the target meets a defined condition across several consecutive measurements.",
+      "schwellwertBedingungLabel": "Condition",
+      "schwellwertBedingung": {
+        "latency_above": "Latency above limit",
+        "unreachable": "Target unreachable"
+      },
+      "schwellwertGrenzwertLabel": "Limit (ms)",
+      "schwellwertEmpfindlichkeitLabel": "Sensitivity N",
+      "schwellwertEmpfindlichkeitHinweis": "Alert only after N consecutive measurements.",
+      "schwellwertDesktop": "Desktop notification",
+      "schwellwertEmail": "Email",
+      "schwellwertKarte": {
+        "latency": "Alert: latency > {{limit}} ms ({{n}}×)",
+        "unreachable": "Alert: outage ({{n}}×)"
+      },
       "listeTitel": "Logging tasks",
       "listeLeer": "No logging tasks created yet.",
       "state": {
