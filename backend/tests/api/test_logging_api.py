@@ -557,3 +557,53 @@ def test_sla_unknown_task_returns_404(db_path: Path) -> None:
     with TestClient(_wired_app(db_path)) as client:
         resp = client.get("/api/monitor/logging/never-existed/sla")
     assert resp.status_code == 404
+
+
+# ── since/until-Durchreichung am Router-Rand (Schnitt 1b) ────────────────────
+# Belegt, dass der Endpunkt die optionalen Query-Floats unveraendert an den Use-Case
+# durchreicht (Spy-Use-Case statt echter Repos -- die since/until-Naht ist "kommen die
+# Werte am Use-Case an", nicht die SLA-Mathematik, die der application-Test deckt).
+
+
+class _SpyGetSla:
+    """Ersetzt ``GetLoggingTaskSla`` und zeichnet die ``since``/``until``-kwargs auf.
+
+    Gibt ein triviales stats-dict zurueck (der Endpunkt reicht es nur durch); die
+    Signatur spiegelt ``GetLoggingTaskSla.__call__`` (``days`` mit Default, since/until
+    als kwargs).
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    def __call__(
+        self,
+        task_id: str,
+        days: int = 30,
+        since: float | None = None,
+        until: float | None = None,
+    ) -> dict[str, Any]:
+        self.calls.append({"task_id": task_id, "since": since, "until": until})
+        return {"task_id": task_id, "uptime_pct": None, "samples": 0, "chart": []}
+
+
+def _app_with_sla_spy(spy: _SpyGetSla) -> FastAPI:
+    app = create_app(AppConfig())
+    app.dependency_overrides[provide_get_logging_task_sla] = lambda: spy
+    return app
+
+
+def test_sla_passes_since_and_until_through_to_use_case() -> None:
+    spy = _SpyGetSla()
+    with TestClient(_app_with_sla_spy(spy)) as client:
+        resp = client.get("/api/monitor/logging/t1/sla?since=100.5&until=200.5")
+    assert resp.status_code == 200
+    assert spy.calls == [{"task_id": "t1", "since": 100.5, "until": 200.5}]
+
+
+def test_sla_without_query_passes_none_through() -> None:
+    spy = _SpyGetSla()
+    with TestClient(_app_with_sla_spy(spy)) as client:
+        resp = client.get("/api/monitor/logging/t1/sla")
+    assert resp.status_code == 200
+    assert spy.calls == [{"task_id": "t1", "since": None, "until": None}]

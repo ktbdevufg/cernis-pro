@@ -444,28 +444,51 @@ class GetAllSlaStats:
 # ``sla_samples`` und fuettert dieselbe reine Domaenen-Rechnung (``compute_sla_stats``,
 # M.2). Wiederverwendung der Rechenlogik, KEINE neue SLA-Mathematik.
 
+# Fester Cutoff fuer eine OFFENE ``until``-Obergrenze des SLA-Ausschnitts (Schnitt 1b):
+# 9_999_999_999.0 ist Jahr 2286 (Unix-ts) -- sicher jenseits aller realen Mess-ts, also
+# faengt der halb-offene ``range(.., eff_until)`` praktisch "bis heute und darueber
+# hinaus" alle Punkte. BEWUSST eine feste Schranke statt ``time.time()``: so bleibt der
+# Use-Case uhrfrei und deterministisch testbar -- anders als der Composition-Root-Provider
+# (app.py, _logging_report_provider), der fuer dieselbe offene Grenze die Uhr nutzen DARF.
+_OPEN_UNTIL_CUTOFF = 9_999_999_999.0
+
 
 class GetLoggingTaskSla:
-    """SLA-Kennzahlen EINER Logging-Aufgabe ueber ihren GESAMTEN Mess-Zeitraum (Pass-Through).
+    """SLA-Kennzahlen EINER Logging-Aufgabe -- gesamter Zeitraum ODER ein Ausschnitt (Pass-Through).
 
     Muster ``GetSlaStats``: laedt die Sample-Zeilen und reicht sie in die reine
     ``compute_sla_stats`` (M.2) -- aber aus dem Logging-RTT-Repo statt aus ``sla_samples``.
     Ablauf: ``task_repo.get`` (``None`` -> ``LoggingTaskNotFound``, der bestehende
-    Fehler) -> ``rtt_repo.all_for(task_id)`` -> die ``LoggingRttSample``-Objekte am
-    Use-Case-Rand in die von der Domaene erwartete Tupel-Reihenfolge ``(alive, rtt_ms,
-    ts)`` umformen (``LoggingRttSample`` traegt ``rtt_ms``/``loss_pct``/``alive``/``ts``
-    -- die Domaene bleibt unangetastet) -> ``compute_sla_stats`` mit
-    ``interval_s=task.interval_s`` (die korrekte Downtime-Schaetzung pro Task, C-3).
-    Das Ergebnis traegt ``task_id`` (Muster ``GetSlaStats``: die Domaene setzt das
-    Schluesselfeld bewusst nicht). Leere Samples -> Null-Stats (``uptime_pct=None``).
+    Fehler) -> die Messpunkte laden (``all_for`` ODER ``range``, s. unten) -> die
+    ``LoggingRttSample``-Objekte am Use-Case-Rand in die von der Domaene erwartete
+    Tupel-Reihenfolge ``(alive, rtt_ms, ts)`` umformen (``LoggingRttSample`` traegt
+    ``rtt_ms``/``loss_pct``/``alive``/``ts`` -- die Domaene bleibt unangetastet) ->
+    ``compute_sla_stats`` mit ``interval_s=task.interval_s`` (die korrekte
+    Downtime-Schaetzung pro Task, C-3). Das Ergebnis traegt ``task_id`` (Muster
+    ``GetSlaStats``: die Domaene setzt das Schluesselfeld bewusst nicht). Leere Samples
+    -> Null-Stats (``uptime_pct=None``). Der ``chart`` bleibt im Ergebnis-dict (kein
+    Eingriff -- ``compute_sla_stats`` baut ihn aus den geladenen Punkten).
 
-    DAYS-SEMANTIK (bewusst anders als ``GetSlaStats``): KEIN ``since``-Filter --
-    ``all_for`` gibt ALLE Messpunkte des Tasks, und die Retention (1 Monat) begrenzt
-    "alle" ohnehin. ``days`` wird nur fuer die Chart-Signatur/Stat-Konsistenz an
-    ``compute_sla_stats`` durchgereicht (das ``days``-Feld im Ergebnis), NICHT als
-    Zeitfenster: ein Logging-Task hat ein klar begrenztes EIGENES Fenster, darum wird
-    ueber den gesamten vorhandenen Task-Zeitraum gerechnet, nicht ueber ein
-    ``days``-Fenster.
+    ZEITRAUM (``since``/``until``, Schnitt 1b): OPTIONALER Ausschnitt ``[since, until)``.
+    * Beide ``None`` -> ``rtt_repo.all_for(task_id)``: ALLE Messpunkte des Tasks --
+      unveraendertes Bestandsverhalten (die Retention von 1 Monat begrenzt "alle"
+      ohnehin). Bestehende Aufrufer ohne ``since``/``until`` bleiben verhaltensgleich.
+    * Sonst -> ``rtt_repo.range(task_id, eff_since, eff_until)`` mit ``eff_since = since
+      if not None else 0.0`` und ``eff_until = until if not None else`` einem festen
+      grossen Cutoff (``_OPEN_UNTIL_CUTOFF``, s. dort).
+
+    UHRFREI -- bewusste Asymmetrie zum Composition-Root-Provider (app.py,
+    ``_logging_report_provider``): DORT wird fuer eine offene ``until``-Grenze die Uhr
+    genutzt (``export_clock.now() + 86400``), weil der Provider im Composition Root
+    sitzt und die Uhr nutzen DARF. HIER im Use-Case sitzt kein Provider dazwischen --
+    er bleibt rein/uhrfrei und nutzt fuer die offene ``until``-Grenze den festen
+    ``_OPEN_UNTIL_CUTOFF`` statt ``time.time()``. So bleibt der Use-Case deterministisch
+    testbar (kein time.time()-Bezug im Ergebnis).
+
+    DAYS-SEMANTIK (bewusst anders als ``GetSlaStats``): ``days`` ist KEIN Zeitfenster --
+    es wird nur fuer die Chart-Signatur/Stat-Konsistenz an ``compute_sla_stats``
+    durchgereicht (das ``days``-Feld im Ergebnis). Das Zeitfenster steuern allein
+    ``since``/``until`` (oder, bei beiden ``None``, der gesamte Task-Zeitraum).
     """
 
     def __init__(
@@ -476,11 +499,26 @@ class GetLoggingTaskSla:
         self._task_repo = task_repo
         self._rtt_repo = rtt_repo
 
-    def __call__(self, task_id: str, days: int = 30) -> dict[str, Any]:
+    def __call__(
+        self,
+        task_id: str,
+        days: int = 30,
+        since: float | None = None,
+        until: float | None = None,
+    ) -> dict[str, Any]:
         task = self._task_repo.get(task_id)
         if task is None:
             raise LoggingTaskNotFound(task_id)
-        samples = self._rtt_repo.all_for(task_id)
+        # Beide Grenzen offen -> Bestandsverhalten (all_for = gesamter Task-Zeitraum).
+        # Sonst der halb-offene range-Ausschnitt: eff_since=0.0 fuer eine offene
+        # Untergrenze, eff_until=_OPEN_UNTIL_CUTOFF fuer eine offene Obergrenze (kein
+        # time.time() -- der Use-Case bleibt uhrfrei, s. Klassen-Docstring).
+        if since is None and until is None:
+            samples = self._rtt_repo.all_for(task_id)
+        else:
+            eff_since = since if since is not None else 0.0
+            eff_until = until if until is not None else _OPEN_UNTIL_CUTOFF
+            samples = self._rtt_repo.range(task_id, eff_since, eff_until)
         # LoggingRttSample (rtt_ms/loss_pct/alive/ts) -> SlaSample-Tupel (alive, rtt_ms,
         # ts) in DIESER Reihenfolge -- das Eingabeformat von compute_sla_stats. ``alive``
         # zu ``float`` gehoben (1.0/0.0): SlaSample ist ``tuple[float, float, float]`` und

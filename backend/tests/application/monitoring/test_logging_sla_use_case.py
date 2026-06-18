@@ -9,6 +9,8 @@ Objekten. Getestet wird die Naht des Use-Cases:
   Schaetzung intervall-korrekt).
 * Unbekannter Task -> ``LoggingTaskNotFound`` (RTT-Repo wird gar nicht erst gefragt).
 * Leere Samples -> Domaenen-Null-Stats (``uptime_pct=None``), mit ``task_id``.
+* OHNE since/until -> ``all_for`` (Bestandsverhalten, gesamter Task-Zeitraum).
+* MIT since/until -> ``range`` statt ``all_for`` (Schnitt 1b, der Ausschnitt).
 """
 
 import pytest
@@ -76,6 +78,8 @@ class _FakeRttRepo:
     def __init__(self, samples: dict[str, list[LoggingRttSample]] | None = None) -> None:
         self._samples = samples or {}
         self.all_for_calls: list[str] = []
+        # (task_id, since, until) jedes range-Aufrufs -- belegt die since/until-Naht.
+        self.range_calls: list[tuple[str, float, float]] = []
 
     def all_for(self, task_id: str) -> list[LoggingRttSample]:
         self.all_for_calls.append(task_id)
@@ -85,7 +89,11 @@ class _FakeRttRepo:
         raise AssertionError("save darf vom SLA-Use-Case nicht gerufen werden")
 
     def range(self, task_id: str, since: float, until: float) -> list[LoggingRttSample]:
-        raise AssertionError("range darf vom SLA-Use-Case nicht gerufen werden")
+        # Schnitt 1b: bei gesetztem since/until nutzt der Use-Case range statt all_for.
+        # Liefert dieselben Test-Samples wie all_for (der Fake filtert nicht -- die Naht
+        # ist "welche Methode + welche Grenzen", nicht das Filter-Verhalten des Repos).
+        self.range_calls.append((task_id, since, until))
+        return self._samples.get(task_id, [])
 
     def delete_older_than(self, cutoff_ts: float) -> int:
         raise AssertionError("delete_older_than darf vom SLA-Use-Case nicht gerufen werden")
@@ -150,3 +158,69 @@ def test_empty_samples_yield_null_stats_with_task_id() -> None:
     assert result["uptime_pct"] is None  # Domaenen-Null-Stat: None, NICHT 0
     assert result["avg_rtt_ms"] == 0
     assert result["chart"] == []
+
+
+# ── since/until-Naht (Schnitt 1b): all_for vs. range ────────────────────────
+
+
+def test_without_since_until_uses_all_for_not_range() -> None:
+    # Bestandsverhalten: ohne Zeitraum-Grenzen liest der Use-Case ALLE Punkte (all_for),
+    # range wird gar nicht erst gerufen.
+    samples = [
+        LoggingRttSample(rtt_ms=4.0, loss_pct=0.0, alive=True, ts=1_700_000_000.0),
+        LoggingRttSample(rtt_ms=6.0, loss_pct=0.0, alive=True, ts=1_700_000_005.0),
+    ]
+    task_repo = _FakeTaskRepo([_task("t1")])
+    rtt_repo = _FakeRttRepo({"t1": samples})
+
+    result = GetLoggingTaskSla(task_repo, rtt_repo)("t1")
+
+    assert rtt_repo.all_for_calls == ["t1"]  # all_for genutzt
+    assert rtt_repo.range_calls == []  # range NICHT gerufen
+    assert result["samples"] == 2  # die all_for-Punkte gerechnet
+
+
+def test_with_since_and_until_uses_range_with_those_bounds() -> None:
+    # Schnitt 1b: gesetzte since UND until -> range mit genau diesen Grenzen; all_for
+    # wird NICHT gerufen.
+    samples = [
+        LoggingRttSample(rtt_ms=5.0, loss_pct=0.0, alive=True, ts=1_700_000_000.0),
+    ]
+    task_repo = _FakeTaskRepo([_task("t1")])
+    rtt_repo = _FakeRttRepo({"t1": samples})
+
+    result = GetLoggingTaskSla(task_repo, rtt_repo)(
+        "t1", since=1_700_000_000.0, until=1_700_000_100.0
+    )
+
+    assert rtt_repo.range_calls == [("t1", 1_700_000_000.0, 1_700_000_100.0)]
+    assert rtt_repo.all_for_calls == []  # all_for NICHT gerufen
+    assert result["task_id"] == "t1"
+    assert result["samples"] == 1
+
+
+def test_only_since_uses_range_with_zero_lower_bound() -> None:
+    # Nur since gesetzt -> range mit eff_until = fester Cutoff (offene Obergrenze,
+    # uhrfrei). eff_since = das gesetzte since.
+    task_repo = _FakeTaskRepo([_task("t1")])
+    rtt_repo = _FakeRttRepo({"t1": []})
+
+    GetLoggingTaskSla(task_repo, rtt_repo)("t1", since=1_700_000_000.0)
+
+    assert len(rtt_repo.range_calls) == 1
+    task_id, since, until = rtt_repo.range_calls[0]
+    assert task_id == "t1"
+    assert since == 1_700_000_000.0  # gesetztes since
+    assert until == 9_999_999_999.0  # _OPEN_UNTIL_CUTOFF (Jahr 2286, fester Wert)
+    assert rtt_repo.all_for_calls == []
+
+
+def test_only_until_uses_range_with_zero_lower_bound() -> None:
+    # Nur until gesetzt -> range mit eff_since = 0.0 (offene Untergrenze).
+    task_repo = _FakeTaskRepo([_task("t1")])
+    rtt_repo = _FakeRttRepo({"t1": []})
+
+    GetLoggingTaskSla(task_repo, rtt_repo)("t1", until=1_700_000_100.0)
+
+    assert rtt_repo.range_calls == [("t1", 0.0, 1_700_000_100.0)]
+    assert rtt_repo.all_for_calls == []

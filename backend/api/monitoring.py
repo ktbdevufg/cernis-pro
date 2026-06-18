@@ -649,15 +649,23 @@ def get_logging_task(
 def logging_task_sla(
     task_id: str,
     get_sla: Annotated[GetLoggingTaskSla, Depends(provide_get_logging_task_sla)],
+    since: Annotated[float | None, Query()] = None,
+    until: Annotated[float | None, Query()] = None,
 ) -> dict[str, Any]:
     """SLA-Kennzahlen EINER Logging-Aufgabe (uptime/avg-RTT/ca.-Downtime). 404 bei unbekannter id.
 
     Reicht das stats-dict durch (``uptime_pct`` kann ``None`` sein -> as-is; das
     Frontend zeigt dann "noch keine Auswertung"). EIGENER Logging-SLA-Pfad neben
     ``/api/sla/{id}`` -- der bleibt unberuehrt.
+
+    ``since``/``until`` sind OPTIONALE Query-Floats (Unix-ts), Default ``None`` (offener
+    Zeitraum = der gesamte Task) -- EXAKT das Muster des Export-Endpunkts
+    ``/api/export/logging`` (``Annotated[float | None, Query()] = None``). Sie werden als
+    kwargs durchgereicht; der Use-Case waehlt ``all_for`` (beide ``None``) bzw. den
+    ``range``-Ausschnitt (mind. eine Grenze gesetzt). ``days`` bleibt sein Default.
     """
     try:
-        return get_sla(task_id)
+        return get_sla(task_id, since=since, until=until)
     except LoggingTaskNotFound as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 

@@ -326,18 +326,41 @@ export async function fetchLoggingVolume() {
   };
 }
 
-// GET /api/monitor/logging/{id}/sla -> SLA-Kennzahlen einer Logging-Aufgabe (C-3).
-// Gemappt: { uptimePct, downtimeMins, avgRttMs, samples }. uptimePct === null heisst
-// "noch keine Auswertung" (zu wenig/keine Daten) -- das bleibt EHRLICH null (kein
-// erfundener Default), die Karte zeigt dann den dezenten Hinweis. 404 (unbekannte id)
-// -> ApiError (die Karte laesst die SLA-Zeile dann still weg).
-export async function fetchLoggingSla(taskId) {
-  const backend = await apiGet(`/api/monitor/logging/${taskId}/sla`);
+// GET /api/monitor/logging/{id}/sla -> SLA-Kennzahlen + stuendlicher Chart einer
+// Logging-Aufgabe (C-3 / Schnitt 1b). Gemappt: { uptimePct, downtimeMins, avgRttMs,
+// samples, chart }. uptimePct === null heisst "noch keine Auswertung" (zu wenig/keine
+// Daten) -- das bleibt EHRLICH null (kein erfundener Default), die Karte zeigt dann den
+// dezenten Hinweis. 404 (unbekannte id) -> ApiError (die Karte laesst die SLA-Zeile
+// dann still weg).
+//
+// since/until (Unix-ts, optional, Default null): schraenken den Auswertungs-Zeitraum
+// auf [since, until) ein -- nur gesetzte Grenzen werden als Query-Param angehaengt
+// (?since=...&until=...). Beide null -> ganzer Task-Zeitraum (Backend-Default). Muster
+// wie apiGet("/api/monitor/events", { limit }): die gesetzten Params als Objekt.
+//
+// chart: stuendliche Buckets (snake_case vom Backend) -> camelCase. Jeder Bucket traegt
+// { ts, datetime, uptime_pct, avg_rtt_ms, samples }. Fehlender/leerer chart -> [].
+export async function fetchLoggingSla(taskId, since = null, until = null) {
+  const params = {};
+  if (since !== null && since !== undefined) {
+    params.since = since;
+  }
+  if (until !== null && until !== undefined) {
+    params.until = until;
+  }
+  const backend = await apiGet(`/api/monitor/logging/${taskId}/sla`, params);
   return {
     uptimePct: backend?.uptime_pct ?? null,
     downtimeMins: backend?.downtime_mins ?? null,
     avgRttMs: backend?.avg_rtt_ms ?? null,
     samples: backend?.samples ?? 0,
+    chart: (backend?.chart ?? []).map((bucket) => ({
+      ts: bucket.ts,
+      datetime: bucket.datetime,
+      uptimePct: bucket.uptime_pct,
+      avgRttMs: bucket.avg_rtt_ms,
+      samples: bucket.samples,
+    })),
   };
 }
 
