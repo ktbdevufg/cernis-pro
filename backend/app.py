@@ -279,7 +279,14 @@ from domain.export import (
     ExportablePort,
     ExportableScan,
 )
-from domain.monitoring import MonitorEvent, MonitorEventType
+from domain.monitoring import (
+    LatencyThreshold,
+    LoggingTask,
+    MonitorEvent,
+    MonitorEventType,
+    PingSample,
+    ThresholdCondition,
+)
 from domain.process import classify_kind
 from domain.scanning import EnrichedHost
 from infrastructure.agent import (
@@ -380,6 +387,7 @@ from infrastructure.traffic_permission import TrafficPermissionAdapter
 from modules.alerting import init_alerts_db
 from modules.devices_db import init_devices_db
 from modules.storage import init_db
+from ports.alerting import AlertNotifierPort, SmtpConfigPort
 from ports.settings import SettingsRepository
 from ws_monitor import make_ws_monitor
 from ws_pcap import make_ws_pcap
@@ -918,6 +926,88 @@ class _MonitorAlertRaiser:
             logger.warning("monitor_alert_raise_failed", target_id=event.target_id)
 
 
+# ── Schwellwert-Alarm -> alerting-Notifier-Naht (Schnitt 3b) ──────────────────
+# Die VIERTE Konsequenz-Naht des Monitorings, ganz analog zu _MonitorAlertRaiser:
+# der Logging-Sink wertet pro Tick je aktiver Aufgabe ihren Schwellwert per
+# evaluate_sample (Hysterese) aus und ruft bei einer Alarm-FLANKE den
+# ThresholdNotifierPort. Dieser Wrapper mappt die rein monitoring-seitige Flanke
+# (LoggingTask + LatencyThreshold + PingSample) auf den vorhandenen alerting-
+# Notifier (Desktop + E-Mail). Die Naht lebt HIER im Composition Root -- nicht im
+# Sink/infrastructure -- weil sie BEIDE Domaenen kennt: sie liest monitoring-Typen
+# UND ruft den alerting-Notifier/SmtpConfig. Ein infrastructure-Adapter duerfte das
+# nicht (Contract "monitoring kennt nicht alerting"); app.py ist als Composition
+# Root von den import-linter-Contracts ausgenommen und der einzige erlaubte Ort.
+# Muster wie _MonitorAlertRaiser: eine kleine Verdrahtungs-Klasse, die einen Port
+# (ThresholdNotifierPort) strukturell erfuellt.
+
+
+class _ThresholdNotifierWiring:
+    """Verdrahtungs-Wrapper, der ``ThresholdNotifierPort`` erfuellt -- mappt Flanke -> Notifier.
+
+    Haelt den vorhandenen alerting-``AlertNotifierAdapter`` (Desktop + E-Mail) und den
+    ``SettingsSmtpConfigAdapter`` und uebersetzt eine frisch gefeuerte Schwellwert-Flanke
+    in den/die gewuenschten Notification-Kanal/Kanaele (3b):
+
+    * **Titel**: ``"CERNIS PRO — <label>"`` -- exakt der Stil des ``_MonitorAlertRaiser``-
+      Umfelds bzw. der bestehenden Alert-Notifications (App-Name + Task-Label).
+    * **Nachricht**: deutsch, nennt das Task-Label, die verletzte Bedingung
+      (``LATENCY_ABOVE`` -> "Latenz ueber <limit_ms> ms"; ``UNREACHABLE`` -> "Ziel nicht
+      erreichbar") und bei Latenz den Messwert (``sample.rtt_ms``). Reiner Notification-
+      Text, KEINE i18n-Maschinerie.
+    * **Desktop** (``threshold.notify_desktop``): ``notifier.macos(title, message,
+      subtitle=task.label)`` -- ``subtitle`` aus dem Task-Label (wie der Notifier den
+      target nutzt).
+    * **E-Mail** (``threshold.notify_email``): ``smtp_config.load()``; NUR wenn das
+      Ergebnis nicht ``None`` ist (konfiguriert), ``notifier.email(subject=title,
+      body=message, config=cfg)``. Ist es ``None`` (keine SMTP-Config), wird KEINE Mail
+      versucht -- kein Fehler, still uebersprungen, aber per ``structlog.info`` sichtbar.
+
+    BEST-EFFORT (Port-Vertrag, EXAKT wie ``_MonitorAlertRaiser`` / der Sink): der GANZE
+    Methodenkoerper steht in try/except -- jeder Fehler wird per ``structlog.warning``
+    geloggt und NIE geworfen. Der Sink ruft uns best-effort, aber wir garantieren den
+    Vertrag selbst (so kann ein Notify-Fehler weder den Sink-``record`` noch den
+    Live-Loop killen).
+    """
+
+    def __init__(self, notifier: AlertNotifierPort, smtp_config: SmtpConfigPort) -> None:
+        self._notifier = notifier
+        self._smtp_config = smtp_config
+
+    @staticmethod
+    def _build_message(task: LoggingTask, threshold: LatencyThreshold, sample: PingSample) -> str:
+        """Baut den deutschen Notification-Text aus Task/Threshold/Sample (reiner View-String)."""
+        if threshold.condition is ThresholdCondition.UNREACHABLE:
+            return f"{task.label}: Ziel nicht erreichbar."
+        # LATENCY_ABOVE: verletzte Latenz-Bedingung + der ausloesende Messwert.
+        return (
+            f"{task.label}: Latenz ueber {threshold.limit_ms:g} ms (gemessen {sample.rtt_ms:g} ms)."
+        )
+
+    async def notify_threshold(
+        self,
+        task: LoggingTask,
+        threshold: LatencyThreshold,
+        sample: PingSample,
+        now: float,
+    ) -> None:
+        title = f"CERNIS PRO — {task.label}"
+        message = self._build_message(task, threshold, sample)
+        try:
+            if threshold.notify_desktop:
+                await self._notifier.macos(title, message, subtitle=task.label)
+            if threshold.notify_email:
+                cfg = self._smtp_config.load()
+                if cfg is None:
+                    # Mail gewuenscht, aber keine SMTP-Config -> still uebersprungen,
+                    # aber sichtbar (kein stiller S3-Fallback, kein Fehler).
+                    logger.info("threshold_email_skipped_no_smtp", task_id=task.id)
+                else:
+                    await self._notifier.email(subject=title, body=message, config=cfg)
+        except Exception:
+            # Best-effort: nie ein Sink-/Loop-Fehler. MIT Log (kein stiller S3-Fang).
+            logger.warning("threshold_notify_failed", task_id=task.id)
+
+
 # ── Frontend-Serving (traversal-sicher) ───────────────────────────────────────
 
 
@@ -1431,6 +1521,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 logging_task_repository(),
                 logging_rtt_repository(),
                 logging_event_repository(),
+                # 3b: Schwellwert-Notifier -- mappt die Alarm-Flanke auf den vorhandenen
+                # alerting-Notifier (Desktop + E-Mail). Bezieht EXAKT die im alerting-
+                # Block gebauten Provider (alert_notifier + smtp_config_adapter()), wie
+                # der RaiseAlert daneben -- keine neuen Provider, spaete Namensaufloesung.
+                threshold_notifier=_ThresholdNotifierWiring(alert_notifier, smtp_config_adapter()),
             ),
         )
 
