@@ -16,6 +16,7 @@ from infrastructure.monitoring.broadcaster import WebSocketMonitorBroadcaster
 from infrastructure.monitoring.job_scheduler import ApschedulerJobScheduler
 from infrastructure.monitoring.logging_events import SqliteLoggingEventRepository
 from infrastructure.monitoring.logging_rtt import SqliteLoggingRttRepository
+from infrastructure.monitoring.logging_sink import MonitorLoggingSink
 from infrastructure.monitoring.logging_tasks import SqliteLoggingTaskRepository
 from infrastructure.monitoring.monitor_events import SqliteMonitorEventRepository
 from infrastructure.monitoring.notifier import MonitorNotifierAdapter
@@ -28,6 +29,7 @@ from infrastructure.monitoring.target_source import CompositeTargetSource
 __all__ = [
     "ApschedulerJobScheduler",
     "CompositeTargetSource",
+    "MonitorLoggingSink",
     "MonitorNotifierAdapter",
     "MonitorPingerAdapter",
     "SqliteLoggingEventRepository",

@@ -106,6 +106,13 @@ class LoggingTask:
     planned_end: float | None
     max_duration_s: int | None
     created_at: float
+    # Effektiver Start (absoluter Unix-ts), gesetzt beim ERSTEN Uebergang nach ACTIVE
+    # (Start-Knopf). Bleibt ueber Pausen UNVERAENDERT (Fortsetzen setzt ihn NICHT neu)
+    # und wird erst bei FINISHED wieder geleert (``None``). Bezugs-ts des
+    # ``IMMEDIATE``-Fensters (Maximaldauer = reine Wanduhr ab hier, Pausenzeit zaehlt
+    # MIT -- ADR 0033). Default ``None``, ans Ende einsortiert: so bleiben die
+    # bestehenden positionsbasierten ``LoggingTask(...)``-Konstruktionen gueltig.
+    effective_start: float | None = None
 
 
 @dataclass(frozen=True)
@@ -151,26 +158,35 @@ class LoggingEventRow:
 def is_window_active(task: LoggingTask, now: float, reference_ts: float | None = None) -> bool:
     """Praedikat: liegt ``now`` innerhalb des aktiven Zeitfensters der Aufgabe?
 
-    Reine Zeitrechnung -- die Domaene haelt KEINE Uhr, ``now`` (und bei ``IMMEDIATE``
-    der ``reference_ts`` = effektiver Start) kommt vom Use-Case. Bewusst KEINE verdeckte
-    Annahme ueber den Bezugs-ts: der Use-Case fuehrt den effektiven Start und uebergibt
-    ihn explizit.
+    Reine Zeitrechnung -- die Domaene haelt KEINE Uhr, ``now`` kommt vom Use-Case.
+
+    Der ``IMMEDIATE``-Bezugs-ts ist seit B-II der persistierte ``task.effective_start``
+    (ADR 0033): er wird HIER herangezogen, der Aufrufer muss ihn NICHT mehr extern
+    fuehren. ``reference_ts`` bleibt aus Kompatibilitaet als OPTIONALER Override
+    erhalten (bestehende Aufrufe/Tests reichen ihn explizit) -- wird er uebergeben,
+    hat er Vorrang vor ``effective_start``; sonst gilt ``effective_start``. So bleibt
+    die zeitfreie Naht der Domaene erhalten und der Parameter wird zugleich
+    entbehrlich, ohne bestehende Aufrufe zu brechen.
 
     * ``SCHEDULED``: aktiv, wenn ``planned_start <= now < planned_end`` (Start
       inklusiv, Ende exklusiv). Fehlt eine der beiden Grenzen, gibt es kein
       definiertes Fenster -> ``False`` (kein stiller Fallback auf "immer aktiv").
-    * ``IMMEDIATE``: aktiv, wenn ``reference_ts <= now < reference_ts + max_duration_s``
-      (Start inklusiv, Ablauf exklusiv). Fehlt ``reference_ts`` oder ``max_duration_s``,
-      ist kein Fenster bestimmbar -> ``False``.
+    * ``IMMEDIATE``: aktiv, wenn ``start_ts <= now < start_ts + max_duration_s`` mit
+      ``start_ts`` = ``reference_ts`` (falls uebergeben) ODER ``task.effective_start``
+      (Start inklusiv, Ablauf exklusiv). Fehlt der Bezugs-ts (noch nie gestartet bzw.
+      schon beendet) oder ``max_duration_s``, ist kein Fenster bestimmbar -> ``False``.
     """
     if task.operation_mode is OperationMode.SCHEDULED:
         if task.planned_start is None or task.planned_end is None:
             return False
         return task.planned_start <= now < task.planned_end
-    # IMMEDIATE: Fenster ab effektivem Start fuer max_duration_s Sekunden.
-    if reference_ts is None or task.max_duration_s is None:
+    # IMMEDIATE: Fenster ab effektivem Start fuer max_duration_s Sekunden. Der explizite
+    # reference_ts hat Vorrang (Kompatibilitaet), sonst gilt der persistierte
+    # effective_start (ADR 0033) -- fehlt beides, ist kein Fenster bestimmbar.
+    start_ts = reference_ts if reference_ts is not None else task.effective_start
+    if start_ts is None or task.max_duration_s is None:
         return False
-    return reference_ts <= now < reference_ts + task.max_duration_s
+    return start_ts <= now < start_ts + task.max_duration_s
 
 
 def conflicts_with(candidate: LoggingTask, others: list[LoggingTask]) -> bool:
@@ -189,11 +205,26 @@ def conflicts_with(candidate: LoggingTask, others: list[LoggingTask]) -> bool:
     )
 
 
-def start(task: LoggingTask) -> LoggingTask:
-    """Uebergang ``CREATED`` -> ``ACTIVE``. Jeder andere Ausgangszustand wirft."""
+def start(task: LoggingTask, effective_start: float) -> LoggingTask:
+    """Uebergang ``CREATED`` -> ``ACTIVE``; setzt den effektiven Start.
+
+    Signatur ``start(task, effective_start)`` (NICHT ``start(task, now)``): die Domaene
+    SETZT hier den ``effective_start`` -- der Parameter benennt also den Wert, den er
+    bekommt, nicht eine generische Uhr. Der Use-Case reicht ``now`` als
+    ``effective_start`` herein (er fuehrt die Zeit, die Domaene bleibt zeitfrei).
+
+    Der ``effective_start`` wird NUR gesetzt, wenn er noch ``None`` ist (erster Start --
+    ADR 0033): ein bereits gesetzter Wert bliebe unveraendert. Aus ``CREATED`` heraus
+    ist er immer ``None``, der Guard ist also vor allem Aussage ueber die Invariante
+    (erster Uebergang nach ACTIVE setzt ihn, kein spaeterer ueberschreibt ihn). Jeder
+    andere Ausgangszustand wirft.
+    """
     if task.state is not TaskState.CREATED:
         raise InvalidTaskTransition("start", task.state)
-    return dataclasses.replace(task, state=TaskState.ACTIVE)
+    new_effective_start = (
+        task.effective_start if task.effective_start is not None else effective_start
+    )
+    return dataclasses.replace(task, state=TaskState.ACTIVE, effective_start=new_effective_start)
 
 
 def pause(task: LoggingTask) -> LoggingTask:
@@ -204,14 +235,24 @@ def pause(task: LoggingTask) -> LoggingTask:
 
 
 def resume(task: LoggingTask) -> LoggingTask:
-    """Uebergang ``PAUSED`` -> ``ACTIVE``. Jeder andere Ausgangszustand wirft."""
+    """Uebergang ``PAUSED`` -> ``ACTIVE``. Jeder andere Ausgangszustand wirft.
+
+    Setzt ``effective_start`` NICHT neu (ADR 0033): Fortsetzen aus einer Pause behaelt
+    den urspruenglichen effektiven Start -- die ``IMMEDIATE``-Maximaldauer ist reine
+    Wanduhr ab dem ersten Start, die Pausenzeit zaehlt MIT.
+    """
     if task.state is not TaskState.PAUSED:
         raise InvalidTaskTransition("resume", task.state)
     return dataclasses.replace(task, state=TaskState.ACTIVE)
 
 
 def stop(task: LoggingTask) -> LoggingTask:
-    """Uebergang ``{ACTIVE, PAUSED}`` -> ``FINISHED``. Jeder andere Ausgangszustand wirft."""
+    """Uebergang ``{ACTIVE, PAUSED}`` -> ``FINISHED``; leert den effektiven Start.
+
+    Setzt ``effective_start`` zurueck auf ``None`` (ADR 0033): die Aufgabe ist beendet,
+    ein kuenftiger erneuter Start (sofern fachlich erlaubt) wuerde einen FRISCHEN
+    effektiven Start setzen. Jeder andere Ausgangszustand als ``ACTIVE``/``PAUSED`` wirft.
+    """
     if task.state not in (TaskState.ACTIVE, TaskState.PAUSED):
         raise InvalidTaskTransition("stop", task.state)
-    return dataclasses.replace(task, state=TaskState.FINISHED)
+    return dataclasses.replace(task, state=TaskState.FINISHED, effective_start=None)

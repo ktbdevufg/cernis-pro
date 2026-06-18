@@ -112,6 +112,26 @@ class _RecordingAlertRaiser:
         self.raised.append(event)
 
 
+class _RecordingSink:
+    """Fake-``MonitorLoggingSinkPort`` (B-II): zeichnet die record-Aufrufe auf.
+
+    Erfuellt den Best-effort-Vertrag (wirft nie). Speist den Sink-Test: record wird pro
+    Target genau einmal je tick gerufen, mit den durchgereichten Messdaten + now.
+    """
+
+    def __init__(self) -> None:
+        self.recorded: list[tuple[str, bool, MonitorEventType | None, float]] = []
+
+    async def record(
+        self,
+        target: MonitorTarget,
+        sample: PingSample,
+        event: MonitorEventType | None,
+        now: float,
+    ) -> None:
+        self.recorded.append((target.id, sample.alive, event, now))
+
+
 class _StaticTargetSource:
     def __init__(self, targets: list[MonitorTarget]) -> None:
         self._targets = targets
@@ -150,6 +170,7 @@ def _build(
         broadcaster=broadcaster,
         target_source=_StaticTargetSource(targets),
         alert_raiser=alert_raiser,
+        logging_sink=_RecordingSink(),
     )
     return uc, rtt, events, notifier, broadcaster, alert_raiser
 
@@ -419,6 +440,7 @@ def test_alert_raiser_failure_does_not_break_tick() -> None:
         broadcaster=broadcaster,
         target_source=_StaticTargetSource([_target()]),
         alert_raiser=_ThrowingAlertRaiser(),
+        logging_sink=_RecordingSink(),
     )
     uc._status["wlan"] = True  # prev=True -> DOWN-Flanke, should_notify True
 
@@ -430,3 +452,70 @@ def test_alert_raiser_failure_does_not_break_tick() -> None:
     with pytest.raises(RuntimeError, match="raiser kaputt"):
         asyncio.run(uc.tick())
     assert len(notifier.notified) == 1  # notify lief VOR dem Raiser-Ausfall
+
+
+# ── B-II: Langzeit-Logging-Sink pro Tick je Target ──────────────────────────
+
+
+def _build_with_sink(
+    pinger: _FakePinger,
+    targets: list[MonitorTarget],
+) -> tuple[RunMonitor, _RecordingSink]:
+    """Wie ``_build``, gibt aber das Sink-Fake heraus (fuer die record-Assertions)."""
+    sink = _RecordingSink()
+    uc = RunMonitor(
+        pinger=pinger,
+        rtt_history=_RecordingRtt(),
+        event_repo=_RecordingEvents(),
+        notifier=_RecordingNotifier(),
+        broadcaster=_RecordingBroadcaster(),
+        target_source=_StaticTargetSource(targets),
+        alert_raiser=_RecordingAlertRaiser(),
+        logging_sink=sink,
+    )
+    return uc, sink
+
+
+def test_sink_record_called_once_per_target() -> None:
+    # Pro tick wird record fuer JEDES enabled Target genau einmal gerufen -- mit den
+    # durchgereichten Messdaten (alive/event) und now = sample.timestamp.
+    pinger = _FakePinger(
+        script={
+            "a": [PingSample(target_id="a", host="h", alive=True, rtt_ms=1.0, timestamp=42.0)],
+            "b": [PingSample(target_id="b", host="h", alive=False, rtt_ms=-1.0, timestamp=42.0)],
+        }
+    )
+    uc, sink = _build_with_sink(pinger, [_target("a"), _target("b")])
+
+    asyncio.run(uc.tick())
+
+    # Genau ein record je Target, mit alive + now aus dem Sample.
+    assert len(sink.recorded) == 2
+    by_target = {r[0]: r for r in sink.recorded}
+    assert by_target["a"][1] is True
+    assert by_target["a"][3] == 42.0  # now = sample.timestamp
+    assert by_target["b"][1] is False
+    # a: Erstmessung up -> UP-Event; b: Erstmessung down -> DOWN-Event (durchgereicht).
+    assert by_target["a"][2] is MonitorEventType.UP
+    assert by_target["b"][2] is MonitorEventType.DOWN
+
+
+def test_sink_record_now_falls_back_to_clock_when_timestamp_zero() -> None:
+    # sample.timestamp == 0.0 (kein gesetzter ts) -> der Loop nutzt time.time() einmalig
+    # als Bezug (now != 0.0); KEINE neue Uhr sonst.
+    sample = PingSample(target_id="wlan", host="h", alive=True, rtt_ms=1.0, timestamp=0.0)
+    uc, sink = _build_with_sink(_FakePinger(default=sample), [_target()])
+
+    asyncio.run(uc.tick())
+
+    assert len(sink.recorded) == 1
+    assert sink.recorded[0][3] > 0.0  # Fallback auf time.time()
+
+
+def test_sink_record_skipped_for_disabled_target() -> None:
+    # Disabled Target: kein Ping, kein record (der Sink wird gar nicht erreicht).
+    uc, sink = _build_with_sink(_FakePinger(), [_target(enabled=False)])
+
+    asyncio.run(uc.tick())
+
+    assert sink.recorded == []

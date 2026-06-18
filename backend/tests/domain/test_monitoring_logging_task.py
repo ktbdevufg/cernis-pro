@@ -35,6 +35,7 @@ def _task(
     planned_start: float | None = None,
     planned_end: float | None = None,
     max_duration_s: int | None = None,
+    effective_start: float | None = None,
 ) -> LoggingTask:
     """Baut einen LoggingTask mit sprechenden Defaults fuer die einzelnen Faelle."""
     return LoggingTask(
@@ -49,6 +50,7 @@ def _task(
         planned_end=planned_end,
         max_duration_s=max_duration_s,
         created_at=1000.0,
+        effective_start=effective_start,
     )
 
 
@@ -56,7 +58,7 @@ def _task(
 
 
 def test_start_created_to_active() -> None:
-    result = start(_task(state=TaskState.CREATED))
+    result = start(_task(state=TaskState.CREATED), 500.0)
     assert result.state is TaskState.ACTIVE
 
 
@@ -83,11 +85,11 @@ def test_stop_paused_to_finished() -> None:
 def test_transition_returns_new_instance_and_leaves_original_untouched() -> None:
     # frozen -> dataclasses.replace: das Original bleibt unveraendert (kein In-Place).
     original = _task(state=TaskState.CREATED)
-    result = start(original)
+    result = start(original, 500.0)
     assert original.state is TaskState.CREATED
     assert result is not original
-    # Nur der Zustand aendert sich, alles andere bleibt gleich.
-    assert result == dataclasses.replace(original, state=TaskState.ACTIVE)
+    # Zustand UND effective_start aendern sich (erster Start setzt ihn), sonst gleich.
+    assert result == dataclasses.replace(original, state=TaskState.ACTIVE, effective_start=500.0)
 
 
 # --- Zustandsuebergaenge: verboten --------------------------------------------
@@ -99,7 +101,7 @@ def test_transition_returns_new_instance_and_leaves_original_untouched() -> None
 )
 def test_start_from_non_created_raises(state: TaskState) -> None:
     with pytest.raises(InvalidTaskTransition):
-        start(_task(state=state))
+        start(_task(state=state), 500.0)
 
 
 @pytest.mark.parametrize(
@@ -143,6 +145,42 @@ def test_invalid_transition_is_standalone_not_value_error() -> None:
     # versehentliches ``except ValueError`` faengt es nicht mit.
     assert not issubclass(InvalidTaskTransition, ValueError)
     assert issubclass(InvalidTaskTransition, Exception)
+
+
+# --- effective_start (ADR 0033) -----------------------------------------------
+
+
+def test_first_start_sets_effective_start() -> None:
+    # Erster Start (effective_start None) setzt ihn auf den uebergebenen ts.
+    result = start(_task(state=TaskState.CREATED, effective_start=None), 500.0)
+    assert result.effective_start == 500.0
+
+
+def test_start_does_not_overwrite_existing_effective_start() -> None:
+    # Ein bereits gesetzter effective_start bleibt unveraendert (nur erster Start setzt).
+    task = _task(state=TaskState.CREATED, effective_start=300.0)
+    result = start(task, 500.0)
+    assert result.effective_start == 300.0
+
+
+def test_pause_keeps_effective_start() -> None:
+    # Pause laesst effective_start stehen (Maximaldauer ist reine Wanduhr, Pause zaehlt mit).
+    task = _task(state=TaskState.ACTIVE, effective_start=500.0)
+    assert pause(task).effective_start == 500.0
+
+
+def test_resume_keeps_effective_start() -> None:
+    # Fortsetzen aus Pause setzt effective_start NICHT neu (bleibt der erste Start).
+    task = _task(state=TaskState.PAUSED, effective_start=500.0)
+    assert resume(task).effective_start == 500.0
+
+
+def test_stop_clears_effective_start() -> None:
+    # Stop leert effective_start (Aufgabe beendet).
+    active = _task(state=TaskState.ACTIVE, effective_start=500.0)
+    assert stop(active).effective_start is None
+    paused = _task(state=TaskState.PAUSED, effective_start=500.0)
+    assert stop(paused).effective_start is None
 
 
 # --- conflicts_with -----------------------------------------------------------
@@ -238,3 +276,38 @@ def test_window_inactive_immediate_without_reference_or_duration() -> None:
     assert is_window_active(task, 520.0, reference_ts=None) is False
     no_duration = _task(operation_mode=OperationMode.IMMEDIATE, max_duration_s=None)
     assert is_window_active(no_duration, 520.0, reference_ts=500.0) is False
+
+
+# --- is_window_active: IMMEDIATE gegen effective_start (ADR 0033) --------------
+# Der Bezugs-ts kommt jetzt aus task.effective_start, OHNE dass der Aufrufer ihn
+# extern uebergibt. reference_ts bleibt nur als optionaler Override.
+
+
+@pytest.mark.parametrize(
+    ("now", "expected"),
+    [
+        (499.0, False),  # vor dem effektiven Start
+        (500.0, True),  # genau am effective_start (inklusiv)
+        (559.0, True),  # kurz vor Ablauf
+        (560.0, False),  # genau am Ablauf (effective_start + 60s, exklusiv)
+    ],
+)
+def test_window_active_immediate_uses_effective_start(now: float, expected: bool) -> None:
+    # KEIN reference_ts uebergeben -> die Domaene zieht task.effective_start.
+    task = _task(operation_mode=OperationMode.IMMEDIATE, max_duration_s=60, effective_start=500.0)
+    assert is_window_active(task, now) is expected
+
+
+def test_window_inactive_immediate_without_effective_start() -> None:
+    # Fehlt effective_start (noch nie gestartet / schon beendet) und kein reference_ts
+    # -> kein Fenster -> False.
+    task = _task(operation_mode=OperationMode.IMMEDIATE, max_duration_s=60, effective_start=None)
+    assert is_window_active(task, 520.0) is False
+
+
+def test_window_immediate_reference_ts_overrides_effective_start() -> None:
+    # Wird reference_ts explizit uebergeben, hat er Vorrang vor effective_start.
+    task = _task(operation_mode=OperationMode.IMMEDIATE, max_duration_s=60, effective_start=500.0)
+    # Override auf 1000 -> bei now=520 (im effective_start-Fenster, aber vor Override) False.
+    assert is_window_active(task, 520.0, reference_ts=1000.0) is False
+    assert is_window_active(task, 1010.0, reference_ts=1000.0) is True

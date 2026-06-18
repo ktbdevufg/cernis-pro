@@ -73,6 +73,7 @@ from domain.monitoring import (
     classify_transition,
     compute_sla_stats,
     conflicts_with,
+    is_window_active,
     should_notify,
 )
 from domain.monitoring import (
@@ -95,6 +96,7 @@ from ports.monitoring import (
     LoggingTaskRepository,
     MonitorBroadcasterPort,
     MonitorEventRepository,
+    MonitorLoggingSinkPort,
     MonitorNotifierPort,
     MonitorPingerPort,
     MonitorTargetSource,
@@ -127,6 +129,7 @@ class RunMonitor:
         broadcaster: MonitorBroadcasterPort,
         target_source: MonitorTargetSource,
         alert_raiser: AlertRaiserPort,
+        logging_sink: MonitorLoggingSinkPort,
         interval: int = _DEFAULT_INTERVAL,
     ) -> None:
         self._pinger = pinger
@@ -136,6 +139,7 @@ class RunMonitor:
         self._broadcaster = broadcaster
         self._target_source = target_source
         self._alert_raiser = alert_raiser
+        self._logging_sink = logging_sink
         self._interval = interval
         # target_id -> letzter bekannter alive-Zustand (None = noch nie gemessen).
         self._status: dict[str, bool] = {}
@@ -184,6 +188,17 @@ class RunMonitor:
 
         # IMMER broadcasten -- auch bei event=None (Altcode: monitor_update jede Runde).
         await self._broadcaster.broadcast(target, sample, event)
+
+        # Langzeit-Logging-Sink (B-II): EINE zusaetzliche best-effort-Konsequenz, NACH
+        # broadcast -- verhaltensneutral (der bestehende ping/classify/notify/broadcast-
+        # Pfad bleibt exakt wie er war; der Sink haengt sich nur HINTEN an). Position
+        # nach broadcast gewaehlt, damit das Live-Update niemals hinter dem Logging-
+        # Schreiben wartet. now = sample.timestamp (der bereits gemessene ts -- KEINE
+        # neue Uhr im Loop); nur falls der Sentinel 0.0 anliegt (kein gesetzter ts),
+        # einmalig time.time() als Bezug. Der Sink ist best-effort (wirft NIE, der
+        # Adapter faengt selbst) -> KEIN try/except hier, wie bei notifier/alert_raiser.
+        sink_now = sample.timestamp if sample.timestamp else time.time()
+        await self._logging_sink.record(target, sample, event, sink_now)
 
     async def run(self) -> None:
         """Endlos-Rahmen: tickt bis ``stop()``. Trivial -- die Logik sitzt in ``tick``."""
@@ -662,9 +677,10 @@ class StartLoggingTask:
     Domaenen-``conflicts_with`` gegen ``list_all``, ob am selben Ziel bereits eine
     ``ACTIVE``-Aufgabe laeuft -> ``LoggingTaskConflict`` (mit der ID des laufenden
     Konkurrenten). Sonst Domaenen-``start`` (``InvalidTaskTransition`` aus falschem
-    Ausgangszustand propagiert) -> ``save``. ``now`` ist Methoden-Parameter (api-Rand),
-    auch wenn der Zustandsuebergang ihn nicht braucht -- der effektive Start fuer das
-    ``IMMEDIATE``-Fenster fuehrt erst B-II ein (kein Schema-Umbau hier).
+    Ausgangszustand propagiert) -> ``save``. ``now`` ist Methoden-Parameter (api-Rand)
+    und wird seit B-II als effektiver Start an ``domain_start`` durchgereicht (ADR 0033):
+    der erste Start setzt damit den ``effective_start`` der Aufgabe, Bezugs-ts des
+    ``IMMEDIATE``-Fensters.
     """
 
     def __init__(self, repository: LoggingTaskRepository) -> None:
@@ -681,7 +697,8 @@ class StartLoggingTask:
             # einen Konkurrenten) -- der Fallback auf task_id ist nur ein defensiver
             # Platzhalter fuer mypy (str statt str | None).
             raise LoggingTaskConflict(running_id or task_id, task.target_id)
-        started = domain_start(task)
+        # now als effektiver Start an die Domaene (ADR 0033): erster Start setzt ihn.
+        started = domain_start(task, now)
         self._repository.save(started)
         return started
 
@@ -836,3 +853,129 @@ class CheckLogVolume:
     def __call__(self) -> LogVolumeResult:
         count = self._rtt_repository.count()
         return LogVolumeResult(count=count, over_threshold=count > _LOG_VOLUME_THRESHOLD)
+
+
+# ── Wiederaufnahme aktiver Logging-Aufgaben nach Neustart (B-II Schritt 4) ───
+# Nach einem Neustart koennen Aufgaben in der DB ``ACTIVE`` stehen, deren Fenster
+# inzwischen abgelaufen ist (IMMEDIATE-Maximaldauer waehrend der Auszeit verstrichen,
+# SCHEDULED planned_end vorbei). Die eigentliche Wiederaufnahme der noch gueltigen
+# Aufgaben ist KEIN Extra-Schritt: der Sink liest jeden Tick die aktiven Tasks frisch
+# und schreibt ab dem naechsten Tick automatisch wieder. Dieser Use-Case raeumt nur die
+# ABGELAUFENEN auf -- sie duerfen nicht als ewig-aktiv haengenbleiben. KEINE Uhr im
+# Use-Case: ``now`` kommt als Parameter (der lifespan liefert ``time.time()``).
+
+
+@dataclass(frozen=True)
+class ResumeResult:
+    """Ergebnis EINES Resume-Laufs: weiterlaufende vs. beendete Aufgaben.
+
+    ``kept_active`` sind die Aufgaben mit noch offenem Fenster (sie laufen weiter, der
+    Sink nimmt sie automatisch auf), ``finished`` die abgelaufenen, die auf FINISHED
+    gesetzt wurden. Klein und benannt (kein nacktes Tuple) -- der lifespan liest beide
+    Zahlen sprechend fuers Log.
+    """
+
+    kept_active: int
+    finished: int
+
+
+class ResumeActiveLoggingTasks:
+    """Beendet abgelaufene ``ACTIVE``-Aufgaben nach Neustart; laesst gueltige laufen.
+
+    Laedt ``list_all`` und prueft fuer jede ``ACTIVE``-Aufgabe ``is_window_active(task,
+    now)`` (Bezugs-ts aus ``task.effective_start`` / ``planned_*`` -- die Domaene zieht
+    ihn selbst, ADR 0033):
+
+    * Fenster noch offen -> nichts tun (die Aufgabe bleibt ACTIVE; der Sink schreibt ab
+      dem naechsten Tick automatisch -- DAS ist die Wiederaufnahme).
+    * Fenster abgelaufen -> Domaenen-``stop`` + ``save`` (auf FINISHED setzen), damit sie
+      nicht als ewig-aktiv haengenbleibt.
+
+    Reiner, deterministisch testbarer Use-Case (kein ``asyncio``, keine Uhr) -- der
+    lifespan ruft ihn einmal beim Start.
+    """
+
+    def __init__(self, repository: LoggingTaskRepository) -> None:
+        self._repository = repository
+
+    def __call__(self, now: float) -> ResumeResult:
+        kept_active = 0
+        finished = 0
+        for task in self._repository.list_all():
+            if task.state is not TaskState.ACTIVE:
+                continue
+            if is_window_active(task, now):
+                kept_active += 1
+                continue
+            # Fenster abgelaufen -> beenden (stop leert effective_start, ADR 0033).
+            self._repository.save(domain_stop(task))
+            finished += 1
+        return ResumeResult(kept_active=kept_active, finished=finished)
+
+
+# ── Periodischer Retention-Runner (B-II Schritt 4) ──────────────────────────
+# Setzt die Logging-Retention DURCH: ein schlanker Runner im Muster ``RunMonitor`` /
+# ``RunThroughputPoll`` (run()/stop(), Logik in tick()), der periodisch
+# ``EnforceLoggingRetention`` mit now-basierten Cutoffs ruft. KEINE Endlosschleife im
+# lifespan -- der Composition Root treibt create_task/Teardown. Retention ist nicht
+# zeitkritisch, darum ein grosszuegiges, BENANNTES Intervall (kein Magic Number).
+
+# Intervall zwischen zwei Retention-Laeufen in SEKUNDEN: einmal pro Stunde. Benannte
+# Policy-Konstante -- Retention ist nicht zeitkritisch (die Spannen sind 30 Tage / 1
+# Jahr), ein stuendlicher Lauf haelt die Tabellen sauber, ohne die DB zu belasten.
+_CLEANUP_INTERVAL_S = 3600
+
+
+class RunLoggingRetention:
+    """Periodischer Runner, der ``EnforceLoggingRetention`` in einer Schleife ruft.
+
+    Muster ``RunMonitor``/``RunThroughputPoll``: ``tick()`` ist EIN Retention-Lauf (voll
+    testbar), ``run()`` nur der triviale ``while``/``sleep``-Rahmen. KEIN
+    ``asyncio.Task``-Management hier -- create_task/Teardown treibt der Composition Root
+    (``app.py``-lifespan), exakt wie beim Monitor-Loop.
+
+    BEST-EFFORT: ``tick`` faengt jeden Fehler des Retention-Laufs und loggt ihn (der
+    periodische Cleanup darf nie den Task killen -- sonst liefe die Retention nach einem
+    transienten DB-Fehler nie wieder). Die ``now - 30d`` / ``now - 365d``-Rechnung macht
+    HIER der Runner (der Aufrufer der zeitfreien ``EnforceLoggingRetention``); ``now``
+    ist ``time.time()`` -- der Runner ist der zeitbehaftete Rand um den reinen Use-Case.
+    """
+
+    def __init__(
+        self,
+        enforce: EnforceLoggingRetention,
+        *,
+        interval: int = _CLEANUP_INTERVAL_S,
+    ) -> None:
+        self._enforce = enforce
+        self._interval = interval
+        self._running = False
+
+    async def tick(self) -> None:
+        """Ein Retention-Lauf: now-basierte Cutoffs rechnen, ``enforce.run`` rufen."""
+        try:
+            now = time.time()
+            result = self._enforce.run(
+                rtt_cutoff_ts=now - _RTT_RETENTION_S,
+                event_cutoff_ts=now - _EVENT_RETENTION_S,
+            )
+            _logger.info(
+                "logging_retention_run",
+                rtt_deleted=result.rtt_deleted,
+                event_deleted=result.event_deleted,
+            )
+        except Exception as exc:
+            # Best-effort: ein fehlgeschlagener Lauf darf den periodischen Task nicht
+            # killen -- geloggt, naechster Lauf laeuft regulaer weiter.
+            _logger.warning("logging_retention_run_failed", error=str(exc))
+
+    async def run(self) -> None:
+        """Endlos-Rahmen: tickt bis ``stop()``. Trivial -- die Logik sitzt in ``tick``."""
+        self._running = True
+        while self._running:
+            await self.tick()
+            await asyncio.sleep(self._interval)
+
+    def stop(self) -> None:
+        """Beendet den ``run``-Loop nach der laufenden Iteration (Flag, kein Cancel)."""
+        self._running = False

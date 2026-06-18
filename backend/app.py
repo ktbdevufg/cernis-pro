@@ -221,6 +221,7 @@ from application.monitoring import (
     CreateLoggingTask,
     DeleteLoggingTask,
     DeleteMonitorTarget,
+    EnforceLoggingRetention,
     GetAllSlaStats,
     GetLoggingTaskDetail,
     GetMonitorEvents,
@@ -230,7 +231,9 @@ from application.monitoring import (
     ListLoggingTasks,
     ManageSchedules,
     PauseLoggingTask,
+    ResumeActiveLoggingTasks,
     ResumeLoggingTask,
+    RunLoggingRetention,
     RunMonitor,
     StartLoggingTask,
     StopLoggingTask,
@@ -319,6 +322,7 @@ from infrastructure.metrics import SqliteMetricsReader
 from infrastructure.monitoring import (
     ApschedulerJobScheduler,
     CompositeTargetSource,
+    MonitorLoggingSink,
     MonitorNotifierAdapter,
     MonitorPingerAdapter,
     SqliteLoggingEventRepository,
@@ -1006,6 +1010,28 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             for row in schedule_repository().list():
                 if row["enabled"]:
                     job_scheduler().register(row, _scheduled_scan)
+            # ── Langzeit-Logging B-II: Resume + periodischer Cleanup ──────────
+            # RESUME: aktive Aufgaben mit noch offenem Fenster nimmt der Sink ab dem
+            # naechsten Tick automatisch wieder auf (er liest die aktiven Tasks frisch)
+            # -- KEIN Extra-Schritt. Der Use-Case beendet nur die ABGELAUFENEN, die
+            # sonst als ewig-aktiv haengenblieben (IMMEDIATE-Maximaldauer/SCHEDULED-Ende
+            # waehrend der Auszeit verstrichen). Einmaliger Aufruf, time.time() als now.
+            import time
+
+            resume_result = ResumeActiveLoggingTasks(logging_task_repository())(time.time())
+            logger.info(
+                "logging_tasks_resumed",
+                kept_active=resume_result.kept_active,
+                finished=resume_result.finished,
+            )
+            # CLEANUP: periodischer Retention-Runner (Muster monitor_task/poll_task).
+            # Setzt EnforceLoggingRetention stuendlich durch; haengt an app.state, der
+            # Teardown stoppt+canceled+awaitet ihn (suppress CancelledError).
+            logging_retention_uc = RunLoggingRetention(
+                EnforceLoggingRetention(logging_rtt_repository(), logging_event_repository())
+            )
+            _app.state.logging_retention = logging_retention_uc
+            _app.state.logging_cleanup_task = asyncio.create_task(logging_retention_uc.run())
             init_alerts_db()
             # agent (A.4+5): KEIN init_agents_db mehr -- das v2-SqliteAgentRepository
             # legt die remote_agents-Tabelle beim Bau selbst an (_ensure_schema),
@@ -1020,6 +1046,13 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             _app.state.monitor_task.cancel()
             with suppress(asyncio.CancelledError):
                 await _app.state.monitor_task
+            # Langzeit-Logging-Cleanup (B-II): periodischer Retention-Runner -- selber
+            # Teardown wie der monitor_task (stop-Flag + cancel + awaiten, CancelledError
+            # unterdruecken). Laeuft immer (im bootstrap-Block gestartet).
+            logging_retention_uc.stop()
+            _app.state.logging_cleanup_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await _app.state.logging_cleanup_task
             # capture-Loop (C.5): laeuft NUR, wenn ueber POST /api/pcap/start gestartet
             # (kein startup-Autostart). Beim Shutdown sauber stoppen + canceln, falls aktiv.
             capture_task = getattr(_app.state, "capture_task", None)
@@ -1388,6 +1421,14 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                     alert_notifier,
                     smtp_config_adapter(),
                 )
+            ),
+            # Langzeit-Logging-Sink (B-II): haelt die drei logging-Repos (Provider
+            # existieren schon). Schreibt pro Tick in die aktiven Logging-Aufgaben --
+            # best-effort, der Live-Loop bleibt unberuehrt.
+            logging_sink=MonitorLoggingSink(
+                logging_task_repository(),
+                logging_rtt_repository(),
+                logging_event_repository(),
             ),
         )
 

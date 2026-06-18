@@ -7,6 +7,7 @@ None, (5) Leerzustand list_all -> [] (nicht None), (6) delete (inkl. idempotent)
 (7) nullable Zeit-/Dauer-Felder (modus-abhaengig).
 """
 
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -124,3 +125,112 @@ def test_delete_removes_only_definition(repo: SqliteLoggingTaskRepository) -> No
 def test_delete_unknown_id_is_idempotent(repo: SqliteLoggingTaskRepository) -> None:
     repo.delete("nie-da")  # kein Fehler bei fehlender id
     assert repo.list_all() == []
+
+
+# ── effective_start (B-II, ADR 0033) ────────────────────────────────────────
+
+
+def test_effective_start_roundtrip(repo: SqliteLoggingTaskRepository) -> None:
+    # Gesetzter effective_start ueberlebt save->get (REAL-Round-trip).
+    task = LoggingTask(
+        id="t-eff",
+        target_id="wlan",
+        label="L",
+        purpose="P",
+        capture_mode=CaptureMode.REACHABILITY,
+        operation_mode=OperationMode.IMMEDIATE,
+        state=TaskState.ACTIVE,
+        planned_start=None,
+        planned_end=None,
+        max_duration_s=3600,
+        created_at=70.0,
+        effective_start=12345.0,
+    )
+    repo.save(task)
+    loaded = repo.get("t-eff")
+    assert loaded == task
+    assert loaded is not None
+    assert loaded.effective_start == 12345.0
+
+
+def test_effective_start_none_roundtrip(repo: SqliteLoggingTaskRepository) -> None:
+    # Default-None bleibt None ueber den Round-trip (nicht etwa 0.0).
+    repo.save(_scheduled_task("t-none"))
+    loaded = repo.get("t-none")
+    assert loaded is not None
+    assert loaded.effective_start is None
+
+
+def test_schema_guard_adds_effective_start_to_legacy_table(tmp_path: Path) -> None:
+    # Migrations-Guard: eine in B-I (ohne effective_start) angelegte Alt-Tabelle wird
+    # beim Repo-Bau idempotent nachgeruestet (PRAGMA-Check + ALTER TABLE), exakt wie
+    # der alive-Guard von SqliteRttHistoryRepository.
+    db_path = tmp_path / "cernis.db"
+    # Alt-Tabelle OHNE effective_start manuell anlegen + eine Zeile setzen.
+    conn = sqlite3.connect(db_path)
+    with conn:
+        conn.execute(
+            """
+            CREATE TABLE monitoring_log_tasks (
+                id             TEXT PRIMARY KEY,
+                target_id      TEXT,
+                label          TEXT,
+                purpose        TEXT,
+                capture_mode   TEXT,
+                operation_mode TEXT,
+                state          TEXT,
+                planned_start  REAL,
+                planned_end    REAL,
+                max_duration_s INTEGER,
+                created_at     REAL
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO monitoring_log_tasks (id, target_id, label, purpose, "
+            "capture_mode, operation_mode, state, planned_start, planned_end, "
+            "max_duration_s, created_at) VALUES "
+            "('alt', 'wlan', 'L', 'P', 'reachability', 'scheduled', 'created', "
+            "100.0, 200.0, NULL, 50.0)"
+        )
+    conn.close()
+
+    # Repo-Bau ruestet die Spalte nach.
+    repo = SqliteLoggingTaskRepository(db_path)
+    cols = {row["name"] for row in _table_info(db_path, "monitoring_log_tasks")}
+    assert "effective_start" in cols
+    # Die Alt-Zeile ist lesbar, effective_start ist None (Default NULL).
+    loaded = repo.get("alt")
+    assert loaded is not None
+    assert loaded.effective_start is None
+    # Und ein neuer save mit gesetztem effective_start funktioniert auf der Tabelle.
+    repo.save(_immediate_task_with_effective_start())
+    again = repo.get("t-new")
+    assert again is not None
+    assert again.effective_start == 999.0
+
+
+def _immediate_task_with_effective_start() -> LoggingTask:
+    return LoggingTask(
+        id="t-new",
+        target_id="lan",
+        label="L",
+        purpose="P",
+        capture_mode=CaptureMode.REACHABILITY,
+        operation_mode=OperationMode.IMMEDIATE,
+        state=TaskState.ACTIVE,
+        planned_start=None,
+        planned_end=None,
+        max_duration_s=3600,
+        created_at=70.0,
+        effective_start=999.0,
+    )
+
+
+def _table_info(db_path: Path, table: str) -> list[sqlite3.Row]:
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        return conn.execute(f"PRAGMA table_info({table})").fetchall()
+    finally:
+        conn.close()

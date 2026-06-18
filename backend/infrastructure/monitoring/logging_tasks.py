@@ -50,6 +50,14 @@ class SqliteLoggingTaskRepository:
         # REPLACE). Enums liegen als ihr str-Wert (TEXT), die Zeit-/Dauer-Felder
         # nullable (modus-abhaengig: planned_* nur SCHEDULED, max_duration_s nur
         # IMMEDIATE -- Muster LoggingTask).
+        #
+        # SCHEMA-GUARD fuer effective_start (B-II, ADR 0033): CREATE TABLE bleibt
+        # UNVERAENDERT (eine in B-I angelegte Tabelle ist dort ein No-Op -> die neue
+        # Spalte fehlte weiter). Darum nach dem CREATE per PRAGMA table_info pruefen
+        # und bei Bedarf via ALTER TABLE ADD COLUMN nachruesten -- EXAKT das Muster, mit
+        # dem SqliteRttHistoryRepository die alive-Spalte nachruestet. Alt-Zeilen ohne
+        # die Spalte bekommen NULL (-> effective_start=None), was fachlich korrekt ist:
+        # eine vor B-II angelegte Aufgabe hat keinen persistierten effektiven Start.
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:
             conn.execute(
@@ -69,6 +77,10 @@ class SqliteLoggingTaskRepository:
                 )
                 """
             )
+            cols = {row["name"] for row in conn.execute("PRAGMA table_info(monitoring_log_tasks)")}
+            if "effective_start" not in cols:
+                # Alt-Tabelle (B-I) -> Spalte nachruesten (Default NULL = None).
+                conn.execute("ALTER TABLE monitoring_log_tasks ADD COLUMN effective_start REAL")
 
     def save(self, task: LoggingTask) -> None:
         # INSERT OR REPLACE -> Upsert ueber PRIMARY KEY id (neuer state bei jedem
@@ -78,8 +90,9 @@ class SqliteLoggingTaskRepository:
                 """
                 INSERT OR REPLACE INTO monitoring_log_tasks (
                     id, target_id, label, purpose, capture_mode, operation_mode,
-                    state, planned_start, planned_end, max_duration_s, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    state, planned_start, planned_end, max_duration_s, created_at,
+                    effective_start
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     task.id,
@@ -93,6 +106,7 @@ class SqliteLoggingTaskRepository:
                     task.planned_end,
                     task.max_duration_s,
                     task.created_at,
+                    task.effective_start,
                 ),
             )
 
@@ -100,7 +114,8 @@ class SqliteLoggingTaskRepository:
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT id, target_id, label, purpose, capture_mode, operation_mode, "
-                "state, planned_start, planned_end, max_duration_s, created_at "
+                "state, planned_start, planned_end, max_duration_s, created_at, "
+                "effective_start "
                 "FROM monitoring_log_tasks WHERE id = ?",
                 (task_id,),
             ).fetchone()
@@ -112,7 +127,8 @@ class SqliteLoggingTaskRepository:
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT id, target_id, label, purpose, capture_mode, operation_mode, "
-                "state, planned_start, planned_end, max_duration_s, created_at "
+                "state, planned_start, planned_end, max_duration_s, created_at, "
+                "effective_start "
                 "FROM monitoring_log_tasks ORDER BY created_at"
             ).fetchall()
         return [self._row_to_task(row) for row in rows]
@@ -138,4 +154,5 @@ class SqliteLoggingTaskRepository:
             planned_end=row["planned_end"],
             max_duration_s=row["max_duration_s"],
             created_at=row["created_at"],
+            effective_start=row["effective_start"],
         )

@@ -128,6 +128,45 @@ class MonitorBroadcasterPort(Protocol):
         ...
 
 
+class MonitorLoggingSinkPort(Protocol):
+    """Hoert den Live-Loop fuer das opt-in Langzeit-Logging mit (B-II, Schreibpfad).
+
+    Die DRITTE best-effort-Konsequenz des Loops neben ``MonitorNotifierPort`` und
+    ``AlertRaiserPort`` -- aber an EINER anderen Naht: nicht an der should_notify-Flanke,
+    sondern PRO Tick je gemessenem Target (der Sink entscheidet selbst, ob eine aktive
+    Logging-Aufgabe an diesem Target zu bedienen ist). Der Loop reicht nur seine rohen
+    Messdaten durch und bleibt logging-blind: WELCHE Aufgaben aktiv sind und WAS sie
+    gemaess ``capture_mode`` schreiben, weiss allein der Adapter (er haelt die drei
+    Logging-Repos). So nennt dieser Port -- und damit ``ports/monitoring`` -- NICHTS
+    aus dem Logging-Kern ueber die Domaenen-Typen hinaus, die der Loop ohnehin fuehrt.
+
+    BEST-EFFORT-Vertrag, EXAKT wie ``MonitorNotifierPort.notify`` / ``AlertRaiserPort``:
+    ``record`` wirft NIE (der Adapter faengt+loggt jeden Persistenz-Fehler selbst). Der
+    Live-Monitor (rtt_history/monitor_events/Notify/Broadcast) darf NIEMALS wegen eines
+    Logging-Fehlers sterben -- darum braucht der Loop kein try/except um diesen Aufruf,
+    genau wie bei den beiden anderen Konsequenz-Ports.
+    """
+
+    async def record(
+        self,
+        target: MonitorTarget,
+        sample: PingSample,
+        event: MonitorEventType | None,
+        now: float,
+    ) -> None:
+        """Persistiert die Messung ``sample`` fuer ``target`` in alle aktiven Aufgaben.
+
+        ``target`` liefert die Ziel-Identitaet (``id`` filtert die zustaendigen
+        Aufgaben), ``sample`` die Messwerte (rtt_ms/loss_pct/alive), ``event`` den
+        erkannten Uebergang oder ``None`` (keine Flanke), ``now`` den Bezugs-ts (der
+        bereits gemessene ``sample.timestamp`` -- KEINE neue Uhr im Loop). Der Adapter
+        waehlt die aktiven Aufgaben am Ziel (state ACTIVE + Zeitfenster offen) und
+        schreibt je nach ``capture_mode`` die dichten RTT-Punkte und/oder die Flanke.
+        Keine passende Aufgabe -> no-op (kein Fehler). Best-effort -- wirft NIE.
+        """
+        ...
+
+
 class AlertRaiserPort(Protocol):
     """Loest einen Alert fuer einen erkannten Uebergang aus (alerting-Naht, A.7a).
 

@@ -151,6 +151,8 @@ def test_start_created_wird_active_und_gespeichert() -> None:
     repo = _FakeTaskRepo([_task("t1", state=TaskState.CREATED)])
     started = StartLoggingTask(repo)("t1", now=999.0)
     assert started.state is TaskState.ACTIVE
+    # now wird als effektiver Start durchgereicht (ADR 0033, B-II).
+    assert started.effective_start == 999.0
     assert repo.saved == [started]
 
 
