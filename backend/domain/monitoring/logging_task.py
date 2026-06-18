@@ -20,6 +20,8 @@ import dataclasses
 from dataclasses import dataclass
 from enum import StrEnum
 
+from domain.monitoring.latency_threshold import LatencyThreshold
+
 
 class CaptureMode(StrEnum):
     """WAS eine Logging-Aufgabe aufzeichnet -- das fachliche Mess-Vokabular.
@@ -121,6 +123,14 @@ class LoggingTask:
     # wie ``effective_start``: bestehende positionsbasierte Konstruktionen bleiben
     # gueltig.
     interval_s: int = 5
+    # Optionaler Schwellwert-Alarm der Aufgabe (1:1): ``None`` = kein Schwellwert
+    # konfiguriert. Der Schwellwert ist eine eigene, vom Lebenszyklus unabhaengige
+    # Konfiguration (s. ``latency_threshold.py``) -- er HAENGT hier am Task, aendert
+    # aber dessen Zustandsuebergaenge nicht (``dataclasses.replace`` traegt ihn
+    # unveraendert mit). Default ``None``, ans Ende einsortiert wie ``effective_start``
+    # und ``interval_s``: so bleiben bestehende positionsbasierte ``LoggingTask(...)``-
+    # Konstruktionen gueltig.
+    threshold: LatencyThreshold | None = None
 
 
 @dataclass(frozen=True)

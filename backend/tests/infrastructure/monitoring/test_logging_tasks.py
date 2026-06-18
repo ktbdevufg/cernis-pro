@@ -14,9 +14,11 @@ import pytest
 
 from domain.monitoring import (
     CaptureMode,
+    LatencyThreshold,
     LoggingTask,
     OperationMode,
     TaskState,
+    ThresholdCondition,
 )
 from infrastructure.monitoring.logging_tasks import SqliteLoggingTaskRepository
 from ports.monitoring import LoggingTaskRepository
@@ -304,6 +306,143 @@ def test_schema_guard_adds_interval_s_to_legacy_table(tmp_path: Path) -> None:
     loaded = repo.get("alt")
     assert loaded is not None
     assert loaded.interval_s == 5
+
+
+# ── threshold (Schnitt 2, Schwellwert-Persistenz 1:1) ───────────────────────
+
+
+def _task_with_threshold(
+    task_id: str = "t-thr",
+    *,
+    condition: ThresholdCondition = ThresholdCondition.LATENCY_ABOVE,
+    notify_desktop: bool = True,
+    notify_email: bool = False,
+) -> LoggingTask:
+    return LoggingTask(
+        id=task_id,
+        target_id="wlan",
+        label="L",
+        purpose="P",
+        capture_mode=CaptureMode.REACHABILITY_LATENCY,
+        operation_mode=OperationMode.IMMEDIATE,
+        state=TaskState.ACTIVE,
+        planned_start=None,
+        planned_end=None,
+        max_duration_s=3600,
+        created_at=70.0,
+        threshold=LatencyThreshold(
+            condition=condition,
+            limit_ms=42.5,
+            consecutive_n=4,
+            notify_desktop=notify_desktop,
+            notify_email=notify_email,
+        ),
+    )
+
+
+@pytest.mark.parametrize("condition", list(ThresholdCondition))
+def test_threshold_roundtrip(
+    repo: SqliteLoggingTaskRepository, condition: ThresholdCondition
+) -> None:
+    # Voller Round-trip MIT Schwellwert -- jede ThresholdCondition einmal, alle Felder
+    # kommen exakt zurueck (REAL/INTEGER/Enum-Round-trip).
+    task = _task_with_threshold("t-thr", condition=condition)
+    repo.save(task)
+    loaded = repo.get("t-thr")
+    assert loaded == task
+    assert loaded is not None
+    assert loaded.threshold is not None
+    assert loaded.threshold.condition is condition
+    assert isinstance(loaded.threshold.condition, ThresholdCondition)
+    assert loaded.threshold.limit_ms == 42.5
+    assert loaded.threshold.consecutive_n == 4
+
+
+def test_threshold_none_roundtrip(repo: SqliteLoggingTaskRepository) -> None:
+    # Ohne Schwellwert (Default None) bleibt threshold None ueber den Round-trip --
+    # alle fuenf Spalten sind dann NULL.
+    repo.save(_scheduled_task("t-thr-none"))
+    loaded = repo.get("t-thr-none")
+    assert loaded is not None
+    assert loaded.threshold is None
+
+
+def test_threshold_bool_channels_roundtrip(repo: SqliteLoggingTaskRepository) -> None:
+    # Die bool-Kanaele liegen als int 0/1 in der DB, kommen aber als echte bool zurueck
+    # (nicht 1/0): notify_desktop=True, notify_email=False.
+    task = _task_with_threshold("t-thr-bool", notify_desktop=True, notify_email=False)
+    repo.save(task)
+    loaded = repo.get("t-thr-bool")
+    assert loaded is not None
+    assert loaded.threshold is not None
+    assert loaded.threshold.notify_desktop is True
+    assert loaded.threshold.notify_email is False
+
+
+def test_schema_guard_adds_threshold_columns_to_legacy_table(tmp_path: Path) -> None:
+    # Migrations-Guard fuer die fuenf Schwellwert-Spalten: eine vor Schnitt 2 angelegte
+    # Tabelle (ohne sie) wird beim Repo-Bau idempotent nachgeruestet. ABWEICHUNG zu
+    # interval_s: KEIN Default (NULL), weil der ganze Schwellwert optional ist --
+    # Alt-Zeilen lesen sich darum als threshold=None.
+    db_path = tmp_path / "cernis.db"
+    # Alt-Tabelle OHNE die threshold-Spalten manuell anlegen + eine Zeile setzen.
+    conn = sqlite3.connect(db_path)
+    with conn:
+        conn.execute(
+            """
+            CREATE TABLE monitoring_log_tasks (
+                id             TEXT PRIMARY KEY,
+                target_id      TEXT,
+                label          TEXT,
+                purpose        TEXT,
+                capture_mode   TEXT,
+                operation_mode TEXT,
+                state          TEXT,
+                planned_start  REAL,
+                planned_end    REAL,
+                max_duration_s INTEGER,
+                created_at     REAL
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO monitoring_log_tasks (id, target_id, label, purpose, "
+            "capture_mode, operation_mode, state, planned_start, planned_end, "
+            "max_duration_s, created_at) VALUES "
+            "('alt', 'wlan', 'L', 'P', 'reachability_latency', 'scheduled', 'created', "
+            "100.0, 200.0, NULL, 50.0)"
+        )
+    conn.close()
+
+    # Repo-Bau ruestet die fuenf Spalten nach.
+    repo = SqliteLoggingTaskRepository(db_path)
+    cols = {row["name"] for row in _table_info(db_path, "monitoring_log_tasks")}
+    assert {
+        "threshold_condition",
+        "threshold_limit_ms",
+        "threshold_consecutive_n",
+        "threshold_notify_desktop",
+        "threshold_notify_email",
+    } <= cols
+    # Die Alt-Zeile ist lesbar, threshold ist None (alle fuenf Spalten NULL).
+    loaded = repo.get("alt")
+    assert loaded is not None
+    assert loaded.threshold is None
+    # Und ein neuer save MIT Schwellwert funktioniert auf der nachgeruesteten Tabelle.
+    repo.save(_task_with_threshold("t-thr"))
+    again = repo.get("t-thr")
+    assert again is not None
+    assert again.threshold is not None
+    assert again.threshold.condition is ThresholdCondition.LATENCY_ABOVE
+
+
+def test_list_all_mixed_threshold_and_none(repo: SqliteLoggingTaskRepository) -> None:
+    # Gemischte Tasks: einer MIT Schwellwert, einer OHNE -- beide lesen sich korrekt.
+    repo.save(_task_with_threshold("t-with"))
+    repo.save(_scheduled_task("t-without"))
+    by_id = {t.id: t for t in repo.list_all()}
+    assert by_id["t-with"].threshold is not None
+    assert by_id["t-without"].threshold is None
 
 
 def _table_info(db_path: Path, table: str) -> list[sqlite3.Row]:
