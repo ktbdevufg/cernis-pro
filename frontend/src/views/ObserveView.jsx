@@ -536,6 +536,10 @@ export default function ObserveView({
   // gewuenschte Funktion (initialFunction, z. B. vom Kopfzeilen-Live-Pill) wird
   // initial uebernommen.
   const [openFunction, setOpenFunction] = useState(initialFunction);
+  // Ob die Logging-Detailansicht offen ist (NUR im logging-Zweig genutzt). Solange
+  // true, blendet die FunctionShell ihren eigenen Zurück-Knopf aus (der wäre über dem
+  // Detail-Zurück redundant). LoggingPanel meldet den Wechsel via onDetailChange.
+  const [loggingDetailOffen, setLoggingDetailOffen] = useState(false);
 
   // Wechselt initialFunction (z. B. erneuter Pill-Klick bei bereits offenem
   // Beobachten-Bereich), die gewuenschte Funktion oeffnen und beim Eltern-State
@@ -546,6 +550,13 @@ export default function ObserveView({
       onFunktionGeoeffnet?.();
     }
   }, [initialFunction, onFunktionGeoeffnet]);
+
+  // Detail-Flag beim Verlassen/Wechseln der Funktion zuruecksetzen: oeffnet man spaeter
+  // erneut Logging, darf kein haengender true-Zustand die Shell-Zurück verbergen. Greift
+  // bei jedem openFunction-Wechsel (auch zurueck zur Kachel-Uebersicht).
+  useEffect(() => {
+    setLoggingDetailOffen(false);
+  }, [openFunction]);
 
   if (openFunction === "scan") {
     return (
@@ -588,8 +599,9 @@ export default function ObserveView({
       <FunctionShell
         title={t("beobachten.cards.logging.title")}
         onBack={() => setOpenFunction(null)}
+        zurueckVerbergen={loggingDetailOffen}
       >
-        <LoggingPanel />
+        <LoggingPanel onDetailChange={setLoggingDetailOffen} />
       </FunctionShell>
     );
   }

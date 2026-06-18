@@ -243,7 +243,8 @@ def test_export_analysis_empty_is_valid() -> None:
 
 # ── Block 3: ExportLoggingReport (sync, Fake-report_provider + Fake-Renderer) ──
 #
-# Alle drei Formate liefern korrekten content/media_type/filename (cernis-monitoring-<task_id>);
+# Alle drei Formate liefern korrekten content/media_type/filename (sprechend:
+# CERNISPRO_<bereinigtes-Label>_<YYYY-MM-DD_HHMM>, gebaut aus dem Report);
 # since/until werden an den Provider durchgereicht; der pdf-Pfad ruft render_pdf mit genau dem
 # aus dem Report gebauten Modell; eine unbekannte task_id -> LoggingReportNotFound (kein Render).
 
@@ -289,7 +290,7 @@ def test_export_logging_json() -> None:
 
     assert isinstance(result, ExportResult)
     assert result.media_type == "application/json"
-    assert result.filename == "cernis-monitoring-abc123.json"
+    assert result.filename == "CERNISPRO_WLAN-Gast_2026-06-11_1530.json"
     payload = json.loads(result.content.decode("utf-8"))
     assert payload["task_label"] == "WLAN-Gast"
     assert payload["sample_count"] == 2
@@ -303,7 +304,7 @@ def test_export_logging_csv() -> None:
     result = use_case("abc123", "csv", None, None)
 
     assert result.media_type == "text/csv"
-    assert result.filename == "cernis-monitoring-abc123.csv"
+    assert result.filename == "CERNISPRO_WLAN-Gast_2026-06-11_1530.csv"
     text = result.content.decode("utf-8")
     assert text.splitlines()[0].startswith("ts_iso,rtt_ms,loss_pct,alive")
     # Die CSV traegt die RTT-Reihe, nicht die Events.
@@ -318,7 +319,7 @@ def test_export_logging_pdf_calls_renderer_with_expected_model() -> None:
     result = use_case("abc123", "pdf", None, None)
 
     assert result.media_type == "application/pdf"
-    assert result.filename == "cernis-monitoring-abc123.pdf"
+    assert result.filename == "CERNISPRO_WLAN-Gast_2026-06-11_1530.pdf"
     assert result.content == b"%PDF-FAKE"
     assert len(renderer.calls) == 1
     assert renderer.calls[0] == build_logging_report_pdf_model(report)

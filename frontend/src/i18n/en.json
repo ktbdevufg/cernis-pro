@@ -400,7 +400,8 @@
         "pause": "Pause",
         "resume": "Resume",
         "stop": "Stop",
-        "delete": "Delete"
+        "delete": "Delete",
+        "detail": "Report"
       },
       "aktionFehler": "Action failed.",
       "rest": {
@@ -418,7 +419,46 @@
         "downtime": "approx. {{wert}} min offline",
         "keineAuswertung": "no analysis yet"
       },
-      "ladeFehler": "Logging tasks could not be loaded."
+      "ladeFehler": "Logging tasks could not be loaded.",
+      "detailTitel": "Report",
+      "detailFehler": "Detail data could not be loaded.",
+      "detailNichtGefunden": "Task not found.",
+      "zeitraumLabel": "Time range",
+      "zeitraum": {
+        "stunde": "Last hour",
+        "24h": "Last 24 hours",
+        "7tage": "Last 7 days",
+        "30tage": "Last 30 days",
+        "frei": "Custom"
+      },
+      "zeitraumVon": "From",
+      "zeitraumBis": "To",
+      "chartTab": {
+        "uptime": "Availability %",
+        "rtt": "Avg RTT (ms)"
+      },
+      "chartLeer": "Too few data points to plot a trend.",
+      "ereignisseTitel": "Events",
+      "ereignisseLeer": "No events in the selected time range.",
+      "ereignisSpalte": {
+        "zeitpunkt": "Time",
+        "ereignis": "Event",
+        "rtt": "RTT"
+      },
+      "exportTitel": "Export",
+      "exportPdf": "PDF",
+      "exportCsv": "CSV",
+      "exportJson": "JSON",
+      "exportLaeuft": "Loading …",
+      "exportFehler": "Export failed.",
+      "kennzahl": {
+        "verfuegbarkeit": "Availability",
+        "rtt": "Avg RTT",
+        "ausfallzeit": "Downtime",
+        "messpunkte": "Data points"
+      },
+      "keineAuswertung": "no analysis",
+      "minuten": "min"
     },
     "lookup": {
       "title": "Look up remote endpoint",

@@ -26,7 +26,7 @@
 //   DELETE /api/monitor/logging/{id}       -> 204 (KEIN Body)
 //   GET    /api/monitor/logging/volume     -> { count, over_threshold }
 
-import { apiGet, apiPost, ApiError } from "./client.js";
+import { apiDownload, apiGet, apiPost, ApiError } from "./client.js";
 
 // Lokaler DELETE-Helfer: client.js kennt nur GET/POST/PUT, kein apiDelete. Statt
 // client.js (Fundament aller Anbindungen) fuer einen einzigen Aufruf zu erweitern,
@@ -389,7 +389,24 @@ export async function fetchLoggingEvents(taskId, since = null, until = null) {
   }));
 }
 
+// GET /api/export/logging/{id}?format=...&since=...&until=... -> Datei-Download
+// (CSV/JSON/PDF) des Logging-Reports einer Aufgabe ueber einen Zeitraum (Schnitt 1c).
+// Nutzt apiDownload (Blob + Browser-Download). Default-Dateiname
+// cernis-monitoring-<taskId>.<format>; den echten Namen liefert in der Regel der
+// Content-Disposition-Header des Backends (apiDownload bevorzugt ihn). since/until
+// (Unix-ts, optional) schraenken den Zeitraum ein -- null wird von apiDownload
+// ohnehin uebersprungen. Liefert den verwendeten Dateinamen (fuer evtl. Feedback);
+// bei !ok/Netzfehler -> ApiError.
+export async function downloadLoggingReport(taskId, format, since = null, until = null) {
+  return apiDownload(
+    `/api/export/logging/${taskId}`,
+    { format, since, until },
+    `cernis-monitoring-${taskId}.${format}`,
+  );
+}
+
 export default {
+  downloadLoggingReport,
   fetchMonitorStatus,
   fetchMonitorEvents,
   fetchRttHistory,

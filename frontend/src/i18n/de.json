@@ -400,7 +400,8 @@
         "pause": "Pause",
         "resume": "Fortsetzen",
         "stop": "Stoppen",
-        "delete": "Löschen"
+        "delete": "Löschen",
+        "detail": "Bericht"
       },
       "aktionFehler": "Aktion fehlgeschlagen.",
       "rest": {
@@ -418,7 +419,46 @@
         "downtime": "ca. {{wert}} Min offline",
         "keineAuswertung": "noch keine Auswertung"
       },
-      "ladeFehler": "Logging-Aufgaben konnten nicht geladen werden."
+      "ladeFehler": "Logging-Aufgaben konnten nicht geladen werden.",
+      "detailTitel": "Bericht",
+      "detailFehler": "Detaildaten konnten nicht geladen werden.",
+      "detailNichtGefunden": "Aufgabe nicht gefunden.",
+      "zeitraumLabel": "Zeitraum",
+      "zeitraum": {
+        "stunde": "Letzte Stunde",
+        "24h": "Letzte 24 Stunden",
+        "7tage": "Letzte 7 Tage",
+        "30tage": "Letzte 30 Tage",
+        "frei": "Frei"
+      },
+      "zeitraumVon": "Von",
+      "zeitraumBis": "Bis",
+      "chartTab": {
+        "uptime": "Verfügbarkeit %",
+        "rtt": "Ø-RTT (ms)"
+      },
+      "chartLeer": "Zu wenige Messpunkte für einen Verlauf.",
+      "ereignisseTitel": "Ereignisse",
+      "ereignisseLeer": "Keine Ereignisse im gewählten Zeitraum.",
+      "ereignisSpalte": {
+        "zeitpunkt": "Zeitpunkt",
+        "ereignis": "Ereignis",
+        "rtt": "RTT"
+      },
+      "exportTitel": "Export",
+      "exportPdf": "PDF",
+      "exportCsv": "CSV",
+      "exportJson": "JSON",
+      "exportLaeuft": "Lädt …",
+      "exportFehler": "Export fehlgeschlagen.",
+      "kennzahl": {
+        "verfuegbarkeit": "Verfügbarkeit",
+        "rtt": "Ø-RTT",
+        "ausfallzeit": "Ausfallzeit",
+        "messpunkte": "Messpunkte"
+      },
+      "keineAuswertung": "keine Auswertung",
+      "minuten": "Min"
     },
     "lookup": {
       "title": "Gegenstelle nachschlagen",

@@ -798,6 +798,112 @@ def build_logging_report_pdf_model(report: ExportableLoggingReport) -> PdfReport
     )
 
 
+# Maximale Laenge des bereinigten Labels im Dateinamen (Auftrag): ein langes Label soll den
+# Dateinamen nicht sprengen. Reine Datenkonstante; das Kuerzen macht ``_sanitize_label``.
+_FILENAME_LABEL_MAX_LEN = 60
+
+# Fallback, wenn das Label nach der Bereinigung leer waere (nur Sonderzeichen): kein leerer
+# Dateiname-Bestandteil (ADR 0001 -- kein stiller leerer Wert).
+_FILENAME_LABEL_FALLBACK = "bericht"
+
+# Prefix aller Logging-Report-Dateinamen (Auftrag): der sprechende Produktname statt der
+# kryptischen ``cernis-monitoring-<hex>``-Form.
+_LOGGING_FILENAME_PREFIX = "CERNISPRO"
+
+# Transliterations-Tabelle fuer deutsche Umlaute/ß (Auftrag): Umlaute werden VOR dem Filtern
+# in ihre ASCII-Mehrbuchstaben-Form ueberfuehrt (ä -> ae usw.), damit aus "Büro" nicht "B_ro"
+# wird, sondern "Buero". Begruendung: so entstehen nie wieder Browser-Zufallsnamen oder
+# verstuemmelte Labels durch im Dateinamen unzulaessige Sonderzeichen -- der Name bleibt
+# lesbar UND ASCII-sicher. Bewusst nur die deutschen Sonderzeichen (die Domaene ist deutsch);
+# alles uebrige Nicht-[A-Za-z0-9_-] faellt im Filter-Schritt auf "_".
+_TRANSLITERATION = {
+    "ä": "ae",
+    "ö": "oe",
+    "ü": "ue",
+    "Ä": "Ae",
+    "Ö": "Oe",
+    "Ü": "Ue",
+    "ß": "ss",
+}
+
+
+def _sanitize_label(label: str) -> str:
+    """Macht aus einem freien Label einen dateinamen-tauglichen Baustein -- rein, testbar.
+
+    Schritte (Auftrag): zuerst die deutschen Umlaute/ß transliterieren (ä -> ae usw., VOR dem
+    Filtern -- s. ``_TRANSLITERATION``), dann alles ausser ``[A-Za-z0-9_-]`` auf ``"_"``
+    abbilden (Leerzeichen, Punkte, Slashes, sonstige Sonderzeichen). Mehrfach-``"_"`` wird zu
+    einem zusammengefasst, fuehrende/abschliessende ``"_"``/``"-"`` werden getrimmt. Das
+    Ergebnis wird auf ``_FILENAME_LABEL_MAX_LEN`` Zeichen begrenzt (damit der Dateiname nicht
+    explodiert; nach dem Kuerzen erneut die Raender trimmen). Ein leeres Ergebnis (Label war
+    nur Sonderzeichen) faellt auf ``_FILENAME_LABEL_FALLBACK`` zurueck (kein leerer Name).
+
+    Rein: kein I/O, keine Uhr; gleiche Eingabe -> gleiches Ergebnis.
+    """
+    # 1) Umlaute/ß transliterieren (vor dem Filtern, sonst gingen sie als Sonderzeichen
+    #    verloren -- "Büro" soll "Buero" werden, nicht "B_ro").
+    transliterated = "".join(_TRANSLITERATION.get(ch, ch) for ch in label)
+    # 2) Nur [A-Za-z0-9_-] zulassen, alles andere -> "_".
+    filtered = "".join(
+        ch if (ch.isascii() and (ch.isalnum() or ch in "_-")) else "_" for ch in transliterated
+    )
+    # 3) Mehrfach-"_" zu einem zusammenfassen (kein "a___b", sondern "a_b").
+    while "__" in filtered:
+        filtered = filtered.replace("__", "_")
+    # 4) Raender trimmen, auf die Maximallaenge kuerzen, danach erneut trimmen (das Kuerzen
+    #    kann am Rand ein "_"/"-" freilegen).
+    trimmed = filtered.strip("_-")[:_FILENAME_LABEL_MAX_LEN].strip("_-")
+    return trimmed or _FILENAME_LABEL_FALLBACK
+
+
+def _readable_stamp(generated_at: str) -> str:
+    """Macht aus dem ISO-``generated_at`` einen LESBAREN Datums-Zeit-Stempel -- rein, testbar.
+
+    Form ``"YYYY-MM-DD_HHMM"`` (z. B. ``"2026-06-18_2052"``) -- bewusst LESBARER als der
+    kompakte ``_filename_stamp`` (``"YYYYMMDD-HHMMSS"``, fuer den Analyse-Export): die Bindes-
+    triche im Datum + der Unterstrich vor der Uhrzeit machen den Logging-Dateinamen auf einen
+    Blick lesbar, ohne Sekundengenauigkeit (fuer einen Berichtsnamen unnoetig). Robust gegen
+    ISO-Varianten (Bruchsekunden, Zeitzonen-Offset): es werden Datum (YYYY-MM-DD) und die
+    ersten zwei Zeit-Bestandteile (HH, MM) aus den Ziffern gelesen. Faellt der Wert voellig
+    unerwartet aus (keine Ziffern), bleibt ``"unbekannt"`` (kein leerer Stempel) -- KEIN
+    Fehler, da der Dateiname nur kosmetisch ist.
+
+    Rein: kein I/O, keine Uhr; gleiche Eingabe -> gleiches Ergebnis.
+    """
+    head = generated_at.replace("T", " ").split(" ")
+    date_digits = "".join(ch for ch in head[0] if ch.isdigit())
+    time_digits = ""
+    if len(head) > 1:
+        # Zeit-Teil bis zum Zeitzonen-/Bruchsekunden-Trenner; nur die Ziffern (HHMMSS...).
+        time_raw = head[1].split("+")[0].split("-")[0].split(".")[0]
+        time_digits = "".join(ch for ch in time_raw if ch.isdigit())
+    if len(date_digits) < 8:
+        return "unbekannt"
+    date_part = f"{date_digits[0:4]}-{date_digits[4:6]}-{date_digits[6:8]}"
+    if len(time_digits) >= 4:
+        return f"{date_part}_{time_digits[0:2]}{time_digits[2:4]}"
+    return date_part
+
+
+def build_logging_report_filename(report: ExportableLoggingReport, ext: str) -> str:
+    """Baut den sprechenden Download-Dateinamen eines Logging-Reports -- rein, testbar.
+
+    Form ``CERNISPRO_<bereinigtes-Label>_<YYYY-MM-DD_HHMM>.<ext>`` (z. B.
+    ``CERNISPRO_WLAN-Gast_2026-06-18_2052.csv``). Loest die alte kryptische
+    ``cernis-monitoring-<hex>``-Form ab: das Label macht den Bericht im Download-Ordner
+    wiedererkennbar, der Zeitstempel haelt mehrere Exporte derselben Aufgabe unterscheidbar.
+    Das Label wird ueber ``_sanitize_label`` dateinamen-sicher gemacht (Umlaute transliteriert,
+    Sonderzeichen -> "_", begrenzt), der Stempel ueber ``_readable_stamp`` (lesbar, ohne
+    Sekunden). BEWUSST in der Domaene (reine Wertlogik, Muster ``_filename_stamp``); der
+    Use-Case ruft nur diesen Helfer + reicht die Endung herein.
+
+    Rein: kein I/O, keine Uhr; gleiche Eingabe -> gleicher Name.
+    """
+    label = _sanitize_label(report.task_label)
+    stamp = _readable_stamp(report.generated_at)
+    return f"{_LOGGING_FILENAME_PREFIX}_{label}_{stamp}.{ext}"
+
+
 def _format_period(period_from: str, period_to: str) -> str:
     """Formt die beiden Zeitraum-Grenzen zu einer lesbaren Kopf-Zeile -- rein, testbar.
 

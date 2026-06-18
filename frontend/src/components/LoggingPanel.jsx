@@ -19,7 +19,7 @@
 // NICHT (leere Liste + dezenter Hinweis). Alle Texte ueber i18n, alle Farben ueber
 // Tokens (tokens.css), nie feste Farben.
 
-import { Pause, Play, Plus, Square, Trash2 } from "lucide-react";
+import { FileText, Pause, Play, Plus, Square, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -40,6 +40,7 @@ import {
   restSekunden,
   ZUSTAND,
 } from "./loggingTask.js";
+import LoggingTaskDetail from "./LoggingTaskDetail.jsx";
 import "./LoggingPanel.css";
 
 // Die drei vom Backend unterstuetzten Erfassungs-Modi (capture_mode-Vokabular).
@@ -255,6 +256,16 @@ function AufgabenKarte({ task, jetzt, sla, onAktion }) {
       )}
 
       <div className="logging-player">
+        {/* Bericht/Detail-Knopf: ein eigener Knopf statt die ganze Karte klickbar zu
+            machen (die Karte traegt schon die Player-Knoepfe -- ein klarer eigener
+            Knopf ist eindeutiger). Loest onAktion("detail", task) aus. Immer sichtbar
+            (ein Bericht ist in jedem Zustand sinnvoll). */}
+        <PlayerKnopf
+          icon={FileText}
+          label={t("beobachten.logging.aktion.detail")}
+          variante="detail"
+          onClick={() => onAktion("detail", task)}
+        />
         {task.state === ZUSTAND.CREATED && (
           <PlayerKnopf
             icon={Play}
@@ -337,7 +348,11 @@ const LEERE_EINGABE = {
   },
 };
 
-export default function LoggingPanel() {
+// onDetailChange (optional): meldet dem Eltern-Bereich, ob die Detailansicht offen
+// ist (true wenn eine Task-id gewaehlt, false zurueck zur Liste). Damit kann der
+// Bereich z. B. seinen eigenen Zurück-Knopf ausblenden, solange das Detail offen ist.
+// Optional (optional chaining) -- ohne das Prop funktioniert das Panel unveraendert.
+export default function LoggingPanel({ onDetailChange }) {
   const { t } = useTranslation();
 
   // Anlage-Modus (reine UI): "assistent" | "erweitert".
@@ -360,6 +375,9 @@ export default function LoggingPanel() {
   const [fehler, setFehler] = useState(null);
   // Gemeinsamer Sekunden-Tick fuer die Restzeit-Anzeige aller Karten.
   const [jetzt, setJetzt] = useState(() => Date.now() / 1000);
+  // Detail-Navigation (Schnitt 1b/1c): null = Liste/Maske, gesetzt = Detailansicht
+  // dieser Task-id. Reine View-Navigation (kein Backend).
+  const [detailTaskId, setDetailTaskId] = useState(null);
 
   // Ein Feld der Eingabe setzen (immutabel).
   const setFeld = (feld, wert) => setEingabe((v) => ({ ...v, [feld]: wert }));
@@ -397,6 +415,14 @@ export default function LoggingPanel() {
     const id = setInterval(() => setJetzt(Date.now() / 1000), 1000);
     return () => clearInterval(id);
   }, []);
+
+  // Detail-Zustand nach aussen melden (Schnitt 1c): wann immer detailTaskId zwischen
+  // null (Liste) und gesetzt (Detail) wechselt, den Eltern-Bereich informieren -- damit
+  // der z. B. seinen eigenen Zurück-Knopf ausblenden kann. Optional (optional chaining):
+  // ohne onDetailChange-Prop ist das ein No-op.
+  useEffect(() => {
+    onDetailChange?.(detailTaskId !== null);
+  }, [detailTaskId, onDetailChange]);
 
   // Aufgaben-Liste neu laden. Fehler -> dezenter Lade-Hinweis (kein Absturz). Im
   // Anschluss EINMALIG die SLA-Kennzahlen der reachability_latency-Tasks nachladen
@@ -519,6 +545,11 @@ export default function LoggingPanel() {
   // Bei 409 (Ziel belegt / falscher Zustand) zeigt der ApiError.message-Text die
   // Backend-detail-Meldung -- freundlich oben anzeigen, kein Absturz.
   const handleAktion = async (aktion, task) => {
+    // Detail/Bericht ist reine View-Navigation -- kein API-Aufruf, kein Reload.
+    if (aktion === "detail") {
+      setDetailTaskId(task.id);
+      return;
+    }
     try {
       if (aktion === "start") {
         await startLoggingTask(task.id);
@@ -539,6 +570,20 @@ export default function LoggingPanel() {
   };
 
   const gueltig = eingabeGueltig();
+
+  // Detailansicht: ersetzt Maske + Liste, solange eine Task-id gewaehlt ist. Zurueck
+  // setzt detailTaskId auf null -> der bestehende Inhalt erscheint wieder. (Der Rest
+  // von LoggingPanel bleibt unveraendert.)
+  if (detailTaskId !== null) {
+    return (
+      <div className="logging">
+        <LoggingTaskDetail
+          taskId={detailTaskId}
+          onZurueck={() => setDetailTaskId(null)}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="logging">

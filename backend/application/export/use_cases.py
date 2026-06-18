@@ -44,6 +44,7 @@ from domain.export import (
     analysis_to_csv,
     analysis_to_json,
     build_analysis_pdf_model,
+    build_logging_report_filename,
     build_logging_report_pdf_model,
     build_pdf_model,
     logging_report_to_csv,
@@ -260,16 +261,19 @@ class ExportLoggingReport:
         * ``pdf`` -> ``build_logging_report_pdf_model`` + ``renderer.render_pdf`` (Bytes).
 
         Der ``media_type`` + die Datei-Endung kommen aus ``_FORMAT_MEDIA_TYPES``; der
-        ``filename`` ist ``cernis-monitoring-<task_id>.<ext>`` (``task_id`` ist Hex,
-        dateinamen-tauglich). ``fmt`` ist bereits ein gueltiges ``ExportFormat``-Literal (der
-        api-Rand validiert via FastAPI 422).
+        ``filename`` ist der SPRECHENDE ``CERNISPRO_<bereinigtes-Label>_<YYYY-MM-DD_HHMM>.<ext>``
+        aus dem reinen Domaenen-Helfer ``build_logging_report_filename`` (gebaut aus dem
+        projizierten Report -- nach dem Provider-Aufruf verfuegbar -- statt der alten
+        kryptischen ``cernis-monitoring-<task_id>``-Form). ``task_id`` dient nur noch dem
+        ``LoggingReportNotFound``. ``fmt`` ist bereits ein gueltiges ``ExportFormat``-Literal
+        (der api-Rand validiert via FastAPI 422).
         """
         report = self._report_provider(task_id, since, until)
         if report is None:
             raise LoggingReportNotFound(task_id)
         content = self._render(report, fmt)
         media_type, ext = _FORMAT_MEDIA_TYPES[fmt]
-        filename = f"cernis-monitoring-{task_id}.{ext}"
+        filename = build_logging_report_filename(report, ext)
         return ExportResult(content=content, media_type=media_type, filename=filename)
 
     def _render(self, report: ExportableLoggingReport, fmt: ExportFormat) -> bytes:

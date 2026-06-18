@@ -29,6 +29,7 @@ from domain.export import (
     analysis_to_csv,
     analysis_to_json,
     build_analysis_pdf_model,
+    build_logging_report_filename,
     build_logging_report_pdf_model,
     build_pdf_model,
     format_ports,
@@ -780,3 +781,91 @@ def test_build_logging_report_pdf_model_empty() -> None:
     model = build_logging_report_pdf_model(_report(events=(), sample_count=0, uptime_pct=None))
     assert model.rows == ()
     assert model.columns == _EXPECTED_LOGGING_PDF_COLUMNS
+
+
+# ── build_logging_report_filename (sprechender Name: Label bereinigt + lesbarer Stempel) ──
+#
+# Getestet ueber den OEFFENTLICHEN Helfer ``build_logging_report_filename`` (die internen
+# ``_sanitize_label``/``_readable_stamp`` sind privat -- der oeffentliche Helfer deckt ihre
+# Randfaelle ueber das Label/generated_at ab). Behauptungen: Grundform, Umlaut-Transliteration,
+# Leerzeichen/Sonderzeichen -> "_", Mehrfach-"_"-Zusammenfassung, Rand-Trimmen, leer -> Fallback
+# "bericht", Laengenlimit, Bindestrich bleibt erhalten, Stempel-Format YYYY-MM-DD_HHMM.
+
+
+def _report_with(
+    label: str, generated_at: str = "2026-06-18T20:52:00+00:00"
+) -> ExportableLoggingReport:
+    """Baut einen minimalen Report mit gezieltem task_label/generated_at fuer den Namens-Test."""
+    return ExportableLoggingReport(
+        task_label=label,
+        task_purpose="",
+        target_id="abc123",
+        generated_at=generated_at,
+        period_from="",
+        period_to="",
+        uptime_pct=None,
+        avg_rtt_ms=0.0,
+        downtime_mins=0.0,
+        sample_count=0,
+    )
+
+
+def test_build_logging_report_filename_basic() -> None:
+    name = build_logging_report_filename(_report_with("test"), "csv")
+    assert name == "CERNISPRO_test_2026-06-18_2052.csv"
+
+
+def test_build_logging_report_filename_keeps_hyphen() -> None:
+    name = build_logging_report_filename(_report_with("WLAN-Gast"), "json")
+    assert name == "CERNISPRO_WLAN-Gast_2026-06-18_2052.json"
+
+
+def test_build_logging_report_filename_transliterates_umlauts() -> None:
+    """Umlaute/ß -> ae/oe/ue/ss (kein "_" -- der Name bleibt lesbar)."""
+    name = build_logging_report_filename(_report_with("Büro SüßMünchen Öl Äther"), "pdf")
+    assert name == "CERNISPRO_Buero_SuessMuenchen_Oel_Aether_2026-06-18_2052.pdf"
+
+
+def test_build_logging_report_filename_spaces_become_underscore() -> None:
+    name = build_logging_report_filename(_report_with("mein bericht heute"), "csv")
+    assert name == "CERNISPRO_mein_bericht_heute_2026-06-18_2052.csv"
+
+
+def test_build_logging_report_filename_special_chars_collapse() -> None:
+    """Sonderzeichen/Slashes/Punkte -> "_", Mehrfach-"_" zu einem zusammengefasst."""
+    name = build_logging_report_filename(_report_with("a/b.c:d  e"), "csv")
+    assert name == "CERNISPRO_a_b_c_d_e_2026-06-18_2052.csv"
+
+
+def test_build_logging_report_filename_trims_edges() -> None:
+    """Fuehrende/abschliessende Sonderzeichen werden getrimmt (kein "_test_")."""
+    name = build_logging_report_filename(_report_with("  --test--  "), "csv")
+    assert name == "CERNISPRO_test_2026-06-18_2052.csv"
+
+
+def test_build_logging_report_filename_empty_label_falls_back() -> None:
+    """Label nur aus Sonderzeichen -> Fallback "bericht" (kein leerer Bestandteil)."""
+    name = build_logging_report_filename(_report_with("///   ..."), "csv")
+    assert name == "CERNISPRO_bericht_2026-06-18_2052.csv"
+
+    leer = build_logging_report_filename(_report_with(""), "csv")
+    assert leer == "CERNISPRO_bericht_2026-06-18_2052.csv"
+
+
+def test_build_logging_report_filename_length_limited() -> None:
+    """Das bereinigte Label wird auf 60 Zeichen begrenzt (der Name explodiert nicht)."""
+    name = build_logging_report_filename(_report_with("x" * 200), "csv")
+    # Genau das 60-x-Label zwischen Prefix und Stempel (mit fester generated_at-Zeit).
+    assert name == "CERNISPRO_" + "x" * 60 + "_2026-06-18_2052.csv"
+
+
+def test_build_logging_report_filename_stamp_without_time() -> None:
+    """Nur ein Datum (keine Uhrzeit im ISO-Wert) -> Stempel ist das reine Datum."""
+    name = build_logging_report_filename(_report_with("test", generated_at="2026-06-18"), "csv")
+    assert name == "CERNISPRO_test_2026-06-18.csv"
+
+
+def test_build_logging_report_filename_stamp_unknown_on_garbage() -> None:
+    """Kein verwertbares Datum -> "unbekannt" (kein leerer Stempel, kein Fehler)."""
+    name = build_logging_report_filename(_report_with("test", generated_at="kaputt"), "csv")
+    assert name == "CERNISPRO_test_unbekannt.csv"

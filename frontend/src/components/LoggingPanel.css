@@ -576,6 +576,11 @@
   color: var(--color-text-sec);
 }
 
+/* Bericht/Detail-Knopf: neutral, dezent (kein Lifecycle-Akzent). */
+.logging-player__knopf--detail {
+  color: var(--color-text-sec);
+}
+
 .logging-player__knopf:hover {
   background: var(--color-accent-bg);
 }

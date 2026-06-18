@@ -17,20 +17,28 @@ export function CardGrid({ children }) {
 }
 
 // Geöffnete Funktion: Zurück-Leiste mit Titel über dem Funktionsinhalt.
-export function FunctionShell({ title, onBack, children }) {
+//
+// zurueckVerbergen (Default false): blendet NUR den Zurück-Knopf aus, der Titel
+// bleibt stehen. Hintergrund: hat der Funktionsinhalt selbst eine Detailansicht
+// mit eigenem Zurück (z. B. die Logging-Detailansicht), wäre der Shell-Zurück
+// darüber redundant + verwirrend. Default false -> alle bestehenden Aufrufer
+// (scan/traffic/monitor) unverändert.
+export function FunctionShell({ title, onBack, children, zurueckVerbergen = false }) {
   const { t } = useTranslation();
 
   return (
     <div className="function-shell">
       <div className="function-shell__bar">
-        <button
-          type="button"
-          className="function-shell__back"
-          onClick={onBack}
-        >
-          <ArrowLeft size={16} />
-          <span>{t("cards.back")}</span>
-        </button>
+        {!zurueckVerbergen && (
+          <button
+            type="button"
+            className="function-shell__back"
+            onClick={onBack}
+          >
+            <ArrowLeft size={16} />
+            <span>{t("cards.back")}</span>
+          </button>
+        )}
         <h2 className="function-shell__title">{title}</h2>
       </div>
 
