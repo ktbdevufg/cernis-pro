@@ -54,6 +54,7 @@ nicht versehentlich abweichend.
 
 import asyncio
 import time
+from dataclasses import dataclass
 from typing import Any, cast
 
 import structlog
@@ -71,6 +72,8 @@ from domain.monitoring import (
 from domain.settings import Setting, SettingValue
 from ports.monitoring import (
     AlertRaiserPort,
+    LoggingEventRepository,
+    LoggingRttRepository,
     MonitorBroadcasterPort,
     MonitorEventRepository,
     MonitorNotifierPort,
@@ -483,3 +486,66 @@ class DeleteMonitorTarget:
         targets = _load_custom_targets(self._repository)
         remaining = [entry for entry in targets if entry.get("id") != target_id]
         _save_custom_targets(self._repository, remaining)
+
+
+# ── Langzeit-Logging-Retention (B-I) ────────────────────────────────────────
+# Der EINZIGE Use-Case des B-I-Schritts 2: das Aufraeumen der dichten Logging-
+# Messdaten nach Ablauf der Retention-Spanne. GETRENNT vom fluechtigen Live-Monitor
+# (eigene Repos/Tabellen). Reiner Pass-Through auf ``delete_older_than`` beider
+# Mess-Repos -- KEINE Uhr im Use-Case (anders als die SLA-Use-Cases, die now -
+# days*86400 selbst rechnen): die Cutoffs kommen als METHODEN-Parameter herein, der
+# Aufrufer (Schritt 3 / B-II) rechnet ``now - 30d`` bzw. ``now - 365d``. So bleibt der
+# Use-Case deterministisch testbar (kein time.time()).
+
+# Retention-Spannen der Logging-Messdaten in SEKUNDEN -- benannte Policy-Konstanten.
+# BEWUSST NICHT hier angewendet (kein time.time() im Use-Case): sie dokumentieren die
+# Policy fuer Schritt 3 / B-II, der daraus die absoluten Cutoffs rechnet
+# (rtt_cutoff_ts = now - _RTT_RETENTION_S, event_cutoff_ts = now - _EVENT_RETENTION_S).
+_RTT_RETENTION_S = 30 * 86400  # dichte RTT-Messpunkte: 1 Monat (30 Tage)
+_EVENT_RETENTION_S = 365 * 86400  # Ereignis-/Anomalie-Flanken: 1 Jahr (365 Tage)
+
+
+@dataclass(frozen=True)
+class LoggingRetentionResult:
+    """Ergebnis EINES Retention-Laufs: geloeschte Zeilen je Messdaten-Art.
+
+    Klein und benannt (kein nacktes Tuple): die beiden Zahlen haben verschiedene
+    Bedeutung (RTT-Messpunkte vs. Ereignis-Flanken) und der Aufrufer (Log/Mengen-
+    Check) liest sie sprechend. ``rtt_deleted``/``event_deleted`` sind die
+    Rueckgabewerte der jeweiligen ``delete_older_than``-Aufrufe.
+    """
+
+    rtt_deleted: int
+    event_deleted: int
+
+
+class EnforceLoggingRetention:
+    """Loescht abgelaufene Logging-Messdaten ueber beide Mess-Repos (Pass-Through).
+
+    Haelt das RTT- und das Event-Repo und reicht je einen ABSOLUTEN Cutoff an deren
+    ``delete_older_than`` durch. KEINE Uhr, KEINE Spannen-Rechnung hier (s.
+    Modul-Kommentar): die beiden Cutoffs sind ``run``-Parameter -- der Aufrufer
+    (Schritt 3 / B-II) bildet sie aus ``_RTT_RETENTION_S`` / ``_EVENT_RETENTION_S``.
+    Die Task-DEFINITIONEN (``LoggingTaskRepository``) sind NICHT betroffen -- Retention
+    raeumt nur die Messdaten, nicht die Aufgaben selbst.
+    """
+
+    def __init__(
+        self,
+        rtt_repository: LoggingRttRepository,
+        event_repository: LoggingEventRepository,
+    ) -> None:
+        self._rtt_repository = rtt_repository
+        self._event_repository = event_repository
+
+    def run(self, rtt_cutoff_ts: float, event_cutoff_ts: float) -> LoggingRetentionResult:
+        """Loescht RTT-Messpunkte vor ``rtt_cutoff_ts`` und Events vor ``event_cutoff_ts``.
+
+        Reiner Pass-Through: je ein ``delete_older_than`` pro Repo, die Rueckgaben
+        (geloeschte Zeilen) gebuendelt im ``LoggingRetentionResult``. Beide Cutoffs
+        sind absolute ts-Werte -- die ``now - 30d`` / ``now - 365d``-Rechnung macht der
+        Aufrufer.
+        """
+        rtt_deleted = self._rtt_repository.delete_older_than(rtt_cutoff_ts)
+        event_deleted = self._event_repository.delete_older_than(event_cutoff_ts)
+        return LoggingRetentionResult(rtt_deleted=rtt_deleted, event_deleted=event_deleted)

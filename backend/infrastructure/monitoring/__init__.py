@@ -14,6 +14,9 @@ Fan-out (``broadcaster``, FastAPI-WebSocket) ist ebenfalls ``modules``-frei.
 
 from infrastructure.monitoring.broadcaster import WebSocketMonitorBroadcaster
 from infrastructure.monitoring.job_scheduler import ApschedulerJobScheduler
+from infrastructure.monitoring.logging_events import SqliteLoggingEventRepository
+from infrastructure.monitoring.logging_rtt import SqliteLoggingRttRepository
+from infrastructure.monitoring.logging_tasks import SqliteLoggingTaskRepository
 from infrastructure.monitoring.monitor_events import SqliteMonitorEventRepository
 from infrastructure.monitoring.notifier import MonitorNotifierAdapter
 from infrastructure.monitoring.pinger import MonitorPingerAdapter
@@ -27,6 +30,9 @@ __all__ = [
     "CompositeTargetSource",
     "MonitorNotifierAdapter",
     "MonitorPingerAdapter",
+    "SqliteLoggingEventRepository",
+    "SqliteLoggingRttRepository",
+    "SqliteLoggingTaskRepository",
     "SqliteMonitorEventRepository",
     "SqliteRttHistoryRepository",
     "SqliteScheduleRepository",

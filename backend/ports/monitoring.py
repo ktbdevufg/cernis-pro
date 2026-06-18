@@ -37,6 +37,9 @@ from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 
 from domain.monitoring import (
+    LoggingEventRow,
+    LoggingRttSample,
+    LoggingTask,
     MonitorEvent,
     MonitorEventType,
     MonitorTarget,
@@ -370,5 +373,174 @@ class SlaSampleRepository(Protocol):
         Speist ``GetAllSlaStats`` (M.7): je id eine Gesamtstatistik. Leere Tabelle ->
         ``[]``, niemals ``None``. Da ``sla_samples`` im Altcode nie geschrieben wird,
         ist die Liste real dauerhaft leer (-> ``/api/sla == []``); s. Modul-Kommentar.
+        """
+        ...
+
+
+# ── Langzeit-Logging (B-I) ──────────────────────────────────────────────────
+# Die Persistenz-Vertraege des opt-in Logging-Kerns (Domaene
+# ``domain.monitoring.logging_task``). GETRENNT vom fluechtigen Live-Monitor: das
+# sind EIGENE Tabellen (``monitoring_log_*``), NICHT ``rtt_history``/``monitor_events``
+# -- der Live-Loop bleibt unberuehrt. Drei Belange, drei Vertraege:
+#
+# * ``LoggingTaskRepository`` -- die Task-DEFINITIONEN (Lebenszyklus, upsert, da der
+#   ``state`` ueber die Lebenszeit wandert; kein reines Append wie die Messdaten).
+# * ``LoggingRttRepository`` -- die dichten RTT-Messpunkte je Task (Retention 1 Monat).
+# * ``LoggingEventRepository`` -- die Ereignis-/Anomalie-Flanken je Task (Retention
+#   1 Jahr).
+#
+# Beide Mess-Repos sind reine Append-Stores mit zeit-basierter Retention
+# (``delete_older_than``) -- die Zeitlogik (``now - 30d`` / ``now - 365d``) liegt beim
+# Aufrufer (Schritt 3 / B-II), die Repos nehmen einen ABSOLUTEN ``cutoff_ts`` (Muster
+# ``SlaSampleRepository.samples_for(since)``: das Repo bleibt uhrfrei). Sync wie alle
+# Persistenz-Ports der Domaene (sqlite ist schnell genug, kein executor).
+
+
+class LoggingTaskRepository(Protocol):
+    """Persistenz der Logging-Aufgaben-DEFINITIONEN (Tabelle ``monitoring_log_tasks``).
+
+    Haelt die ``LoggingTask``-Lebenszyklus-Objekte -- KEIN reines Append: der
+    ``state`` einer Aufgabe wandert ueber ihre Lebenszeit (``CREATED`` -> ``ACTIVE``
+    <-> ``PAUSED`` -> ``FINISHED``), darum ist ``save`` ein UPSERT anhand ``task.id``
+    (Insert ODER Update). Speist die spaetere Konfliktpruefung (``conflicts_with``
+    braucht alle Aufgaben am Ziel) und die Uebersicht -- darum ``list_all``. Die
+    Mess-DATEN (RTT, Events) liegen in eigenen Repos; ``delete`` loescht NUR die
+    Definition.
+    """
+
+    def save(self, task: LoggingTask) -> None:
+        """Legt ``task`` ab oder aktualisiert die bestehende Definition (Upsert ueber ``id``).
+
+        Insert beim ersten Mal, Update bei jedem weiteren ``save`` derselben ``id``
+        (z. B. nach einem Zustandsuebergang ``start``/``pause``/``stop``, der einen
+        NEUEN ``LoggingTask`` mit gewechseltem ``state`` liefert). Die Enums
+        (``capture_mode``/``operation_mode``/``state``) werden als ihr ``str``-Wert
+        abgelegt; ``save`` schreibt KEINE Uhr (``created_at`` kommt aus dem ``task``).
+        """
+        ...
+
+    def get(self, task_id: str) -> LoggingTask | None:
+        """Laedt EINE Aufgaben-Definition anhand ihrer ``id`` (Enum-Round-trip).
+
+        Unbekannte ``id`` -> ``None`` (kein Fehler) -- der EINZIGE ``None``-Rueckgabe-
+        Punkt dieser Ports (eine fehlende Einzel-Definition ist ein legitimer Zustand,
+        anders als die Listen-Methoden, die ``[]`` liefern). Die gespeicherten
+        Enum-Strings werden via ``CaptureMode``/``OperationMode``/``TaskState``
+        zurueck in die Domaenen-Enums gehoben.
+        """
+        ...
+
+    def list_all(self) -> list[LoggingTask]:
+        """Alle Aufgaben-Definitionen (fuer Uebersicht + Konfliktpruefung).
+
+        Speist die Domaenen-``conflicts_with`` (sie braucht alle Aufgaben am selben
+        Ziel) und die UI-Uebersicht. Leere Tabelle -> ``[]``, niemals ``None``.
+        """
+        ...
+
+    def delete(self, task_id: str) -> None:
+        """Loescht NUR die Aufgaben-Definition (die Messdaten liegen separat).
+
+        Idempotent: eine unbekannte ``id`` ist kein Fehler (Muster
+        ``ScheduleRepository.delete``). Die zugehoerigen RTT-/Event-Messpunkte werden
+        hier NICHT mitgeloescht -- das ist ein eigener Belang (eigene Repos +
+        Retention), den dieser Vertrag bewusst nicht vermischt.
+        """
+        ...
+
+
+class LoggingRttRepository(Protocol):
+    """Persistenz der dichten RTT-Messpunkte je Logging-Aufgabe (Retention 1 Monat).
+
+    Reiner Append-Store (Tabelle ``monitoring_log_rtt``): EIN Messpunkt pro ``save``,
+    nie ein Update. Anders als ``RttHistoryRepository`` (Live-Monitor) gibt es hier
+    KEINEN Zeilen-Cap pro Ziel -- die Mengenbegrenzung laeuft ueber die zeit-basierte
+    Retention (``delete_older_than``), nicht ueber ein Trim. ``range`` gibt benannte
+    Domaenen-``LoggingRttSample`` heraus (s. Domaenen-Docstring: vier Felder ->
+    benannt statt Tuple).
+    """
+
+    def save(self, task_id: str, rtt_ms: float, loss_pct: float, alive: bool, ts: float) -> None:
+        """Legt einen RTT-Messpunkt fuer ``task_id`` ab (Append, nie Update).
+
+        ``ts`` ist Unix-ts; der RTT-Sentinel ``-1.0`` (nicht erreichbar) wird
+        unveraendert gespeichert (Muster ``RttHistoryRepository``). KEIN Trim -- die
+        Mengenbegrenzung uebernimmt ``delete_older_than`` (Retention).
+        """
+        ...
+
+    def range(self, task_id: str, since: float, until: float) -> list[LoggingRttSample]:
+        """Messpunkte eines Tasks im Zeitfenster ``[since, until)``, chronologisch aufsteigend.
+
+        ``since`` INKLUSIV, ``until`` EXKLUSIV (Halb-offen ``ts >= since AND ts <
+        until``) -- konsistent mit dem Zeitfenster-Praedikat der Domaene
+        (``is_window_active``: Start inklusiv, Ende exklusiv), damit kein Messpunkt
+        an einer Fenstergrenze doppelt in zwei aneinandergrenzende Bereiche faellt.
+        Beide Grenzen sind ABSOLUTE ts-Werte (das Repo bleibt uhrfrei, Muster
+        ``SlaSampleRepository.samples_for``). Reihenfolge AUFSTEIGEND (``ORDER BY
+        ts``). Keine Daten / unbekannter Task -> ``[]``, niemals ``None``.
+        """
+        ...
+
+    def delete_older_than(self, cutoff_ts: float) -> int:
+        """Loescht alle Messpunkte ALTER als ``cutoff_ts`` und gibt die Zeilenzahl zurueck.
+
+        Retention-Mechanik: ``ts < cutoff_ts`` (strikt aelter; ein Punkt GENAU auf
+        dem Cutoff bleibt, symmetrisch zur ``since``-Inklusivitaet von ``range``).
+        ``cutoff_ts`` ist absolut -- die ``now - 30d``-Rechnung macht der Aufrufer
+        (Schritt 3 / B-II), nicht das Repo. Rueckgabe = Zahl geloeschter Zeilen
+        (fuer Log/Mengen-Check). Nichts zu loeschen -> ``0``.
+        """
+        ...
+
+    def count(self) -> int:
+        """Gesamtzahl gespeicherter RTT-Messpunkte (ueber alle Tasks).
+
+        Fuer den spaeteren Mengen-Check (Schritt 3 / B-II: Retention/Storage-
+        Beobachtung). Leere Tabelle -> ``0``.
+        """
+        ...
+
+
+class LoggingEventRepository(Protocol):
+    """Persistenz der Ereignis-/Anomalie-Flanken je Logging-Aufgabe (Retention 1 Jahr).
+
+    Reiner Append-Store (Tabelle ``monitoring_log_events``), Muster wie
+    ``MonitorEventRepository``. Der ``event_type`` ist bewusst ein ROHER ``str`` am
+    Port-Rand (NICHT der Live-Monitor-``MonitorEventType``): der Logging-Kern ist vom
+    fluechtigen Live-Monitor GETRENNT (Domaenen-Docstring) -- ihn an dessen
+    up/down-Vokabular zu koppeln, wuerde diese Trennung an der Persistenz-Naht wieder
+    aufweichen und das Logging-Event-Vokabular fuer immer an die Live-Monitor-Enum
+    binden. Der rohe ``str`` haelt die Naht offen (das fachliche Logging-Event-
+    Vokabular wird von B-II definiert, nicht hier vorweggenommen) -- Muster
+    ``monitor_events.event TEXT``, das den Wert ebenfalls als String am Rand fuehrt.
+    """
+
+    def save(self, task_id: str, event_type: str, rtt_ms: float, ts: float) -> None:
+        """Legt eine Ereignis-Flanke fuer ``task_id`` ab (Append, nie Update).
+
+        ``event_type`` als roher ``str`` (s. Klassen-Docstring), ``ts`` Unix-ts,
+        ``rtt_ms`` der Messwert an der Flanke (Sentinel ``-1.0`` erlaubt). KEIN Trim
+        -- die Mengenbegrenzung uebernimmt ``delete_older_than``.
+        """
+        ...
+
+    def range(self, task_id: str, since: float, until: float) -> list[LoggingEventRow]:
+        """Ereignisse eines Tasks im Zeitfenster ``[since, until)``, chronologisch aufsteigend.
+
+        Halb-offenes Fenster (``since`` inklusiv, ``until`` exklusiv) + absolute
+        ts-Grenzen + aufsteigende Reihenfolge -- EXAKT wie ``LoggingRttRepository.range``
+        (gemeinsame Fenster-Semantik des Logging-Kerns). Keine Daten / unbekannter
+        Task -> ``[]``, niemals ``None``.
+        """
+        ...
+
+    def delete_older_than(self, cutoff_ts: float) -> int:
+        """Loescht Ereignisse ALTER als ``cutoff_ts`` und gibt die Zeilenzahl zurueck.
+
+        Retention-Mechanik wie ``LoggingRttRepository.delete_older_than`` (``ts <
+        cutoff_ts``, absoluter Cutoff vom Aufrufer, Rueckgabe = geloeschte Zeilen) --
+        nur die Retention-SPANNE unterscheidet sich (1 Jahr statt 1 Monat), und die
+        liegt beim Aufrufer, nicht im Repo. Nichts zu loeschen -> ``0``.
         """
         ...

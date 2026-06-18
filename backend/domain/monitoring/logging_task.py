@@ -108,6 +108,46 @@ class LoggingTask:
     created_at: float
 
 
+@dataclass(frozen=True)
+class LoggingRttSample:
+    """Ein dichter RTT-Messpunkt EINER Logging-Aufgabe (reiner Datentraeger).
+
+    BEWUSST ein benannter frozen Datentraeger -- NICHT ein nacktes ``tuple`` wie
+    ``SlaSample``: dieser Messpunkt traegt VIER fachlich verschiedene Werte
+    (``rtt_ms``/``loss_pct``/``alive``/``ts``), bei denen die Positions-Bedeutung
+    eines Tuples leicht verwechselbar waere; das Hausmuster fuer mehrfeldige
+    Repo-Rueckgaben sind benannte frozen dataclasses (``PingSample``,
+    ``MonitorEvent``). ``SlaSample`` blieb ein Tuple, weil es das EingabeFORMAT der
+    reinen ``compute_sla_stats`` 1:1 spiegelt -- hier gibt es keine solche Fremd-
+    Signatur, an die wir uns binden muessten. ``ts`` ist Unix-ts (Muster
+    ``PingSample.timestamp``); der RTT-Sentinel ``-1.0`` (nicht erreichbar) bleibt
+    wie in ``PingSample`` erhalten.
+    """
+
+    rtt_ms: float
+    loss_pct: float
+    alive: bool
+    ts: float
+
+
+@dataclass(frozen=True)
+class LoggingEventRow:
+    """Eine Ereignis-/Anomalie-Flanke EINER Logging-Aufgabe (reiner Datentraeger).
+
+    Symmetrisch zu ``LoggingRttSample`` -- benannter frozen Datentraeger statt Tuple:
+    ``event_type``/``rtt_ms``/``ts`` sind drei fachlich verschiedene Werte, deren
+    Positions-Bedeutung als Tuple verwechselbar waere (Hausmuster ``MonitorEvent``).
+    ``event_type`` ist ein ROHER ``str`` (KEIN ``MonitorEventType``): der Logging-Kern
+    ist vom Live-Monitor getrennt (s. Modul-Docstring) -- das Logging-Event-Vokabular
+    wird von B-II bestimmt, nicht an die Live-Monitor-Enum gebunden. ``ts`` ist
+    Unix-ts; der RTT-Sentinel ``-1.0`` bleibt erhalten.
+    """
+
+    event_type: str
+    rtt_ms: float
+    ts: float
+
+
 def is_window_active(task: LoggingTask, now: float, reference_ts: float | None = None) -> bool:
     """Praedikat: liegt ``now`` innerhalb des aktiven Zeitfensters der Aufgabe?
 

@@ -4,6 +4,8 @@ Logging-Aufgaben der monitoring-Domaene."""
 from domain.monitoring.logging_task import (
     CaptureMode,
     InvalidTaskTransition,
+    LoggingEventRow,
+    LoggingRttSample,
     LoggingTask,
     OperationMode,
     TaskState,
@@ -44,6 +46,8 @@ __all__ = [
     "CronSpec",
     "IntervalSpec",
     "InvalidTaskTransition",
+    "LoggingEventRow",
+    "LoggingRttSample",
     "LoggingTask",
     "MonitorEvent",
     "MonitorEventType",

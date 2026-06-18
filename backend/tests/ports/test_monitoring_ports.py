@@ -21,13 +21,22 @@ import asyncio
 from typing import Any
 
 from domain.monitoring import (
+    CaptureMode,
+    LoggingEventRow,
+    LoggingRttSample,
+    LoggingTask,
     MonitorEvent,
     MonitorEventType,
     MonitorTarget,
+    OperationMode,
     PingSample,
     SlaSample,
+    TaskState,
 )
 from ports.monitoring import (
+    LoggingEventRepository,
+    LoggingRttRepository,
+    LoggingTaskRepository,
     MonitorBroadcasterPort,
     MonitorEventRepository,
     MonitorNotifierPort,
@@ -166,6 +175,68 @@ class _FakeSlaRepo:
         return list(self.samples.keys())
 
 
+class _FakeLoggingTaskRepo:
+    def __init__(self) -> None:
+        self.tasks: dict[str, LoggingTask] = {}
+
+    def save(self, task: LoggingTask) -> None:
+        self.tasks[task.id] = task  # Upsert ueber id
+
+    def get(self, task_id: str) -> LoggingTask | None:
+        return self.tasks.get(task_id)
+
+    def list_all(self) -> list[LoggingTask]:
+        return list(self.tasks.values())
+
+    def delete(self, task_id: str) -> None:
+        self.tasks.pop(task_id, None)
+
+
+class _FakeLoggingRttRepo:
+    def __init__(self) -> None:
+        # (task_id, rtt_ms, loss_pct, alive, ts)
+        self.rows: list[tuple[str, float, float, bool, float]] = []
+
+    def save(self, task_id: str, rtt_ms: float, loss_pct: float, alive: bool, ts: float) -> None:
+        self.rows.append((task_id, rtt_ms, loss_pct, alive, ts))
+
+    def range(self, task_id: str, since: float, until: float) -> list[LoggingRttSample]:
+        return [
+            LoggingRttSample(rtt_ms=r, loss_pct=lp, alive=a, ts=ts)
+            for (tid, r, lp, a, ts) in self.rows
+            if tid == task_id and since <= ts < until
+        ]
+
+    def delete_older_than(self, cutoff_ts: float) -> int:
+        before = len(self.rows)
+        self.rows = [row for row in self.rows if row[4] >= cutoff_ts]
+        return before - len(self.rows)
+
+    def count(self) -> int:
+        return len(self.rows)
+
+
+class _FakeLoggingEventRepo:
+    def __init__(self) -> None:
+        # (task_id, event_type, rtt_ms, ts)
+        self.rows: list[tuple[str, str, float, float]] = []
+
+    def save(self, task_id: str, event_type: str, rtt_ms: float, ts: float) -> None:
+        self.rows.append((task_id, event_type, rtt_ms, ts))
+
+    def range(self, task_id: str, since: float, until: float) -> list[LoggingEventRow]:
+        return [
+            LoggingEventRow(event_type=et, rtt_ms=r, ts=ts)
+            for (tid, et, r, ts) in self.rows
+            if tid == task_id and since <= ts < until
+        ]
+
+    def delete_older_than(self, cutoff_ts: float) -> int:
+        before = len(self.rows)
+        self.rows = [row for row in self.rows if row[3] >= cutoff_ts]
+        return before - len(self.rows)
+
+
 # ── Statische Konformitaet: mypy prueft die Zuweisung an den Port-Typ ───────
 
 
@@ -178,6 +249,9 @@ def _assert_target_source(_: MonitorTargetSource) -> None: ...
 def _assert_schedule_repo(_: ScheduleRepository) -> None: ...
 def _assert_job_scheduler(_: ScanJobScheduler) -> None: ...
 def _assert_sla_repo(_: SlaSampleRepository) -> None: ...
+def _assert_logging_task_repo(_: LoggingTaskRepository) -> None: ...
+def _assert_logging_rtt_repo(_: LoggingRttRepository) -> None: ...
+def _assert_logging_event_repo(_: LoggingEventRepository) -> None: ...
 
 
 def test_fakes_satisfy_ports_statically() -> None:
@@ -191,6 +265,9 @@ def test_fakes_satisfy_ports_statically() -> None:
     _assert_schedule_repo(_FakeScheduleRepo())
     _assert_job_scheduler(_FakeJobScheduler())
     _assert_sla_repo(_FakeSlaRepo())
+    _assert_logging_task_repo(_FakeLoggingTaskRepo())
+    _assert_logging_rtt_repo(_FakeLoggingRttRepo())
+    _assert_logging_event_repo(_FakeLoggingEventRepo())
 
 
 # ── Dynamischer Smoke: Methoden aufrufbar, Domaenentypen kommen heraus ──────
@@ -293,3 +370,55 @@ def test_sla_repo_samples_for_and_target_ids() -> None:
     assert rows == [(1, 3.0, 100.0), (0, -1.0, 200.0)]  # (alive, rtt_ms, ts)
     assert repo.samples_for("wlan", 150.0) == [(0, -1.0, 200.0)]  # since filtert
     assert repo.target_ids() == ["wlan"]
+
+
+def _logging_task(task_id: str, state: TaskState) -> LoggingTask:
+    return LoggingTask(
+        id=task_id,
+        target_id="wlan",
+        label="L",
+        purpose="P",
+        capture_mode=CaptureMode.REACHABILITY,
+        operation_mode=OperationMode.IMMEDIATE,
+        state=state,
+        planned_start=None,
+        planned_end=None,
+        max_duration_s=60,
+        created_at=1.0,
+    )
+
+
+def test_logging_task_repo_upsert_get_list_delete() -> None:
+    repo: LoggingTaskRepository = _FakeLoggingTaskRepo()
+    assert repo.list_all() == []  # Leer-Zustand, nicht None
+    assert repo.get("t1") is None  # unbekannt -> None
+    repo.save(_logging_task("t1", TaskState.CREATED))
+    repo.save(_logging_task("t1", TaskState.ACTIVE))  # Upsert: gleiche id, neuer state
+    assert len(repo.list_all()) == 1
+    loaded = repo.get("t1")
+    assert loaded is not None and loaded.state is TaskState.ACTIVE
+    repo.delete("t1")
+    assert repo.get("t1") is None
+
+
+def test_logging_rtt_repo_range_retention_count() -> None:
+    repo: LoggingRttRepository = _FakeLoggingRttRepo()
+    assert repo.range("t1", 0.0, 1000.0) == []  # Leer-Zustand, nicht None
+    assert repo.count() == 0
+    repo.save("t1", rtt_ms=3.0, loss_pct=0.0, alive=True, ts=100.0)
+    repo.save("t1", rtt_ms=-1.0, loss_pct=100.0, alive=False, ts=200.0)
+    rows = repo.range("t1", 100.0, 200.0)  # since inkl., until exkl.
+    assert rows == [LoggingRttSample(rtt_ms=3.0, loss_pct=0.0, alive=True, ts=100.0)]
+    assert repo.count() == 2
+    assert repo.delete_older_than(200.0) == 1  # nur ts=100 ist strikt aelter
+    assert repo.count() == 1
+
+
+def test_logging_event_repo_range_retention() -> None:
+    repo: LoggingEventRepository = _FakeLoggingEventRepo()
+    assert repo.range("t1", 0.0, 1000.0) == []  # Leer-Zustand, nicht None
+    repo.save("t1", event_type="flap", rtt_ms=1.0, ts=100.0)
+    repo.save("t1", event_type="spike", rtt_ms=9.0, ts=200.0)
+    rows = repo.range("t1", 100.0, 200.0)
+    assert rows == [LoggingEventRow(event_type="flap", rtt_ms=1.0, ts=100.0)]
+    assert repo.delete_older_than(200.0) == 1
