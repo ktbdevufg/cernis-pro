@@ -17,6 +17,7 @@ from domain.capture import (
     PacketSummary,
     apply_packet,
     neighbor_age,
+    radial_topology,
     ring_trim,
     stats_to_view,
     topology_graph,
@@ -254,6 +255,142 @@ def test_topology_graph_skips_nodes_without_id() -> None:
     graph = topology_graph(neighbors, hosts)
     assert graph["nodes"] == []
     assert graph["edges"] == []
+
+
+# ── radial_topology (Gateway-zentriert, measured/assumed) ────────────────────
+
+
+def test_radial_topology_empty() -> None:
+    graph = radial_topology(neighbors=[], hosts=[], gateway_ip="192.168.1.1")
+    assert graph == {"nodes": [], "edges": []}
+
+
+def test_radial_topology_only_gateway() -> None:
+    hosts = [{"ip": "192.168.1.1", "mac": "AA:AA:AA:AA:AA:01", "hostname": "fritzbox"}]
+    graph = radial_topology(neighbors=[], hosts=hosts, gateway_ip="192.168.1.1")
+    assert len(graph["nodes"]) == 1
+    assert graph["nodes"][0]["type"] == "gateway"
+    # Das Gateway bekommt keine assumed-Kante auf sich selbst.
+    assert graph["edges"] == []
+
+
+def test_radial_topology_hosts_without_neighbors_get_assumed_edges() -> None:
+    hosts = [
+        {"ip": "192.168.1.1", "mac": "AA:AA:AA:AA:AA:01", "hostname": "gw"},
+        {"ip": "192.168.1.2", "mac": "AA:AA:AA:AA:AA:02", "hostname": "pc"},
+        {"ip": "192.168.1.3", "mac": "AA:AA:AA:AA:AA:03", "hostname": "phone"},
+    ]
+    graph = radial_topology(neighbors=[], hosts=hosts, gateway_ip="192.168.1.1")
+    gw_id = "AA:AA:AA:AA:AA:01"
+    assumed = [e for e in graph["edges"] if e["kind"] == "assumed"]
+    assert len(assumed) == 2  # nur die beiden Nicht-Gateway-Hosts
+    assert all(e["target"] == gw_id for e in assumed)
+    assert {e["source"] for e in assumed} == {"AA:AA:AA:AA:AA:02", "AA:AA:AA:AA:AA:03"}
+
+
+def test_radial_topology_measured_edge_from_matching_host() -> None:
+    hosts = [
+        {"ip": "192.168.1.1", "mac": "AA:AA:AA:AA:AA:01", "hostname": "gw"},
+        {"ip": "192.168.1.2", "mac": "BB:BB:BB:BB:BB:02", "hostname": "pc"},
+    ]
+    neighbors = [
+        {
+            "source_mac": "BB:BB:BB:BB:BB:02",
+            "chassis_id": "switch-1",
+            "system_desc": "managed switch",
+        }
+    ]
+    graph = radial_topology(neighbors=neighbors, hosts=hosts, gateway_ip="192.168.1.1")
+    measured = [e for e in graph["edges"] if e["kind"] == "measured"]
+    assert measured == [{"source": "BB:BB:BB:BB:BB:02", "target": "switch-1", "kind": "measured"}]
+    # Der Host mit measured-Pfad bekommt KEINE assumed-Kante mehr.
+    assumed = [e for e in graph["edges"] if e["kind"] == "assumed"]
+    assert all(e["source"] != "BB:BB:BB:BB:BB:02" for e in assumed)
+
+
+def test_radial_topology_mixed_measured_and_assumed() -> None:
+    hosts = [
+        {"ip": "192.168.1.1", "mac": "AA:AA:AA:AA:AA:01", "hostname": "gw"},
+        {"ip": "192.168.1.2", "mac": "BB:BB:BB:BB:BB:02", "hostname": "pc"},
+        {"ip": "192.168.1.3", "mac": "CC:CC:CC:CC:CC:03", "hostname": "tv"},
+    ]
+    neighbors = [
+        {"source_mac": "BB:BB:BB:BB:BB:02", "chassis_id": "switch-1", "system_desc": "switch"}
+    ]
+    graph = radial_topology(neighbors=neighbors, hosts=hosts, gateway_ip="192.168.1.1")
+    kinds = {e["kind"] for e in graph["edges"]}
+    assert kinds == {"measured", "assumed"}
+    # pc: measured zum switch; tv: assumed zum gw; gw: gar keine.
+    by_source = {(e["source"], e["kind"]) for e in graph["edges"]}
+    assert ("BB:BB:BB:BB:BB:02", "measured") in by_source
+    assert ("CC:CC:CC:CC:CC:03", "assumed") in by_source
+    assert ("AA:AA:AA:AA:AA:01", "assumed") not in by_source
+
+
+def test_radial_topology_neighbor_without_matching_host_attaches_to_gateway() -> None:
+    # source_mac trifft keinen Host -> measured-Kante haengt am Gateway (Messpunkt).
+    hosts = [{"ip": "192.168.1.1", "mac": "AA:AA:AA:AA:AA:01", "hostname": "gw"}]
+    neighbors = [
+        {"source_mac": "ZZ:ZZ:ZZ:ZZ:ZZ:99", "chassis_id": "switch-1", "system_desc": "switch"}
+    ]
+    graph = radial_topology(neighbors=neighbors, hosts=hosts, gateway_ip="192.168.1.1")
+    measured = [e for e in graph["edges"] if e["kind"] == "measured"]
+    assert measured == [{"source": "AA:AA:AA:AA:AA:01", "target": "switch-1", "kind": "measured"}]
+
+
+def test_radial_topology_no_gateway_means_no_assumed_edges() -> None:
+    # gateway_ip trifft keinen Host -> ehrlicher Leerzustand, keine Sternkanten.
+    hosts = [
+        {"ip": "192.168.1.2", "mac": "BB:BB:BB:BB:BB:02", "hostname": "pc"},
+        {"ip": "192.168.1.3", "mac": "CC:CC:CC:CC:CC:03", "hostname": "tv"},
+    ]
+    graph = radial_topology(neighbors=[], hosts=hosts, gateway_ip="192.168.1.1")
+    assert all(node["type"] == "host" for node in graph["nodes"])
+    assert graph["edges"] == []
+
+
+def test_radial_topology_empty_gateway_ip_no_center() -> None:
+    hosts = [{"ip": "192.168.1.2", "mac": "BB:BB:BB:BB:BB:02"}]
+    graph = radial_topology(neighbors=[], hosts=hosts, gateway_ip="")
+    assert graph["nodes"][0]["type"] == "host"
+    assert graph["edges"] == []
+
+
+def test_radial_topology_dedup_duplicate_edges() -> None:
+    # Zwei Nachbarn mit demselben chassis_id vom selben Host -> nur EINE measured-Kante.
+    hosts = [
+        {"ip": "192.168.1.1", "mac": "AA:AA:AA:AA:AA:01", "hostname": "gw"},
+        {"ip": "192.168.1.2", "mac": "BB:BB:BB:BB:BB:02", "hostname": "pc"},
+    ]
+    neighbors = [
+        {"source_mac": "BB:BB:BB:BB:BB:02", "chassis_id": "switch-1", "system_desc": "switch"},
+        {"source_mac": "BB:BB:BB:BB:BB:02", "chassis_id": "switch-1", "system_desc": "switch"},
+    ]
+    graph = radial_topology(neighbors=neighbors, hosts=hosts, gateway_ip="192.168.1.1")
+    measured = [e for e in graph["edges"] if e["kind"] == "measured"]
+    assert len(measured) == 1
+
+
+def test_radial_topology_skips_hosts_without_id() -> None:
+    hosts = [{"hostname": "kein-id"}, {"ip": "192.168.1.2", "mac": "BB:BB:BB:BB:BB:02"}]
+    graph = radial_topology(neighbors=[], hosts=hosts, gateway_ip="192.168.1.9")
+    ids = [node["id"] for node in graph["nodes"]]
+    assert ids == ["BB:BB:BB:BB:BB:02"]
+
+
+def test_radial_topology_edges_only_between_existing_nodes() -> None:
+    hosts = [
+        {"ip": "192.168.1.1", "mac": "AA:AA:AA:AA:AA:01", "hostname": "gw"},
+        {"ip": "192.168.1.2", "mac": "BB:BB:BB:BB:BB:02", "hostname": "pc"},
+    ]
+    neighbors = [
+        {"source_mac": "BB:BB:BB:BB:BB:02", "chassis_id": "switch-1", "system_desc": "switch"}
+    ]
+    graph = radial_topology(neighbors=neighbors, hosts=hosts, gateway_ip="192.168.1.1")
+    node_ids = {node["id"] for node in graph["nodes"]}
+    for edge in graph["edges"]:
+        assert edge["source"] in node_ids
+        assert edge["target"] in node_ids
 
 
 # ── neighbor_age ─────────────────────────────────────────────────────────────
