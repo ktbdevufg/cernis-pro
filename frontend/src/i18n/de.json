@@ -304,7 +304,10 @@
       "verlaufTitel": "RTT-Verlauf",
       "liveFenster": "Live-Fenster",
       "verlaufLeer": "Noch keine Verlaufsdaten.",
-      "tonSignal": "Signalton bei Zustandswechsel"
+      "tonFuerZiel": "Ton für {{label}}",
+      "tonKeinZiel": "Ton (kein Ziel)",
+      "tonAnTitel": "Signalton an",
+      "tonAusTitel": "Signalton aus"
     },
     "topology": {
       "titel": "Netz-Topologie",

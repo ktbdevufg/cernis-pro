@@ -78,6 +78,17 @@
   accent-color: var(--color-accent);
 }
 
+/* Kein Ziel anwählbar (keine Karten): Schalter gedämpft und nicht klickbar —
+   ehrlicher Zustand statt totem Schalter. */
+.monitor__ton-schalter--inaktiv {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.monitor__ton-schalter--inaktiv .monitor__ton-checkbox {
+  cursor: not-allowed;
+}
+
 .monitor__ton-label {
   font-size: 12px;
   letter-spacing: 0.03em;
@@ -159,6 +170,23 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Dezentes Ton-Symbol je Karte: zeigt pro Ziel an, ob der Signalton an ist.
+   Ruhig (gedämpfte Tertiärfarbe); aus-Zustand noch zurückhaltender. Token-Farben. */
+.monitor-karte__ton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.monitor-karte__ton--an {
+  color: var(--color-text-tert);
+}
+
+.monitor-karte__ton--aus {
+  color: var(--status-inaktiv);
 }
 
 /* Dezenter Löschen-Button (nur eigene Ziele). Ruhig, hebt sich erst beim Hover. */

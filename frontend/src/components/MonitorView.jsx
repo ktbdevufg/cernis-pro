@@ -11,7 +11,7 @@
 // Ansicht NICHT (leere Liste statt Absturz). Token-Variablen aus tokens.css,
 // nie feste Farben.
 
-import { Activity, Plus, Trash2 } from "lucide-react";
+import { Activity, Plus, Trash2, Volume2, VolumeX } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -45,9 +45,25 @@ const GATEWAY_PRAEFIX = "gw_";
 // (gateway/internet/dns o. Ä.) tragen es NICHT und bleiben ohne Löschen-Button.
 const EIGENES_ZIEL_PRAEFIX = "custom_";
 
-// Settings-Key für den persistierten Signalton-Schalter (Muster wie
-// scan_columns in ObserveView). Default ist AUS — kein überraschender Ton.
-const MONITOR_SOUND_KEY = "monitor_sound";
+// Settings-Key für den persistierten Signalton — NEU pro Ziel statt global.
+// Wert ist eine Map { targetId: bool } (als JSON-Objekt persistiert). Semantik:
+// fehlt ein targetId in der Map, gilt der Default AN (Ton an). Eine leere/nicht
+// gesetzte Map heißt also: alle Ziele tönen.
+//
+// Bewusst KEINE Migration des alten globalen Keys "monitor_sound": dessen
+// Default war global AUS, der neue Default ist pro Ziel AN. Karl will die
+// Funktion bewusst neu starten (Ton an pro Ziel), nicht den alten Aus-Zustand
+// über alle Ziele zementieren. Ein evtl. vorhandener alter Wert wird daher
+// ignoriert; er stört nicht (eigener Key) und kann später aufgeräumt werden.
+const MONITOR_SOUND_TARGETS_KEY = "monitor_sound_targets";
+
+// Liest aus der Ziel-Ton-Map, ob für ein Ziel der Ton an ist. Fehlt der Eintrag
+// (oder ist kein echter Boolean), gilt der Default AN. Eine Quelle für die
+// Default-Semantik, damit Schalter und Stream-Callback sie identisch lesen.
+function tonAnFuerZiel(map, targetId) {
+  const wert = map?.[targetId];
+  return typeof wert === "boolean" ? wert : true;
+}
 
 // Formatiert eine RTT in Millisekunden auf eine Nachkommastelle ("8.0 ms").
 // null = ehrliche Lücke -> "—" (kein erfundener Wert).
@@ -63,7 +79,7 @@ function formatRtt(rttMs) {
 // festen nicht). Die Karte ist als Ganzes anklickbar (wählt das Ziel für den
 // großen Graphen aus); die ausgewählte Karte hebt sich durch einen Akzent-Rand
 // ab. Der Löschen-Button darf den Karten-Klick NICHT auslösen.
-function StatusKarte({ ziel, eigen, verlauf, ausgewaehlt, onWaehlen, onLoeschen }) {
+function StatusKarte({ ziel, eigen, verlauf, ausgewaehlt, tonAn, onWaehlen, onLoeschen }) {
   const { t } = useTranslation();
 
   // Ampel-Klasse: aktiv (alive true), offline (alive false) oder unbekannt
@@ -99,6 +115,21 @@ function StatusKarte({ ziel, eigen, verlauf, ausgewaehlt, onWaehlen, onLoeschen 
       <div className="monitor-karte__kopf">
         <span className={ampelKlasse} aria-hidden="true" />
         <span className="monitor-karte__label">{ziel.label}</span>
+        {/* Dezentes Ton-Symbol: zeigt pro Ziel auf einen Blick, ob der Signalton
+            an ist (Lautsprecher) oder aus (durchgestrichen). Rein anzeigend —
+            geschaltet wird über den Schalter in der Kopfzeile fürs gewählte
+            Ziel. */}
+        <span
+          className={
+            tonAn
+              ? "monitor-karte__ton monitor-karte__ton--an"
+              : "monitor-karte__ton monitor-karte__ton--aus"
+          }
+          aria-hidden="true"
+          title={tonAn ? t("beobachten.monitor.tonAnTitel") : t("beobachten.monitor.tonAusTitel")}
+        >
+          {tonAn ? <Volume2 size={13} /> : <VolumeX size={13} />}
+        </span>
         {eigen && (
           <button
             type="button"
@@ -189,17 +220,19 @@ export default function MonitorView() {
   const [verlaeufe, setVerlaeufe] = useState(new Map());
   // Für den großen Graphen gewähltes Ziel (targetId) oder null (Default unten).
   const [gewaehltesZiel, setGewaehltesZiel] = useState(null);
-  // Signalton bei Zustandswechsel an/aus. Default AUS (kein überraschender Ton
-  // beim ersten Start); beim Mount aus den Settings nachgeladen, persistiert.
-  const [tonAn, setTonAn] = useState(false);
+  // Signalton bei Zustandswechsel — PRO ZIEL an/aus statt global. Map
+  // { targetId: bool }; fehlt ein Ziel, gilt der Default AN (tonAnFuerZiel).
+  // Beim Mount aus den Settings nachgeladen, danach persistiert. Ein leeres
+  // Objekt heißt: alle Ziele tönen (Default).
+  const [tonProZiel, setTonProZiel] = useState({});
 
   // Aktives Stream-Handle ({ stop() }) — zum sauberen Schließen bei Unmount.
   const streamRef = useRef(null);
-  // Spiegelt tonAn als Ref, damit der im Stream-useEffect gebundene Callback
-  // immer den aktuellen Wert sieht (statt eines veralteten Closure-Werts) —
-  // tonAn darf NICHT ins Dependency-Array, sonst würde der Strom bei jedem
-  // Schalter-Wechsel neu aufgebaut.
-  const tonAnRef = useRef(false);
+  // Spiegelt die Ziel-Ton-Map als Ref, damit der im Stream-useEffect gebundene
+  // Callback immer den aktuellen Stand sieht (statt eines veralteten Closure-
+  // Werts) — die Map darf NICHT ins Dependency-Array, sonst würde der Strom bei
+  // jedem Schalter-Wechsel neu aufgebaut (Render-Loop-/Stream-Neuaufbau-Falle).
+  const tonProZielRef = useRef({});
 
   // Hängt einen RTT-Wert hinten an die Reihe eines Ziels (immutabel) und kürzt
   // vorne auf MAX_VERLAUF. null wird mit angehängt (ehrliche Lücke).
@@ -228,15 +261,17 @@ export default function MonitorView() {
     });
   };
 
-  // tonAn immer in die Ref spiegeln, sobald sich der State ändert. So liest der
-  // im Stream-useEffect gebundene onUpdate-Callback stets den aktuellen Wert.
+  // Die Ziel-Ton-Map immer in die Ref spiegeln, sobald sich der State ändert. So
+  // liest der im Stream-useEffect gebundene onUpdate-Callback stets den aktuellen
+  // Stand, ohne dass die Map ins Dep-Array muss.
   useEffect(() => {
-    tonAnRef.current = tonAn;
-  }, [tonAn]);
+    tonProZielRef.current = tonProZiel;
+  }, [tonProZiel]);
 
-  // Beim Mount den persistierten Schalterzustand laden. Nur ein echter Boolean
-  // übernimmt; sonst bleibt der Default false. Fehler werden toleriert (Muster
-  // wie scan_columns in ObserveView).
+  // Beim Mount die persistierte Ziel-Ton-Map laden. Nur ein echtes Objekt
+  // (keine Liste, kein null) übernimmt; sonst bleibt die leere Default-Map
+  // (alle Ziele tönen). Fehler werden toleriert (Muster wie scan_columns in
+  // ObserveView).
   useEffect(() => {
     let abgebrochen = false;
     (async () => {
@@ -245,12 +280,12 @@ export default function MonitorView() {
         if (abgebrochen) {
           return;
         }
-        const roh = settings?.[MONITOR_SOUND_KEY];
-        if (typeof roh === "boolean") {
-          setTonAn(roh);
+        const roh = settings?.[MONITOR_SOUND_TARGETS_KEY];
+        if (roh && typeof roh === "object" && !Array.isArray(roh)) {
+          setTonProZiel(roh);
         }
       } catch {
-        // Settings nicht erreichbar: Default (Ton aus) bleibt aktiv.
+        // Settings nicht erreichbar: leere Default-Map bleibt (alle Ziele an).
       }
     })();
     return () => {
@@ -258,13 +293,20 @@ export default function MonitorView() {
     };
   }, []);
 
-  // Schalter umlegen: Zustand sofort setzen (UI reagiert live) und persistieren
-  // (feuern und vergessen; Fehler nur loggen, UI nicht blockieren) — exakt das
-  // Muster von handleSpaltenWechsel in ObserveView.
-  const handleTonWechsel = (wert) => {
-    setTonAn(wert);
-    updateSetting(MONITOR_SOUND_KEY, wert).catch((fehler) => {
-      console.error("monitor_sound speichern fehlgeschlagen", fehler);
+  // Ton für ein einzelnes Ziel umlegen: Map sofort aktualisieren (UI reagiert
+  // live) und die ganze Map persistieren (feuern und vergessen; Fehler nur
+  // loggen, UI nicht blockieren) — Muster von handleSpaltenWechsel in
+  // ObserveView. Ohne targetId (kein Ziel da) passiert nichts.
+  const handleTonWechsel = (targetId, wert) => {
+    if (targetId === null || targetId === undefined) {
+      return;
+    }
+    setTonProZiel((vorher) => {
+      const naechste = { ...vorher, [targetId]: wert };
+      updateSetting(MONITOR_SOUND_TARGETS_KEY, naechste).catch((fehler) => {
+        console.error("monitor_sound_targets speichern fehlgeschlagen", fehler);
+      });
+      return naechste;
     });
   };
 
@@ -342,10 +384,11 @@ export default function MonitorView() {
         // Neuen Wert hinten an die Verlaufsreihe des Ziels anhängen (null = Lücke).
         haengeVerlaufAn(targetId, rttMs);
         if (event !== null && event !== undefined) {
-          // Ein echter Zustandswechsel (up/down/degraded): bei aktivem Schalter
-          // einen kurzen Signalton spielen. tonAn über die Ref lesen, damit der
-          // hier gebundene Callback nicht auf einem veralteten Closure-Wert sitzt.
-          if (tonAnRef.current) {
+          // Ein echter Zustandswechsel (up/down/degraded): NUR tönen, wenn der
+          // Ton fürs Ziel DIESES Frames an ist (Lookup in der Ziel-Ton-Map,
+          // Default an). Die Map über die Ref lesen, damit der hier gebundene
+          // Callback nicht auf einem veralteten Closure-Wert sitzt.
+          if (tonAnFuerZiel(tonProZielRef.current, targetId)) {
             spieleSignalton();
           }
           setLog((vorher) =>
@@ -429,6 +472,16 @@ export default function MonitorView() {
     aktiveTargetId !== null ? (verlaeufe.get(aktiveTargetId) ?? []) : [];
   const labelDesGewaehlten = aktivesZiel?.label ?? "";
 
+  // Der Ton-Schalter in der Kopfzeile wirkt auf das effektiv aktive Ziel
+  // (angewählt oder Default) — exakt dieselbe Logik wie der große Graph. Gibt es
+  // gar kein Ziel (keine Karten), ist der Schalter deaktiviert (ehrlicher
+  // Zustand, kein toter Schalter). Sein Zustand spiegelt den Ton des aktiven
+  // Ziels (Default an).
+  const schalterAktiv = aktiveTargetId !== null;
+  const tonDesAktiven = schalterAktiv
+    ? tonAnFuerZiel(tonProZiel, aktiveTargetId)
+    : false;
+
   return (
     <div className="monitor">
       {/* Dezenter Hinweisstreifen, wenn der Strom getrennt ist (Reconnect läuft). */}
@@ -448,14 +501,27 @@ export default function MonitorView() {
       {/* Kopfzeile über den Karten: Zielen-Titel links, Signalton-Schalter rechts. */}
       <div className="monitor__kopfzeile">
         <div className="monitor__zieleTitel">{t("beobachten.monitor.zieleTitel")}</div>
-        <label className="monitor__ton-schalter">
+        <label
+          className={
+            schalterAktiv
+              ? "monitor__ton-schalter"
+              : "monitor__ton-schalter monitor__ton-schalter--inaktiv"
+          }
+        >
           <input
             type="checkbox"
             className="monitor__ton-checkbox"
-            checked={tonAn}
-            onChange={(e) => handleTonWechsel(e.target.checked)}
+            checked={tonDesAktiven}
+            disabled={!schalterAktiv}
+            onChange={(e) => handleTonWechsel(aktiveTargetId, e.target.checked)}
           />
-          <span className="monitor__ton-label">{t("beobachten.monitor.tonSignal")}</span>
+          {/* Beschriftung macht klar, dass der Schalter fürs angewählte Ziel
+              gilt. Ohne Ziel ein neutraler Hinweis statt eines toten Schalters. */}
+          <span className="monitor__ton-label">
+            {schalterAktiv
+              ? t("beobachten.monitor.tonFuerZiel", { label: labelDesGewaehlten })
+              : t("beobachten.monitor.tonKeinZiel")}
+          </span>
         </label>
       </div>
       <div className="monitor__karten">
@@ -466,6 +532,7 @@ export default function MonitorView() {
             eigen={String(ziel.targetId).startsWith(EIGENES_ZIEL_PRAEFIX)}
             verlauf={verlaeufe.get(ziel.targetId) ?? []}
             ausgewaehlt={ziel.targetId === aktiveTargetId}
+            tonAn={tonAnFuerZiel(tonProZiel, ziel.targetId)}
             onWaehlen={setGewaehltesZiel}
             onLoeschen={handleLoeschen}
           />
