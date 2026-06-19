@@ -59,6 +59,7 @@ from api.analysis import (
 )
 from api.analysis import router as analysis_router
 from api.capture import (
+    TopologySource,
     provide_build_topology,
     provide_capture_lldp,
     provide_capture_status,
@@ -1804,10 +1805,16 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     # Root. BuildTopology kennt weder devices/scanning/interfaces noch infra -- es
     # bekommt drei schlanke Provider-Callables, die hier die Fremd-Daten in rohe
     # dicts/den Roh-Wert projizieren (Muster application.export.ScanProvider):
-    #   * Hosts  <- persistierter Scan-Bestand (device_repository, mac/ip/hostname/vendor),
+    #   * Hosts  <- WAEHLBARE Quelle (Nutzer-Wahl, s.u.): juengster Scan ODER Bestand,
     #   * Nachbarn <- akkumulierte LLDP/CDP-Tabelle (GetLldpNeighbors),
     #   * Gateway-IP <- primaeres Interface (ListInterfaces, async -> Coroutine-Provider).
-    def _topology_hosts() -> list[dict[str, str]]:
+    #
+    # Host-Quelle als Nutzer-Wahl (Leitprinzip Karl: maximale Entscheidungsfreiheit,
+    # Muster AUTO/MANUELL beim Polling): zwei Projektionen, der Endpunkt waehlt per
+    # ``?source=`` welche (str -> Projektion-Hebung HIER, nicht im Use-Case).
+    #   * "all_known": gesamter device_repository-Bestand (alle je gesehenen Geraete,
+    #     auch offline) -- das bisherige Verhalten.
+    def _topology_hosts_all_known() -> list[dict[str, str]]:
         devices = GetDevices(device_repository())(known_only=False)
         return [
             {
@@ -1817,6 +1824,34 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 "vendor": d.vendor,
             }
             for d in devices
+        ]
+
+    #   * "last_scan": nur die Hosts des JUENGSTEN gespeicherten Scans (Live-Bild).
+    #     Lesepfad wie der analysis-hosts-Schnitt (Schnitt B, s.u. ~Z.2374): das
+    #     bestehende scan_history_repository() (lru_cache, im scanning-Block
+    #     verdrahtet) -- list(1) liefert die juengste Summary, get() den ScanRecord
+    #     mit den EnrichedHost-Objekten. KEIN neuer Scan-Zugriff, KEINE zweite
+    #     Repo-Instanz. Ausfallsicher (Muster Schnitt B): kein Scan ODER ein
+    #     CorruptScanError -> ehrlich leere Hostliste, kein Crash.
+    def _topology_hosts_last_scan() -> list[dict[str, str]]:
+        summaries = scan_history_repository().list(1)
+        if not summaries:
+            return []
+        try:
+            record = scan_history_repository().get(summaries[0].scan_id)
+        except CorruptScanError:
+            logger.warning("topology.hosts_skipped_corrupt_scan", scan_id=summaries[0].scan_id)
+            return []
+        if record is None:
+            return []
+        return [
+            {
+                "mac": h.mac,
+                "ip": h.ip,
+                "hostname": h.hostname,
+                "vendor": h.vendor,
+            }
+            for h in record.hosts
         ]
 
     def _topology_neighbors() -> list[dict[str, str]]:
@@ -1840,9 +1875,18 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 return iface.gateway
         return ""
 
-    app.dependency_overrides[provide_build_topology] = lambda: BuildTopology(
-        _topology_hosts, _topology_neighbors, _topology_gateway
-    )
+    # Factory statt fertigem Use-Case: der Endpunkt reicht die gewaehlte ``source``
+    # herein, hier faellt die Entscheidung, WELCHE Host-Projektion ``BuildTopology``
+    # bekommt. So bleibt der Use-Case quellen-agnostisch (Regel 5: die Quelle-
+    # Unterscheidung lebt in der Verdrahtung). Nachbarn/Gateway sind quellen-
+    # unabhaengig und in beiden Faellen identisch.
+    def _build_topology_for(source: TopologySource) -> BuildTopology:
+        host_provider = (
+            _topology_hosts_last_scan if source == "last_scan" else _topology_hosts_all_known
+        )
+        return BuildTopology(host_provider, _topology_neighbors, _topology_gateway)
+
+    app.dependency_overrides[provide_build_topology] = lambda: _build_topology_for
 
     app.add_api_websocket_route("/ws/pcap", make_ws_pcap(capture_broadcaster()))
 

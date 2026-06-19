@@ -43,7 +43,7 @@ import asyncio
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
@@ -143,8 +143,25 @@ def provide_get_lldp_neighbors() -> GetLldpNeighbors:
     raise NotImplementedError("GetLldpNeighbors wird in app.py verdrahtet")
 
 
-def provide_build_topology() -> BuildTopology:
-    raise NotImplementedError("BuildTopology wird in app.py verdrahtet")
+# Waehlbare Host-Quelle der Topologie (Nutzer-Wahl, kein fester Default):
+#   * "last_scan"  -> nur die Hosts des juengsten gespeicherten Scans (Live-Bild),
+#   * "all_known"  -> der gesamte device_repository-Bestand (bisheriges Verhalten).
+# Als ``Literal`` am Query-Rand (Hausmuster api/export.export_scan / api/process.
+# list_processes): FastAPI lehnt einen ungueltigen Wert selbst mit 422 ab -- keine
+# eigene Validierung, kein domain-Import. Die Hebung str -> Projektion macht der
+# Composition Root: die Factory unten waehlt anhand dieses Werts den Host-Provider.
+type TopologySource = Literal["last_scan", "all_known"]
+
+
+# Composition-Root-Factory: liefert einen ``BuildTopology`` mit der zur ``source``
+# passenden Host-Projektion. WARUM Factory statt fertigem Use-Case: die Quelle-
+# Unterscheidung gehoert in die Verdrahtung (Regel 5), NICHT in die Use-Case-Logik
+# -- ``BuildTopology`` bleibt quellen-agnostisch (bekommt nur EINEN Host-Provider).
+type BuildTopologyFactory = Callable[[TopologySource], BuildTopology]
+
+
+def provide_build_topology() -> BuildTopologyFactory:
+    raise NotImplementedError("BuildTopology-Factory wird in app.py verdrahtet")
 
 
 # ── Serialisierungs-Helfer (Domaenen-Objekt -> Wire-dict am api-Rand) ─────────
@@ -319,15 +336,22 @@ async def lldp_capture(
 
 @router.get("/topology")
 async def topology(
-    build_topology: Annotated[BuildTopology, Depends(provide_build_topology)],
+    build_topology_for: Annotated[BuildTopologyFactory, Depends(provide_build_topology)],
+    source: TopologySource = "last_scan",
 ) -> dict[str, list[dict[str, Any]]]:
     """Radialer Heimnetz-Graph ``{nodes, edges}`` (Gateway-Zentrum, ADR 0035).
+
+    ``?source=last_scan`` (Default) zeigt nur die Hosts des juengsten gespeicherten
+    Scans (aktuelles Live-Bild); ``?source=all_known`` den gesamten device_repository-
+    Bestand (alle je gesehenen Geraete, auch offline). Ein ungueltiger Wert -> 422
+    (FastAPI-``Literal``-Validierung). Die Factory liefert den ``BuildTopology`` mit
+    der passenden Host-Projektion -- die Use-Case-Logik kennt die Quelle nicht.
 
     Der Use-Case gibt rohe Domaenen-dicts (nodes/edges); dieser Rand baut die
     endgueltige Wire-Form. Ehrlicher Leerzustand: ohne Scan-Hosts/LLDP-Daten ist
     der Graph leer (``{"nodes": [], "edges": []}``) -- kein erfundener Inhalt.
     """
-    graph = await build_topology()
+    graph = await build_topology_for(source)()
     return {
         "nodes": [_topology_node_to_dict(n) for n in graph["nodes"]],
         "edges": [

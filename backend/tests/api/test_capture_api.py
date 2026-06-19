@@ -416,12 +416,75 @@ def _topology_uc(
     return BuildTopology(lambda: hosts, lambda: neighbors, _gateway)
 
 
+def _topology_factory(
+    hosts: list[dict[str, str]], neighbors: list[dict[str, str]], gateway_ip: str
+) -> object:
+    """Factory-Override (Muster app.py): liefert quellen-UNABHAENGIG denselben
+    Use-Case -- der ``source``-Param wird durchgereicht, aber im Test ignoriert
+    (die Quelle-Unterscheidung lebt im Composition Root, nicht hier)."""
+    uc = _topology_uc(hosts, neighbors, gateway_ip)
+    return lambda _source: uc
+
+
 def test_topology_empty_returns_empty_graph() -> None:
     app = _build_app()
-    app.dependency_overrides[provide_build_topology] = lambda: _topology_uc([], [], "192.168.1.1")
+    app.dependency_overrides[provide_build_topology] = lambda: _topology_factory(
+        [], [], "192.168.1.1"
+    )
     resp = TestClient(app).get("/api/topology")
     assert resp.status_code == 200
     assert resp.json() == {"nodes": [], "edges": []}
+
+
+def test_topology_default_source_is_last_scan() -> None:
+    """Ohne ``?source`` waehlt der Endpunkt ``last_scan`` -- die Factory bekommt
+    genau diesen Wert hereingereicht (Default-Vertrag des Auftrags)."""
+    app = _build_app()
+    gesehen: list[str] = []
+
+    def _factory() -> object:
+        uc = _topology_uc([], [], "192.168.1.1")
+
+        def _for(source: str) -> BuildTopology:
+            gesehen.append(source)
+            return uc
+
+        return _for
+
+    app.dependency_overrides[provide_build_topology] = _factory
+    resp = TestClient(app).get("/api/topology")
+    assert resp.status_code == 200
+    assert gesehen == ["last_scan"]
+
+
+def test_topology_explicit_all_known_source() -> None:
+    """``?source=all_known`` wird an die Factory durchgereicht."""
+    app = _build_app()
+    gesehen: list[str] = []
+
+    def _factory() -> object:
+        uc = _topology_uc([], [], "192.168.1.1")
+
+        def _for(source: str) -> BuildTopology:
+            gesehen.append(source)
+            return uc
+
+        return _for
+
+    app.dependency_overrides[provide_build_topology] = _factory
+    resp = TestClient(app).get("/api/topology?source=all_known")
+    assert resp.status_code == 200
+    assert gesehen == ["all_known"]
+
+
+def test_topology_invalid_source_returns_422() -> None:
+    """Ein ungueltiger ``source`` -> 422 (FastAPI-``Literal``-Validierung)."""
+    app = _build_app()
+    app.dependency_overrides[provide_build_topology] = lambda: _topology_factory(
+        [], [], "192.168.1.1"
+    )
+    resp = TestClient(app).get("/api/topology?source=bogus")
+    assert resp.status_code == 422
 
 
 def test_topology_marks_gateway_and_assumed_edges() -> None:
@@ -430,7 +493,7 @@ def test_topology_marks_gateway_and_assumed_edges() -> None:
         {"mac": "AA:AA:AA:AA:AA:02", "ip": "192.168.1.2", "hostname": "pc", "vendor": "Dell"},
     ]
     app = _build_app()
-    app.dependency_overrides[provide_build_topology] = lambda: _topology_uc(
+    app.dependency_overrides[provide_build_topology] = lambda: _topology_factory(
         hosts, [], "192.168.1.1"
     )
     resp = TestClient(app).get("/api/topology")
@@ -454,7 +517,7 @@ def test_topology_measured_edge_wire_shape() -> None:
         {"source_mac": "BB:BB:BB:BB:BB:02", "chassis_id": "switch-1", "system_desc": "switch"}
     ]
     app = _build_app()
-    app.dependency_overrides[provide_build_topology] = lambda: _topology_uc(
+    app.dependency_overrides[provide_build_topology] = lambda: _topology_factory(
         hosts, neighbors, "192.168.1.1"
     )
     body = TestClient(app).get("/api/topology").json()
