@@ -11,7 +11,7 @@ fastapi/starlette).
 
 import asyncio
 import sys
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager, suppress
 from dataclasses import replace
 from datetime import datetime
@@ -72,6 +72,12 @@ from api.capture import (
     provide_stop_capture,
 )
 from api.capture import router as capture_router
+from api.cve import (
+    provide_cve_acknowledge,
+    provide_get_active_findings,
+    provide_get_cve_status,
+)
+from api.cve import router as cve_router
 from api.devices import (
     provide_delete_device,
     provide_get_device,
@@ -199,6 +205,11 @@ from application.capture import (
     GetLldpNeighbors,
     RunCapture,
     StartCapture,
+)
+from application.cve import (
+    GetActiveFindings,
+    GetCveMonitorStatus,
+    RunCveMonitor,
 )
 from application.devices import (
     DeleteDevice,
@@ -330,6 +341,9 @@ from infrastructure.capture import (
 )
 from infrastructure.clock import SystemClock
 from infrastructure.config import APP_NAME, APP_VERSION, AppConfig
+from infrastructure.cve_acknowledgements_db import SqliteCveAcknowledgementRepository
+from infrastructure.cve_checkstate_db import SqliteCveCheckStateRepository
+from infrastructure.cve_findings_db import SqliteCveFindingRepository
 from infrastructure.device_repository import SqliteDeviceRepository
 from infrastructure.diagnostics_linux import (
     DiagnosticsToolMissing,
@@ -408,6 +422,8 @@ from modules.alerting import init_alerts_db
 from modules.devices_db import init_devices_db
 from modules.storage import init_db
 from ports.alerting import AlertNotifierPort, SmtpConfigPort
+from ports.cve import InventoryHost, InventoryPort, LookupCve
+from ports.security import PortQuery
 from ports.settings import SettingsRepository
 from ws_monitor import make_ws_monitor
 from ws_pcap import make_ws_pcap
@@ -577,6 +593,37 @@ def _read_disabled_rule_ids(settings: SettingsRepository) -> frozenset[str]:
         return frozenset()
     # Nur String-Eintraege als rule_id; kaputte Nicht-String-Eintraege ueberspringen.
     return frozenset(x for x in setting.value if isinstance(x, str))
+
+
+# Defaults der cve-Domaene (ADR 0037): Auffrisch-Intervall 24h (Fall 3; 0 = aus), Scan-
+# Intervall 20s (Drosselung; der NVD-sleep(0.6) kommt obendrauf). Im Composition Root, weil
+# die Settings-Auswertung hier lebt -- die Domaene/Application tragen ihre eigenen Defaults
+# (DEFAULT_REFRESH_INTERVAL_HOURS / DEFAULT_SCAN_INTERVAL_SECONDS) fuer den direkten Gebrauch.
+_CVE_DEFAULT_REFRESH_HOURS = 24
+_CVE_DEFAULT_SCAN_SECONDS = 20
+
+
+def _read_cve_int_setting(settings: SettingsRepository, key: str, default: int) -> int:
+    """Liest einen ganzzahligen cve-Setting-Wert defensiv (S3-konform).
+
+    Fehlender Key (frische DB ist normal -> kein Log) ODER Nicht-Zahl-Wert -> ``default``.
+    Kaputtes JSON (``CorruptSettingError``) -> GELOGGTE Warnung + ``default`` (eine kaputte
+    Komfort-Einstellung darf den Worker nicht faellen; der Fehler wird benannt, nicht still
+    verschluckt). Bools werden ausgeschlossen (``True`` ist in Python ein int-Subtyp, aber
+    als Intervall-Wert sinnlos). Negative Werte werden auf 0 geklemmt (0 = Fall 3 aus bzw.
+    minimal-Intervall) -- kein negativer sleep/Intervall.
+    """
+    try:
+        setting = settings.get(key)
+    except CorruptSettingError:
+        logger.warning("cve_setting_corrupt", key=key)
+        return default
+    if setting is None:
+        return default
+    value = setting.value
+    if isinstance(value, bool) or not isinstance(value, int):
+        return default
+    return max(0, value)
 
 
 class _FilteredRuleProvider:
@@ -1144,6 +1191,17 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             )
             _app.state.logging_retention = logging_retention_uc
             _app.state.logging_cleanup_task = asyncio.create_task(logging_retention_uc.run())
+            # ── CVE-Drip-Worker (ADR 0037) ────────────────────────────────────
+            # Gedrosselter Hintergrund-Loop (Muster monitor_task): prueft pro Intervall
+            # HOECHSTENS EINEN faelligen Host (Faelle 1-3) gegen den jüngsten Scan-Bestand.
+            # KEIN stures Neu-Pruefen beim Start -- die tick-Logik entscheidet Faelligkeit
+            # aus dem persistierten last_checked_ts je Host (dreimal Neustart am Tag
+            # rattert NICHT dreimal alles durch; Fall 3 greift erst nach dem Intervall).
+            # Leerer Bestand / kein faelliger Host -> der Loop schlaeft (kein NVD-Aufruf).
+            # Haengt an app.state; der Teardown stoppt+cancelt+awaitet ihn.
+            run_cve_monitor_uc = _build_run_cve_monitor()
+            _app.state.run_cve_monitor = run_cve_monitor_uc
+            _app.state.cve_monitor_task = asyncio.create_task(run_cve_monitor_uc.run())
             init_alerts_db()
             # agent (A.4+5): KEIN init_agents_db mehr -- das v2-SqliteAgentRepository
             # legt die remote_agents-Tabelle beim Bau selbst an (_ensure_schema),
@@ -1165,6 +1223,13 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             _app.state.logging_cleanup_task.cancel()
             with suppress(asyncio.CancelledError):
                 await _app.state.logging_cleanup_task
+            # CVE-Drip-Worker (ADR 0037): selber Teardown wie der monitor_task (stop-Flag
+            # + cancel + awaiten, CancelledError unterdruecken). Laeuft immer (im bootstrap-
+            # Block gestartet).
+            run_cve_monitor_uc.stop()
+            _app.state.cve_monitor_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await _app.state.cve_monitor_task
             # capture-Loop (C.5): laeuft NUR, wenn ueber POST /api/pcap/start gestartet
             # (kein startup-Autostart). Beim Shutdown sauber stoppen + canceln, falls aktiv.
             capture_task = getattr(_app.state, "capture_task", None)
@@ -1725,6 +1790,129 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             status_code=503,
             content={"detail": "Secret-Speicher (OS-Keystore) ist nicht verfuegbar."},
         )
+
+    # ── cve-Domaene verdrahten (ADR 0037, Regel 5: Quer-Domaenen-Naht nur hier) ──
+    # CVE-Schwachstellen-Monitoring ueber den bekannten Geraete-Bestand. Die cve-Domaene
+    # kennt WEDER security NOCH scanning/devices -- beide Quer-Nähte (Bestand+Ports,
+    # NVD-Lookup) laufen AUSSCHLIESSLICH hier ueber quellen-agnostische Provider, die die
+    # Fremd-Daten in die cve-eigenen Rand-Typen (InventoryHost/LookupCve) projizieren
+    # (Muster BuildTopology, ADR 0035/0036).
+
+    @lru_cache(maxsize=1)
+    def cve_finding_repository() -> SqliteCveFindingRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteCveFindingRepository(get_db_path())
+
+    @lru_cache(maxsize=1)
+    def cve_checkstate_repository() -> SqliteCveCheckStateRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteCveCheckStateRepository(get_db_path())
+
+    @lru_cache(maxsize=1)
+    def cve_acknowledgement_repository() -> SqliteCveAcknowledgementRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteCveAcknowledgementRepository(get_db_path())
+
+    # Host-/Port-QUELLE des Worker (ADR 0037): der JUENGSTE gespeicherte Scan-Record. Er
+    # traegt je Host MAC + IP + die offenen Ports MIT Servicename (EnrichedHost.ports), ist
+    # PERSISTENT und ueberlebt Neustarts -- der Worker arbeitet damit gegen den letzten
+    # bekannten Port-Stand je Host, OHNE dass ein brandneuer Scan noetig ist. Lesepfad wie
+    # der topology/analysis-Schnitt B: list(1) -> juengste Summary, get() -> ScanRecord.
+    # Ausfallsicher (Schnitt B): kein Scan ODER CorruptScanError -> ehrlich leerer Bestand
+    # (der Worker schlaeft dann, kein NVD-Aufruf), kein Crash. Nur Ports mit state=="open"
+    # gelten als offen (Muster _flagged_ports ~Z.874).
+    class _ScanHistoryInventory:
+        def list_hosts(self) -> list[InventoryHost]:
+            summaries = scan_history_repository().list(1)
+            if not summaries:
+                return []
+            try:
+                record = scan_history_repository().get(summaries[0].scan_id)
+            except CorruptScanError:
+                logger.warning("cve.inventory_skipped_corrupt_scan", scan_id=summaries[0].scan_id)
+                return []
+            if record is None:
+                return []
+            hosts: list[InventoryHost] = []
+            for h in record.hosts:
+                if not h.mac:
+                    # Ohne stabile MAC kein Pruefstand/Befund-Schluessel -> ueberspringen.
+                    continue
+                open_ports = tuple(
+                    InventoryPort(p.port, p.service) for p in h.ports if p.state == "open"
+                )
+                hosts.append(InventoryHost(mac=h.mac, ip=h.ip, ports=open_ports))
+            return hosts
+
+    # CVE-Lookup-NAHT (ADR 0037): WIEDERVERWENDET den vorhandenen security-``cve_lookup_adapter``
+    # (oben instanziiert) -- KEIN zweiter NVD-Adapter. Uebersetzt die cve-eigenen
+    # InventoryPort -> ports.security.PortQuery und die zurueckkommenden CveFinding ->
+    # cve-eigene LookupCve. Ehrlicher NVD-Ausfall (S3) liegt im Adapter (leere Liste +
+    # Warn-Log, kein erfundener Befund); diese Naht erfindet nichts dazu.
+    class _SecurityCveLookup:
+        async def lookup(self, ports: Sequence[InventoryPort]) -> list[LookupCve]:
+            queries = [PortQuery(port=p.port, service=p.service) for p in ports]
+            findings = await cve_lookup_adapter.lookup_for_host(queries)
+            return [
+                LookupCve(
+                    cve_id=f.cve_id,
+                    description=f.description,
+                    severity=f.severity,
+                    cvss_score=f.cvss_score,
+                    published=f.published,
+                    port=f.port,
+                    service=f.service,
+                    url=f.url,
+                )
+                for f in findings
+            ]
+
+    cve_inventory = _ScanHistoryInventory()
+    cve_lookup_provider = _SecurityCveLookup()
+
+    # Auffrisch-Intervall (Fall 3) live aus der Setting ``cve_refresh_interval_hours``
+    # (Default 24h, 0/leer = Auffrischung AUS). Als Provider-Callable -> Live-Reload, eine
+    # geaenderte Setting wirkt beim naechsten tick. Ausfallsicher gegen kaputte Settings
+    # (CorruptSettingError) und Nicht-Zahl-Werte -> Default; gibt Sekunden zurueck.
+    def _cve_refresh_interval_seconds() -> float:
+        hours = _read_cve_int_setting(
+            repository(), "cve_refresh_interval_hours", _CVE_DEFAULT_REFRESH_HOURS
+        )
+        return hours * 3600.0
+
+    def _build_run_cve_monitor() -> RunCveMonitor:
+        interval = _read_cve_int_setting(
+            repository(), "cve_scan_interval_seconds", _CVE_DEFAULT_SCAN_SECONDS
+        )
+        return RunCveMonitor(
+            inventory=cve_inventory,
+            lookup=cve_lookup_provider,
+            findings=cve_finding_repository(),
+            checkstate=cve_checkstate_repository(),
+            refresh_interval_provider=_cve_refresh_interval_seconds,
+            interval=interval,
+        )
+
+    app.include_router(cve_router)
+    app.dependency_overrides[provide_get_active_findings] = lambda: GetActiveFindings(
+        cve_finding_repository(), cve_acknowledgement_repository()
+    )
+    app.dependency_overrides[provide_get_cve_status] = lambda: GetCveMonitorStatus(
+        cve_inventory,
+        cve_checkstate_repository(),
+        cve_finding_repository(),
+        cve_acknowledgement_repository(),
+        refresh_interval_provider=_cve_refresh_interval_seconds,
+    )
+
+    # Acknowledge-Schreibnaht (ADR 0037, Muster _acknowledge): Pass-Through an record(...).
+    def _cve_acknowledge(mac: str, cve_id: str, port: int, action: str) -> None:
+        cve_acknowledgement_repository().record(mac, cve_id, port, action)
+
+    app.dependency_overrides[provide_cve_acknowledge] = lambda: _cve_acknowledge
 
     # ── capture-Domaene v2 verdrahten (C.4+5, Regel 5: ports<->infra nur hier) ──
     # REST (pcap/lldp) ueber duenne Use-Cases im api-Ring; der WS-Handler /ws/pcap
