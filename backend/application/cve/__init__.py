@@ -8,6 +8,7 @@ NIE (ADR 0037).
 
 from application.cve.use_cases import (
     ActiveFinding,
+    GetAcknowledgedFindings,
     GetActiveFindings,
     GetCveMonitorStatus,
     MonitorStatus,
@@ -16,6 +17,7 @@ from application.cve.use_cases import (
 
 __all__ = [
     "ActiveFinding",
+    "GetAcknowledgedFindings",
     "GetActiveFindings",
     "GetCveMonitorStatus",
     "MonitorStatus",

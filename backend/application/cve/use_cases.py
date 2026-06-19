@@ -41,6 +41,7 @@ from ports.cve import (
 
 __all__ = [
     "ActiveFinding",
+    "GetAcknowledgedFindings",
     "GetActiveFindings",
     "GetCveMonitorStatus",
     "MonitorStatus",
@@ -258,6 +259,61 @@ class GetActiveFindings:
                 )
             )
         return active
+
+
+class GetAcknowledgedFindings:
+    """Spiegelbild zu ``GetActiveFindings``: liefert die QUITTIERTEN Befunde mit Daten.
+
+    Etappe 3a (ADR 0037): der Lesepfad fuer die ausgeblendeten Befunde. "Quittiert" =
+    der (mac, cve_id, port) ist effektiv quittiert (sein juengster ack/unack-Eintrag ist
+    ``ack``). Wo ``GetActiveFindings`` diese Tripel HERAUSfiltert, BEHAELT dieser Use-Case
+    genau sie -- volle Daten aus dem Findings-Repo, gefiltert ueber ``acknowledged_keys()``.
+
+    Gleiche ``ActiveFinding``-Form (die Wire-Form ist identisch, ``_finding_to_dict`` greift
+    wieder): ``is_new`` ist fuer ausgeblendete Befunde fachlich weniger relevant, wird aber
+    konsistent berechnet (keine Sonderform). Reihenfolge = die des Findings-Repos
+    (severity-stark zuerst, wie aktiv).
+    """
+
+    def __init__(
+        self,
+        findings: CveFindingRepository,
+        acknowledgements: CveAcknowledgementRepository,
+        new_window_seconds: float = DEFAULT_NEW_WINDOW_SECONDS,
+        now_provider: Callable[[], float] = time.time,
+    ) -> None:
+        self._findings = findings
+        self._acknowledgements = acknowledgements
+        self._new_window_seconds = new_window_seconds
+        self._now = now_provider
+
+    def __call__(self, mac: str | None = None) -> list[ActiveFinding]:
+        """Quittierte Befunde -- alle (``mac=None``) oder nur eines Hosts."""
+        now = self._now()
+        acked = self._acknowledgements.acknowledged_keys()
+        records = self._findings.list_for_host(mac) if mac else self._findings.list_all()
+        result: list[ActiveFinding] = []
+        for r in records:
+            if (r.mac, r.cve_id, r.port) not in acked:
+                continue
+            result.append(
+                ActiveFinding(
+                    mac=r.mac,
+                    ip=r.ip,
+                    cve_id=r.cve_id,
+                    port=r.port,
+                    service=r.service,
+                    severity=r.severity,
+                    cvss_score=r.cvss_score,
+                    description=r.description,
+                    url=r.url,
+                    published=r.published,
+                    first_seen_ts=r.first_seen_ts,
+                    last_seen_ts=r.last_seen_ts,
+                    is_new=is_new(r.first_seen_ts, now, self._new_window_seconds),
+                )
+            )
+        return result
 
 
 @dataclass(frozen=True)

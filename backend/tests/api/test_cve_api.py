@@ -17,11 +17,12 @@ from fastapi.testclient import TestClient
 
 from api.cve import (
     provide_cve_acknowledge,
+    provide_get_acknowledged_findings,
     provide_get_active_findings,
     provide_get_cve_status,
     router,
 )
-from application.cve import GetActiveFindings, GetCveMonitorStatus
+from application.cve import GetAcknowledgedFindings, GetActiveFindings, GetCveMonitorStatus
 from domain.cve.models import CveFindingRecord
 from infrastructure.cve_acknowledgements_db import SqliteCveAcknowledgementRepository
 from infrastructure.cve_checkstate_db import SqliteCveCheckStateRepository
@@ -50,6 +51,9 @@ def context(tmp_path: Path) -> Iterator[Context]:
     app = FastAPI()
     app.include_router(router)
     app.dependency_overrides[provide_get_active_findings] = lambda: GetActiveFindings(
+        findings, acks, now_provider=lambda: NOW
+    )
+    app.dependency_overrides[provide_get_acknowledged_findings] = lambda: GetAcknowledgedFindings(
         findings, acks, now_provider=lambda: NOW
     )
     app.dependency_overrides[provide_get_cve_status] = lambda: GetCveMonitorStatus(
@@ -128,6 +132,37 @@ def test_unack_reaktiviert(context: Context) -> None:
         json={"mac": MAC, "cve_id": "CVE-1", "port": 22, "action": "unack"},
     )
     assert len(client.get("/api/cve").json()) == 1  # wieder aktiv
+
+
+def test_acknowledged_endpunkt_zeigt_quittierte_nicht_in_aktiv(context: Context) -> None:
+    client, findings = context
+    _seed(findings, "CVE-1", 22, first=NOW)
+    assert client.get("/api/cve/acknowledged").json() == []  # noch nichts quittiert
+    client.post(
+        "/api/cve/acknowledge",
+        json={"mac": MAC, "cve_id": "CVE-1", "port": 22, "action": "ack"},
+    )
+    acked = client.get("/api/cve/acknowledged").json()
+    assert len(acked) == 1
+    assert acked[0]["cve_id"] == "CVE-1"
+    assert acked[0]["severity"] == "HIGH"  # volle Daten, gleiche Wire-Form
+    assert client.get("/api/cve").json() == []  # gleichzeitig NICHT mehr aktiv
+
+
+def test_acknowledged_nach_unack_wieder_leer(context: Context) -> None:
+    client, findings = context
+    _seed(findings, "CVE-1", 22, first=NOW)
+    client.post(
+        "/api/cve/acknowledge",
+        json={"mac": MAC, "cve_id": "CVE-1", "port": 22, "action": "ack"},
+    )
+    assert len(client.get("/api/cve/acknowledged").json()) == 1
+    client.post(
+        "/api/cve/acknowledge",
+        json={"mac": MAC, "cve_id": "CVE-1", "port": 22, "action": "unack"},
+    )
+    assert client.get("/api/cve/acknowledged").json() == []  # raus aus ausgeblendet
+    assert len(client.get("/api/cve").json()) == 1  # zurueck in aktiv
 
 
 def test_acknowledge_ungueltige_action_422(context: Context) -> None:

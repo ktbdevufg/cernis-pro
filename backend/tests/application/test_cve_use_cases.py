@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from application.cve.use_cases import (
+    GetAcknowledgedFindings,
     GetActiveFindings,
     GetCveMonitorStatus,
     RunCveMonitor,
@@ -238,6 +239,44 @@ def test_active_findings_is_new_flag(repos: Repos) -> None:
     by_id = {f.cve_id: f for f in GetActiveFindings(findings, acks, now_provider=_at(now))()}
     assert by_id["CVE-OLD"].is_new is False
     assert by_id["CVE-NEW"].is_new is True
+
+
+# ── GetAcknowledgedFindings: Spiegelbild zu GetActiveFindings ──────────────────
+
+
+def test_acknowledged_findings_behaelt_nur_quittierte(repos: Repos) -> None:
+    findings, _, acks = repos
+    _seed(findings, "CVE-1", 22, first=999.0)
+    _seed(findings, "CVE-2", 22, first=0.0, severity="LOW")
+    acks.record(MAC, "CVE-1", 22, "ack")  # nur CVE-1 quittiert
+    acked = GetAcknowledgedFindings(findings, acks, now_provider=_at(1000.0))()
+    assert {f.cve_id for f in acked} == {"CVE-1"}
+
+
+def test_acknowledged_und_active_sind_spiegelbild(repos: Repos) -> None:
+    findings, _, acks = repos
+    _seed(findings, "CVE-1", 22, first=999.0)
+    _seed(findings, "CVE-2", 22, first=0.0, severity="LOW")
+    acks.record(MAC, "CVE-1", 22, "ack")
+    active = {f.cve_id for f in GetActiveFindings(findings, acks, now_provider=_at(1000.0))()}
+    acked = {f.cve_id for f in GetAcknowledgedFindings(findings, acks, now_provider=_at(1000.0))()}
+    assert active == {"CVE-2"}
+    assert acked == {"CVE-1"}
+    assert active.isdisjoint(acked)  # kein Befund in beiden Listen
+
+
+def test_acknowledged_leer_wenn_nichts_quittiert(repos: Repos) -> None:
+    findings, _, acks = repos
+    _seed(findings, "CVE-1", 22, first=999.0)
+    assert GetAcknowledgedFindings(findings, acks, now_provider=_at(1000.0))() == []
+
+
+def test_acknowledged_unack_nimmt_befund_wieder_raus(repos: Repos) -> None:
+    findings, _, acks = repos
+    _seed(findings, "CVE-1", 22, first=999.0)
+    acks.record(MAC, "CVE-1", 22, "ack")
+    acks.record(MAC, "CVE-1", 22, "unack")  # juengster gewinnt -> nicht mehr quittiert
+    assert GetAcknowledgedFindings(findings, acks, now_provider=_at(1000.0))() == []
 
 
 # ── GetCveMonitorStatus ───────────────────────────────────────────────────────

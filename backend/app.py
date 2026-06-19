@@ -74,6 +74,7 @@ from api.capture import (
 from api.capture import router as capture_router
 from api.cve import (
     provide_cve_acknowledge,
+    provide_get_acknowledged_findings,
     provide_get_active_findings,
     provide_get_cve_status,
 )
@@ -207,6 +208,7 @@ from application.capture import (
     StartCapture,
 )
 from application.cve import (
+    GetAcknowledgedFindings,
     GetActiveFindings,
     GetCveMonitorStatus,
     RunCveMonitor,
@@ -1898,6 +1900,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     app.include_router(cve_router)
     app.dependency_overrides[provide_get_active_findings] = lambda: GetActiveFindings(
+        cve_finding_repository(), cve_acknowledgement_repository()
+    )
+    # Etappe 3a (ADR 0037): Lesepfad fuer die QUITTIERTEN Befunde (Spiegelbild, gleiche Repos).
+    app.dependency_overrides[provide_get_acknowledged_findings] = lambda: GetAcknowledgedFindings(
         cve_finding_repository(), cve_acknowledgement_repository()
     )
     app.dependency_overrides[provide_get_cve_status] = lambda: GetCveMonitorStatus(

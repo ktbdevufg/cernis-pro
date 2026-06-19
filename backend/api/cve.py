@@ -9,6 +9,7 @@ linter: api -> nur application). Die Lese-Use-Cases (``GetActiveFindings``,
 Routen:
 * ``GET  /api/cve``                 -- alle AKTIVEN (nicht quittierten) Befunde + is_new.
 * ``GET  /api/cve/host/{mac}``      -- aktive Befunde eines Hosts.
+* ``GET  /api/cve/acknowledged``    -- alle QUITTIERTEN (ausgeblendeten) Befunde (Etappe 3a).
 * ``POST /api/cve/acknowledge``     -- ack/unack eines (mac, cve_id, port)-Befunds.
 * ``GET  /api/cve/status``          -- schlanker Worker-/Pruef-Status.
 
@@ -23,7 +24,13 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, Path
 from pydantic import BaseModel
 
-from application.cve import ActiveFinding, GetActiveFindings, GetCveMonitorStatus, MonitorStatus
+from application.cve import (
+    ActiveFinding,
+    GetAcknowledgedFindings,
+    GetActiveFindings,
+    GetCveMonitorStatus,
+    MonitorStatus,
+)
 
 router = APIRouter(prefix="/api/cve", tags=["cve"])
 
@@ -33,6 +40,10 @@ router = APIRouter(prefix="/api/cve", tags=["cve"])
 
 def provide_get_active_findings() -> GetActiveFindings:
     raise NotImplementedError("provide_get_active_findings nicht verdrahtet (app.py)")
+
+
+def provide_get_acknowledged_findings() -> GetAcknowledgedFindings:
+    raise NotImplementedError("provide_get_acknowledged_findings nicht verdrahtet (app.py)")
 
 
 def provide_get_cve_status() -> GetCveMonitorStatus:
@@ -116,6 +127,18 @@ def list_active_findings_for_host(
 ) -> list[dict[str, object]]:
     """Aktive Befunde EINES Hosts. Unbekannte/leere MAC -> ``[]``."""
     return [_finding_to_dict(f) for f in get_findings(mac)]
+
+
+@router.get("/acknowledged")
+def list_acknowledged_findings(
+    get_findings: Annotated[GetAcknowledgedFindings, Depends(provide_get_acknowledged_findings)],
+) -> list[dict[str, object]]:
+    """Alle QUITTIERTEN (ausgeblendeten) Befunde -- gleiche Wire-Form wie GET /api/cve.
+
+    Etappe 3a: der Rueckweg zum Reaktivieren (unack). Leer -> ``[]``. ``is_new`` wird
+    mitgeliefert (gleiche Form), ist fuer ausgeblendete Befunde aber zweitrangig.
+    """
+    return [_finding_to_dict(f) for f in get_findings()]
 
 
 @router.post("/acknowledge")
