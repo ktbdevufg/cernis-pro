@@ -141,6 +141,11 @@
         "subtitle": "Record reachability and latency over time — immediate or scheduled.",
         "locked": ""
       },
+      "topology": {
+        "title": "Topology",
+        "subtitle": "The home network as a radial graph — gateway at the center, devices around it.",
+        "locked": ""
+      },
       "processes": {
         "title": "Processes",
         "subtitle": "Running processes with their network connections.",
@@ -300,6 +305,20 @@
       "liveFenster": "Live window",
       "verlaufLeer": "No history data yet.",
       "tonSignal": "Sound on state change"
+    },
+    "topology": {
+      "titel": "Network topology",
+      "neuLaden": "Reload",
+      "ladeFehler": "Could not load topology.",
+      "leer": "No topology data — run a scan or LLDP capture is required.",
+      "legendeGemessen": "measured (LLDP/CDP)",
+      "legendeAngenommen": "assumed (star to gateway)",
+      "typGateway": "Gateway",
+      "typSwitch": "Switch",
+      "typNetwork": "Network device",
+      "typHost": "Host",
+      "knotenAnzahl_one": "{{count}} node",
+      "knotenAnzahl_other": "{{count}} nodes"
     },
     "logging": {
       "modusAssistent": "Wizard",

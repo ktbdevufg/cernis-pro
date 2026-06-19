@@ -141,6 +141,11 @@
         "subtitle": "Erreichbarkeit und Latenz über Zeit aufzeichnen — sofort oder geplant.",
         "locked": ""
       },
+      "topology": {
+        "title": "Topologie",
+        "subtitle": "Das Heimnetz als radialer Graph — Gateway im Zentrum, Geräte ringsum.",
+        "locked": ""
+      },
       "processes": {
         "title": "Prozesse",
         "subtitle": "Laufende Prozesse mit ihren Netzverbindungen.",
@@ -300,6 +305,20 @@
       "liveFenster": "Live-Fenster",
       "verlaufLeer": "Noch keine Verlaufsdaten.",
       "tonSignal": "Signalton bei Zustandswechsel"
+    },
+    "topology": {
+      "titel": "Netz-Topologie",
+      "neuLaden": "Neu laden",
+      "ladeFehler": "Topologie konnte nicht geladen werden.",
+      "leer": "Keine Topologie-Daten — Scan ausführen oder LLDP-Capture nötig.",
+      "legendeGemessen": "gemessen (LLDP/CDP)",
+      "legendeAngenommen": "angenommen (Stern zum Gateway)",
+      "typGateway": "Gateway",
+      "typSwitch": "Switch",
+      "typNetwork": "Netzgerät",
+      "typHost": "Host",
+      "knotenAnzahl_one": "{{count}} Knoten",
+      "knotenAnzahl_other": "{{count}} Knoten"
     },
     "logging": {
       "modusAssistent": "Assistent",

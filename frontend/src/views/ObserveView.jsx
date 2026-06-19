@@ -11,7 +11,7 @@
 // Die View weiß nicht, ob die Daten echt oder Platzhalter sind. Bei echter
 // Anbindung wird nur dieser Import ausgetauscht.
 
-import { Activity, FileClock, ListTree, Radar, Repeat } from "lucide-react";
+import { Activity, FileClock, ListTree, Network, Radar, Repeat } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -32,6 +32,7 @@ import ScanDetailPanel from "../components/ScanDetailPanel.jsx";
 import ScanTable, {
   DEFAULT_SICHTBARE_SPALTEN,
 } from "../components/ScanTable.jsx";
+import TopologyView from "../components/TopologyView.jsx";
 import TrafficView from "../components/TrafficView.jsx";
 import "./ObserveView.css";
 
@@ -60,6 +61,7 @@ const FUNKTIONEN = [
   { id: "traffic", icon: Repeat, locked: false },
   { id: "monitor", icon: Activity, locked: false },
   { id: "logging", icon: FileClock, locked: false },
+  { id: "topology", icon: Network, locked: false },
   { id: "processes", icon: ListTree, locked: true },
 ];
 
@@ -602,6 +604,17 @@ export default function ObserveView({
         zurueckVerbergen={loggingDetailOffen}
       >
         <LoggingPanel onDetailChange={setLoggingDetailOffen} />
+      </FunctionShell>
+    );
+  }
+
+  if (openFunction === "topology") {
+    return (
+      <FunctionShell
+        title={t("beobachten.cards.topology.title")}
+        onBack={() => setOpenFunction(null)}
+      >
+        <TopologyView />
       </FunctionShell>
     );
   }
