@@ -298,7 +298,8 @@
       "ladeFehler": "Konnte nicht entfernt werden.",
       "verlaufTitel": "RTT-Verlauf",
       "liveFenster": "Live-Fenster",
-      "verlaufLeer": "Noch keine Verlaufsdaten."
+      "verlaufLeer": "Noch keine Verlaufsdaten.",
+      "tonSignal": "Signalton bei Zustandswechsel"
     },
     "logging": {
       "modusAssistent": "Assistent",

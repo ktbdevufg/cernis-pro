@@ -298,7 +298,8 @@
       "ladeFehler": "Could not be removed.",
       "verlaufTitel": "RTT history",
       "liveFenster": "Live window",
-      "verlaufLeer": "No history data yet."
+      "verlaufLeer": "No history data yet.",
+      "tonSignal": "Sound on state change"
     },
     "logging": {
       "modusAssistent": "Wizard",

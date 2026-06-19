@@ -22,7 +22,9 @@ import {
   fetchMonitorStatus,
   fetchRttHistory,
 } from "../api/monitoring.js";
+import { fetchSettings, updateSetting } from "../api/settings.js";
 import { starteMonitorStream } from "../api/monitorStream.js";
+import { spieleSignalton } from "../lib/sound.js";
 import RttGraph from "./RttGraph.jsx";
 import RttSparkline from "./RttSparkline.jsx";
 import "./MonitorView.css";
@@ -42,6 +44,10 @@ const GATEWAY_PRAEFIX = "gw_";
 // ist (vergeben in api/monitoring.addMonitorTarget). Die drei festen Ziele
 // (gateway/internet/dns o. Ä.) tragen es NICHT und bleiben ohne Löschen-Button.
 const EIGENES_ZIEL_PRAEFIX = "custom_";
+
+// Settings-Key für den persistierten Signalton-Schalter (Muster wie
+// scan_columns in ObserveView). Default ist AUS — kein überraschender Ton.
+const MONITOR_SOUND_KEY = "monitor_sound";
 
 // Formatiert eine RTT in Millisekunden auf eine Nachkommastelle ("8.0 ms").
 // null = ehrliche Lücke -> "—" (kein erfundener Wert).
@@ -183,9 +189,17 @@ export default function MonitorView() {
   const [verlaeufe, setVerlaeufe] = useState(new Map());
   // Für den großen Graphen gewähltes Ziel (targetId) oder null (Default unten).
   const [gewaehltesZiel, setGewaehltesZiel] = useState(null);
+  // Signalton bei Zustandswechsel an/aus. Default AUS (kein überraschender Ton
+  // beim ersten Start); beim Mount aus den Settings nachgeladen, persistiert.
+  const [tonAn, setTonAn] = useState(false);
 
   // Aktives Stream-Handle ({ stop() }) — zum sauberen Schließen bei Unmount.
   const streamRef = useRef(null);
+  // Spiegelt tonAn als Ref, damit der im Stream-useEffect gebundene Callback
+  // immer den aktuellen Wert sieht (statt eines veralteten Closure-Werts) —
+  // tonAn darf NICHT ins Dependency-Array, sonst würde der Strom bei jedem
+  // Schalter-Wechsel neu aufgebaut.
+  const tonAnRef = useRef(false);
 
   // Hängt einen RTT-Wert hinten an die Reihe eines Ziels (immutabel) und kürzt
   // vorne auf MAX_VERLAUF. null wird mit angehängt (ehrliche Lücke).
@@ -211,6 +225,46 @@ export default function MonitorView() {
       const bestehend = naechste.get(targetId) ?? { targetId };
       naechste.set(targetId, { ...bestehend, ...teil });
       return naechste;
+    });
+  };
+
+  // tonAn immer in die Ref spiegeln, sobald sich der State ändert. So liest der
+  // im Stream-useEffect gebundene onUpdate-Callback stets den aktuellen Wert.
+  useEffect(() => {
+    tonAnRef.current = tonAn;
+  }, [tonAn]);
+
+  // Beim Mount den persistierten Schalterzustand laden. Nur ein echter Boolean
+  // übernimmt; sonst bleibt der Default false. Fehler werden toleriert (Muster
+  // wie scan_columns in ObserveView).
+  useEffect(() => {
+    let abgebrochen = false;
+    (async () => {
+      try {
+        const settings = await fetchSettings();
+        if (abgebrochen) {
+          return;
+        }
+        const roh = settings?.[MONITOR_SOUND_KEY];
+        if (typeof roh === "boolean") {
+          setTonAn(roh);
+        }
+      } catch {
+        // Settings nicht erreichbar: Default (Ton aus) bleibt aktiv.
+      }
+    })();
+    return () => {
+      abgebrochen = true;
+    };
+  }, []);
+
+  // Schalter umlegen: Zustand sofort setzen (UI reagiert live) und persistieren
+  // (feuern und vergessen; Fehler nur loggen, UI nicht blockieren) — exakt das
+  // Muster von handleSpaltenWechsel in ObserveView.
+  const handleTonWechsel = (wert) => {
+    setTonAn(wert);
+    updateSetting(MONITOR_SOUND_KEY, wert).catch((fehler) => {
+      console.error("monitor_sound speichern fehlgeschlagen", fehler);
     });
   };
 
@@ -288,6 +342,12 @@ export default function MonitorView() {
         // Neuen Wert hinten an die Verlaufsreihe des Ziels anhängen (null = Lücke).
         haengeVerlaufAn(targetId, rttMs);
         if (event !== null && event !== undefined) {
+          // Ein echter Zustandswechsel (up/down/degraded): bei aktivem Schalter
+          // einen kurzen Signalton spielen. tonAn über die Ref lesen, damit der
+          // hier gebundene Callback nicht auf einem veralteten Closure-Wert sitzt.
+          if (tonAnRef.current) {
+            spieleSignalton();
+          }
           setLog((vorher) =>
             [
               { targetId, label, event, rttMs: rttMs ?? null, datetime },
@@ -385,8 +445,19 @@ export default function MonitorView() {
         </div>
       )}
 
-      {/* Status-Karten oben, responsives Grid. */}
-      <div className="monitor__zieleTitel">{t("beobachten.monitor.zieleTitel")}</div>
+      {/* Kopfzeile über den Karten: Zielen-Titel links, Signalton-Schalter rechts. */}
+      <div className="monitor__kopfzeile">
+        <div className="monitor__zieleTitel">{t("beobachten.monitor.zieleTitel")}</div>
+        <label className="monitor__ton-schalter">
+          <input
+            type="checkbox"
+            className="monitor__ton-checkbox"
+            checked={tonAn}
+            onChange={(e) => handleTonWechsel(e.target.checked)}
+          />
+          <span className="monitor__ton-label">{t("beobachten.monitor.tonSignal")}</span>
+        </label>
+      </div>
       <div className="monitor__karten">
         {kartenListe.map((ziel) => (
           <StatusKarte

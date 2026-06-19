@@ -54,6 +54,37 @@
   color: var(--color-text-tert);
 }
 
+/* Kopfzeile über den Karten: Zielen-Titel links, Signalton-Schalter rechts. */
+.monitor__kopfzeile {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+/* Dezenter Signalton-Schalter: kleine Checkbox mit getracktem Label, ruhig
+   rechts in der Kopfzeile. Farben strikt über Token-Variablen. */
+.monitor__ton-schalter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.monitor__ton-checkbox {
+  cursor: pointer;
+  accent-color: var(--color-accent);
+}
+
+.monitor__ton-label {
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--color-text-tert);
+}
+
 /* Status-Karten oben: responsives Grid, füllt die Breite. */
 .monitor__karten {
   display: grid;
