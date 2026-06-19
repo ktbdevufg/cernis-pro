@@ -23,6 +23,7 @@ Naht-Linie wie ``RunMonitor``/Broadcaster: der Use-Case gibt rohe Domaenen-Daten
 der api-Rand baut die Wire-Form (``_packet_to_dict`` / ``_neighbor_to_dict``).
 """
 
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import structlog
@@ -33,11 +34,23 @@ from domain.capture import (
     PacketSummary,
     apply_packet,
     neighbor_age,
+    radial_topology,
     ring_trim,
 )
 from ports.capture import CaptureBroadcasterPort, LldpSnifferPort, PacketSnifferPort
 
 _logger = structlog.get_logger(__name__)
+
+# Schlanke Provider-Callables (Muster application.export.ScanProvider): die
+# Topologie braucht Daten aus FREMDEN Domaenen (scanning-Hosts, interfaces-Gateway).
+# Statt deren Use-Cases/Domaenen zu importieren (Quer-Kopplung), reicht der
+# Composition Root die fertig projizierten Roh-dicts/den Roh-Wert herein -- so
+# bleibt dieser Use-Case auf domain/capture + ports/capture beschraenkt.
+HostProvider = Callable[[], list[dict[str, str]]]
+NeighborProvider = Callable[[], list[dict[str, str]]]
+# Gateway aus der interfaces-Discovery -> echtes I/O, daher async (ListInterfaces
+# ist async). Hosts/Nachbarn liegen in-memory bzw. in der lokalen DB -> sync.
+GatewayProvider = Callable[[], Awaitable[str]]
 
 
 class RunCapture:
@@ -221,6 +234,39 @@ class GetLldpNeighbors:
 
     def __call__(self) -> list[LLDPNeighbor]:
         return list(self._capture_lldp.neighbors.values())
+
+
+class BuildTopology:
+    """Stellt den radialen Heimnetz-Graphen zusammen (Gateway-zentriert).
+
+    Zieht die drei Quellen ueber schlanke Provider-Callables zusammen --
+    Scan-Hosts (scanning/devices), LLDP/CDP-Nachbarn (eigene Domaene) und die
+    Gateway-IP des primaeren Interface (interfaces) -- und ruft die reine
+    Domaenen-Funktion ``radial_topology``. Gibt ROHE ``{nodes, edges}`` zurueck;
+    die Wire-Form baut der api-Rand (Naht-Linie wie ``GetLldpNeighbors`` /
+    Broadcaster). Kennt KEINE Fremd-Domaene und KEIN ``infrastructure`` -- die
+    Provider projizieren im Composition Root (Muster ``application.export``).
+
+    Kein stiller Fallback: leere Quellen -> ehrlich leerer Graph (``radial_topology``
+    liefert dann ``{"nodes": [], "edges": []}``), keine erfundenen Knoten.
+    """
+
+    def __init__(
+        self,
+        host_provider: HostProvider,
+        neighbor_provider: NeighborProvider,
+        gateway_provider: GatewayProvider,
+    ) -> None:
+        self._host_provider = host_provider
+        self._neighbor_provider = neighbor_provider
+        self._gateway_provider = gateway_provider
+
+    async def __call__(self) -> dict[str, list[dict[str, str]]]:
+        return radial_topology(
+            neighbors=self._neighbor_provider(),
+            hosts=self._host_provider(),
+            gateway_ip=await self._gateway_provider(),
+        )
 
 
 def enrich_neighbor(neighbor: LLDPNeighbor, now: float) -> tuple[int, bool]:
