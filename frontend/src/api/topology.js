@@ -38,8 +38,12 @@ function mappeEdge(edge) {
 }
 
 // Ruft GET /api/topology und übersetzt nodes/edges in die View-Form.
-export async function fetchTopology() {
-  const backend = await apiGet("/api/topology");
+// ``source`` waehlt die Host-Quelle (Backend-Default "last_scan"):
+//   "last_scan" -> nur die Hosts des juengsten gespeicherten Scans (Live-Bild),
+//   "all_known" -> der gesamte bekannte Geraete-Bestand (auch offline).
+// Wird der Param ausgelassen, entscheidet der Backend-Default.
+export async function fetchTopology(source = "last_scan") {
+  const backend = await apiGet("/api/topology", { source });
   return {
     nodes: (backend?.nodes ?? []).map(mappeNode),
     edges: (backend?.edges ?? []).map(mappeEdge),

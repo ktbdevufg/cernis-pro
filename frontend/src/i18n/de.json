@@ -318,7 +318,12 @@
       "typNetwork": "Netzgerät",
       "typHost": "Host",
       "knotenAnzahl_one": "{{count}} Knoten",
-      "knotenAnzahl_other": "{{count}} Knoten"
+      "knotenAnzahl_other": "{{count}} Knoten",
+      "quelleLabel": "Anzuzeigende Geräte",
+      "quelleLetzterScan": "Letzter Scan",
+      "quelleAlleBekannten": "Alle bekannten Geräte",
+      "quelleHinweisLetzterScan": "Zeigt nur die Geräte, die beim letzten Scan gefunden wurden — das aktuelle Live-Bild des Netzes.",
+      "quelleHinweisAlleBekannten": "Zeigt alle je gefundenen Geräte, auch solche, die gerade offline sind."
     },
     "logging": {
       "modusAssistent": "Assistent",

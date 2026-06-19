@@ -318,7 +318,12 @@
       "typNetwork": "Network device",
       "typHost": "Host",
       "knotenAnzahl_one": "{{count}} node",
-      "knotenAnzahl_other": "{{count}} nodes"
+      "knotenAnzahl_other": "{{count}} nodes",
+      "quelleLabel": "Devices to show",
+      "quelleLetzterScan": "Last scan",
+      "quelleAlleBekannten": "All known devices",
+      "quelleHinweisLetzterScan": "Shows only the devices found in the most recent scan — the current live picture of your network.",
+      "quelleHinweisAlleBekannten": "Shows every device ever found, including ones that are currently offline."
     },
     "logging": {
       "modusAssistent": "Wizard",

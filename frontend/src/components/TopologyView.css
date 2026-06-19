@@ -57,6 +57,51 @@
   cursor: default;
 }
 
+/* Host-Quelle: Segmented Control (zwei aneinanderstoßende Knöpfe). Designsprache
+   wie der Reload-Button (Akzentrand, Token-Variablen); der aktive Knopf trägt
+   den Akzent-Hintergrund. */
+.topology__quelle {
+  display: inline-flex;
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.topology__quelle-knopf {
+  font-size: 12px;
+  padding: 4px 10px;
+  color: var(--color-text-sec);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.topology__quelle-knopf + .topology__quelle-knopf {
+  border-left: 1px solid var(--color-accent-border);
+}
+
+.topology__quelle-knopf:hover:not(:disabled):not(.topology__quelle-knopf--aktiv) {
+  background: var(--color-accent-bg);
+}
+
+.topology__quelle-knopf--aktiv {
+  color: var(--color-accent);
+  background: var(--color-accent-bg);
+  font-weight: 600;
+}
+
+.topology__quelle-knopf:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Erklärender Untertext zur gewählten Quelle — zielgruppengerecht, kein Jargon. */
+.topology__quelle-hinweis {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
 /* Legende: gemessen (durchgezogen) vs. angenommen (gestrichelt). */
 .topology__legende {
   display: flex;

@@ -71,12 +71,16 @@ export default function TopologyView() {
   const [fehler, setFehler] = useState(null);
   // Reload-Zähler: Erhöhung triggert den Lade-Effekt erneut (kein t im Dep-Array).
   const [reload, setReload] = useState(0);
+  // Host-Quelle (Nutzer-Wahl): "last_scan" (Default, Live-Bild des jüngsten Scans)
+  // oder "all_known" (gesamter bekannter Bestand). Eine Änderung lädt neu — daher
+  // im Dep-Array; es ist ein primitiver State, NICHT t/i18n (die bleiben draußen).
+  const [quelle, setQuelle] = useState("last_scan");
 
   useEffect(() => {
     let abgebrochen = false;
     setLadend(true);
     setFehler(null);
-    fetchTopology()
+    fetchTopology(quelle)
       .then((daten) => {
         if (abgebrochen) return;
         setGraph(daten);
@@ -92,12 +96,47 @@ export default function TopologyView() {
     return () => {
       abgebrochen = true;
     };
-  }, [reload]);
+  }, [reload, quelle]);
+
+  // Segmented Control für die Host-Quelle. Auswahl setzt ``quelle`` -> Lade-Effekt
+  // feuert (quelle steht im Dep-Array). Die aktive Schaltfläche trägt --aktiv +
+  // aria-pressed; der Untertext darunter erklärt zielgruppengerecht, was gilt.
+  const quellWahl = (
+    <div className="topology__quelle" role="group" aria-label={t("beobachten.topology.quelleLabel")}>
+      <button
+        type="button"
+        className={`topology__quelle-knopf${quelle === "last_scan" ? " topology__quelle-knopf--aktiv" : ""}`}
+        aria-pressed={quelle === "last_scan"}
+        onClick={() => setQuelle("last_scan")}
+        disabled={ladend}
+      >
+        {t("beobachten.topology.quelleLetzterScan")}
+      </button>
+      <button
+        type="button"
+        className={`topology__quelle-knopf${quelle === "all_known" ? " topology__quelle-knopf--aktiv" : ""}`}
+        aria-pressed={quelle === "all_known"}
+        onClick={() => setQuelle("all_known")}
+        disabled={ladend}
+      >
+        {t("beobachten.topology.quelleAlleBekannten")}
+      </button>
+    </div>
+  );
+
+  const quellHinweis = (
+    <p className="topology__quelle-hinweis">
+      {quelle === "last_scan"
+        ? t("beobachten.topology.quelleHinweisLetzterScan")
+        : t("beobachten.topology.quelleHinweisAlleBekannten")}
+    </p>
+  );
 
   const kopf = (
     <div className="topology__kopf">
       <span className="topology__titel">{t("beobachten.topology.titel")}</span>
       <div className="topology__kopf-rechts">
+        {quellWahl}
         {graph.nodes.length > 0 ? (
           <span className="topology__anzahl">
             {t("beobachten.topology.knotenAnzahl", { count: graph.nodes.length })}
@@ -119,6 +158,7 @@ export default function TopologyView() {
     return (
       <div className="topology">
         {kopf}
+        {quellHinweis}
         <p className="topology__leer">{t("beobachten.topology.ladeFehler")}</p>
       </div>
     );
@@ -128,6 +168,7 @@ export default function TopologyView() {
     return (
       <div className="topology">
         {kopf}
+        {quellHinweis}
         <p className="topology__leer">{t("beobachten.topology.leer")}</p>
       </div>
     );
@@ -149,6 +190,7 @@ export default function TopologyView() {
   return (
     <div className="topology">
       {kopf}
+      {quellHinweis}
       <div className="topology__legende">
         <span className="topology__legende-item">
           <svg className="topology__legende-svg" viewBox="0 0 28 8" aria-hidden="true">
