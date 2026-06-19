@@ -88,6 +88,7 @@ from api.diagnostics import (
     provide_check_tools,
     provide_check_traceroute_permission,
     provide_detect_rogue_dhcp,
+    provide_enrich_route_orgs,
     provide_grab_banner,
     provide_resolve_dns,
     provide_run_traceroute,
@@ -214,6 +215,7 @@ from application.diagnostics import (
     CheckExternalReachability,
     CheckTraceroutePermission,
     DetectRogueDhcp,
+    EnrichRouteOrgs,
     GrabBanner,
     ResolveDns,
     RogueDhcpPermissionError,
@@ -2256,18 +2258,18 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         logger.error("resolver_data_missing", path=exc.path)
         return JSONResponse(status_code=503, content={"detail": exc.message})
 
-    # ── Route zum Ziel (ADR 0036, Hauptpfad): traceroute-Hops lokal mit Geo/ASN ──
-    # Regel 5: die Quer-Domaenen-Naht (diagnostics-Hops + resolver-Geo) faellt AUSSCHLIESSLICH
-    # hier im Composition Root. WEDER die diagnostics-Domaene NOCH ihr Port nennt resolver --
-    # der Use-Case bekommt quellen-agnostische Callables herein (Muster BuildTopology/
-    # export.ScanProvider). Bewusst HIER (nach dem resolver-Block), weil der geo_asn_db-Lookup
-    # schon in Scope ist -- keine zweite Instanz.
+    # ── Route zum Ziel (ADR 0036): traceroute-Hops + Geo/ASN, zwei getrennte Naehte ──
+    # Regel 5: die Quer-Domaenen-Naht (diagnostics-Hops + resolver-Geo/RDAP) faellt
+    # AUSSCHLIESSLICH hier im Composition Root. WEDER die diagnostics-Domaene NOCH ihr Port
+    # nennt resolver -- die Use-Cases bekommen quellen-agnostische Callables herein (Muster
+    # BuildTopology/export.ScanProvider). Bewusst HIER (nach dem resolver-Block), weil beide
+    # resolver-Adapter (geo_asn_db/RdapClient) schon in Scope sind -- keine zweite Instanz.
     #
     # HAUPTPFAD (lokal+synchron, schnell, root-frei): BuildRouteGeo bekommt den eigenen
     # RunTraceroute-Use-Case (Hop-Quelle) + ein Geo-Callable, das HIER den lazy geladenen
     # CsvGeoAsnDb-Lookup auf ein rohes dict PROJIZIERT (asn_org bleibt None -- die CSV-DB
-    # kennt nur Land + ASN-Nummer; der Klartext-Org-Name kommt optional ueber eine spaetere
-    # RDAP-Nachladung, NICHT hier geraten -- ehrliche Leere, kein stiller Fallback S3).
+    # kennt nur Land + ASN-Nummer; der Klartext-Org-Name kommt optional ueber die zweite
+    # Naht, NICHT hier geraten -- ehrliche Leere, kein stiller Fallback S3).
     def _route_geo_lookup(ip: str) -> dict[str, str | None]:
         record = geo_asn_db().lookup(ip)
         return {"country": record.country, "asn": record.asn, "asn_org": record.asn_org}
@@ -2277,7 +2279,20 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             target, privileged
         )
 
+    # OPTIONALE NACHLADUNG (Netz-I/O ueber RDAP, NUR auf expliziten Abruf): EnrichRouteOrgs
+    # bekommt ein Org-Callable, das HIER pro IP den RdapClient ruft und dessen ``org``-Feld
+    # (registrant/administrative entity, der Betreibername je IP) auf den rohen ``str | None``
+    # PROJIZIERT. Der RdapClient ist laut Port-Vertrag STRENG fehlertolerant (liefert bei
+    # jedem Fehlschlag leere Fakten, wirft NIE) -- die Nachladung blockiert/faelscht NIE.
+    async def _route_org_lookup(ip: str) -> str | None:
+        facts = await RdapClient().lookup(ip)
+        return facts.org
+
+    async def _enrich_route_orgs(ips: list[str]) -> Any:
+        return await EnrichRouteOrgs(_route_org_lookup)(ips)
+
     app.dependency_overrides[provide_build_route_geo] = lambda: _build_route_geo
+    app.dependency_overrides[provide_enrich_route_orgs] = lambda: _enrich_route_orgs
 
     # ── export-Domaene v2 verdrahten (Block 1: gespeicherter Scan -> CSV/JSON/PDF, ADR 0015) ──
     # Der ExportScan-Use-Case kennt KEINE scanning-Domaene: er bekommt den Scan ueber ein

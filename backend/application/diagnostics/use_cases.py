@@ -62,7 +62,7 @@ Block 3:
   Alternative -- anders als traceroute KEINE rootless Methode).
 """
 
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 
 from application.diagnostics.errors import RogueDhcpPermissionError
 from domain.diagnostics import (
@@ -124,6 +124,13 @@ _NOT_CONFIGURED_HINT = (
 # resolver-Domaene NICHT (import-linter independence). Die echte Geo-Quelle (CsvGeoAsnDb)
 # wird erst im Composition Root (app.py) eingehaengt -- der Use-Case kennt sie nicht.
 GeoLookup = Callable[[str], dict[str, str | None]]
+
+# Quellen-AGNOSTISCHE RDAP-Naht (ADR 0036, optionale Nachladung): ``EnrichRouteOrgs``
+# loest den Betreibernamen je IP ueber dieses Callable auf -- IP -> Org-Name oder ``None``.
+# Wie ``GeoLookup`` BEWUSST ein roher Typ (str|None, KEIN resolver-domain-Typ): die
+# diagnostics-Domaene nennt resolver nicht. Async, weil die echte Quelle (RdapClient) Netz-
+# I/O macht; STRENG fehlertolerant (liefert ``None`` statt zu werfen) -- am Rand verdrahtet.
+OrgLookup = Callable[[str], Awaitable[str | None]]
 
 
 class ResolveDns:
@@ -212,6 +219,49 @@ class BuildRouteGeo:
                 }
             )
         return {"target": result.target, "privileged": result.privileged, "hops": hops}
+
+
+class EnrichRouteOrgs:
+    """Optionale Org-Namen-Nachladung (ADR 0036): RDAP-Org je Hop-IP, nur auf Abruf.
+
+    GETRENNT vom lokalen Hauptpfad (``BuildRouteGeo``): diese Naht macht Netz-I/O (RDAP)
+    und laeuft NUR auf expliziten Nutzer-Abruf (Frontend-Schalter, Default AUS). Bekommt ein
+    rohes ``OrgLookup``-Callable (IP -> Org-Name|``None``) per Constructor-Injection -- es
+    nennt die resolver-Domaene NICHT (roher ``str | None``), die echte RDAP-Quelle faellt
+    erst im Composition Root. KEIN ``infrastructure``, independence bleibt hart.
+
+    BATCH ueber die deduplizierten, ANTWORTENDEN Hop-IPs (nicht pro Hop einzeln, nicht ueber
+    die ASN): RDAP loest pro IP auf (der RdapClient liefert den Org-Namen je IP, nicht je
+    ASN), und mehrere Hops teilen sich oft eine IP/ein Netz -- Dedup spart Netz-Aufrufe. Eine
+    private/Luecken-IP (``None``) hat keinen Eintrag. STRENG fehlertolerant: scheitert/haengt
+    eine Aufloesung, bleibt der Name ``None`` (der Port-Vertrag des RDAP-Adapters wirft nie)
+    -- die Nachladung blockiert NIE und faelscht NIE einen Namen (S3).
+
+    Gibt eine rohe ``{ip: org}``-Map zurueck (nur IPs mit gefundenem Namen); der api-Rand
+    projiziert sie, das Frontend blendet die Namen in die bereits geladene Liste ein.
+    """
+
+    def __init__(self, org_lookup: OrgLookup) -> None:
+        self._org_lookup = org_lookup
+
+    async def __call__(self, ips: Sequence[str]) -> dict[str, str]:
+        """Loest den Org-Namen je eindeutiger ``ip`` ueber RDAP auf -> ``{ip: org}``-Map.
+
+        Dedupliziert die ``ips`` (Reihenfolge des ersten Vorkommens), fragt jede ueber
+        ``org_lookup`` ab und nimmt nur die mit einem nicht-leeren Namen in die Map auf. Eine
+        gescheiterte/leere Aufloesung liefert ``None`` -> die IP fehlt schlicht in der Map
+        (ehrliche Leere, kein erfundener Name). Leere/komplett erfolglose Eingabe -> leere Map.
+        """
+        seen: set[str] = set()
+        orgs: dict[str, str] = {}
+        for ip in ips:
+            if not ip or ip in seen:
+                continue
+            seen.add(ip)
+            org = await self._org_lookup(ip)
+            if org:
+                orgs[ip] = org
+        return orgs
 
 
 class GrabBanner:

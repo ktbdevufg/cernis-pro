@@ -20,6 +20,7 @@ from application.diagnostics import (
     CheckExternalReachability,
     CheckTraceroutePermission,
     DetectRogueDhcp,
+    EnrichRouteOrgs,
     ExternalCheckError,
     GrabBanner,
     ResolveDns,
@@ -772,3 +773,47 @@ def test_route_privileged_is_passed_through() -> None:
     uc = BuildRouteGeo(RunTraceroute(runner), lambda ip: {})
     asyncio.run(uc("1.1.1.1", True))
     assert runner.calls == [("1.1.1.1", True)]
+
+
+class FakeOrgLookup:
+    """In-Memory-Org-Callable: IP -> Org-Name|None; zaehlt die Aufrufe (fuer Dedup-Beweis)."""
+
+    def __init__(self, orgs: dict[str, str | None]) -> None:
+        self._orgs = orgs
+        self.calls: list[str] = []
+
+    async def __call__(self, ip: str) -> str | None:
+        self.calls.append(ip)
+        return self._orgs.get(ip)
+
+
+def test_enrich_orgs_returns_only_found_names() -> None:
+    # Nur IPs MIT gefundenem Namen landen in der Map; eine ohne Treffer (None) fehlt schlicht
+    # (ehrliche Leere, kein erfundener Name).
+    lookup = FakeOrgLookup({"1.1.1.1": "Cloudflare", "192.168.0.1": None})
+    out = asyncio.run(EnrichRouteOrgs(lookup)(["1.1.1.1", "192.168.0.1"]))
+    assert out == {"1.1.1.1": "Cloudflare"}
+
+
+def test_enrich_orgs_dedupes_ips() -> None:
+    # Dieselbe IP mehrfach -> nur EIN RDAP-Aufruf (Dedup spart Netz), ein Map-Eintrag.
+    lookup = FakeOrgLookup({"9.9.9.9": "Quad9"})
+    out = asyncio.run(EnrichRouteOrgs(lookup)(["9.9.9.9", "9.9.9.9", "9.9.9.9"]))
+    assert out == {"9.9.9.9": "Quad9"}
+    assert lookup.calls == ["9.9.9.9"]
+
+
+def test_enrich_orgs_empty_input_yields_empty_map() -> None:
+    # Leere/komplett erfolglose Eingabe -> leere Map (kein Aufruf bei leeren IP-Strings).
+    lookup = FakeOrgLookup({})
+    assert asyncio.run(EnrichRouteOrgs(lookup)([])) == {}
+    assert asyncio.run(EnrichRouteOrgs(lookup)([""])) == {}
+    assert lookup.calls == []
+
+
+def test_enrich_orgs_tolerates_lookup_returning_none() -> None:
+    # Eine Aufloesung, die None liefert (Adapter ist fehlertolerant), blockiert die anderen
+    # NICHT: die erfolgreichen Namen kommen trotzdem in die Map.
+    lookup = FakeOrgLookup({"1.1.1.1": None, "9.9.9.9": "Quad9"})
+    out = asyncio.run(EnrichRouteOrgs(lookup)(["1.1.1.1", "9.9.9.9"]))
+    assert out == {"9.9.9.9": "Quad9"}

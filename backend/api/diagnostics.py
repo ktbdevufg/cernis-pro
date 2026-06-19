@@ -18,7 +18,10 @@ Attribut-Zugriff zu JSON serialisiert (Typ ``Any``, Muster ``api/process``).
   traceroute-Hops je IP LOKAL+SYNCHRON mit Land + ASN-Nummer angereichert (kein Netz, kein
   Root). ``privileged`` optional (Default ``false`` -- keine Sackgasse). Liefert ``{target,
   privileged, hops:[{hop, address, rtt_ms, country, asn, asn_org}]}``; nicht-antwortende Hops
-  als ``null``-Luecke, ``asn_org`` im Hauptpfad IMMER ``null`` (ehrlich, lokale Geo-DB).
+  als ``null``-Luecke, ``asn_org`` im Hauptpfad IMMER ``null`` (ehrlich -- s. ``/route/orgs``).
+* ``GET /api/diagnostics/route/orgs?ips=<ip>&ips=<ip>`` (ADR 0036) -- OPTIONALE Org-Namen-
+  Nachladung je Hop-IP ueber RDAP (Netz-I/O), NUR auf expliziten Nutzer-Abruf. Liefert
+  ``{orgs:{ip: org}}`` (nur IPs MIT Treffer). Streng fehlertolerant: blockiert NIE.
 * ``GET /api/diagnostics/tools?tools=dig&tools=traceroute`` (1b) -- ``tools`` ist ein
   WIEDERHOLBARER Query-Parameter. OHNE ``tools`` werden ALLE registrierten Tools geprueft
   (Erstinstallation); MIT ``tools`` nur die genannten (Laufzeit). Liefert den ``ToolReport``
@@ -106,6 +109,10 @@ type RunTracerouteRunner = Callable[[str, bool], Awaitable[Any]]
 # durchgereicht) und reichert jeden Hop lokal+synchron mit Geo/ASN an. Liefert das rohe
 # ``{target, privileged, hops:[...]}``-dict (``Any`` -- der api-Ring kennt keine domain-Typen).
 type BuildRouteGeoRunner = Callable[[str, bool], Awaitable[Any]]
+# Route-zum-Ziel (ADR 0036, optionale Nachladung): loest die Org-Namen je Hop-IP ueber RDAP
+# (Netz-I/O) auf, NUR auf expliziten Abruf. Bekommt die Hop-IPs als Liste, liefert die rohe
+# ``{ip: org}``-Map (``Any`` -- der api-Ring kennt keine domain-Typen).
+type EnrichRouteOrgsRunner = Callable[[list[str]], Awaitable[Any]]
 # 1b: prueft die angefragten (oder bei None alle) Tools und liefert den rohen ToolReport
 # (``Any`` -- der api-Ring kennt keine domain-Typen). Synchron: reine lokale which-Checks.
 type CheckToolsRunner = Callable[[list[str] | None], Any]
@@ -139,6 +146,10 @@ def provide_check_traceroute_permission() -> CheckTraceroutePermission:
 
 def provide_build_route_geo() -> BuildRouteGeoRunner:
     raise NotImplementedError("BuildRouteGeoRunner wird in app.py verdrahtet")
+
+
+def provide_enrich_route_orgs() -> EnrichRouteOrgsRunner:
+    raise NotImplementedError("EnrichRouteOrgsRunner wird in app.py verdrahtet")
 
 
 def provide_check_tools() -> CheckToolsRunner:
@@ -347,6 +358,25 @@ async def route(
     """
     result = await build(target, privileged)
     return _route_to_dict(result)
+
+
+@router.get("/route/orgs")
+async def route_orgs(
+    enrich: Annotated[EnrichRouteOrgsRunner, Depends(provide_enrich_route_orgs)],
+    ips: Annotated[list[str], Query()],
+) -> dict[str, Any]:
+    """Optionale Org-Namen-Nachladung (ADR 0036): RDAP-Betreibername je Hop-IP, auf Abruf.
+
+    ``ips`` ist ein wiederholbarer Pflicht-Query-Param (``?ips=1.1.1.1&ips=9.9.9.9``) -- die
+    antwortenden Hop-IPs der bereits geladenen Liste. GETRENNT vom Hauptpfad, weil dies
+    Netz-I/O macht (RDAP): das Frontend ruft es NUR auf expliziten Nutzer-Wunsch (Schalter,
+    Default AUS). Loest jede eindeutige IP ueber RDAP auf und liefert die rohe ``{orgs:{ip:
+    org}}``-Map -- nur IPs MIT gefundenem Namen. STRENG fehlertolerant: scheitert/haengt eine
+    Aufloesung, fehlt die IP schlicht in der Map (``null``, kein erfundener Name); die
+    Nachladung blockiert NIE die schon sichtbare Liste.
+    """
+    orgs = await enrich(ips)
+    return {"orgs": orgs}
 
 
 @router.get("/tools")
