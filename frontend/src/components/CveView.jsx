@@ -18,18 +18,32 @@
 // Hostnamen. Statt eine zweite Geräte-Naht zu öffnen, zeigen wir den ehrlich
 // vorhandenen Wert (kein erfundener Hostname).
 //
-// Acknowledge: nur „ack" (quittieren) — der Befund verschwindet nach dem Neuladen
-// aus der Liste. „unack/Reaktivieren" ist hier NICHT abbildbar: es gibt keinen
-// Endpunkt, der quittierte Befunde LISTET (das Backend KANN unack, aber es fehlt
-// der Lesepfad). Als Nachzügler dokumentiert (siehe ADR 0037 / Auftrag).
+// Acknowledge (Etappe 3a): „ack" blendet einen Befund aus (verschwindet aus der
+// aktiven Liste nach dem Neuladen). Der Rückweg ist jetzt gebaut: ein aufklappbarer
+// Bereich „Ausgeblendete Befunde" lädt die quittierten Befunde (GET /api/cve/acknowledged)
+// und bietet pro Befund „Wieder einblenden" (action="unack") — der Befund wandert
+// zurück in die aktive Liste. Beide Listen werden nach jeder Aktion neu geladen.
 //
 // i18n: alle Texte über t(); t/i18n NIE in useEffect-Dependencies (Render-Loop).
 
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Check, ExternalLink, ShieldAlert, ShieldOff } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  ExternalLink,
+  RotateCcw,
+  ShieldAlert,
+  ShieldOff,
+} from "lucide-react";
 
-import { acknowledgeCve, fetchCveFindings, fetchCveStatus } from "../api/cve.js";
+import {
+  acknowledgeCve,
+  fetchAcknowledgedCveFindings,
+  fetchCveFindings,
+  fetchCveStatus,
+} from "../api/cve.js";
 import "./CveView.css";
 
 // Severity-Rang für die Sortierung. Höher = gefährlicher = weiter oben. Ein
@@ -71,10 +85,13 @@ function SeverityBadge({ severity }) {
 }
 
 // Eine Befund-Zeile: CVE-ID (verlinkt), Severity-Badge, „NEU“-Badge, CVSS, Gerät,
-// Port/Service, Beschreibung, Veröffentlichungsdatum, Quittieren-Knopf.
-function BefundZeile({ befund, zeigeGeraet, onAck, quittiert }) {
+// Port/Service, Beschreibung, Veröffentlichungsdatum, Aktions-Knopf. ``modus``
+// steuert den Knopf: "active" -> Quittieren (ack), "hidden" -> Wieder einblenden
+// (unack). ``busy`` sperrt den Knopf während die Aktion läuft.
+function BefundZeile({ befund, zeigeGeraet, modus = "active", onAction, busy }) {
   const { t } = useTranslation();
   const published = kurzDatum(befund.published);
+  const istHidden = modus === "hidden";
 
   return (
     <div className={befund.isNew ? "cve-row cve-row--new" : "cve-row"}>
@@ -107,13 +124,21 @@ function BefundZeile({ befund, zeigeGeraet, onAck, quittiert }) {
         <button
           className="cve-row__ack"
           type="button"
-          onClick={() => onAck(befund)}
-          disabled={quittiert}
+          onClick={() => onAction(befund)}
+          disabled={busy}
         >
-          <Check size={13} aria-hidden="true" />
-          {quittiert
-            ? t("untersuchen.cve.acking")
-            : t("untersuchen.cve.ack")}
+          {istHidden ? (
+            <RotateCcw size={13} aria-hidden="true" />
+          ) : (
+            <Check size={13} aria-hidden="true" />
+          )}
+          {istHidden
+            ? busy
+              ? t("untersuchen.cve.reactivating")
+              : t("untersuchen.cve.reactivate")
+            : busy
+              ? t("untersuchen.cve.acking")
+              : t("untersuchen.cve.ack")}
         </button>
       </div>
 
@@ -144,7 +169,7 @@ function BefundZeile({ befund, zeigeGeraet, onAck, quittiert }) {
 
 // „Nach Gerät“: ein aufklappbarer Host-Block. Kopf zeigt ip||mac, Anzahl Befunde
 // und die höchste Severity des Hosts.
-function HostBlock({ label, mac, befunde, onAck, quittierte }) {
+function HostBlock({ label, mac, befunde, onAction, busyKeys }) {
   const { t } = useTranslation();
   const [offen, setOffen] = useState(true);
   // Höchste Severity im Block (für die Kopf-Kennzeichnung).
@@ -178,8 +203,9 @@ function HostBlock({ label, mac, befunde, onAck, quittierte }) {
               key={`${b.cveId}-${b.port}`}
               befund={b}
               zeigeGeraet={false}
-              onAck={onAck}
-              quittiert={quittierte.has(`${b.mac}|${b.cveId}|${b.port}`)}
+              modus="active"
+              onAction={onAction}
+              busy={busyKeys.has(`${b.mac}|${b.cveId}|${b.port}`)}
             />
           ))}
         </div>
@@ -228,26 +254,34 @@ function gruppiereNachGeraet(befunde) {
 export default function CveView() {
   const { t } = useTranslation();
   const [befunde, setBefunde] = useState(null); // null = noch nicht geladen
+  const [ausgeblendete, setAusgeblendete] = useState([]); // quittierte Befunde
   const [status, setStatus] = useState(null);
   const [laedt, setLaedt] = useState(true);
   const [fehler, setFehler] = useState(false);
   const [gruppierung, setGruppierung] = useState("severity"); // "severity" | "device"
-  // (mac|cveId|port)-Keys, die gerade quittiert werden (Knopf gesperrt).
-  const [quittierte, setQuittierte] = useState(new Set());
+  const [zeigeAusgeblendete, setZeigeAusgeblendete] = useState(false);
+  // (mac|cveId|port)-Keys, die gerade eine ack/unack-Aktion laufen haben (Knopf gesperrt).
+  const [beschaeftigt, setBeschaeftigt] = useState(new Set());
 
-  // Befunde + Status laden. In einem useCallback, damit der Reload nach einem
-  // ack denselben Pfad nimmt. t/i18n bewusst NICHT in den Dependencies.
+  // Aktive Befunde + Status + ausgeblendete Befunde laden. In einem useCallback, damit
+  // der Reload nach einer Aktion denselben Pfad nimmt. t/i18n NICHT in den Dependencies.
   const laden = useCallback(async () => {
     setLaedt(true);
     setFehler(false);
     try {
-      const [bf, st] = await Promise.all([fetchCveFindings(), fetchCveStatus()]);
+      const [bf, st, hidden] = await Promise.all([
+        fetchCveFindings(),
+        fetchCveStatus(),
+        fetchAcknowledgedCveFindings(),
+      ]);
       setBefunde(bf);
       setStatus(st);
+      setAusgeblendete(hidden);
     } catch {
       setFehler(true);
       setBefunde(null);
       setStatus(null);
+      setAusgeblendete([]);
     } finally {
       setLaedt(false);
     }
@@ -257,20 +291,21 @@ export default function CveView() {
     laden();
   }, [laden]);
 
-  // Einen Befund quittieren (action="ack"). Nach Erfolg die Liste neu laden — der
-  // Befund verschwindet dann (das Backend liefert nur noch aktive Befunde).
-  const quittieren = useCallback(
-    async (befund) => {
+  // Eine ack/unack-Aktion auf einen Befund ausführen, dann beide Listen neu laden.
+  // "ack" blendet aus (Befund wandert in die ausgeblendete Liste), "unack" reaktiviert
+  // (Befund wandert zurück in die aktive Liste). Reiner gemeinsamer Pfad.
+  const wendeAktionAn = useCallback(
+    async (befund, action) => {
       const key = `${befund.mac}|${befund.cveId}|${befund.port}`;
-      setQuittierte((prev) => new Set(prev).add(key));
+      setBeschaeftigt((prev) => new Set(prev).add(key));
       try {
-        await acknowledgeCve(befund.mac, befund.cveId, befund.port, "ack");
+        await acknowledgeCve(befund.mac, befund.cveId, befund.port, action);
         await laden();
       } catch {
-        // Quittieren fehlgeschlagen: Knopf wieder freigeben, Befund bleibt sichtbar.
+        // Aktion fehlgeschlagen: Knopf wieder freigeben, Zustand bleibt unverändert.
         setFehler(true);
       } finally {
-        setQuittierte((prev) => {
+        setBeschaeftigt((prev) => {
           const next = new Set(prev);
           next.delete(key);
           return next;
@@ -279,6 +314,9 @@ export default function CveView() {
     },
     [laden],
   );
+
+  const quittieren = useCallback((b) => wendeAktionAn(b, "ack"), [wendeAktionAn]);
+  const reaktivieren = useCallback((b) => wendeAktionAn(b, "unack"), [wendeAktionAn]);
 
   // ── Render ──────────────────────────────────────────────────────────────
 
@@ -357,8 +395,9 @@ export default function CveView() {
               key={`${b.mac}-${b.cveId}-${b.port}`}
               befund={b}
               zeigeGeraet
-              onAck={quittieren}
-              quittiert={quittierte.has(`${b.mac}|${b.cveId}|${b.port}`)}
+              modus="active"
+              onAction={quittieren}
+              busy={beschaeftigt.has(`${b.mac}|${b.cveId}|${b.port}`)}
             />
           ))}
         </div>
@@ -370,12 +409,53 @@ export default function CveView() {
               label={g.label}
               mac={g.mac}
               befunde={g.befunde}
-              onAck={quittieren}
-              quittierte={quittierte}
+              onAction={quittieren}
+              busyKeys={beschaeftigt}
             />
           ))}
         </div>
       )}
+
+      {/* Ausgeblendete (quittierte) Befunde: dezenter Aufklapp-Bereich. Der Knopf
+          zeigt die Anzahl; ist nichts ausgeblendet, ist er ausgegraut und deaktiviert
+          (ehrlicher Zustand statt verstecktem Element). */}
+      <div className="cve__hidden">
+        <button
+          type="button"
+          className="cve__hidden-toggle"
+          onClick={() => setZeigeAusgeblendete((v) => !v)}
+          aria-expanded={zeigeAusgeblendete}
+          disabled={ausgeblendete.length === 0}
+        >
+          {ausgeblendete.length === 0 ? (
+            <ShieldOff size={13} aria-hidden="true" />
+          ) : zeigeAusgeblendete ? (
+            <ChevronDown size={14} aria-hidden="true" />
+          ) : (
+            <ChevronRight size={14} aria-hidden="true" />
+          )}
+          {ausgeblendete.length === 0
+            ? t("untersuchen.cve.noHidden")
+            : zeigeAusgeblendete
+              ? t("untersuchen.cve.hideHidden")
+              : t("untersuchen.cve.hiddenHeading", { count: ausgeblendete.length })}
+        </button>
+
+        {zeigeAusgeblendete && ausgeblendete.length > 0 && (
+          <div className="cve__hidden-body">
+            {sortiereNachSchwere(ausgeblendete).map((b) => (
+              <BefundZeile
+                key={`${b.mac}-${b.cveId}-${b.port}`}
+                befund={b}
+                zeigeGeraet
+                modus="hidden"
+                onAction={reaktivieren}
+                busy={beschaeftigt.has(`${b.mac}|${b.cveId}|${b.port}`)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
 
       <div className="cve__footnote">
         <ShieldOff size={12} aria-hidden="true" />

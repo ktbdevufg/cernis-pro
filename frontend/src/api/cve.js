@@ -9,11 +9,11 @@
 //        { mac, ip, cve_id, port, service, severity, cvss_score, description,
 //          url, published, first_seen_ts, last_seen_ts, is_new }. Leer -> [].
 //   GET  /api/cve/host/{mac}   -> aktive Befunde EINES Hosts (gleiche Form).
+//   GET  /api/cve/acknowledged -> Liste QUITTIERTER (ausgeblendeter) Befunde
+//        (gleiche Form wie GET /api/cve, Etappe 3a). Leer -> [].
 //   POST /api/cve/acknowledge  { mac, cve_id, port, action } -> { ok: true }.
 //        action ist "ack" | "unack"; ein anderer Wert -> HTTP 422 (kein stiller
-//        Durchlauf). In dieser Etappe ruft das Frontend nur "ack" (siehe CveView:
-//        es gibt keinen Endpunkt, der quittierte Befunde LISTET, daher kein
-//        sinnvoller unack-Einstiegspunkt — als Nachzügler dokumentiert).
+//        Durchlauf). "ack" blendet aus, "unack" reaktiviert (CveView nutzt beides).
 //   GET  /api/cve/status       -> { hosts_total, hosts_due, hosts_checked,
 //          findings_total, findings_active, sleeping }.
 
@@ -54,6 +54,13 @@ export async function fetchCveFindingsForHost(mac) {
   return (backend ?? []).map(mappeBefund);
 }
 
+// Alle quittierten (ausgeblendeten) Befunde, gerätübergreifend (Etappe 3a). Gleiche
+// Wire-Form wie /api/cve, daher derselbe Mapper. Fehlt die Antwort -> [].
+export async function fetchAcknowledgedCveFindings() {
+  const backend = await apiGet("/api/cve/acknowledged");
+  return (backend ?? []).map(mappeBefund);
+}
+
 // Quittiert ("ack") bzw. reaktiviert ("unack") einen Befund pro (mac, cveId, port).
 // Liefert die Wire-Antwort { ok: true } durch — das Frontend mutiert nichts
 // optimistisch, sondern lädt die Liste nach dem ack neu. Wirft ApiError bei
@@ -81,6 +88,7 @@ export async function fetchCveStatus() {
 export default {
   fetchCveFindings,
   fetchCveFindingsForHost,
+  fetchAcknowledgedCveFindings,
   acknowledgeCve,
   fetchCveStatus,
 };

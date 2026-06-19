@@ -307,6 +307,56 @@
   background: var(--color-bg);
 }
 
+/* ── Ausgeblendete (quittierte) Befunde ───────────────────────────────────── */
+
+.cve__hidden {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Dezenter Aufklapp-Knopf: gedämpft, klar abgesetzt von den aktiven Aktionen.
+   Deaktiviert (nichts ausgeblendet) -> ausgegraut, kein Zeiger. */
+.cve__hidden-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 5px 10px;
+  font-size: 0.82rem;
+  color: var(--color-text-sec);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.cve__hidden-toggle:hover:not(:disabled) {
+  color: var(--color-text);
+  border-color: var(--color-text-tert);
+}
+
+.cve__hidden-toggle:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* Der aufgeklappte Bereich: gedämpft (ausgegraut), damit die ausgeblendeten
+   Befunde optisch klar hinter den aktiven zurücktreten. */
+.cve__hidden-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: var(--color-bar);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.cve__hidden-body .cve-row {
+  opacity: 0.78;
+}
+
 /* ── Zustände & Fußnote ───────────────────────────────────────────────────── */
 
 .cve__state {
