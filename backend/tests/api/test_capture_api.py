@@ -21,6 +21,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from api.capture import (
+    provide_build_topology,
     provide_capture_lldp,
     provide_capture_status,
     provide_get_lldp_neighbors,
@@ -32,7 +33,7 @@ from api.capture import (
     provide_stop_capture,
 )
 from api.capture import router as capture_router
-from application.capture import CaptureLldp, GetLldpNeighbors, StartCapture
+from application.capture import BuildTopology, CaptureLldp, GetLldpNeighbors, StartCapture
 from domain.capture import LLDPNeighbor, PacketSummary
 
 # ── Fakes ────────────────────────────────────────────────────────────────────
@@ -399,3 +400,69 @@ def test_lldp_capture_timeout_returns_503(monkeypatch: pytest.MonkeyPatch) -> No
     resp = TestClient(app).post("/api/lldp/capture", json={})
     assert resp.status_code == 503
     assert "error" in resp.json()
+
+
+# ── topology ──────────────────────────────────────────────────────────────────
+
+
+def _topology_uc(
+    hosts: list[dict[str, str]], neighbors: list[dict[str, str]], gateway_ip: str
+) -> BuildTopology:
+    """BuildTopology mit drei In-Memory-Providern (kein I/O, async-Gateway)."""
+
+    async def _gateway() -> str:
+        return gateway_ip
+
+    return BuildTopology(lambda: hosts, lambda: neighbors, _gateway)
+
+
+def test_topology_empty_returns_empty_graph() -> None:
+    app = _build_app()
+    app.dependency_overrides[provide_build_topology] = lambda: _topology_uc([], [], "192.168.1.1")
+    resp = TestClient(app).get("/api/topology")
+    assert resp.status_code == 200
+    assert resp.json() == {"nodes": [], "edges": []}
+
+
+def test_topology_marks_gateway_and_assumed_edges() -> None:
+    hosts = [
+        {"mac": "AA:AA:AA:AA:AA:01", "ip": "192.168.1.1", "hostname": "gw", "vendor": "AVM"},
+        {"mac": "AA:AA:AA:AA:AA:02", "ip": "192.168.1.2", "hostname": "pc", "vendor": "Dell"},
+    ]
+    app = _build_app()
+    app.dependency_overrides[provide_build_topology] = lambda: _topology_uc(
+        hosts, [], "192.168.1.1"
+    )
+    resp = TestClient(app).get("/api/topology")
+    assert resp.status_code == 200
+    body = resp.json()
+    by_id = {n["id"]: n for n in body["nodes"]}
+    assert by_id["AA:AA:AA:AA:AA:01"]["type"] == "gateway"
+    assert by_id["AA:AA:AA:AA:AA:02"]["type"] == "host"
+    # Der Nicht-Gateway-Host bekommt eine gestrichelte (assumed) Sternkante.
+    assert body["edges"] == [
+        {"source": "AA:AA:AA:AA:AA:02", "target": "AA:AA:AA:AA:AA:01", "kind": "assumed"}
+    ]
+
+
+def test_topology_measured_edge_wire_shape() -> None:
+    hosts = [
+        {"mac": "AA:AA:AA:AA:AA:01", "ip": "192.168.1.1", "hostname": "gw", "vendor": ""},
+        {"mac": "BB:BB:BB:BB:BB:02", "ip": "192.168.1.2", "hostname": "pc", "vendor": ""},
+    ]
+    neighbors = [
+        {"source_mac": "BB:BB:BB:BB:BB:02", "chassis_id": "switch-1", "system_desc": "switch"}
+    ]
+    app = _build_app()
+    app.dependency_overrides[provide_build_topology] = lambda: _topology_uc(
+        hosts, neighbors, "192.168.1.1"
+    )
+    body = TestClient(app).get("/api/topology").json()
+    kinds = {e["kind"] for e in body["edges"]}
+    assert "measured" in kinds
+    measured = next(e for e in body["edges"] if e["kind"] == "measured")
+    assert measured == {"source": "BB:BB:BB:BB:BB:02", "target": "switch-1", "kind": "measured"}
+    # Switch-Knoten traegt die Wire-Felder (description/port/protocol vorhanden).
+    switch = next(n for n in body["nodes"] if n["id"] == "switch-1")
+    assert switch["type"] == "switch"
+    assert {"description", "port", "protocol"} <= switch.keys()

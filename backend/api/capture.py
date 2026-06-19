@@ -18,6 +18,7 @@ RegressionSSCHUTZ: die Wire-Form bleibt 1:1, AUSSER der EINEN bewussten Heilung)
 * ``POST /api/pcap/save``      -> 404 ``{error}`` ohne pcap / 200 ``{ok, path, size}`` (GEHEILT).
 * ``GET  /api/lldp/neighbors`` -> Liste mit ``age_secs``/``expired``.
 * ``POST /api/lldp/capture``   -> Nachbar-Liste / 503 bei Fehler/Timeout.
+* ``GET  /api/topology``       -> radialer Heimnetz-Graph ``{nodes, edges}`` (ADR 0035).
 
 BEWUSSTE HEILUNG ggue. C.0 (der einzige Umschlag): ``/api/pcap/save`` lieferte im
 Altcode bei vorhandener Capture-Datei einen 500er (``os.path.basename`` auf ein nie
@@ -26,8 +27,10 @@ gebundenes ``os`` -- ``main.py`` importiert nur ``os as _os``). Hier 200 mit
 ``os.path.basename``). Der C.0-Test bleibt UNVERAENDERT (friert v1 gegen ``main.py``
 ein); diese geheilte Form lebt im v2-eigenen ``test_capture_api``.
 
-Tote Routen WEGGELASSEN (vom C.0-Contract bewusst nicht festgenagelt): ``/api/pcap/
-download`` und ``/api/lldp/topology``.
+Tote Route WEGGELASSEN (vom C.0-Contract bewusst nicht festgenagelt): ``/api/pcap/
+download``. Die fruehere tote ``/api/lldp/topology`` ist NICHT reaktiviert, sondern
+durch den sauber neu gebauten ``/api/topology`` ERSETZT (ADR 0035) -- Gateway-
+zentrierter Graph mit measured/assumed-Kanten statt des dangling-edge-Altcodes.
 
 Shape-Naht: Die Use-Cases geben ROHE Domaenen-Objekte / Wire-nahe dicts; dieser Rand
 baut die endgueltige Wire-Form (``_packet_to_dict`` / ``_neighbor_to_dict`` mit
@@ -46,7 +49,13 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from application.capture import CaptureLldp, GetLldpNeighbors, StartCapture, enrich_neighbor
+from application.capture import (
+    BuildTopology,
+    CaptureLldp,
+    GetLldpNeighbors,
+    StartCapture,
+    enrich_neighbor,
+)
 
 router = APIRouter(prefix="/api", tags=["capture"])
 
@@ -132,6 +141,10 @@ def provide_capture_lldp() -> CaptureLldp:
 
 def provide_get_lldp_neighbors() -> GetLldpNeighbors:
     raise NotImplementedError("GetLldpNeighbors wird in app.py verdrahtet")
+
+
+def provide_build_topology() -> BuildTopology:
+    raise NotImplementedError("BuildTopology wird in app.py verdrahtet")
 
 
 # ── Serialisierungs-Helfer (Domaenen-Objekt -> Wire-dict am api-Rand) ─────────
@@ -299,3 +312,44 @@ async def lldp_capture(
     except Exception as exc:
         # Jeder Sniff-Fehler ODER Timeout -> 503 (Altcode-Naht, kein roher 500er).
         return JSONResponse(status_code=503, content={"error": str(exc)})
+
+
+# ── topology ──────────────────────────────────────────────────────────────────
+
+
+@router.get("/topology")
+async def topology(
+    build_topology: Annotated[BuildTopology, Depends(provide_build_topology)],
+) -> dict[str, list[dict[str, Any]]]:
+    """Radialer Heimnetz-Graph ``{nodes, edges}`` (Gateway-Zentrum, ADR 0035).
+
+    Der Use-Case gibt rohe Domaenen-dicts (nodes/edges); dieser Rand baut die
+    endgueltige Wire-Form. Ehrlicher Leerzustand: ohne Scan-Hosts/LLDP-Daten ist
+    der Graph leer (``{"nodes": [], "edges": []}``) -- kein erfundener Inhalt.
+    """
+    graph = await build_topology()
+    return {
+        "nodes": [_topology_node_to_dict(n) for n in graph["nodes"]],
+        "edges": [
+            {"source": e["source"], "target": e["target"], "kind": e["kind"]}
+            for e in graph["edges"]
+        ],
+    }
+
+
+def _topology_node_to_dict(node: dict[str, str]) -> dict[str, Any]:
+    """Knoten-Roh-dict -> Wire-dict. Host-/Gateway-Knoten und Switch-/Netzwerk-
+    Knoten tragen unterschiedliche Felder; der Rand reicht die vorhandenen durch
+    (``.get`` mit Default), damit beide Formen stabil serialisieren.
+    """
+    return {
+        "id": node.get("id", ""),
+        "type": node.get("type", "host"),
+        "ip": node.get("ip", ""),
+        "mac": node.get("mac", ""),
+        "hostname": node.get("hostname", ""),
+        "vendor": node.get("vendor", ""),
+        "description": node.get("description", ""),
+        "port": node.get("port", ""),
+        "protocol": node.get("protocol", ""),
+    }

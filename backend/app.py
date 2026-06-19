@@ -59,6 +59,7 @@ from api.analysis import (
 )
 from api.analysis import router as analysis_router
 from api.capture import (
+    provide_build_topology,
     provide_capture_lldp,
     provide_capture_status,
     provide_get_lldp_neighbors,
@@ -190,6 +191,7 @@ from application.alerting import (
 )
 from application.analysis import AddUserRules, AnalyzeSnapshot, ListUserRules
 from application.capture import (
+    BuildTopology,
     CaptureLldp,
     GetLldpNeighbors,
     RunCapture,
@@ -1796,6 +1798,51 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.dependency_overrides[provide_save_dir] = lambda: _save_dir
     app.dependency_overrides[provide_capture_lldp] = lambda: capture_lldp()
     app.dependency_overrides[provide_get_lldp_neighbors] = lambda: GetLldpNeighbors(capture_lldp())
+
+    # ── Topologie (ADR 0035): radialer Heimnetz-Graph ──────────────────────────
+    # Regel 5: die Quer-Domaenen-Naht laeuft AUSSCHLIESSLICH hier im Composition
+    # Root. BuildTopology kennt weder devices/scanning/interfaces noch infra -- es
+    # bekommt drei schlanke Provider-Callables, die hier die Fremd-Daten in rohe
+    # dicts/den Roh-Wert projizieren (Muster application.export.ScanProvider):
+    #   * Hosts  <- persistierter Scan-Bestand (device_repository, mac/ip/hostname/vendor),
+    #   * Nachbarn <- akkumulierte LLDP/CDP-Tabelle (GetLldpNeighbors),
+    #   * Gateway-IP <- primaeres Interface (ListInterfaces, async -> Coroutine-Provider).
+    def _topology_hosts() -> list[dict[str, str]]:
+        devices = GetDevices(device_repository())(known_only=False)
+        return [
+            {
+                "mac": d.mac,
+                "ip": d.last_ip or "",
+                "hostname": d.hostname,
+                "vendor": d.vendor,
+            }
+            for d in devices
+        ]
+
+    def _topology_neighbors() -> list[dict[str, str]]:
+        neighbors = GetLldpNeighbors(capture_lldp())()
+        return [
+            {
+                "source_mac": n.source_mac,
+                "chassis_id": n.chassis_id,
+                "system_name": n.system_name,
+                "system_desc": n.system_desc,
+                "port_id": n.port_id,
+                "protocol": n.protocol,
+            }
+            for n in neighbors
+        ]
+
+    async def _topology_gateway() -> str:
+        interfaces = await ListInterfaces(InterfaceDiscoveryAdapter())()
+        for iface in interfaces:
+            if iface.is_primary and iface.gateway:
+                return iface.gateway
+        return ""
+
+    app.dependency_overrides[provide_build_topology] = lambda: BuildTopology(
+        _topology_hosts, _topology_neighbors, _topology_gateway
+    )
 
     app.add_api_websocket_route("/ws/pcap", make_ws_pcap(capture_broadcaster()))
 
