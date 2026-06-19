@@ -4,7 +4,7 @@
 //
 // Funktionen:
 //   "analysis"  Analyse (gesperrt: braucht gesammelte Daten)
-//   "diagnose"  Diagnose (aktiv, Inhalt vorerst Platzhalter)
+//   "diagnose"  Diagnose (aktiv: zeigt die Route-zum-Ziel-Ansicht, ADR 0036)
 //   "cve"       CVE-Abgleich (aktiv, Inhalt vorerst Platzhalter)
 
 import { Activity, ScanSearch, ShieldAlert } from "lucide-react";
@@ -17,6 +17,7 @@ import {
   InProgress,
 } from "../components/AreaShell.jsx";
 import FunctionCard from "../components/FunctionCard.jsx";
+import RouteView from "../components/RouteView.jsx";
 
 // Kachel-Definition: Schlüssel, Icon, Sperrstatus. Reihenfolge ist verbindlich.
 const FUNKTIONEN = [
@@ -31,12 +32,14 @@ export default function InvestigateView() {
   const [openFunction, setOpenFunction] = useState(null);
 
   if (openFunction) {
+    // "diagnose" zeigt die Route-zum-Ziel-Ansicht (ADR 0036); die übrigen
+    // Funktionen sind vorerst Platzhalter.
     return (
       <FunctionShell
         title={t(`untersuchen.cards.${openFunction}.title`)}
         onBack={() => setOpenFunction(null)}
       >
-        <InProgress />
+        {openFunction === "diagnose" ? <RouteView /> : <InProgress />}
       </FunctionShell>
     );
   }

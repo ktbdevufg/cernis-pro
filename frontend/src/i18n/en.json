@@ -567,6 +567,25 @@
         "subtitle": "Match detected services against known CVE entries.",
         "locked": ""
       }
+    },
+    "route": {
+      "targetLabel": "Target",
+      "targetPlaceholder": "Enter a domain or IP (e.g. 1.1.1.1)",
+      "start": "Trace route",
+      "measuring": "Measuring …",
+      "idle": "Enter an internet target to show the network path to it.",
+      "noReply": "no reply",
+      "noHops": "No hops found.",
+      "error": "The route could not be measured.",
+      "toolMissing": "The program \"traceroute\" is not available on this system.",
+      "permissionHint": "A more precise measurement is possible with privileges — it also runs without.",
+      "loadOrgs": "Load operator names (internet query)",
+      "loadingOrgs": "loading …",
+      "colHop": "Hop",
+      "colIp": "IP",
+      "colCountry": "Country",
+      "colOperator": "Operator / ASN",
+      "colRtt": "RTT"
     }
   },
   "export": {

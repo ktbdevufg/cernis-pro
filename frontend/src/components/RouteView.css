@@ -1,0 +1,155 @@
+/* Route-zum-Ziel-Ansicht (CERNIS PRO 2.0) — folgt der Designsprache der übrigen
+   Diagnose-/Detail-Panels (gleiche Farb-/Radius-Variablen). */
+
+.route {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 4px;
+}
+
+.route__form {
+  display: flex;
+  gap: 8px;
+}
+
+.route__input {
+  flex: 1;
+  padding: 8px 12px;
+  font-size: 0.95rem;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.route__input:focus {
+  outline: 2px solid var(--color-accent);
+  border-color: var(--color-accent-border);
+}
+
+.route__start {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  font-size: 0.9rem;
+  color: var(--color-accent-strong);
+  background: transparent;
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.route__start:hover:not(:disabled) {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.route__start:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.route__permission {
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  color: var(--color-text-sec);
+  background: var(--color-bar);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.route__error {
+  padding: 10px 12px;
+  font-size: 0.9rem;
+  color: var(--color-text);
+  background: var(--color-bar);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.route__toolbar {
+  display: flex;
+  align-items: center;
+}
+
+.route__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--color-text-sec);
+  cursor: pointer;
+}
+
+.route__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.route__table th {
+  text-align: left;
+  padding: 6px 10px;
+  font-weight: 600;
+  color: var(--color-text-sec);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.route__row td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text);
+  vertical-align: middle;
+}
+
+.route__row--gap td {
+  opacity: 0.6;
+}
+
+.route__hop-nr {
+  width: 3em;
+  color: var(--color-text-sec);
+  font-variant-numeric: tabular-nums;
+}
+
+.route__mono {
+  font-family: var(--font-mono, monospace);
+}
+
+.route__flag {
+  font-size: 1.05rem;
+}
+
+.route__org {
+  display: block;
+}
+
+.route__asn {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--color-text-sec);
+  font-variant-numeric: tabular-nums;
+}
+
+.route__rtt {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.route__muted {
+  color: var(--color-text-sec);
+  font-style: italic;
+}
+
+.route__empty,
+.route__hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 32px;
+  color: var(--color-text-sec);
+  text-align: center;
+}
