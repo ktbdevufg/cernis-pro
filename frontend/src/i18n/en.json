@@ -586,6 +586,37 @@
       "colCountry": "Country",
       "colOperator": "Operator / ASN",
       "colRtt": "RTT"
+    },
+    "cve": {
+      "loading": "Loading CVE findings …",
+      "error": "The CVE findings could not be loaded.",
+      "groupLabel": "Grouping",
+      "bySeverity": "By severity",
+      "byDevice": "By device",
+      "newBadge": "NEW",
+      "cvssLabel": "CVSS score",
+      "ack": "Acknowledge",
+      "acking": "Acknowledging …",
+      "portLabel": "Port {{port}}",
+      "publishedLabel": "published {{date}}",
+      "findingCount": "{{count}} finding(s)",
+      "emptyNoFindings": "No open CVE findings.",
+      "emptyNoScan": "No scan yet — run a network scan, then CERNIS checks the discovered devices for vulnerabilities one by one.",
+      "emptyHint": "The check runs in the background and is throttled — findings appear gradually.",
+      "ackOnlyNote": "Acknowledged findings are hidden; reactivating them is not yet possible in this view.",
+      "severity": {
+        "critical": "Critical",
+        "high": "High",
+        "medium": "Medium",
+        "low": "Low",
+        "unknown": "Unknown"
+      },
+      "status": {
+        "sleeping": "Worker sleeping (no host due)",
+        "checking": "Worker checking … ({{due}} due)",
+        "hosts": "{{checked}}/{{total}} hosts checked",
+        "active": "{{count}} active findings"
+      }
     }
   },
   "export": {

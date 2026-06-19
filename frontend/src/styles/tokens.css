@@ -39,6 +39,18 @@
   --sev-low-bd: #B4B2A9;
   --sev-low-bg: #f1efe8;
 
+  /* CVE-Monitoring (ADR 0037): CRITICAL braucht eine fünfte, intensivere Stufe
+     ÜBER --sev-high (dunkles, sattes Rot). high/medium/low reusen die sev-Tokens;
+     unknown nutzt die neutralen text-Töne. --cve-new ist eine ZWEITE, von der
+     Severity unabhängige Dimension ("neu seit 24h"): türkiser Akzent, klar gegen
+     die Severity-Rottöne abgesetzt. */
+  --cve-crit-text: #7A1414;
+  --cve-crit-bd: #B91C1C;
+  --cve-crit-bg: #F8DADA;
+  --cve-new-text: var(--color-accent-strong);
+  --cve-new-bd: var(--color-accent);
+  --cve-new-bg: var(--color-accent-bg);
+
   --color-link: #185FA5;
   --color-ok-bg: #E1F5EE;
   --color-ok-text: #0F6E56;
@@ -91,6 +103,15 @@
   --sev-low-text: #b4b2a9;
   --sev-low-bd: #444441;
   --sev-low-bg: #222220;
+
+  /* CVE-Monitoring (ADR 0037): CRITICAL als fünfte Stufe, im Dunkelmodus heller/
+     klarer (analog --sev-high-text). --cve-new spiegelt den türkisen Akzent. */
+  --cve-crit-text: #FFB3B3;
+  --cve-crit-bd: #DC2626;
+  --cve-crit-bg: #3A0F0F;
+  --cve-new-text: var(--color-accent-strong);
+  --cve-new-bd: var(--color-accent);
+  --cve-new-bg: var(--color-accent-bg);
 
   --color-link: #85B7EB;
   --color-ok-bg: #0c2e26;

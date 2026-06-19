@@ -1,0 +1,345 @@
+/* CVE-Abgleich-Ansicht (CERNIS PRO 2.0) — folgt der Designsprache der übrigen
+   Diagnose-/Detail-Panels (gleiche Farb-/Radius-Variablen). Zwei farbliche
+   Belange getrennt: Severity (--cve-crit / --sev-*) und isNew (--cve-new-*). */
+
+.cve {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 4px;
+}
+
+/* ── Status-Zeile ─────────────────────────────────────────────────────────── */
+
+.cve__status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  font-size: 0.82rem;
+  color: var(--color-text-sec);
+  background: var(--color-bar);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.cve__status-sep {
+  color: var(--color-text-tert);
+}
+
+/* Puls: prüft = sattes Akzent-Grün, schläft = gedämpft. Reine CSS-Animation. */
+.cve__pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--status-aktiv);
+  animation: cve-pulse 1.6s ease-in-out infinite;
+}
+
+.cve__pulse--idle {
+  background: var(--color-text-tert);
+  animation: none;
+}
+
+@keyframes cve-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* ── Toolbar / Segmented Control ──────────────────────────────────────────── */
+
+.cve__toolbar {
+  display: flex;
+  align-items: center;
+}
+
+.cve__seg {
+  display: inline-flex;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.cve__seg-btn {
+  padding: 6px 14px;
+  font-size: 0.85rem;
+  color: var(--color-text-sec);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.cve__seg-btn + .cve__seg-btn {
+  border-left: 1px solid var(--color-border);
+}
+
+.cve__seg-btn--on {
+  color: var(--color-accent-strong);
+  background: var(--color-accent-bg);
+}
+
+/* ── Befund-Liste & -Zeile ────────────────────────────────────────────────── */
+
+.cve__list,
+.cve__hosts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cve-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* isNew: zweite Dimension — türkiser linker Rand + dezenter Hintergrund-Hauch,
+   bewusst NICHT rot (das ist die Severity). */
+.cve-row--new {
+  border-left-color: var(--cve-new-bd);
+  background: linear-gradient(
+    90deg,
+    var(--cve-new-bg) 0%,
+    var(--color-card) 40%
+  );
+}
+
+.cve-row__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cve-row__id {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono, monospace);
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--color-link);
+  text-decoration: none;
+}
+
+.cve-row__id:hover {
+  text-decoration: underline;
+}
+
+.cve-row__cvss {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.82rem;
+  color: var(--color-text-sec);
+}
+
+.cve-row__spacer {
+  flex: 1;
+}
+
+.cve-row__ack {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  font-size: 0.8rem;
+  color: var(--color-accent-strong);
+  background: transparent;
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.cve-row__ack:hover:not(:disabled) {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.cve-row__ack:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.cve-row__meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 0.82rem;
+  color: var(--color-text-sec);
+}
+
+.cve-row__device {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--color-text);
+}
+
+.cve-row__mac {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.75rem;
+  color: var(--color-text-tert);
+}
+
+.cve-row__port {
+  font-variant-numeric: tabular-nums;
+}
+
+.cve-row__desc {
+  font-size: 0.85rem;
+  color: var(--color-text);
+  line-height: 1.45;
+}
+
+/* ── Severity-Badge (data-sev wählt das Farbtripel) ───────────────────────── */
+
+.cve-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+
+.cve-badge--sev[data-sev="CRITICAL"] {
+  color: var(--cve-crit-text);
+  background: var(--cve-crit-bg);
+  border-color: var(--cve-crit-bd);
+}
+
+.cve-badge--sev[data-sev="HIGH"] {
+  color: var(--sev-high-text);
+  background: var(--sev-high-bg);
+  border-color: var(--sev-high-bd);
+}
+
+.cve-badge--sev[data-sev="MEDIUM"] {
+  color: var(--sev-med-text);
+  background: var(--sev-med-bg);
+  border-color: var(--sev-med-bd);
+}
+
+.cve-badge--sev[data-sev="LOW"] {
+  color: var(--sev-low-text);
+  background: var(--sev-low-bg);
+  border-color: var(--sev-low-bd);
+}
+
+.cve-badge--sev[data-sev="UNKNOWN"] {
+  color: var(--color-text-tert);
+  background: var(--color-bar);
+  border-color: var(--color-border);
+}
+
+/* isNew-Badge: türkiser Akzent, klar gegen die Severity-Rottöne abgesetzt. */
+.cve-badge--new {
+  color: var(--cve-new-text);
+  background: var(--cve-new-bg);
+  border-color: var(--cve-new-bd);
+}
+
+/* ── „Nach Gerät“: Host-Block ─────────────────────────────────────────────── */
+
+.cve-host {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.cve-host__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 0.88rem;
+  color: var(--color-text);
+  background: var(--color-bar);
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.cve-host__name {
+  font-weight: 600;
+}
+
+.cve-host__mac {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.75rem;
+  color: var(--color-text-tert);
+}
+
+.cve-host__spacer {
+  flex: 1;
+}
+
+.cve-host__count {
+  font-size: 0.8rem;
+  color: var(--color-text-sec);
+  font-variant-numeric: tabular-nums;
+}
+
+.cve-host__body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+/* Im Host-Block sitzen die Zeilen schon in einem Rahmen — flacher darstellen. */
+.cve-host__body .cve-row {
+  background: var(--color-bg);
+}
+
+/* ── Zustände & Fußnote ───────────────────────────────────────────────────── */
+
+.cve__state {
+  padding: 24px;
+  text-align: center;
+  color: var(--color-text-sec);
+}
+
+.cve__state--error {
+  color: var(--sev-high-text);
+}
+
+.cve__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 32px;
+  text-align: center;
+  color: var(--color-text-sec);
+}
+
+.cve__empty-hint {
+  font-size: 0.82rem;
+  color: var(--color-text-tert);
+  max-width: 34em;
+}
+
+.cve__footnote {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  color: var(--color-text-tert);
+  padding-top: 2px;
+}

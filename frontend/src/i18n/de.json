@@ -586,6 +586,37 @@
       "colCountry": "Land",
       "colOperator": "Betreiber / ASN",
       "colRtt": "RTT"
+    },
+    "cve": {
+      "loading": "Lade CVE-Befunde …",
+      "error": "Die CVE-Befunde konnten nicht geladen werden.",
+      "groupLabel": "Gruppierung",
+      "bySeverity": "Nach Schwere",
+      "byDevice": "Nach Gerät",
+      "newBadge": "NEU",
+      "cvssLabel": "CVSS-Score",
+      "ack": "Quittieren",
+      "acking": "Quittiere …",
+      "portLabel": "Port {{port}}",
+      "publishedLabel": "veröffentlicht {{date}}",
+      "findingCount": "{{count}} Befund(e)",
+      "emptyNoFindings": "Keine offenen CVE-Befunde.",
+      "emptyNoScan": "Noch kein Scan — führe einen Netzwerk-Scan aus, dann prüft CERNIS die gefundenen Geräte nach und nach auf Schwachstellen.",
+      "emptyHint": "Die Prüfung läuft im Hintergrund und ist gedrosselt — Befunde erscheinen nach und nach.",
+      "ackOnlyNote": "Quittierte Befunde werden ausgeblendet; ein Reaktivieren ist in dieser Ansicht noch nicht möglich.",
+      "severity": {
+        "critical": "Kritisch",
+        "high": "Hoch",
+        "medium": "Mittel",
+        "low": "Niedrig",
+        "unknown": "Unbekannt"
+      },
+      "status": {
+        "sleeping": "Worker schläft (kein Host fällig)",
+        "checking": "Worker prüft … ({{due}} fällig)",
+        "hosts": "{{checked}}/{{total}} Hosts geprüft",
+        "active": "{{count}} aktive Befunde"
+      }
     }
   },
   "export": {

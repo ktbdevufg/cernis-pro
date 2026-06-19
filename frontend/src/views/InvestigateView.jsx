@@ -5,7 +5,7 @@
 // Funktionen:
 //   "analysis"  Analyse (gesperrt: braucht gesammelte Daten)
 //   "diagnose"  Diagnose (aktiv: zeigt die Route-zum-Ziel-Ansicht, ADR 0036)
-//   "cve"       CVE-Abgleich (aktiv, Inhalt vorerst Platzhalter)
+//   "cve"       CVE-Abgleich (aktiv: zeigt die CVE-Befund-Ansicht, ADR 0037)
 
 import { Activity, ScanSearch, ShieldAlert } from "lucide-react";
 import { useState } from "react";
@@ -16,6 +16,7 @@ import {
   FunctionShell,
   InProgress,
 } from "../components/AreaShell.jsx";
+import CveView from "../components/CveView.jsx";
 import FunctionCard from "../components/FunctionCard.jsx";
 import RouteView from "../components/RouteView.jsx";
 
@@ -32,14 +33,20 @@ export default function InvestigateView() {
   const [openFunction, setOpenFunction] = useState(null);
 
   if (openFunction) {
-    // "diagnose" zeigt die Route-zum-Ziel-Ansicht (ADR 0036); die übrigen
-    // Funktionen sind vorerst Platzhalter.
+    // "diagnose" zeigt die Route-zum-Ziel-Ansicht (ADR 0036), "cve" die
+    // CVE-Befund-Ansicht (ADR 0037); die übrigen Funktionen sind Platzhalter.
     return (
       <FunctionShell
         title={t(`untersuchen.cards.${openFunction}.title`)}
         onBack={() => setOpenFunction(null)}
       >
-        {openFunction === "diagnose" ? <RouteView /> : <InProgress />}
+        {openFunction === "diagnose" ? (
+          <RouteView />
+        ) : openFunction === "cve" ? (
+          <CveView />
+        ) : (
+          <InProgress />
+        )}
       </FunctionShell>
     );
   }
