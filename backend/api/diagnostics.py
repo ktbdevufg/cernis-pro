@@ -14,6 +14,11 @@ Attribut-Zugriff zu JSON serialisiert (Typ ``Any``, Muster ``api/process``).
   processes). Liefert das ``TracerouteResult`` als dict.
 * ``GET /api/diagnostics/traceroute/permission`` -- die ``{ok, error}``-Rechte-Naht
   (``CheckTraceroutePermission``): ``ok=true`` = privilegierte (genauere) Methode moeglich.
+* ``GET /api/diagnostics/route?target=<host>&privileged=<bool>`` (ADR 0036) -- Route zum Ziel:
+  traceroute-Hops je IP LOKAL+SYNCHRON mit Land + ASN-Nummer angereichert (kein Netz, kein
+  Root). ``privileged`` optional (Default ``false`` -- keine Sackgasse). Liefert ``{target,
+  privileged, hops:[{hop, address, rtt_ms, country, asn, asn_org}]}``; nicht-antwortende Hops
+  als ``null``-Luecke, ``asn_org`` im Hauptpfad IMMER ``null`` (ehrlich, lokale Geo-DB).
 * ``GET /api/diagnostics/tools?tools=dig&tools=traceroute`` (1b) -- ``tools`` ist ein
   WIEDERHOLBARER Query-Parameter. OHNE ``tools`` werden ALLE registrierten Tools geprueft
   (Erstinstallation); MIT ``tools`` nur die genannten (Laufzeit). Liefert den ``ToolReport``
@@ -97,6 +102,10 @@ _DEFAULT_DNS_TYPES: list[str] = ["A", "AAAA", "PTR"]
 # Projektion bleibt am Rand (dieser Router) -- die Runner serialisieren NICHT.
 type ResolveDnsRunner = Callable[[str, list[str]], Awaitable[Any]]
 type RunTracerouteRunner = Callable[[str, bool], Awaitable[Any]]
+# Route-zum-Ziel (ADR 0036, Hauptpfad): misst den Pfad zu ``target`` (``privileged``
+# durchgereicht) und reichert jeden Hop lokal+synchron mit Geo/ASN an. Liefert das rohe
+# ``{target, privileged, hops:[...]}``-dict (``Any`` -- der api-Ring kennt keine domain-Typen).
+type BuildRouteGeoRunner = Callable[[str, bool], Awaitable[Any]]
 # 1b: prueft die angefragten (oder bei None alle) Tools und liefert den rohen ToolReport
 # (``Any`` -- der api-Ring kennt keine domain-Typen). Synchron: reine lokale which-Checks.
 type CheckToolsRunner = Callable[[list[str] | None], Any]
@@ -126,6 +135,10 @@ def provide_run_traceroute() -> RunTracerouteRunner:
 
 def provide_check_traceroute_permission() -> CheckTraceroutePermission:
     raise NotImplementedError("CheckTraceroutePermission wird in app.py verdrahtet")
+
+
+def provide_build_route_geo() -> BuildRouteGeoRunner:
+    raise NotImplementedError("BuildRouteGeoRunner wird in app.py verdrahtet")
 
 
 def provide_check_tools() -> CheckToolsRunner:
@@ -173,6 +186,29 @@ def _traceroute_result_to_dict(result: Any) -> dict[str, Any]:
         "target": result.target,
         "privileged": result.privileged,
         "hops": [_hop_to_dict(hop) for hop in result.hops],
+    }
+
+
+def _route_hop_to_dict(h: Any) -> dict[str, Any]:
+    # h ist ein rohes Hop-dict aus BuildRouteGeo (ADR 0036). address/rtt_ms sind null bei
+    # einer Luecke (nicht-antwortender Hop); country/asn/asn_org sind null, wenn die lokale
+    # Geo-DB nichts liefert (asn_org IMMER null im Hauptpfad -- ehrliche Leere, kein Fallback).
+    return {
+        "hop": h["hop"],
+        "address": h["address"],
+        "rtt_ms": h["rtt_ms"],
+        "country": h["country"],
+        "asn": h["asn"],
+        "asn_org": h["asn_org"],
+    }
+
+
+def _route_to_dict(result: Any) -> dict[str, Any]:
+    # result ist das rohe {target, privileged, hops} dict aus BuildRouteGeo; hops projiziert.
+    return {
+        "target": result["target"],
+        "privileged": result["privileged"],
+        "hops": [_route_hop_to_dict(hop) for hop in result["hops"]],
     }
 
 
@@ -290,6 +326,27 @@ def get_traceroute_permission(
     (Root); ``ok=false`` + Begruendung = nur die unprivilegierte (ungenauere) Methode.
     """
     return check_permission_uc()
+
+
+@router.get("/route")
+async def route(
+    target: str,
+    build: Annotated[BuildRouteGeoRunner, Depends(provide_build_route_geo)],
+    privileged: bool = False,
+) -> dict[str, Any]:
+    """Route zum Ziel (ADR 0036, Hauptpfad): traceroute-Hops je IP lokal mit Geo/ASN.
+
+    Misst den Pfad zu ``target`` und reichert jeden antwortenden Hop lokal+synchron mit Land
+    + ASN-Nummer an (kein Netz-I/O, kein Root noetig). ``privileged`` ist OPTIONAL (Default
+    ``false`` -- der unprivilegierte Pfad funktioniert ohne Root, keine Sackgasse; ``true``
+    waehlt die genauere Methode, laeuft aber nur, wenn der Prozess die Rechte ohnehin hat).
+    Liefert ``{target, privileged, hops:[{hop, address, rtt_ms, country, asn, asn_org}]}``.
+    Nicht-antwortende Hops erscheinen als ``null``-Luecke; ``asn_org`` ist im Hauptpfad IMMER
+    ``null`` (die Org-Namen kommen optional ueber ``/route/orgs``). Fehlt ``traceroute`` ->
+    503 (globaler Handler).
+    """
+    result = await build(target, privileged)
+    return _route_to_dict(result)
 
 
 @router.get("/tools")

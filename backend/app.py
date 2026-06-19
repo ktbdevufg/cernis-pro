@@ -82,6 +82,7 @@ from api.devices import (
 )
 from api.devices import router as devices_router
 from api.diagnostics import (
+    provide_build_route_geo,
     provide_check_dhcp_permission,
     provide_check_external,
     provide_check_tools,
@@ -207,6 +208,7 @@ from application.devices import (
     UpdateDeviceMeta,
 )
 from application.diagnostics import (
+    BuildRouteGeo,
     CheckDhcpPermission,
     CheckDiagnosticsTools,
     CheckExternalReachability,
@@ -2253,6 +2255,29 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # am Composition Root gemappt. Die Meldung benennt die fehlende Datei.
         logger.error("resolver_data_missing", path=exc.path)
         return JSONResponse(status_code=503, content={"detail": exc.message})
+
+    # ── Route zum Ziel (ADR 0036, Hauptpfad): traceroute-Hops lokal mit Geo/ASN ──
+    # Regel 5: die Quer-Domaenen-Naht (diagnostics-Hops + resolver-Geo) faellt AUSSCHLIESSLICH
+    # hier im Composition Root. WEDER die diagnostics-Domaene NOCH ihr Port nennt resolver --
+    # der Use-Case bekommt quellen-agnostische Callables herein (Muster BuildTopology/
+    # export.ScanProvider). Bewusst HIER (nach dem resolver-Block), weil der geo_asn_db-Lookup
+    # schon in Scope ist -- keine zweite Instanz.
+    #
+    # HAUPTPFAD (lokal+synchron, schnell, root-frei): BuildRouteGeo bekommt den eigenen
+    # RunTraceroute-Use-Case (Hop-Quelle) + ein Geo-Callable, das HIER den lazy geladenen
+    # CsvGeoAsnDb-Lookup auf ein rohes dict PROJIZIERT (asn_org bleibt None -- die CSV-DB
+    # kennt nur Land + ASN-Nummer; der Klartext-Org-Name kommt optional ueber eine spaetere
+    # RDAP-Nachladung, NICHT hier geraten -- ehrliche Leere, kein stiller Fallback S3).
+    def _route_geo_lookup(ip: str) -> dict[str, str | None]:
+        record = geo_asn_db().lookup(ip)
+        return {"country": record.country, "asn": record.asn, "asn_org": record.asn_org}
+
+    async def _build_route_geo(target: str, privileged: bool) -> Any:
+        return await BuildRouteGeo(RunTraceroute(SystemTracerouteRunner()), _route_geo_lookup)(
+            target, privileged
+        )
+
+    app.dependency_overrides[provide_build_route_geo] = lambda: _build_route_geo
 
     # ── export-Domaene v2 verdrahten (Block 1: gespeicherter Scan -> CSV/JSON/PDF, ADR 0015) ──
     # Der ExportScan-Use-Case kennt KEINE scanning-Domaene: er bekommt den Scan ueber ein

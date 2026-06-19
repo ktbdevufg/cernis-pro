@@ -14,6 +14,7 @@ import pytest
 
 from application.diagnostics import (
     DEFAULT_CPNETCHECK_URL,
+    BuildRouteGeo,
     CheckDhcpPermission,
     CheckDiagnosticsTools,
     CheckExternalReachability,
@@ -663,3 +664,111 @@ def test_detect_blocks_when_nmap_missing_probe_not_called() -> None:
     with pytest.raises(RogueDhcpPermissionError):
         asyncio.run(uc())
     assert probe.calls == 0
+
+
+# ── Route zum Ziel (ADR 0036): BuildRouteGeo (Hauptpfad) + EnrichRouteOrgs (Nachladung) ──
+
+
+def _route_uc(result: TracerouteResult, geo: dict[str, dict[str, str | None]]) -> BuildRouteGeo:
+    """Baut BuildRouteGeo mit einem Fake-traceroute + einem Dict-basierten Geo-Callable.
+
+    Das Geo-Callable ist quellen-agnostisch (IP -> rohes dict): es nennt resolver NICHT.
+    Eine IP ohne Eintrag in ``geo`` liefert ein leeres dict (ehrliche Leerwerte, kein Fehler).
+    """
+    runner = FakeTracerouteRunner(result)
+    return BuildRouteGeo(RunTraceroute(runner), lambda ip: geo.get(ip, {}))
+
+
+def test_route_hop_with_geo_is_enriched() -> None:
+    # Ein antwortender Hop mit Geo-Treffer: country + asn werden uebernommen, asn_org bleibt
+    # None (Hauptpfad ist lokal+synchron, der Org-Name kommt optional ueber die Nachladung).
+    result = TracerouteResult(
+        target="1.1.1.1",
+        privileged=False,
+        hops=(TracerouteHop(hop=1, address="1.1.1.1", rtt_ms=4.2),),
+    )
+    geo = {"1.1.1.1": {"country": "AU", "asn": "13335", "asn_org": None}}
+    out = asyncio.run(_route_uc(result, geo)("1.1.1.1", False))
+    assert out["target"] == "1.1.1.1"
+    assert out["privileged"] is False
+    assert out["hops"] == [
+        {
+            "hop": 1,
+            "address": "1.1.1.1",
+            "rtt_ms": 4.2,
+            "country": "AU",
+            "asn": "13335",
+            "asn_org": None,
+        }
+    ]
+
+
+def test_route_hop_without_geo_has_honest_empty_values() -> None:
+    # Ein antwortender Hop OHNE Geo-Treffer (z. B. private IP): country/asn/asn_org ehrlich
+    # None -- der Hop bleibt, mit leeren Geo-Feldern (kein erfundener Wert, kein Weglassen).
+    result = TracerouteResult(
+        target="example.com",
+        privileged=False,
+        hops=(TracerouteHop(hop=1, address="192.168.0.1", rtt_ms=0.8),),
+    )
+    out = asyncio.run(_route_uc(result, {})("example.com", False))
+    assert out["hops"] == [
+        {
+            "hop": 1,
+            "address": "192.168.0.1",
+            "rtt_ms": 0.8,
+            "country": None,
+            "asn": None,
+            "asn_org": None,
+        }
+    ]
+
+
+def test_route_non_responding_hop_stays_as_null_gap_no_geo_lookup() -> None:
+    # Ein nicht-antwortender Hop (address=None) bleibt als Luecke sichtbar UND wird NICHT
+    # per Geo angefragt (ein Geo-Callable, das bei Aufruf wirft, beweist das).
+    result = TracerouteResult(
+        target="1.1.1.1",
+        privileged=True,
+        hops=(
+            TracerouteHop(hop=1, address="10.0.0.1", rtt_ms=1.0),
+            TracerouteHop(hop=2, address=None, rtt_ms=None),
+        ),
+    )
+
+    looked_up: list[str] = []
+
+    def geo_lookup(ip: str) -> dict[str, str | None]:
+        # Wird nur fuer antwortende Hops (echte address) gerufen -- die Liste beweist es.
+        looked_up.append(ip)
+        return {"country": "US", "asn": "7922", "asn_org": None}
+
+    uc = BuildRouteGeo(RunTraceroute(FakeTracerouteRunner(result)), geo_lookup)
+    out = asyncio.run(uc("1.1.1.1", True))
+    hops = out["hops"]
+    assert isinstance(hops, list)
+    assert hops[1] == {
+        "hop": 2,
+        "address": None,
+        "rtt_ms": None,
+        "country": None,
+        "asn": None,
+        "asn_org": None,
+    }
+    # Der Geo-Lookup wurde NUR fuer den antwortenden Hop (10.0.0.1) gerufen, NICHT fuer die Luecke.
+    assert looked_up == ["10.0.0.1"]
+
+
+def test_route_empty_result_yields_empty_hops() -> None:
+    # Kein Hop ermittelt -> ehrlich leere Hop-Liste (kein Fehler, kein erfundener Hop).
+    result = TracerouteResult(target="1.1.1.1", privileged=False, hops=())
+    out = asyncio.run(_route_uc(result, {})("1.1.1.1", False))
+    assert out == {"target": "1.1.1.1", "privileged": False, "hops": []}
+
+
+def test_route_privileged_is_passed_through() -> None:
+    # Die privileged-Wahl wird unveraendert an RunTraceroute durchgereicht (bewusste Wahl).
+    runner = FakeTracerouteRunner(TracerouteResult(target="1.1.1.1", privileged=True, hops=()))
+    uc = BuildRouteGeo(RunTraceroute(runner), lambda ip: {})
+    asyncio.run(uc("1.1.1.1", True))
+    assert runner.calls == [("1.1.1.1", True)]

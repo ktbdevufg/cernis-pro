@@ -8,11 +8,13 @@ from application.diagnostics.errors import (
 )
 from application.diagnostics.use_cases import (
     DEFAULT_CPNETCHECK_URL,
+    BuildRouteGeo,
     CheckDhcpPermission,
     CheckDiagnosticsTools,
     CheckExternalReachability,
     CheckTraceroutePermission,
     DetectRogueDhcp,
+    GeoLookup,
     GrabBanner,
     ResolveDns,
     RunTraceroute,
@@ -20,6 +22,7 @@ from application.diagnostics.use_cases import (
 
 __all__ = [
     "DEFAULT_CPNETCHECK_URL",
+    "BuildRouteGeo",
     "CheckDhcpPermission",
     "CheckDiagnosticsTools",
     "CheckExternalReachability",
@@ -28,6 +31,7 @@ __all__ = [
     "DiagnosticsApplicationError",
     "DiagnosticsToolMissingError",
     "ExternalCheckError",
+    "GeoLookup",
     "GrabBanner",
     "ResolveDns",
     "RogueDhcpPermissionError",

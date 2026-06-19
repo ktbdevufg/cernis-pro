@@ -62,7 +62,7 @@ Block 3:
   Alternative -- anders als traceroute KEINE rootless Methode).
 """
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 from application.diagnostics.errors import RogueDhcpPermissionError
 from domain.diagnostics import (
@@ -118,6 +118,13 @@ _NOT_CONFIGURED_HINT = (
     "Externer Check nicht konfiguriert: bitte cpnetcheck-URL und Token in den Einstellungen setzen."
 )
 
+# Quellen-AGNOSTISCHE Geo-Naht (ADR 0036, Hauptpfad): ``BuildRouteGeo`` reichert jeden
+# antwortenden Hop ueber dieses Callable an -- IP -> rohes ``{country, asn, asn_org}``-dict.
+# Es ist BEWUSST ein dict (KEIN ``GeoAsnRecord``): so nennt die diagnostics-Domaene die
+# resolver-Domaene NICHT (import-linter independence). Die echte Geo-Quelle (CsvGeoAsnDb)
+# wird erst im Composition Root (app.py) eingehaengt -- der Use-Case kennt sie nicht.
+GeoLookup = Callable[[str], dict[str, str | None]]
+
 
 class ResolveDns:
     """DNS-Aufloesung: duenner Lese-Pass-Through ueber den ``DnsResolver``.
@@ -150,6 +157,61 @@ class RunTraceroute:
     async def __call__(self, target: str, privileged: bool) -> TracerouteResult:
         """Misst den Pfad zu ``target`` (duenner Pass-Through; ``privileged`` durchgereicht)."""
         return await self._runner.run(target, privileged)
+
+
+class BuildRouteGeo:
+    """Route-zum-Ziel (ADR 0036): traceroute-Hops je IP lokal mit Geo/ASN anreichern.
+
+    Quellen-AGNOSTISCH (Muster ``BuildTopology``/``application.export``): bekommt den
+    ``RunTraceroute``-Use-Case (eigene diagnostics-Domaene -- erlaubt) UND ein rohes
+    ``GeoLookup``-Callable (IP -> ``{country, asn, asn_org}``-dict) per Constructor-Injection.
+    Das Geo-Callable nennt die resolver-Domaene NICHT (es reicht ein dict herein) -- die
+    echte Quelle (CsvGeoAsnDb) faellt erst im Composition Root, die independence-Naht bleibt
+    hart (weder diagnostics-Domaene noch -Port kennt resolver). KEIN ``infrastructure``.
+
+    LOKAL + SYNCHRON im Geo-Teil (der Lookup ist ein lokaler DB-Treffer, kein Netz-I/O):
+    der Hauptpfad bleibt schnell und root-frei. ``asn_org`` traegt der lokale DB-Lookup
+    BEWUSST ``None`` (die CSV-DB kennt nur Land + ASN-Nummer; der Klartext-Betreibername
+    kommt -- nur auf expliziten Nutzer-Abruf -- aus ``EnrichRouteOrgs``/RDAP, nicht hier
+    geraten). Das ist ehrliche Leere, KEIN stiller Fallback (S3).
+
+    EHRLICHE LUECKEN: ein nicht-antwortender Hop (``address=None``) wird NICHT per Geo
+    angefragt und behaelt ``country/asn/asn_org = None`` -- die Luecke bleibt als Hop
+    sichtbar (kein Weglassen, kein erfundener Wert). Gibt ROHE ``list[dict]`` zurueck; die
+    Wire-Form baut der api-Rand.
+    """
+
+    def __init__(self, run_traceroute: RunTraceroute, geo_lookup: GeoLookup) -> None:
+        self._run_traceroute = run_traceroute
+        self._geo_lookup = geo_lookup
+
+    async def __call__(self, target: str, privileged: bool) -> dict[str, object]:
+        """Misst den Pfad zu ``target`` und reichert jeden antwortenden Hop lokal an.
+
+        ``privileged`` wird unveraendert an ``RunTraceroute`` durchgereicht (bewusste
+        Nutzerwahl, keine Selbst-Eskalation). Pro Hop: hat er eine ``address``, wird sie
+        lokal+synchron ueber ``geo_lookup`` aufgeloest (``country``/``asn`` aus der DB,
+        ``asn_org`` ehrlich ``None``); ist die ``address`` ``None`` (Timeout-Luecke), bleibt
+        der Hop ohne Geo-Felder (``None``) -- die Luecke bleibt sichtbar. Gibt rohe
+        ``{target, privileged, hops:[{hop, address, rtt_ms, country, asn, asn_org}]}`` zurueck.
+        """
+        result = await self._run_traceroute(target, privileged)
+        hops: list[dict[str, object]] = []
+        for hop in result.hops:
+            geo: dict[str, str | None] = (
+                self._geo_lookup(hop.address) if hop.address is not None else {}
+            )
+            hops.append(
+                {
+                    "hop": hop.hop,
+                    "address": hop.address,
+                    "rtt_ms": hop.rtt_ms,
+                    "country": geo.get("country"),
+                    "asn": geo.get("asn"),
+                    "asn_org": geo.get("asn_org"),
+                }
+            )
+        return {"target": result.target, "privileged": result.privileged, "hops": hops}
 
 
 class GrabBanner:
