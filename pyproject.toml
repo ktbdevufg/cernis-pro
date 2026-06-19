@@ -239,6 +239,7 @@ modules = [
     "domain.resolver",
     "domain.sni",
     "domain.fritz_detail",
+    "domain.cve",
 ]
 
 # Die neuen Ringe duerfen den Altcode (modules/) NIE importieren. Der Legacy-Bezug
