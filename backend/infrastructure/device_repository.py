@@ -77,6 +77,22 @@ def _decode_list(mac: str, column: str, raw: str) -> tuple[Any, ...]:
     return tuple(decoded)
 
 
+def _row_value(row: sqlite3.Row, column: str, default: Any) -> Any:
+    """Liest eine Spalte aus einer ``sqlite3.Row`` defensiv (fehlt sie -> Default).
+
+    ``sqlite3.Row`` hat kein ``.get`` -- ein Zugriff auf eine nicht vorhandene
+    Spalte wuerfe ``IndexError``. Fuer additiv eingefuehrte Spalten (z. B.
+    ``watch_dismissed``) braucht es einen Fallback, falls eine Row aus einer
+    Alt-Tabelle ohne diese Spalte stammt (doppelte Absicherung neben dem
+    ALTER-Default).
+    """
+    # sqlite3.Row ist kein dict; ``in`` pruefte Werte, nicht Spaltennamen --
+    # darum explizit ueber die Spaltennamen-Liste von ``keys()``.
+    if column in list(row.keys()):
+        return row[column]
+    return default
+
+
 def _row_to_trust_state(raw: Any) -> TrustState:
     """TEXT-Spalte -> ``TrustState``. NULL/leer -> Default NEUTRAL (defensiv).
 
@@ -100,6 +116,10 @@ def _row_to_device(row: sqlite3.Row) -> Device:
         times_seen=row["times_seen"],
         is_known=bool(row["is_known"]),
         trust_state=_row_to_trust_state(row["trust_state"]),
+        # Defensiv: eine vor der Migration angelegte Zeile hat die Spalte evtl.
+        # nicht (der ALTER-Default griffe -- hier doppelt abgesichert). Fehlt
+        # die Spalte ganz, gilt False (in der Wache, nicht weggelegt).
+        watch_dismissed=bool(_row_value(row, "watch_dismissed", 0)),
         vendor=row["vendor"],
         label=row["label"],
         notes=row["notes"],
@@ -145,6 +165,7 @@ class SqliteDeviceRepository:
                     category     TEXT DEFAULT '',
                     is_known     INTEGER DEFAULT 0,
                     trust_state  TEXT NOT NULL DEFAULT 'neutral',
+                    watch_dismissed INTEGER NOT NULL DEFAULT 0,
                     first_seen   TEXT DEFAULT (datetime('now')),
                     last_seen    TEXT DEFAULT (datetime('now')),
                     last_ip      TEXT DEFAULT '',
@@ -170,6 +191,14 @@ class SqliteDeviceRepository:
                 conn.execute(
                     "ALTER TABLE devices ADD COLUMN trust_state TEXT NOT NULL DEFAULT 'neutral'"
                 )
+            # Zweiter additiver Schema-Guard (gleiches Muster wie trust_state):
+            # eine vor der Wache-Etappe angelegte devices-Tabelle bekommt
+            # watch_dismissed per ALTER nachgeruestet. NOT NULL DEFAULT 0 ->
+            # bestehende Zeilen erhalten verlustfrei "nicht weggelegt".
+            if "watch_dismissed" not in cols:
+                conn.execute(
+                    "ALTER TABLE devices ADD COLUMN watch_dismissed INTEGER NOT NULL DEFAULT 0"
+                )
 
     def get(self, mac: str) -> Device | None:
         with self._connect() as conn:
@@ -189,17 +218,29 @@ class SqliteDeviceRepository:
             rows = conn.execute(query).fetchall()
         return [_row_to_device(row) for row in rows]
 
+    def get_unclassified(self) -> list[Device]:
+        # Die Wache: noch nicht eingeordnet (is_known=0) UND nicht weggelegt
+        # (watch_dismissed=0), neueste zuerst. Leerer Bestand -> [].
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM devices WHERE is_known = 0 AND watch_dismissed = 0"
+                " ORDER BY last_seen DESC"
+            ).fetchall()
+        return [_row_to_device(row) for row in rows]
+
     def save(self, device: Device) -> None:
         with self._connect() as conn:
             conn.execute(
                 "INSERT INTO devices ("
                 " mac, vendor, label, tags, notes, category, is_known, trust_state,"
+                " watch_dismissed,"
                 " first_seen, last_seen, last_ip, times_seen, open_ports, hostname, os_guess"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(mac) DO UPDATE SET"
                 " vendor = excluded.vendor, label = excluded.label, tags = excluded.tags,"
                 " notes = excluded.notes, category = excluded.category,"
                 " is_known = excluded.is_known, trust_state = excluded.trust_state,"
+                " watch_dismissed = excluded.watch_dismissed,"
                 " first_seen = excluded.first_seen,"
                 " last_seen = excluded.last_seen, last_ip = excluded.last_ip,"
                 " times_seen = excluded.times_seen, open_ports = excluded.open_ports,"
@@ -213,6 +254,7 @@ class SqliteDeviceRepository:
                     device.category,
                     int(device.is_known),
                     device.trust_state.value,
+                    int(device.watch_dismissed),
                     _fmt_dt(device.first_seen),
                     _fmt_dt(device.last_seen),
                     device.last_ip,

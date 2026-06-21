@@ -10,7 +10,7 @@
 //     os_guess, tags[], open_ports[], last_ip, times_seen, first_seen,
 //     last_seen }
 
-import { apiPut } from "./client.js";
+import { apiGet, apiPost, apiPut } from "./client.js";
 
 // Ein Wire-Gerät -> View-Gerät. snake_case -> camelCase. Fehlende Felder
 // werden leer/null, nicht erfunden.
@@ -25,6 +25,8 @@ export function mappeDevice(wire) {
     // Wertende Einschätzung (trusted/neutral/watch). Defensiver Default
     // "neutral" — kein erfundener Wert, falls das Feld fehlt.
     trustState: wire.trust_state ?? "neutral",
+    // Wache-Wegleg-Flag: nur ein echtes true zählt (fehlt das Feld -> false).
+    watchDismissed: wire.watch_dismissed === true,
     hostname: wire.hostname,
     osGuess: wire.os_guess,
     tags: wire.tags ?? [],
@@ -73,4 +75,29 @@ export async function setTrustState(mac, trustState) {
   return mappeDevice(antwort);
 }
 
-export default { updateDeviceMeta, setTrustState };
+// Lädt die Gäste-/Unbekannt-Wache: noch nicht eingeordnete, nicht weggelegte
+// Geräte (GET /api/devices/unclassified). Liefert die gemappte View-Liste
+// (camelCase). Leere Wache -> [].
+export async function fetchUnclassifiedDevices() {
+  const antwort = await apiGet("/api/devices/unclassified");
+  return (antwort ?? []).map(mappeDevice);
+}
+
+// Legt ein Gerät aus der Wache weg (dismissed=true) oder holt es zurück
+// (dismissed=false) per POST /api/devices/{mac}/dismiss. Gibt das aktualisierte
+// Gerät in View-Form zurück. Das Gerät bleibt im Bestand — nur die Wache-
+// Sichtbarkeit ändert sich (rücknehmbar).
+export async function dismissDevice(mac, dismissed) {
+  const antwort = await apiPost(
+    `/api/devices/${encodeURIComponent(mac)}/dismiss`,
+    { dismissed },
+  );
+  return mappeDevice(antwort);
+}
+
+export default {
+  updateDeviceMeta,
+  setTrustState,
+  fetchUnclassifiedDevices,
+  dismissDevice,
+};

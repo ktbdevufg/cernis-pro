@@ -182,6 +182,11 @@
         "subtitle": "Capture the local network: devices, IPv4, MAC, open ports.",
         "locked": ""
       },
+      "watch": {
+        "title": "Guest watch",
+        "subtitle": "Newly seen, not-yet-classified devices — collected quietly, no alarm.",
+        "locked": ""
+      },
       "traffic": {
         "title": "Per-app traffic",
         "subtitle": "Which application connects where, broken down by app.",
@@ -303,6 +308,27 @@
           "saveError": "Save failed."
         }
       }
+    },
+    "watch": {
+      "counter_one": "{{count}} since your last look",
+      "counter_other": "{{count}} since your last look",
+      "subtitle": "A quiet collection — no alarm. Classify whenever it suits you.",
+      "empty": "Nothing waiting. New, unclassified devices show up here.",
+      "loadError": "Could not load the watch.",
+      "actionError": "Action failed.",
+      "actionTrust": "Trusted",
+      "actionNote": "Note",
+      "actionDismiss": "Hide",
+      "notePlaceholder": "Free note about this device",
+      "noteSave": "Save",
+      "seenUnknown": "first seen at an unknown time",
+      "seenJustNow": "first seen just now",
+      "seenMinutes_one": "first seen {{count}} minute ago",
+      "seenMinutes_other": "first seen {{count}} minutes ago",
+      "seenHours_one": "first seen {{count}} hour ago",
+      "seenHours_other": "first seen {{count}} hours ago",
+      "seenDays_one": "first seen {{count}} day ago",
+      "seenDays_other": "first seen {{count}} days ago"
     },
     "traffic": {
       "title": "Per-app traffic",

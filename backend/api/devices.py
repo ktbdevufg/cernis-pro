@@ -24,9 +24,11 @@ from pydantic import BaseModel
 from application.devices import (
     DeleteDevice,
     DeviceNotFoundError,
+    DismissDeviceFromWatch,
     GetDevice,
     GetDevices,
     GetDeviceStats,
+    GetUnclassifiedDevices,
     InvalidTrustStateError,
     RecordScannedHost,
     UpdateDeviceMeta,
@@ -63,6 +65,14 @@ def provide_record_scanned_host() -> RecordScannedHost:
     raise NotImplementedError("RecordScannedHost wird in app.py verdrahtet")
 
 
+def provide_get_unclassified_devices() -> GetUnclassifiedDevices:
+    raise NotImplementedError("GetUnclassifiedDevices wird in app.py verdrahtet")
+
+
+def provide_dismiss_device_from_watch() -> DismissDeviceFromWatch:
+    raise NotImplementedError("DismissDeviceFromWatch wird in app.py verdrahtet")
+
+
 class DeviceMetaBody(BaseModel):
     """Partielles Update der User-Metadaten -- alle Felder optional (None = nicht aendern)."""
 
@@ -75,6 +85,14 @@ class DeviceMetaBody(BaseModel):
     # Validierung gegen die erlaubten Werte und die Hebung str->TrustState macht
     # der Use-Case; ein ungueltiger Wert wird unten auf HTTP 422 abgebildet.
     trust_state: str | None = None
+    # Wache-Wegleg-Flag ueber den generischen Update-Pfad (None = nicht aendern).
+    watch_dismissed: bool | None = None
+
+
+class DismissBody(BaseModel):
+    """Body von POST /{mac}/dismiss: ``dismissed`` legt weg (True) bzw. holt zurueck (False)."""
+
+    dismissed: bool
 
 
 def _device_to_dict(device: Any) -> dict[str, Any]:
@@ -88,6 +106,7 @@ def _device_to_dict(device: Any) -> dict[str, Any]:
         "category": device.category,
         "is_known": device.is_known,
         "trust_state": device.trust_state.value,
+        "watch_dismissed": device.watch_dismissed,
         "hostname": device.hostname,
         "os_guess": device.os_guess,
         "tags": list(device.tags),
@@ -127,6 +146,16 @@ def list_devices(
     return [_device_to_dict(device) for device in get_devices(known_only)]
 
 
+# /unclassified VOR /{mac} deklarieren, sonst faengt der Pfad-Parameter
+# "unclassified" als MAC.
+@router.get("/unclassified")
+def list_unclassified_devices(
+    get_unclassified: Annotated[GetUnclassifiedDevices, Depends(provide_get_unclassified_devices)],
+) -> list[dict[str, Any]]:
+    """Die Gaeste-/Unbekannt-Wache: noch nicht eingeordnete, nicht weggelegte Geraete."""
+    return [_device_to_dict(device) for device in get_unclassified()]
+
+
 @router.get("/{mac}")
 def get_device(
     mac: str,
@@ -161,6 +190,7 @@ def put_device(
             category=body.category,
             is_known=body.is_known,
             trust_state=body.trust_state,
+            watch_dismissed=body.watch_dismissed,
         )
     except DeviceNotFoundError as exc:
         raise HTTPException(
@@ -184,3 +214,22 @@ def delete_device(
     """Loescht ein Geraet (inkl. IP-History). Idempotent -> kein 404."""
     delete_device(mac)
     return {"ok": True}
+
+
+@router.post("/{mac}/dismiss")
+def dismiss_device(
+    mac: str,
+    body: DismissBody,
+    dismiss_from_watch: Annotated[
+        DismissDeviceFromWatch, Depends(provide_dismiss_device_from_watch)
+    ],
+) -> dict[str, Any]:
+    """Legt ein Geraet aus der Wache weg (``dismissed=true``) bzw. holt es zurueck;
+    unbekannte MAC -> 404. Anders als DELETE bleibt das Geraet im Bestand."""
+    try:
+        updated = dismiss_from_watch(mac, body.dismissed)
+    except DeviceNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Geraet nicht gefunden."
+        ) from exc
+    return _device_to_dict(updated)

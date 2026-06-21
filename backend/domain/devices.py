@@ -69,6 +69,11 @@ class Device:
     times_seen: int = 1
     is_known: bool = False
     trust_state: TrustState = TrustState.NEUTRAL
+    # Gaeste-/Unbekannt-Wache: das Geraet wurde aus der Wache "weggelegt"
+    # (ignoriert, NICHT geloescht). Default False = es taucht in der Wache auf,
+    # solange es zugleich nicht bekannt ist (``is_known``). Allein
+    # User-gesteuert -- ein Scan aendert es NIE (wie is_known/trust_state).
+    watch_dismissed: bool = False
     vendor: str = ""
     label: str = ""
     notes: str = ""
@@ -175,9 +180,11 @@ def merge_scan(existing: Device | None, scanned: ScannedHost, now: datetime) -> 
     Die Zeit kommt ausschliesslich ueber ``now`` (kein ``datetime.now()`` hier).
     """
     if existing is None:
-        # Neuentdeckung: trust_state wird NICHT gesetzt -> der Default NEUTRAL
-        # greift. Ein Scan vergibt nie eine Wertung; die kommt allein vom User
-        # ueber UpdateDeviceMeta (wie is_known).
+        # Neuentdeckung: trust_state und watch_dismissed werden NICHT gesetzt ->
+        # die Defaults NEUTRAL bzw. False greifen. Ein Scan vergibt nie eine
+        # Wertung und legt nichts weg; das kommt allein vom User ueber
+        # UpdateDeviceMeta/DismissDeviceFromWatch (wie is_known). Eine
+        # Neuentdeckung gehoert also frisch in die Wache (watch_dismissed=False).
         return Device(
             mac=scanned.mac,
             first_seen=now,
@@ -199,8 +206,10 @@ def merge_scan(existing: Device | None, scanned: ScannedHost, now: datetime) -> 
         vendor=_scan_or_keep(scanned.vendor, existing.vendor),
         hostname=_scan_or_keep(scanned.hostname, existing.hostname),
         os_guess=_scan_or_keep(scanned.os_guess, existing.os_guess),
-        # first_seen/label/tags/notes/is_known/trust_state/category bleiben via
-        # replace erhalten -- ein Re-Scan aendert trust_state NIE.
+        # first_seen/label/tags/notes/is_known/trust_state/watch_dismissed/
+        # category bleiben via replace erhalten -- ein Re-Scan aendert
+        # watch_dismissed NIE (ein einmal Weggelegtes bleibt weggelegt, ein
+        # noch nicht Weggelegtes bleibt in der Wache).
     )
 
 

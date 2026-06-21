@@ -14,9 +14,11 @@ import pytest
 from application.devices import (
     DeleteDevice,
     DeviceNotFoundError,
+    DismissDeviceFromWatch,
     GetDevice,
     GetDevices,
     GetDeviceStats,
+    GetUnclassifiedDevices,
     InvalidTrustStateError,
     RecordScannedHost,
     UpdateDeviceMeta,
@@ -52,6 +54,10 @@ class FakeDeviceRepository:
 
     def get_all(self, known_only: bool) -> list[Device]:
         items = [d for d in self._devices.values() if d.is_known or not known_only]
+        return sorted(items, key=lambda d: d.last_seen, reverse=True)
+
+    def get_unclassified(self) -> list[Device]:
+        items = [d for d in self._devices.values() if not d.is_known and not d.watch_dismissed]
         return sorted(items, key=lambda d: d.last_seen, reverse=True)
 
     def save(self, device: Device) -> None:
@@ -157,6 +163,22 @@ def test_get_devices_passes_known_only_through(repo: FakeDeviceRepository) -> No
     assert [d.mac for d in GetDevices(repo)(known_only=True)] == ["AA:BB:CC:DD:EE:01"]
 
 
+# ── GetUnclassifiedDevices (Wache) ──────────────────────────────────────────
+
+
+def test_get_unclassified_filters_known_and_dismissed(repo: FakeDeviceRepository) -> None:
+    # In der Wache: nur is_known=False UND watch_dismissed=False.
+    repo.save(_device("AA:BB:CC:DD:EE:01"))  # is_known=False, watch_dismissed=False -> in Wache
+    repo.save(_device("AA:BB:CC:DD:EE:02", is_known=True))  # bekannt -> raus
+    repo.save(_device("AA:BB:CC:DD:EE:03", watch_dismissed=True))  # weggelegt -> raus
+    macs = {d.mac for d in GetUnclassifiedDevices(repo)()}
+    assert macs == {"AA:BB:CC:DD:EE:01"}
+
+
+def test_get_unclassified_empty_returns_empty_list(repo: FakeDeviceRepository) -> None:
+    assert GetUnclassifiedDevices(repo)() == []
+
+
 # ── GetDevice ───────────────────────────────────────────────────────────────
 
 
@@ -244,6 +266,51 @@ def test_update_explicit_is_known_overrides_trust_implication(repo: FakeDeviceRe
     updated = UpdateDeviceMeta(repo)(MAC, trust_state=TrustState.TRUSTED, is_known=False)
     assert updated.is_known is False
     assert updated.trust_state is TrustState.TRUSTED
+
+
+def test_update_device_meta_sets_watch_dismissed(repo: FakeDeviceRepository) -> None:
+    # Generischer Update-Pfad fuer das Wache-Wegleg-Flag.
+    repo.save(_device(watch_dismissed=False))
+    updated = UpdateDeviceMeta(repo)(MAC, watch_dismissed=True)
+    assert updated.watch_dismissed is True
+
+
+def test_update_device_meta_watch_dismissed_none_leaves_untouched(
+    repo: FakeDeviceRepository,
+) -> None:
+    repo.save(_device(watch_dismissed=True))
+    updated = UpdateDeviceMeta(repo)(MAC, label="neu")  # watch_dismissed nicht uebergeben
+    assert updated.watch_dismissed is True
+
+
+# ── DismissDeviceFromWatch ──────────────────────────────────────────────────
+
+
+def test_dismiss_sets_watch_dismissed_true(repo: FakeDeviceRepository) -> None:
+    repo.save(_device(watch_dismissed=False))
+    updated = DismissDeviceFromWatch(repo)(MAC, dismissed=True)
+    assert updated.watch_dismissed is True
+    stored = repo.get(MAC)
+    assert stored is not None
+    assert stored.watch_dismissed is True
+
+
+def test_dismiss_reverts_watch_dismissed_false(repo: FakeDeviceRepository) -> None:
+    # Ruecknehmbar: ein weggelegtes Geraet wieder in die Wache holen.
+    repo.save(_device(watch_dismissed=True))
+    updated = DismissDeviceFromWatch(repo)(MAC, dismissed=False)
+    assert updated.watch_dismissed is False
+
+
+def test_dismiss_single_save_path(repo: FakeDeviceRepository) -> None:
+    repo.save(_device())  # save_calls == 1 (Setup)
+    DismissDeviceFromWatch(repo)(MAC, dismissed=True)
+    assert repo.save_calls == 2  # genau EIN zusaetzlicher Schreibpfad
+
+
+def test_dismiss_unknown_mac_raises(repo: FakeDeviceRepository) -> None:
+    with pytest.raises(DeviceNotFoundError):
+        DismissDeviceFromWatch(repo)("AA:BB:CC:DD:EE:99", dismissed=True)
 
 
 def test_update_device_meta_single_save_no_dual_write(repo: FakeDeviceRepository) -> None:

@@ -96,6 +96,20 @@ def test_default_trust_state_neutral_roundtrips(repo: SqliteDeviceRepository) ->
     assert got.trust_state is TrustState.NEUTRAL
 
 
+def test_watch_dismissed_roundtrips(repo: SqliteDeviceRepository) -> None:
+    repo.save(_device(watch_dismissed=True))
+    got = repo.get(MAC)
+    assert got is not None
+    assert got.watch_dismissed is True
+
+
+def test_default_watch_dismissed_false_roundtrips(repo: SqliteDeviceRepository) -> None:
+    repo.save(_device())  # _device setzt watch_dismissed nicht -> Default False
+    got = repo.get(MAC)
+    assert got is not None
+    assert got.watch_dismissed is False
+
+
 def test_save_with_none_last_ip_roundtrips(repo: SqliteDeviceRepository) -> None:
     repo.save(_device(last_ip=None))
     got = repo.get(MAC)
@@ -152,6 +166,28 @@ def test_append_and_get_ip_history_order_and_limit(repo: SqliteDeviceRepository)
 
 def test_get_ip_history_unknown_mac_returns_empty(repo: SqliteDeviceRepository) -> None:
     assert repo.get_ip_history("00:00:00:00:00:00") == []
+
+
+# ── get_unclassified (Wache) ────────────────────────────────────────────────
+
+
+def test_get_unclassified_empty_returns_empty_list(repo: SqliteDeviceRepository) -> None:
+    assert repo.get_unclassified() == []
+
+
+def test_get_unclassified_filters_known_and_dismissed(repo: SqliteDeviceRepository) -> None:
+    repo.save(_device("AA:BB:CC:DD:EE:01", is_known=False, watch_dismissed=False))  # in Wache
+    repo.save(_device("AA:BB:CC:DD:EE:02", is_known=True))  # bekannt -> raus
+    repo.save(_device("AA:BB:CC:DD:EE:03", is_known=False, watch_dismissed=True))  # weggelegt
+    macs = [d.mac for d in repo.get_unclassified()]
+    assert macs == ["AA:BB:CC:DD:EE:01"]
+
+
+def test_get_unclassified_orders_by_last_seen_desc(repo: SqliteDeviceRepository) -> None:
+    repo.save(_device("AA:BB:CC:DD:EE:01", is_known=False, last_seen=EARLIER))
+    repo.save(_device("AA:BB:CC:DD:EE:02", is_known=False, last_seen=NOW))
+    macs = [d.mac for d in repo.get_unclassified()]
+    assert macs == ["AA:BB:CC:DD:EE:02", "AA:BB:CC:DD:EE:01"]  # neuer zuerst
 
 
 # ── BUG-1-FIX: delete raeumt beide Tabellen ─────────────────────────────────
@@ -255,6 +291,20 @@ def test_migration_adds_trust_state_with_neutral_default(tmp_path: Path) -> None
     got = repo.get(MAC)
     assert got is not None
     assert got.trust_state is TrustState.NEUTRAL
+
+
+def test_migration_adds_watch_dismissed_with_false_default(tmp_path: Path) -> None:
+    # Die Legacy-DB hat weder trust_state NOCH watch_dismissed; beide additiven
+    # Guards greifen verlustfrei. Die Bestandszeile bekommt watch_dismissed=False
+    # (gehoert also in die Wache, sofern nicht bekannt).
+    db_path = tmp_path / "cernis.db"
+    _create_legacy_devices_db(db_path, MAC)
+    repo = SqliteDeviceRepository(db_path)  # _ensure_schema ruestet die Spalte nach
+    got = repo.get(MAC)
+    assert got is not None
+    assert got.watch_dismissed is False
+    # Und die migrierte Zeile (is_known=0) erscheint in der Wache.
+    assert [d.mac for d in repo.get_unclassified()] == [MAC]
 
 
 # ── MAC-Normalisierung ───────────────────────────────────────────────────────

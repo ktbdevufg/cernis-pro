@@ -182,6 +182,11 @@
         "subtitle": "Das lokale Netz aufnehmen: Geräte, IPv4, MAC, offene Ports.",
         "locked": ""
       },
+      "watch": {
+        "title": "Gäste-Wache",
+        "subtitle": "Neu gesehene, noch nicht eingeordnete Geräte — ruhig gesammelt, kein Alarm.",
+        "locked": ""
+      },
       "traffic": {
         "title": "Per-App-Verkehr",
         "subtitle": "Welche Anwendung wohin verbindet, aufgeschlüsselt je App.",
@@ -303,6 +308,27 @@
           "saveError": "Speichern fehlgeschlagen."
         }
       }
+    },
+    "watch": {
+      "counter_one": "{{count}} seit deinem letzten Blick",
+      "counter_other": "{{count}} seit deinem letzten Blick",
+      "subtitle": "Ruhige Sammlung — kein Alarm. Ordne ein, wann es dir passt.",
+      "empty": "Nichts in der Wache. Neue, nicht eingeordnete Geräte erscheinen hier.",
+      "loadError": "Die Wache konnte nicht geladen werden.",
+      "actionError": "Aktion fehlgeschlagen.",
+      "actionTrust": "Vertraut",
+      "actionNote": "Notiz",
+      "actionDismiss": "Ausblenden",
+      "notePlaceholder": "Freie Notiz zu diesem Gerät",
+      "noteSave": "Speichern",
+      "seenUnknown": "zuerst gesehen zu unbekannter Zeit",
+      "seenJustNow": "gerade zuerst gesehen",
+      "seenMinutes_one": "zuerst gesehen vor {{count}} Minute",
+      "seenMinutes_other": "zuerst gesehen vor {{count}} Minuten",
+      "seenHours_one": "zuerst gesehen vor {{count}} Stunde",
+      "seenHours_other": "zuerst gesehen vor {{count}} Stunden",
+      "seenDays_one": "zuerst gesehen vor {{count}} Tag",
+      "seenDays_other": "zuerst gesehen vor {{count}} Tagen"
     },
     "traffic": {
       "title": "Per-App-Verkehr",

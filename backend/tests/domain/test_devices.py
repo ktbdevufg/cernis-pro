@@ -186,6 +186,29 @@ def test_merge_scan_preserves_trust_state_over_rescan() -> None:
     assert result.trust_state is TrustState.WATCH
 
 
+# ── watch_dismissed: Default, Insert, Bewahrung ─────────────────────────────
+
+
+def test_device_default_watch_dismissed_is_false() -> None:
+    dev = Device(mac=MAC, first_seen=NOW, last_seen=NOW)
+    assert dev.watch_dismissed is False
+
+
+def test_merge_scan_new_device_watch_dismissed_false() -> None:
+    # Insert-Zweig (existing is None): watch_dismissed wird nicht gesetzt ->
+    # Default False -> eine Neuentdeckung gehoert frisch in die Wache.
+    result = merge_scan(None, ScannedHost(mac=MAC, ip="10.0.0.5"), NOW)
+    assert result.watch_dismissed is False
+
+
+def test_merge_scan_preserves_watch_dismissed_over_rescan() -> None:
+    # Ein Re-Scan darf watch_dismissed NIE aendern (wie is_known/trust_state):
+    # ein einmal Weggelegtes bleibt weggelegt.
+    existing = replace(_curated_existing(), watch_dismissed=True)
+    result = merge_scan(existing, ScannedHost(mac=MAC, ip="10.0.0.9"), NOW)
+    assert result.watch_dismissed is True
+
+
 # ── should_append_ip ─────────────────────────────────────────────────────────
 
 

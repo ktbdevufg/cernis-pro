@@ -81,9 +81,11 @@ from api.cve import (
 from api.cve import router as cve_router
 from api.devices import (
     provide_delete_device,
+    provide_dismiss_device_from_watch,
     provide_get_device,
     provide_get_device_stats,
     provide_get_devices,
+    provide_get_unclassified_devices,
     provide_record_scanned_host,
     provide_update_device_meta,
 )
@@ -215,9 +217,11 @@ from application.cve import (
 )
 from application.devices import (
     DeleteDevice,
+    DismissDeviceFromWatch,
     GetDevice,
     GetDevices,
     GetDeviceStats,
+    GetUnclassifiedDevices,
     RecordScannedHost,
     UpdateDeviceMeta,
 )
@@ -1321,8 +1325,14 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         device_repository(), device_clock
     )
     app.dependency_overrides[provide_get_devices] = lambda: GetDevices(device_repository())
+    app.dependency_overrides[provide_get_unclassified_devices] = lambda: GetUnclassifiedDevices(
+        device_repository()
+    )
     app.dependency_overrides[provide_get_device] = lambda: GetDevice(device_repository())
     app.dependency_overrides[provide_update_device_meta] = lambda: UpdateDeviceMeta(
+        device_repository()
+    )
+    app.dependency_overrides[provide_dismiss_device_from_watch] = lambda: DismissDeviceFromWatch(
         device_repository()
     )
     app.dependency_overrides[provide_delete_device] = lambda: DeleteDevice(device_repository())

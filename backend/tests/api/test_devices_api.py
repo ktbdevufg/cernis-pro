@@ -19,17 +19,21 @@ from fastapi.testclient import TestClient
 
 from api.devices import (
     provide_delete_device,
+    provide_dismiss_device_from_watch,
     provide_get_device,
     provide_get_device_stats,
     provide_get_devices,
+    provide_get_unclassified_devices,
     provide_update_device_meta,
 )
 from app import create_app
 from application.devices import (
     DeleteDevice,
+    DismissDeviceFromWatch,
     GetDevice,
     GetDevices,
     GetDeviceStats,
+    GetUnclassifiedDevices,
     UpdateDeviceMeta,
 )
 from domain.devices import Device, IpHistoryEntry
@@ -72,8 +76,14 @@ def _wired_app(repo: SqliteDeviceRepository) -> FastAPI:
     app = create_app(AppConfig())
     app.dependency_overrides[provide_get_device_stats] = lambda: GetDeviceStats(repo, clock)
     app.dependency_overrides[provide_get_devices] = lambda: GetDevices(repo)
+    app.dependency_overrides[provide_get_unclassified_devices] = lambda: GetUnclassifiedDevices(
+        repo
+    )
     app.dependency_overrides[provide_get_device] = lambda: GetDevice(repo)
     app.dependency_overrides[provide_update_device_meta] = lambda: UpdateDeviceMeta(repo)
+    app.dependency_overrides[provide_dismiss_device_from_watch] = lambda: DismissDeviceFromWatch(
+        repo
+    )
     app.dependency_overrides[provide_delete_device] = lambda: DeleteDevice(repo)
     return app
 
@@ -168,6 +178,60 @@ def test_default_trust_state_neutral_in_response(
     repo.save(_device())
     body = client.get(f"/api/devices/{MAC}").json()
     assert body["trust_state"] == "neutral"
+
+
+# ── Wache: GET /unclassified ────────────────────────────────────────────────
+
+
+def test_unclassified_lists_only_watch_devices(
+    client: TestClient, repo: SqliteDeviceRepository
+) -> None:
+    repo.save(_device("AA:BB:CC:DD:EE:01", is_known=False, watch_dismissed=False))  # in Wache
+    repo.save(_device("AA:BB:CC:DD:EE:02", is_known=True))  # bekannt -> raus
+    repo.save(_device("AA:BB:CC:DD:EE:03", is_known=False, watch_dismissed=True))  # weggelegt
+    body = client.get("/api/devices/unclassified").json()
+    assert [d["mac"] for d in body] == ["AA:BB:CC:DD:EE:01"]
+    assert body[0]["watch_dismissed"] is False
+
+
+def test_unclassified_not_swallowed_by_mac_route(
+    client: TestClient, repo: SqliteDeviceRepository
+) -> None:
+    # /unclassified VOR /{mac}: der Pfad darf NICHT als MAC "unclassified" enden
+    # (das gaebe einen 404 ueber GetDevice). Leerer Bestand -> [] mit 200.
+    resp = client.get("/api/devices/unclassified")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+# ── Wache: POST /{mac}/dismiss ──────────────────────────────────────────────
+
+
+def test_dismiss_removes_device_from_watch(
+    client: TestClient, repo: SqliteDeviceRepository
+) -> None:
+    repo.save(_device(is_known=False, watch_dismissed=False))
+    resp = client.post(f"/api/devices/{MAC}/dismiss", json={"dismissed": True})
+    assert resp.status_code == 200
+    assert resp.json()["watch_dismissed"] is True
+    # Aus der Wache verschwunden, aber weiter im Bestand.
+    assert client.get("/api/devices/unclassified").json() == []
+    assert client.get(f"/api/devices/{MAC}").status_code == 200
+
+
+def test_dismiss_revert_brings_device_back(
+    client: TestClient, repo: SqliteDeviceRepository
+) -> None:
+    repo.save(_device(is_known=False, watch_dismissed=True))
+    resp = client.post(f"/api/devices/{MAC}/dismiss", json={"dismissed": False})
+    assert resp.status_code == 200
+    assert resp.json()["watch_dismissed"] is False
+    assert [d["mac"] for d in client.get("/api/devices/unclassified").json()] == [MAC]
+
+
+def test_dismiss_unknown_device_404(client: TestClient) -> None:
+    resp = client.post("/api/devices/AA:BB:CC:DD:EE:99/dismiss", json={"dismissed": True})
+    assert resp.status_code == 404
 
 
 # ── DELETE idempotent ───────────────────────────────────────────────────────

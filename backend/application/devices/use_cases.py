@@ -58,6 +58,21 @@ class GetDevices:
         return self._repository.get_all(known_only)
 
 
+class GetUnclassifiedDevices:
+    """Die Gaeste-/Unbekannt-Wache: noch nicht eingeordnete, nicht weggelegte Geraete.
+
+    Reine Lese-Orchestrierung -- die Filterung (``is_known=0 AND
+    watch_dismissed=0``) und die Sortierung (``last_seen`` absteigend) liegen im
+    Repository. Leerer Bestand -> ``[]``.
+    """
+
+    def __init__(self, repository: DeviceRepository) -> None:
+        self._repository = repository
+
+    def __call__(self) -> list[Device]:
+        return self._repository.get_unclassified()
+
+
 class GetDevice:
     """Ein Geraet samt IP-Historie; unbekannte MAC -> ``DeviceNotFoundError``."""
 
@@ -93,6 +108,7 @@ class UpdateDeviceMeta:
         category: str | None = None,
         is_known: bool | None = None,
         trust_state: TrustState | str | None = None,
+        watch_dismissed: bool | None = None,
     ) -> Device:
         norm = normalize_mac(mac)
         existing = self._repository.get(norm)
@@ -110,6 +126,11 @@ class UpdateDeviceMeta:
             changes["category"] = category
         if is_known is not None:
             changes["is_known"] = is_known
+        if watch_dismissed is not None:
+            # Generischer Update-Pfad fuer das Wache-Wegleg-Flag; der bequeme
+            # Spezialpfad fuers Frontend ist DismissDeviceFromWatch. None laesst
+            # das Feld unberuehrt, wie alle anderen optionalen Parameter.
+            changes["watch_dismissed"] = watch_dismissed
         if trust_state is not None:
             # Hebung str->TrustState hier (der api-Ring darf domain nicht
             # importieren). Ungueltiger Wert -> lauter Application-Fehler, kein
@@ -127,6 +148,30 @@ class UpdateDeviceMeta:
                 changes["is_known"] = True
 
         updated = replace(existing, **changes)
+        self._repository.save(updated)
+        return updated
+
+
+class DismissDeviceFromWatch:
+    """Legt ein Geraet aus der Wache weg (ignorieren, NICHT loeschen) -- ruecknehmbar.
+
+    Bequemer Spezialpfad fuers Frontend: setzt ``watch_dismissed`` ueber
+    read-modify-write (``dataclasses.replace``, ``Device`` ist frozen) mit genau
+    EINEM Schreibpfad (``repo.save``) -- wie ``UpdateDeviceMeta``, nur auf das
+    eine Feld fokussiert. ``dismissed=True`` legt weg (Geraet verschwindet aus
+    der Wache, bleibt aber im Bestand), ``dismissed=False`` holt es zurueck
+    (ruecknehmbar). Unbekannte MAC -> ``DeviceNotFoundError``.
+    """
+
+    def __init__(self, repository: DeviceRepository) -> None:
+        self._repository = repository
+
+    def __call__(self, mac: str, dismissed: bool) -> Device:
+        norm = normalize_mac(mac)
+        existing = self._repository.get(norm)
+        if existing is None:
+            raise DeviceNotFoundError(norm)
+        updated = replace(existing, watch_dismissed=dismissed)
         self._repository.save(updated)
         return updated
 

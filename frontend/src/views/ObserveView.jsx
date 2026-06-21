@@ -11,7 +11,15 @@
 // Die View weiß nicht, ob die Daten echt oder Platzhalter sind. Bei echter
 // Anbindung wird nur dieser Import ausgetauscht.
 
-import { Activity, FileClock, ListTree, Network, Radar, Repeat } from "lucide-react";
+import {
+  Activity,
+  FileClock,
+  ListTree,
+  Network,
+  Radar,
+  Repeat,
+  ShieldQuestion,
+} from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -34,6 +42,7 @@ import ScanTable, {
 } from "../components/ScanTable.jsx";
 import TopologyView from "../components/TopologyView.jsx";
 import TrafficView from "../components/TrafficView.jsx";
+import WatchView from "./WatchView.jsx";
 import "./ObserveView.css";
 
 // Bildet die rohe Backend-Phase auf eine der drei Anzeige-Phasen ab. Bekannt
@@ -58,6 +67,7 @@ const SCAN_COLUMNS_KEY = "scan_columns";
 // Kachel-Definition: Schlüssel, Icon, Sperrstatus. Reihenfolge ist verbindlich.
 const FUNKTIONEN = [
   { id: "scan", icon: Radar, locked: false },
+  { id: "watch", icon: ShieldQuestion, locked: false },
   { id: "traffic", icon: Repeat, locked: false },
   { id: "monitor", icon: Activity, locked: false },
   { id: "logging", icon: FileClock, locked: false },
@@ -570,6 +580,17 @@ export default function ObserveView({
         onBack={() => setOpenFunction(null)}
       >
         <ScanInhalt />
+      </FunctionShell>
+    );
+  }
+
+  if (openFunction === "watch") {
+    return (
+      <FunctionShell
+        title={t("beobachten.cards.watch.title")}
+        onBack={() => setOpenFunction(null)}
+      >
+        <WatchView />
       </FunctionShell>
     );
   }

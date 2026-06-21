@@ -43,6 +43,16 @@ class DeviceRepository(Protocol):
         """
         ...
 
+    def get_unclassified(self) -> list[Device]:
+        """Die Wache-Liste: Geraete mit ``is_known=0 AND watch_dismissed=0``.
+
+        Noch nie eingeordnete (``is_known`` False) und nicht weggelegte
+        (``watch_dismissed`` False) Geraete, ``last_seen`` absteigend (neueste
+        zuerst). Leerer Bestand -> ``[]``, niemals ``None``. Die Sortierung ist
+        Sache des Adapters.
+        """
+        ...
+
     def save(self, device: Device) -> None:
         """Upsert auf ``device.mac`` -- legt an oder aktualisiert.
 
