@@ -7,7 +7,8 @@
     "settings": "Einstellungen",
     "liveOne": "Live-Monitoring aktiv",
     "liveMany": "{{count}} Monitorings aktiv",
-    "liveZurAnsicht": "Zur Logging-Ansicht"
+    "liveZurAnsicht": "Zur Logging-Ansicht",
+    "home": "Zur Startseite"
   },
   "settings": {
     "title": "Einstellungen",
@@ -70,6 +71,19 @@
       "rulesEmpty": "Keine Regeln vorhanden.",
       "honestyTitle": "Ehrlich gesagt",
       "honestyText": "Die kritische Backdoor-Liste ist historisch nützlich, fängt moderne Malware aber kaum: die nutzt heute 443, DNS oder dynamische Ports. Ein Treffer ist ein klares Signal, aber kein vollständiger Malware-Scan – kein falsches Sicherheitsgefühl."
+    },
+    "startseite": {
+      "title": "Startseite",
+      "hint": "Abgeschaltete Bereiche werden auf der Startseite ausgeblendet. Die Daten gehen dadurch nicht verloren – die Bereiche erscheinen sofort wieder, sobald du sie einschaltest.",
+      "status": "Status-Zeile",
+      "schnellzugriff": "Schnellzugriff",
+      "beachtenswert": "Beachtenswert",
+      "cve": "Neue CVE-Befunde",
+      "kennzahlen": "Kennzahlen-Fußzeile",
+      "statusMonitoring": "Monitoring-Angabe in der Status-Zeile",
+      "loading": "Lädt …",
+      "loadError": "Einstellungen konnten nicht geladen werden.",
+      "saveError": "Speichern fehlgeschlagen."
     }
   },
   "nav": {

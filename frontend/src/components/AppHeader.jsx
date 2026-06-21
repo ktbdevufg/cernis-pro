@@ -10,12 +10,18 @@ import LivePill from "./LivePill.jsx";
 import ThemeToggle from "./ThemeToggle.jsx";
 import "./AppHeader.css";
 
-export default function AppHeader({ theme, onThemeChange, onOpenSettings, onGoToLogging }) {
+export default function AppHeader({ theme, onThemeChange, onOpenSettings, onGoToLogging, onGoHome }) {
   const { t } = useTranslation();
 
   return (
     <header className="app-header">
-      <div className="app-header__brand">
+      <button
+        type="button"
+        className="app-header__brand app-header__brand--button"
+        onClick={onGoHome}
+        aria-label={t("header.home")}
+        title={t("header.home")}
+      >
         <img
           className="app-header__logo"
           src="/cernis-logo.png"
@@ -26,7 +32,7 @@ export default function AppHeader({ theme, onThemeChange, onOpenSettings, onGoTo
           CERNIS PRO
           <span className="app-header__version">{t("app.version")}</span>
         </span>
-      </div>
+      </button>
 
       {/* Live-Monitoring-Pill: nur sichtbar, wenn eine Logging-Aufgabe aktiv ist
           (datengetrieben, eigener Poll). Klick fuehrt zur Logging-Ansicht. */}

@@ -545,3 +545,13 @@
   margin: 0;
   line-height: 1.5;
 }
+
+/* Startseite-Sektion: status_monitoring als eingerückter Unterpunkt der
+   Status-Zeile. Nutzt sonst die auffaelligkeit__rule/__switch-Optik. */
+.startseite__rule--sub {
+  padding-left: 20px;
+}
+
+.startseite__rule--sub .auffaelligkeit__rule-title {
+  color: var(--color-text-sec);
+}

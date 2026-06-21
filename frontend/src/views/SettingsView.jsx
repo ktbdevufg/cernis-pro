@@ -66,6 +66,231 @@ function SettingsSektion({ title, children }) {
   );
 }
 
+// Setting-Key der Startseiten-Bereichsschalter. Wert ist ein JSON-Objekt mit
+// Booleans; fehlt der Key -> alle Defaults true. SPIEGELT bewusst OverviewView
+// (SECTIONS_KEY / SECTION_DEFAULTS): OverviewView liest, diese Sektion schreibt.
+const STARTSEITE_KEY = "overview_sections";
+
+// Default-Sichtbarkeit aller Startseiten-Bereiche (alle true). Identisch zu
+// OverviewView.SECTION_DEFAULTS — fehlt ein einzelner Schalter, gilt sein Default.
+const STARTSEITE_DEFAULTS = {
+  status: true,
+  schnellzugriff: true,
+  beachtenswert: true,
+  cve: true,
+  kennzahlen: true,
+  status_monitoring: true,
+};
+
+// Liest `overview_sections` aus dem rohen Settings-Dict und mischt es über die
+// Defaults. Toleriert Objekt UND JSON-String (Backend-Settings tragen Werte teils
+// als String) — exakt OverviewView.leseSektionen. Nur echte Booleans werden
+// übernommen, alles andere fällt auf den Default true zurück; unparsbar -> Defaults.
+function leseStartseite(settings) {
+  const roh = settings?.[STARTSEITE_KEY];
+  let obj = null;
+  if (roh && typeof roh === "object") {
+    obj = roh;
+  } else if (typeof roh === "string" && roh.length > 0) {
+    try {
+      const geparst = JSON.parse(roh);
+      if (geparst && typeof geparst === "object") {
+        obj = geparst;
+      }
+    } catch {
+      obj = null;
+    }
+  }
+  if (!obj) {
+    return { ...STARTSEITE_DEFAULTS };
+  }
+  const ergebnis = { ...STARTSEITE_DEFAULTS };
+  for (const key of Object.keys(STARTSEITE_DEFAULTS)) {
+    if (typeof obj[key] === "boolean") {
+      ergebnis[key] = obj[key];
+    }
+  }
+  return ergebnis;
+}
+
+// Startseiten-Sektion: eigener Daten-State analog FritzBoxSektion/Auffaelligkeit-
+// Sektion (laden beim Mount, schreiben pro Änderung gegen die Settings-API).
+// onGespeichert ist das gemeinsame zeigeGespeichert-Feedback aus SettingsView.
+//
+// Pro Bereich ein Toggle im auffaelligkeit__rule/__switch-Stil. status_monitoring
+// ist ein Detail der Status-Zeile -> eingerückt und deaktiviert, solange status aus
+// ist (nicht versteckt, damit der Nutzer es kennt).
+function OverviewSektion({ onGespeichert }) {
+  const { t } = useTranslation();
+
+  const [sektionen, setSektionen] = useState(STARTSEITE_DEFAULTS);
+  const [ladeStatus, setLadeStatus] = useState("laedt"); // laedt | bereit | fehler
+  const [speicherFehler, setSpeicherFehler] = useState(false);
+
+  // Einmal beim Mount laden, über die Defaults mischen. Fehler nicht verschlucken
+  // (console.error) und in den Lade-Fehlerzustand gehen.
+  useEffect(() => {
+    let aktiv = true;
+    (async () => {
+      try {
+        const settings = await fetchSettings();
+        if (!aktiv) {
+          return;
+        }
+        setSektionen(leseStartseite(settings));
+        setLadeStatus("bereit");
+      } catch (fehler) {
+        if (!aktiv) {
+          return;
+        }
+        console.error("Startseiten-Einstellungen laden fehlgeschlagen:", fehler);
+        setLadeStatus("fehler");
+      }
+    })();
+    return () => {
+      aktiv = false;
+    };
+  }, []);
+
+  // Einen Bereich umschalten: lokal spiegeln, dann das KOMPLETTE Objekt schreiben
+  // (updateSetting serialisiert wie bei den anderen Objekt-Settings). Bei Fehler
+  // den Speicher-Fehlerzustand setzen, lokalen Zustand belassen.
+  const handleToggle = async (key, an) => {
+    setSpeicherFehler(false);
+    const naechste = { ...sektionen, [key]: an };
+    setSektionen(naechste);
+    try {
+      await updateSetting(STARTSEITE_KEY, naechste);
+      onGespeichert();
+    } catch (fehler) {
+      console.error("overview_sections speichern fehlgeschlagen:", fehler);
+      setSpeicherFehler(true);
+    }
+  };
+
+  if (ladeStatus === "laedt") {
+    return (
+      <SettingsSektion title={t("settings.startseite.title")}>
+        <div className="settings__row">
+          <span className="settings__hint">
+            {t("settings.startseite.loading")}
+          </span>
+        </div>
+      </SettingsSektion>
+    );
+  }
+
+  if (ladeStatus === "fehler") {
+    return (
+      <SettingsSektion title={t("settings.startseite.title")}>
+        <div className="settings__row">
+          <span className="settings__hint settings__hint--error">
+            {t("settings.startseite.loadError")}
+          </span>
+        </div>
+      </SettingsSektion>
+    );
+  }
+
+  // Reihenfolge laut Briefing. status_monitoring folgt direkt auf status, optisch
+  // als dessen Unterpunkt.
+  return (
+    <SettingsSektion title={t("settings.startseite.title")}>
+      <ul className="auffaelligkeit__rules">
+        <li className="auffaelligkeit__rule">
+          <label className="auffaelligkeit__rule-label">
+            <span className="auffaelligkeit__rule-title">
+              {t("settings.startseite.status")}
+            </span>
+          </label>
+          <input
+            type="checkbox"
+            className="auffaelligkeit__switch"
+            checked={sektionen.status}
+            onChange={(e) => handleToggle("status", e.target.checked)}
+          />
+        </li>
+        <li className="auffaelligkeit__rule startseite__rule--sub">
+          <label className="auffaelligkeit__rule-label">
+            <span className="auffaelligkeit__rule-title">
+              {t("settings.startseite.statusMonitoring")}
+            </span>
+          </label>
+          <input
+            type="checkbox"
+            className="auffaelligkeit__switch"
+            checked={sektionen.status_monitoring}
+            disabled={!sektionen.status}
+            onChange={(e) =>
+              handleToggle("status_monitoring", e.target.checked)
+            }
+          />
+        </li>
+        <li className="auffaelligkeit__rule">
+          <label className="auffaelligkeit__rule-label">
+            <span className="auffaelligkeit__rule-title">
+              {t("settings.startseite.schnellzugriff")}
+            </span>
+          </label>
+          <input
+            type="checkbox"
+            className="auffaelligkeit__switch"
+            checked={sektionen.schnellzugriff}
+            onChange={(e) => handleToggle("schnellzugriff", e.target.checked)}
+          />
+        </li>
+        <li className="auffaelligkeit__rule">
+          <label className="auffaelligkeit__rule-label">
+            <span className="auffaelligkeit__rule-title">
+              {t("settings.startseite.beachtenswert")}
+            </span>
+          </label>
+          <input
+            type="checkbox"
+            className="auffaelligkeit__switch"
+            checked={sektionen.beachtenswert}
+            onChange={(e) => handleToggle("beachtenswert", e.target.checked)}
+          />
+        </li>
+        <li className="auffaelligkeit__rule">
+          <label className="auffaelligkeit__rule-label">
+            <span className="auffaelligkeit__rule-title">
+              {t("settings.startseite.cve")}
+            </span>
+          </label>
+          <input
+            type="checkbox"
+            className="auffaelligkeit__switch"
+            checked={sektionen.cve}
+            onChange={(e) => handleToggle("cve", e.target.checked)}
+          />
+        </li>
+        <li className="auffaelligkeit__rule">
+          <label className="auffaelligkeit__rule-label">
+            <span className="auffaelligkeit__rule-title">
+              {t("settings.startseite.kennzahlen")}
+            </span>
+          </label>
+          <input
+            type="checkbox"
+            className="auffaelligkeit__switch"
+            checked={sektionen.kennzahlen}
+            onChange={(e) => handleToggle("kennzahlen", e.target.checked)}
+          />
+        </li>
+      </ul>
+
+      <p className="settings__hint">{t("settings.startseite.hint")}</p>
+
+      {speicherFehler ? (
+        <span className="settings__hint settings__hint--error">
+          {t("settings.startseite.saveError")}
+        </span>
+      ) : null}
+    </SettingsSektion>
+  );
+}
+
 // FritzBox-Sektion: einzige Sektion mit eigenem Daten-State (laden + schreiben
 // gegen die Settings-API). onGespeichert ist das vorhandene zeigeGespeichert
 // aus SettingsView — gemeinsames Feedback-Muster, nicht neu erfunden.
@@ -1036,6 +1261,7 @@ export default function SettingsView({ lang, onLangChange, onClose }) {
             </select>
           </SettingsZeile>
         </SettingsSektion>
+        <OverviewSektion onGespeichert={zeigeGespeichert} />
         <FritzBoxSektion onGespeichert={zeigeGespeichert} />
         <AuffaelligkeitSektion onGespeichert={zeigeGespeichert} />
       </div>

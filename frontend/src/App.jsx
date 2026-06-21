@@ -88,6 +88,10 @@ export default function App() {
         onThemeChange={setTheme}
         onOpenSettings={() => setSettingsOffen(true)}
         onGoToLogging={goToLogging}
+        onGoHome={() => {
+          setSettingsOffen(false);
+          setActiveTab("overview");
+        }}
       />
       {/* Einstellungen ist kein Reiter: bei offenem Modus bleibt kein Reiter
           aktiv markiert, daher blenden wir die Reiterleiste aus. */}

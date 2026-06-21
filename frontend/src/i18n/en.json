@@ -7,7 +7,8 @@
     "settings": "Settings",
     "liveOne": "Live monitoring active",
     "liveMany": "{{count}} monitorings active",
-    "liveZurAnsicht": "Open logging view"
+    "liveZurAnsicht": "Open logging view",
+    "home": "Go to home"
   },
   "settings": {
     "title": "Settings",
@@ -70,6 +71,19 @@
       "rulesEmpty": "No rules available.",
       "honestyTitle": "To be honest",
       "honestyText": "The critical backdoor list is historically useful but barely catches modern malware: today it uses 443, DNS or dynamic ports. A hit is a clear signal, but not a full malware scan – no false sense of security."
+    },
+    "startseite": {
+      "title": "Home page",
+      "hint": "Disabled areas are hidden on the home page. No data is lost – the areas reappear immediately once you switch them back on.",
+      "status": "Status line",
+      "schnellzugriff": "Quick access",
+      "beachtenswert": "Noteworthy",
+      "cve": "New CVE findings",
+      "kennzahlen": "Metrics footer",
+      "statusMonitoring": "Monitoring detail in the status line",
+      "loading": "Loading …",
+      "loadError": "Settings could not be loaded.",
+      "saveError": "Saving failed."
     }
   },
   "nav": {
