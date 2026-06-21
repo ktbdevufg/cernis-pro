@@ -8,7 +8,7 @@
 //   "cve"       CVE-Abgleich (aktiv: zeigt die CVE-Befund-Ansicht, ADR 0037)
 
 import { Activity, ScanSearch, ShieldAlert } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -27,10 +27,25 @@ const FUNKTIONEN = [
   { id: "cve", icon: ShieldAlert, locked: false },
 ];
 
-export default function InvestigateView() {
+export default function InvestigateView({
+  initialFunction = null,
+  onFunktionGeoeffnet,
+}) {
   const { t } = useTranslation();
-  // null -> Kachel-Übersicht; sonst die geöffnete Funktion.
-  const [openFunction, setOpenFunction] = useState(null);
+  // null -> Kachel-Übersicht; sonst die geöffnete Funktion. Eine von aussen
+  // gewuenschte Funktion (initialFunction, z. B. von der Startseiten-Kachel)
+  // wird initial uebernommen.
+  const [openFunction, setOpenFunction] = useState(initialFunction);
+
+  // Wechselt initialFunction (z. B. erneuter Kachel-Klick bei bereits offenem
+  // Untersuchen-Bereich), die gewuenschte Funktion oeffnen und beim Eltern-State
+  // quittieren, damit der Nutzer danach frei zur Uebersicht zurueck kann.
+  useEffect(() => {
+    if (initialFunction) {
+      setOpenFunction(initialFunction);
+      onFunktionGeoeffnet?.();
+    }
+  }, [initialFunction, onFunktionGeoeffnet]);
 
   if (openFunction) {
     // "diagnose" zeigt die Route-zum-Ziel-Ansicht (ADR 0036), "cve" die

@@ -57,6 +57,26 @@ export default function App() {
   // EINMAL als initiale Funktion an ObserveView gereicht; danach von ObserveView
   // quittiert (onFunktionGeoeffnet -> null), damit der Nutzer dort frei navigiert.
   const [observeFunktion, setObserveFunktion] = useState(null);
+  // Wunsch-Funktion im Untersuchen-Bereich (z. B. von der Startseiten-Kachel).
+  // Spiegelt das observeFunktion-Muster: EINMAL als initiale Funktion an
+  // InvestigateView gereicht, danach von dort quittiert (onFunktionGeoeffnet ->
+  // null), damit der Nutzer dort frei navigiert.
+  const [investigateFunktion, setInvestigateFunktion] = useState(null);
+
+  // Von der Startseite (OverviewView): Reiter wechseln und optional zusätzlich
+  // die gewünschte Funktion im Ziel-Bereich vormerken. Ohne funktion bleibt es
+  // beim reinen Reiter-Wechsel (wie bisher).
+  const handleNavigate = (tab, funktion) => {
+    setActiveTab(tab);
+    if (!funktion) {
+      return;
+    }
+    if (tab === "observe") {
+      setObserveFunktion(funktion);
+    } else if (tab === "investigate") {
+      setInvestigateFunktion(funktion);
+    }
+  };
 
   // Vom Kopfzeilen-Pill: zur Logging-Ansicht springen. Reiter auf "observe" und
   // die logging-Funktion vormerken; ein offener Einstellungs-Modus wird verlassen.
@@ -125,7 +145,7 @@ export default function App() {
         ) : (
           <>
             {activeTab === "overview" && (
-              <OverviewView onNavigate={(tab) => setActiveTab(tab)} />
+              <OverviewView onNavigate={handleNavigate} />
             )}
             {activeTab === "observe" && (
               <ObserveView
@@ -135,7 +155,12 @@ export default function App() {
                 onFunktionGeoeffnet={() => setObserveFunktion(null)}
               />
             )}
-            {activeTab === "investigate" && <InvestigateView />}
+            {activeTab === "investigate" && (
+              <InvestigateView
+                initialFunction={investigateFunktion}
+                onFunktionGeoeffnet={() => setInvestigateFunktion(null)}
+              />
+            )}
             {activeTab === "export" && <ExportView />}
             {activeTab === "devices" && <DevicesView />}
           </>

@@ -261,9 +261,11 @@ export default function OverviewView({ onNavigate }) {
     : t("overview.status.lastScanUnknown");
 
   // Sprung-Helfer: nur auslösen, wenn onNavigate verdrahtet ist (defensiv).
-  const springe = (tab) => {
+  // funktion ist optional: fehlt sie, wechselt nur der Reiter (wie bisher);
+  // ist sie gesetzt, öffnet der Aufrufer zusätzlich die Ziel-Funktion.
+  const springe = (tab, funktion) => {
     if (onNavigate) {
-      onNavigate(tab);
+      onNavigate(tab, funktion);
     }
   };
 
@@ -310,19 +312,19 @@ export default function OverviewView({ onNavigate }) {
               icon={Radar}
               title={t("beobachten.cards.scan.title")}
               subtitle={t("beobachten.cards.scan.subtitle")}
-              onOpen={() => springe("observe")}
+              onOpen={() => springe("observe", "scan")}
             />
             <FunctionCard
               icon={Activity}
               title={t("beobachten.cards.monitor.title")}
               subtitle={t("beobachten.cards.monitor.subtitle")}
-              onOpen={() => springe("observe")}
+              onOpen={() => springe("observe", "monitor")}
             />
             <FunctionCard
               icon={ShieldAlert}
               title={t("untersuchen.cards.cve.title")}
               subtitle={t("untersuchen.cards.cve.subtitle")}
-              onOpen={() => springe("investigate")}
+              onOpen={() => springe("investigate", "cve")}
             />
           </CardGrid>
         </section>
