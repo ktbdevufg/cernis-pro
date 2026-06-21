@@ -155,6 +155,11 @@ function BefundZeile({ befund, zeigeGeraet, name = "", modus = "active", onActio
               </span>
             )}
           </div>
+          {published && (
+            <span className="cve-row__published">
+              {t("untersuchen.cve.publishedLabel", { date: published })}
+            </span>
+          )}
         </div>
 
         {/* Spalte 2: Gerät (nur wenn nicht schon im Host-Block-Kopf). */}
@@ -204,17 +209,10 @@ function BefundZeile({ befund, zeigeGeraet, name = "", modus = "active", onActio
         </div>
       </div>
 
-      {/* Voll-breiter Fuß: Beschreibung + Datum, durch eine dünne Linie abgesetzt. */}
-      {(befund.description || published) && (
+      {/* Voll-breiter Fuß: nur noch die Beschreibung, durch eine dünne Linie abgesetzt. */}
+      {befund.description && (
         <div className="cve-row__foot">
-          {befund.description && (
-            <span className="cve-row__desc">{befund.description}</span>
-          )}
-          {published && (
-            <span className="cve-row__published">
-              {t("untersuchen.cve.publishedLabel", { date: published })}
-            </span>
-          )}
+          <span className="cve-row__desc">{befund.description}</span>
         </div>
       )}
     </div>

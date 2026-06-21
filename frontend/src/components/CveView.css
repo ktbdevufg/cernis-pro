@@ -251,8 +251,10 @@
   line-height: 1.45;
 }
 
-/* Veröffentlichungsdatum: dezent an die Beschreibung angehängt. */
+/* Veröffentlichungsdatum: dezente kleine Zeile linksbündig unter den Badges. */
 .cve-row__published {
+  display: block;
+  margin-top: 4px;
   font-size: 0.78rem;
   color: var(--color-text-tert);
 }
