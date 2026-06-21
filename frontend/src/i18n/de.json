@@ -96,6 +96,20 @@
   "placeholder": {
     "inProgress": "in Arbeit"
   },
+  "manual": {
+    "title": "Benutzerhandbuch",
+    "vorlaeufigHint": "Dieser Abschnitt beschreibt das geplante Verhalten; die endgültige Oberfläche wird noch festgelegt.",
+    "linksLabel": "Weiterführend",
+    "tocLabel": "Inhalt",
+    "kategorien": {
+      "Grundlagen": "Grundlagen",
+      "Startseite": "Startseite",
+      "Beobachten": "Beobachten",
+      "Diagnose": "Diagnose",
+      "Untersuchen": "Untersuchen",
+      "Einstellungen": "Einstellungen"
+    }
+  },
   "cards": {
     "open": "Öffnen",
     "back": "Zurück",

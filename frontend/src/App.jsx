@@ -10,6 +10,7 @@ import TabNav, { REITER } from "./components/TabNav.jsx";
 import DevicesView from "./views/DevicesView.jsx";
 import ExportView from "./views/ExportView.jsx";
 import InvestigateView from "./views/InvestigateView.jsx";
+import ManualView from "./views/ManualView.jsx";
 import ObserveView from "./views/ObserveView.jsx";
 import OverviewView from "./views/OverviewView.jsx";
 import SettingsView from "./views/SettingsView.jsx";
@@ -49,6 +50,9 @@ export default function App() {
   // Einstellungs-Bereich ist ein eigener Modus (kein Reiter): überlagert den
   // View-Bereich. Schließen kehrt zum vorher aktiven Reiter zurück.
   const [settingsOffen, setSettingsOffen] = useState(false);
+  // Benutzerhandbuch ist ebenfalls ein eigener Modus (kein Reiter) und schließt
+  // sich mit den Einstellungen gegenseitig aus: immer nur einer ist offen.
+  const [handbuchOffen, setHandbuchOffen] = useState(false);
   // Wunsch-Funktion im Beobachten-Bereich (z. B. vom Kopfzeilen-Live-Pill). Wird
   // EINMAL als initiale Funktion an ObserveView gereicht; danach von ObserveView
   // quittiert (onFunktionGeoeffnet -> null), damit der Nutzer dort frei navigiert.
@@ -58,6 +62,7 @@ export default function App() {
   // die logging-Funktion vormerken; ein offener Einstellungs-Modus wird verlassen.
   const goToLogging = () => {
     setSettingsOffen(false);
+    setHandbuchOffen(false);
     setActiveTab("observe");
     setObserveFunktion("logging");
   };
@@ -86,19 +91,32 @@ export default function App() {
       <AppHeader
         theme={theme}
         onThemeChange={setTheme}
-        onOpenSettings={() => setSettingsOffen(true)}
+        onOpenSettings={() => {
+          setHandbuchOffen(false);
+          setSettingsOffen(true);
+        }}
+        onOpenManual={() => {
+          setSettingsOffen(false);
+          setHandbuchOffen(true);
+        }}
         onGoToLogging={goToLogging}
         onGoHome={() => {
           setSettingsOffen(false);
+          setHandbuchOffen(false);
           setActiveTab("overview");
         }}
       />
-      {/* Einstellungen ist kein Reiter: bei offenem Modus bleibt kein Reiter
-          aktiv markiert, daher blenden wir die Reiterleiste aus. */}
-      {!settingsOffen && <TabNav active={activeTab} onChange={setActiveTab} />}
+      {/* Einstellungen UND Handbuch sind kein Reiter: bei einem offenen Modus
+          bleibt kein Reiter aktiv markiert, daher blenden wir die Reiterleiste
+          aus. */}
+      {!settingsOffen && !handbuchOffen && (
+        <TabNav active={activeTab} onChange={setActiveTab} />
+      )}
 
       <main className="app__content">
-        {settingsOffen ? (
+        {handbuchOffen ? (
+          <ManualView onClose={() => setHandbuchOffen(false)} />
+        ) : settingsOffen ? (
           <SettingsView
             lang={lang}
             onLangChange={setLang}

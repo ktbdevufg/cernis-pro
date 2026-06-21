@@ -10,7 +10,7 @@ import LivePill from "./LivePill.jsx";
 import ThemeToggle from "./ThemeToggle.jsx";
 import "./AppHeader.css";
 
-export default function AppHeader({ theme, onThemeChange, onOpenSettings, onGoToLogging, onGoHome }) {
+export default function AppHeader({ theme, onThemeChange, onOpenSettings, onOpenManual, onGoToLogging, onGoHome }) {
   const { t } = useTranslation();
 
   return (
@@ -40,7 +40,11 @@ export default function AppHeader({ theme, onThemeChange, onOpenSettings, onGoTo
 
       <div className="app-header__controls">
         <ThemeToggle theme={theme} onChange={onThemeChange} />
-        <button type="button" className="control-button">
+        <button
+          type="button"
+          className="control-button"
+          onClick={onOpenManual}
+        >
           <BookOpen size={16} />
           <span>{t("header.manual")}</span>
         </button>

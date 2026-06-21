@@ -96,6 +96,20 @@
   "placeholder": {
     "inProgress": "in progress"
   },
+  "manual": {
+    "title": "User Manual",
+    "vorlaeufigHint": "This section describes the planned behaviour; the final interface is not yet fixed.",
+    "linksLabel": "Further reading",
+    "tocLabel": "Contents",
+    "kategorien": {
+      "Grundlagen": "Basics",
+      "Startseite": "Home screen",
+      "Beobachten": "Observe",
+      "Diagnose": "Diagnostics",
+      "Untersuchen": "Investigate",
+      "Einstellungen": "Settings"
+    }
+  },
   "cards": {
     "open": "Open",
     "back": "Back",
