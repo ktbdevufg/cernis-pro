@@ -21,3 +21,18 @@ class DeviceNotFoundError(DevicesApplicationError):
     def __init__(self, mac: str) -> None:
         self.mac = mac
         super().__init__(f"Kein Geraet mit MAC {mac!r}")
+
+
+class InvalidTrustStateError(DevicesApplicationError):
+    """Ein uebergebener ``trust_state``-Wert ist keiner der erlaubten Zustaende.
+
+    Der api-Ring darf den ``domain``-Ring nicht importieren (import-linter), kann
+    also nicht selbst gegen ``TrustState`` validieren. Deshalb nimmt der Use-Case
+    auch einen rohen ``str`` entgegen und hebt ihn intern via ``TrustState(...)``;
+    ein ungueltiger Wert ist KEIN stiller Fallback, sondern dieser Fehler -- den
+    der Router auf HTTP 422 abbildet.
+    """
+
+    def __init__(self, value: str) -> None:
+        self.value = value
+        super().__init__(f"Ungueltiger trust_state {value!r}")

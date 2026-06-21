@@ -1,6 +1,10 @@
 """Use-Cases der devices-Domaene und ihre Application-Exceptions."""
 
-from application.devices.errors import DeviceNotFoundError, DevicesApplicationError
+from application.devices.errors import (
+    DeviceNotFoundError,
+    DevicesApplicationError,
+    InvalidTrustStateError,
+)
 from application.devices.use_cases import (
     DeleteDevice,
     GetDevice,
@@ -17,6 +21,7 @@ __all__ = [
     "GetDevice",
     "GetDeviceStats",
     "GetDevices",
+    "InvalidTrustStateError",
     "RecordScannedHost",
     "UpdateDeviceMeta",
 ]

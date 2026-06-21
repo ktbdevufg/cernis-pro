@@ -30,7 +30,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from domain.devices import Device, DeviceStats, IpHistoryEntry, normalize_mac
+from domain.devices import Device, DeviceStats, IpHistoryEntry, TrustState, normalize_mac
 
 
 class CorruptDeviceError(Exception):
@@ -77,6 +77,19 @@ def _decode_list(mac: str, column: str, raw: str) -> tuple[Any, ...]:
     return tuple(decoded)
 
 
+def _row_to_trust_state(raw: Any) -> TrustState:
+    """TEXT-Spalte -> ``TrustState``. NULL/leer -> Default NEUTRAL (defensiv).
+
+    Eine fehlende oder leere Spalte (z. B. eine vor der Migration angelegte
+    Zeile, deren ALTER-Default griffe -- hier doppelt abgesichert) faellt auf
+    NEUTRAL zurueck. Ein nicht-leerer, aber unbekannter Wert ist hingegen KEIN
+    stiller Fallback, sondern ein Fehler ueber ``TrustState(...)`` (Finding S3).
+    """
+    if raw is None or raw == "":
+        return TrustState.NEUTRAL
+    return TrustState(raw)
+
+
 def _row_to_device(row: sqlite3.Row) -> Device:
     mac = row["mac"]
     return Device(
@@ -86,6 +99,7 @@ def _row_to_device(row: sqlite3.Row) -> Device:
         last_ip=row["last_ip"],
         times_seen=row["times_seen"],
         is_known=bool(row["is_known"]),
+        trust_state=_row_to_trust_state(row["trust_state"]),
         vendor=row["vendor"],
         label=row["label"],
         notes=row["notes"],
@@ -116,8 +130,8 @@ class SqliteDeviceRepository:
             conn.close()
 
     def _ensure_schema(self) -> None:
-        # Schema exakt wie der Bestand (devices 14 Spalten, device_ip_history) --
-        # known_devices wird bewusst NICHT angelegt.
+        # Schema wie der Bestand (devices + trust_state = 15 Spalten,
+        # device_ip_history) -- known_devices wird bewusst NICHT angelegt.
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:
             conn.executescript(
@@ -130,6 +144,7 @@ class SqliteDeviceRepository:
                     notes        TEXT DEFAULT '',
                     category     TEXT DEFAULT '',
                     is_known     INTEGER DEFAULT 0,
+                    trust_state  TEXT NOT NULL DEFAULT 'neutral',
                     first_seen   TEXT DEFAULT (datetime('now')),
                     last_seen    TEXT DEFAULT (datetime('now')),
                     last_ip      TEXT DEFAULT '',
@@ -146,6 +161,15 @@ class SqliteDeviceRepository:
                 );
                 """
             )
+            # SCHEMA-GUARD (additive Migration, Hausmuster wie monitoring_log_tasks):
+            # eine vor dieser Etappe angelegte devices-Tabelle bekommt trust_state
+            # per ALTER nachgeruestet. NOT NULL DEFAULT 'neutral' -> bestehende
+            # Zeilen erhalten verlustfrei den Default, kein Datenverlust.
+            cols = {row["name"] for row in conn.execute("PRAGMA table_info(devices)")}
+            if "trust_state" not in cols:
+                conn.execute(
+                    "ALTER TABLE devices ADD COLUMN trust_state TEXT NOT NULL DEFAULT 'neutral'"
+                )
 
     def get(self, mac: str) -> Device | None:
         with self._connect() as conn:
@@ -169,13 +193,14 @@ class SqliteDeviceRepository:
         with self._connect() as conn:
             conn.execute(
                 "INSERT INTO devices ("
-                " mac, vendor, label, tags, notes, category, is_known,"
+                " mac, vendor, label, tags, notes, category, is_known, trust_state,"
                 " first_seen, last_seen, last_ip, times_seen, open_ports, hostname, os_guess"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(mac) DO UPDATE SET"
                 " vendor = excluded.vendor, label = excluded.label, tags = excluded.tags,"
                 " notes = excluded.notes, category = excluded.category,"
-                " is_known = excluded.is_known, first_seen = excluded.first_seen,"
+                " is_known = excluded.is_known, trust_state = excluded.trust_state,"
+                " first_seen = excluded.first_seen,"
                 " last_seen = excluded.last_seen, last_ip = excluded.last_ip,"
                 " times_seen = excluded.times_seen, open_ports = excluded.open_ports,"
                 " hostname = excluded.hostname, os_guess = excluded.os_guess",
@@ -187,6 +212,7 @@ class SqliteDeviceRepository:
                     device.notes,
                     device.category,
                     int(device.is_known),
+                    device.trust_state.value,
                     _fmt_dt(device.first_seen),
                     _fmt_dt(device.last_seen),
                     device.last_ip,

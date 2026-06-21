@@ -21,13 +21,14 @@ from dataclasses import replace
 from datetime import timedelta
 from typing import Any
 
-from application.devices.errors import DeviceNotFoundError
+from application.devices.errors import DeviceNotFoundError, InvalidTrustStateError
 from domain.devices import (
     Device,
     DeviceStats,
     DeviceWithHistory,
     IpHistoryEntry,
     ScannedHost,
+    TrustState,
     merge_scan,
     normalize_mac,
     should_append_ip,
@@ -91,6 +92,7 @@ class UpdateDeviceMeta:
         notes: str | None = None,
         category: str | None = None,
         is_known: bool | None = None,
+        trust_state: TrustState | str | None = None,
     ) -> Device:
         norm = normalize_mac(mac)
         existing = self._repository.get(norm)
@@ -108,6 +110,21 @@ class UpdateDeviceMeta:
             changes["category"] = category
         if is_known is not None:
             changes["is_known"] = is_known
+        if trust_state is not None:
+            # Hebung str->TrustState hier (der api-Ring darf domain nicht
+            # importieren). Ungueltiger Wert -> lauter Application-Fehler, kein
+            # stiller Fallback (Finding S3).
+            try:
+                resolved = TrustState(trust_state)
+            except ValueError as exc:
+                raise InvalidTrustStateError(str(trust_state)) from exc
+            changes["trust_state"] = resolved
+            # Konsistenz-Regel: wer trusted/watch setzt, hat das Geraet damit
+            # eingeordnet -> is_known mitsetzen. NEUTRAL laesst is_known
+            # unberuehrt. Explizit uebergebenes is_known hat Vorrang (oben bereits
+            # in changes), wird hier NICHT ueberschrieben.
+            if resolved in (TrustState.TRUSTED, TrustState.WATCH) and "is_known" not in changes:
+                changes["is_known"] = True
 
         updated = replace(existing, **changes)
         self._repository.save(updated)

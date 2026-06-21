@@ -17,6 +17,25 @@ NIE zurueck (bewusste Korrektur von BUG 2 der Ist-Analyse).
 import re
 from dataclasses import dataclass, replace
 from datetime import datetime
+from enum import StrEnum
+
+
+class TrustState(StrEnum):
+    """Wertende Vertrauens-Einschaetzung des Nutzers ueber ein Geraet.
+
+    EIGENSTAENDIG und NICHT dasselbe wie ``is_known``: ``is_known`` ist der
+    faktische Marker "kenne ich / eingeordnet" (treibt die Gaeste-Wache),
+    ``trust_state`` ist die wertende Haltung. Ein Geraet kann bekannt, aber
+    nicht vertraut sein (z. B. ein IoT-Geraet, das man ``watch`` setzt).
+
+    Default ist ``NEUTRAL`` -- noch keine Wertung abgegeben. Die Konsistenz-Regel
+    (``trusted``/``watch`` impliziert ``is_known``) gehoert NICHT hierher, sondern
+    in den Use-Case ``UpdateDeviceMeta``: die Domaene traegt nur den Wert.
+    """
+
+    TRUSTED = "trusted"
+    NEUTRAL = "neutral"
+    WATCH = "watch"
 
 
 def normalize_mac(raw: str) -> str:
@@ -39,7 +58,8 @@ class Device:
 
     Scan-getriebene Felder: ``vendor``, ``hostname``, ``os_guess``, ``open_ports``,
     ``last_ip``, ``last_seen``, ``times_seen``. User-kuratierte Felder, die ein
-    Scan bewahrt: ``label``, ``tags``, ``notes``, ``is_known``, ``category``.
+    Scan bewahrt: ``label``, ``tags``, ``notes``, ``is_known``, ``trust_state``,
+    ``category``.
     """
 
     mac: str
@@ -48,6 +68,7 @@ class Device:
     last_ip: str | None = None
     times_seen: int = 1
     is_known: bool = False
+    trust_state: TrustState = TrustState.NEUTRAL
     vendor: str = ""
     label: str = ""
     notes: str = ""
@@ -154,6 +175,9 @@ def merge_scan(existing: Device | None, scanned: ScannedHost, now: datetime) -> 
     Die Zeit kommt ausschliesslich ueber ``now`` (kein ``datetime.now()`` hier).
     """
     if existing is None:
+        # Neuentdeckung: trust_state wird NICHT gesetzt -> der Default NEUTRAL
+        # greift. Ein Scan vergibt nie eine Wertung; die kommt allein vom User
+        # ueber UpdateDeviceMeta (wie is_known).
         return Device(
             mac=scanned.mac,
             first_seen=now,
@@ -175,7 +199,8 @@ def merge_scan(existing: Device | None, scanned: ScannedHost, now: datetime) -> 
         vendor=_scan_or_keep(scanned.vendor, existing.vendor),
         hostname=_scan_or_keep(scanned.hostname, existing.hostname),
         os_guess=_scan_or_keep(scanned.os_guess, existing.os_guess),
-        # first_seen/label/tags/notes/is_known/category bleiben via replace erhalten.
+        # first_seen/label/tags/notes/is_known/trust_state/category bleiben via
+        # replace erhalten -- ein Re-Scan aendert trust_state NIE.
     )
 
 

@@ -131,6 +131,45 @@ def test_put_unknown_device_404(client: TestClient) -> None:
     assert resp.status_code == 404
 
 
+# ── trust_state: PUT, 422, Spiegelung in GET/Liste ──────────────────────────
+
+
+def test_put_sets_trust_state_and_reflects(
+    client: TestClient, repo: SqliteDeviceRepository
+) -> None:
+    repo.save(_device(is_known=False))
+    resp = client.put(f"/api/devices/{MAC}", json={"trust_state": "watch"})
+    assert resp.status_code == 200
+    assert resp.json()["trust_state"] == "watch"
+    # Konsistenz-Regel ueber HTTP: watch ordnet ein -> is_known mitgesetzt.
+    assert resp.json()["is_known"] is True
+
+
+def test_put_invalid_trust_state_422(client: TestClient, repo: SqliteDeviceRepository) -> None:
+    repo.save(_device())
+    resp = client.put(f"/api/devices/{MAC}", json={"trust_state": "kaputt"})
+    assert resp.status_code == 422
+
+
+def test_trust_state_appears_in_get_and_list(
+    client: TestClient, repo: SqliteDeviceRepository
+) -> None:
+    repo.save(_device())
+    client.put(f"/api/devices/{MAC}", json={"trust_state": "trusted"})
+    single = client.get(f"/api/devices/{MAC}").json()
+    assert single["trust_state"] == "trusted"
+    listed = client.get("/api/devices").json()
+    assert listed[0]["trust_state"] == "trusted"
+
+
+def test_default_trust_state_neutral_in_response(
+    client: TestClient, repo: SqliteDeviceRepository
+) -> None:
+    repo.save(_device())
+    body = client.get(f"/api/devices/{MAC}").json()
+    assert body["trust_state"] == "neutral"
+
+
 # ── DELETE idempotent ───────────────────────────────────────────────────────
 
 

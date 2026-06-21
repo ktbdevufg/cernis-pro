@@ -27,6 +27,7 @@ from application.devices import (
     GetDevice,
     GetDevices,
     GetDeviceStats,
+    InvalidTrustStateError,
     RecordScannedHost,
     UpdateDeviceMeta,
 )
@@ -70,6 +71,10 @@ class DeviceMetaBody(BaseModel):
     notes: str | None = None
     category: str | None = None
     is_known: bool | None = None
+    # Als roher str entgegengenommen (kein domain-Import im api-Ring). Die
+    # Validierung gegen die erlaubten Werte und die Hebung str->TrustState macht
+    # der Use-Case; ein ungueltiger Wert wird unten auf HTTP 422 abgebildet.
+    trust_state: str | None = None
 
 
 def _device_to_dict(device: Any) -> dict[str, Any]:
@@ -82,6 +87,7 @@ def _device_to_dict(device: Any) -> dict[str, Any]:
         "notes": device.notes,
         "category": device.category,
         "is_known": device.is_known,
+        "trust_state": device.trust_state.value,
         "hostname": device.hostname,
         "os_guess": device.os_guess,
         "tags": list(device.tags),
@@ -154,10 +160,18 @@ def put_device(
             notes=body.notes,
             category=body.category,
             is_known=body.is_known,
+            trust_state=body.trust_state,
         )
     except DeviceNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Geraet nicht gefunden."
+        ) from exc
+    except InvalidTrustStateError as exc:
+        # Bare 422 wie der uebrige Router (monitoring/analysis): vermeidet die
+        # Deprecation des status.HTTP_422_*-Alias der installierten Starlette.
+        raise HTTPException(
+            status_code=422,
+            detail=f"Ungueltiger trust_state: {exc.value!r}.",
         ) from exc
     return _device_to_dict(updated)
 

@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from domain.devices import Device, IpHistoryEntry
+from domain.devices import Device, IpHistoryEntry, TrustState
 from infrastructure.device_repository import (
     CorruptDeviceError,
     SqliteDeviceRepository,
@@ -80,6 +80,20 @@ def test_save_then_get_roundtrips_all_fields(repo: SqliteDeviceRepository) -> No
     assert isinstance(got.open_ports, tuple)
     assert got.is_known is True  # bool bleibt bool
     assert got.last_seen.tzinfo is not None  # datetime tz-aware
+
+
+def test_trust_state_roundtrips(repo: SqliteDeviceRepository) -> None:
+    repo.save(_device(trust_state=TrustState.WATCH))
+    got = repo.get(MAC)
+    assert got is not None
+    assert got.trust_state is TrustState.WATCH
+
+
+def test_default_trust_state_neutral_roundtrips(repo: SqliteDeviceRepository) -> None:
+    repo.save(_device())  # _device setzt trust_state nicht -> Default NEUTRAL
+    got = repo.get(MAC)
+    assert got is not None
+    assert got.trust_state is TrustState.NEUTRAL
 
 
 def test_save_with_none_last_ip_roundtrips(repo: SqliteDeviceRepository) -> None:
@@ -193,6 +207,54 @@ def test_get_corrupt_json_raises_with_mac(repo: SqliteDeviceRepository, tmp_path
         repo.get(MAC)
     assert exc_info.value.mac == MAC
     assert exc_info.value.column == "tags"
+
+
+# ── Migration: Alt-DB ohne trust_state-Spalte ───────────────────────────────
+
+
+def _create_legacy_devices_db(db_path: Path, mac: str) -> None:
+    """Legt eine devices-Tabelle OHNE trust_state-Spalte an (Vor-Migrations-Stand)."""
+    iso = "2026-05-28T12:00:00.000000+00:00"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE devices (
+                mac          TEXT PRIMARY KEY,
+                vendor       TEXT DEFAULT '',
+                label        TEXT DEFAULT '',
+                tags         TEXT DEFAULT '[]',
+                notes        TEXT DEFAULT '',
+                category     TEXT DEFAULT '',
+                is_known     INTEGER DEFAULT 0,
+                first_seen   TEXT,
+                last_seen    TEXT,
+                last_ip      TEXT DEFAULT '',
+                times_seen   INTEGER DEFAULT 1,
+                open_ports   TEXT DEFAULT '[]',
+                hostname     TEXT DEFAULT '',
+                os_guess     TEXT DEFAULT ''
+            );
+            """
+        )
+        conn.execute(
+            "INSERT INTO devices (mac, first_seen, last_seen) VALUES (?, ?, ?)",
+            (mac, iso, iso),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_migration_adds_trust_state_with_neutral_default(tmp_path: Path) -> None:
+    # Eine Alt-DB ohne trust_state-Spalte wird additiv migriert; die Bestandszeile
+    # bekommt verlustfrei den Default 'neutral'.
+    db_path = tmp_path / "cernis.db"
+    _create_legacy_devices_db(db_path, MAC)
+    repo = SqliteDeviceRepository(db_path)  # _ensure_schema ruestet die Spalte nach
+    got = repo.get(MAC)
+    assert got is not None
+    assert got.trust_state is TrustState.NEUTRAL
 
 
 # ── MAC-Normalisierung ───────────────────────────────────────────────────────

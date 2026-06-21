@@ -17,10 +17,18 @@ from application.devices import (
     GetDevice,
     GetDevices,
     GetDeviceStats,
+    InvalidTrustStateError,
     RecordScannedHost,
     UpdateDeviceMeta,
 )
-from domain.devices import Device, DeviceStats, IpHistoryEntry, ScannedHost, normalize_mac
+from domain.devices import (
+    Device,
+    DeviceStats,
+    IpHistoryEntry,
+    ScannedHost,
+    TrustState,
+    normalize_mac,
+)
 from ports.devices import Clock, DeviceRepository
 
 NOW = datetime(2026, 5, 28, 12, 0, 0, tzinfo=UTC)
@@ -190,6 +198,52 @@ def test_update_device_meta_can_set_is_known(repo: FakeDeviceRepository) -> None
     repo.save(_device(is_known=False))
     updated = UpdateDeviceMeta(repo)(MAC, is_known=True)
     assert updated.is_known is True
+
+
+def test_update_device_meta_sets_trust_state(repo: FakeDeviceRepository) -> None:
+    repo.save(_device(trust_state=TrustState.NEUTRAL))
+    updated = UpdateDeviceMeta(repo)(MAC, trust_state=TrustState.WATCH)
+    assert updated.trust_state is TrustState.WATCH
+
+
+def test_update_device_meta_accepts_raw_str_trust_state(repo: FakeDeviceRepository) -> None:
+    # Der api-Ring reicht einen rohen str durch -> Hebung im Use-Case.
+    repo.save(_device())
+    updated = UpdateDeviceMeta(repo)(MAC, trust_state="trusted")
+    assert updated.trust_state is TrustState.TRUSTED
+
+
+def test_update_device_meta_invalid_trust_state_raises(repo: FakeDeviceRepository) -> None:
+    repo.save(_device())
+    with pytest.raises(InvalidTrustStateError):
+        UpdateDeviceMeta(repo)(MAC, trust_state="vertrauenswuerdig")
+
+
+def test_update_trust_trusted_implies_is_known(repo: FakeDeviceRepository) -> None:
+    # Konsistenz-Regel: trusted ordnet das Geraet ein -> is_known mitgesetzt.
+    repo.save(_device(is_known=False))
+    updated = UpdateDeviceMeta(repo)(MAC, trust_state=TrustState.TRUSTED)
+    assert updated.is_known is True
+
+
+def test_update_trust_watch_implies_is_known(repo: FakeDeviceRepository) -> None:
+    repo.save(_device(is_known=False))
+    updated = UpdateDeviceMeta(repo)(MAC, trust_state=TrustState.WATCH)
+    assert updated.is_known is True
+
+
+def test_update_trust_neutral_leaves_is_known_untouched(repo: FakeDeviceRepository) -> None:
+    repo.save(_device(is_known=False))
+    updated = UpdateDeviceMeta(repo)(MAC, trust_state=TrustState.NEUTRAL)
+    assert updated.is_known is False  # NEUTRAL beruehrt is_known nie
+
+
+def test_update_explicit_is_known_overrides_trust_implication(repo: FakeDeviceRepository) -> None:
+    # Explizit uebergebenes is_known hat Vorrang vor der trusted/watch-Implikation.
+    repo.save(_device(is_known=False))
+    updated = UpdateDeviceMeta(repo)(MAC, trust_state=TrustState.TRUSTED, is_known=False)
+    assert updated.is_known is False
+    assert updated.trust_state is TrustState.TRUSTED
 
 
 def test_update_device_meta_single_save_no_dual_write(repo: FakeDeviceRepository) -> None:

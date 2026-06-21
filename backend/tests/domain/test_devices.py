@@ -5,6 +5,7 @@ Merge-Regeln (``merge_scan`` inkl. BUG-2-FIX, ``should_append_ip``). ``now`` wir
 als fixer Wert injiziert -> deterministisch, keine Uhr in der Domaene.
 """
 
+from dataclasses import replace
 from datetime import datetime
 
 import pytest
@@ -13,6 +14,7 @@ from domain.devices import (
     Device,
     IpHistoryEntry,
     ScannedHost,
+    TrustState,
     merge_scan,
     normalize_mac,
     should_append_ip,
@@ -161,6 +163,27 @@ def test_merge_scan_bug2_fix_scan_never_resets_is_known() -> None:
     # BUG-2-FIX: ein Scan setzt is_known nie auf False zurueck.
     result = merge_scan(_curated_existing(), ScannedHost(mac=MAC, ip="10.0.0.9"), NOW)
     assert result.is_known is True
+
+
+# ── trust_state: Default, Insert, Bewahrung ─────────────────────────────────
+
+
+def test_device_default_trust_state_is_neutral() -> None:
+    dev = Device(mac=MAC, first_seen=NOW, last_seen=NOW)
+    assert dev.trust_state is TrustState.NEUTRAL
+
+
+def test_merge_scan_new_device_trust_state_neutral() -> None:
+    # Insert-Zweig (existing is None): trust_state wird nicht gesetzt -> Default.
+    result = merge_scan(None, ScannedHost(mac=MAC, ip="10.0.0.5"), NOW)
+    assert result.trust_state is TrustState.NEUTRAL
+
+
+def test_merge_scan_preserves_trust_state_over_rescan() -> None:
+    # Ein Re-Scan darf trust_state NIE aendern (wie is_known).
+    existing = replace(_curated_existing(), trust_state=TrustState.WATCH)
+    result = merge_scan(existing, ScannedHost(mac=MAC, ip="10.0.0.9"), NOW)
+    assert result.trust_state is TrustState.WATCH
 
 
 # ── should_append_ip ─────────────────────────────────────────────────────────
