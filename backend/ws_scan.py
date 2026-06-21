@@ -232,6 +232,15 @@ def _host_detail_frame(host: Any) -> dict[str, Any]:
         # IMMER vorhanden, auch falls die Anreicherung mal uebersprungen wird
         # (MAC-lose/nicht ermittelbare Hosts gelten als bekannt).
         "is_known": True,
+        # trust_state-Default "neutral" (Vertrauens-Einschaetzung, ADR devices):
+        # EIGENSTAENDIG zu is_known. Der EnrichedHost traegt KEINE Wertung -- die
+        # liegt nur auf der Device-Entitaet (devices-DB). Der Composition-Root-Loop
+        # ueberschreibt mit dem echten Wert aus der Kuratierung (device.trust_state.value).
+        # Default haelt das Frame-Schema konsistent -- trust_state ist IMMER vorhanden,
+        # auch falls die Anreicherung mal uebersprungen wird (neue/MAC-lose Hosts ->
+        # noch keine Wertung -> "neutral"). Analog zu is_known: reine Projektion ohne
+        # I/O hier, die Anreicherung braucht die devices-DB und gehoert in den Loop.
+        "trust_state": "neutral",
         # is_changed-Default False ("keine IP-Aenderung, sofern nicht angereichert").
         # Der Composition-Root-Loop ueberschreibt mit dem echten Wert (Vorzustand-IP
         # vs. Scan-IP, gelesen VOR record_seen). Haelt das Frame-Schema konsistent.
@@ -413,6 +422,10 @@ def make_ws_scan(
                         frame["label"] = kuratiert["label"]
                         frame["tags"] = kuratiert["tags"]
                         frame["notes"] = kuratiert["notes"]
+                        # trust_state aus der devices-DB ueberschreibt den "neutral"-
+                        # Default -- so haftet die Einordnung auch nach einem echten
+                        # Re-Scan (nicht nur innerhalb der Sitzung).
+                        frame["trust_state"] = kuratiert["trust_state"]
                         alte_ip = kuratiert.get("last_ip")
                         if alte_ip is not None and alte_ip != event.host.ip:
                             is_changed = True
@@ -572,10 +585,14 @@ def _lese_kuratierung(get_device: Any, mac: str) -> dict[str, Any] | None:
     # den neue-Ports-Vergleich (Achse A, Port-History). GENAUSO wie last_ip vom Aufrufer
     # VOR dem devices-Upsert gelesen (merge_scan ueberschreibt open_ports UNBEDINGT mit
     # dem neuen Scan-Stand). Additiv -- derselbe eine Lesevorgang.
+    # trust_state = wertende Einordnung aus der devices-DB (EIGENSTAENDIG zu is_known).
+    # Als String projiziert (StrEnum .value), damit der api-Ring keinen domain-Typ in
+    # die Wire-Form traegt -- analog zu api/devices.py. Additiv -- derselbe eine Lesevorgang.
     return {
         "label": device.label,
         "tags": list(device.tags),
         "notes": device.notes,
+        "trust_state": device.trust_state.value,
         "last_ip": device.last_ip,
         "open_ports": list(device.open_ports),
     }

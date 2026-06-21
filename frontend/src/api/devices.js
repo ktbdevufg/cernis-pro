@@ -6,8 +6,9 @@
 // kleine reine Helfer, kein erfundener Fallback (fehlt ein Feld -> leer/null).
 //
 // Wire-Form (aus backend/api/devices.py):
-//   { mac, vendor, label, notes, category, is_known, hostname, os_guess,
-//     tags[], open_ports[], last_ip, times_seen, first_seen, last_seen }
+//   { mac, vendor, label, notes, category, is_known, trust_state, hostname,
+//     os_guess, tags[], open_ports[], last_ip, times_seen, first_seen,
+//     last_seen }
 
 import { apiPut } from "./client.js";
 
@@ -21,6 +22,9 @@ export function mappeDevice(wire) {
     notes: wire.notes,
     category: wire.category,
     isKnown: wire.is_known === true,
+    // Wertende Einschätzung (trusted/neutral/watch). Defensiver Default
+    // "neutral" — kein erfundener Wert, falls das Feld fehlt.
+    trustState: wire.trust_state ?? "neutral",
     hostname: wire.hostname,
     osGuess: wire.os_guess,
     tags: wire.tags ?? [],
@@ -44,9 +48,13 @@ export function tagsAusText(text) {
 // Schreibt die kuratierten Notizfelder (label/tags/notes) eines Geräts per
 // PUT /api/devices/{mac} und gibt das aktualisierte Gerät in View-Form zurück.
 // Der Body enthält nur die übergebenen Felder; category/is_known werden hier
-// bewusst NICHT angefasst.
-export async function updateDeviceMeta(mac, { label, tags, notes }) {
+// bewusst NICHT angefasst. trust_state wird nur mitgesendet, wenn trustState
+// übergeben wurde (partielles Update — sonst weglassen).
+export async function updateDeviceMeta(mac, { label, tags, notes, trustState }) {
   const body = { label, tags, notes };
+  if (trustState !== undefined) {
+    body.trust_state = trustState;
+  }
   const antwort = await apiPut(
     `/api/devices/${encodeURIComponent(mac)}`,
     body,
@@ -54,4 +62,15 @@ export async function updateDeviceMeta(mac, { label, tags, notes }) {
   return mappeDevice(antwort);
 }
 
-export default { updateDeviceMeta };
+// Sofort-speichernder Helfer für den Einordnungs-Klick: schickt NUR
+// { trust_state } per PUT /api/devices/{mac} und gibt das gemappte Gerät
+// zurück. Entkoppelt vom Notizen-Speichern; is_known wird serverseitig
+// konsistent gesetzt und kommt über das gemappte Gerät zurück.
+export async function setTrustState(mac, trustState) {
+  const antwort = await apiPut(`/api/devices/${encodeURIComponent(mac)}`, {
+    trust_state: trustState,
+  });
+  return mappeDevice(antwort);
+}
+
+export default { updateDeviceMeta, setTrustState };

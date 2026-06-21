@@ -350,6 +350,9 @@ function ScanInhalt() {
       tags: aktualisiert.tags,
       notes: aktualisiert.notes,
       isKnown: aktualisiert.isKnown,
+      // Frisch gesetzte Einordnung haftet in der Liste und im Merge-Puffer (Ref)
+      // innerhalb der Sitzung — sonst steht bei Wiederanwahl wieder "neutral".
+      trustState: aktualisiert.trustState,
     };
     geraeteRef.current.set(schluessel, gepatcht);
     setGeraete([...geraeteRef.current.values()]);

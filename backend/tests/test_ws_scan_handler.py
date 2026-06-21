@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 
 import ws_scan
 from application.devices.errors import DeviceNotFoundError
-from domain.devices import ScannedHost
+from domain.devices import ScannedHost, TrustState
 from domain.scanning import (
     EnrichedHost,
     HostEnriched,
@@ -90,6 +90,8 @@ class _FakeStoredDevice:
     (frisch angelegt / keine IP). Aus ihr leitet der Loop ``is_changed`` ab.
     ``open_ports`` ist der VORZUSTANDS-Portstand aus der devices-DB (ADR 0026); Default
     leeres Tupel (kein Vorzustand). Aus ihm leitet der Loop ``new_ports`` ab.
+    ``trust_state`` ist die wertende Einordnung aus der devices-DB; Default ``NEUTRAL``
+    (noch keine Wertung). Der Loop projiziert daraus ``.value`` ins host_detail-Frame.
     """
 
     def __init__(
@@ -99,12 +101,14 @@ class _FakeStoredDevice:
         notes: str,
         last_ip: str | None = None,
         open_ports: tuple[int, ...] = (),
+        trust_state: TrustState = TrustState.NEUTRAL,
     ) -> None:
         self.label = label
         self.tags = tags
         self.notes = notes
         self.last_ip = last_ip
         self.open_ports = open_ports
+        self.trust_state = trust_state
 
 
 class _FakeDeviceWithHistory:
@@ -294,7 +298,7 @@ def test_full_frame_sequence_matches_s1_contract() -> None:
     assert frames[8] == {"type": "scan_complete", "total_found": 1}
 
 
-def test_host_detail_frame_has_28_keys_incl_axis_b() -> None:
+def test_host_detail_frame_has_29_keys_incl_axis_b() -> None:
     host = EnrichedHost(
         ip="10.0.0.5",
         mac="AA:BB:CC:DD:EE:02",
@@ -308,12 +312,13 @@ def test_host_detail_frame_has_28_keys_incl_axis_b() -> None:
         frame = ws.receive_json()
 
     assert frame["type"] == "host_detail"
-    # 28 Keys: die 20 S.1-Contract-Keys + source (S.7f) + additional_ips (MAC-Gruppierung)
+    # 29 Keys: die 20 S.1-Contract-Keys + source (S.7f) + additional_ips (MAC-Gruppierung)
     # + is_known (Baseline-Anreicherung, ADR 0019) + is_changed (DHCP-Wechsel, ADR 0020)
     # + new_ports (Port-History Achse A, ADR 0026)
     # + analysis_severity (Auffaelligkeits-Bewertung Achse B, ADR 0029)
     # + flagged_ports (getroffene Ports je Stufe, Achse B, ADR 0030)
-    # + acknowledged_ports (quittierte Ports, Achse B, ADR 0031).
+    # + acknowledged_ports (quittierte Ports, Achse B, ADR 0031)
+    # + trust_state (wertende Einordnung aus der devices-DB).
     assert set(frame.keys()) == {
         "type",
         "ip",
@@ -343,11 +348,15 @@ def test_host_detail_frame_has_28_keys_incl_axis_b() -> None:
         "analysis_severity",
         "flagged_ports",
         "acknowledged_ports",
+        "trust_state",
     }
     assert frame["ports"] == [{"port": 22, "state": "open", "service": "ssh"}]
     assert frame["category"] == "server"
     assert frame["additional_ips"] == ["10.0.0.6", "10.0.0.7"]
     assert frame["source"] == "arp"  # Quelle haengt am persistenten Host (S.7f)
+    # Ohne kuratiertes device (kein _FakeGetDevice mit stored) bleibt der Default:
+    # trust_state "neutral" -- IMMER vorhanden, wie is_known.
+    assert frame["trust_state"] == "neutral"
 
 
 # ── analysis_severity (Auffaelligkeits-Bewertung, Achse B, ADR 0029) ──────────
@@ -751,10 +760,15 @@ def test_host_detail_is_known_read_before_record_seen() -> None:
 
 
 def test_host_detail_enriched_with_stored_curated_fields() -> None:
-    """Gespeichertes device -> Frame traegt dessen label/tags/notes, nicht Scan-Defaults."""
+    """Gespeichertes device -> Frame traegt label/tags/notes/trust_state, nicht Defaults."""
     # Der Scan traegt label/tags/notes LEER; die devices-DB ist die Wahrheit.
     host = EnrichedHost(ip="192.168.1.33", mac="AA:BB:CC:DD:EE:33", category="server")
-    stored = _FakeStoredDevice(label="NAS", tags=("infra", "storage"), notes="im Keller")
+    stored = _FakeStoredDevice(
+        label="NAS",
+        tags=("infra", "storage"),
+        notes="im Keller",
+        trust_state=TrustState.WATCH,
+    )
     get_device = _FakeGetDevice(stored=stored)
     client = _client([HostEnriched(host=host)], get_device=get_device)
     with client.websocket_connect("/ws/scan") as ws:
@@ -764,6 +778,9 @@ def test_host_detail_enriched_with_stored_curated_fields() -> None:
     assert frame["label"] == "NAS"
     assert frame["tags"] == ["infra", "storage"]
     assert frame["notes"] == "im Keller"
+    # trust_state aus der devices-DB ueberschreibt den "neutral"-Default -> haftet
+    # auch nach einem echten Re-Scan (das eigentliche Fix-Ziel von Etappe 2).
+    assert frame["trust_state"] == "watch"
     assert get_device.asked == ["AA:BB:CC:DD:EE:33"]
 
 

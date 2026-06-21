@@ -270,7 +270,14 @@
           "statusNew": "Erstmals in diesem Netz gesehen",
           "statusKnown": "Seit dem ersten Scan bekannt",
           "notable": "Anderweitig auffällig",
-          "additionalIps": "Weitere Adressen (gleiche MAC)"
+          "additionalIps": "Weitere Adressen (gleiche MAC)",
+          "trust": {
+            "heading": "Einordnung",
+            "trusted": "Vertraut",
+            "neutral": "Neutral",
+            "watch": "Beobachten",
+            "saveError": "Einordnung konnte nicht gespeichert werden"
+          }
         },
         "ports": {
           "heading": "Offene Ports",

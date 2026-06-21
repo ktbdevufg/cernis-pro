@@ -270,7 +270,14 @@
           "statusNew": "Seen on this network for the first time",
           "statusKnown": "Known since the first scan",
           "notable": "Notable in some way",
-          "additionalIps": "Additional addresses (same MAC)"
+          "additionalIps": "Additional addresses (same MAC)",
+          "trust": {
+            "heading": "Classification",
+            "trusted": "Trusted",
+            "neutral": "Neutral",
+            "watch": "Watch",
+            "saveError": "Could not save classification"
+          }
         },
         "ports": {
           "heading": "Open ports",

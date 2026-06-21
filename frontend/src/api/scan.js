@@ -130,6 +130,10 @@ export function mappeHost(host) {
     // Achse-B-Quelle: es leitet sich aus analysisSeverity ab (eine Wahrheit).
     notable: (host.analysis_severity ?? null) !== null,
     label: host.label ?? undefined,
+    // Einordnung/Vertrauensstatus (trust_state) aus der devices-DB. Defensiver
+    // Default "neutral", wenn das Frame ihn (noch) nicht trägt — Stil wie die
+    // übrigen kuratierten Felder.
+    trustState: host.trust_state ?? "neutral",
     // SMB-/NetBIOS-Name aus dem Scan (kann leer sein). Wird u. a. von der
     // CVE-Ansicht als letzter Rückfall für den Anzeige-Namen genutzt.
     smbName: host.smb_name ?? "",
@@ -187,6 +191,10 @@ export function mappeHostFound(frame) {
     acknowledgedPorts: [],
     notable: false,
     label: undefined,
+    // Einordnung/Vertrauensstatus: das schnelle Frame trägt keinen — Default-
+    // Platzhalter "neutral", analog zu isNew/label hier. Das nachfolgende
+    // host_detail (gleicher schluessel) liefert den echten Wert.
+    trustState: "neutral",
     tags: undefined,
     notes: undefined,
     // Quelle des Hosts: "ping" (aktiv) vs. "fritzbox" (Import). Steuert den

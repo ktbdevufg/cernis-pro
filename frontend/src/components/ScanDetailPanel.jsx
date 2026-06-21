@@ -14,7 +14,11 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { acknowledge } from "../api/analysis.js";
-import { tagsAusText, updateDeviceMeta } from "../api/devices.js";
+import {
+  setTrustState as setDeviceTrustState,
+  tagsAusText,
+  updateDeviceMeta,
+} from "../api/devices.js";
 import "./ScanDetailPanel.css";
 
 // Eine Feld-Zeile: Label links, Wert rechts. mono tönt den Wert monospace.
@@ -49,6 +53,12 @@ export default function ScanDetailPanel({ geraet, onClose, onGespeichert }) {
   // Speicher-Status: "idle" | "speichert" | "ok" | "fehler".
   const [status, setStatus] = useState("idle");
 
+  // Wertende Einordnung (trusted/neutral/watch) als Segmented Control. Eigener
+  // State, da sofort-speichernd beim Klick (entkoppelt vom Notizen-Speichern).
+  const [trustState, setTrustState] = useState(geraet.trustState || "neutral");
+  // Dezenter Fehlerhinweis, wenn das Sofort-Speichern fehlschlägt.
+  const [trustFehler, setTrustFehler] = useState(false);
+
   // Lokaler Quittier-Status PRO Port (Schnitt 8b): portNum -> "idle" | "sending"
   // | "acked" | "unacked" | "error". Bewusst KEINE optimistische Änderung von
   // Pille/Färbung/acknowledgedPorts — der echte Zustand kommt erst beim nächsten
@@ -62,6 +72,9 @@ export default function ScanDetailPanel({ geraet, onClose, onGespeichert }) {
     setTagsWert((geraet.tags || []).join(", "));
     setNotesWert(geraet.notes || "");
     setStatus("idle");
+    // Einordnung neu aus dem Gerät; Fehlerhinweis zurücknehmen.
+    setTrustState(geraet.trustState || "neutral");
+    setTrustFehler(false);
     // Quittier-Hinweise pro Port mit zurücksetzen — wie die Notizfelder gehören
     // sie zum gewählten Gerät und dürfen nicht auf das nächste übergreifen.
     setAckStatus({});
@@ -100,6 +113,30 @@ export default function ScanDetailPanel({ geraet, onClose, onGespeichert }) {
     } catch (fehler) {
       setAckStatus((vorher) => ({ ...vorher, [portNum]: "error" }));
       console.error("Quittieren des Ports fehlgeschlagen:", fehler);
+    }
+  };
+
+  // Setzt die Einordnung (trusted/neutral/watch) sofort beim Klick. Lokaler
+  // State wird optimistisch gesetzt, dann per PUT geschrieben. Bei Erfolg meldet
+  // onGespeichert das aktualisierte Gerät nach oben (der echte is_known-Wert
+  // kommt so zurück — KEINE optimistische is_known-Anzeige hier). Bei Fehler
+  // wird der lokale State zurückgedreht und ein dezenter Hinweis gezeigt.
+  const handleTrustChange = async (neu) => {
+    if (neu === trustState) {
+      return;
+    }
+    const vorher = trustState;
+    setTrustState(neu);
+    setTrustFehler(false);
+    try {
+      const aktualisiert = await setDeviceTrustState(geraet.mac, neu);
+      if (onGespeichert) {
+        onGespeichert(aktualisiert);
+      }
+    } catch (fehler) {
+      setTrustState(vorher);
+      setTrustFehler(true);
+      console.error("Setzen der Einordnung fehlgeschlagen:", fehler);
     }
   };
 
@@ -202,6 +239,47 @@ export default function ScanDetailPanel({ geraet, onClose, onGespeichert }) {
               {t("beobachten.scan.detail.identity.notable")}
             </p>
           )}
+
+          {/* Einordnung: wertende Einschätzung als Segmented Control. Sofort-
+              speichernd beim Klick. Eigenständig zu is_known (neu/bekannt). */}
+          <div className="scan-detail__trust">
+            <span
+              id="scan-detail-trust-label"
+              className="scan-detail__trust-heading"
+            >
+              {t("beobachten.scan.detail.identity.trust.heading")}
+            </span>
+            <div
+              className="scan-detail__trust-group"
+              role="group"
+              aria-labelledby="scan-detail-trust-label"
+            >
+              {[
+                { wert: "trusted", key: "trusted" },
+                { wert: "neutral", key: "neutral" },
+                { wert: "watch", key: "watch" },
+              ].map(({ wert, key }) => (
+                <button
+                  key={wert}
+                  type="button"
+                  className={
+                    trustState === wert
+                      ? "scan-detail__trust-btn scan-detail__trust-btn--aktiv"
+                      : "scan-detail__trust-btn"
+                  }
+                  aria-pressed={trustState === wert}
+                  onClick={() => handleTrustChange(wert)}
+                >
+                  {t(`beobachten.scan.detail.identity.trust.${key}`)}
+                </button>
+              ))}
+            </div>
+            {trustFehler && (
+              <p className="scan-detail__trust-error">
+                {t("beobachten.scan.detail.identity.trust.saveError")}
+              </p>
+            )}
+          </div>
         </section>
 
         {/* 2. Offene Ports */}

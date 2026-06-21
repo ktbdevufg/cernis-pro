@@ -157,6 +157,67 @@
   border-color: var(--sev-low-bd);
 }
 
+/* --- Einordnung: Segmented Control (wertende Einschätzung) --- */
+.scan-detail__trust {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.scan-detail__trust-heading {
+  font-size: 12px;
+  color: var(--color-text-sec);
+}
+
+/* Drei zusammenhängende Knöpfe: gemeinsamer Rahmen, geteilte Trennlinien. */
+.scan-detail__trust-group {
+  display: flex;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.scan-detail__trust-btn {
+  flex: 1;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--color-text-sec);
+  background: transparent;
+  border: none;
+  border-left: 1px solid var(--color-border);
+  cursor: pointer;
+}
+
+.scan-detail__trust-btn:first-child {
+  border-left: none;
+}
+
+.scan-detail__trust-btn:hover:not(.scan-detail__trust-btn--aktiv) {
+  background: var(--color-bar);
+  color: var(--color-text);
+}
+
+.scan-detail__trust-btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+/* Aktiver Zustand: Türkis-Akzent (Einordnung ist kein Urteil — kein Severity-
+   Orange/Rot hier). */
+.scan-detail__trust-btn--aktiv {
+  color: var(--color-accent-strong);
+  background: var(--color-accent-bg);
+  font-weight: 500;
+}
+
+.scan-detail__trust-error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--sev-high-text);
+}
+
 /* --- Offene Ports --- */
 .scan-detail__ports {
   display: flex;
