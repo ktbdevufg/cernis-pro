@@ -1414,7 +1414,15 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         return GetDevice(device_repository())
 
     def _build_is_known() -> Any:
-        return host_history_repository().is_known
+        # Baseline EINMAL beim WS-Aufbau lesen. Leere Historie (allererster Scan, kein
+        # Vorzustand) -> JEDER Host bekannt: new_host_seen feuert nicht ("neu" ist gegen
+        # eine leere Baseline bedeutungslos; gleiche Linie wie MAC-lose Hosts -> True).
+        # Sonst der normale Vorzustand-Abgleich gegen die vor record_seen gelesene Menge.
+        repo = host_history_repository()
+        baseline = repo.known_macs()
+        if not baseline:
+            return lambda mac: True
+        return lambda mac: True if not mac else (mac in baseline)
 
     # analysis-Achse-B-Bewertung (ADR 0029 + 0030): der WS-Handler bewertet pro
     # angereichertem Host den LIVE-Portstand gegen die KONFIGURIERTEN Regeln und traegt BEIDE
@@ -2673,13 +2681,16 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 # sind alle gesehenen Hosts bekannt; new_host_seen feuert ab dem zweiten
                 # Scan fuer echte Neuzugaenge.
                 known = host_history_repository().known_macs()
-                # Projektion EnrichedHost -> ObservedHost ueber die freie Funktion
-                # _observed_host (ADR 0029, Single Source mit dem WS-Severity-Pfad). Das
-                # is_known wird HIER aus dem Bulk-Read bestimmt (MAC-lose Hosts -> True,
-                # gleiche Linie wie das Repository) und hereingereicht -- kein
-                # Verhaltenswechsel zur frueheren Inline-Projektion.
+                # Leere Historie (allererster Scan, kein Vorzustand) -> JEDER Host bekannt:
+                # "neu" ist gegen eine leere Baseline bedeutungslos, sonst flaggt der erste
+                # Scan ALLE Hosts als new_host_seen. Ab dem zweiten Scan normaler Abgleich.
+                # Linie wie MAC-lose -> True.
+                history_empty = not known
                 hosts_observed = tuple(
-                    _observed_host(h, is_known=(h.mac in known) if h.mac else True)
+                    _observed_host(
+                        h,
+                        is_known=True if history_empty or not h.mac else (h.mac in known),
+                    )
                     for h in record.hosts
                 )
         snapshot = Snapshot(

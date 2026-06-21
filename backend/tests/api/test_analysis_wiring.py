@@ -222,3 +222,44 @@ def test_known_host_not_new_unknown_host_is_new(monkeypatch: pytest.MonkeyPatch)
     new_host_obs = [o for o in observations if o.observation.rule_id == "new_host_seen"]
     assert len(new_host_obs) == 1
     assert new_host_obs[0].observation.subject == "192.168.1.52"  # Y, nicht X
+
+
+def test_first_scan_empty_history_suppresses_new_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Erstlauf-Naht (C.2): leere Historie (allererster Scan) -> KEIN new_host_seen,
+    obwohl alle Hosts formal unbekannt sind. Echte Port-Befunde feuern aber WEITER --
+    der Fix unterdrueckt nur die gegen eine leere Baseline bedeutungslose 'neu'-Aussage."""
+
+    class _TwoHostOnePortScanHistoryRepo:
+        """Juengster Scan, zwei Hosts; einer mit offenem rdp-Port (3389, auffaellig-
+        Default ADR 0027) -> belegt, dass der Port-Befund trotz Erstlauf feuert."""
+
+        def __init__(self, *args: Any, **kwargs: Any) -> None: ...
+
+        def list(self, limit: int) -> list[ScanSummary]:
+            return [ScanSummary(scan_id=10, cidr="192.168.1.0/24", host_count=2)]
+
+        def get(self, scan_id: int) -> ScanRecord:
+            return ScanRecord(
+                scan_id=scan_id,
+                cidr="192.168.1.0/24",
+                hosts=(
+                    EnrichedHost(ip="192.168.1.51", mac="AA:BB:CC:00:00:01", hostname="a"),
+                    EnrichedHost(
+                        ip="192.168.1.52",
+                        mac="AA:BB:CC:00:00:02",
+                        hostname="b",
+                        ports=(PortInfo(port=3389, state="open"),),
+                    ),
+                ),
+            )
+
+    _wire_fakes(monkeypatch)
+    monkeypatch.setattr(app_module, "SqliteScanHistoryRepository", _TwoHostOnePortScanHistoryRepo)
+
+    app = create_app(AppConfig())
+    runner = app.dependency_overrides[provide_analyze]()
+    observations = asyncio.run(runner())
+
+    rule_ids = _rule_ids(observations)
+    assert "new_host_seen" not in rule_ids
+    assert "host_remote_access_port" in rule_ids
