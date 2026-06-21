@@ -7,6 +7,86 @@
   max-width: 560px;
 }
 
+/* Teil A — Gesamt-Layout: Navigation links, Inhalt rechts. Eine schmale Rubriken-
+   Spalte mit Trenner rechts, daneben der breite Inhaltsbereich. Hebt das
+   max-width des Einzel-Spalten-Layouts auf, der Inhalt nutzt die volle Breite. */
+.settings--layout {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 24px;
+  max-width: none;
+}
+
+.settings__nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 0 0 180px;
+  padding-right: 16px;
+  border-right: 1px solid var(--color-border);
+}
+
+/* Eine Rubrik in der linken Spalte: ruhig, aktive Rubrik mit dezentem
+   Token-Akzent (Hintergrund + linker Akzentstreifen). */
+.settings__nav-item {
+  padding: 8px 12px;
+  font-size: 14px;
+  text-align: left;
+  color: var(--color-text-sec);
+  background: none;
+  border: none;
+  border-left: 3px solid transparent;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  cursor: pointer;
+}
+
+.settings__nav-item:hover {
+  color: var(--color-text);
+  background: var(--color-card);
+}
+
+.settings__nav-item--aktiv {
+  color: var(--color-text);
+  font-weight: 600;
+  background: var(--color-accent-bg);
+  border-left-color: var(--color-accent);
+}
+
+.settings__nav-item:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Rechter Inhaltsbereich: gestapelte Sektionen, auf eine angenehme Lesebreite
+   begrenzt und linksbündig. Ohne diese Grenze liefen die Port-Zeilen (Bezeichnung)
+   über die gesamte Fensterbreite ins Leere. 620px liegt mittig im Richtwert
+   560–680px und lässt Port + Bezeichnung + Kästchen (+ Mülleimer) ausgewogen wirken. */
+.settings__content {
+  flex: 0 1 620px;
+  min-width: 0;
+  max-width: 620px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* Schmale Fenster: Navigation und Inhalt untereinander statt nebeneinander. */
+@media (max-width: 720px) {
+  .settings--layout {
+    flex-direction: column;
+  }
+
+  .settings__nav {
+    flex: 0 0 auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    padding-right: 0;
+    padding-bottom: 12px;
+    border-right: none;
+    border-bottom: 1px solid var(--color-border);
+  }
+}
+
 /* Eine benannte Sektion. */
 .settings__section {
   display: flex;
@@ -252,36 +332,11 @@
   gap: 12px;
 }
 
-/* Die zweispaltige Port/Service-Tabelle plus schmale Aktionsspalte. */
-.auffaelligkeit__grid {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 14px;
-}
-
-.auffaelligkeit__grid th {
-  padding: 4px 8px;
-  font-size: 11px;
-  font-weight: 600;
-  text-align: left;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--color-text-tert);
-  border-bottom: 1px solid var(--color-border);
-}
-
-.auffaelligkeit__grid td {
-  padding: 5px 8px;
-  color: var(--color-text);
-  border-bottom: 1px solid var(--color-border);
-}
-
-.auffaelligkeit__grid tr:last-child td {
-  border-bottom: none;
-}
-
-.auffaelligkeit__service {
-  color: var(--color-text-sec);
+/* Teil E — oranger Hinweis unter der Listen-Überschrift (nur wenn abgewählte
+   Ports existieren). Dezent, in der severity-orange-Farbe der Auffälligkeit. */
+.auffaelligkeit__disabled-hint {
+  font-size: 12px;
+  color: var(--severity-auffaellig);
 }
 
 .auffaelligkeit__empty {
@@ -289,11 +344,82 @@
   font-style: italic;
 }
 
-/* Aktionsspalte: rechtsbündiger, dezenter Lösch-Button. */
-.auffaelligkeit__cell-action {
-  width: 1%;
+/* Teil C — Port-Liste im Box-Schema: Einträge UNTEREINANDER, je Zeile vier
+   abgesetzte Boxen mit Abstand. */
+.auffaelligkeit__portlist {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Eine Port-Zeile: Port-Box (FEST) · Bezeichnungs-Box (1fr) · Kästchen-Box ·
+   Entfernen-Box. Grid hält die Spalten über alle Zeilen bündig untereinander.
+   Die erste Spalte hat eine FESTE Breite, bemessen an einer 5-stelligen Zahl
+   (5ch) plus den seitlichen Box-Innenabständen (2×12px). Dadurch ist jede
+   Port-Box gleich breit; kurze Nummern stehen rechtsbündig (siehe __port-box),
+   links bleibt entsprechend Platz. */
+.auffaelligkeit__portrow {
+  display: grid;
+  grid-template-columns: calc(5ch + 24px) 1fr auto auto;
+  align-items: stretch;
+  gap: 8px;
+}
+
+/* Abgewählte Zeile (Teil D): gedämpft, aber sichtbar und wieder anhakbar. */
+.auffaelligkeit__portrow--inaktiv {
+  opacity: 0.55;
+}
+
+/* 1) Port-Nummer-Box: eng um die Zahl, symmetrischer Innenabstand, tabular-nums
+   und rechtsbündig, damit kurze/lange Ports sauber untereinander stehen. */
+.auffaelligkeit__port-box {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 10px 12px;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
   text-align: right;
-  white-space: nowrap;
+  color: var(--color-text);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* 2) Bezeichnungs-Box: restliche Breite, Service-Name (oder dezent leer). */
+.auffaelligkeit__port-service {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 10px 12px;
+  font-size: 14px;
+  color: var(--color-text-sec);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* 3) Kästchen-Box und 4) Entfernen-Box: gleiche Box-Optik, mittig. */
+.auffaelligkeit__port-toggle,
+.auffaelligkeit__port-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 12px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* Leerer Platzhalter an der Mülleimer-Stelle für Standard-Ports: gleiche
+   Grundfläche wie die Entfernen-Box (transparente Bordüre = identische Breite),
+   aber ohne sichtbaren Rahmen/Hintergrund, damit die Spalten bündig bleiben. */
+.auffaelligkeit__port-remove--leer {
+  background: none;
+  border-color: transparent;
 }
 
 .auffaelligkeit__remove {
@@ -479,11 +605,13 @@
   gap: 8px;
 }
 
-/* Block 3: Regel-Liste mit An/Aus-Schaltern. */
+/* Block 3 / Teil B: Regel-Zeilen als abgesetzte Boxen. Jede Zeile besteht aus
+   einer breiten Text-Box (mit optionalem Severity-Böppel davor) und — mit
+   klarem Abstand — einer separaten Box mit dem Kästchen rechts. */
 .auffaelligkeit__rules {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 8px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -491,21 +619,24 @@
 
 .auffaelligkeit__rule {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   justify-content: space-between;
-  gap: 12px;
-  padding: 6px 0;
+  gap: 8px;
 }
 
-.auffaelligkeit__rule + .auffaelligkeit__rule {
-  border-top: 1px solid var(--color-border);
-}
-
+/* Text-Box: dezente Füller-Fläche, abgerundet, angenehmer Innenabstand. Nimmt
+   die restliche Breite; Severity-Böppel + Titel sitzen darin. */
 .auffaelligkeit__rule-label {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
+  flex: 1 1 auto;
+  padding: 10px 12px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
 }
 
 .auffaelligkeit__rule-title {
@@ -513,7 +644,31 @@
   color: var(--color-text);
 }
 
-/* Dezenter Severity-Punkt je Regel. */
+/* Kästchen-Box: eigene abgesetzte Box rechts, gleiche Optik wie die Text-Box. */
+.auffaelligkeit__rule-switchbox {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  padding: 10px 14px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* Severity-Böppel-Box: eigenes kleines abgesetztes Kästchen ganz links. */
+.auffaelligkeit__rule-sevbox {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  padding: 10px 12px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* Dezenter Severity-Böppel je Regel — als eigenes kleines Kästchen ganz links. */
 .auffaelligkeit__dot {
   flex: 0 0 auto;
   width: 8px;

@@ -413,16 +413,6 @@ export default function OverviewView({ onNavigate }) {
       {/* Dezenter Ladehinweis: nur während des ersten Laufs, kein Vollbild-Spinner. */}
       {laedt && <p className="overview-view__loading">…</p>}
 
-      {/* "Anpassen"-Knopf vorbereitet; Aktion folgt in Block 2 (hier no-op). */}
-      <div className="overview-view__customize">
-        <button
-          type="button"
-          className="overview-view__customize-btn"
-          // onClick folgt in Block 2 (Settings-UI zum Umschalten der Bereiche).
-        >
-          {t("overview.customize")}
-        </button>
-      </div>
     </div>
   );
 }

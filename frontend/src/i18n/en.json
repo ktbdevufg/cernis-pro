@@ -70,7 +70,17 @@
       "rulesHint": "Enable or disable individual suspiciousness rules. Disabled rules are no longer evaluated.",
       "rulesEmpty": "No rules available.",
       "honestyTitle": "To be honest",
-      "honestyText": "The critical backdoor list is historically useful but barely catches modern malware: today it uses 443, DNS or dynamic ports. A hit is a clear signal, but not a full malware scan – no false sense of security."
+      "honestyText": "The critical backdoor list is historically useful but barely catches modern malware: today it uses 443, DNS or dynamic ports. A hit is a clear signal, but not a full malware scan – no false sense of security.",
+      "disabledHint_one": "1 port is permanently ignored.",
+      "disabledHint_other": "{{count}} ports are permanently ignored.",
+      "portActive": "Port is evaluated",
+      "portInactive": "Port is ignored"
+    },
+    "nav": {
+      "general": "General",
+      "startseite": "Home page",
+      "fritzbox": "FRITZ!Box",
+      "auffaelligkeit": "What is suspicious?"
     },
     "startseite": {
       "title": "Home page",
@@ -163,8 +173,7 @@
     "beachtenswertHeading": "Worth noting",
     "fromLastScan": "from the last scan",
     "cveHeading": "New CVE findings",
-    "cveNewBadge": "NEW",
-    "customize": "Customize"
+    "cveNewBadge": "NEW"
   },
   "beobachten": {
     "cards": {

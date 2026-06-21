@@ -8,7 +8,7 @@
 // kommt als Prop (lang) und wird über onLangChange zurückgemeldet — die
 // Persistenz bleibt in App.jsx (single source of truth).
 
-import { Upload, X } from "lucide-react";
+import { Trash2, Upload } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -196,89 +196,51 @@ function OverviewSektion({ onGespeichert }) {
   // als dessen Unterpunkt.
   return (
     <SettingsSektion title={t("settings.startseite.title")}>
-      <ul className="auffaelligkeit__rules">
-        <li className="auffaelligkeit__rule">
-          <label className="auffaelligkeit__rule-label">
-            <span className="auffaelligkeit__rule-title">
-              {t("settings.startseite.status")}
-            </span>
-          </label>
-          <input
-            type="checkbox"
-            className="auffaelligkeit__switch"
-            checked={sektionen.status}
-            onChange={(e) => handleToggle("status", e.target.checked)}
-          />
-        </li>
-        <li className="auffaelligkeit__rule startseite__rule--sub">
-          <label className="auffaelligkeit__rule-label">
-            <span className="auffaelligkeit__rule-title">
-              {t("settings.startseite.statusMonitoring")}
-            </span>
-          </label>
-          <input
-            type="checkbox"
-            className="auffaelligkeit__switch"
-            checked={sektionen.status_monitoring}
-            disabled={!sektionen.status}
-            onChange={(e) =>
-              handleToggle("status_monitoring", e.target.checked)
-            }
-          />
-        </li>
-        <li className="auffaelligkeit__rule">
-          <label className="auffaelligkeit__rule-label">
-            <span className="auffaelligkeit__rule-title">
-              {t("settings.startseite.schnellzugriff")}
-            </span>
-          </label>
-          <input
-            type="checkbox"
-            className="auffaelligkeit__switch"
-            checked={sektionen.schnellzugriff}
-            onChange={(e) => handleToggle("schnellzugriff", e.target.checked)}
-          />
-        </li>
-        <li className="auffaelligkeit__rule">
-          <label className="auffaelligkeit__rule-label">
-            <span className="auffaelligkeit__rule-title">
-              {t("settings.startseite.beachtenswert")}
-            </span>
-          </label>
-          <input
-            type="checkbox"
-            className="auffaelligkeit__switch"
-            checked={sektionen.beachtenswert}
-            onChange={(e) => handleToggle("beachtenswert", e.target.checked)}
-          />
-        </li>
-        <li className="auffaelligkeit__rule">
-          <label className="auffaelligkeit__rule-label">
-            <span className="auffaelligkeit__rule-title">
-              {t("settings.startseite.cve")}
-            </span>
-          </label>
-          <input
-            type="checkbox"
-            className="auffaelligkeit__switch"
-            checked={sektionen.cve}
-            onChange={(e) => handleToggle("cve", e.target.checked)}
-          />
-        </li>
-        <li className="auffaelligkeit__rule">
-          <label className="auffaelligkeit__rule-label">
-            <span className="auffaelligkeit__rule-title">
-              {t("settings.startseite.kennzahlen")}
-            </span>
-          </label>
-          <input
-            type="checkbox"
-            className="auffaelligkeit__switch"
-            checked={sektionen.kennzahlen}
-            onChange={(e) => handleToggle("kennzahlen", e.target.checked)}
-          />
-        </li>
-      </ul>
+      {/* Teil B — Bereichs-Schalter als abgesetzte Boxen (Text-Box + Kästchen-Box).
+          status_monitoring ist Detail der Status-Zeile: eingerückt und deaktiviert,
+          solange status aus ist. Datengetrieben, Reihenfolge laut Briefing.
+          Im auffaelligkeit__block, damit die Schalter denselben seitlichen
+          Innenabstand wie Port- und Regel-Zeilen haben (nicht am Rand kleben). */}
+      <div className="auffaelligkeit__block">
+        <ul className="auffaelligkeit__rules">
+        {[
+          { key: "status", sub: false, disabled: false },
+          { key: "statusMonitoring", schalter: "status_monitoring", sub: true },
+          { key: "schnellzugriff", sub: false },
+          { key: "beachtenswert", sub: false },
+          { key: "cve", sub: false },
+          { key: "kennzahlen", sub: false },
+        ].map((eintrag) => {
+          const schalter = eintrag.schalter ?? eintrag.key;
+          const istDeaktiviert = schalter === "status_monitoring" && !sektionen.status;
+          return (
+            <li
+              key={schalter}
+              className={
+                eintrag.sub
+                  ? "auffaelligkeit__rule startseite__rule--sub"
+                  : "auffaelligkeit__rule"
+              }
+            >
+              <span className="auffaelligkeit__rule-label">
+                <span className="auffaelligkeit__rule-title">
+                  {t(`settings.startseite.${eintrag.key}`)}
+                </span>
+              </span>
+              <span className="auffaelligkeit__rule-switchbox">
+                <input
+                  type="checkbox"
+                  className="auffaelligkeit__switch"
+                  checked={sektionen[schalter]}
+                  disabled={istDeaktiviert}
+                  onChange={(e) => handleToggle(schalter, e.target.checked)}
+                />
+              </span>
+            </li>
+          );
+        })}
+        </ul>
+      </div>
 
       <p className="settings__hint">{t("settings.startseite.hint")}</p>
 
@@ -500,16 +462,24 @@ function ServiceZelle({ port, serviceCache, onServiceGeladen }) {
   return <>{service ?? t("settings.auffaelligkeit.serviceUnknown")}</>;
 }
 
-// Eine Port→Service-Tabelle (auffällig ODER kritisch). Stateless bzgl. Persistenz:
-// die Portliste (sortierte Zahlen) kommt als Prop, jede Änderung geht als neue
-// vollständige Liste an onChange zurück; das Speichern hält die Sektion. variante
-// steuert nur die Optik ("auffaellig"|"kritisch") über die severity-Tokens. Der
-// serviceCache wird über beide Tabellen geteilt (siehe ServiceZelle).
+// Eine Port→Service-Liste (auffällig ODER kritisch) im Box-Schema. Stateless bzgl.
+// Persistenz: aktive und abgewählte Ports kommen als Props, jede Änderung meldet
+// die Sektion über die Handler zurück (sie hält das Speichern). variante steuert
+// nur die Optik ("auffaellig"|"kritisch") über die severity-Tokens. Der
+// serviceCache wird über beide Listen geteilt (siehe ServiceZelle).
+//
+// Anzeige-Liste = Vereinigung aus aktivePorts (angehakt) + disabledPorts
+// (abgewählt), sortiert nach Portnummer. Das Kästchen schaltet einen Port zwischen
+// aktiv/abgewählt; der Mülleimer entfernt ihn endgültig aus BEIDEN Listen.
 function PortTabelle({
   variante,
   titel,
-  ports,
-  onChange,
+  aktivePorts,
+  disabledPorts,
+  standardPorts,
+  onToggle,
+  onRemove,
+  onAdd,
   onReset,
   serviceCache,
   onServiceGeladen,
@@ -519,7 +489,18 @@ function PortTabelle({
   const [eingabe, setEingabe] = useState("");
   const [service, setService] = useState(null); // Auto-Lookup-Ergebnis (oder null)
   const [fehler, setFehler] = useState(""); // dezente Inline-Meldung (i18n-Key)
-  const portSet = new Set(ports);
+
+  // Anzeige-Liste: Vereinigung beider Listen, dedupliziert + sortiert. Ein Set der
+  // aktiven Ports steuert das Kästchen; ein Set ALLER Ports verhindert Duplikate
+  // beim Hinzufügen (ein abgewählter Port zählt als vorhanden).
+  const aktivSet = new Set(aktivePorts);
+  const alleSet = new Set([...aktivePorts, ...disabledPorts]);
+  const anzeigePorts = [...alleSet].sort((a, b) => a - b);
+
+  // Standard-Ports der Rubrik (aus konfig.defaults durchgereicht): nur SELBST
+  // hinzugefügte Ports (nicht in dieser Menge) bekommen den Mülleimer. Standard-
+  // Ports behalten ihr Kästchen, aber kein Entfernen.
+  const standardSet = new Set(standardPorts);
 
   // Auto-Lookup beim Tippen, entprellt (~300ms). Eine leere/ungültige Eingabe
   // löst keinen Aufruf aus; ein fehlgeschlagener Lookup ist „—", kein Crash.
@@ -556,19 +537,19 @@ function PortTabelle({
   }, [eingabe]);
 
   // Port hinzufügen: Range 1–65535 erzwingen (ungültig -> Inline-Meldung, kein
-  // Eintrag), Duplikate innerhalb DIESER Liste verhindern. Ein Port DARF in beiden
-  // Listen stehen — das ist Sache der jeweils anderen Tabelle, hier nicht geprüft.
+  // Eintrag), Duplikate gegen die GESAMTE Anzeige-Liste verhindern (aktiv ODER
+  // abgewählt). Der neue Port kommt aktiv (angehakt) hinzu — das übernimmt onAdd.
   const handleHinzufuegen = () => {
     const port = Number(eingabe.trim());
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
       setFehler("portInvalid");
       return;
     }
-    if (portSet.has(port)) {
+    if (alleSet.has(port)) {
       setFehler("portDuplicate");
       return;
     }
-    onChange([...ports, port].sort((a, b) => a - b));
+    onAdd(port);
     setEingabe("");
     setService(null);
     setFehler("");
@@ -596,48 +577,77 @@ function PortTabelle({
         </button>
       </div>
 
-      <table className="auffaelligkeit__grid">
-        <thead>
-          <tr>
-            <th>{t("settings.auffaelligkeit.colPort")}</th>
-            <th>{t("settings.auffaelligkeit.colService")}</th>
-            <th aria-hidden="true" />
-          </tr>
-        </thead>
-        <tbody>
-          {ports.length === 0 ? (
-            <tr>
-              <td colSpan={3} className="auffaelligkeit__empty">
-                {t("settings.auffaelligkeit.empty")}
-              </td>
-            </tr>
-          ) : (
-            ports.map((port) => (
-              <tr key={port}>
-                <td>{port}</td>
-                <td className="auffaelligkeit__service">
+      {/* Teil E — oranger Hinweis, nur wenn abgewählte Ports existieren. */}
+      {disabledPorts.length > 0 ? (
+        <span className="auffaelligkeit__disabled-hint">
+          {t("settings.auffaelligkeit.disabledHint", {
+            count: disabledPorts.length,
+          })}
+        </span>
+      ) : null}
+
+      {/* Box-Schema: pro Zeile vier abgesetzte Boxen, Einträge untereinander. */}
+      {anzeigePorts.length === 0 ? (
+        <span className="auffaelligkeit__empty">
+          {t("settings.auffaelligkeit.empty")}
+        </span>
+      ) : (
+        <ul className="auffaelligkeit__portlist">
+          {anzeigePorts.map((port) => {
+            const aktiv = aktivSet.has(port);
+            const istStandard = standardSet.has(port);
+            const zeilenKlasse = aktiv
+              ? "auffaelligkeit__portrow"
+              : "auffaelligkeit__portrow auffaelligkeit__portrow--inaktiv";
+            return (
+              <li key={port} className={zeilenKlasse}>
+                <span className="auffaelligkeit__port-box">{port}</span>
+                <span className="auffaelligkeit__port-service">
                   <ServiceZelle
                     port={port}
                     serviceCache={serviceCache}
                     onServiceGeladen={onServiceGeladen}
                   />
-                </td>
-                <td className="auffaelligkeit__cell-action">
-                  <button
-                    type="button"
-                    className="auffaelligkeit__remove"
-                    aria-label={t("settings.auffaelligkeit.remove")}
-                    title={t("settings.auffaelligkeit.remove")}
-                    onClick={() => onChange(ports.filter((p) => p !== port))}
-                  >
-                    <X size={14} aria-hidden="true" />
-                  </button>
-                </td>
-              </tr>
-            ))
-          )}
-        </tbody>
-      </table>
+                </span>
+                <span className="auffaelligkeit__port-toggle">
+                  <input
+                    type="checkbox"
+                    className="auffaelligkeit__switch"
+                    checked={aktiv}
+                    aria-label={t(
+                      aktiv
+                        ? "settings.auffaelligkeit.portActive"
+                        : "settings.auffaelligkeit.portInactive",
+                    )}
+                    onChange={(e) => onToggle(port, e.target.checked)}
+                  />
+                </span>
+                {/* Mülleimer nur bei selbst hinzugefügten Ports. Standard-Ports
+                    (in der defaults-Liste) bekommen an gleicher Stelle einen
+                    leeren Platzhalter, damit die Spalten bündig bleiben. */}
+                {istStandard ? (
+                  <span
+                    className="auffaelligkeit__port-remove auffaelligkeit__port-remove--leer"
+                    aria-hidden="true"
+                  />
+                ) : (
+                  <span className="auffaelligkeit__port-remove">
+                    <button
+                      type="button"
+                      className="auffaelligkeit__remove"
+                      aria-label={t("settings.auffaelligkeit.remove")}
+                      title={t("settings.auffaelligkeit.remove")}
+                      onClick={() => onRemove(port)}
+                    >
+                      <Trash2 size={14} aria-hidden="true" />
+                    </button>
+                  </span>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
 
       <div className="auffaelligkeit__add">
         <input
@@ -886,6 +896,10 @@ function AuffaelligkeitSektion({ onGespeichert }) {
 
   const [auffaelligePorts, setAuffaelligePorts] = useState([]);
   const [kritischePorts, setKritischePorts] = useState([]);
+  // Abgewählte Ports je Liste (Teil D): reine Frontend-Keys, additiv. Sie ändern
+  // NICHT, was das Backend auswertet — dort steht nur die jeweils aktive Liste.
+  const [auffaelligDisabled, setAuffaelligDisabled] = useState([]);
+  const [kritischDisabled, setKritischDisabled] = useState([]);
   const [portCount, setPortCount] = useState(DEFAULT_PORT_COUNT);
   const [regeln, setRegeln] = useState([]); // [{ id, title, severity, disabled }]
   const [serviceCache, setServiceCache] = useState({}); // port -> name|null
@@ -922,6 +936,21 @@ function AuffaelligkeitSektion({ onGespeichert }) {
           Array.isArray(settings.analysis_critical_ports)
             ? [...settings.analysis_critical_ports].sort((a, b) => a - b)
             : DEFAULT_KRITISCHE_PORTS,
+        );
+        // Disabled-Listen: fehlt der Key (alte DB), als leeres Array behandeln.
+        setAuffaelligDisabled(
+          Array.isArray(settings.analysis_suspicious_ports_disabled)
+            ? [...settings.analysis_suspicious_ports_disabled].sort(
+                (a, b) => a - b,
+              )
+            : [],
+        );
+        setKritischDisabled(
+          Array.isArray(settings.analysis_critical_ports_disabled)
+            ? [...settings.analysis_critical_ports_disabled].sort(
+                (a, b) => a - b,
+              )
+            : [],
         );
         setPortCount(
           Number.isInteger(settings.analysis_port_count_threshold)
@@ -962,6 +991,64 @@ function AuffaelligkeitSektion({ onGespeichert }) {
       console.error(`${key} speichern fehlgeschlagen:`, fehler);
       setSpeicherFehler(true);
     }
+  };
+
+  // Schreibt BEIDE Listen einer Rubrik (aktiv + disabled) atomar gegen die API.
+  // Erst lokal spiegeln, dann zwei updateSetting-Aufrufe; bei Fehler den
+  // Speicher-Fehlerzustand setzen. Genutzt von Kästchen-Toggle und Mülleimer.
+  const schreibeListenpaar = async (konfig, neuAktiv, neuDisabled) => {
+    setSpeicherFehler(false);
+    konfig.setAktiv(neuAktiv);
+    konfig.setDisabled(neuDisabled);
+    try {
+      await updateSetting(konfig.aktivKey, neuAktiv);
+      await updateSetting(konfig.disabledKey, neuDisabled);
+      onGespeichert();
+    } catch (fehler) {
+      console.error(`${konfig.aktivKey} speichern fehlgeschlagen:`, fehler);
+      setSpeicherFehler(true);
+    }
+  };
+
+  // Kästchen umschalten (Teil D). Anhaken: Port aus disabled raus, in aktiv rein.
+  // Abwählen: Port aus aktiv raus, in disabled rein. Beide Listen sortiert.
+  const handlePortToggle = (konfig, port, anhaken) => {
+    if (anhaken) {
+      const neuAktiv = [...konfig.aktiv, port].sort((a, b) => a - b);
+      const neuDisabled = konfig.disabled.filter((p) => p !== port);
+      schreibeListenpaar(konfig, neuAktiv, neuDisabled);
+    } else {
+      const neuAktiv = konfig.aktiv.filter((p) => p !== port);
+      const neuDisabled = [...konfig.disabled, port].sort((a, b) => a - b);
+      schreibeListenpaar(konfig, neuAktiv, neuDisabled);
+    }
+  };
+
+  // Mülleimer (Teil D): Port endgültig aus BEIDEN Listen entfernen.
+  const handlePortRemove = (konfig, port) => {
+    const neuAktiv = konfig.aktiv.filter((p) => p !== port);
+    const neuDisabled = konfig.disabled.filter((p) => p !== port);
+    schreibeListenpaar(konfig, neuAktiv, neuDisabled);
+  };
+
+  // „Hinzufügen" (Teil D): neuer Port kommt aktiv (angehakt) hinzu, disabled bleibt.
+  const handlePortAdd = (konfig, port) => {
+    const neuAktiv = [...konfig.aktiv, port].sort((a, b) => a - b);
+    schreibePortliste(konfig.aktivKey, konfig.setAktiv, neuAktiv);
+  };
+
+  // „Auf Standard zurücksetzen" (Teil D): aktive Liste auf die Standard-Ports,
+  // disabled-Liste leeren — alle Standard-Ports also wieder aktiv.
+  const handlePortReset = (konfig) => {
+    schreibeListenpaar(konfig, [...konfig.defaults], []);
+  };
+
+  // Upload-Pfad (Schnitt 7): geschriebene Liste ist die aktive Liste; die darin
+  // enthaltenen Ports werden aus disabled entfernt (sonst Doppelung aktiv+disabled).
+  const handlePortUpload = (konfig, neueAktiv) => {
+    const aktivSet = new Set(neueAktiv);
+    const neuDisabled = konfig.disabled.filter((p) => !aktivSet.has(p));
+    schreibeListenpaar(konfig, neueAktiv, neuDisabled);
   };
 
   // Block 2: die Schwelle schreiben.
@@ -1021,92 +1108,80 @@ function AuffaelligkeitSektion({ onGespeichert }) {
     );
   }
 
+  // Listen-Konfigurationen: bündeln je Rubrik die beiden Settings-Keys, die
+  // Standard-Ports und die State-Setter. Die Handler oben arbeiten generisch
+  // darauf, sodass auffällig/kritisch denselben Pfad teilen.
+  const auffaelligKonfig = {
+    aktivKey: "analysis_suspicious_ports",
+    disabledKey: "analysis_suspicious_ports_disabled",
+    defaults: DEFAULT_AUFFAELLIGE_PORTS,
+    aktiv: auffaelligePorts,
+    disabled: auffaelligDisabled,
+    setAktiv: setAuffaelligePorts,
+    setDisabled: setAuffaelligDisabled,
+  };
+  const kritischKonfig = {
+    aktivKey: "analysis_critical_ports",
+    disabledKey: "analysis_critical_ports_disabled",
+    defaults: DEFAULT_KRITISCHE_PORTS,
+    aktiv: kritischePorts,
+    disabled: kritischDisabled,
+    setAktiv: setKritischePorts,
+    setDisabled: setKritischDisabled,
+  };
+
   return (
     <SettingsSektion title={t("settings.auffaelligkeit.title")}>
-      {/* Block 1 — zwei getrennte Port→Service-Tabellen, je mit Upload darunter. */}
+      {/* Block 1 — zwei getrennte Port-Listen, je mit Upload darunter. */}
       <div className="auffaelligkeit__block">
         <div className="auffaelligkeit__listengruppe">
           <PortTabelle
             variante="auffaellig"
             titel={t("settings.auffaelligkeit.suspiciousTitle")}
-            ports={auffaelligePorts}
+            aktivePorts={auffaelligePorts}
+            disabledPorts={auffaelligDisabled}
+            standardPorts={auffaelligKonfig.defaults}
             serviceCache={serviceCache}
             onServiceGeladen={merkeService}
-            onChange={(neu) =>
-              schreibePortliste(
-                "analysis_suspicious_ports",
-                setAuffaelligePorts,
-                neu,
-              )
+            onToggle={(port, anhaken) =>
+              handlePortToggle(auffaelligKonfig, port, anhaken)
             }
-            onReset={() =>
-              schreibePortliste(
-                "analysis_suspicious_ports",
-                setAuffaelligePorts,
-                [...DEFAULT_AUFFAELLIGE_PORTS],
-              )
-            }
+            onRemove={(port) => handlePortRemove(auffaelligKonfig, port)}
+            onAdd={(port) => handlePortAdd(auffaelligKonfig, port)}
+            onReset={() => handlePortReset(auffaelligKonfig)}
           />
           <PortUpload
             variante="auffaellig"
             bestehendePorts={auffaelligePorts}
             serviceCache={serviceCache}
             onServiceGeladen={merkeService}
-            onErgaenzen={(neu) =>
-              schreibePortliste(
-                "analysis_suspicious_ports",
-                setAuffaelligePorts,
-                neu,
-              )
-            }
-            onErsetzen={(neu) =>
-              schreibePortliste(
-                "analysis_suspicious_ports",
-                setAuffaelligePorts,
-                neu,
-              )
-            }
+            onErgaenzen={(neu) => handlePortUpload(auffaelligKonfig, neu)}
+            onErsetzen={(neu) => handlePortUpload(auffaelligKonfig, neu)}
           />
         </div>
         <div className="auffaelligkeit__listengruppe">
           <PortTabelle
             variante="kritisch"
             titel={t("settings.auffaelligkeit.criticalTitle")}
-            ports={kritischePorts}
+            aktivePorts={kritischePorts}
+            disabledPorts={kritischDisabled}
+            standardPorts={kritischKonfig.defaults}
             serviceCache={serviceCache}
             onServiceGeladen={merkeService}
-            onChange={(neu) =>
-              schreibePortliste(
-                "analysis_critical_ports",
-                setKritischePorts,
-                neu,
-              )
+            onToggle={(port, anhaken) =>
+              handlePortToggle(kritischKonfig, port, anhaken)
             }
-            onReset={() =>
-              schreibePortliste("analysis_critical_ports", setKritischePorts, [
-                ...DEFAULT_KRITISCHE_PORTS,
-              ])
-            }
+            onRemove={(port) => handlePortRemove(kritischKonfig, port)}
+            onAdd={(port) => handlePortAdd(kritischKonfig, port)}
+            onReset={() => handlePortReset(kritischKonfig)}
           />
           <PortUpload
             variante="kritisch"
             bestehendePorts={kritischePorts}
             serviceCache={serviceCache}
             onServiceGeladen={merkeService}
-            onErgaenzen={(neu) =>
-              schreibePortliste(
-                "analysis_critical_ports",
-                setKritischePorts,
-                neu,
-              )
-            }
-            onErsetzen={(neu) =>
-              schreibePortliste(
-                "analysis_critical_ports",
-                setKritischePorts,
-                neu,
-              )
-            }
+            onErgaenzen={(neu) => handlePortUpload(kritischKonfig, neu)}
+            onErsetzen={(neu) => handlePortUpload(kritischKonfig, neu)}
           />
         </div>
       </div>
@@ -1154,34 +1229,42 @@ function AuffaelligkeitSektion({ onGespeichert }) {
           </span>
         ) : (
           <ul className="auffaelligkeit__rules">
-            {regeln.map((regel) => (
-              <li key={regel.id} className="auffaelligkeit__rule">
-                <label className="auffaelligkeit__rule-label">
-                  {regel.severity === "critical" ||
-                  regel.severity === "notable" ? (
+            {regeln.map((regel) => {
+              const dotVariante =
+                regel.severity === "critical"
+                  ? "kritisch"
+                  : regel.severity === "notable"
+                    ? "auffaellig"
+                    : "neutral";
+              return (
+                <li key={regel.id} className="auffaelligkeit__rule">
+                  {/* Severity-Böppel als eigenes abgesetztes Kästchen ganz links. */}
+                  <span className="auffaelligkeit__rule-sevbox">
                     <span
-                      className={`auffaelligkeit__dot auffaelligkeit__dot--${
-                        regel.severity === "critical" ? "kritisch" : "auffaellig"
-                      }`}
+                      className={`auffaelligkeit__dot auffaelligkeit__dot--${dotVariante}`}
                       aria-hidden="true"
                     />
-                  ) : (
-                    <span className="auffaelligkeit__dot auffaelligkeit__dot--neutral" aria-hidden="true" />
-                  )}
-                  <span className="auffaelligkeit__rule-title">
-                    {regel.title}
                   </span>
-                </label>
-                <input
-                  type="checkbox"
-                  className="auffaelligkeit__switch"
-                  checked={!regel.disabled}
-                  onChange={(e) =>
-                    handleRegelToggle(regel.id, !e.target.checked)
-                  }
-                />
-              </li>
-            ))}
+                  {/* Breite Text-Box mit der Bezeichnung. */}
+                  <span className="auffaelligkeit__rule-label">
+                    <span className="auffaelligkeit__rule-title">
+                      {regel.title}
+                    </span>
+                  </span>
+                  {/* Separate Box mit dem Kästchen rechts. */}
+                  <span className="auffaelligkeit__rule-switchbox">
+                    <input
+                      type="checkbox"
+                      className="auffaelligkeit__switch"
+                      checked={!regel.disabled}
+                      onChange={(e) =>
+                        handleRegelToggle(regel.id, !e.target.checked)
+                      }
+                    />
+                  </span>
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>
@@ -1231,39 +1314,83 @@ export default function SettingsView({ lang, onLangChange, onClose }) {
     zeigeGespeichert();
   };
 
+  // Teil A — Navigation links, Inhalt rechts. Eine Rubrik zur Zeit sichtbar; der
+  // State bleibt lokal (kein Routing). Default ist die erste Rubrik.
+  const [rubrik, setRubrik] = useState("general");
+  const rubriken = [
+    { id: "general", label: t("settings.nav.general") },
+    { id: "startseite", label: t("settings.nav.startseite") },
+    { id: "fritzbox", label: t("settings.nav.fritzbox") },
+    { id: "auffaelligkeit", label: t("settings.nav.auffaelligkeit") },
+  ];
+
   return (
     <FunctionShell title={t("settings.title")} onBack={onClose}>
-      <div className="settings">
-        {/* Dezente Bestätigungszeile; aria-live für Screenreader. Reserviert
-            keinen festen Platz — sie erscheint nur kurz nach einer Änderung. */}
-        <span
-          className={
-            gespeichert
-              ? "settings__saved settings__saved--shown"
-              : "settings__saved"
-          }
-          role="status"
-          aria-live="polite"
-        >
-          {gespeichert ? t("settings.saved") : ""}
-        </span>
-        <SettingsSektion title={t("settings.sectionGeneral")}>
-          <SettingsZeile label={t("settings.language")}>
-            {/* Sprachnamen in ihrer eigenen Schreibweise — Konvention bei
-                Sprachwahl, daher nicht übersetzt. */}
-            <select
-              className="settings__select"
-              value={lang}
-              onChange={(e) => handleLang(e.target.value)}
+      <div className="settings settings--layout">
+        {/* Linke Navigations-Spalte: Rubriken-Liste, aktive dezent hervorgehoben. */}
+        <nav className="settings__nav" aria-label={t("settings.title")}>
+          {rubriken.map((eintrag) => (
+            <button
+              key={eintrag.id}
+              type="button"
+              className={
+                rubrik === eintrag.id
+                  ? "settings__nav-item settings__nav-item--aktiv"
+                  : "settings__nav-item"
+              }
+              aria-current={rubrik === eintrag.id ? "page" : undefined}
+              onClick={() => setRubrik(eintrag.id)}
             >
-              <option value="de">Deutsch</option>
-              <option value="en">English</option>
-            </select>
-          </SettingsZeile>
-        </SettingsSektion>
-        <OverviewSektion onGespeichert={zeigeGespeichert} />
-        <FritzBoxSektion onGespeichert={zeigeGespeichert} />
-        <AuffaelligkeitSektion onGespeichert={zeigeGespeichert} />
+              {eintrag.label}
+            </button>
+          ))}
+        </nav>
+
+        {/* Rechter Inhaltsbereich: zeigt die aktive Rubrik. */}
+        <div className="settings__content">
+          {/* Dezente Bestätigungszeile; aria-live für Screenreader. Reserviert
+              keinen festen Platz — sie erscheint nur kurz nach einer Änderung. */}
+          <span
+            className={
+              gespeichert
+                ? "settings__saved settings__saved--shown"
+                : "settings__saved"
+            }
+            role="status"
+            aria-live="polite"
+          >
+            {gespeichert ? t("settings.saved") : ""}
+          </span>
+
+          {rubrik === "general" ? (
+            <SettingsSektion title={t("settings.sectionGeneral")}>
+              <SettingsZeile label={t("settings.language")}>
+                {/* Sprachnamen in ihrer eigenen Schreibweise — Konvention bei
+                    Sprachwahl, daher nicht übersetzt. */}
+                <select
+                  className="settings__select"
+                  value={lang}
+                  onChange={(e) => handleLang(e.target.value)}
+                >
+                  <option value="de">Deutsch</option>
+                  <option value="en">English</option>
+                </select>
+              </SettingsZeile>
+            </SettingsSektion>
+          ) : null}
+
+          {rubrik === "startseite" ? (
+            <OverviewSektion onGespeichert={zeigeGespeichert} />
+          ) : null}
+
+          {rubrik === "fritzbox" ? (
+            <FritzBoxSektion onGespeichert={zeigeGespeichert} />
+          ) : null}
+
+          {rubrik === "auffaelligkeit" ? (
+            <AuffaelligkeitSektion onGespeichert={zeigeGespeichert} />
+          ) : null}
+        </div>
       </div>
     </FunctionShell>
   );

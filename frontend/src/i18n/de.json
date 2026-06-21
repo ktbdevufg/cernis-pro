@@ -70,7 +70,17 @@
       "rulesHint": "Schaltet einzelne Auffälligkeits-Regeln ein oder aus. Ausgeschaltete Regeln werden nicht mehr ausgewertet.",
       "rulesEmpty": "Keine Regeln vorhanden.",
       "honestyTitle": "Ehrlich gesagt",
-      "honestyText": "Die kritische Backdoor-Liste ist historisch nützlich, fängt moderne Malware aber kaum: die nutzt heute 443, DNS oder dynamische Ports. Ein Treffer ist ein klares Signal, aber kein vollständiger Malware-Scan – kein falsches Sicherheitsgefühl."
+      "honestyText": "Die kritische Backdoor-Liste ist historisch nützlich, fängt moderne Malware aber kaum: die nutzt heute 443, DNS oder dynamische Ports. Ein Treffer ist ein klares Signal, aber kein vollständiger Malware-Scan – kein falsches Sicherheitsgefühl.",
+      "disabledHint_one": "1 Port wird dauerhaft nicht berücksichtigt.",
+      "disabledHint_other": "{{count}} Ports werden dauerhaft nicht berücksichtigt.",
+      "portActive": "Port wird gewertet",
+      "portInactive": "Port wird ignoriert"
+    },
+    "nav": {
+      "general": "Allgemein",
+      "startseite": "Startseite",
+      "fritzbox": "FRITZ!Box",
+      "auffaelligkeit": "Was ist auffällig?"
     },
     "startseite": {
       "title": "Startseite",
@@ -163,8 +173,7 @@
     "beachtenswertHeading": "Beachtenswert",
     "fromLastScan": "aus dem letzten Scan",
     "cveHeading": "Neue CVE-Befunde",
-    "cveNewBadge": "NEU",
-    "customize": "Anpassen"
+    "cveNewBadge": "NEU"
   },
   "beobachten": {
     "cards": {
