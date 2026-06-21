@@ -1,194 +1,59 @@
-/* Überblick-Ansicht: Lagebild + Leerzustand */
+/* Überblick-Ansicht: datengetriebener Lage-Überblick (CERNIS PRO 2.0)
+ * Gestapeltes Layout, robust für schmale Fenster. Farben AUSSCHLIESSLICH über
+ * Tokens aus styles/tokens.css — keine festen Hex-Werte. Einseitige Ränder
+ * (border-left als Severity-Akzent) immer mit border-radius: 0. */
 
 .overview-view {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-/* TEMP: Zustand-Umschalter nur fürs Bauen — entfällt mit echter Datenanbindung. */
-.overview-view__switch {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding-bottom: 12px;
-  border-bottom: 1px dashed var(--color-border);
-}
-
-.overview-view__switch-label {
-  font-size: 13px;
-  color: var(--color-text-tert);
-}
-
-.overview-view__switch-buttons {
-  display: inline-flex;
-  gap: 4px;
-}
-
-.overview-view__switch-btn {
-  padding: 4px 12px;
-  font-size: 13px;
-  color: var(--color-text-sec);
-  background: transparent;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-}
-
-.overview-view__switch-btn:hover {
-  color: var(--color-text);
-}
-
-.overview-view__switch-btn--active {
-  color: var(--color-accent);
-  border-color: var(--color-accent);
-  background: var(--color-accent-bg);
-}
-
-.overview-view__switch-btn:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-}
-
-/* Lagebild (Zustand B) */
-.overview {
   display: flex;
   flex-direction: column;
   gap: 24px;
 }
 
-.overview__banner {
-  padding: 12px 16px;
-  color: var(--sev-med-text);
-  background: var(--sev-med-bg);
-  border: 1px solid var(--sev-med-bd);
-  border-radius: var(--radius-md);
+/* Dezenter Ladehinweis (kein Vollbild-Spinner). */
+.overview-view__loading {
+  color: var(--color-text-tert);
+  font-size: 20px;
+  text-align: center;
+  padding: 8px 0;
 }
 
-.overview__section {
+/* ── Status-Zeile (reine Fakten) ──────────────────────────────────────────── */
+.overview-status {
   display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.overview__heading {
-  color: var(--color-text);
-}
-
-.overview__findings {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  list-style: none;
-}
-
-.overview__finding {
-  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 14px;
-  width: 100%;
+  justify-content: space-between;
+  gap: 12px;
   padding: 14px 16px;
-  text-align: left;
-  color: var(--color-text);
   background: var(--color-card);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
 }
 
-.overview__finding:hover {
-  border-color: var(--color-accent);
-  background: var(--color-accent-bg);
+.overview-status__facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  color: var(--color-text-sec);
+  font-size: 14px;
 }
 
-.overview__finding:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-}
-
-.overview__finding-icon {
+.overview-status__fact {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  color: var(--sev-med-text);
+  gap: 6px;
 }
 
-.overview__finding-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex: 1;
-  min-width: 0;
+.overview-status__fact--monitor {
+  color: var(--color-accent-strong);
 }
 
-.overview__finding-title {
-  font-weight: 500;
-}
-
-.overview__finding-subtitle {
-  font-size: 14px;
-  color: var(--color-text-sec);
-}
-
-.overview__finding-chevron {
-  flex-shrink: 0;
-  color: var(--color-text-tert);
-}
-
-/* Kennzahlen-Grid */
-.overview__metrics {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
-}
-
-.overview__metric {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 18px 16px;
-  background: var(--color-card);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-}
-
-.overview__metric-value {
-  font-size: 28px;
-  font-weight: 500;
-  line-height: 1.1;
-  color: var(--color-text);
-}
-
-.overview__metric-label {
-  font-size: 14px;
-  color: var(--color-text-sec);
-}
-
-/* Leerzustand (Zustand A) */
-.overview--empty {
+.overview-status__scan-btn {
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 56px 20px;
-  text-align: center;
-}
-
-.overview__empty-icon {
-  color: var(--color-text-tert);
-}
-
-.overview__empty-title {
-  color: var(--color-text);
-}
-
-.overview__empty-text {
-  max-width: 420px;
-  color: var(--color-text-sec);
-}
-
-/* Primärer Akzent-Button ("Ersten Scan starten"): gefüllt, aber gedeckt. */
-.overview__empty-button {
-  margin-top: 8px;
-  padding: 10px 20px;
+  gap: 6px;
+  padding: 8px 14px;
   font-weight: 500;
   color: var(--color-accent-strong);
   background: var(--color-accent-bg-strong);
@@ -196,17 +61,209 @@
   border-radius: var(--radius-md);
 }
 
-.overview__empty-button:hover {
+.overview-status__scan-btn:hover {
   background: var(--color-accent-bg);
 }
 
-.overview__empty-button:focus-visible {
+.overview-status__scan-btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* ── Bereiche mit Überschrift (Schnellzugriff/Beachtenswert/CVE) ──────────── */
+.overview-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.overview-section__heading {
+  color: var(--color-text);
+  font-size: 17px;
+}
+
+.overview-section__sub {
+  color: var(--color-text-tert);
+  font-size: 14px;
+  font-weight: 400;
+}
+
+/* ── Beachtenswert: Achse-B-Hosts aus dem letzten Scan ────────────────────── */
+.overview-notable {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  list-style: none;
+}
+
+.overview-notable__item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  /* Severity-Akzent als linker Rand -> radius 0 (einseitiger Rand). */
+  border-left: 3px solid var(--color-border);
+  border-radius: 0;
+}
+
+/* Severity-Akzent: notable -> auffällig (orange), critical -> kritisch (rot). */
+.overview-notable__item[data-sev="notable"] {
+  border-left-color: var(--severity-auffaellig);
+}
+
+.overview-notable__item[data-sev="critical"] {
+  border-left-color: var(--severity-kritisch);
+}
+
+.overview-notable__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--color-text-sec);
+}
+
+.overview-notable__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.overview-notable__title {
+  color: var(--color-text);
+  font-weight: 500;
+}
+
+.overview-notable__meta {
+  color: var(--color-text-sec);
+  font-size: 13px;
+}
+
+/* ── Neue CVE-Befunde: scrollbare Liste, eigener Scope ────────────────────── */
+.overview-cve {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  list-style: none;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.overview-cve__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.overview-cve__badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+}
+
+/* NEU-Badge: Akzent-Türkis (von der Severity unabhängige Dimension). */
+.overview-cve__badge--new {
+  color: var(--cve-new-text);
+  background: var(--cve-new-bg);
+  border-color: var(--cve-new-bd);
+}
+
+/* CVSS-Badge: rot ab >= 7 (kritischer Bereich), sonst orange (mittel). */
+.overview-cve__badge--cvss[data-high="true"] {
+  color: var(--cve-crit-text);
+  background: var(--cve-crit-bg);
+  border-color: var(--cve-crit-bd);
+}
+
+.overview-cve__badge--cvss[data-high="false"] {
+  color: var(--sev-med-text);
+  background: var(--sev-med-bg);
+  border-color: var(--sev-med-bd);
+}
+
+.overview-cve__id {
+  color: var(--color-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+}
+
+.overview-cve__where {
+  color: var(--color-text-sec);
+  font-size: 13px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Kennzahlen-Fußzeile (schmal, sekundär) ───────────────────────────────── */
+.overview-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.overview-metrics__item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px;
+  background: var(--color-bar);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.overview-metrics__value {
+  color: var(--color-text);
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 1.1;
+}
+
+.overview-metrics__label {
+  color: var(--color-text-tert);
+  font-size: 13px;
+}
+
+/* ── "Anpassen"-Knopf (Aktion folgt in Block 2) ───────────────────────────── */
+.overview-view__customize {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.overview-view__customize-btn {
+  padding: 6px 14px;
+  font-size: 13px;
+  color: var(--color-text-sec);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.overview-view__customize-btn:hover {
+  color: var(--color-text);
+  border-color: var(--color-accent);
+}
+
+.overview-view__customize-btn:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
 
 @media (max-width: 560px) {
-  .overview__metrics {
+  .overview-metrics {
     grid-template-columns: 1fr;
   }
 }

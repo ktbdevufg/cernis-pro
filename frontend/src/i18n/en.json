@@ -113,11 +113,30 @@
       "activeConnections": "Active connections",
       "devicesOnNetwork": "Devices on network"
     },
-    "stateToggle": {
-      "label": "Display (temporary)",
-      "empty": "empty",
-      "data": "Data"
-    }
+    "status": {
+      "lastScanRelative": "Last scan {{zeit}} ago",
+      "lastScanUnknown": "No scan yet",
+      "relativeMinutes_one": "1 min",
+      "relativeMinutes_other": "{{count}} min",
+      "relativeHours_one": "1 h",
+      "relativeHours_other": "{{count}} h",
+      "relativeDays_one": "1 day",
+      "relativeDays_other": "{{count}} days",
+      "relativeJustNow": "a few seconds",
+      "devicesKnown_one": "1 device",
+      "devicesKnown_other": "{{count}} devices",
+      "observations_one": "1 observation",
+      "observations_other": "{{count}} observations",
+      "monitoringActive_one": "1 target monitored",
+      "monitoringActive_other": "{{count}} targets monitored",
+      "newScan": "New scan"
+    },
+    "quickAccessHeading": "Quick access",
+    "beachtenswertHeading": "Worth noting",
+    "fromLastScan": "from the last scan",
+    "cveHeading": "New CVE findings",
+    "cveNewBadge": "NEW",
+    "customize": "Customize"
   },
   "beobachten": {
     "cards": {

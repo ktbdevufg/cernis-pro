@@ -102,7 +102,9 @@ export default function App() {
           />
         ) : (
           <>
-            {activeTab === "overview" && <OverviewView />}
+            {activeTab === "overview" && (
+              <OverviewView onNavigate={(tab) => setActiveTab(tab)} />
+            )}
             {activeTab === "observe" && (
               <ObserveView
                 refreshInterval={refreshInterval}

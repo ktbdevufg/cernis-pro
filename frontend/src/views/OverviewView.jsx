@@ -1,151 +1,428 @@
 // Überblick-Ansicht (CERNIS PRO 2.0)
-// Zeigt das Lagebild des Netzwerks in zwei Zuständen:
-//   A) leer  — noch nichts beobachtet (Einladung zum ersten Scan)
-//   B) Daten — Auffälliges zuerst, darunter verdichtete Kennzahlen
+// Echte, datengetriebene Startseite ("Lage-Überblick"). Gestapeltes Layout,
+// robust für schmale Fenster. Lädt beim Mount alle Quellen einzeln abgesichert
+// (Promise.allSettled): fällt eine Quelle aus, entfällt nur ihr Bereich, KEIN
+// Crash. Zeigt ausschließlich Fakten — kein Urteil ("ruhig/sicher" o. Ä.).
 //
-// Datenquelle ist ausschließlich der Import aus mockData/overviewMock.
-// Die View weiß nicht, ob die Daten echt oder Platzhalter sind. Bei echter
-// Anbindung wird nur dieser Import ausgetauscht.
+// Bereiche (jeder einzeln über das Backend-Setting `overview_sections`
+// abschaltbar, Defaults alle true — in dieser Etappe NUR lesen + respektieren):
+//   status         Status-Zeile: letzter Scan + Geräte, Beobachtungen,
+//                  Monitoring-Baustein, "Neuer Scan"-Knopf.
+//   schnellzugriff Kacheln (FunctionCard) für Scan/Monitoring/CVE.
+//   beachtenswert  Achse-B-Hosts (analysisSeverity !== null) aus dem letzten Scan.
+//   cve            Neue CVE-Befunde (isNew === true).
+//   kennzahlen     Apps mit Verkehr + aktive Verbindungen.
+//   status_monitoring  steuert NUR den Monitoring-Baustein der Status-Zeile.
+//
+// i18n: t/i18n NIE in useEffect-Dependencies (Render-Loop). Persistenz läuft
+// ausschließlich über das Backend-Setting — KEINE localStorage-Eigenbauten hier.
 
 import {
-  ChevronRight,
-  Globe,
+  Activity,
+  Plus,
   Radar,
+  ShieldAlert,
   Smartphone,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import overviewMock from "../mockData/overviewMock.js";
+import { fetchCveFindings } from "../api/cve.js";
+import { fetchMonitorStatus } from "../api/monitoring.js";
+import { fetchScanDetail, fetchScanHistory } from "../api/scan.js";
+import { fetchSettings } from "../api/settings.js";
+import { fetchTraffic } from "../api/traffic.js";
+import { CardGrid } from "../components/AreaShell.jsx";
+import FunctionCard from "../components/FunctionCard.jsx";
 import "./OverviewView.css";
 
-// Abbildung der Mock-Icon-Schlüssel auf lucide-Komponenten.
-// Hält den Mock frei von Komponenten-Referenzen.
-const FINDING_ICONS = {
-  smartphone: Smartphone,
-  globe: Globe,
+// Settings-Key für die Bereichs-Schalter. Wert ist ein JSON-Objekt mit Booleans;
+// fehlt der Key -> alle Defaults true. In dieser Etappe NUR gelesen.
+const SECTIONS_KEY = "overview_sections";
+
+// Default-Sichtbarkeit aller Bereiche. Fehlt der Setting-Key oder ein einzelner
+// Schalter, gilt der jeweilige Default (alle true).
+const SECTION_DEFAULTS = {
+  status: true,
+  schnellzugriff: true,
+  beachtenswert: true,
+  cve: true,
+  kennzahlen: true,
+  status_monitoring: true,
 };
 
-// Lage-Block: Hinweis-Balken + "Auffälliges zuerst" + Kennzahlen-Grid.
-function Lagebild({ daten }) {
+// Liest `overview_sections` aus dem rohen Settings-Dict und mischt es über die
+// Defaults. Der gespeicherte Wert kann ein Objekt ODER ein JSON-String sein
+// (Backend-Settings tragen Werte teils als String); beides wird toleriert. Bei
+// fehlendem/unparsbarem Wert bleiben die Defaults (alle true) — kein Crash.
+function leseSektionen(settings) {
+  const roh = settings?.[SECTIONS_KEY];
+  let obj = null;
+  if (roh && typeof roh === "object") {
+    obj = roh;
+  } else if (typeof roh === "string" && roh.length > 0) {
+    try {
+      const geparst = JSON.parse(roh);
+      if (geparst && typeof geparst === "object") {
+        obj = geparst;
+      }
+    } catch {
+      // Unparsbarer Wert: bei den Defaults bleiben (kein stiller Müll-Wert).
+      obj = null;
+    }
+  }
+  if (!obj) {
+    return { ...SECTION_DEFAULTS };
+  }
+  // Nur echte Booleans übernehmen; alles andere fällt auf den Default zurück.
+  const ergebnis = { ...SECTION_DEFAULTS };
+  for (const key of Object.keys(SECTION_DEFAULTS)) {
+    if (typeof obj[key] === "boolean") {
+      ergebnis[key] = obj[key];
+    }
+  }
+  return ergebnis;
+}
+
+// Relativzeit ("vor X Min./Std./Tagen") aus einem ISO-Datum, clientseitig
+// gerechnet. Liefert einen i18n-Schlüssel + count-Objekt zurück, damit die
+// Pluralisierung über t() läuft. Unparsbar -> null (Aufrufer zeigt "Noch kein Scan").
+function relativeZeit(isoString) {
+  if (!isoString) {
+    return null;
+  }
+  const ms = new Date(isoString).getTime();
+  if (Number.isNaN(ms)) {
+    return null;
+  }
+  const sekunden = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+  if (sekunden < 60) {
+    return { key: "overview.status.relativeJustNow", count: null };
+  }
+  const minuten = Math.floor(sekunden / 60);
+  if (minuten < 60) {
+    return { key: "overview.status.relativeMinutes", count: minuten };
+  }
+  const stunden = Math.floor(minuten / 60);
+  if (stunden < 24) {
+    return { key: "overview.status.relativeHours", count: stunden };
+  }
+  const tage = Math.floor(stunden / 24);
+  return { key: "overview.status.relativeDays", count: tage };
+}
+
+// Icon-Schlüssel des Scan-Mappers -> lucide-Komponente für die Beachtenswert-
+// Zeile. Nur ein dezenter Anker; bei unbekanntem Schlüssel ein neutrales Default.
+const HOST_ICON = {
+  phone: Smartphone,
+};
+
+export default function OverviewView({ onNavigate }) {
   const { t } = useTranslation();
-  const { auffaelligkeiten, kennzahlen } = daten;
 
-  return (
-    <div className="overview">
-      {auffaelligkeiten.length > 0 && (
-        <div className="overview__banner" role="status">
-          {t("overview.situation.attention", { count: auffaelligkeiten.length })}
-        </div>
-      )}
+  // Sichtbarkeit der Bereiche (Defaults true, bis das Setting geladen ist).
+  const [sektionen, setSektionen] = useState(SECTION_DEFAULTS);
 
-      <section className="overview__section">
-        <h2 className="overview__heading">{t("overview.findingsHeading")}</h2>
-        <ul className="overview__findings">
-          {auffaelligkeiten.map((eintrag) => {
-            const Icon = FINDING_ICONS[eintrag.icon] ?? Radar;
-            return (
-              <li key={eintrag.id}>
-                {/* Klick vorerst ohne Funktion (Platzhalter, kein API-Call). */}
-                <button type="button" className="overview__finding">
-                  <span className="overview__finding-icon" aria-hidden="true">
-                    <Icon size={20} />
-                  </span>
-                  <span className="overview__finding-text">
-                    <span className="overview__finding-title">
-                      {t(`overview.findings.${eintrag.i18nKey}.title`)}
-                    </span>
-                    <span className="overview__finding-subtitle">
-                      {t(`overview.findings.${eintrag.i18nKey}.subtitle`)}
-                    </span>
-                  </span>
-                  <ChevronRight
-                    size={18}
-                    className="overview__finding-chevron"
-                    aria-hidden="true"
-                  />
-                </button>
-              </li>
+  // Status-Zeile: letzter Scan (Relativzeit-Basis) + bekannte Geräte.
+  const [letzterScan, setLetzterScan] = useState(null); // { scannedAt, hostCount } | null
+  // Achse-B-Hosts des letzten Scans (analysisSeverity !== null). Speist sowohl die
+  // Beobachtungen-Zahl der Status-Zeile als auch den Beachtenswert-Bereich.
+  const [auffaellige, setAuffaellige] = useState([]);
+  // Aktive Monitoring-Ziele (nur Anzahl wird gebraucht).
+  const [monitorZiele, setMonitorZiele] = useState([]);
+  // Neue CVE-Befunde (isNew === true).
+  const [neueCves, setNeueCves] = useState([]);
+  // Kennzahlen-Fußzeile.
+  const [kennzahlen, setKennzahlen] = useState(null); // { appsWithTraffic, activeConnections } | null
+
+  // Dezenter Ladezustand (kein Vollbild-Spinner): nur, bis der erste Lauf durch ist.
+  const [laedt, setLaedt] = useState(true);
+
+  // Beim Mount alle Quellen laden. Jede Quelle einzeln gegen Fehler abgesichert
+  // (Promise.allSettled): bei Fehler bleibt der jeweilige Bereich leer/weg, die
+  // übrigen laufen weiter. t bewusst NICHT in den Dependencies (Render-Loop).
+  useEffect(() => {
+    let abgebrochen = false;
+
+    async function laden() {
+      // Settings zuerst lesen (steuert nur die Sichtbarkeit, nicht das Laden —
+      // die Daten holen wir ohnehin, das Verstecken passiert im Render).
+      const [
+        settingsErg,
+        historyErg,
+        monitorErg,
+        cveErg,
+        trafficErg,
+      ] = await Promise.allSettled([
+        fetchSettings(),
+        fetchScanHistory(1),
+        fetchMonitorStatus(),
+        fetchCveFindings(),
+        fetchTraffic(),
+      ]);
+
+      if (abgebrochen) {
+        return;
+      }
+
+      // Sektionen (Setting). Fehler -> Defaults (alle true).
+      setSektionen(
+        settingsErg.status === "fulfilled"
+          ? leseSektionen(settingsErg.value)
+          : { ...SECTION_DEFAULTS },
+      );
+
+      // Letzter Scan: neuester History-Eintrag liefert scannedAt + hostCount.
+      // Sein id speist den Detail-Abruf für die Achse-B-Hosts.
+      let scanId = null;
+      if (historyErg.status === "fulfilled") {
+        const neuester = (historyErg.value ?? [])[0] ?? null;
+        if (neuester) {
+          setLetzterScan({
+            scannedAt: neuester.scannedAt,
+            hostCount: neuester.hostCount,
+          });
+          scanId = neuester.id;
+        } else {
+          setLetzterScan(null);
+        }
+      } else {
+        setLetzterScan(null);
+      }
+
+      // Monitoring-Ziele (nur Anzahl relevant).
+      setMonitorZiele(
+        monitorErg.status === "fulfilled" ? monitorErg.value ?? [] : [],
+      );
+
+      // Neue CVE-Befunde: nur isNew === true.
+      setNeueCves(
+        cveErg.status === "fulfilled"
+          ? (cveErg.value ?? []).filter((b) => b.isNew === true)
+          : [],
+      );
+
+      // Kennzahlen: Apps mit Verkehr (connectionCount > 0) + Summe der Verbindungen.
+      if (trafficErg.status === "fulfilled") {
+        const apps = trafficErg.value ?? [];
+        const mitVerkehr = apps.filter((a) => (a.connectionCount ?? 0) > 0).length;
+        const summe = apps.reduce((acc, a) => acc + (a.connectionCount ?? 0), 0);
+        setKennzahlen({ appsWithTraffic: mitVerkehr, activeConnections: summe });
+      } else {
+        setKennzahlen(null);
+      }
+
+      // Achse-B-Hosts: Detail des neuesten Scans laden und Hosts mit
+      // analysisSeverity !== null herausziehen. Eigene Absicherung, da dieser
+      // Abruf von der scanId abhängt (kann fehlen oder fehlschlagen).
+      if (scanId !== null && scanId !== undefined) {
+        try {
+          const detail = await fetchScanDetail(scanId);
+          if (!abgebrochen) {
+            setAuffaellige(
+              (detail.geraete ?? []).filter((g) => g.analysisSeverity !== null),
             );
-          })}
-        </ul>
-      </section>
+          }
+        } catch {
+          if (!abgebrochen) {
+            setAuffaellige([]);
+          }
+        }
+      } else {
+        setAuffaellige([]);
+      }
 
-      <section className="overview__section">
-        <div className="overview__metrics">
-          {kennzahlen.map((kennzahl) => (
-            <div key={kennzahl.id} className="overview__metric">
-              <span className="overview__metric-value">{kennzahl.value}</span>
-              <span className="overview__metric-label">
-                {t(`overview.metrics.${kennzahl.i18nKey}`)}
-              </span>
-            </div>
-          ))}
-        </div>
-      </section>
-    </div>
-  );
-}
+      if (!abgebrochen) {
+        setLaedt(false);
+      }
+    }
 
-// Leerzustand: dezentes Icon, Überschrift, erklärender Satz, Akzent-Button.
-function Leerzustand() {
-  const { t } = useTranslation();
+    laden();
+    return () => {
+      abgebrochen = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  return (
-    <div className="overview overview--empty">
-      <Radar size={48} className="overview__empty-icon" aria-hidden="true" />
-      <h2 className="overview__empty-title">{t("overview.empty.title")}</h2>
-      <p className="overview__empty-text">{t("overview.empty.text")}</p>
-      {/* Button löst vorerst nichts aus (Platzhalter, kein API-Call). */}
-      <button type="button" className="overview__empty-button">
-        {t("overview.empty.startScan")}
-      </button>
-    </div>
-  );
-}
+  // ── Abgeleitete Anzeigewerte ───────────────────────────────────────────────
 
-export default function OverviewView() {
-  const { t } = useTranslation();
+  const monitorAnzahl = monitorZiele.length;
+  const beobachtungen = auffaellige.length;
 
-  // TEMP: Zustand-Umschalter nur fürs Bauen — entfällt mit echter
-  // Datenanbindung (Zustand ergibt sich dann aus den Daten).
-  const [zeigeDaten, setZeigeDaten] = useState(true);
+  // Relativzeit-Text des letzten Scans (oder "Noch kein Scan").
+  const relativ = relativeZeit(letzterScan?.scannedAt);
+  const letzterScanText = relativ
+    ? t("overview.status.lastScanRelative", {
+        zeit:
+          relativ.count === null
+            ? t("overview.status.relativeJustNow")
+            : t(relativ.key, { count: relativ.count }),
+      })
+    : t("overview.status.lastScanUnknown");
+
+  // Sprung-Helfer: nur auslösen, wenn onNavigate verdrahtet ist (defensiv).
+  const springe = (tab) => {
+    if (onNavigate) {
+      onNavigate(tab);
+    }
+  };
 
   return (
     <div className="overview-view">
-      {/* TEMP: Zustand-Umschalter nur fürs Bauen — entfällt mit echter
-          Datenanbindung (Zustand ergibt sich dann aus den Daten). */}
-      <div className="overview-view__switch">
-        <span className="overview-view__switch-label">
-          {t("overview.stateToggle.label")}
-        </span>
-        <div className="overview-view__switch-buttons">
+      {/* Status-Zeile (reine Fakten, KEIN Urteil) */}
+      {sektionen.status && (
+        <section className="overview-status" aria-label={t("overview.quickAccessHeading")}>
+          <div className="overview-status__facts">
+            <span className="overview-status__fact">{letzterScanText}</span>
+            {letzterScan && (
+              <span className="overview-status__fact">
+                {t("overview.status.devicesKnown", { count: letzterScan.hostCount ?? 0 })}
+              </span>
+            )}
+            <span className="overview-status__fact">
+              {t("overview.status.observations", { count: beobachtungen })}
+            </span>
+            {/* Monitoring-Baustein NUR bei aktiven Zielen UND aktivem Unter-Schalter. */}
+            {sektionen.status_monitoring && monitorAnzahl > 0 && (
+              <span className="overview-status__fact overview-status__fact--monitor">
+                <Activity size={14} aria-hidden="true" />
+                {t("overview.status.monitoringActive", { count: monitorAnzahl })}
+              </span>
+            )}
+          </div>
           <button
             type="button"
-            className={
-              zeigeDaten
-                ? "overview-view__switch-btn"
-                : "overview-view__switch-btn overview-view__switch-btn--active"
-            }
-            onClick={() => setZeigeDaten(false)}
+            className="overview-status__scan-btn"
+            onClick={() => springe("observe")}
           >
-            {t("overview.stateToggle.empty")}
+            <Plus size={15} aria-hidden="true" />
+            <span>{t("overview.status.newScan")}</span>
           </button>
-          <button
-            type="button"
-            className={
-              zeigeDaten
-                ? "overview-view__switch-btn overview-view__switch-btn--active"
-                : "overview-view__switch-btn"
-            }
-            onClick={() => setZeigeDaten(true)}
-          >
-            {t("overview.stateToggle.data")}
-          </button>
-        </div>
-      </div>
+        </section>
+      )}
 
-      {zeigeDaten ? <Lagebild daten={overviewMock} /> : <Leerzustand />}
+      {/* Schnellzugriff: bestehende FunctionCard im CardGrid */}
+      {sektionen.schnellzugriff && (
+        <section className="overview-section">
+          <h2 className="overview-section__heading">{t("overview.quickAccessHeading")}</h2>
+          <CardGrid>
+            <FunctionCard
+              icon={Radar}
+              title={t("beobachten.cards.scan.title")}
+              subtitle={t("beobachten.cards.scan.subtitle")}
+              onOpen={() => springe("observe")}
+            />
+            <FunctionCard
+              icon={Activity}
+              title={t("beobachten.cards.monitor.title")}
+              subtitle={t("beobachten.cards.monitor.subtitle")}
+              onOpen={() => springe("observe")}
+            />
+            <FunctionCard
+              icon={ShieldAlert}
+              title={t("untersuchen.cards.cve.title")}
+              subtitle={t("untersuchen.cards.cve.subtitle")}
+              onOpen={() => springe("investigate")}
+            />
+          </CardGrid>
+        </section>
+      )}
+
+      {/* Beachtenswert: Achse-B-Hosts aus dem letzten Scan (nur wenn vorhanden) */}
+      {sektionen.beachtenswert && auffaellige.length > 0 && (
+        <section className="overview-section">
+          <h2 className="overview-section__heading">
+            {t("overview.beachtenswertHeading")}{" "}
+            <span className="overview-section__sub">· {t("overview.fromLastScan")}</span>
+          </h2>
+          <ul className="overview-notable">
+            {auffaellige.map((host) => {
+              const Icon = HOST_ICON[host.icon] ?? Radar;
+              const titel = host.label || host.hostname || host.ip || "—";
+              const detail = [host.ip, host.label || host.hostname]
+                .filter(Boolean)
+                .join(" · ");
+              return (
+                <li
+                  key={host.schluessel ?? host.ip}
+                  className="overview-notable__item"
+                  data-sev={host.analysisSeverity}
+                >
+                  <span className="overview-notable__icon" aria-hidden="true">
+                    <Icon size={18} />
+                  </span>
+                  <span className="overview-notable__text">
+                    <span className="overview-notable__title">{titel}</span>
+                    <span className="overview-notable__meta">{detail}</span>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
+
+      {/* Neue CVEs (nur wenn vorhanden): scrollbare Liste, eigener CSS-Scope */}
+      {sektionen.cve && neueCves.length > 0 && (
+        <section className="overview-section">
+          <h2 className="overview-section__heading">{t("overview.cveHeading")}</h2>
+          <ul className="overview-cve">
+            {neueCves.map((befund) => {
+              const hochCvss =
+                typeof befund.cvssScore === "number" && befund.cvssScore >= 7;
+              const ort = [befund.ip, befund.service].filter(Boolean).join(" · ");
+              return (
+                <li
+                  key={`${befund.mac ?? befund.ip}-${befund.cveId}-${befund.port}`}
+                  className="overview-cve__item"
+                >
+                  <span className="overview-cve__badge overview-cve__badge--new">
+                    {t("overview.cveNewBadge")}
+                  </span>
+                  {befund.cvssScore !== null && (
+                    <span
+                      className="overview-cve__badge overview-cve__badge--cvss"
+                      data-high={hochCvss ? "true" : "false"}
+                    >
+                      {befund.cvssScore}
+                    </span>
+                  )}
+                  <span className="overview-cve__id">{befund.cveId}</span>
+                  {ort && <span className="overview-cve__where">{ort}</span>}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
+
+      {/* Kennzahlen-Fußzeile (schmal, sekundär, nur zwei Werte) */}
+      {sektionen.kennzahlen && kennzahlen && (
+        <section className="overview-metrics" aria-label={t("overview.metrics.appsWithTraffic")}>
+          <div className="overview-metrics__item">
+            <span className="overview-metrics__value">{kennzahlen.appsWithTraffic}</span>
+            <span className="overview-metrics__label">{t("overview.metrics.appsWithTraffic")}</span>
+          </div>
+          <div className="overview-metrics__item">
+            <span className="overview-metrics__value">{kennzahlen.activeConnections}</span>
+            <span className="overview-metrics__label">{t("overview.metrics.activeConnections")}</span>
+          </div>
+        </section>
+      )}
+
+      {/* Dezenter Ladehinweis: nur während des ersten Laufs, kein Vollbild-Spinner. */}
+      {laedt && <p className="overview-view__loading">…</p>}
+
+      {/* "Anpassen"-Knopf vorbereitet; Aktion folgt in Block 2 (hier no-op). */}
+      <div className="overview-view__customize">
+        <button
+          type="button"
+          className="overview-view__customize-btn"
+          // onClick folgt in Block 2 (Settings-UI zum Umschalten der Bereiche).
+        >
+          {t("overview.customize")}
+        </button>
+      </div>
     </div>
   );
 }
