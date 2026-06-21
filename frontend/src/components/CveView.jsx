@@ -44,7 +44,32 @@ import {
   fetchCveFindings,
   fetchCveStatus,
 } from "../api/cve.js";
+import { fetchScanDetail, fetchScanHistory } from "../api/scan.js";
 import "./CveView.css";
+
+// Erster nicht-leerer (getrimmter) String aus den Argumenten, sonst "". Reine
+// Hilfsfunktion für die Namens-Priorität (kein Raten, kein Platzhalter).
+function ersterNichtLeer(...werte) {
+  for (const w of werte) {
+    const s = typeof w === "string" ? w.trim() : "";
+    if (s) {
+      return s;
+    }
+  }
+  return "";
+}
+
+// Löst über die MAC den Anzeige-Namen eines Befunds aus der Scan-Map auf.
+// Priorität: label -> hostname -> smbName. Kein Treffer -> "" (Aufrufer fällt
+// dann ehrlich auf die IP zurück).
+function anzeigeName(befund, nameByMac) {
+  const mac = (befund.mac ?? "").toLowerCase();
+  const eintrag = mac ? nameByMac.get(mac) : undefined;
+  if (!eintrag) {
+    return "";
+  }
+  return ersterNichtLeer(eintrag.label, eintrag.hostname, eintrag.smbName);
+}
 
 // Severity-Rang für die Sortierung. Höher = gefährlicher = weiter oben. Ein
 // unbekannter/leerer Wert landet als UNKNOWN ganz unten (kein Raten).
@@ -88,80 +113,109 @@ function SeverityBadge({ severity }) {
 // Port/Service, Beschreibung, Veröffentlichungsdatum, Aktions-Knopf. ``modus``
 // steuert den Knopf: "active" -> Quittieren (ack), "hidden" -> Wieder einblenden
 // (unack). ``busy`` sperrt den Knopf während die Aktion läuft.
-function BefundZeile({ befund, zeigeGeraet, modus = "active", onAction, busy }) {
+function BefundZeile({ befund, zeigeGeraet, name = "", modus = "active", onAction, busy }) {
   const { t } = useTranslation();
   const published = kurzDatum(befund.published);
   const istHidden = modus === "hidden";
 
+  // Kopf-Grid: ohne Geräte-Spalte (im Host-Block) eine Spalte weniger, damit die
+  // Struktur bündig bleibt statt zu zerreißen.
+  const kopfClass = zeigeGeraet
+    ? "cve-row__head"
+    : "cve-row__head cve-row__head--ohne-geraet";
+
   return (
     <div className={befund.isNew ? "cve-row cve-row--new" : "cve-row"}>
-      <div className="cve-row__head">
-        {befund.url ? (
-          <a
-            className="cve-row__id"
-            href={befund.url}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            {befund.cveId ?? "—"}
-            <ExternalLink size={12} aria-hidden="true" />
-          </a>
-        ) : (
-          <span className="cve-row__id">{befund.cveId ?? "—"}</span>
-        )}
-        <SeverityBadge severity={befund.severity} />
-        {befund.isNew && (
-          <span className="cve-badge cve-badge--new">
-            {t("untersuchen.cve.newBadge")}
-          </span>
-        )}
-        {befund.cvssScore !== null && (
-          <span className="cve-row__cvss" title={t("untersuchen.cve.cvssLabel")}>
-            {Number(befund.cvssScore).toFixed(1)}
-          </span>
-        )}
-        <span className="cve-row__spacer" />
-        <button
-          className="cve-row__ack"
-          type="button"
-          onClick={() => onAction(befund)}
-          disabled={busy}
-        >
-          {istHidden ? (
-            <RotateCcw size={13} aria-hidden="true" />
+      <div className={kopfClass}>
+        {/* Spalte 1: CVE-ID + Link, darunter die Badges. */}
+        <div className="cve-row__col cve-row__col--cve">
+          {befund.url ? (
+            <a
+              className="cve-row__id"
+              href={befund.url}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {befund.cveId ?? "—"}
+              <ExternalLink size={12} aria-hidden="true" />
+            </a>
           ) : (
-            <Check size={13} aria-hidden="true" />
+            <span className="cve-row__id">{befund.cveId ?? "—"}</span>
           )}
-          {istHidden
-            ? busy
-              ? t("untersuchen.cve.reactivating")
-              : t("untersuchen.cve.reactivate")
-            : busy
-              ? t("untersuchen.cve.acking")
-              : t("untersuchen.cve.ack")}
-        </button>
-      </div>
+          <div className="cve-row__badges">
+            <SeverityBadge severity={befund.severity} />
+            {befund.isNew && (
+              <span className="cve-badge cve-badge--new">
+                {t("untersuchen.cve.newBadge")}
+              </span>
+            )}
+            {befund.cvssScore !== null && (
+              <span className="cve-row__cvss" title={t("untersuchen.cve.cvssLabel")}>
+                {Number(befund.cvssScore).toFixed(1)}
+              </span>
+            )}
+          </div>
+        </div>
 
-      <div className="cve-row__meta">
+        {/* Spalte 2: Gerät (nur wenn nicht schon im Host-Block-Kopf). */}
         {zeigeGeraet && (
-          <span className="cve-row__device">
-            {geraetLabel(befund)}
-            <span className="cve-row__mac">{befund.mac}</span>
-          </span>
+          <div className="cve-row__col cve-row__col--device">
+            {name ? (
+              <span className="cve-row__hostname">{name}</span>
+            ) : (
+              <span className="cve-row__hostname">{geraetLabel(befund)}</span>
+            )}
+            {name && befund.ip && <span className="cve-row__ip">{befund.ip}</span>}
+            {befund.mac && <span className="cve-row__mac">{befund.mac}</span>}
+          </div>
         )}
-        <span className="cve-row__port">
-          {t("untersuchen.cve.portLabel", { port: befund.port ?? "—" })}
-          {befund.service ? ` · ${befund.service}` : ""}
-        </span>
-        {published && (
-          <span className="cve-row__published">
-            {t("untersuchen.cve.publishedLabel", { date: published })}
+
+        {/* Spalte 3: Port + Service. */}
+        <div className="cve-row__col cve-row__col--port">
+          <span className="cve-row__port">
+            {t("untersuchen.cve.portLabel", { port: befund.port ?? "—" })}
           </span>
-        )}
+          {befund.service && (
+            <span className="cve-row__service">{befund.service}</span>
+          )}
+        </div>
+
+        {/* Spalte 4: Aktion. */}
+        <div className="cve-row__col cve-row__col--action">
+          <button
+            className="cve-row__ack"
+            type="button"
+            onClick={() => onAction(befund)}
+            disabled={busy}
+          >
+            {istHidden ? (
+              <RotateCcw size={13} aria-hidden="true" />
+            ) : (
+              <Check size={13} aria-hidden="true" />
+            )}
+            {istHidden
+              ? busy
+                ? t("untersuchen.cve.reactivating")
+                : t("untersuchen.cve.reactivate")
+              : busy
+                ? t("untersuchen.cve.acking")
+                : t("untersuchen.cve.ack")}
+          </button>
+        </div>
       </div>
 
-      {befund.description && (
-        <div className="cve-row__desc">{befund.description}</div>
+      {/* Voll-breiter Fuß: Beschreibung + Datum, durch eine dünne Linie abgesetzt. */}
+      {(befund.description || published) && (
+        <div className="cve-row__foot">
+          {befund.description && (
+            <span className="cve-row__desc">{befund.description}</span>
+          )}
+          {published && (
+            <span className="cve-row__published">
+              {t("untersuchen.cve.publishedLabel", { date: published })}
+            </span>
+          )}
+        </div>
       )}
     </div>
   );
@@ -169,7 +223,7 @@ function BefundZeile({ befund, zeigeGeraet, modus = "active", onAction, busy }) 
 
 // „Nach Gerät“: ein aufklappbarer Host-Block. Kopf zeigt ip||mac, Anzahl Befunde
 // und die höchste Severity des Hosts.
-function HostBlock({ label, mac, befunde, onAction, busyKeys }) {
+function HostBlock({ label, ip, name = "", mac, befunde, onAction, busyKeys }) {
   const { t } = useTranslation();
   const [offen, setOffen] = useState(true);
   // Höchste Severity im Block (für die Kopf-Kennzeichnung).
@@ -186,7 +240,14 @@ function HostBlock({ label, mac, befunde, onAction, busyKeys }) {
         onClick={() => setOffen((v) => !v)}
         aria-expanded={offen}
       >
-        <span className="cve-host__name">{label}</span>
+        {name ? (
+          <>
+            <span className="cve-host__name">{name}</span>
+            {ip && <span className="cve-host__ip">{ip}</span>}
+          </>
+        ) : (
+          <span className="cve-host__name">{label}</span>
+        )}
         <span className="cve-host__mac">{mac}</span>
         <span className="cve-host__spacer" />
         <span className="cve-badge cve-badge--sev" data-sev={hoechste.key}>
@@ -234,7 +295,7 @@ function gruppiereNachGeraet(befunde) {
   for (const b of befunde) {
     const key = b.mac ?? "—";
     if (!proMac.has(key)) {
-      proMac.set(key, { mac: key, label: geraetLabel(b), befunde: [] });
+      proMac.set(key, { mac: key, ip: b.ip ?? null, label: geraetLabel(b), befunde: [] });
     }
     proMac.get(key).befunde.push(b);
   }
@@ -255,6 +316,10 @@ export default function CveView() {
   const { t } = useTranslation();
   const [befunde, setBefunde] = useState(null); // null = noch nicht geladen
   const [ausgeblendete, setAusgeblendete] = useState([]); // quittierte Befunde
+  // MAC (lowercase) -> { label, hostname, smbName } aus dem letzten Scan. Quelle
+  // für den prominenten Geräte-Namen; bleibt leer, wenn kein Scan ladbar ist
+  // (dann fällt die Anzeige ehrlich auf die IP zurück).
+  const [nameByMac, setNameByMac] = useState(() => new Map());
   const [status, setStatus] = useState(null);
   const [laedt, setLaedt] = useState(true);
   const [fehler, setFehler] = useState(false);
@@ -290,6 +355,42 @@ export default function CveView() {
   useEffect(() => {
     laden();
   }, [laden]);
+
+  // Letzten Scan EINMALIG laden (wie die Beobachten-Ansicht: Historie → jüngste
+  // scan_id → Detail) und daraus die MAC→Name-Tabelle bauen. Eigener Effekt mit
+  // leeren Deps: t/i18n NIE hier rein (sonst Re-Fetch bei jedem Sprachwechsel/Render).
+  // Schlägt der Scan-Load fehl, bleibt die Map leer → Anzeige fällt auf „nur IP".
+  useEffect(() => {
+    let abgebrochen = false;
+    (async () => {
+      try {
+        const liste = await fetchScanHistory(1);
+        if (abgebrochen || liste.length === 0) {
+          return;
+        }
+        const detail = await fetchScanDetail(liste[0].id);
+        if (abgebrochen) {
+          return;
+        }
+        const map = new Map();
+        for (const g of detail.geraete) {
+          if (g.mac) {
+            map.set(g.mac.toLowerCase(), {
+              label: g.label ?? "",
+              hostname: g.hostname ?? "",
+              smbName: g.smbName ?? "",
+            });
+          }
+        }
+        setNameByMac(map);
+      } catch {
+        // Kein Scan erreichbar / Fehler: Map bleibt leer, CVE-Anzeige unberührt.
+      }
+    })();
+    return () => {
+      abgebrochen = true;
+    };
+  }, []);
 
   // Eine ack/unack-Aktion auf einen Befund ausführen, dann beide Listen neu laden.
   // "ack" blendet aus (Befund wandert in die ausgeblendete Liste), "unack" reaktiviert
@@ -395,6 +496,7 @@ export default function CveView() {
               key={`${b.mac}-${b.cveId}-${b.port}`}
               befund={b}
               zeigeGeraet
+              name={anzeigeName(b, nameByMac)}
               modus="active"
               onAction={quittieren}
               busy={beschaeftigt.has(`${b.mac}|${b.cveId}|${b.port}`)}
@@ -407,6 +509,8 @@ export default function CveView() {
             <HostBlock
               key={g.mac}
               label={g.label}
+              ip={g.ip}
+              name={anzeigeName(g.befunde[0], nameByMac)}
               mac={g.mac}
               befunde={g.befunde}
               onAction={quittieren}
@@ -448,6 +552,7 @@ export default function CveView() {
                 key={`${b.mac}-${b.cveId}-${b.port}`}
                 befund={b}
                 zeigeGeraet
+                name={anzeigeName(b, nameByMac)}
                 modus="hidden"
                 onAction={reaktivieren}
                 busy={beschaeftigt.has(`${b.mac}|${b.cveId}|${b.port}`)}

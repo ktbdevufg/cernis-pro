@@ -130,6 +130,9 @@ export function mappeHost(host) {
     // Achse-B-Quelle: es leitet sich aus analysisSeverity ab (eine Wahrheit).
     notable: (host.analysis_severity ?? null) !== null,
     label: host.label ?? undefined,
+    // SMB-/NetBIOS-Name aus dem Scan (kann leer sein). Wird u. a. von der
+    // CVE-Ansicht als letzter Rückfall für den Anzeige-Namen genutzt.
+    smbName: host.smb_name ?? "",
     tags: host.tags ?? undefined,
     notes: host.notes ?? undefined,
     // Weitere IPs derselben MAC (MAC-Gruppierung): Proxy-ARP/Spoofing-Info,

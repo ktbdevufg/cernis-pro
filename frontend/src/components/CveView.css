@@ -115,11 +115,46 @@
   );
 }
 
+/* Kopf-Grid: vier Spalten (CVE / Gerät / Port / Aktion). Die Aktion läuft nach
+   ihrem Inhalt (auto), die übrigen teilen den Rest gewichtet auf. */
 .cve-row__head {
+  display: grid;
+  grid-template-columns: 1.4fr 1.3fr 0.9fr auto;
+  align-items: start;
+  gap: 12px;
+}
+
+/* Im Host-Block fällt die Gerät-Spalte weg (steht schon im Block-Kopf). */
+.cve-row__head--ohne-geraet {
+  grid-template-columns: 1.4fr 0.9fr auto;
+}
+
+/* Schmale Fenster: Spalten brechen untereinander um (breite Ansicht hat Vorrang). */
+@media (max-width: 720px) {
+  .cve-row__head,
+  .cve-row__head--ohne-geraet {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Jede Kopf-Spalte ist ein vertikaler Block. */
+.cve-row__col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.cve-row__col--action {
+  align-items: flex-start;
+}
+
+/* Badge-Reihe unter der CVE-ID. */
+.cve-row__badges {
   display: flex;
   align-items: center;
-  gap: 8px;
   flex-wrap: wrap;
+  gap: 6px;
 }
 
 .cve-row__id {
@@ -141,10 +176,6 @@
   font-variant-numeric: tabular-nums;
   font-size: 0.82rem;
   color: var(--color-text-sec);
-}
-
-.cve-row__spacer {
-  flex: 1;
 }
 
 .cve-row__ack {
@@ -170,20 +201,19 @@
   cursor: default;
 }
 
-.cve-row__meta {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  font-size: 0.82rem;
-  color: var(--color-text-sec);
+/* Prominenter Geräte-Name (fett, oben in der Gerät-Spalte). */
+.cve-row__hostname {
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--color-text);
+  overflow-wrap: anywhere;
 }
 
-.cve-row__device {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
-  color: var(--color-text);
+/* Sekundäre IP: gleiche gedämpfte Optik wie die MAC daneben. */
+.cve-row__ip {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.75rem;
+  color: var(--color-text-tert);
 }
 
 .cve-row__mac {
@@ -193,13 +223,38 @@
 }
 
 .cve-row__port {
+  font-size: 0.82rem;
+  color: var(--color-text-sec);
   font-variant-numeric: tabular-nums;
+}
+
+/* Service unter dem Port: sekundär, gedämpft. */
+.cve-row__service {
+  font-size: 0.78rem;
+  color: var(--color-text-tert);
+  overflow-wrap: anywhere;
+}
+
+/* Voll-breiter Fuß: durch eine dünne Token-Linie vom Kopf abgesetzt. */
+.cve-row__foot {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 2px;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-border);
 }
 
 .cve-row__desc {
   font-size: 0.85rem;
   color: var(--color-text);
   line-height: 1.45;
+}
+
+/* Veröffentlichungsdatum: dezent an die Beschreibung angehängt. */
+.cve-row__published {
+  font-size: 0.78rem;
+  color: var(--color-text-tert);
 }
 
 /* ── Severity-Badge (data-sev wählt das Farbtripel) ───────────────────────── */
@@ -277,6 +332,13 @@
 
 .cve-host__name {
   font-weight: 600;
+}
+
+/* Sekundäre IP im Host-Kopf: gleiche gedämpfte Optik wie die MAC. */
+.cve-host__ip {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.75rem;
+  color: var(--color-text-tert);
 }
 
 .cve-host__mac {
