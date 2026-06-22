@@ -18,6 +18,7 @@ Die ``float``-Zeitstempel sind Unix-ts -- dasselbe Muster wie ``PingSample.times
 
 import dataclasses
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 
 from domain.monitoring.latency_threshold import LatencyThreshold
@@ -42,12 +43,15 @@ class OperationMode(StrEnum):
 
     ``SCHEDULED``: festes Fenster zwischen ``planned_start`` und ``planned_end``.
     ``IMMEDIATE``: laeuft ab einem effektiven Start (vom Use-Case gefuehrt) fuer
-    hoechstens ``max_duration_s`` Sekunden. Die Unterscheidung steuert, welche Felder
-    ``is_window_active`` heranzieht.
+    hoechstens ``max_duration_s`` Sekunden. ``RECURRING``: wiederkehrendes Tagesfenster
+    (taeglich gleiche Uhrzeit ueber einen Gesamtzeitraum); steuert, dass
+    ``is_window_active`` die wiederkehrenden ``recur_*``-Felder heranzieht. Die
+    Unterscheidung steuert, welche Felder ``is_window_active`` heranzieht.
     """
 
     SCHEDULED = "scheduled"
     IMMEDIATE = "immediate"
+    RECURRING = "recurring"
 
 
 class TaskState(StrEnum):
@@ -131,6 +135,21 @@ class LoggingTask:
     # und ``interval_s``: so bleiben bestehende positionsbasierte ``LoggingTask(...)``-
     # Konstruktionen gueltig.
     threshold: LatencyThreshold | None = None
+    # Wiederkehrendes Tagesfenster -- nur fuer operation_mode RECURRING relevant;
+    # eigenstaendig in monitoring gefuehrt (KEIN Import aus domain.scheduler --
+    # independence-Contract). ``recur_start_minute``/``recur_end_minute`` sind Minuten
+    # seit Mitternacht gegen die LOKALE Wanduhr (halb-offen [start, end)); None =
+    # kein wiederkehrendes Fenster definiert -> is_window_active False.
+    # ``recur_weekdays`` leer = alle Tage (0=Mo..6=So). ``recur_from``/``recur_until``
+    # sind Unix-ts (Gesamtzeitraum); ``recur_until`` None bzw. 0 ist NICHT als
+    # Leerzustand zu deuten -- hier ist None der ehrliche "kein Ende"-Wert (unbegrenzt).
+    # Alle mit Default und ans Ende einsortiert wie ``effective_start``/``interval_s``/
+    # ``threshold``: bestehende positionsbasierte Konstruktionen bleiben gueltig.
+    recur_start_minute: int | None = None
+    recur_end_minute: int | None = None
+    recur_weekdays: frozenset[int] = frozenset()
+    recur_from: float | None = None
+    recur_until: float | None = None
 
 
 @dataclass(frozen=True)
@@ -193,18 +212,43 @@ def is_window_active(task: LoggingTask, now: float, reference_ts: float | None =
       ``start_ts`` = ``reference_ts`` (falls uebergeben) ODER ``task.effective_start``
       (Start inklusiv, Ablauf exklusiv). Fehlt der Bezugs-ts (noch nie gestartet bzw.
       schon beendet) oder ``max_duration_s``, ist kein Fenster bestimmbar -> ``False``.
+    * ``RECURRING``: aktiv, wenn ``now`` im Gesamtzeitraum ``[recur_from, recur_until)``
+      liegt UND der Wochentag passt (leere ``recur_weekdays``-Menge = alle Tage) UND die
+      lokale Wanduhr-Minute im halb-offenen Tagesfenster ``[recur_start_minute,
+      recur_end_minute)`` liegt. Fehlt das Tagesfenster (eine der beiden Minuten-Grenzen
+      ``None``) -> ``False`` (kein stiller Fallback). ``recur_until`` ``None`` heisst
+      "kein Ende" (unbegrenzt). Die lokale Kalender-Sicht wird aus ``now`` abgeleitet
+      (``datetime.fromtimestamp`` ohne tz = lokale Zeit -- dieselbe Konvention wie
+      ``application/scheduler/use_cases._wall_minute_and_weekday``); das ist zulaessig,
+      weil ``now`` von aussen kommt und nur lokal interpretiert wird (kein
+      ``time.time()`` in der Domaene).
     """
     if task.operation_mode is OperationMode.SCHEDULED:
         if task.planned_start is None or task.planned_end is None:
             return False
         return task.planned_start <= now < task.planned_end
-    # IMMEDIATE: Fenster ab effektivem Start fuer max_duration_s Sekunden. Der explizite
-    # reference_ts hat Vorrang (Kompatibilitaet), sonst gilt der persistierte
-    # effective_start (ADR 0033) -- fehlt beides, ist kein Fenster bestimmbar.
-    start_ts = reference_ts if reference_ts is not None else task.effective_start
-    if start_ts is None or task.max_duration_s is None:
-        return False
-    return start_ts <= now < start_ts + task.max_duration_s
+    if task.operation_mode is OperationMode.IMMEDIATE:
+        # IMMEDIATE: Fenster ab effektivem Start fuer max_duration_s Sekunden. Der explizite
+        # reference_ts hat Vorrang (Kompatibilitaet), sonst gilt der persistierte
+        # effective_start (ADR 0033) -- fehlt beides, ist kein Fenster bestimmbar.
+        start_ts = reference_ts if reference_ts is not None else task.effective_start
+        if start_ts is None or task.max_duration_s is None:
+            return False
+        return start_ts <= now < start_ts + task.max_duration_s
+    if task.operation_mode is OperationMode.RECURRING:
+        if task.recur_start_minute is None or task.recur_end_minute is None:
+            return False
+        if task.recur_from is not None and now < task.recur_from:
+            return False
+        if task.recur_until is not None and now >= task.recur_until:
+            return False
+        local = datetime.fromtimestamp(now)
+        now_minute = local.hour * 60 + local.minute
+        weekday = local.weekday()
+        if task.recur_weekdays and weekday not in task.recur_weekdays:
+            return False
+        return task.recur_start_minute <= now_minute < task.recur_end_minute
+    return False
 
 
 def conflicts_with(candidate: LoggingTask, others: list[LoggingTask]) -> bool:

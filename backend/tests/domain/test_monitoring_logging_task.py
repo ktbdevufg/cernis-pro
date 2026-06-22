@@ -8,6 +8,7 @@ Parameter rein.
 """
 
 import dataclasses
+from datetime import datetime
 
 import pytest
 
@@ -36,6 +37,11 @@ def _task(
     planned_end: float | None = None,
     max_duration_s: int | None = None,
     effective_start: float | None = None,
+    recur_start_minute: int | None = None,
+    recur_end_minute: int | None = None,
+    recur_weekdays: frozenset[int] = frozenset(),
+    recur_from: float | None = None,
+    recur_until: float | None = None,
 ) -> LoggingTask:
     """Baut einen LoggingTask mit sprechenden Defaults fuer die einzelnen Faelle."""
     return LoggingTask(
@@ -51,6 +57,11 @@ def _task(
         max_duration_s=max_duration_s,
         created_at=1000.0,
         effective_start=effective_start,
+        recur_start_minute=recur_start_minute,
+        recur_end_minute=recur_end_minute,
+        recur_weekdays=recur_weekdays,
+        recur_from=recur_from,
+        recur_until=recur_until,
     )
 
 
@@ -339,3 +350,168 @@ def test_logging_task_carries_explicit_interval_s() -> None:
         interval_s=30,
     )
     assert task.interval_s == 30
+
+
+# --- is_window_active: RECURRING ----------------------------------------------
+# Minute + Wochentag werden zeitzonenunabhaengig aus der LOKALEN Sicht derselben
+# Test-now abgeleitet (kein hardcodiertes Minuten-/Wochentags-Literal) -- Muster wie
+# ``_active_window`` in test_scheduler_use_cases.py.
+
+NOW = 1_700_000_000.0  # fixer Bezugs-ts; alle Erwartungen lokal daraus abgeleitet
+
+
+def _local_minute_and_weekday(now: float) -> tuple[int, int]:
+    """Lokale Wanduhr-Minute + Wochentag derselben epoch -- wie in der Domaene."""
+    local = datetime.fromtimestamp(now)
+    return local.hour * 60 + local.minute, local.weekday()
+
+
+def test_window_active_recurring_in_window_weekday_and_range() -> None:
+    # now im Tagesfenster + Wochentag passt + im Gesamtzeitraum -> True.
+    now_minute, weekday = _local_minute_and_weekday(NOW)
+    task = _task(
+        operation_mode=OperationMode.RECURRING,
+        recur_start_minute=now_minute,
+        recur_end_minute=now_minute + 1,
+        recur_weekdays=frozenset({weekday}),
+        recur_from=NOW - 1000.0,
+        recur_until=NOW + 1000.0,
+    )
+    assert is_window_active(task, NOW) is True
+
+
+def test_window_inactive_recurring_before_recur_from() -> None:
+    # now vor recur_from -> False (auch wenn Tagesfenster + Wochentag passen).
+    now_minute, weekday = _local_minute_and_weekday(NOW)
+    task = _task(
+        operation_mode=OperationMode.RECURRING,
+        recur_start_minute=now_minute,
+        recur_end_minute=now_minute + 1,
+        recur_weekdays=frozenset({weekday}),
+        recur_from=NOW + 1.0,  # Gesamtzeitraum beginnt erst nach now
+        recur_until=None,
+    )
+    assert is_window_active(task, NOW) is False
+
+
+def test_window_inactive_recurring_at_or_after_recur_until() -> None:
+    # now >= recur_until -> False (Ende exklusiv).
+    now_minute, weekday = _local_minute_and_weekday(NOW)
+    task = _task(
+        operation_mode=OperationMode.RECURRING,
+        recur_start_minute=now_minute,
+        recur_end_minute=now_minute + 1,
+        recur_weekdays=frozenset({weekday}),
+        recur_from=NOW - 1000.0,
+        recur_until=NOW,  # genau am Ende -> exklusiv blockiert
+    )
+    assert is_window_active(task, NOW) is False
+
+
+def test_window_recurring_recur_until_none_never_blocks_by_range_end() -> None:
+    # recur_until None heisst "kein Ende" -> Zeitraum-Ende blockiert nie.
+    now_minute, weekday = _local_minute_and_weekday(NOW)
+    task = _task(
+        operation_mode=OperationMode.RECURRING,
+        recur_start_minute=now_minute,
+        recur_end_minute=now_minute + 1,
+        recur_weekdays=frozenset({weekday}),
+        recur_from=NOW - 1000.0,
+        recur_until=None,
+    )
+    assert is_window_active(task, NOW) is True
+
+
+def test_window_inactive_recurring_weekday_not_in_set() -> None:
+    # Wochentag nicht in recur_weekdays -> False.
+    now_minute, weekday = _local_minute_and_weekday(NOW)
+    other_weekday = (weekday + 1) % 7
+    task = _task(
+        operation_mode=OperationMode.RECURRING,
+        recur_start_minute=now_minute,
+        recur_end_minute=now_minute + 1,
+        recur_weekdays=frozenset({other_weekday}),
+        recur_from=None,
+        recur_until=None,
+    )
+    assert is_window_active(task, NOW) is False
+
+
+def test_window_active_recurring_empty_weekdays_counts_every_day() -> None:
+    # recur_weekdays leer = jeder Tag zaehlt -> Wochentag-Pruefung greift nicht.
+    now_minute, _ = _local_minute_and_weekday(NOW)
+    task = _task(
+        operation_mode=OperationMode.RECURRING,
+        recur_start_minute=now_minute,
+        recur_end_minute=now_minute + 1,
+        recur_weekdays=frozenset(),  # leer = alle Tage
+        recur_from=None,
+        recur_until=None,
+    )
+    assert is_window_active(task, NOW) is True
+
+
+def test_window_active_recurring_now_minute_equals_start_is_inclusive() -> None:
+    # now_minute == recur_start_minute -> True (Start inklusiv).
+    now_minute, _ = _local_minute_and_weekday(NOW)
+    task = _task(
+        operation_mode=OperationMode.RECURRING,
+        recur_start_minute=now_minute,
+        recur_end_minute=now_minute + 5,
+        recur_weekdays=frozenset(),
+        recur_from=None,
+        recur_until=None,
+    )
+    assert is_window_active(task, NOW) is True
+
+
+def test_window_inactive_recurring_now_minute_equals_end_is_exclusive() -> None:
+    # now_minute == recur_end_minute -> False (Ende exklusiv).
+    now_minute, _ = _local_minute_and_weekday(NOW)
+    task = _task(
+        operation_mode=OperationMode.RECURRING,
+        recur_start_minute=now_minute - 5,
+        recur_end_minute=now_minute,  # Fenster endet genau jetzt -> exklusiv
+        recur_weekdays=frozenset(),
+        recur_from=None,
+        recur_until=None,
+    )
+    assert is_window_active(task, NOW) is False
+
+
+def test_window_inactive_recurring_without_daily_window() -> None:
+    # recur_start_minute None -> kein Tagesfenster definiert -> False (kein Fallback).
+    now_minute, _ = _local_minute_and_weekday(NOW)
+    no_start = _task(
+        operation_mode=OperationMode.RECURRING,
+        recur_start_minute=None,
+        recur_end_minute=now_minute + 1,
+    )
+    no_end = _task(
+        operation_mode=OperationMode.RECURRING,
+        recur_start_minute=now_minute,
+        recur_end_minute=None,
+    )
+    assert is_window_active(no_start, NOW) is False
+    assert is_window_active(no_end, NOW) is False
+
+
+# --- is_window_active: Gegenprobe SCHEDULED/IMMEDIATE unveraendert -------------
+
+
+def test_window_scheduled_still_behaves_unchanged() -> None:
+    # Bestandstest-aequivalenter SCHEDULED-Fall bleibt gruen (Logik unveraendert).
+    task = _task(
+        operation_mode=OperationMode.SCHEDULED,
+        planned_start=100.0,
+        planned_end=200.0,
+    )
+    assert is_window_active(task, 100.0) is True  # Start inklusiv
+    assert is_window_active(task, 200.0) is False  # Ende exklusiv
+
+
+def test_window_immediate_still_behaves_unchanged() -> None:
+    # Bestandstest-aequivalenter IMMEDIATE-Fall bleibt gruen (Logik unveraendert).
+    task = _task(operation_mode=OperationMode.IMMEDIATE, max_duration_s=60)
+    assert is_window_active(task, 500.0, reference_ts=500.0) is True
+    assert is_window_active(task, 560.0, reference_ts=500.0) is False
