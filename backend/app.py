@@ -140,6 +140,8 @@ from api.monitoring import (
     provide_update_schedule,
 )
 from api.monitoring import router as monitoring_router
+from api.outbound import OutboundContactOut, OutboundOverviewOut, provide_outbound_contacts
+from api.outbound import router as outbound_router
 from api.process import provide_check_process_permission, provide_list_processes
 from api.process import router as process_router
 from api.resolver import provide_resolve_endpoint, provide_resolve_ptr_batch
@@ -280,6 +282,7 @@ from application.monitoring import (
     StopLoggingTask,
     UpdateSchedule,
 )
+from application.outbound import BuildOutboundContacts, RawConnection
 from application.process import CheckProcessPermission, ListProcesses
 from application.resolver import ResolveEndpoint, ResolvePtrBatch
 from application.scanning import (
@@ -2475,6 +2478,88 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # am Composition Root gemappt. Die Meldung benennt die fehlende Datei.
         logger.error("resolver_data_missing", path=exc.path)
         return JSONResponse(status_code=503, content={"detail": exc.message})
+
+    # ── outbound-Domaene v2 verdrahten (Block 2, Etappe 2b; Regel 5: Naht nur hier) ──
+    # Die Aussenkontakt-Sicht DIESES Hosts fuehrt DREI Quellen zusammen
+    # (Verbindungen/Namen/Geo). Der application-Ring (BuildOutboundContacts) nennt
+    # KEINE dieser Quell-Domaenen -- die drei quellen-agnostischen Provider werden HIER
+    # aus den bestehenden Root-Helfern gebaut (traffic/resolver/sni bleiben getrennt).
+    # Reuse der schon in Scope stehenden Helfer: _traffic_adapter(), resolve_ptr_batch_uc,
+    # _resolve_endpoint, sni_sniffer()/GetObservedSni -- nichts davon neu bauen.
+    async def _outbound_contacts() -> OutboundOverviewOut:
+        # (1) Verbindungs-Provider SYNCHRON im Protocol-Sinn: BuildOutboundContacts ruft
+        # den Provider synchron, list_connections() ist aber async. Sauberste Loesung im
+        # Rahmen der 2a-Signatur: den Snapshot EINMAL hier async holen und einen sync
+        # Provider (Closure ueber die schon geholte Liste) hereinreichen. Mappt
+        # domain.traffic.Connection -> RawConnection und filtert remote=None raus (der
+        # Provider liefert NUR Verbindungen mit Gegenstelle).
+        conns = await _traffic_adapter().list_connections()
+        raws = [
+            RawConnection(
+                remote_ip=c.remote.ip,
+                remote_port=c.remote.port,
+                app_name=c.app_name,
+                pid=c.pid,
+            )
+            for c in conns
+            if c.remote is not None
+        ]
+
+        def _connections_provider() -> list[RawConnection]:
+            return raws
+
+        # (2) Namens-Provider (async, ips -> {ip: hostname|None}): kombiniert SNI (konkreter,
+        # app-naeher) mit PTR. Regel pro IP: zuerst der SNI-Hostname, sonst der PTR-Name,
+        # sonst None -- ueber alle angefragten IPs.
+        async def _hostname_provider(ips: Sequence[str]) -> dict[str, str | None]:
+            wanted = set(ips)
+            sni_by_ip: dict[str, str] = {}
+            for observed in GetObservedSni(sni_sniffer())():
+                if observed.remote_ip in wanted:
+                    # Erster SNI-Treffer je IP gewinnt (deterministisch ueber die Reihenfolge).
+                    sni_by_ip.setdefault(observed.remote_ip, observed.hostname)
+            ptr_by_ip = await resolve_ptr_batch_uc(tuple(ips))
+            return {ip: sni_by_ip.get(ip) or ptr_by_ip.get(ip) for ip in ips}
+
+        # (3) Geo/Betreiber/ASN-Provider (async, ip -> (country, operator, asn)): projiziert
+        # die RemoteEndpointFacts aus _resolve_endpoint defensiv. country: GeoDB vor RDAP-Netz;
+        # operator: asn_org (Klartext); asn: asn-Nummer. Jedes Feld kann None sein -- dann
+        # bleibt die Komponente None (BuildOutboundContacts kapselt try/except schon; hier nur
+        # ehrlich projizieren, S3).
+        async def _geo_operator_provider(
+            ip: str,
+        ) -> tuple[str | None, str | None, str | None]:
+            facts = await _resolve_endpoint(ip, None)
+            country = facts.country_geodb.value or facts.country_rdap_net.value
+            operator = facts.asn_org.value
+            asn = facts.asn.value
+            return (country, operator, asn)
+
+        overview = await BuildOutboundContacts(
+            _connections_provider, _hostname_provider, _geo_operator_provider
+        )()
+        # Projektion application.OutboundOverview -> api.OutboundOverviewOut (Regel 4:
+        # der api-Ring kennt den application-Typ NICHT; die Projektion faellt hier im Root).
+        return OutboundOverviewOut(
+            contacts=[
+                OutboundContactOut(
+                    remote_ip=contact.remote_ip,
+                    remote_port=contact.remote_port,
+                    hostname=contact.hostname,
+                    country=contact.country,
+                    operator=contact.operator,
+                    asn=contact.asn,
+                    app_name=contact.app_name,
+                    pid=contact.pid,
+                    connection_count=contact.connection_count,
+                )
+                for contact in overview.contacts
+            ],
+            host_scope=overview.host_scope,
+        )
+
+    app.include_router(outbound_router)
+    app.dependency_overrides[provide_outbound_contacts] = lambda: _outbound_contacts
 
     # ── Route zum Ziel (ADR 0036): traceroute-Hops + Geo/ASN, zwei getrennte Naehte ──
     # Regel 5: die Quer-Domaenen-Naht (diagnostics-Hops + resolver-Geo/RDAP) faellt
