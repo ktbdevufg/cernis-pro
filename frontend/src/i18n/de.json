@@ -290,7 +290,7 @@
       "auffaelligPill": "auffällig",
       "kritischPill": "kritisch",
       "pingUnit": "{{value}} ms",
-      "pingSubMs": ">0 ms",
+      "pingSubMs": ">1 ms",
       "morePorts": "+{{count}}",
       "morePortsTitle_one": "1 weiterer Port",
       "morePortsTitle_other": "{{count}} weitere Ports",
