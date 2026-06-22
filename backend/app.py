@@ -359,6 +359,7 @@ from domain.monitoring import (
     LoggingTask,
     MonitorEvent,
     MonitorEventType,
+    OperationMode,
     PingSample,
     ThresholdCondition,
     compute_sla_stats,
@@ -1126,6 +1127,88 @@ class _ThresholdNotifierWiring:
             logger.warning("threshold_notify_failed", task_id=task.id)
 
 
+# ── RECURRING-Logging <-> Scheduler-Job-Naht (3b-3) ──────────────────────────
+# Beim Anlegen eines RECURRING-Logging-Tasks soll automatisch der zugehoerige
+# Scheduler-Job (job_type "monitoring_window") entstehen, beim Loeschen wieder
+# verschwinden. Diese Naht lebt HIER im Composition Root -- nicht am
+# provide_*-Override (ein loses Wrapper-Closure briche die ``Annotated[...,
+# Depends]``-Signatur, mypy meckert), sondern als schmaler Erben-Wrapper, der den
+# Use-Case-Vertrag STRUKTURELL durch Vererbung erfuellt (Muster wie die anderen
+# Verdrahtungs-Wrapper, nur ueber Erbung statt Komposition, weil das Interface ein
+# konkreter Use-Case-Typ ist). Beide Wrapper kennen monitoring UND scheduler --
+# app.py ist als Composition Root von den import-linter-Contracts ausgenommen.
+
+
+class _CreateLoggingTaskWithSchedule(CreateLoggingTask):
+    """``CreateLoggingTask`` + Auto-Scheduler-Job fuer RECURRING-Tasks (3b-3).
+
+    Erbt von ``CreateLoggingTask`` (erfuellt den Use-Case-Vertrag durch Vererbung) und
+    haengt EINE Konsequenz an: legt der Nutzer einen RECURRING-Task an, entsteht der
+    zugehoerige ScheduledJob (``job_type`` "monitoring_window") ueber ``CreateScheduledJob``.
+    Der Job traegt in seinen ``params`` die ``task_id`` (damit der Handler den Task am Ende
+    des Gesamtzeitraums beenden kann) und ``recur_until`` (als String, leer = unbegrenzt).
+    Das ``DailyWindow`` baut sich aus den ``recur_*``-Feldern des frisch angelegten Tasks
+    (None-Leerwerte auf die Domaenen-Leerform 0/0.0 gemappt -- der Task ist hier bereits
+    RECURRING, also sind die Minuten gesetzt; die ``or``-Fallbacks sind nur mypy-Defensive).
+
+    Bei jedem anderen Modus (IMMEDIATE/SCHEDULED) wird KEIN Job angelegt -- der Wrapper
+    verhaelt sich dann exakt wie ``CreateLoggingTask``.
+    """
+
+    def __init__(self, repo: SqliteLoggingTaskRepository, create_job: CreateScheduledJob) -> None:
+        super().__init__(repo)
+        self._create_job = create_job
+
+    def __call__(self, **kwargs: Any) -> LoggingTask:
+        task = super().__call__(**kwargs)
+        if task.operation_mode is OperationMode.RECURRING:
+            window = DailyWindow(
+                start_minute=task.recur_start_minute or 0,
+                end_minute=task.recur_end_minute or 0,
+                weekdays=task.recur_weekdays,
+                from_epoch=task.recur_from or 0.0,
+                until_epoch=task.recur_until or 0.0,
+            )
+            self._create_job(
+                "monitoring_window",
+                (
+                    ("task_id", task.id),
+                    ("recur_until", str(task.recur_until) if task.recur_until else ""),
+                ),
+                window,
+            )
+        return task
+
+
+class _DeleteLoggingTaskWithUnschedule(DeleteLoggingTask):
+    """``DeleteLoggingTask`` + Mitloeschen des zugehoerigen Scheduler-Jobs (3b-3).
+
+    Gegenstueck zu ``_CreateLoggingTaskWithSchedule``: erbt von ``DeleteLoggingTask`` und
+    raeumt nach dem Loeschen der Task-Definition den verwaisten ScheduledJob ab. Sucht ueber
+    ``ListScheduledJobs`` den Job mit ``job_type == "monitoring_window"`` und ``task_id``-
+    ``param`` gleich der geloeschten ``task_id`` und entfernt ihn via ``DeleteScheduledJob``.
+
+    Idempotent wie der Basis-Use-Case: existiert kein passender Job (Task war nicht
+    RECURRING oder schon abgeraeumt), passiert nichts -- kein Fehler.
+    """
+
+    def __init__(
+        self,
+        repo: SqliteLoggingTaskRepository,
+        list_jobs: ListScheduledJobs,
+        delete_job: DeleteScheduledJob,
+    ) -> None:
+        super().__init__(repo)
+        self._list_jobs = list_jobs
+        self._delete_job = delete_job
+
+    def __call__(self, task_id: str) -> None:
+        super().__call__(task_id)
+        for job in self._list_jobs():
+            if job.job_type == "monitoring_window" and dict(job.params).get("task_id") == task_id:
+                self._delete_job(job.id)
+
+
 # ── Frontend-Serving (traversal-sicher) ───────────────────────────────────────
 
 
@@ -1739,8 +1822,13 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     # Langzeit-Logging-Lifecycle (B-I Schritt 3): Anlegen + Lebenszyklus ueber dem
     # ``logging_task_repository()``; der Mengen-Befund ueber dem ``logging_rtt_repository()``.
     # NUR Endpunkt-Verdrahtung -- KEIN Lifespan-/Loop-Eingriff (B-II).
-    app.dependency_overrides[provide_create_logging_task] = lambda: CreateLoggingTask(
-        logging_task_repository()
+    # Auto-Scheduler-Job (3b-3): der Create-Override nutzt den Erben-Wrapper, der bei
+    # einem RECURRING-Task zusaetzlich den monitoring_window-Job anlegt (CreateScheduledJob
+    # ueber dem scheduled_job_repository() -- spaete Namensaufloesung, die Factory ist im
+    # scheduler-Block weiter unten definiert, Muster wie _build_run_monitor/alert_notifier).
+    app.dependency_overrides[provide_create_logging_task] = lambda: _CreateLoggingTaskWithSchedule(
+        logging_task_repository(),
+        CreateScheduledJob(scheduled_job_repository()),
     )
     app.dependency_overrides[provide_list_logging_tasks] = lambda: ListLoggingTasks(
         logging_task_repository()
@@ -1760,8 +1848,15 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.dependency_overrides[provide_stop_logging_task] = lambda: StopLoggingTask(
         logging_task_repository()
     )
-    app.dependency_overrides[provide_delete_logging_task] = lambda: DeleteLoggingTask(
-        logging_task_repository()
+    # Mitloeschen (3b-3): der Delete-Override nutzt den Erben-Wrapper, der nach dem
+    # Loeschen der Task-Definition den verwaisten monitoring_window-Job abraeumt
+    # (ListScheduledJobs/DeleteScheduledJob ueber dem scheduled_job_repository()).
+    app.dependency_overrides[provide_delete_logging_task] = lambda: (
+        _DeleteLoggingTaskWithUnschedule(
+            logging_task_repository(),
+            ListScheduledJobs(scheduled_job_repository()),
+            DeleteScheduledJob(scheduled_job_repository()),
+        )
     )
     app.dependency_overrides[provide_check_log_volume] = lambda: CheckLogVolume(
         logging_rtt_repository()

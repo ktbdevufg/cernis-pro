@@ -173,6 +173,14 @@ export function mappeLoggingTask(task) {
           notifyEmail: task.threshold.notify_email,
         }
       : null,
+    // Wiederkehrendes Tagesfenster (3b). Nur bei operationMode "recurring" fachlich
+    // relevant; sonst tragen die Felder die Backend-Leerwerte (null / leere Liste). Die
+    // Minuten/ts bleiben roh (die Karte formatiert selbst); recurWeekdays als Array (0..6).
+    recurStartMinute: task.recur_start_minute ?? null,
+    recurEndMinute: task.recur_end_minute ?? null,
+    recurWeekdays: task.recur_weekdays ?? [],
+    recurFrom: task.recur_from ?? null,
+    recurUntil: task.recur_until ?? null,
   };
 }
 
@@ -239,6 +247,11 @@ export async function createLoggingTask({
   maxDurationS = null,
   intervalS = null,
   threshold = null,
+  recurStartMinute = null,
+  recurEndMinute = null,
+  recurWeekdays = null,
+  recurFrom = null,
+  recurUntil = null,
 }) {
   const payload = {
     target_id: targetId,
@@ -250,6 +263,20 @@ export async function createLoggingTask({
     planned_end: plannedEnd,
     max_duration_s: maxDurationS,
   };
+  // Wiederkehrendes Tagesfenster (3b): nur im recurring-Fall mitgeben (snake_case). Die
+  // Minuten/Wochentage sind dann gesetzt; recur_from/recur_until nur senden, wenn vorhanden
+  // (Unix-ts) -- weglassen, wenn null (leeres Zeitraum-Feld = unbegrenzt bzw. ab sofort).
+  if (operationMode === "recurring") {
+    payload.recur_start_minute = recurStartMinute;
+    payload.recur_end_minute = recurEndMinute;
+    payload.recur_weekdays = recurWeekdays ?? [];
+    if (recurFrom !== null && recurFrom !== undefined) {
+      payload.recur_from = recurFrom;
+    }
+    if (recurUntil !== null && recurUntil !== undefined) {
+      payload.recur_until = recurUntil;
+    }
+  }
   // Mess-Intervall (C-2): nur senden, wenn gesetzt -- sonst weglassen, dann greift der
   // Backend-Default (5). Der Assistent reicht es NIE durch (still Default 5).
   if (intervalS !== null && intervalS !== undefined) {

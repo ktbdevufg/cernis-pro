@@ -97,6 +97,88 @@ function lokalZuTs(wert) {
   return Number.isNaN(ms) ? null : ms / 1000;
 }
 
+// Wiederkehrend (3b): Helfer hh:mm <-> Minuten seit Mitternacht. ``minutenZuHhmm``
+// formatiert eine Minutenzahl (0..1440) als "HH:MM" fuer das time-Input; ungueltige
+// Werte -> "" (kein Absturz). ``hhmmZuMinuten`` parst ein "HH:MM"-time-Input in Minuten
+// seit Mitternacht; leer/ungueltig -> null (ehrliche Luecke).
+function minutenZuHhmm(minuten) {
+  if (minuten === null || minuten === undefined || Number.isNaN(minuten)) {
+    return "";
+  }
+  const std = Math.floor(minuten / 60);
+  const min = Math.floor(minuten % 60);
+  return `${String(std).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
+}
+
+function hhmmZuMinuten(wert) {
+  if (!wert) {
+    return null;
+  }
+  const [std, min] = wert.split(":").map((teil) => Number(teil));
+  if (Number.isNaN(std) || Number.isNaN(min)) {
+    return null;
+  }
+  return std * 60 + min;
+}
+
+// Wiederkehrend (3b): Helfer fuer das Zeitraum-Datum (date-Input "2026-06-18") <-> Unix-ts
+// in SEKUNDEN. ``datumZuTs`` parst ein date-Input zu Mitternachts-ts; leer/ungueltig ->
+// null. ``tsZuDatum`` formatiert einen Unix-ts als "YYYY-MM-DD" fuer das date-Input
+// bzw. (lokalisiert in der Karte) -- hier die rohe ISO-Form; null -> "".
+function datumZuTs(wert) {
+  if (!wert) {
+    return null;
+  }
+  const ms = new Date(wert).getTime();
+  return Number.isNaN(ms) ? null : ms / 1000;
+}
+
+function tsZuDatum(ts) {
+  if (ts === null || ts === undefined || Number.isNaN(ts)) {
+    return "";
+  }
+  const d = new Date(ts * 1000);
+  if (Number.isNaN(d.getTime())) {
+    return "";
+  }
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+    d.getDate(),
+  ).padStart(2, "0")}`;
+}
+
+// Wiederkehrend (3b): zaehlt die Tage im Zeitraum [von, bis], die auf einen der
+// gewaehlten Wochentage fallen -- die Vorschau "Ergibt N Messlaeufe". Reine Frontend-
+// Rechnung, defensiv: fehlt das von-Datum ODER ist die Wochentags-Liste leer, kann N
+// nicht bestimmt werden (-> null). Leere Wochentags-Liste bedeutet zwar fachlich "alle
+// Tage", aber die Vorschau soll dann nichts Konkretes versprechen (defensiv null). Ist
+// das bis-Datum leer, signalisiert der Aufrufer "laeuft bis auf Weiteres" separat.
+// JS getDay(): 0=So..6=Sa -> auf das Backend-Schema 0=Mo..6=So umgerechnet.
+function zaehleMesslaeufe(vonTs, bisTs, weekdays) {
+  if (vonTs === null || bisTs === null || !weekdays || weekdays.length === 0) {
+    return null;
+  }
+  if (bisTs < vonTs) {
+    return 0;
+  }
+  const aktiv = new Set(weekdays);
+  let anzahl = 0;
+  const tag = new Date(vonTs * 1000);
+  tag.setHours(0, 0, 0, 0);
+  const ende = new Date(bisTs * 1000);
+  ende.setHours(0, 0, 0, 0);
+  // Obergrenze gegen versehentliche Endlosschleifen bei kaputten Eingaben (defensiv).
+  let schutz = 0;
+  while (tag.getTime() <= ende.getTime() && schutz < 4000) {
+    const backendTag = (tag.getDay() + 6) % 7; // So=0..Sa=6 -> Mo=0..So=6
+    if (aktiv.has(backendTag)) {
+      anzahl += 1;
+    }
+    tag.setDate(tag.getDate() + 1);
+    schutz += 1;
+  }
+  return anzahl;
+}
+
 // CSS-Modifier-Klasse des Zustands-Pills je Backend-Zustand (aktiv gruen /
 // pausiert lila / angelegt grau / beendet gedaempft). Unbekannte Zustaende ->
 // gedaempft (kein Absturz).
@@ -174,6 +256,33 @@ function AufgabenKarte({ task, jetzt, sla, onAktion }) {
   // das geladene { uptimePct, downtimeMins, avgRttMs, samples } oder undefined (noch
   // nicht geladen / Ladefehler -> Zeile still weglassen, kein Absturz). uptimePct ===
   // null heisst "noch keine Auswertung" (zu wenig/keine Daten -> dezenter Hinweis).
+  // Wiederkehrend (3b): bei operationMode "recurring" statt der einmaligen Restzeit eine
+  // eigene Meta-Zeile "Wiederkehrend · <HH:MM>-<HH:MM> · <Wochentage-Kurz>" und, wenn ein
+  // Ende-Datum gesetzt ist, "· bis <Datum>". Defensiv: fehlende Felder lassen den
+  // jeweiligen Teil weg (kein Absturz). Die Wochentags-Kurzform aus diskreten i18n-Tokens
+  // (kein zusammengebauter Satz) -- leere Liste = alle Tage (-> kein Tage-Teil).
+  const istWiederkehrend = task.operationMode === "recurring";
+  const wochentageKurz =
+    istWiederkehrend && Array.isArray(task.recurWeekdays)
+      ? task.recurWeekdays
+          .map((tag) => t(`beobachten.logging.recurWochentag.${tag}`, { defaultValue: "" }))
+          .filter(Boolean)
+          .join(", ")
+      : "";
+  const wiederkehrendText = istWiederkehrend
+    ? t("beobachten.logging.wiederkehrendKarte", {
+        von: minutenZuHhmm(task.recurStartMinute),
+        bis: minutenZuHhmm(task.recurEndMinute),
+        tage: wochentageKurz,
+      })
+    : null;
+  const wiederkehrendBisText =
+    istWiederkehrend && task.recurUntil
+      ? t("beobachten.logging.wiederkehrendKarteBis", {
+          datum: new Date(task.recurUntil * 1000).toLocaleDateString(i18n.language),
+        })
+      : null;
+
   const zeigtSla = task.captureMode === "reachability_latency" && sla !== undefined;
   const hatAuswertung = zeigtSla && sla.uptimePct !== null;
   const uptimeText = hatAuswertung ? formatiereZahl(sla.uptimePct, 1, i18n.language) : null;
@@ -212,6 +321,22 @@ function AufgabenKarte({ task, jetzt, sla, onAktion }) {
               ·
             </span>
             <span className="logging-karte__schwellwert">{schwellwertText}</span>
+          </>
+        )}
+        {wiederkehrendText && (
+          <>
+            <span className="logging-karte__trenner" aria-hidden="true">
+              ·
+            </span>
+            <span className="logging-karte__wiederkehrend">{wiederkehrendText}</span>
+            {wiederkehrendBisText && (
+              <>
+                <span className="logging-karte__trenner" aria-hidden="true">
+                  ·
+                </span>
+                <span className="logging-karte__wiederkehrend-bis">{wiederkehrendBisText}</span>
+              </>
+            )}
           </>
         )}
         {restText && (
@@ -334,6 +459,15 @@ const LEERE_EINGABE = {
   // Assistent-Modus unsichtbar (wird nicht in den Payload gereicht -> Backend-Default);
   // nur der Erweitert-Modus zeigt das Feld und reicht es mit.
   intervalS: 5,
+  // Wiederkehrendes Tagesfenster (3b). Nur fuer operationMode "recurring" relevant.
+  // recurStartMinute/recurEndMinute sind Minuten seit Mitternacht (600/660 = 10:00-11:00
+  // als sinnvolle Vorbelegung); recurWeekdays als Array 0..6 (Mo-Fr vorbelegt); recurFrom/
+  // recurUntil sind leere Strings (date-Inputs, leer = ab sofort / unbegrenzt).
+  recurStartMinute: 600,
+  recurEndMinute: 660,
+  recurWeekdays: [0, 1, 2, 3, 4],
+  recurFrom: "",
+  recurUntil: "",
   // Schwellwert-Alarm (Schnitt 5). Verschachteltes Objekt mit eigenem aktiv-Flag:
   // aktiv=false bedeutet KEIN Schwellwert (nichts in den Payload). Die Default-Werte
   // sind sinnvoll vorbelegt (Latenz > 100 ms, 3 Messungen in Folge, Desktop an,
@@ -497,6 +631,19 @@ export default function LoggingPanel({ onDetailChange }) {
         plannedEnd: lokalZuTs(eingabe.plannedEnd),
       };
     }
+    // Wiederkehrend (3b): Tagesfenster (Minuten), Wochentage (Array 0..6) und der optionale
+    // Gesamtzeitraum (recurFrom/recurUntil als Unix-ts oder null -> der API-Client laesst
+    // null-Grenzen weg). Das Tagesfenster ist hier durch eingabeGueltig garantiert gesetzt.
+    if (eingabe.operationMode === "recurring") {
+      return {
+        ...basis,
+        recurStartMinute: eingabe.recurStartMinute,
+        recurEndMinute: eingabe.recurEndMinute,
+        recurWeekdays: eingabe.recurWeekdays,
+        recurFrom: datumZuTs(eingabe.recurFrom),
+        recurUntil: datumZuTs(eingabe.recurUntil),
+      };
+    }
     return { ...basis, maxDurationS: eingabe.maxDurationS };
   };
 
@@ -510,6 +657,16 @@ export default function LoggingPanel({ onDetailChange }) {
       return (
         lokalZuTs(eingabe.plannedStart) !== null &&
         lokalZuTs(eingabe.plannedEnd) !== null
+      );
+    }
+    // Wiederkehrend (3b): das Tagesfenster muss vollstaendig + sinnvoll sein (von < bis).
+    // Wochentage/Zeitraum sind optional (leere Wochentage = alle Tage; leerer Zeitraum =
+    // ab sofort/unbegrenzt) -- darum hier nicht erzwungen.
+    if (eingabe.operationMode === "recurring") {
+      return (
+        eingabe.recurStartMinute !== null &&
+        eingabe.recurEndMinute !== null &&
+        eingabe.recurEndMinute > eingabe.recurStartMinute
       );
     }
     return eingabe.maxDurationS !== null;
@@ -728,10 +885,21 @@ function BetriebFelder({ eingabe, setFeld }) {
             />
             {t("beobachten.logging.betriebGeplant")}
           </label>
+          <label className="logging__radio">
+            <input
+              type="radio"
+              name="betrieb"
+              checked={eingabe.operationMode === "recurring"}
+              onChange={() => setFeld("operationMode", "recurring")}
+            />
+            {t("beobachten.logging.betriebWiederkehrend")}
+          </label>
         </div>
       </div>
 
-      {eingabe.operationMode === "immediate" ? (
+      {eingabe.operationMode === "recurring" ? (
+        <WiederkehrendFelder eingabe={eingabe} setFeld={setFeld} />
+      ) : eingabe.operationMode === "immediate" ? (
         <label className="logging-feld">
           <span className="logging-feld__label">{t("beobachten.logging.dauerLabel")}</span>
           <select
@@ -772,9 +940,152 @@ function BetriebFelder({ eingabe, setFeld }) {
   );
 }
 
-// Abschluss-Knoepfe (Anlegen / Anlegen & starten). In beiden Modi identisch.
-function AbschlussKnoepfe({ gueltig, onAnlegen }) {
+// Wochentage in Anzeige-Reihenfolge (Mo..So) -- die Werte sind das Backend-Schema 0..6
+// (0=Mo). Verbindliche Reihenfolge der Chips.
+const WOCHENTAGE = [0, 1, 2, 3, 4, 5, 6];
+
+// Wiederkehrend-Felder (3b) -- nur bei operationMode "recurring" gerendert (in derselben
+// Zeile/Gruppe wie Start/Ende bei "geplant"). Drei Bloecke: Tagesfenster (zwei HH:MM-
+// Eingaben -> intern Minuten seit Mitternacht, von < bis), Wochentage (sieben umschaltbare
+// Chips Mo..So) und Zeitraum (zwei Datums-Eingaben -> Unix-ts; bis optional = unbegrenzt).
+// Plus eine Vorschau-Zeile "Ergibt N Messlaeufe" (defensiv, kein Absturz bei leeren Feldern).
+function WiederkehrendFelder({ eingabe, setFeld }) {
   const { t } = useTranslation();
+
+  // Einen Wochentag umschalten (Array bleibt sortiert fuer eine stabile Anzeige/Payload).
+  const toggleWochentag = (tag) => {
+    const aktiv = eingabe.recurWeekdays.includes(tag);
+    const neu = aktiv
+      ? eingabe.recurWeekdays.filter((w) => w !== tag)
+      : [...eingabe.recurWeekdays, tag].sort((a, b) => a - b);
+    setFeld("recurWeekdays", neu);
+  };
+
+  // Vorschau: N Messlaeufe im Zeitraum auf den gewaehlten Wochentagen. Leeres bis-Datum ->
+  // "laeuft bis auf Weiteres" (kein N). Sonst die Frontend-Rechnung (null -> nichts zeigen).
+  const vonTs = datumZuTs(eingabe.recurFrom);
+  const bisTs = datumZuTs(eingabe.recurUntil);
+  const unbegrenzt = eingabe.recurUntil === "";
+  const anzahl = unbegrenzt ? null : zaehleMesslaeufe(vonTs, bisTs, eingabe.recurWeekdays);
+
+  return (
+    <>
+      <div className="logging-feld">
+        <span className="logging-feld__label">
+          {t("beobachten.logging.recurTagesfensterLabel")}
+        </span>
+        <div className="logging__zeitzeile logging__zeitzeile--kompakt">
+          <label className="logging-feld logging-feld--inline">
+            <span className="logging-feld__sublabel">{t("beobachten.logging.recurVon")}</span>
+            <input
+              type="time"
+              className="logging-feld__input"
+              value={minutenZuHhmm(eingabe.recurStartMinute)}
+              onChange={(e) => setFeld("recurStartMinute", hhmmZuMinuten(e.target.value))}
+            />
+          </label>
+          <label className="logging-feld logging-feld--inline">
+            <span className="logging-feld__sublabel">{t("beobachten.logging.recurBis")}</span>
+            <input
+              type="time"
+              className="logging-feld__input"
+              value={minutenZuHhmm(eingabe.recurEndMinute)}
+              onChange={(e) => setFeld("recurEndMinute", hhmmZuMinuten(e.target.value))}
+            />
+          </label>
+        </div>
+      </div>
+
+      <div className="logging-feld">
+        <span className="logging-feld__label">
+          {t("beobachten.logging.recurWochentageLabel")}
+        </span>
+        <div className="logging__wochentage">
+          {WOCHENTAGE.map((tag) => {
+            const aktiv = eingabe.recurWeekdays.includes(tag);
+            return (
+              <button
+                key={tag}
+                type="button"
+                className={
+                  aktiv
+                    ? "logging-chip logging-chip--aktiv"
+                    : "logging-chip"
+                }
+                aria-pressed={aktiv}
+                onClick={() => toggleWochentag(tag)}
+              >
+                {t(`beobachten.logging.recurWochentag.${tag}`)}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="logging-feld">
+        <span className="logging-feld__label">
+          {t("beobachten.logging.recurZeitraumLabel")}
+        </span>
+        <div className="logging__zeitzeile logging__zeitzeile--kompakt">
+          <label className="logging-feld logging-feld--inline">
+            <span className="logging-feld__sublabel">
+              {t("beobachten.logging.recurZeitraumVon")}
+            </span>
+            <input
+              type="date"
+              className="logging-feld__input"
+              value={eingabe.recurFrom}
+              onChange={(e) => setFeld("recurFrom", e.target.value)}
+            />
+          </label>
+          <label className="logging-feld logging-feld--inline">
+            <span className="logging-feld__sublabel">
+              {t("beobachten.logging.recurZeitraumBis")}
+            </span>
+            <input
+              type="date"
+              className="logging-feld__input"
+              value={eingabe.recurUntil}
+              onChange={(e) => setFeld("recurUntil", e.target.value)}
+            />
+          </label>
+        </div>
+      </div>
+
+      <div className="logging__vorschau" role="note">
+        {unbegrenzt
+          ? t("beobachten.logging.recurVorschauUnbegrenzt")
+          : anzahl !== null
+            ? t("beobachten.logging.recurVorschau", { n: anzahl })
+            : null}
+      </div>
+    </>
+  );
+}
+
+// Abschluss-Knoepfe (Anlegen / Anlegen & starten). In beiden Modi identisch.
+function AbschlussKnoepfe({ gueltig, onAnlegen, recurring = false }) {
+  const { t } = useTranslation();
+  // Bei "recurring" (3b) heisst der Haupt-Aktionsknopf "Planen" und legt den Task an +
+  // startet ihn anschliessend (derselbe create->start-Pfad wie "Anlegen & starten", damit
+  // der Task ACTIVE/scharf ist). Der sekundaere "Anlegen"-Knopf entfaellt dann (ein blosses
+  // CREATED ohne Start ergibt fuer eine geplante Wiederkehr keinen Sinn). Bei sofort/geplant
+  // bleiben beide Knoepfe unveraendert.
+  if (recurring) {
+    return (
+      <div className="logging__abschluss">
+        <button
+          type="button"
+          className="logging__knopf logging__knopf--primaer"
+          disabled={!gueltig}
+          onClick={() => onAnlegen(true)}
+        >
+          <Plus size={15} />
+          {t("beobachten.logging.planen")}
+        </button>
+      </div>
+    );
+  }
   return (
     <div className="logging__abschluss">
       <button
@@ -927,7 +1238,11 @@ function AssistentMaske({
             {t("beobachten.logging.weiter")}
           </button>
         ) : (
-          <AbschlussKnoepfe gueltig={gueltig} onAnlegen={onAnlegen} />
+          <AbschlussKnoepfe
+            gueltig={gueltig}
+            onAnlegen={onAnlegen}
+            recurring={eingabe.operationMode === "recurring"}
+          />
         )}
       </div>
     </div>
@@ -981,7 +1296,11 @@ function ErweitertMaske({ eingabe, setFeld, setThresholdFeld, ziele, gueltig, on
         <IntervallFeld eingabe={eingabe} setFeld={setFeld} />
       </div>
       <SchwellwertFeld eingabe={eingabe} setThresholdFeld={setThresholdFeld} />
-      <AbschlussKnoepfe gueltig={gueltig} onAnlegen={onAnlegen} />
+      <AbschlussKnoepfe
+        gueltig={gueltig}
+        onAnlegen={onAnlegen}
+        recurring={eingabe.operationMode === "recurring"}
+      />
     </div>
   );
 }

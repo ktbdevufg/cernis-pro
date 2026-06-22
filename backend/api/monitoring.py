@@ -108,7 +108,7 @@ class PatchScheduleBody(BaseModel):
 # Mengen sind nur die Frueh-Validierung am Rand (422 statt 500). Weicht das Vokabular
 # je ab, faengt es spaetestens der Enum-Konstruktor im Use-Case (kein stiller Drift).
 _CAPTURE_MODES = frozenset({"interface_status", "reachability", "reachability_latency"})
-_OPERATION_MODES = frozenset({"scheduled", "immediate"})
+_OPERATION_MODES = frozenset({"scheduled", "immediate", "recurring"})
 
 # Erlaubte Mess-Intervall-Stufen in Sekunden (C-2). Wie die Modus-Mengen oben nur die
 # Frueh-Validierung am Rand (422 statt 500/stiller Drift); den Default 5 setzt NICHT
@@ -152,6 +152,10 @@ class CreateLoggingTaskBody(BaseModel):
     (422 bei Verstoss), nicht das Modell (Pydantic kann die Kreuz-Bedingung nicht
     ausdruecken, ohne sie zu verstecken). ``id``/``created_at`` setzt der Router
     (uuid4/time.time()), nicht der Client.
+
+    RECURRING braucht ``recur_start_minute`` + ``recur_end_minute`` (Tagesfenster);
+    ``recur_weekdays`` leer = alle Tage; ``recur_from``/``recur_until`` optional
+    (Gesamtzeitraum, ``recur_until`` None = unbegrenzt).
     """
 
     target_id: str
@@ -170,6 +174,16 @@ class CreateLoggingTaskBody(BaseModel):
     # NUR der Erweitert-Modus der Maske sendet ihn; der Use-Case baut daraus den
     # ``LatencyThreshold`` (str -> Enum-Hebung), der Router validiert nur die rohen Werte.
     threshold: ThresholdBody | None = None
+    # Wiederkehrendes Tagesfenster (3b) -- nur fuer ``operation_mode == "recurring"``
+    # relevant, sonst ungenutzt. ``recur_start_minute``/``recur_end_minute`` sind
+    # Minuten seit Mitternacht (0..1440); ``recur_weekdays`` leer = alle Tage (0=Mo..6=So);
+    # ``recur_from``/``recur_until`` sind Unix-ts (Gesamtzeitraum), ``recur_until`` None =
+    # unbegrenzt. Die Modus-/Feld-Konsistenz prueft ``_validate_logging_modes`` (422).
+    recur_start_minute: int | None = None
+    recur_end_minute: int | None = None
+    recur_weekdays: list[int] = []
+    recur_from: float | None = None
+    recur_until: float | None = None
 
 
 class AddTargetBody(BaseModel):
@@ -343,6 +357,16 @@ def _logging_task_to_dict(task: Any) -> dict[str, Any]:
         # Schwellwert konfiguriert ist. ``condition`` als StrEnum-Wert (``str(...)``),
         # die bools als echte Wire-bools (nicht 0/1).
         "threshold": _threshold_to_dict(task.threshold),
+        # RECURRING-Tagesfenster (3b): roh durchgereicht (Unix-ts/Minuten bzw. ``None``),
+        # damit die Karte die Wiederkehr-Meta zeigen kann. ``recur_weekdays`` als sortierte
+        # Liste (das frozenset waere nicht JSON-serialisierbar, Muster ScheduledJobOut).
+        # NUR bei operation_mode "recurring" fachlich relevant; sonst tragen die Felder die
+        # Domaenen-Leerwerte (None / leere Liste).
+        "recur_start_minute": task.recur_start_minute,
+        "recur_end_minute": task.recur_end_minute,
+        "recur_weekdays": sorted(task.recur_weekdays),
+        "recur_from": task.recur_from,
+        "recur_until": task.recur_until,
     }
 
 
@@ -538,6 +562,25 @@ def _validate_logging_modes(body: CreateLoggingTaskBody) -> None:
             422,
             detail="operation_mode 'immediate' braucht max_duration_s",
         )
+    # RECURRING (3b): braucht ein Tagesfenster (beide Minuten-Grenzen) -- kein stiller
+    # Fallback (Finding S3). Zusaetzlich: end > start (halb-offenes Fenster) und beide
+    # Grenzen im Tagesbereich 0..1440 (Minuten seit Mitternacht).
+    if body.operation_mode == "recurring":
+        if body.recur_start_minute is None or body.recur_end_minute is None:
+            raise HTTPException(
+                422,
+                detail="operation_mode 'recurring' braucht recur_start_minute und recur_end_minute",
+            )
+        if body.recur_end_minute <= body.recur_start_minute:
+            raise HTTPException(
+                422,
+                detail="recur_end_minute muss groesser als recur_start_minute sein",
+            )
+        if not (0 <= body.recur_start_minute <= 1440) or not (0 <= body.recur_end_minute <= 1440):
+            raise HTTPException(
+                422,
+                detail="recur_start_minute und recur_end_minute muessen im Bereich 0..1440 liegen",
+            )
     # Mess-Intervall (C-2): wenn gesetzt, muss es eine der erlaubten Stufen sein --
     # sonst 422 (kein stiller Fallback, Finding S3). ``None`` ist erlaubt (= nicht
     # gesetzt -> Use-Case-Default 5).
@@ -627,6 +670,14 @@ def create_logging_task(
         "threshold_notify_email": (
             body.threshold.notify_email if body.threshold is not None else False
         ),
+        # RECURRING-Tagesfenster (3b): roh durchgereicht (Muster planned_start etc.); die
+        # Modus-Konsistenz prueft ``_validate_logging_modes``, der Use-Case hebt nichts.
+        # ``recur_weekdays`` als ``frozenset`` (Domaenen-Form ``LoggingTask.recur_weekdays``).
+        "recur_start_minute": body.recur_start_minute,
+        "recur_end_minute": body.recur_end_minute,
+        "recur_weekdays": frozenset(body.recur_weekdays),
+        "recur_from": body.recur_from,
+        "recur_until": body.recur_until,
     }
     if body.interval_s is not None:
         task = create_task(interval_s=body.interval_s, **common_kwargs)

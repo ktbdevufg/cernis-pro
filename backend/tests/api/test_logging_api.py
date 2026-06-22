@@ -178,6 +178,69 @@ def test_create_missing_mandatory_field_is_422(db_path: Path) -> None:
     assert resp.status_code == 422
 
 
+# ── recurring (3b, wiederkehrendes Tagesfenster) ────────────────────────────
+
+
+def _recurring_body(**overrides: Any) -> dict[str, Any]:
+    """Valider RECURRING-Create-Body (Tagesfenster 10:00-11:00, Mo-Fr) -- ueberschreibbar."""
+    body = {
+        "target_id": "wlan",
+        "label": "Wiederkehrend",
+        "purpose": "Abend-Logging",
+        "capture_mode": "reachability_latency",
+        "operation_mode": "recurring",
+        "recur_start_minute": 600,
+        "recur_end_minute": 660,
+        "recur_weekdays": [0, 1, 2, 3, 4],
+    }
+    body.update(overrides)
+    return body
+
+
+def test_create_recurring_without_window_is_422(db_path: Path) -> None:
+    # operation_mode "recurring" ohne recur_start_minute/recur_end_minute -> 422.
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.post(
+            "/api/monitor/logging",
+            json={
+                "target_id": "wlan",
+                "label": "L",
+                "purpose": "P",
+                "capture_mode": "reachability",
+                "operation_mode": "recurring",
+            },
+        )
+    assert resp.status_code == 422
+
+
+def test_create_recurring_end_not_after_start_is_422(db_path: Path) -> None:
+    # recur_end_minute <= recur_start_minute -> 422 (halb-offenes Fenster braucht end > start).
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.post(
+            "/api/monitor/logging",
+            json=_recurring_body(recur_start_minute=660, recur_end_minute=600),
+        )
+    assert resp.status_code == 422
+
+
+def test_create_recurring_carries_recur_fields(db_path: Path) -> None:
+    # Gueltiger recurring-Create -> 201 + die recur_*-Felder in der Wire-Form. weekdays
+    # kommen sortiert zurueck (sorted(task.recur_weekdays)); recur_until fehlt -> None.
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.post(
+            "/api/monitor/logging",
+            json=_recurring_body(recur_weekdays=[4, 0, 2], recur_from=1000.0),
+        )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["operation_mode"] == "recurring"
+    assert body["recur_start_minute"] == 600
+    assert body["recur_end_minute"] == 660
+    assert body["recur_weekdays"] == [0, 2, 4]
+    assert body["recur_from"] == 1000.0
+    assert body["recur_until"] is None
+
+
 # ── interval_s (C-2, Mess-Intervall) ────────────────────────────────────────
 
 
@@ -318,6 +381,11 @@ def test_threshold_reaches_use_case_as_raw_fields(db_path: Path) -> None:
                 effective_start = None
                 interval_s = 5
                 threshold = None
+                recur_start_minute = None
+                recur_end_minute = None
+                recur_weekdays: frozenset[int] = frozenset()
+                recur_from = None
+                recur_until = None
 
             return _Task()
 

@@ -142,6 +142,55 @@
   gap: 12px;
 }
 
+/* Wiederkehrend (3b): kompaktere Variante fuer Tagesfenster/Zeitraum (von/bis). */
+.logging__zeitzeile--kompakt {
+  gap: 10px;
+}
+
+/* Wiederkehrend (3b): ein Inline-Feld (Sub-Label ueber dem Eingabefeld). */
+.logging-feld--inline {
+  gap: 4px;
+}
+
+.logging-feld__sublabel {
+  font-size: 11px;
+  color: var(--color-text-tert);
+}
+
+/* Wiederkehrend (3b): Wochentags-Chips Mo..So. */
+.logging__wochentage {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.logging-chip {
+  padding: 5px 10px;
+  font-size: 12px;
+  color: var(--color-text-sec);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.logging-chip:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.logging-chip--aktiv {
+  color: var(--color-accent-strong);
+  background: var(--color-accent-bg);
+  border-color: var(--color-accent);
+}
+
+/* Wiederkehrend (3b): Vorschau-Zeile "Ergibt N Messlaeufe". */
+.logging__vorschau {
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
 /* ── Assistent ─────────────────────────────────────────────────────────────── */
 
 .logging-assistent {
@@ -433,6 +482,12 @@
    die scharfgestellte Alarm-Bedingung, ohne als Fehler zu schreien. */
 .logging-karte__schwellwert {
   color: var(--sev-med-text);
+}
+
+/* Wiederkehrende Aufzeichnung in der Karten-Meta (3b): Tagesfenster + Wochentage statt
+   der einmaligen Restzeit. Dezent per Akzentfarbe (Muster Mess-Intervall). */
+.logging-karte__wiederkehrend {
+  color: var(--color-accent-strong);
 }
 
 /* Fortschrittsbalken (nur aktive Aufgaben). */

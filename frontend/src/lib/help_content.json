@@ -273,6 +273,21 @@
     }
   },
 
+  "help.monitor.recurring": {
+    "status": "final",
+    "kategorie": "Beobachten",
+    "de": {
+      "titel": "Wiederkehrende Aufzeichnung: lokales Ziel oder Internet-Ziel?",
+      "kurz": "Bei einer wiederkehrenden Aufzeichnung waehlen Sie ein Ziel. Ein lokales Ziel ist Ihr eigener Anschluss (z. B. der Router); ein Internet-Ziel liegt draussen im Netz. Faellt beides aus, liegt das Problem meist bei Ihnen; klappt nur das Internet-Ziel nicht, ist eher Ihr Anbieter dran.",
+      "lang": "Eine wiederkehrende Aufzeichnung misst Ihr Ziel taeglich in einem festen Zeitfenster. Welches Ziel Sie waehlen, entscheidet, was Sie eigentlich pruefen.\n\nEin LOKALES Ziel ist etwas in Ihrem eigenen Netzwerk - typischerweise Ihr Router oder Ihr eigener Anschluss. Antwortet das nicht, liegt die Stoerung mit grosser Wahrscheinlichkeit bei Ihnen zu Hause: Geraet aus, Kabel lose, WLAN-Problem.\n\nEin INTERNET-Ziel ist ein Punkt ausserhalb Ihres Netzes - der Weg nach draussen. Antwortet das nicht, kann es trotzdem an Ihrem Anschluss liegen oder am Weg dorthin.\n\nDie beiden zusammen ergeben ein klares Bild: Brechen BEIDE weg (lokal und Internet), liegt das Problem fast immer bei Ihrem eigenen Anschluss. Klappt das lokale Ziel, aber NUR das Internet-Ziel nicht, dann steht Ihr Anschluss - der Engpass liegt beim Weg nach draussen, also meist bei Ihrem Provider. So koennen Sie schon vor einem Anruf bei der Hotline einordnen, wo der Fehler steckt."
+    },
+    "en": {
+      "titel": "Recurring recording: local target or internet target?",
+      "kurz": "For a recurring recording you pick a target. A local target is your own connection (e.g. the router); an internet target is somewhere out on the net. If both fail, the problem is usually on your side; if only the internet target fails, it is more likely your provider.",
+      "lang": "A recurring recording measures your target every day within a fixed time window. Which target you pick decides what you are really checking.\n\nA LOCAL target is something in your own network - typically your router or your own connection. If it does not answer, the fault is most likely at your home: device off, cable loose, Wi-Fi problem.\n\nAn INTERNET target is a point outside your network - the path to the outside. If it does not answer, it can still be your connection or the path leading there.\n\nTogether the two give a clear picture: if BOTH fail (local and internet), the problem is almost always your own connection. If the local target works but ONLY the internet target fails, your connection is up - the bottleneck is the path to the outside, so usually your provider. This lets you locate the fault even before you call the hotline."
+    }
+  },
+
   "help.cve.uebersicht": {
     "status": "final",
     "kategorie": "Untersuchen",
