@@ -47,6 +47,7 @@ Connect-Frame).
 import time
 import uuid
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import datetime
 from typing import Annotated, Any
 
@@ -62,6 +63,7 @@ from application.monitoring import (
     GetAllSlaStats,
     GetLoggingTaskDetail,
     GetLoggingTaskEvents,
+    GetLoggingTaskRtt,
     GetLoggingTaskSla,
     GetMonitorEvents,
     GetRttHistory,
@@ -72,11 +74,14 @@ from application.monitoring import (
     LoggingTaskConflict,
     LoggingTaskNotFound,
     ManageSchedules,
+    OutageInterval,
     PauseLoggingTask,
     ResumeLoggingTask,
+    SeriesAnalysis,
     StartLoggingTask,
     StopLoggingTask,
     UpdateSchedule,
+    analyze_series,
 )
 
 router = APIRouter(prefix="/api", tags=["monitoring"])
@@ -293,6 +298,10 @@ def provide_get_logging_task_events() -> GetLoggingTaskEvents:
     raise NotImplementedError("GetLoggingTaskEvents wird in app.py verdrahtet")
 
 
+def provide_get_logging_task_rtt() -> GetLoggingTaskRtt:
+    raise NotImplementedError("GetLoggingTaskRtt wird in app.py verdrahtet")
+
+
 # ── Serialisierungs-Helfer (Domaenen-Objekt -> Wire-dict am api-Rand) ─────────
 
 
@@ -384,6 +393,49 @@ def _threshold_to_dict(threshold: Any) -> dict[str, Any] | None:
         "consecutive_n": threshold.consecutive_n,
         "notify_desktop": threshold.notify_desktop,
         "notify_email": threshold.notify_email,
+    }
+
+
+def _series_analysis_to_dict(analysis: SeriesAnalysis) -> dict[str, Any]:
+    """``SeriesAnalysis`` -> Wire-dict der Serien-Auswertung (Block 3c, Etappe 2).
+
+    Projiziert das Gesamtergebnis je verschachtelten Datentraeger (Muster
+    ``_logging_event_to_dict``: der Use-Case/die Aggregation liefert die Domaenen-Daten,
+    dieser Rand baut die Wire-Form). Alle Felder ROH durchgereicht -- ``None`` bleibt
+    ``None`` (z. B. offener Outage ``end_ts``, un-angereicherte ``minute_of_day``/``day_key``,
+    ``worst_slot_minute``), keine Rundung (das macht das Frontend).
+    """
+    metrics = analysis.metrics
+    return {
+        "has_latency": analysis.has_latency,
+        "metrics": {
+            "availability_pct": metrics.availability_pct,
+            "outage_count": metrics.outage_count,
+            "avg_outage_s": metrics.avg_outage_s,
+            "worst_slot_minute": metrics.worst_slot_minute,
+        },
+        "outages": [
+            {
+                "start_ts": outage.start_ts,
+                "end_ts": outage.end_ts,
+                "duration_s": outage.duration_s,
+                "minute_of_day": outage.minute_of_day,
+                "day_key": outage.day_key,
+            }
+            for outage in analysis.outages
+        ],
+        "heatmap": [
+            {"minute_of_day": slot.minute_of_day, "outage_count": slot.outage_count}
+            for slot in analysis.heatmap
+        ],
+        "ranking": [
+            {
+                "minute_of_day": entry.minute_of_day,
+                "day_count": entry.day_count,
+                "longest_outage_s": entry.longest_outage_s,
+            }
+            for entry in analysis.ranking
+        ],
     }
 
 
@@ -762,6 +814,64 @@ def logging_task_events(
     except LoggingTaskNotFound as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return [_logging_event_to_dict(row) for row in rows]
+
+
+def _enrich_outages_local(outages: list[OutageInterval]) -> list[OutageInterval]:
+    """Setzt je Outage ``minute_of_day`` + ``day_key`` aus ``start_ts`` in LOKALER Zeit.
+
+    Die Aggregation (``series_analysis``) rechnet bewusst KEINE Wanduhr (zeitfrei, ADR
+    0002) -- die Umrechnung Unix-ts -> Tagesfenster-Minute/lokales Datum gehoert an den
+    Router-Rand, der die Server-Zeitzone nutzen DARF. ``datetime.fromtimestamp`` ohne
+    ``tz`` ist die lokale Zeit. ``minute_of_day`` = lokale Stunde*60 + Minute (0..1439),
+    ``day_key`` = ISO-Datum ``yyyy-mm-dd``. ``OutageInterval`` ist frozen -> neue
+    Instanzen ueber ``dataclasses.replace`` (die uebrigen Felder bleiben unveraendert).
+    """
+    enriched: list[OutageInterval] = []
+    for outage in outages:
+        local = datetime.fromtimestamp(outage.start_ts)
+        enriched.append(
+            replace(
+                outage,
+                minute_of_day=local.hour * 60 + local.minute,
+                day_key=local.date().isoformat(),
+            )
+        )
+    return enriched
+
+
+@router.get("/monitor/logging/{task_id}/series")
+def logging_task_series(
+    task_id: str,
+    get_detail: Annotated[GetLoggingTaskDetail, Depends(provide_get_logging_task_detail)],
+    get_events: Annotated[GetLoggingTaskEvents, Depends(provide_get_logging_task_events)],
+    get_rtt: Annotated[GetLoggingTaskRtt, Depends(provide_get_logging_task_rtt)],
+    since: Annotated[float | None, Query()] = None,
+    until: Annotated[float | None, Query()] = None,
+    slot_minutes: Annotated[int, Query(ge=1, le=60)] = 10,
+) -> dict[str, Any]:
+    """Serien-Auswertung EINER Logging-Aufgabe (Block 3c). 404 bei unbekannter id.
+
+    Laedt Task (fuer ``capture_mode`` + 404), Event-Flanken und die dichten RTT-Samples
+    (``since``/``until`` analog ``logging_task_events``) und reicht sie in die reine,
+    zeitfreie ``analyze_series``. Die lokale Anreicherung der Outages (``minute_of_day``/
+    ``day_key`` aus ``start_ts``) gibt der Router ueber ``_enrich_outages_local`` herein
+    (die Aggregation rechnet keine Wanduhr). Das Ergebnis projiziert dieser Rand ueber
+    ``_series_analysis_to_dict`` in die Wire-Form (Felder roh, keine Rundung).
+    """
+    try:
+        task = get_detail(task_id)
+    except LoggingTaskNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    events = get_events(task_id, since=since, until=until)
+    rtt = get_rtt(task_id, since=since, until=until)
+    analysis = analyze_series(
+        task.capture_mode,
+        rtt,
+        events,
+        slot_minutes,
+        _enrich_outages_local,
+    )
+    return _series_analysis_to_dict(analysis)
 
 
 @router.post("/monitor/logging/{task_id}/start")

@@ -134,6 +134,7 @@ from api.monitoring import (
     provide_get_all_sla_stats,
     provide_get_logging_task_detail,
     provide_get_logging_task_events,
+    provide_get_logging_task_rtt,
     provide_get_logging_task_sla,
     provide_get_monitor_events,
     provide_get_rtt_history,
@@ -286,6 +287,7 @@ from application.monitoring import (
     GetAllSlaStats,
     GetLoggingTaskDetail,
     GetLoggingTaskEvents,
+    GetLoggingTaskRtt,
     GetLoggingTaskSla,
     GetMonitorEvents,
     GetRttHistory,
@@ -1870,6 +1872,12 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     # (range) -- rohe LoggingEventRow-Flanken, die Wire-Projektion macht der Router.
     app.dependency_overrides[provide_get_logging_task_events] = lambda: GetLoggingTaskEvents(
         logging_task_repository(), logging_event_repository()
+    )
+    # Serien-RTT (Block 3c): Task-Repo (fuer get + 404) UND RTT-Repo (all_for/range) --
+    # rohe LoggingRttSample-Messpunkte fuer die zeitfreie analyze_series; der Router
+    # reicht sie zusammen mit den Event-Flanken in die Aggregation.
+    app.dependency_overrides[provide_get_logging_task_rtt] = lambda: GetLoggingTaskRtt(
+        logging_task_repository(), logging_rtt_repository()
     )
 
     app.add_api_websocket_route(

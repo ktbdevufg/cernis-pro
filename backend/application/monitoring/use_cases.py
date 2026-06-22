@@ -65,6 +65,7 @@ from domain.monitoring import (
     CaptureMode,
     LatencyThreshold,
     LoggingEventRow,
+    LoggingRttSample,
     LoggingTask,
     MonitorEvent,
     MonitorTarget,
@@ -578,6 +579,53 @@ class GetLoggingTaskEvents:
         eff_since = since if since is not None else 0.0
         eff_until = until if until is not None else _OPEN_UNTIL_CUTOFF
         return self._event_repo.range(task_id, eff_since, eff_until)
+
+
+class GetLoggingTaskRtt:
+    """Die dichten RTT-Messpunkte EINER Logging-Aufgabe -- gesamter Zeitraum ODER ein Ausschnitt.
+
+    Schlanker LESE-Use-Case (Muster ``GetLoggingTaskEvents``): ``task_repo.get``
+    (``None`` -> ``LoggingTaskNotFound``, der bestehende Fehler) -> die Messpunkte ueber
+    das RTT-Repo laden -> die ROHEN ``LoggingRttSample``-Domaenenobjekte herausgeben (KEINE
+    Rechnung, keine Tupel-Umformung -- anders als ``GetLoggingTaskSla``, das die Samples in
+    ``compute_sla_stats`` fuettert). Speist die zeitfreie Serien-Aggregation (Block 3c):
+    der Router reicht diese rohen Samples in ``analyze_series``.
+
+    ZEITRAUM (``since``/``until``): OPTIONALER Ausschnitt ``[since, until)`` -- since/until-
+    Logik EXAKT wie ``GetLoggingTaskSla`` (anders als ``GetLoggingTaskEvents``: das
+    ``LoggingRttRepository`` HAT ein ``all_for``).
+    * Beide ``None`` -> ``rtt_repo.all_for(task_id)``: ALLE Messpunkte des Tasks (die
+      Retention von 1 Monat begrenzt "alle" ohnehin).
+    * Sonst -> ``rtt_repo.range(task_id, eff_since, eff_until)`` mit ``eff_since = since
+      if not None else 0.0`` und ``eff_until = until if not None else _OPEN_UNTIL_CUTOFF``
+      (offene Obergrenze ueber den festen Cutoff, kein ``time.time()`` -- UHRFREI,
+      deterministisch testbar, Muster ``GetLoggingTaskSla``).
+    """
+
+    def __init__(
+        self,
+        task_repo: LoggingTaskRepository,
+        rtt_repo: LoggingRttRepository,
+    ) -> None:
+        self._task_repo = task_repo
+        self._rtt_repo = rtt_repo
+
+    def __call__(
+        self,
+        task_id: str,
+        since: float | None = None,
+        until: float | None = None,
+    ) -> list[LoggingRttSample]:
+        task = self._task_repo.get(task_id)
+        if task is None:
+            raise LoggingTaskNotFound(task_id)
+        # Beide Grenzen offen -> all_for (gesamter Task-Zeitraum, Muster GetLoggingTaskSla);
+        # sonst der halb-offene range-Ausschnitt mit eff_since/eff_until.
+        if since is None and until is None:
+            return self._rtt_repo.all_for(task_id)
+        eff_since = since if since is not None else 0.0
+        eff_until = until if until is not None else _OPEN_UNTIL_CUTOFF
+        return self._rtt_repo.range(task_id, eff_since, eff_until)
 
 
 # ── Targets-Schreibpfad (M.9-Nachzuegler) ───────────────────────────────────
