@@ -2,18 +2,20 @@
 // Layout: fixe Kopfzeile, darunter Reiterleiste, darunter scrollbarer Inhalt.
 // Hält State: aktiver Reiter, Theme, Sprache. Theme + Sprache in localStorage.
 
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import AppHeader from "./components/AppHeader.jsx";
 import TabNav, { REITER } from "./components/TabNav.jsx";
-import DevicesView from "./views/DevicesView.jsx";
-import ExportView from "./views/ExportView.jsx";
-import InvestigateView from "./views/InvestigateView.jsx";
-import ManualView from "./views/ManualView.jsx";
-import ObserveView from "./views/ObserveView.jsx";
-import OverviewView from "./views/OverviewView.jsx";
-import SettingsView from "./views/SettingsView.jsx";
+// Die grossen Views werden erst bei Bedarf geladen (Code-Splitting), damit der
+// Haupt-Chunk klein bleibt. AppHeader/TabNav bleiben statisch (immer sichtbar).
+const DevicesView = lazy(() => import("./views/DevicesView.jsx"));
+const ExportView = lazy(() => import("./views/ExportView.jsx"));
+const InvestigateView = lazy(() => import("./views/InvestigateView.jsx"));
+const ManualView = lazy(() => import("./views/ManualView.jsx"));
+const ObserveView = lazy(() => import("./views/ObserveView.jsx"));
+const OverviewView = lazy(() => import("./views/OverviewView.jsx"));
+const SettingsView = lazy(() => import("./views/SettingsView.jsx"));
 import "./App.css";
 
 const THEME_KEY = "cernis_theme";
@@ -40,7 +42,7 @@ function ermittleStartRefresh() {
 }
 
 export default function App() {
-  const { i18n } = useTranslation();
+  const { t, i18n } = useTranslation();
 
   const [activeTab, setActiveTab] = useState(REITER[0].id);
   const [theme, setTheme] = useState(ermittleStartTheme);
@@ -134,37 +136,44 @@ export default function App() {
       )}
 
       <main className="app__content">
-        {handbuchOffen ? (
-          <ManualView onClose={() => setHandbuchOffen(false)} />
-        ) : settingsOffen ? (
-          <SettingsView
-            lang={lang}
-            onLangChange={setLang}
-            onClose={() => setSettingsOffen(false)}
-          />
-        ) : (
-          <>
-            {activeTab === "overview" && (
-              <OverviewView onNavigate={handleNavigate} />
-            )}
-            {activeTab === "observe" && (
-              <ObserveView
-                refreshInterval={refreshInterval}
-                onRefreshIntervalChange={setRefreshInterval}
-                initialFunction={observeFunktion}
-                onFunktionGeoeffnet={() => setObserveFunktion(null)}
-              />
-            )}
-            {activeTab === "investigate" && (
-              <InvestigateView
-                initialFunction={investigateFunktion}
-                onFunktionGeoeffnet={() => setInvestigateFunktion(null)}
-              />
-            )}
-            {activeTab === "export" && <ExportView />}
-            {activeTab === "devices" && <DevicesView />}
-          </>
-        )}
+        {/* Ein einziges Suspense umschliesst alle lazy geladenen Views, damit
+            beim Nachladen eines Chunks ein ruhiger Platzhalter erscheint statt
+            eines Absturzes. */}
+        <Suspense
+          fallback={<div className="app__lazy-fallback">{t("app.laedt")}</div>}
+        >
+          {handbuchOffen ? (
+            <ManualView onClose={() => setHandbuchOffen(false)} />
+          ) : settingsOffen ? (
+            <SettingsView
+              lang={lang}
+              onLangChange={setLang}
+              onClose={() => setSettingsOffen(false)}
+            />
+          ) : (
+            <>
+              {activeTab === "overview" && (
+                <OverviewView onNavigate={handleNavigate} />
+              )}
+              {activeTab === "observe" && (
+                <ObserveView
+                  refreshInterval={refreshInterval}
+                  onRefreshIntervalChange={setRefreshInterval}
+                  initialFunction={observeFunktion}
+                  onFunktionGeoeffnet={() => setObserveFunktion(null)}
+                />
+              )}
+              {activeTab === "investigate" && (
+                <InvestigateView
+                  initialFunction={investigateFunktion}
+                  onFunktionGeoeffnet={() => setInvestigateFunktion(null)}
+                />
+              )}
+              {activeTab === "export" && <ExportView />}
+              {activeTab === "devices" && <DevicesView />}
+            </>
+          )}
+        </Suspense>
       </main>
     </div>
   );

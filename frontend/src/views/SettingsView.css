@@ -422,6 +422,39 @@
   border-color: transparent;
 }
 
+/* DNS-Wächter-IP-Listen: schmales, ruhiges 2-Spalten-Grid (IP-Box dehnt sich,
+   Entfernen-Knopf rechts) — bewusst anders als die 4-spaltige Port-Tabelle, weil
+   IPs keine rechtsbündigen Spalten brauchen. */
+.dnsip__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dnsip__row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: stretch;
+  gap: 8px;
+}
+
+/* IP-Box: gleiche Box-Optik wie __port-box, aber LINKSbündig (IPs liest man von
+   links), restliche Breite. */
+.dnsip__box {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 10px 12px;
+  font-size: 14px;
+  color: var(--color-text);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
 .auffaelligkeit__remove {
   display: inline-flex;
   align-items: center;

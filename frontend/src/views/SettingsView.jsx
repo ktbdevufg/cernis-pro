@@ -1373,10 +1373,10 @@ function IpListe({ titel, hinweis, ips, onChange }) {
           {t("settings.dnswatch.listEmpty")}
         </span>
       ) : (
-        <ul className="auffaelligkeit__portlist">
+        <ul className="dnsip__list">
           {ips.map((ip) => (
-            <li key={ip} className="auffaelligkeit__portrow">
-              <span className="auffaelligkeit__port-box">{ip}</span>
+            <li key={ip} className="dnsip__row">
+              <span className="dnsip__box">{ip}</span>
               <span className="auffaelligkeit__port-remove">
                 <button
                   type="button"

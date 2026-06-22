@@ -22,3 +22,9 @@
 .app__placeholder-note {
   color: var(--color-text-sec);
 }
+
+/* Ruhiger Platzhalter, waehrend ein lazy geladener View-Chunk nachkommt. */
+.app__lazy-fallback {
+  color: var(--color-text-sec);
+  padding: 8px 0;
+}
