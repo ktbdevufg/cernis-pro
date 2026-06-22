@@ -162,6 +162,16 @@ from api.scanning import (
     provide_lookup_vendor,
 )
 from api.scanning import router as scanning_router
+from api.scheduler import (
+    CreateJobBody,
+    ScheduledJobOut,
+    provide_scheduler_create,
+    provide_scheduler_delete,
+    provide_scheduler_list,
+    provide_scheduler_pause,
+    provide_scheduler_resume,
+)
+from api.scheduler import router as scheduler_router
 from api.security import (
     provide_check_default_creds,
     provide_clear_arp_baseline,
@@ -302,6 +312,14 @@ from application.scanning import (
     LookupVendor,
     RunNetworkScan,
 )
+from application.scheduler import (
+    CreateScheduledJob,
+    DeleteScheduledJob,
+    ListScheduledJobs,
+    PauseScheduledJob,
+    ResumeScheduledJob,
+    RunScheduler,
+)
 from application.security import (
     CheckDefaultCreds,
     ClearArpBaseline,
@@ -346,6 +364,7 @@ from domain.monitoring import (
 )
 from domain.process import classify_kind
 from domain.scanning import EnrichedHost
+from domain.scheduler.models import DailyWindow
 from infrastructure.agent import (
     SqliteAgentRepository,
     UrllibAgentPinger,
@@ -427,6 +446,7 @@ from infrastructure.scanning.port_scanner import PortScannerAdapter
 from infrastructure.scanning.scan_history import CorruptScanError, SqliteScanHistoryRepository
 from infrastructure.scanning.ssdp import SsdpAdapter
 from infrastructure.scanning.vendor_lookup import VendorLookupAdapter
+from infrastructure.scheduler_jobs_db import SqliteScheduledJobRepository
 from infrastructure.secret_store import KeyringSecretStore, SecretStoreUnavailableError
 from infrastructure.security import (
     CveLookupAdapter,
@@ -452,6 +472,7 @@ from modules.devices_db import init_devices_db
 from modules.storage import init_db
 from ports.alerting import AlertNotifierPort, SmtpConfigPort
 from ports.cve import InventoryHost, InventoryPort, LookupCve
+from ports.scheduler import JobHandler
 from ports.security import PortQuery
 from ports.settings import SettingsRepository
 from ws_monitor import make_ws_monitor
@@ -1231,6 +1252,15 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             run_cve_monitor_uc = _build_run_cve_monitor()
             _app.state.run_cve_monitor = run_cve_monitor_uc
             _app.state.cve_monitor_task = asyncio.create_task(run_cve_monitor_uc.run())
+            # ── v2-Scheduler-Worker (Block 3a, Etappe 3b) ─────────────────────
+            # Lifespan-Worker (Muster cve_monitor_task): tickt bis stop(); der Task
+            # haengt an app.state (kein GC). Die Handler-Registry ist in 3b LEER --
+            # der Worker laeuft und tut nichts (ehrlicher Leerzustand, S3); der erste
+            # Handler (monitoring_window) kommt in Block 3b. Getrennt vom alten
+            # ApschedulerJobScheduler (job_scheduler().start oben), eigene Tabelle.
+            run_scheduler_uc = _build_run_scheduler()
+            _app.state.run_scheduler = run_scheduler_uc
+            _app.state.scheduler_task = asyncio.create_task(run_scheduler_uc.run())
             init_alerts_db()
             # agent (A.4+5): KEIN init_agents_db mehr -- das v2-SqliteAgentRepository
             # legt die remote_agents-Tabelle beim Bau selbst an (_ensure_schema),
@@ -1259,6 +1289,13 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             _app.state.cve_monitor_task.cancel()
             with suppress(asyncio.CancelledError):
                 await _app.state.cve_monitor_task
+            # v2-Scheduler-Worker (Etappe 3b): selber Teardown wie der cve_monitor_task
+            # (stop-Flag + cancel + awaiten, CancelledError unterdruecken). Laeuft immer
+            # (im bootstrap-Block gestartet).
+            run_scheduler_uc.stop()
+            _app.state.scheduler_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await _app.state.scheduler_task
             # capture-Loop (C.5): laeuft NUR, wenn ueber POST /api/pcap/start gestartet
             # (kein startup-Autostart). Beim Shutdown sauber stoppen + canceln, falls aktiv.
             capture_task = getattr(_app.state, "capture_task", None)
@@ -1960,6 +1997,75 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         cve_acknowledgement_repository().record(mac, cve_id, port, action)
 
     app.dependency_overrides[provide_cve_acknowledge] = lambda: _cve_acknowledge
+
+    # ── scheduler-Domaene v2 verdrahten (Block 3a, Etappe 3b, Regel 5: ports<->infra nur hier) ──
+    # Der v2-Scheduler haengt -- getrennt vom alten ApschedulerJobScheduler/_scheduled_scan,
+    # der unberuehrt daneben weiterlaeuft -- an der laufenden App: ein REST-Router fuer die
+    # Verwaltung der Jobs und ein Lifespan-Worker (gestartet weiter unten im Lifespan). Repo-
+    # Factory wie die anderen Repos (injizierter db_path via get_db_path()), Muster cve.
+
+    @lru_cache(maxsize=1)
+    def scheduled_job_repository() -> SqliteScheduledJobRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteScheduledJobRepository(get_db_path())
+
+    # Handler-Registry (job_type -> JobHandler): LEER in Etappe 3b. Der erste Handler
+    # (monitoring_window) wird in Block 3b/Monitoring registriert. Eine leere Registry ist
+    # GUELTIG -- der Worker laeuft und tut ohne Handler nichts (ehrlicher Leerzustand, S3).
+    scheduler_handlers: dict[str, JobHandler] = {}
+
+    def _build_run_scheduler() -> RunScheduler:
+        return RunScheduler(scheduled_job_repository(), scheduler_handlers)
+
+    # Anlege-Runner: baut aus dem flachen CreateJobBody den domain-DailyWindow + params-Tupel
+    # und legt den Job ueber CreateScheduledJob an (Regel 4: die Projektion lebt HIER im
+    # Composition Root, der api-Ring kennt domain/application nicht).
+    def _scheduler_create(body: CreateJobBody) -> int:
+        window = DailyWindow(
+            start_minute=body.window.start_minute,
+            end_minute=body.window.end_minute,
+            weekdays=frozenset(body.window.weekdays),
+            from_epoch=body.window.from_epoch,
+            until_epoch=body.window.until_epoch,
+        )
+        params = tuple((k, v) for k, v in body.params)
+        return CreateScheduledJob(scheduled_job_repository())(body.job_type, params, window)
+
+    # Lese-Runner: projiziert jeden ScheduledJob auf die flache ScheduledJobOut-Wire-Form
+    # (window flach ausgerollt, weekdays sortiert, state als str).
+    def _scheduler_list() -> list[ScheduledJobOut]:
+        return [
+            ScheduledJobOut(
+                id=job.id,
+                job_type=job.job_type,
+                params=[(k, v) for k, v in job.params],
+                start_minute=job.window.start_minute,
+                end_minute=job.window.end_minute,
+                weekdays=sorted(job.window.weekdays),
+                from_epoch=job.window.from_epoch,
+                until_epoch=job.window.until_epoch,
+                state=job.state.value,
+            )
+            for job in ListScheduledJobs(scheduled_job_repository())()
+        ]
+
+    # Zustands-Runner: pause/resume/delete je ein Pass-Through an den jeweiligen Use-Case.
+    def _scheduler_pause(job_id: int) -> None:
+        PauseScheduledJob(scheduled_job_repository())(job_id)
+
+    def _scheduler_resume(job_id: int) -> None:
+        ResumeScheduledJob(scheduled_job_repository())(job_id)
+
+    def _scheduler_delete(job_id: int) -> None:
+        DeleteScheduledJob(scheduled_job_repository())(job_id)
+
+    app.include_router(scheduler_router)
+    app.dependency_overrides[provide_scheduler_create] = lambda: _scheduler_create
+    app.dependency_overrides[provide_scheduler_list] = lambda: _scheduler_list
+    app.dependency_overrides[provide_scheduler_pause] = lambda: _scheduler_pause
+    app.dependency_overrides[provide_scheduler_resume] = lambda: _scheduler_resume
+    app.dependency_overrides[provide_scheduler_delete] = lambda: _scheduler_delete
 
     # ── capture-Domaene v2 verdrahten (C.4+5, Regel 5: ports<->infra nur hier) ──
     # REST (pcap/lldp) ueber duenne Use-Cases im api-Ring; der WS-Handler /ws/pcap
@@ -3205,6 +3311,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             alert_rules=alert_rule_repository(),
             agents=agent_repository(),
             dns_watch_acknowledgements=dns_watch_acknowledgement_repository(),
+            scheduled_jobs=scheduled_job_repository(),
             secret_store=secret_store(),
         )
 

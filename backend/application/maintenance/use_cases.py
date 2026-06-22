@@ -53,6 +53,7 @@ __all__ = [
     "FactoryReset",
     "KnownHostsCleaner",
     "ResetScanData",
+    "ScheduledJobCleaner",
 ]
 
 _logger = structlog.get_logger(__name__)
@@ -86,6 +87,19 @@ class DnsWatchAckCleaner(Protocol):
 
     def clear_all(self) -> None:
         """Leert die DNS-Waechter-Quittierungen (``dns_watch_acknowledgements``) vollstaendig."""
+        ...
+
+
+class ScheduledJobCleaner(Protocol):
+    """Schmaler Vertrag fuer die v2-Scheduler-Jobs (``scheduler_jobs``-Tabelle).
+
+    Der ``ScheduledJobRepository``-Adapter (``SqliteScheduledJobRepository``) erfuellt
+    diesen Vertrag via seiner ``clear_all``-Methode; der Werkszustand braucht hier nur
+    das Leeren. Getrennt vom alten ``ApschedulerJobScheduler``/``schedules`` (eigene Tabelle).
+    """
+
+    def clear_all(self) -> None:
+        """Leert die v2-Scheduler-Jobs (``scheduler_jobs``) vollstaendig."""
         ...
 
 
@@ -162,6 +176,7 @@ class FactoryReset:
         alert_rules: AlertRuleRepository,
         agents: AgentRepository,
         dns_watch_acknowledgements: DnsWatchAckCleaner,
+        scheduled_jobs: ScheduledJobCleaner,
         secret_store: SecretStore,
     ) -> None:
         self._reset_scan_data = reset_scan_data
@@ -179,6 +194,7 @@ class FactoryReset:
         self._alert_rules = alert_rules
         self._agents = agents
         self._dns_watch_acknowledgements = dns_watch_acknowledgements
+        self._scheduled_jobs = scheduled_jobs
         self._secret_store = secret_store
 
     def run(self, *, include_secrets: bool = False) -> None:
@@ -205,6 +221,9 @@ class FactoryReset:
         self._logging_tasks.clear_all()
         self._logging_rtt.clear_all()
         self._logging_events.clear_all()
+        # v2-Scheduler-Jobs (eigene Tabelle, getrennt vom alten ApschedulerJobScheduler/
+        # schedules). Eigener Schritt im Monitoring-Block; raeumt nur die scheduler_jobs.
+        self._scheduled_jobs.clear_all()
 
         # e/f: Alert-Regeln, Agenten.
         self._alert_rules.clear_all()

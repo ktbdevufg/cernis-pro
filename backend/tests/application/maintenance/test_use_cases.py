@@ -154,6 +154,7 @@ def _make_factory_reset(
         alert_rules=_Spy(calls, "alert_rules"),
         agents=_Spy(calls, "agents"),
         dns_watch_acknowledgements=_Spy(calls, "dns_watch_acknowledgements"),
+        scheduled_jobs=_Spy(calls, "scheduled_jobs"),
         secret_store=secret_store,
     )
 
@@ -224,6 +225,7 @@ def test_factory_reset_ruft_stufe1_und_stufe2() -> None:
         "logging_tasks.clear_all",
         "logging_rtt.clear_all",
         "logging_events.clear_all",
+        "scheduled_jobs.clear_all",
         "alert_rules.clear_all",
         "agents.clear_all",
         "dns_watch_acknowledgements.clear_all",
