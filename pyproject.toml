@@ -241,6 +241,7 @@ modules = [
     "domain.fritz_detail",
     "domain.cve",
     "domain.dns_watch",
+    "domain.scheduler",
 ]
 
 # Die neuen Ringe duerfen den Altcode (modules/) NIE importieren. Der Legacy-Bezug
