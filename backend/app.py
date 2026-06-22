@@ -109,6 +109,11 @@ from api.fritz import provide_get_fritz_detail
 from api.fritz import router as fritz_router
 from api.interfaces import provide_list_interfaces
 from api.interfaces import router as interfaces_router
+from api.maintenance import (
+    provide_factory_reset,
+    provide_reset_scan_data,
+)
+from api.maintenance import router as maintenance_router
 from api.metrics import provide_export_metrics
 from api.metrics import router as metrics_router
 from api.monitoring import (
@@ -247,6 +252,7 @@ from application.export import (
 )
 from application.fritz_detail import FritzDetailAuthError, GetFritzDetail
 from application.interfaces import ListInterfaces
+from application.maintenance import FactoryReset, ResetScanData
 from application.metrics import ExportMetrics
 from application.monitoring import (
     AddMonitorTarget,
@@ -2951,6 +2957,58 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.dependency_overrides[provide_list_all_rules] = lambda: _list_all_rules
     app.dependency_overrides[provide_delete_user_rule] = lambda: _delete_user_rule
     app.dependency_overrides[provide_acknowledge] = lambda: _acknowledge
+
+    # ── maintenance-Domaene v2 verdrahten (Etappe 3, Regel 5: ports<->infra nur hier) ──
+    # Die Wartungs-Funktion (Daten loeschen) komponiert die zwei Stufen aus den BEREITS
+    # vorhandenen Repo-Factories des uebrigen Bestands -- KEINE eigenen Repos, KEINE
+    # zweiten Instanzen. Stufe 1 (ResetScanData) leert die Befund-/Verlaufstabellen;
+    # Stufe 2 (FactoryReset) fuehrt erst die ganze Stufe 1 aus (dieselbe Instanz, die
+    # auch der Stufe-1-Endpunkt nutzt -- der Use-Case komponiert sie selbst) und raeumt
+    # DANACH Geraete, Settings, Regeln, Monitoring (Scheduler-Jobs zuerst, dann Tabellen),
+    # Alert-Regeln und Agenten ab. Der Scheduler ist die SELBE gecachte Instanz wie bei
+    # ManageSchedules (job_scheduler(), lru_cache) -- KEINE zweite. Die Factories liegen
+    # ueber den gesamten create_app-Scope verteilt; die Closures loesen ihre Namen erst
+    # beim Request auf (alle Factories sind dann definiert).
+    #
+    # Verdrahtet als Use-Case-INSTANZ (Muster der devices-POST-Use-Cases): das Override
+    # liefert die Instanz, der Router ruft ihre ``run``-Methode. Stufe-1- und Stufe-2-
+    # Instanz teilen sich DIESELBE ResetScanData (FactoryReset komponiert sie) -- darum
+    # einmal lazy memoisiert, damit beide Endpunkte/Use-Cases dieselbe Instanz sehen.
+    @lru_cache(maxsize=1)
+    def reset_scan_data_use_case() -> ResetScanData:
+        return ResetScanData(
+            scan_history=scan_history_repository(),
+            cve_findings=cve_finding_repository(),
+            cve_checkstate=cve_checkstate_repository(),
+            cve_acknowledgements=cve_acknowledgement_repository(),
+            known_hosts=host_history_repository(),
+            analysis_acknowledgements=acknowledgement_repository(),
+            arp_guard=arp_guard_repository(),
+        )
+
+    @lru_cache(maxsize=1)
+    def factory_reset_use_case() -> FactoryReset:
+        return FactoryReset(
+            reset_scan_data=reset_scan_data_use_case(),
+            devices=device_repository(),
+            settings=repository(),
+            user_rules=analysis_rule_repository(),
+            schedules=schedule_repository(),
+            scheduler=job_scheduler(),
+            rtt_history=rtt_history_repository(),
+            monitor_events=monitor_event_repository(),
+            sla_samples=sla_sample_repository(),
+            logging_tasks=logging_task_repository(),
+            logging_rtt=logging_rtt_repository(),
+            logging_events=logging_event_repository(),
+            alert_rules=alert_rule_repository(),
+            agents=agent_repository(),
+            secret_store=secret_store(),
+        )
+
+    app.include_router(maintenance_router)
+    app.dependency_overrides[provide_reset_scan_data] = reset_scan_data_use_case
+    app.dependency_overrides[provide_factory_reset] = factory_reset_use_case
 
     # ── Frontend-Serving ── MUSS als LETZTES registriert werden ──────────────────
     # Der "/"-Mount faengt alle zuvor NICHT gematchten Pfade. Deshalb hier ganz am
