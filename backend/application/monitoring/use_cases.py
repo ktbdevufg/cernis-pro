@@ -797,6 +797,9 @@ class CreateLoggingTask:
     bleibt ``task.threshold`` ``None``. Die rohe Wert-Validierung (condition-Vokabular,
     ``consecutive_n >= 1``, ``limit_ms >= 0``) macht der Router (422); die Hebung hier ist
     die zweite, autoritative Linie (ein ``ThresholdCondition``-Fehlwert wirft ``ValueError``).
+
+    RECURRING-Felder (3b): die fuenf ``recur_*``-Werte werden roh durchgereicht (wie
+    ``planned_start`` etc.) -- die Modus-Konsistenz prueft der Rand, nicht dieser Use-Case.
     """
 
     def __init__(self, repository: LoggingTaskRepository) -> None:
@@ -821,6 +824,11 @@ class CreateLoggingTask:
         threshold_consecutive_n: int = 3,
         threshold_notify_desktop: bool = True,
         threshold_notify_email: bool = False,
+        recur_start_minute: int | None = None,
+        recur_end_minute: int | None = None,
+        recur_weekdays: frozenset[int] = frozenset(),
+        recur_from: float | None = None,
+        recur_until: float | None = None,
     ) -> LoggingTask:
         # Schwellwert nur bauen, wenn der Client eine condition gesendet hat -- sonst
         # bleibt der Task ohne Schwellwert (Domaenen-Default ``threshold=None``). Die
@@ -850,6 +858,11 @@ class CreateLoggingTask:
             created_at=created_at,
             interval_s=interval_s,
             threshold=threshold,
+            recur_start_minute=recur_start_minute,
+            recur_end_minute=recur_end_minute,
+            recur_weekdays=recur_weekdays,
+            recur_from=recur_from,
+            recur_until=recur_until,
         )
         self._repository.save(task)
         return task

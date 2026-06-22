@@ -302,6 +302,7 @@ from application.monitoring import (
     StopLoggingTask,
     UpdateSchedule,
 )
+from application.monitoring.scheduler_handler import MonitoringWindowHandler
 from application.outbound import BuildOutboundContacts, RawConnection
 from application.process import CheckProcessPermission, ListProcesses
 from application.resolver import ResolveEndpoint, ResolvePtrBatch
@@ -2010,10 +2011,14 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
         return SqliteScheduledJobRepository(get_db_path())
 
-    # Handler-Registry (job_type -> JobHandler): LEER in Etappe 3b. Der erste Handler
-    # (monitoring_window) wird in Block 3b/Monitoring registriert. Eine leere Registry ist
-    # GUELTIG -- der Worker laeuft und tut ohne Handler nichts (ehrlicher Leerzustand, S3).
-    scheduler_handlers: dict[str, JobHandler] = {}
+    # Handler-Registry (job_type -> JobHandler): erster Abnehmer monitoring_window (Block
+    # 3b) registriert -- beendet einen RECURRING-Logging-Task am Ende seines
+    # Gesamtzeitraums (StopLoggingTask ueber dem logging_task_repository()). Weitere
+    # Job-Typen kommen hier dazu.
+    _monitoring_window_handler = MonitoringWindowHandler(StopLoggingTask(logging_task_repository()))
+    scheduler_handlers: dict[str, JobHandler] = {
+        _monitoring_window_handler.job_type: _monitoring_window_handler,
+    }
 
     def _build_run_scheduler() -> RunScheduler:
         return RunScheduler(scheduled_job_repository(), scheduler_handlers)

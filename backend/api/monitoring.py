@@ -591,43 +591,47 @@ def create_logging_task(
     Feld-Konsistenz prueft ``_validate_logging_modes`` (422 bei Verstoss).
     """
     _validate_logging_modes(body)
-    # interval_s (C-2): nur durchreichen, wenn der Client es gesetzt hat -- sonst greift
-    # der Use-Case-/Domaenen-Default (5). So bleibt der Default an EINER Stelle (Domaene),
-    # der Router setzt keine eigene 5.
-    interval_kwargs: dict[str, int] = (
-        {"interval_s": body.interval_s} if body.interval_s is not None else {}
-    )
     # Schwellwert (Schnitt 4): die ROHEN Wire-Felder durchreichen -- der Use-Case hebt
     # ``condition`` zu ``ThresholdCondition`` und baut den ``LatencyThreshold`` (Muster
     # ``capture_mode``; der api-Ring importiert KEINE Domaenen-Typen). ``threshold_condition``
     # ist das EINE "kein Schwellwert"-Signal: bei ``None`` baut der Use-Case keinen
     # Threshold (Default ``threshold=None``) und ignoriert die uebrigen threshold-Felder.
-    # Anders als interval_s daher KEIN bedingtes kwargs-Dict -- ein gemischt typisiertes
-    # ``**dict`` liesse sich nicht typsicher unpacken; die explizite Durchreichung mit
-    # condition als None-Anker ist hier sauberer.
     threshold_condition = body.threshold.condition if body.threshold is not None else None
-    task = create_task(
-        task_id=uuid.uuid4().hex,
-        target_id=body.target_id,
-        label=body.label,
-        purpose=body.purpose,
-        capture_mode=body.capture_mode,
-        operation_mode=body.operation_mode,
-        created_at=time.time(),
-        planned_start=body.planned_start,
-        planned_end=body.planned_end,
-        max_duration_s=body.max_duration_s,
-        threshold_condition=threshold_condition,
-        threshold_limit_ms=body.threshold.limit_ms if body.threshold is not None else 0.0,
-        threshold_consecutive_n=(body.threshold.consecutive_n if body.threshold is not None else 3),
-        threshold_notify_desktop=(
+
+    # interval_s (C-2): nur durchreichen, wenn der Client es gesetzt hat -- sonst greift
+    # der Use-Case-/Domaenen-Default (5). So bleibt der Default an EINER Stelle (Domaene),
+    # der Router setzt keine eigene 5. Seit den ``recur_*``-Parametern (3b) ist ``interval_s``
+    # NICHT mehr das letzte Keyword-Argument; ein ``**dict[str, int]``-Unpack liesse sich
+    # gegen die gemischt typisierten Folgeparameter (``recur_weekdays: frozenset[int]``) nicht
+    # mehr typsicher unpacken. Darum die beiden Pfade explizit (Muster threshold-Durchreichung):
+    # mit gesetztem ``interval_s`` ODER ganz ohne (dann greift der Domaenen-Default).
+    common_kwargs: dict[str, Any] = {
+        "task_id": uuid.uuid4().hex,
+        "target_id": body.target_id,
+        "label": body.label,
+        "purpose": body.purpose,
+        "capture_mode": body.capture_mode,
+        "operation_mode": body.operation_mode,
+        "created_at": time.time(),
+        "planned_start": body.planned_start,
+        "planned_end": body.planned_end,
+        "max_duration_s": body.max_duration_s,
+        "threshold_condition": threshold_condition,
+        "threshold_limit_ms": body.threshold.limit_ms if body.threshold is not None else 0.0,
+        "threshold_consecutive_n": (
+            body.threshold.consecutive_n if body.threshold is not None else 3
+        ),
+        "threshold_notify_desktop": (
             body.threshold.notify_desktop if body.threshold is not None else True
         ),
-        threshold_notify_email=(
+        "threshold_notify_email": (
             body.threshold.notify_email if body.threshold is not None else False
         ),
-        **interval_kwargs,
-    )
+    }
+    if body.interval_s is not None:
+        task = create_task(interval_s=body.interval_s, **common_kwargs)
+    else:
+        task = create_task(**common_kwargs)
     return _logging_task_to_dict(task)
 
 
