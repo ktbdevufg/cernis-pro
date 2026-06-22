@@ -6,6 +6,11 @@ Hosts, ob sie DNS-relevant ist und in welche von drei Kategorien sie faellt
 keine Fremd-Domaene, kein Framework, kein infrastructure/modules-Import.
 """
 
+from domain.dns_watch.defaults import (
+    DEFAULT_DOH_PROVIDER_IPS,
+    doh_providers_or_default,
+    expected_servers_or_default,
+)
 from domain.dns_watch.logic import (
     CATEGORY_EXPECTED,
     CATEGORY_OPEN,
@@ -24,10 +29,13 @@ __all__ = [
     "CATEGORY_EXPECTED",
     "CATEGORY_OPEN",
     "CATEGORY_POSSIBLE_DOH",
+    "DEFAULT_DOH_PROVIDER_IPS",
     "HOST_SCOPE_LOCAL",
     "DnsContact",
     "DnsWatchOverview",
     "RawDnsConnection",
     "classify",
+    "doh_providers_or_default",
+    "expected_servers_or_default",
     "is_dns_relevant",
 ]
