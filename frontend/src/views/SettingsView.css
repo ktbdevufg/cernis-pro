@@ -710,3 +710,17 @@
 .startseite__rule--sub .auffaelligkeit__rule-title {
   color: var(--color-text-sec);
 }
+
+/* ── Sektion „Wartung" ─────────────────────────────────────────────────────── */
+
+/* Erklärtext unter der „Daten löschen"-Zeile: dezent, eingerückt wie der
+   Zeilen-Innenabstand (die Zeile selbst hat 12px/16px Padding). */
+.settings__wartung-hint {
+  padding: 0 16px 12px;
+}
+
+/* Ruhiger „erledigt"-Hinweis nach erfolgreicher Löschung (ok-Ton). */
+.settings__wartung-done {
+  padding: 0 16px 12px;
+  color: var(--color-ok-text);
+}

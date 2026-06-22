@@ -80,7 +80,8 @@
       "general": "Allgemein",
       "startseite": "Startseite",
       "fritzbox": "FRITZ!Box",
-      "auffaelligkeit": "Was ist auffällig?"
+      "auffaelligkeit": "Was ist auffällig?",
+      "wartung": "Wartung"
     },
     "startseite": {
       "title": "Startseite",
@@ -94,6 +95,52 @@
       "loading": "Lädt …",
       "loadError": "Einstellungen konnten nicht geladen werden.",
       "saveError": "Speichern fehlgeschlagen."
+    },
+    "wartung": {
+      "title": "Wartung",
+      "rowTitle": "Daten löschen",
+      "rowDescription": "Scan-Daten zurücksetzen oder CERNIS auf Werkszustand bringen.",
+      "openButton": "Optionen anzeigen",
+      "doneScan": "Scan-Daten zurückgesetzt.",
+      "doneFactory": "Auf Werkszustand zurückgesetzt. Die Einstellungen wurden ebenfalls zurückgesetzt.",
+      "dialog": {
+        "title": "Daten löschen",
+        "close": "Schließen",
+        "cancel": "Abbrechen"
+      },
+      "choice": {
+        "scan": {
+          "title": "Scan-Daten zurücksetzen",
+          "deletes": "Löscht: Scan-Historie, CVE-Befundstand, Baseline, Quittierungen.",
+          "keeps": "Bleibt: Einstellungen, Geräte-Gedächtnis, Monitoring-Aufzeichnungen."
+        },
+        "factory": {
+          "title": "Werkszustand",
+          "deletes": "Löscht alle Daten – Scans, Geräte-Gedächtnis, Monitoring, Einstellungen. Verhält sich danach wie frisch installiert."
+        }
+      },
+      "confirm": {
+        "lead": "Folgendes wird unwiderruflich gelöscht:",
+        "warning": "Kann nicht rückgängig gemacht werden. Sind Sie sicher?",
+        "includeSecrets": "Auch gespeicherte Zugangsdaten entfernen (cpnetcheck-Token im Schlüsselbund)",
+        "back": "Zurück",
+        "delete": "Endgültig löschen",
+        "error": "Löschen fehlgeschlagen. Bitte erneut versuchen.",
+        "scan": {
+          "title": "Scan-Daten zurücksetzen?",
+          "item1": "Scan-Historie",
+          "item2": "CVE-Befundstand",
+          "item3": "Baseline",
+          "item4": "Quittierungen"
+        },
+        "factory": {
+          "title": "Auf Werkszustand zurücksetzen?",
+          "item1": "Alle Scan-Daten",
+          "item2": "Geräte-Gedächtnis und Notizen",
+          "item3": "Monitoring-Aufzeichnungen",
+          "item4": "Einstellungen"
+        }
+      }
     }
   },
   "nav": {

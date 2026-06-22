@@ -80,7 +80,8 @@
       "general": "General",
       "startseite": "Home page",
       "fritzbox": "FRITZ!Box",
-      "auffaelligkeit": "What is suspicious?"
+      "auffaelligkeit": "What is suspicious?",
+      "wartung": "Maintenance"
     },
     "startseite": {
       "title": "Home page",
@@ -94,6 +95,52 @@
       "loading": "Loading …",
       "loadError": "Settings could not be loaded.",
       "saveError": "Saving failed."
+    },
+    "wartung": {
+      "title": "Maintenance",
+      "rowTitle": "Delete data",
+      "rowDescription": "Reset scan data or restore CERNIS to factory state.",
+      "openButton": "Show options",
+      "doneScan": "Scan data has been reset.",
+      "doneFactory": "Restored to factory state. Your settings have been reset as well.",
+      "dialog": {
+        "title": "Delete data",
+        "close": "Close",
+        "cancel": "Cancel"
+      },
+      "choice": {
+        "scan": {
+          "title": "Reset scan data",
+          "deletes": "Deletes: scan history, CVE findings, baseline, acknowledgements.",
+          "keeps": "Keeps: settings, device memory, monitoring recordings."
+        },
+        "factory": {
+          "title": "Factory state",
+          "deletes": "Deletes all data – scans, device memory, monitoring, settings. Behaves like a fresh install afterwards."
+        }
+      },
+      "confirm": {
+        "lead": "The following will be irreversibly deleted:",
+        "warning": "This cannot be undone. Are you sure?",
+        "includeSecrets": "Also remove stored credentials (cpnetcheck token in the keychain)",
+        "back": "Back",
+        "delete": "Delete permanently",
+        "error": "Deletion failed. Please try again.",
+        "scan": {
+          "title": "Reset scan data?",
+          "item1": "Scan history",
+          "item2": "CVE findings",
+          "item3": "Baseline",
+          "item4": "Acknowledgements"
+        },
+        "factory": {
+          "title": "Restore factory state?",
+          "item1": "All scan data",
+          "item2": "Device memory and notes",
+          "item3": "Monitoring recordings",
+          "item4": "Settings"
+        }
+      }
     }
   },
   "nav": {
