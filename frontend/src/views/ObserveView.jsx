@@ -14,6 +14,7 @@
 import {
   Activity,
   FileClock,
+  Globe,
   ListTree,
   Network,
   Radar,
@@ -36,6 +37,7 @@ import ColumnManager from "../components/ColumnManager.jsx";
 import FunctionCard from "../components/FunctionCard.jsx";
 import LoggingPanel from "../components/LoggingPanel.jsx";
 import MonitorView from "../components/MonitorView.jsx";
+import OutboundView from "../components/OutboundView.jsx";
 import ScanDetailPanel from "../components/ScanDetailPanel.jsx";
 import ScanTable, {
   DEFAULT_SICHTBARE_SPALTEN,
@@ -69,6 +71,7 @@ const FUNKTIONEN = [
   { id: "scan", icon: Radar, locked: false },
   { id: "watch", icon: ShieldQuestion, locked: false },
   { id: "traffic", icon: Repeat, locked: false },
+  { id: "outbound", icon: Globe, locked: false },
   { id: "monitor", icon: Activity, locked: false },
   { id: "logging", icon: FileClock, locked: false },
   { id: "topology", icon: Network, locked: false },
@@ -605,6 +608,17 @@ export default function ObserveView({
           refreshInterval={refreshInterval}
           onRefreshIntervalChange={onRefreshIntervalChange}
         />
+      </FunctionShell>
+    );
+  }
+
+  if (openFunction === "outbound") {
+    return (
+      <FunctionShell
+        title={t("beobachten.cards.outbound.title")}
+        onBack={() => setOpenFunction(null)}
+      >
+        <OutboundView />
       </FunctionShell>
     );
   }

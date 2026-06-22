@@ -239,6 +239,11 @@
         "subtitle": "Which application connects where, broken down by app.",
         "locked": "available once observation has started"
       },
+      "outbound": {
+        "title": "Outbound contacts",
+        "subtitle": "Who this machine talks to on the outside — grouped by operator, country or device.",
+        "locked": ""
+      },
       "monitor": {
         "title": "Live monitoring",
         "subtitle": "Reachability and latency of gateway and internet, live.",
@@ -424,6 +429,22 @@
       "sniActive": "SNI active",
       "sniHint": "Shows the real domain names apps request (instead of just the host). Requires elevated privileges.",
       "sniPermission": "SNI observation requires elevated privileges."
+    },
+    "outbound": {
+      "hostScopeLocal": "Contacts of this machine — passively observed, not a network-wide view.",
+      "groupByLabel": "Group by",
+      "groupBy": {
+        "operator": "Operator",
+        "country": "Country",
+        "device": "Device"
+      },
+      "showLocalToggle": "Show local & infrastructure",
+      "emptyGroupOperator": "Not specified",
+      "emptyGroupCountry": "Not specified",
+      "emptyGroupDevice": "Unattributed",
+      "empty": "No outbound contacts. As soon as this machine talks to the outside, they show up here.",
+      "loadError": "Outbound contacts could not be loaded.",
+      "connectionsSuffix": "×{{count}}"
     },
     "monitor": {
       "zieleTitel": "Targets",

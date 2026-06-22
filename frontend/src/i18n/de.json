@@ -239,6 +239,11 @@
         "subtitle": "Welche Anwendung wohin verbindet, aufgeschlüsselt je App.",
         "locked": "erst nach Start der Beobachtung"
       },
+      "outbound": {
+        "title": "Außenkontakte",
+        "subtitle": "Mit wem dieser Rechner nach außen spricht — gebündelt nach Betreiber, Land oder Gerät.",
+        "locked": ""
+      },
       "monitor": {
         "title": "Live-Monitoring",
         "subtitle": "Erreichbarkeit und Latenz von Gateway und Internet, live.",
@@ -424,6 +429,22 @@
       "sniActive": "SNI aktiv",
       "sniHint": "Zeigt die echten von Apps angefragten Domainnamen (statt nur des Hosters). Erfordert erhöhte Rechte.",
       "sniPermission": "SNI-Beobachtung braucht erhöhte Rechte."
+    },
+    "outbound": {
+      "hostScopeLocal": "Kontakte dieses Rechners — passiv beobachtet, kein netzweiter Blick.",
+      "groupByLabel": "Gruppieren nach",
+      "groupBy": {
+        "operator": "Betreiber",
+        "country": "Land",
+        "device": "Gerät"
+      },
+      "showLocalToggle": "Lokale & Infrastruktur zeigen",
+      "emptyGroupOperator": "Ohne Angabe",
+      "emptyGroupCountry": "Ohne Angabe",
+      "emptyGroupDevice": "Nicht zugeordnet",
+      "empty": "Keine Außenkontakte. Sobald dieser Rechner nach außen spricht, erscheinen sie hier.",
+      "loadError": "Außenkontakte konnten nicht geladen werden.",
+      "connectionsSuffix": "×{{count}}"
     },
     "monitor": {
       "zieleTitel": "Ziele",
