@@ -76,11 +76,28 @@
       "portActive": "Port is evaluated",
       "portInactive": "Port is ignored"
     },
+    "dnswatch": {
+      "title": "DNS watchdog",
+      "loading": "Loading …",
+      "loadError": "Settings could not be loaded.",
+      "saveError": "Saving failed.",
+      "expectedTitle": "Expected DNS servers",
+      "expectedHint": "IPs of the DNS servers this machine regularly uses. Leave empty to use the gateway as default — then any other resolver counts as “open”.",
+      "dohTitle": "Known DoH providers",
+      "dohHint": "IPs of known DNS-over-HTTPS providers. Matches are only flagged heuristically as “possible DoH”, not as suspicious.",
+      "addPlaceholder": "Add IP address",
+      "add": "Add",
+      "remove": "Remove",
+      "listEmpty": "No IPs in this list.",
+      "ipInvalid": "Please enter a valid IPv4 or IPv6 address.",
+      "ipDuplicate": "This IP is already in the list."
+    },
     "nav": {
       "general": "General",
       "startseite": "Home page",
       "fritzbox": "FRITZ!Box",
       "auffaelligkeit": "What is suspicious?",
+      "dnswatch": "DNS watchdog",
       "wartung": "Maintenance"
     },
     "startseite": {
@@ -242,6 +259,11 @@
       "outbound": {
         "title": "Outbound contacts",
         "subtitle": "Who this machine talks to on the outside — grouped by operator, country or device.",
+        "locked": ""
+      },
+      "dnswatch": {
+        "title": "DNS watchdog",
+        "subtitle": "Devices/apps that bypass the expected DNS — port 53 to a foreign resolver or possible DoH.",
         "locked": ""
       },
       "monitor": {
@@ -444,6 +466,24 @@
       "emptyGroupDevice": "Unattributed",
       "empty": "No outbound contacts. As soon as this machine talks to the outside, they show up here.",
       "loadError": "Outbound contacts could not be loaded.",
+      "connectionsSuffix": "×{{count}}"
+    },
+    "dnswatch": {
+      "hostScopeLocal": "Findings of this machine — passively observed, not a network-wide view.",
+      "countOpen": "open",
+      "countDoh": "possible DoH",
+      "countExpected": "as expected",
+      "categoryLabels": {
+        "offen": "open",
+        "moegliche_doh": "possible DoH",
+        "erwartungsgemaess": "as expected"
+      },
+      "markKnown": "Mark as known",
+      "unmarkKnown": "Undo marking",
+      "footerExpected": "Expected DNS servers: {{servers}}",
+      "settingsHint": "Adjustable in the settings.",
+      "empty": "No device bypasses the expected DNS. Everything talks to the expected resolvers.",
+      "loadError": "DNS watchdog could not be loaded.",
       "connectionsSuffix": "×{{count}}"
     },
     "monitor": {

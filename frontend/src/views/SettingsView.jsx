@@ -48,6 +48,40 @@ const DEFAULT_PORT_COUNT = 10;
 // ist winzig; alles über 1 MB wird abgelehnt, statt den Browser zu blockieren.
 const UPLOAD_MAX_BYTES = 1024 * 1024;
 
+// Settings-Keys der zwei editierbaren DNS-Wächter-Listen (JSON-Arrays von
+// IP-Strings). SPIEGELT bewusst die Modulkonstanten aus backend/api/dns_watch.py
+// (DNS_EXPECTED_SERVERS_KEY / DNS_DOH_PROVIDERS_KEY) — normale Listen-Settings,
+// leeres Array zulässig (dann greift der Backend-Default, z. B. Gateway).
+const DNS_EXPECTED_SERVERS_KEY = "dns_expected_servers";
+const DNS_DOH_PROVIDERS_KEY = "dns_doh_providers";
+
+// Grobe IP-Prüfung ohne Library (analog OutboundView.istLokaleIp): IPv4 als vier
+// 0–255-Oktette ODER ein IPv6-Kandidat (enthält ":" und nur Hex/Doppelpunkt).
+// Bewusst pragmatisch — die Listen sind editierbare Hinweise, keine sicherheits-
+// kritische Eingabe; offensichtlicher Müll wird abgewiesen, nicht jeder Edge-Case.
+function istGueltigeIp(roh) {
+  const ip = String(roh).trim();
+  if (ip === "") {
+    return false;
+  }
+  // IPv4: vier Oktette 0–255.
+  const v4 = ip.split(".");
+  if (v4.length === 4) {
+    return v4.every((teil) => {
+      if (!/^\d{1,3}$/.test(teil)) {
+        return false;
+      }
+      const zahl = Number(teil);
+      return zahl >= 0 && zahl <= 255;
+    });
+  }
+  // IPv6: grob — enthält ":" und besteht nur aus Hex-Ziffern/Doppelpunkten.
+  if (ip.includes(":")) {
+    return /^[0-9a-fA-F:]+$/.test(ip) && ip.length >= 2;
+  }
+  return false;
+}
+
 // Eine Settings-Zeile: Label links, Bedienelement rechts.
 function SettingsZeile({ label, children }) {
   return (
@@ -1290,6 +1324,220 @@ function AuffaelligkeitSektion({ onGespeichert }) {
   );
 }
 
+// Eine editierbare IP-Liste (DNS-Wächter): Liste der IP-Strings mit Mülleimer je
+// Eintrag + Eingabefeld zum Hinzufügen. Stateless bzgl. Persistenz — die aktuelle
+// Liste kommt als Prop, jede Änderung meldet die Sektion über onChange zurück (sie
+// hält das Speichern). Leeres Array ist zulässig (dann greift der Backend-Default).
+// Validierung über istGueltigeIp; Duplikate werden abgewiesen (Inline-Meldung).
+function IpListe({ titel, hinweis, ips, onChange }) {
+  const { t } = useTranslation();
+
+  const [eingabe, setEingabe] = useState("");
+  const [fehler, setFehler] = useState(""); // dezente Inline-Meldung (i18n-Key) oder ""
+
+  const handleHinzufuegen = () => {
+    const ip = eingabe.trim();
+    if (!istGueltigeIp(ip)) {
+      setFehler("ipInvalid");
+      return;
+    }
+    if (ips.includes(ip)) {
+      setFehler("ipDuplicate");
+      return;
+    }
+    onChange([...ips, ip]);
+    setEingabe("");
+    setFehler("");
+  };
+
+  const handleEingabe = (wert) => {
+    setEingabe(wert);
+    if (fehler !== "") {
+      setFehler("");
+    }
+  };
+
+  const handleEntfernen = (ip) => {
+    onChange(ips.filter((eintrag) => eintrag !== ip));
+  };
+
+  return (
+    <div className="auffaelligkeit__block">
+      <span className="auffaelligkeit__badge auffaelligkeit__badge--neutral">
+        {titel}
+      </span>
+      <span className="settings__hint">{hinweis}</span>
+
+      {ips.length === 0 ? (
+        <span className="auffaelligkeit__empty">
+          {t("settings.dnswatch.listEmpty")}
+        </span>
+      ) : (
+        <ul className="auffaelligkeit__portlist">
+          {ips.map((ip) => (
+            <li key={ip} className="auffaelligkeit__portrow">
+              <span className="auffaelligkeit__port-box">{ip}</span>
+              <span className="auffaelligkeit__port-remove">
+                <button
+                  type="button"
+                  className="auffaelligkeit__remove"
+                  aria-label={t("settings.dnswatch.remove")}
+                  title={t("settings.dnswatch.remove")}
+                  onClick={() => handleEntfernen(ip)}
+                >
+                  <Trash2 size={14} aria-hidden="true" />
+                </button>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="auffaelligkeit__add">
+        <input
+          className="settings__input auffaelligkeit__add-input"
+          type="text"
+          value={eingabe}
+          onChange={(e) => handleEingabe(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              handleHinzufuegen();
+            }
+          }}
+          placeholder={t("settings.dnswatch.addPlaceholder")}
+        />
+        <button
+          type="button"
+          className="settings__button"
+          onClick={handleHinzufuegen}
+        >
+          {t("settings.dnswatch.add")}
+        </button>
+      </div>
+      {fehler !== "" ? (
+        <span className="settings__hint settings__hint--error">
+          {t(`settings.dnswatch.${fehler}`)}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+// DNS-Wächter-Sektion: zwei editierbare IP-Listen (erwartete DNS-Server + bekannte
+// DoH-Anbieter). Eigener Daten-State analog AuffaelligkeitSektion (laden beim Mount,
+// schreiben pro Änderung gegen die Settings-API). onGespeichert ist das gemeinsame
+// zeigeGespeichert-Feedback aus SettingsView. Fehlt ein Key (frische DB), gilt das
+// leere Array — dann greift im Backend der Default (z. B. Gateway als DNS-Server).
+function DnsWatchSektion({ onGespeichert }) {
+  const { t } = useTranslation();
+
+  const [expectedServers, setExpectedServers] = useState([]);
+  const [dohProviders, setDohProviders] = useState([]);
+  const [ladeStatus, setLadeStatus] = useState("laedt"); // laedt | bereit | fehler
+  const [speicherFehler, setSpeicherFehler] = useState(false);
+
+  // Einmal beim Mount laden. Nur valide String-Arrays übernehmen; sonst leeres
+  // Array (Backend-Default greift). Fehler nicht verschlucken; Lade-Fehlerzustand.
+  useEffect(() => {
+    let aktiv = true;
+    (async () => {
+      try {
+        const settings = await fetchSettings();
+        if (!aktiv) {
+          return;
+        }
+        setExpectedServers(
+          Array.isArray(settings[DNS_EXPECTED_SERVERS_KEY])
+            ? settings[DNS_EXPECTED_SERVERS_KEY].filter(
+                (eintrag) => typeof eintrag === "string",
+              )
+            : [],
+        );
+        setDohProviders(
+          Array.isArray(settings[DNS_DOH_PROVIDERS_KEY])
+            ? settings[DNS_DOH_PROVIDERS_KEY].filter(
+                (eintrag) => typeof eintrag === "string",
+              )
+            : [],
+        );
+        setLadeStatus("bereit");
+      } catch (fehler) {
+        if (!aktiv) {
+          return;
+        }
+        console.error("DNS-Wächter-Einstellungen laden fehlgeschlagen:", fehler);
+        setLadeStatus("fehler");
+      }
+    })();
+    return () => {
+      aktiv = false;
+    };
+  }, []);
+
+  // Eine Liste schreiben: erst lokal spiegeln, dann persistieren; bei Fehler den
+  // Speicher-Fehlerzustand setzen (Muster wie AuffaelligkeitSektion.schreibePortliste).
+  const schreibeListe = async (key, setLocal, neueListe) => {
+    setSpeicherFehler(false);
+    setLocal(neueListe);
+    try {
+      await updateSetting(key, neueListe);
+      onGespeichert();
+    } catch (fehler) {
+      console.error(`${key} speichern fehlgeschlagen:`, fehler);
+      setSpeicherFehler(true);
+    }
+  };
+
+  if (ladeStatus === "laedt") {
+    return (
+      <SettingsSektion title={t("settings.dnswatch.title")}>
+        <div className="settings__row">
+          <span className="settings__hint">{t("settings.dnswatch.loading")}</span>
+        </div>
+      </SettingsSektion>
+    );
+  }
+
+  if (ladeStatus === "fehler") {
+    return (
+      <SettingsSektion title={t("settings.dnswatch.title")}>
+        <div className="settings__row">
+          <span className="settings__hint settings__hint--error">
+            {t("settings.dnswatch.loadError")}
+          </span>
+        </div>
+      </SettingsSektion>
+    );
+  }
+
+  return (
+    <SettingsSektion title={t("settings.dnswatch.title")}>
+      <IpListe
+        titel={t("settings.dnswatch.expectedTitle")}
+        hinweis={t("settings.dnswatch.expectedHint")}
+        ips={expectedServers}
+        onChange={(neu) =>
+          schreibeListe(DNS_EXPECTED_SERVERS_KEY, setExpectedServers, neu)
+        }
+      />
+      <IpListe
+        titel={t("settings.dnswatch.dohTitle")}
+        hinweis={t("settings.dnswatch.dohHint")}
+        ips={dohProviders}
+        onChange={(neu) =>
+          schreibeListe(DNS_DOH_PROVIDERS_KEY, setDohProviders, neu)
+        }
+      />
+
+      {speicherFehler ? (
+        <span className="settings__hint settings__hint--error">
+          {t("settings.dnswatch.saveError")}
+        </span>
+      ) : null}
+    </SettingsSektion>
+  );
+}
+
 // Wartungs-Sektion: EINE Zeile „Daten löschen" mit Erklärtext + Knopf, der den
 // zweistufigen Bestätigungs-Dialog öffnet. Eigener offen-State; der Backend-Aufruf
 // läuft hier (die Sektion hält das „erledigt"-Feedback über onGespeichert).
@@ -1414,6 +1662,7 @@ export default function SettingsView({ lang, onLangChange, onClose }) {
     { id: "startseite", label: t("settings.nav.startseite") },
     { id: "fritzbox", label: t("settings.nav.fritzbox") },
     { id: "auffaelligkeit", label: t("settings.nav.auffaelligkeit") },
+    { id: "dnswatch", label: t("settings.nav.dnswatch") },
     { id: "wartung", label: t("settings.nav.wartung") },
   ];
 
@@ -1482,6 +1731,10 @@ export default function SettingsView({ lang, onLangChange, onClose }) {
 
           {rubrik === "auffaelligkeit" ? (
             <AuffaelligkeitSektion onGespeichert={zeigeGespeichert} />
+          ) : null}
+
+          {rubrik === "dnswatch" ? (
+            <DnsWatchSektion onGespeichert={zeigeGespeichert} />
           ) : null}
 
           {rubrik === "wartung" ? (

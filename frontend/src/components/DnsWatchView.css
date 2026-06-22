@@ -1,0 +1,222 @@
+/* DNS-Wächter: drei Kennzahlen über der Umgeher-Liste, Fußzeile mit erwarteten
+   DNS-Servern. Designsprache wie ObserveView/OutboundView/TrafficView: dezent,
+   flach, ruhig. Orange (#EA580C) NUR für offene, unquittierte Befunde; ein
+   gedämpftes, gesetztes Grün als eigener ruhiger Ton für „als bekannt markiert".
+   Mögliche DoH + erwartungsgemäß bleiben neutral (rein heuristisch bzw. ruhig). */
+
+/* Severity-Orange (offen/unquittiert) und gedämpftes Grün (bekannt) als lokale
+   Tokens — bewusst eigene Töne, nicht aus dem neutralen Beobachten-Akzent. */
+.dnswatch {
+  --dnswatch-offen: #ea580c;
+  --dnswatch-bekannt: #4d7c5a;
+
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Monospace für IP/Hostname — System-Monospace als Fallback. */
+.dnswatch-mono {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+/* Ehrlicher host_scope-Banner: ruhiger, neutraler Info-Streifen (kein Alarm). */
+.dnswatch__scope {
+  flex-shrink: 0;
+  padding: 9px 12px;
+  font-size: 12px;
+  color: var(--color-text-sec);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* Ruhiger Hinweis-Streifen (Lade-/Schreibfehler): Stil wie observe__hinweis. */
+.dnswatch__hinweis {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex-shrink: 0;
+  padding: 9px 12px;
+  font-size: 12px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.dnswatch__hinweis-title {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-tert);
+}
+
+.dnswatch__hinweis-text {
+  color: var(--color-text-sec);
+}
+
+/* Drei Kennzahl-Karten nebeneinander (umbrechend auf engem Raum). */
+.dnswatch__kennzahlen {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+/* Eine ruhige Kennzahl-Karte: Zahl groß, Label klein darunter. Neutral. */
+.dnswatch-kennzahl {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 120px;
+  padding: 12px 14px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.dnswatch-kennzahl__zahl {
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--color-text);
+}
+
+.dnswatch-kennzahl__label {
+  font-size: 12px;
+  color: var(--color-text-sec);
+}
+
+/* „offen"-Kennzahl: Zahl und Rand im Severity-Orange — hier lohnt ein Blick. */
+.dnswatch-kennzahl--offen {
+  border-color: var(--dnswatch-offen);
+}
+
+.dnswatch-kennzahl--offen .dnswatch-kennzahl__zahl {
+  color: var(--dnswatch-offen);
+}
+
+/* Umgeher-Liste: scrollt intern, füllt die Resthöhe. */
+.dnswatch__liste {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Eine Umgeher-Zeile: Titel + Untertitel links, Quittier-Knopf rechts.
+   Standard (neutral): für moegliche_doh + erwartungsgemaess. */
+.dnswatch-zeile {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 12px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* offen & unquittiert: Severity-Orange-Akzent (linker Rand + Randfarbe). */
+.dnswatch-zeile--offen {
+  border-color: var(--dnswatch-offen);
+  border-left: 3px solid var(--dnswatch-offen);
+}
+
+/* offen & quittiert: gedämpftes, gesetztes Grün — bekannt, NICHT versteckt,
+   nur aus dem Orange genommen. */
+.dnswatch-zeile--bekannt {
+  border-color: var(--dnswatch-bekannt);
+  border-left: 3px solid var(--dnswatch-bekannt);
+}
+
+.dnswatch-zeile__main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.dnswatch-zeile__title {
+  font-size: 13px;
+  color: var(--color-text);
+  word-break: break-all;
+}
+
+.dnswatch-zeile__sub {
+  font-size: 12px;
+  color: var(--color-text-tert);
+  word-break: break-word;
+}
+
+.dnswatch-zeile__aktion {
+  flex-shrink: 0;
+}
+
+/* Quittier-Knopf: dezenter, neutraler Knopf (kein Alarm-Ton). */
+.dnswatch-zeile__ack {
+  padding: 5px 12px;
+  font-size: 12px;
+  color: var(--color-text-sec);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.dnswatch-zeile__ack:hover {
+  color: var(--color-accent-strong);
+  border-color: var(--color-accent-strong);
+}
+
+.dnswatch-zeile__ack:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Ehrlicher Leerzustand (kein Gerät umgeht den erwarteten DNS): ruhige Zeile. */
+.dnswatch__empty {
+  margin: 0;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--color-text-sec);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* Fußzeile: erwartete DNS-Server + Hinweis auf die Einstellungen. */
+.dnswatch__footer {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex-shrink: 0;
+  padding: 9px 12px;
+  font-size: 12px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.dnswatch__footer-servers {
+  color: var(--color-text-sec);
+  word-break: break-word;
+}
+
+.dnswatch__footer-hint {
+  color: var(--color-text-tert);
+}

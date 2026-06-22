@@ -76,11 +76,28 @@
       "portActive": "Port wird gewertet",
       "portInactive": "Port wird ignoriert"
     },
+    "dnswatch": {
+      "title": "DNS-Wächter",
+      "loading": "Lädt …",
+      "loadError": "Einstellungen konnten nicht geladen werden.",
+      "saveError": "Speichern fehlgeschlagen.",
+      "expectedTitle": "Erwartete DNS-Server",
+      "expectedHint": "IPs der DNS-Server, die dieser Rechner regulär nutzt. Leer lassen, um den Gateway als Default zu verwenden — dann gilt jeder andere Resolver als „offen“.",
+      "dohTitle": "Bekannte DoH-Anbieter",
+      "dohHint": "IPs bekannter DNS-over-HTTPS-Anbieter. Treffer werden nur heuristisch als „mögliche DoH“ markiert, nicht als auffällig.",
+      "addPlaceholder": "IP-Adresse hinzufügen",
+      "add": "Hinzufügen",
+      "remove": "Entfernen",
+      "listEmpty": "Keine IPs in dieser Liste.",
+      "ipInvalid": "Bitte eine gültige IPv4- oder IPv6-Adresse eingeben.",
+      "ipDuplicate": "Diese IP steht bereits in der Liste."
+    },
     "nav": {
       "general": "Allgemein",
       "startseite": "Startseite",
       "fritzbox": "FRITZ!Box",
       "auffaelligkeit": "Was ist auffällig?",
+      "dnswatch": "DNS-Wächter",
       "wartung": "Wartung"
     },
     "startseite": {
@@ -242,6 +259,11 @@
       "outbound": {
         "title": "Außenkontakte",
         "subtitle": "Mit wem dieser Rechner nach außen spricht — gebündelt nach Betreiber, Land oder Gerät.",
+        "locked": ""
+      },
+      "dnswatch": {
+        "title": "DNS-Wächter",
+        "subtitle": "Geräte/Apps, die den erwarteten DNS umgehen — Port 53 zu fremdem Resolver oder mögliche DoH.",
         "locked": ""
       },
       "monitor": {
@@ -444,6 +466,24 @@
       "emptyGroupDevice": "Nicht zugeordnet",
       "empty": "Keine Außenkontakte. Sobald dieser Rechner nach außen spricht, erscheinen sie hier.",
       "loadError": "Außenkontakte konnten nicht geladen werden.",
+      "connectionsSuffix": "×{{count}}"
+    },
+    "dnswatch": {
+      "hostScopeLocal": "Befunde dieses Rechners — passiv beobachtet, kein netzweiter Blick.",
+      "countOpen": "offen",
+      "countDoh": "mögliche DoH",
+      "countExpected": "erwartungsgemäß",
+      "categoryLabels": {
+        "offen": "offen",
+        "moegliche_doh": "mögliche DoH",
+        "erwartungsgemaess": "erwartungsgemäß"
+      },
+      "markKnown": "Als bekannt markieren",
+      "unmarkKnown": "Markierung zurücknehmen",
+      "footerExpected": "Erwartete DNS-Server: {{servers}}",
+      "settingsHint": "In den Einstellungen anpassbar.",
+      "empty": "Kein Gerät umgeht den erwarteten DNS. Alles spricht mit den erwarteten Resolvern.",
+      "loadError": "DNS-Wächter konnte nicht geladen werden.",
       "connectionsSuffix": "×{{count}}"
     },
     "monitor": {

@@ -19,6 +19,7 @@ import {
   Network,
   Radar,
   Repeat,
+  ShieldAlert,
   ShieldQuestion,
 } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
@@ -34,6 +35,7 @@ import { starteScanStream } from "../api/scanStream.js";
 import { fetchSettings, updateSetting } from "../api/settings.js";
 import { CardGrid, FunctionShell } from "../components/AreaShell.jsx";
 import ColumnManager from "../components/ColumnManager.jsx";
+import DnsWatchView from "../components/DnsWatchView.jsx";
 import FunctionCard from "../components/FunctionCard.jsx";
 import LoggingPanel from "../components/LoggingPanel.jsx";
 import MonitorView from "../components/MonitorView.jsx";
@@ -72,6 +74,7 @@ const FUNKTIONEN = [
   { id: "watch", icon: ShieldQuestion, locked: false },
   { id: "traffic", icon: Repeat, locked: false },
   { id: "outbound", icon: Globe, locked: false },
+  { id: "dnswatch", icon: ShieldAlert, locked: false },
   { id: "monitor", icon: Activity, locked: false },
   { id: "logging", icon: FileClock, locked: false },
   { id: "topology", icon: Network, locked: false },
@@ -619,6 +622,17 @@ export default function ObserveView({
         onBack={() => setOpenFunction(null)}
       >
         <OutboundView />
+      </FunctionShell>
+    );
+  }
+
+  if (openFunction === "dnswatch") {
+    return (
+      <FunctionShell
+        title={t("beobachten.cards.dnswatch.title")}
+        onBack={() => setOpenFunction(null)}
+      >
+        <DnsWatchView />
       </FunctionShell>
     );
   }
