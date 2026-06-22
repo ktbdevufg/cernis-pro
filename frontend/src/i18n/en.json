@@ -282,6 +282,11 @@
             "neutral": "Neutral",
             "watch": "Watch",
             "saveError": "Could not save classification"
+          },
+          "deviation": {
+            "label": "Observation:",
+            "new": "New on the network since the last scan.",
+            "changed": "IP address has changed since the last scan."
           }
         },
         "ports": {

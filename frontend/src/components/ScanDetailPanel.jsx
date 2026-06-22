@@ -280,6 +280,22 @@ export default function ScanDetailPanel({ geraet, onClose, onGespeichert }) {
               </p>
             )}
           </div>
+
+          {/* Abweichungs-Feststellung: dezenter, neutraler Hinweis aus der
+              vorhandenen Baseline. Erscheint NUR, wenn das Gerät neu ist oder
+              sich seine IP geändert hat. isNew/isChanged sind laut Mapper
+              disjunkt; isNew hat Vorrang, defensiv per if/else-if. Bewusst
+              KEINE "neuer Port"-Aussage (newPorts kommt im Frame nicht an). */}
+          {(geraet.isNew || geraet.isChanged) && (
+            <p className="scan-detail__deviation">
+              <span className="scan-detail__deviation-label">
+                {t("beobachten.scan.detail.identity.deviation.label")}
+              </span>{" "}
+              {geraet.isNew
+                ? t("beobachten.scan.detail.identity.deviation.new")
+                : t("beobachten.scan.detail.identity.deviation.changed")}
+            </p>
+          )}
         </section>
 
         {/* 2. Offene Ports */}

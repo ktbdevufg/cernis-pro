@@ -282,6 +282,11 @@
             "neutral": "Neutral",
             "watch": "Beobachten",
             "saveError": "Einordnung konnte nicht gespeichert werden"
+          },
+          "deviation": {
+            "label": "Feststellung:",
+            "new": "Seit dem letzten Scan neu im Netz.",
+            "changed": "IP-Adresse hat sich seit dem letzten Scan geändert."
           }
         },
         "ports": {

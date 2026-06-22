@@ -218,6 +218,25 @@
   color: var(--sev-high-text);
 }
 
+/* Abweichungs-Feststellung: ruhiger, kleiner Hinweis (kein lautes Badge).
+   Dezenter Severity-Orange-Akzent über die schon genutzten notable-Tokens
+   (--sev-low-*) und den auffällig-Streifen links — keine neu kodierte Farbe. */
+.scan-detail__deviation {
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--sev-low-text);
+  background: var(--sev-low-bg);
+  border: 1px solid var(--sev-low-bd);
+  border-left: 2px solid var(--severity-auffaellig);
+  border-radius: var(--radius-md);
+}
+
+/* Label leicht abgesetzt (kräftiger), der Feststellungstext bleibt normal. */
+.scan-detail__deviation-label {
+  font-weight: 600;
+}
+
 /* --- Offene Ports --- */
 .scan-detail__ports {
   display: flex;
