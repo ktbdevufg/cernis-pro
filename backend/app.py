@@ -103,6 +103,15 @@ from api.diagnostics import (
     provide_run_traceroute,
 )
 from api.diagnostics import router as diagnostics_router
+from api.dns_watch import (
+    DNS_DOH_PROVIDERS_KEY,
+    DNS_EXPECTED_SERVERS_KEY,
+    DnsContactOut,
+    DnsWatchOverviewOut,
+    provide_dns_watch,
+    provide_dns_watch_acknowledge,
+)
+from api.dns_watch import router as dns_watch_router
 from api.export import provide_export_analysis, provide_export_logging, provide_export_scan
 from api.export import router as export_router
 from api.fritz import provide_get_fritz_detail
@@ -245,6 +254,7 @@ from application.diagnostics import (
     RogueDhcpPermissionError,
     RunTraceroute,
 )
+from application.dns_watch import BuildDnsWatch, RawDnsConnection
 from application.export import (
     ExportAnalysis,
     ExportLoggingReport,
@@ -314,6 +324,7 @@ from domain.analysis import (
     service_for_port,
 )
 from domain.analysis.engine import _SEVERITY_RANK
+from domain.dns_watch import doh_providers_or_default, expected_servers_or_default
 from domain.export import (
     ExportableAnalysis,
     ExportableFinding,
@@ -372,6 +383,9 @@ from infrastructure.diagnostics_linux import (
     ShutilToolDetector,
     SocketBannerGrabber,
     SystemTracerouteRunner,
+)
+from infrastructure.dns_watch_acknowledgements_db import (
+    SqliteDnsWatchAcknowledgementRepository,
 )
 from infrastructure.export_pdf import ReportlabRenderer
 from infrastructure.interfaces_linux import InterfaceDiscoveryAdapter
@@ -2560,6 +2574,108 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     app.include_router(outbound_router)
     app.dependency_overrides[provide_outbound_contacts] = lambda: _outbound_contacts
+
+    # ── dns_watch-Domaene v2 verdrahten (Block 2, Etappe 2d-3; Regel 5: Naht nur hier) ──
+    # Die DNS-Befund-Sicht DIESES Hosts fuehrt FUENF Quellen zusammen
+    # (Verbindungen/Namen/Quittierungen/erwartete-Server/DoH-Listen). Der application-Ring
+    # (BuildDnsWatch) nennt KEINE Quell-Domaene -- die Provider werden HIER aus den schon
+    # in Scope stehenden Root-Helfern gebaut (NICHTS neu): _traffic_adapter(),
+    # GetObservedSni/sni_sniffer(), resolve_ptr_batch_uc, repository() (Settings),
+    # _topology_gateway() (Gateway des primaeren Interface). Die zwei editierbaren Listen
+    # sind normale Listen-Settings (value = JSON-Liste von IP-Strings).
+    @lru_cache(maxsize=1)
+    def dns_watch_acknowledgement_repository() -> SqliteDnsWatchAcknowledgementRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteDnsWatchAcknowledgementRepository(get_db_path())
+
+    def _dns_watch_read_list(key: str) -> list[str]:
+        # Liest einen Settings-Key defensiv als Liste von Strings (S3: kein Wurf bei
+        # fehlendem/krummem Wert). get_all() liefert den JSON-decodierten Wert; ist er
+        # eine Liste -> als Strings, sonst leere Liste (dann greift der domain-Default).
+        value = repository().get_all().get(key)
+        if isinstance(value, list):
+            return [str(x) for x in value]
+        return []
+
+    async def _dns_watch() -> DnsWatchOverviewOut:
+        # (1) Verbindungs-Provider: GENAU wie im outbound-Block den Snapshot EINMAL async
+        # holen und einen sync Closure-Provider darueber reichen (BuildDnsWatch ruft den
+        # Provider synchron). Mappt domain.traffic.Connection -> RawDnsConnection und
+        # filtert remote=None raus (nur Verbindungen mit Gegenstelle).
+        conns = await _traffic_adapter().list_connections()
+        raws = [
+            RawDnsConnection(
+                remote_ip=c.remote.ip,
+                remote_port=c.remote.port,
+                l4=c.l4,
+                app_name=c.app_name,
+                pid=c.pid,
+            )
+            for c in conns
+            if c.remote is not None
+        ]
+
+        def _connections_provider() -> list[RawDnsConnection]:
+            return raws
+
+        # (2) Namens-Provider (async, ips -> {ip: hostname|None}): dieselbe SNI+PTR-Logik
+        # wie im outbound-Block -- eigene lokale Closure (NICHT refaktoriert). Regel pro IP:
+        # zuerst der SNI-Hostname, sonst der PTR-Name, sonst None.
+        async def _hostname_provider(ips: Sequence[str]) -> dict[str, str | None]:
+            wanted = set(ips)
+            sni_by_ip: dict[str, str] = {}
+            for observed in GetObservedSni(sni_sniffer())():
+                if observed.remote_ip in wanted:
+                    sni_by_ip.setdefault(observed.remote_ip, observed.hostname)
+            ptr_by_ip = await resolve_ptr_batch_uc(tuple(ips))
+            return {ip: sni_by_ip.get(ip) or ptr_by_ip.get(ip) for ip in ips}
+
+        # (3) Gateway des primaeren Interface fuer den expected-Default (sonst leer/None);
+        # ueber den schon vorhandenen Interface-Weg (_topology_gateway, kein neuer Adapter).
+        gateway = await _topology_gateway()
+
+        # (4) Die fuenf Provider fuer BuildDnsWatch: acknowledged liest die quittierten
+        # Befund-Schluessel; die zwei Listen-Closures fallen ueber die domain-Defaults
+        # (Gateway-Fallback bzw. DoH-Startliste), wenn der Nutzer nichts konfiguriert hat.
+        overview = await BuildDnsWatch(
+            _connections_provider,
+            _hostname_provider,
+            dns_watch_acknowledgement_repository().acknowledged_keys,
+            lambda: expected_servers_or_default(
+                _dns_watch_read_list(DNS_EXPECTED_SERVERS_KEY), gateway
+            ),
+            lambda: doh_providers_or_default(_dns_watch_read_list(DNS_DOH_PROVIDERS_KEY)),
+        )()
+        # Projektion application.DnsWatchOverview -> api.DnsWatchOverviewOut (Regel 4:
+        # der api-Ring kennt den application-Typ NICHT; die Projektion faellt hier im Root).
+        return DnsWatchOverviewOut(
+            contacts=[
+                DnsContactOut(
+                    remote_ip=contact.remote_ip,
+                    remote_port=contact.remote_port,
+                    category=contact.category,
+                    hostname=contact.hostname,
+                    app_name=contact.app_name,
+                    pid=contact.pid,
+                    connection_count=contact.connection_count,
+                    acknowledged=contact.acknowledged,
+                )
+                for contact in overview.contacts
+            ],
+            host_scope=overview.host_scope,
+            counts=dict(overview.counts),
+            expected_servers=list(overview.expected_servers),
+            doh_providers=list(overview.doh_providers),
+        )
+
+    def _dns_watch_acknowledge(remote_ip: str, category: str, action: str) -> None:
+        # Schreib-Naht analog _acknowledge: EINE append-only Log-Zeile (ack/unack).
+        dns_watch_acknowledgement_repository().record(remote_ip, category, action)
+
+    app.include_router(dns_watch_router)
+    app.dependency_overrides[provide_dns_watch] = lambda: _dns_watch
+    app.dependency_overrides[provide_dns_watch_acknowledge] = lambda: _dns_watch_acknowledge
 
     # ── Route zum Ziel (ADR 0036): traceroute-Hops + Geo/ASN, zwei getrennte Naehte ──
     # Regel 5: die Quer-Domaenen-Naht (diagnostics-Hops + resolver-Geo/RDAP) faellt
