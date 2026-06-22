@@ -193,6 +193,11 @@ class SqliteUserRuleRepository:
         with self._connect() as conn:
             conn.execute("DELETE FROM analysis_user_rules WHERE id = ?", (rule_id,))
 
+    def clear_all(self) -> None:
+        """Leert alle eigenen Regeln (nur die eigene Tabelle ``analysis_user_rules``)."""
+        with self._connect() as conn:
+            conn.execute("DELETE FROM analysis_user_rules")
+
     # ── Mapping ─────────────────────────────────────────────────────────────
 
     @staticmethod

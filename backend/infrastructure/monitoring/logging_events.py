@@ -93,3 +93,8 @@ class SqliteLoggingEventRepository:
         with self._connect() as conn:
             cursor = conn.execute("DELETE FROM monitoring_log_events WHERE ts < ?", (cutoff_ts,))
             return cursor.rowcount
+
+    def clear_all(self) -> None:
+        # Leert alle Ereignis-Flanken (nur die eigene Tabelle monitoring_log_events).
+        with self._connect() as conn:
+            conn.execute("DELETE FROM monitoring_log_events")

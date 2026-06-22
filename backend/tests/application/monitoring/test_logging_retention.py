@@ -35,6 +35,9 @@ class _FakeRttRepo:
     def count(self) -> int:
         raise AssertionError("count darf im Retention-Use-Case nicht gerufen werden")
 
+    def clear_all(self) -> None:
+        """No-op fuer den Fake (kein interner Sample-Speicher, nur die Loeschzahl)."""
+
 
 class _FakeEventRepo:
     def __init__(self, deleted: int) -> None:
@@ -50,6 +53,9 @@ class _FakeEventRepo:
     def delete_older_than(self, cutoff_ts: float) -> int:
         self.cutoff_calls.append(cutoff_ts)
         return self._deleted
+
+    def clear_all(self) -> None:
+        """No-op fuer den Fake (kein interner Event-Speicher, nur die Loeschzahl)."""
 
 
 def test_run_passes_each_cutoff_to_its_repo() -> None:

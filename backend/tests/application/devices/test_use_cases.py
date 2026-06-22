@@ -88,6 +88,11 @@ class FakeDeviceRepository:
         active = sum(1 for d in self._devices.values() if d.last_seen >= active_since)
         return DeviceStats(total=total, known=known, unknown=total - known, active=active)
 
+    def clear_all(self) -> None:
+        """Leert Geraete und IP-Historie."""
+        self._devices.clear()
+        self._history.clear()
+
 
 class FakeClock:
     """Uhr mit fixem ``now`` -- deterministisch."""

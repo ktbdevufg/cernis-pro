@@ -118,6 +118,11 @@ class SqliteLoggingRttRepository:
             cursor = conn.execute("DELETE FROM monitoring_log_rtt WHERE ts < ?", (cutoff_ts,))
             return cursor.rowcount
 
+    def clear_all(self) -> None:
+        # Leert alle dichten RTT-Messpunkte (nur die eigene Tabelle monitoring_log_rtt).
+        with self._connect() as conn:
+            conn.execute("DELETE FROM monitoring_log_rtt")
+
     def count(self) -> int:
         with self._connect() as conn:
             row = conn.execute("SELECT COUNT(*) AS n FROM monitoring_log_rtt").fetchone()

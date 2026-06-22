@@ -57,6 +57,10 @@ class _FakeTaskRepo:
         self.deleted.append(task_id)
         self._store.pop(task_id, None)
 
+    def clear_all(self) -> None:
+        """Leert den internen Task-Speicher (No-op-Naht fuer den Fake)."""
+        self._store.clear()
+
 
 class _FakeRttRepo:
     """``LoggingRttRepository``-Fake -- nur ``count`` wird vom CheckLogVolume gerufen."""
@@ -78,6 +82,9 @@ class _FakeRttRepo:
 
     def count(self) -> int:
         return self._count
+
+    def clear_all(self) -> None:
+        """No-op fuer den Fake (kein interner Sample-Speicher, nur eine count-Zahl)."""
 
 
 def _task(

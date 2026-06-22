@@ -53,6 +53,10 @@ class _FakeTaskRepo:
     def delete(self, task_id: str) -> None:
         raise AssertionError("delete darf von ResumeActiveLoggingTasks nicht gerufen werden")
 
+    def clear_all(self) -> None:
+        """Leert den internen Task-Speicher (No-op-Naht fuer den Fake)."""
+        self._store.clear()
+
 
 def _immediate(
     *,

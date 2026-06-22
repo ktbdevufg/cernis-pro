@@ -117,3 +117,8 @@ class SqliteRttHistoryRepository:
             )
             for row in reversed(rows)
         ]
+
+    def clear_all(self) -> None:
+        # Leert die gesamte RTT-Historie (nur die eigene Tabelle rtt_history).
+        with self._connect() as conn:
+            conn.execute("DELETE FROM rtt_history")

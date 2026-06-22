@@ -50,6 +50,10 @@ class _FakeSettingsRepository:
     def delete(self, key: str) -> None:
         self._store.pop(key, None)
 
+    def clear_all(self) -> None:
+        """Leert den internen Settings-Speicher (No-op-Schreibpfad fuer den Fake)."""
+        self._store.clear()
+
 
 def _stored_password(repo: _FakeSettingsRepository) -> Any:
     setting = repo.get("smtp_config")

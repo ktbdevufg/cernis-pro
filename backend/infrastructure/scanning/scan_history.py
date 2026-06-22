@@ -89,6 +89,11 @@ class SqliteScanHistoryRepository:
                 (cidr, len(hosts), payload),
             )
 
+    def clear_all(self) -> None:
+        """Leert die gesamte Scan-Historie (nur die eigene Tabelle ``scan_history``)."""
+        with self._connect() as conn:
+            conn.execute("DELETE FROM scan_history")
+
     def list(self, limit: int) -> list[ScanSummary]:
         with self._connect() as conn:
             rows = conn.execute(

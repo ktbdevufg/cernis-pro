@@ -36,6 +36,10 @@ class _FakeSettingsRepo:
     def delete(self, key: str) -> None:
         self._store.pop(key, None)
 
+    def clear_all(self) -> None:
+        """Leert den kompletten Settings-Store (No-op-Vertrag fuer den Fake)."""
+        self._store.clear()
+
     def written(self) -> list[dict[str, Any]]:
         """Der zuletzt geschriebene Custom-Targets-Wert als typisierte Liste (Spy-Ziel)."""
         value = self._store.get(CUSTOM_TARGETS_KEY)

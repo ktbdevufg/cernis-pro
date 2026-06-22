@@ -148,6 +148,12 @@ class SqliteAlertRuleRepository:
         with self._connect() as conn:
             conn.execute("DELETE FROM alert_rules WHERE id = ?", (rule_id,))
 
+    def clear_all(self) -> None:
+        # Beide eigenen Tabellen (Regeln + Historie) in EINER Transaktion raeumen.
+        with self._connect() as conn:
+            conn.execute("DELETE FROM alert_rules")
+            conn.execute("DELETE FROM alert_history")
+
     # ── history ───────────────────────────────────────────────
 
     def save_event(self, event: AlertEvent) -> None:

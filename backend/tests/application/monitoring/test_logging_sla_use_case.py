@@ -66,6 +66,10 @@ class _FakeTaskRepo:
     def delete(self, task_id: str) -> None:
         raise AssertionError("delete darf vom SLA-Use-Case nicht gerufen werden")
 
+    def clear_all(self) -> None:
+        """Leert den internen Task-Speicher (No-op-Naht fuer den Fake)."""
+        self._store.clear()
+
 
 class _FakeRttRepo:
     """``LoggingRttRepository``-Fake -- nur ``all_for`` wird gerufen; zeichnet das auf.
@@ -100,6 +104,10 @@ class _FakeRttRepo:
 
     def count(self) -> int:
         raise AssertionError("count darf vom SLA-Use-Case nicht gerufen werden")
+
+    def clear_all(self) -> None:
+        """Leert die hinterlegten RTT-Samples (No-op-Naht fuer den Fake)."""
+        self._samples.clear()
 
 
 def test_known_samples_yield_expected_stats_with_task_id() -> None:

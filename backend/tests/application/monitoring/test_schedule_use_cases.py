@@ -61,6 +61,10 @@ class _FakeRepo:
     def delete(self, schedule_id: int) -> None:
         self.rows = [r for r in self.rows if r["id"] != schedule_id]
 
+    def clear_all(self) -> None:
+        """Leert alle Schedule-Zeilen (No-op-Vertrag fuer den Fake)."""
+        self.rows.clear()
+
 
 class _FakeJobScheduler:
     def __init__(

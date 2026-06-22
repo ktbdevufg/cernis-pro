@@ -64,6 +64,14 @@ class AgentRepository(Protocol):
         """
         ...
 
+    def clear_all(self) -> None:
+        """Leert alle Agent-Stammdaten (nur die eigene Tabelle).
+
+        Token-frei wie der uebrige Vertrag: die Tokens im ``SecretStore`` raeumt
+        der Use-Case getrennt, nicht das Repository.
+        """
+        ...
+
 
 class AgentPinger(Protocol):
     """Ausgehender Erreichbarkeits-Check gegen einen Remote-Agenten."""

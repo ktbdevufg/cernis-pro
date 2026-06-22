@@ -99,3 +99,8 @@ class SqliteMonitorEventRepository:
             )
             for row in rows
         ]
+
+    def clear_all(self) -> None:
+        # Leert alle Uebergangs-Ereignisse (nur die eigene Tabelle monitor_events).
+        with self._connect() as conn:
+            conn.execute("DELETE FROM monitor_events")

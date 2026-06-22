@@ -78,6 +78,11 @@ class SqliteCveAcknowledgementRepository:
                 (mac, cve_id, port, action),
             )
 
+    def clear_all(self) -> None:
+        """Leert das gesamte ack-Log (nur die eigene Tabelle ``cve_acknowledgements``)."""
+        with self._connect() as conn:
+            conn.execute("DELETE FROM cve_acknowledgements")
+
     # ── Lese-Pfad ─────────────────────────────────────────────────────────────
 
     def acknowledged_keys(self) -> set[tuple[str, str, int]]:

@@ -84,6 +84,10 @@ class UserRuleStore(Protocol):
         """Loescht eine gespeicherte eigene Regel."""
         ...
 
+    def clear_all(self) -> None:
+        """Leert alle gespeicherten eigenen Regeln (nur die eigene Tabelle)."""
+        ...
+
 
 class HelpLinkResolver(Protocol):
     """Loest einen ``HelpKind`` in eine konkrete Hilfe-URL auf (Vision 6.4: URL = Infra)."""

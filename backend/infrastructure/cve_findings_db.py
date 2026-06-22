@@ -114,6 +114,11 @@ class SqliteCveFindingRepository:
                 ),
             )
 
+    def clear_all(self) -> None:
+        """Leert alle CVE-Befunde (nur die eigene Tabelle ``cve_findings``)."""
+        with self._connect() as conn:
+            conn.execute("DELETE FROM cve_findings")
+
     # ── Lese-Pfad ─────────────────────────────────────────────────────────────
 
     def list_all(self) -> list[CveFindingRecord]:

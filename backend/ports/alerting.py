@@ -109,6 +109,10 @@ class AlertRuleRepository(Protocol):
         DB -> ``[]`` (der geheilte Pfad, den A.1 einfriert)."""
         ...
 
+    def clear_all(self) -> None:
+        """Leert Alert-Regeln UND -Historie (nur die eigenen Tabellen)."""
+        ...
+
 
 # ── Notification ──────────────────────────────────────────────────────────
 

@@ -52,6 +52,10 @@ class _FakeSettings:
     def delete(self, key: str) -> None:
         self._store.pop(key, None)
 
+    def clear_all(self) -> None:
+        """Leert den internen Settings-Speicher (No-op-Schreibpfad fuer den Fake)."""
+        self._store.clear()
+
 
 def _patch_interfaces(monkeypatch: pytest.MonkeyPatch, ifaces: list[_FakeIface]) -> None:
     monkeypatch.setattr(target_source, "get_interfaces", lambda: ifaces)

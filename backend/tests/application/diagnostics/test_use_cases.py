@@ -176,6 +176,10 @@ class FakeSettingsRepository:
     def delete(self, key: str) -> None:
         self._data.pop(key, None)
 
+    def clear_all(self) -> None:
+        """Leert den gesamten In-Memory-Store."""
+        self._data.clear()
+
 
 class FakeSecretStore:
     """In-Memory-Implementierung des ``SecretStore``-Protocols (nur ``get`` relevant)."""

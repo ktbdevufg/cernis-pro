@@ -93,6 +93,10 @@ class DeviceRepository(Protocol):
         """
         ...
 
+    def clear_all(self) -> None:
+        """Leert Geraete UND ihre IP-History (nur die eigenen Tabellen)."""
+        ...
+
 
 class Clock(Protocol):
     """Die EINE Zeitquelle der Anwendung."""

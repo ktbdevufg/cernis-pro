@@ -84,6 +84,10 @@ class _FakeSettingsRepository:
     def delete(self, key: str) -> None:
         self._store.pop(key, None)
 
+    def clear_all(self) -> None:
+        """Leert den gesamten In-Memory-Store."""
+        self._store.clear()
+
 
 class _FakeNotifier:
     """Fake-``AlertNotifierPort`` -- email() gibt ein konfigurierbares ``EmailResult``,

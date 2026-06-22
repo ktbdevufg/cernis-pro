@@ -108,3 +108,8 @@ class SqliteHostHistoryRepository:
             return
         with self._connect() as conn:
             conn.execute("INSERT OR IGNORE INTO analysis_known_hosts (mac) VALUES (?)", (mac,))
+
+    def clear_all(self) -> None:
+        """Leert die gesamte Host-Historie (nur die eigene Tabelle ``analysis_known_hosts``)."""
+        with self._connect() as conn:
+            conn.execute("DELETE FROM analysis_known_hosts")

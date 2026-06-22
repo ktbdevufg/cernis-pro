@@ -124,6 +124,9 @@ class _FakeScanHistory:
             return ScanRecord(scan_id=1, cidr="10.0.0.0/24", hosts=())
         return None
 
+    def clear_all(self) -> None:
+        """No-op fuer den Fake (kein interner Speicher zu leeren)."""
+
 
 # ── Statische Konformitaet: mypy prueft die Zuweisung an den Port-Typ ───────
 

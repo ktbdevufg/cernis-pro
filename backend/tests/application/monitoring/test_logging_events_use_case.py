@@ -66,6 +66,10 @@ class _FakeTaskRepo:
     def delete(self, task_id: str) -> None:
         raise AssertionError("delete darf vom Events-Use-Case nicht gerufen werden")
 
+    def clear_all(self) -> None:
+        """Leert den internen Task-Speicher (No-op-Naht fuer den Fake)."""
+        self._store.clear()
+
 
 class _FakeEventRepo:
     """``LoggingEventRepository``-Fake -- nur ``range`` wird gerufen; zeichnet das auf.
@@ -91,6 +95,10 @@ class _FakeEventRepo:
 
     def delete_older_than(self, cutoff_ts: float) -> int:
         raise AssertionError("delete_older_than darf vom Events-Use-Case nicht gerufen werden")
+
+    def clear_all(self) -> None:
+        """Leert die hinterlegten Event-Zeilen (No-op-Naht fuer den Fake)."""
+        self._rows.clear()
 
 
 def test_without_since_until_uses_full_open_range() -> None:

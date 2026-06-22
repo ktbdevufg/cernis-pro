@@ -63,6 +63,10 @@ class FakeAgentRepository:
     def delete(self, agent_id: str) -> None:
         self._data.pop(agent_id, None)
 
+    def clear_all(self) -> None:
+        """Leert den gesamten In-Memory-Speicher."""
+        self._data.clear()
+
 
 class FakeSecretStore:
     """In-Memory-Implementierung des SecretStore-Protocols."""

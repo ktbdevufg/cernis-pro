@@ -154,6 +154,10 @@ class _FakeScanHistory:
     def save(self, cidr: str, hosts: Sequence[EnrichedHost]) -> None:
         self.saved = (cidr, tuple(hosts))
 
+    def clear_all(self) -> None:
+        """Verwirft den zuletzt gespeicherten Scan (No-op-Vertrag fuer den Fake)."""
+        self.saved = None
+
     # list/get gehoeren zum Port-Protocol; der Use-Case ruft sie nicht, aber der
     # Fake muss den Vertrag strukturell vollstaendig erfuellen (mypy).
     def list(self, limit: int) -> list[ScanSummary]:

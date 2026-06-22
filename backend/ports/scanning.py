@@ -229,3 +229,7 @@ class ScanHistoryRepository(Protocol):
         ``None`` ist ein legitimer Zustand ("Scan-ID gibt es nicht"), kein Fehler.
         """
         ...
+
+    def clear_all(self) -> None:
+        """Leert die gesamte Scan-Historie (nur die eigene Tabelle)."""
+        ...

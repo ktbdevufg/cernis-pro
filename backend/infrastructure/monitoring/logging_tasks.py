@@ -199,6 +199,12 @@ class SqliteLoggingTaskRepository:
         with self._connect() as conn:
             conn.execute("DELETE FROM monitoring_log_tasks WHERE id = ?", (task_id,))
 
+    def clear_all(self) -> None:
+        # Leert alle Aufgaben-Definitionen (nur die eigene Tabelle
+        # monitoring_log_tasks -- die Messdaten liegen in eigenen Repos).
+        with self._connect() as conn:
+            conn.execute("DELETE FROM monitoring_log_tasks")
+
     @staticmethod
     def _row_to_task(row: sqlite3.Row) -> LoggingTask:
         # Enum-Round-trip: gespeicherte Strings zurueck in die Domaenen-Enums.

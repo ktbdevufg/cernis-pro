@@ -272,6 +272,12 @@ class SqliteDeviceRepository:
             conn.execute("DELETE FROM devices WHERE mac = ?", (norm,))
             conn.execute("DELETE FROM device_ip_history WHERE mac = ?", (norm,))
 
+    def clear_all(self) -> None:
+        # Beide eigenen Tabellen in EINER Transaktion raeumen (Muster wie delete).
+        with self._connect() as conn:
+            conn.execute("DELETE FROM devices")
+            conn.execute("DELETE FROM device_ip_history")
+
     def append_ip_history(self, entry: IpHistoryEntry) -> None:
         with self._connect() as conn:
             conn.execute(

@@ -92,3 +92,10 @@ class SqliteSlaSampleRepository:
         with self._connect() as conn:
             rows = conn.execute("SELECT DISTINCT target_id FROM sla_samples").fetchall()
         return [row["target_id"] for row in rows]
+
+    def clear_all(self) -> None:
+        # Leert alle SLA-Samples (nur die eigene Tabelle sla_samples). Das ist
+        # ein Loesch-Pfad (Wartung), KEIN Beleben des aufgeschobenen record-
+        # Schreibpfads (M.7b) -- die Lese-Natur des Adapters bleibt unberuehrt.
+        with self._connect() as conn:
+            conn.execute("DELETE FROM sla_samples")

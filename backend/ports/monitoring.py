@@ -269,6 +269,10 @@ class RttHistoryRepository(Protocol):
         """
         ...
 
+    def clear_all(self) -> None:
+        """Leert die gesamte RTT-Historie (nur die eigene Tabelle)."""
+        ...
+
 
 class MonitorEventRepository(Protocol):
     """Persistenz der Uebergangs-Ereignisse (Altcode-Tabelle ``monitor_events``)."""
@@ -290,6 +294,10 @@ class MonitorEventRepository(Protocol):
         ``[]``, niemals ``None``. Reihenfolge wie Altcode ``get_monitor_events``
         (``ts`` absteigend).
         """
+        ...
+
+    def clear_all(self) -> None:
+        """Leert alle Uebergangs-Ereignisse (nur die eigene Tabelle)."""
         ...
 
 
@@ -371,6 +379,14 @@ class ScheduleRepository(Protocol):
         """Loescht die Schedule-Zeile. Idempotent (kein Fehler bei fehlender id).
 
         REIN Persistenz: entfernt KEINEN Job (der Use-Case ruft zusaetzlich
+        ``ScanJobScheduler.unregister``).
+        """
+        ...
+
+    def clear_all(self) -> None:
+        """Leert alle Schedules (nur die eigene Tabelle).
+
+        REIN Persistenz: entfernt KEINE laufenden Jobs (der Use-Case ruft dafuer
         ``ScanJobScheduler.unregister``).
         """
         ...
@@ -464,6 +480,14 @@ class SlaSampleRepository(Protocol):
         """
         ...
 
+    def clear_all(self) -> None:
+        """Leert alle SLA-Samples (nur die eigene Tabelle).
+
+        Ein reiner Loesch-Pfad (Wartung) -- KEIN Beleben des aufgeschobenen
+        ``record``-Schreibpfads (M.7b); die Lese-Natur des Vertrags bleibt.
+        """
+        ...
+
 
 # ── Langzeit-Logging (B-I) ──────────────────────────────────────────────────
 # Die Persistenz-Vertraege des opt-in Logging-Kerns (Domaene
@@ -536,6 +560,14 @@ class LoggingTaskRepository(Protocol):
         """
         ...
 
+    def clear_all(self) -> None:
+        """Leert alle Aufgaben-Definitionen (nur die eigene Tabelle).
+
+        Wie ``delete`` betrifft das NUR die Definitionen -- die Messdaten (RTT/
+        Events) liegen in eigenen Repos und werden hier nicht mitgeleert.
+        """
+        ...
+
 
 class LoggingRttRepository(Protocol):
     """Persistenz der dichten RTT-Messpunkte je Logging-Aufgabe (Retention 1 Monat).
@@ -603,6 +635,10 @@ class LoggingRttRepository(Protocol):
         """
         ...
 
+    def clear_all(self) -> None:
+        """Leert alle dichten RTT-Messpunkte (nur die eigene Tabelle)."""
+        ...
+
 
 class LoggingEventRepository(Protocol):
     """Persistenz der Ereignis-/Anomalie-Flanken je Logging-Aufgabe (Retention 1 Jahr).
@@ -645,4 +681,8 @@ class LoggingEventRepository(Protocol):
         nur die Retention-SPANNE unterscheidet sich (1 Jahr statt 1 Monat), und die
         liegt beim Aufrufer, nicht im Repo. Nichts zu loeschen -> ``0``.
         """
+        ...
+
+    def clear_all(self) -> None:
+        """Leert alle Ereignis-Flanken (nur die eigene Tabelle)."""
         ...

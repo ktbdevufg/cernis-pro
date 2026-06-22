@@ -34,6 +34,10 @@ class _FakeSlaRepo:
     def target_ids(self) -> list[str]:
         return list(self._samples.keys())
 
+    def clear_all(self) -> None:
+        """Leert die hinterlegten Samples (No-op-Vertrag fuer den Fake)."""
+        self._samples.clear()
+
 
 def _now() -> float:
     return time.time()

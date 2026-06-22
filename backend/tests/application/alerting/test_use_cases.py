@@ -110,6 +110,11 @@ class FakeRepo:
         self.calls.append(f"recent:{limit}")
         return self.saved_events[:limit]
 
+    def clear_all(self) -> None:
+        """Leert Regeln und gespeicherte Events."""
+        self.rules.clear()
+        self.saved_events.clear()
+
 
 class FakeNotifier:
     """In-Memory-AlertNotifierPort. Teilt optional das ``seq``-Log mit dem Repo."""

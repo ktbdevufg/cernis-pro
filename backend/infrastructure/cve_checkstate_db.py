@@ -104,6 +104,11 @@ class SqliteCveCheckStateRepository:
                 (mac, checked_ts, _ports_to_text(ports)),
             )
 
+    def clear_all(self) -> None:
+        """Leert alle Pruefstaende (nur die eigene Tabelle ``cve_check_state``)."""
+        with self._connect() as conn:
+            conn.execute("DELETE FROM cve_check_state")
+
     def all_states(self) -> list[HostCheckState]:
         """Alle Pruefstaende (Status-Endpunkt). Leer -> ``[]``."""
         with self._connect() as conn:

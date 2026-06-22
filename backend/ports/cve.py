@@ -141,6 +141,10 @@ class CveFindingRepository(Protocol):
         """Alle Befunde eines Hosts. Leere/unbekannte MAC -> ``[]``."""
         ...
 
+    def clear_all(self) -> None:
+        """Leert alle CVE-Befunde (nur die eigene Tabelle)."""
+        ...
+
 
 class CveCheckStateRepository(Protocol):
     """Persistenz des per-Host-Pruefstands (last_checked_ts + geprueftes Port-Set).
@@ -168,6 +172,10 @@ class CveCheckStateRepository(Protocol):
         """Alle Pruefstaende (Status-Endpunkt: wie viele Hosts geprueft). Leer -> ``[]``."""
         ...
 
+    def clear_all(self) -> None:
+        """Leert alle per-Host-Pruefstaende (nur die eigene Tabelle)."""
+        ...
+
 
 class CveAcknowledgementRepository(Protocol):
     """Append-only ack/unack-Audit der Befunde (ADR-0031-Muster, ADR 0037).
@@ -187,4 +195,8 @@ class CveAcknowledgementRepository(Protocol):
         Reine Ableitung: ein Tripel ist quittiert, wenn sein JUENGSTER Eintrag
         ``action == 'ack'`` ist (ein spaeteres ``unack`` hebt es wieder auf). Leer -> ``set()``.
         """
+        ...
+
+    def clear_all(self) -> None:
+        """Leert das gesamte ack-Log (nur die eigene Tabelle)."""
         ...

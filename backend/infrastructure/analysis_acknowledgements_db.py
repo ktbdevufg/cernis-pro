@@ -89,6 +89,11 @@ class SqliteAcknowledgementRepository:
                 (mac, port, severity, action),
             )
 
+    def clear_all(self) -> None:
+        """Leert das gesamte ack-Log (nur die eigene Tabelle ``analysis_acknowledgements``)."""
+        with self._connect() as conn:
+            conn.execute("DELETE FROM analysis_acknowledgements")
+
     # ── Lese-Pfad ─────────────────────────────────────────────────────────────
 
     def acknowledged_ports(self, mac: str) -> set[int]:

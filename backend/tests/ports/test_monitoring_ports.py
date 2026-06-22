@@ -90,6 +90,10 @@ class _FakeRttHistory:
     def recent(self, target_id: str, limit: int) -> list[PingSample]:
         return [s for s in self.saved if s.target_id == target_id][:limit]
 
+    def clear_all(self) -> None:
+        """Leert die gespeicherten RTT-Samples (No-op-Schreibpfad fuer den Fake)."""
+        self.saved.clear()
+
 
 class _FakeEventRepo:
     def __init__(self) -> None:
@@ -100,6 +104,10 @@ class _FakeEventRepo:
 
     def recent(self, limit: int) -> list[MonitorEvent]:
         return list(reversed(self.saved))[:limit]
+
+    def clear_all(self) -> None:
+        """Leert die gespeicherten Events (No-op-Schreibpfad fuer den Fake)."""
+        self.saved.clear()
 
 
 class _FakeTargetSource:
@@ -144,6 +152,10 @@ class _FakeScheduleRepo:
     def delete(self, schedule_id: int) -> None:
         self.rows = [r for r in self.rows if r["id"] != schedule_id]
 
+    def clear_all(self) -> None:
+        """Leert die gespeicherten Schedule-Zeilen (No-op-Schreibpfad fuer den Fake)."""
+        self.rows.clear()
+
 
 class _FakeJobScheduler:
     def __init__(self) -> None:
@@ -174,6 +186,10 @@ class _FakeSlaRepo:
     def target_ids(self) -> list[str]:
         return list(self.samples.keys())
 
+    def clear_all(self) -> None:
+        """Leert die gespeicherten SLA-Samples (No-op-Schreibpfad fuer den Fake)."""
+        self.samples.clear()
+
 
 class _FakeLoggingTaskRepo:
     def __init__(self) -> None:
@@ -190,6 +206,10 @@ class _FakeLoggingTaskRepo:
 
     def delete(self, task_id: str) -> None:
         self.tasks.pop(task_id, None)
+
+    def clear_all(self) -> None:
+        """Leert die gespeicherten Logging-Tasks (No-op-Schreibpfad fuer den Fake)."""
+        self.tasks.clear()
 
 
 class _FakeLoggingRttRepo:
@@ -222,6 +242,10 @@ class _FakeLoggingRttRepo:
     def count(self) -> int:
         return len(self.rows)
 
+    def clear_all(self) -> None:
+        """Leert die gespeicherten RTT-Zeilen (No-op-Schreibpfad fuer den Fake)."""
+        self.rows.clear()
+
 
 class _FakeLoggingEventRepo:
     def __init__(self) -> None:
@@ -242,6 +266,10 @@ class _FakeLoggingEventRepo:
         before = len(self.rows)
         self.rows = [row for row in self.rows if row[3] >= cutoff_ts]
         return before - len(self.rows)
+
+    def clear_all(self) -> None:
+        """Leert die gespeicherten Event-Zeilen (No-op-Schreibpfad fuer den Fake)."""
+        self.rows.clear()
 
 
 # ── Statische Konformitaet: mypy prueft die Zuweisung an den Port-Typ ───────

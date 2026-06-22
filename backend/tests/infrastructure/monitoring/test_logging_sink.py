@@ -52,6 +52,10 @@ class _FakeTaskRepo:
     def delete(self, task_id: str) -> None:
         raise AssertionError("delete darf vom Sink nicht gerufen werden")
 
+    def clear_all(self) -> None:
+        """Leert die hinterlegten Tasks (No-op-Vertrag fuer den Fake)."""
+        self._tasks.clear()
+
 
 class _RecordingRtt:
     def __init__(self) -> None:
@@ -59,6 +63,10 @@ class _RecordingRtt:
 
     def save(self, task_id: str, rtt_ms: float, loss_pct: float, alive: bool, ts: float) -> None:
         self.saved.append((task_id, rtt_ms, loss_pct, alive, ts))
+
+    def clear_all(self) -> None:
+        """Leert die aufgezeichneten RTT-Punkte (No-op-Vertrag fuer den Fake)."""
+        self.saved.clear()
 
     def range(self, task_id: str, since: float, until: float) -> list[LoggingRttSample]:
         raise AssertionError("range darf vom Sink nicht gerufen werden")
@@ -79,6 +87,10 @@ class _RecordingEvents:
 
     def save(self, task_id: str, event_type: str, rtt_ms: float, ts: float) -> None:
         self.saved.append((task_id, event_type, rtt_ms, ts))
+
+    def clear_all(self) -> None:
+        """Leert die aufgezeichneten Events (No-op-Vertrag fuer den Fake)."""
+        self.saved.clear()
 
     def range(self, task_id: str, since: float, until: float) -> list[LoggingEventRow]:
         raise AssertionError("range darf vom Sink nicht gerufen werden")

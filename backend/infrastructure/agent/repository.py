@@ -135,3 +135,9 @@ class SqliteAgentRepository:
         # Idempotent: DELETE auf eine unbekannte id ist kein Fehler (altcode-treu).
         with self._connect() as conn:
             conn.execute("DELETE FROM remote_agents WHERE id = ?", (agent_id,))
+
+    def clear_all(self) -> None:
+        # Leert alle Agent-Stammdaten (nur die eigene Tabelle remote_agents). Die
+        # Tokens liegen im SecretStore -- die loescht der Use-Case getrennt.
+        with self._connect() as conn:
+            conn.execute("DELETE FROM remote_agents")

@@ -65,6 +65,10 @@ class _FakeSettings:
 
     def delete(self, key: str) -> None: ...
 
+    def clear_all(self) -> None:
+        """Leert die vorbereiteten Werte (no-op-tauglicher Stub)."""
+        self._values.clear()
+
 
 def _builtins() -> _CompositeRuleProvider:
     # Nur die Built-in-Defaults (kein User-Store) als innerer Provider.

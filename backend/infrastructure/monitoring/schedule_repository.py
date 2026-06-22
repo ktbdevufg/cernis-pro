@@ -107,3 +107,10 @@ class SqliteScheduleRepository:
         # Idempotent: DELETE auf eine nicht-existente id ist kein Fehler (0 rows).
         with self._connect() as conn:
             conn.execute("DELETE FROM scan_schedules WHERE id=?", (schedule_id,))
+
+    def clear_all(self) -> None:
+        # Leert alle Schedules (nur die eigene Tabelle scan_schedules). REIN
+        # Persistenz: entfernt KEINEN laufenden Job (das macht der Use-Case ueber
+        # den ScanJobScheduler).
+        with self._connect() as conn:
+            conn.execute("DELETE FROM scan_schedules")

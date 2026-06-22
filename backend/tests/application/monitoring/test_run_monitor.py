@@ -61,6 +61,10 @@ class _RecordingRtt:
     def save(self, sample: PingSample) -> None:
         self.saved.append(sample)
 
+    def clear_all(self) -> None:
+        """Leert die aufgezeichneten RTT-Samples (No-op-Vertrag fuer den Fake)."""
+        self.saved.clear()
+
     def recent(self, target_id: str, limit: int) -> list[PingSample]:
         return []
 
@@ -71,6 +75,10 @@ class _RecordingEvents:
 
     def save(self, event: MonitorEvent) -> None:
         self.saved.append(event)
+
+    def clear_all(self) -> None:
+        """Leert die aufgezeichneten Events (No-op-Vertrag fuer den Fake)."""
+        self.saved.clear()
 
     def recent(self, limit: int) -> list[MonitorEvent]:
         return []
