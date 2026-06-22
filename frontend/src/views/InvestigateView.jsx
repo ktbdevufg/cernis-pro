@@ -3,8 +3,8 @@
 // öffnet vorerst einen "in Arbeit"-Platzhalter mit Zurück-Weg.
 //
 // Funktionen:
-//   "analysis"  Analyse (gesperrt: braucht gesammelte Daten)
 //   "diagnose"  Diagnose (aktiv: zeigt die Route-zum-Ziel-Ansicht, ADR 0036)
+//   "analysis"  Analyse (gesperrt: braucht gesammelte Daten)
 //   "cve"       CVE-Abgleich (aktiv: zeigt die CVE-Befund-Ansicht, ADR 0037)
 
 import { Activity, ScanSearch, ShieldAlert } from "lucide-react";
@@ -22,8 +22,8 @@ import RouteView from "../components/RouteView.jsx";
 
 // Kachel-Definition: Schlüssel, Icon, Sperrstatus. Reihenfolge ist verbindlich.
 const FUNKTIONEN = [
-  { id: "analysis", icon: ScanSearch, locked: true },
   { id: "diagnose", icon: Activity, locked: false },
+  { id: "analysis", icon: ScanSearch, locked: true },
   { id: "cve", icon: ShieldAlert, locked: false },
 ];
 
