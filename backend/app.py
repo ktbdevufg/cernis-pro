@@ -3204,6 +3204,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             logging_events=logging_event_repository(),
             alert_rules=alert_rule_repository(),
             agents=agent_repository(),
+            dns_watch_acknowledgements=dns_watch_acknowledgement_repository(),
             secret_store=secret_store(),
         )
 

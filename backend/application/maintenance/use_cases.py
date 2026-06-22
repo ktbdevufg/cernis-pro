@@ -49,6 +49,7 @@ from ports.settings import SecretStore, SettingsRepository
 
 __all__ = [
     "AnalysisAckCleaner",
+    "DnsWatchAckCleaner",
     "FactoryReset",
     "KnownHostsCleaner",
     "ResetScanData",
@@ -77,6 +78,14 @@ class AnalysisAckCleaner(Protocol):
 
     def clear_all(self) -> None:
         """Leert die Analyse-Quittierungen (``analysis_acknowledgements``) vollstaendig."""
+        ...
+
+
+class DnsWatchAckCleaner(Protocol):
+    """Schmaler Vertrag fuer dns_watch_acknowledgements (Adapter ohne eigenen Port)."""
+
+    def clear_all(self) -> None:
+        """Leert die DNS-Waechter-Quittierungen (``dns_watch_acknowledgements``) vollstaendig."""
         ...
 
 
@@ -152,6 +161,7 @@ class FactoryReset:
         logging_events: LoggingEventRepository,
         alert_rules: AlertRuleRepository,
         agents: AgentRepository,
+        dns_watch_acknowledgements: DnsWatchAckCleaner,
         secret_store: SecretStore,
     ) -> None:
         self._reset_scan_data = reset_scan_data
@@ -168,6 +178,7 @@ class FactoryReset:
         self._logging_events = logging_events
         self._alert_rules = alert_rules
         self._agents = agents
+        self._dns_watch_acknowledgements = dns_watch_acknowledgements
         self._secret_store = secret_store
 
     def run(self, *, include_secrets: bool = False) -> None:
@@ -198,6 +209,8 @@ class FactoryReset:
         # e/f: Alert-Regeln, Agenten.
         self._alert_rules.clear_all()
         self._agents.clear_all()
+        # DNS-Waechter-Quittierungen (nutzergesetzte ack-Liste).
+        self._dns_watch_acknowledgements.clear_all()
 
         # Optional: die bekannten cpnetcheck-Secrets (idempotent).
         if include_secrets:

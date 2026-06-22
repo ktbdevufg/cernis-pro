@@ -153,6 +153,7 @@ def _make_factory_reset(
         logging_events=_Spy(calls, "logging_events"),
         alert_rules=_Spy(calls, "alert_rules"),
         agents=_Spy(calls, "agents"),
+        dns_watch_acknowledgements=_Spy(calls, "dns_watch_acknowledgements"),
         secret_store=secret_store,
     )
 
@@ -225,8 +226,24 @@ def test_factory_reset_ruft_stufe1_und_stufe2() -> None:
         "logging_events.clear_all",
         "alert_rules.clear_all",
         "agents.clear_all",
+        "dns_watch_acknowledgements.clear_all",
     ]
     assert calls == expected
+
+
+def test_factory_reset_loescht_dns_watch_quittierungen() -> None:
+    calls: list[str] = []
+    factory = _make_factory_reset(
+        calls,
+        reset_scan_data=_make_reset_scan_data(calls),
+        schedules=_ScheduleRepoSpy(calls, rows=[]),
+        scheduler=_SchedulerSpy(calls),
+        secret_store=_SecretStoreSpy(calls),
+    )
+
+    factory.run()
+
+    assert "dns_watch_acknowledgements.clear_all" in calls
 
 
 # ── (3) include_secrets steuert SecretStore.delete ─────────────────────────────
