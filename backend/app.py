@@ -2531,7 +2531,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         ) -> tuple[str | None, str | None, str | None]:
             facts = await _resolve_endpoint(ip, None)
             country = facts.country_geodb.value or facts.country_rdap_net.value
-            operator = facts.asn_org.value
+            operator = facts.asn_org.value or (f"AS{facts.asn.value}" if facts.asn.value else None)
             asn = facts.asn.value
             return (country, operator, asn)
 
