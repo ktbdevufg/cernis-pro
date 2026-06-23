@@ -19,24 +19,47 @@
   text-align: right;
 }
 
-/* ── 1. Titelkopf (Logo + Titel) ──────────────────────────────────────────────── */
+/* ── 1. Bericht-Titelkopf (Logo + grosse Ueberschrift + Erstelldatum) ──────────── */
 .security-report__kopf {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 16px;
+  padding-bottom: 14px;
+  border-bottom: 2px solid var(--color-accent);
 }
 
 .security-report__logo {
-  height: 32px;
+  height: 44px;
   width: auto;
   display: block;
 }
 
+.security-report__kopf-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .security-report__titel {
   margin: 0;
-  font-size: 18px;
-  font-weight: 600;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
   color: var(--color-text);
+}
+
+.security-report__kopf-datum {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-tert);
+}
+
+/* Einleitung: ruhiger Fliesstext unter dem Kopf (Achse-B-Haltung in Klartext). */
+.security-report__einleitung {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--color-text-sec);
 }
 
 /* Dezenter Fehlerhinweis (Ladefehler kippt die Ansicht nicht). */
@@ -115,6 +138,15 @@
   font-weight: 600;
 }
 
+/* Erklaerzeile direkt unter dem Gauge: ordnet die Zahl mit echten Werten ein. */
+.security-report__gauge-einordnung {
+  margin: 0;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--color-text-sec);
+}
+
 .security-report__gauge-toggle {
   align-self: center;
   padding: 6px 14px;
@@ -152,6 +184,26 @@
   margin: 0;
   font-size: 12px;
   color: var(--color-text-sec);
+}
+
+/* ── 3.4 Score-Beitragsliste als eigener Abschnitt (mit Ueberschrift) ──────────── */
+.security-report__beitraege-abschnitt {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 18px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.security-report__beitraege-kopf {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 /* ── 3b. Schwere-Kennzahlen ────────────────────────────────────────────────────── */
@@ -261,6 +313,13 @@
   gap: 10px;
 }
 
+/* Fix 4: Die Komponente rendert IMMER alle Geraete. Am Bildschirm werden die ueber
+   Top-6 hinausgehenden Zeilen ausgeblendet (kompakte Ansicht + "+ X weitere"-Hinweis);
+   im Druck blendet @media print sie wieder ein (vollstaendige Liste aufs Papier). */
+.security-report__balken-zeile--ueberzaehlig {
+  display: none;
+}
+
 .security-report__balken-label {
   font-size: 12px;
   color: var(--color-text-sec);
@@ -363,6 +422,35 @@
   font-size: 12px;
 }
 
+/* CVE-Befunde nach Geraet gruppiert: pro Geraet ein Block mit eigener Ueberschrift
+   und kleiner Tabelle. Bloecke bleiben im Druck moeglichst zusammen. */
+.security-report__cve-gruppen {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.security-report__cve-gruppe {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.security-report__cve-geraet {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-sec);
+}
+
+/* Beschreibungs-Spalte darf umbrechen (Klartext kann lang sein). */
+.security-report__cve-beschreibung {
+  color: var(--color-text-sec);
+  white-space: normal;
+}
+
 /* Severity-Badge (klein, Token-Farben). */
 .security-report__badge {
   display: inline-block;
@@ -407,6 +495,19 @@
   font-style: italic;
   line-height: 1.5;
   color: var(--color-text-tert);
+}
+
+/* Bericht-Fusszeile (UNSER Inhalt am Dokument-Ende: Wortmarke + Erstelldatum). Dezent,
+   mit Trennlinie nach oben, damit sie wie ein Dokument-Abschluss wirkt. */
+.security-report__fusszeile {
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+  text-align: center;
+  font-size: 11px;
+  color: var(--color-text-tert);
+  break-inside: avoid;
+  page-break-inside: avoid;
 }
 
 /* ── 5. Rogue-DHCP-Statushinweis (dezent) ──────────────────────────────────────── */
@@ -464,15 +565,51 @@
     print-color-adjust: exact;
   }
 
-  /* App-Rahmen ausblenden: Kopfzeile, alle Reiter/Tab-Leisten, der Zurueck-Balken der
-     FunctionShell und der Drucken-Knopf gehoeren nicht aufs Papier. */
+  /* Druck-Theme: das KOMPLETTE helle Token-Set (1:1 aus tokens.css
+     [data-theme="light"]) auf dem Berichts-Container NEU definieren — exakt die
+     Tokens, die der Bericht real nutzt (per grep "var(--" verifiziert), nicht mehr.
+     So erben ALLE Bericht-Elemente druckfreundliche Farben (dunkler Text auf Weiss,
+     satte Badges, klare Linien) — unabhaengig davon, ob die App gerade im Dunkel-
+     oder Hellmodus laeuft. Keine Einzelfarben-Overrides noetig. */
+  .security-report {
+    --color-bg: #ffffff;
+    --color-card: #f7f6f2;
+    --color-text: #1a1a18;
+    --color-text-sec: #5f5e5a;
+    --color-text-tert: #888780;
+    --color-border: rgba(0, 0, 0, 0.12);
+
+    --color-accent: #107e9c;
+    --color-accent-strong: #0b6a84;
+    --color-accent-bg: #e0eff4;
+    --color-accent-bg-strong: #cee7ee;
+    --color-accent-border: #84c2d4;
+
+    --sev-med-text: #854f0b;
+    --sev-med-bd: #ef9f27;
+    --sev-med-bg: #faeeda;
+    --sev-low-bd: #b4b2a9;
+    --sev-low-bg: #f1efe8;
+
+    --cve-crit-text: #7a1414;
+    --cve-crit-bd: #b91c1c;
+    --cve-crit-bg: #f8dada;
+
+    color: var(--color-text);
+  }
+
+  /* App-Rahmen ausblenden: Kopfzeile (.app-header) und Reiterzeile (.tab-nav) sind die
+     real verwendeten Klassen (verifiziert: AppHeader.jsx / TabNav.jsx). Dazu der
+     Zurueck-Balken der FunctionShell und der Drucken-Knopf — nichts davon gehoert aufs
+     Papier. Der "+ X weitere"-Hinweis entfaellt, weil im Druck ALLE Geraete erscheinen
+     (s. unten). Die alten, nie greifenden Selektoren (.tab-bar/.tabbar/[role=tablist])
+     sind entfernt — .tab-nav ist die korrekte Reiterklasse. */
   .app-header,
-  .tab-bar,
-  .tabbar,
-  [role="tablist"],
+  .tab-nav,
   .function-shell__bar,
   .security-report__aktionen,
   .security-report__gauge-toggle,
+  .security-report__balken-rest,
   .security-report__laedt {
     display: none !important;
   }
@@ -482,12 +619,96 @@
     display: flex !important;
   }
 
-  /* Flaechen druckfreundlich neutralisieren (keine schweren Card-Hintergruende). */
-  .security-report__gauge,
-  .security-report__balken,
-  .security-report__rogue,
-  .security-report__leerzustand,
-  .security-report__kennzahl {
-    background: transparent !important;
+  /* Fix 4: vollstaendige Geraete-Liste aufs Papier. Am Bildschirm sind die ueber Top-6
+     hinausgehenden Zeilen ausgeblendet (.--ueberzaehlig, s.o.); im Druck werden ALLE
+     Zeilen wieder eingeblendet, da man im PDF nichts aufklappen kann. */
+  .security-report__balken-zeile--ueberzaehlig {
+    display: grid !important;
   }
+
+  /* Kern-Fix: die Eltern-Container-Kette begrenzt am Bildschirm Hoehe + Scrolling
+     (scrollbare Box fester Hoehe). Das ist am Bildschirm korrekt, zwingt aber im
+     Druck den gesamten Bericht auf EINE Seite. Im Druck heben wir Hoehe/Overflow/
+     Flex der GANZEN Kette auf, damit der Inhalt frei ueber mehrere Druckseiten
+     umbricht. Nur hier (im @media print) ueberschrieben — der Bildschirm bleibt. */
+  html,
+  body {
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  /* App-Grundgeruest (.app: height 100%) und der scrollende Hauptcontainer
+     (.app__content: flex 1 + overflow-y auto). */
+  .app,
+  .app__content {
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  /* FunctionShell-Kette: .function-shell (height 100% + min-height 0) und
+     .function-shell__body (flex 1 + min-height 0). Im Druck als normaler Block. */
+  .function-shell,
+  .function-shell__body {
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    flex: none !important;
+    display: block !important;
+  }
+
+  /* Der Bericht selbst: keine Hoehen-/Overflow-Klammer, kein position-Kontext, der
+     den Druck-Flow kappen koennte (position: relative am Bildschirm). Zusaetzlich der
+     EIGENE Inhaltsrand (Problem 1): da @page margin:0 den Blattrand auf 0 zieht (damit
+     der Browser keinen Platz fuer Kopf-/Fusszeile hat), stellen wir die Druckraender
+     hier per Padding selbst her — oben/unten etwas mehr, damit der Inhalt schoen sitzt. */
+  .security-report {
+    position: static !important;
+    height: auto !important;
+    overflow: visible !important;
+    padding: 14mm 12mm !important;
+  }
+
+  /* ── Problem 1: Browser-Druckkopf/-fuss entfernen (Chromium-Zielumgebung) ───────
+     Chromium druckt Datum, Titel, URL und Seitenzahl in die SEITENRAENDER. @page mit
+     margin:0 zieht diese Raender auf null -> es bleibt physisch KEIN Platz mehr fuer
+     die Browser-Kopf-/Fusszeile, sie verschwindet. Das ist der Mechanismus sauber
+     druckender Webseiten. html/body auf margin:0/padding:0, damit @page greift und der
+     Inhalt buendig am (nun randlosen) Blatt beginnt; den realen Inhaltsrand macht das
+     Padding an .security-report (s.o.). HINWEIS: zuverlaessig in Chromium/Chrome/Edge;
+     fuer absolut jeden Browser keine Garantie — Firefox bietet die Kopf-/Fusszeile
+     weiterhin im Dialog an. */
+  @page {
+    margin: 0;
+  }
+
+  html,
+  body {
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* ── Problem 2: Seitenumbruch je Rubrik ────────────────────────────────────────
+     Seite 1 traegt Titelkopf, Einleitung, Gauge, Kennzahlen, die Score-Beitragsliste
+     ("Wie der Score zustande kommt") und den Donut. Danach beginnt JEDE folgende
+     Haupt-Rubrik auf einer NEUEN Seite via break-before: page:
+       - "Auffaelligkeiten je Geraet" (.security-report__balken) — erster Umbruch,
+       - die vier nummerierten Tabellen-Rubriken (.security-report__abschnitt):
+         Ports, CVE, Netz, Quittiert.
+     break-before (statt break-after auf der jeweils letzten Rubrik) vermeidet eine
+     leere Schlussseite ganz automatisch — nach der letzten Rubrik kommt kein weiterer
+     erzwungener Umbruch. page-break-inside: avoid je Abschnitt bleibt (oben definiert):
+     eine Rubrik wird moeglichst nicht zerrissen. */
+  .security-report__balken,
+  .security-report__abschnitt {
+    break-before: page;
+    page-break-before: always;
+  }
+
+  /* Abschnitts-/Rubrik-Titel nie allein am Seitenende: der Titel haelt mit dem
+     folgenden Inhalt zusammen (kein verwaister Kopf). */
+  .security-report__abschnitt-titel {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
 }

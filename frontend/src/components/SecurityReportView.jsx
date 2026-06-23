@@ -221,17 +221,30 @@ export default function SecurityReportView() {
 
   const sprache = i18n.language === "en" ? "en" : "de";
   const rogueZeitpunkt = bericht ? formatZeitpunkt(bericht.rogueDhcpCheckedTs, sprache) : null;
+  // Erstelldatum des Berichts: heute, lokal formatiert. Reine Anzeige im Titelkopf und
+  // in der Fusszeile (kein State, kein Effekt) — ein gedrucktes Dokument datiert sich.
+  const erstelltDatum = new Date().toLocaleDateString(sprache === "en" ? "en-US" : "de-DE", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
 
   return (
     <div className="security-report">
-      {/* ── 1. Titelkopf: Logo + Titel (Hilfe-Anker am Titel) ──────────────────── */}
-      <div className="security-report__kopf">
+      {/* ── 1. Bericht-Titelkopf: Logo + grosse Ueberschrift + Erstelldatum ──────
+          Eigener Dokument-Kopf (NICHT die App-Navi). Der Hilfe-Anker bleibt am Titel. */}
+      <header className="security-report__kopf">
         {/* Echtes Repo-Asset aus public/ (wie AppHeader). */}
         <img className="security-report__logo" src="/cernis-logo.png" alt="CERNIS PRO" />
-        <h3 className="security-report__titel" id="help.report.security">
-          {t("report.security.titel")}
-        </h3>
-      </div>
+        <div className="security-report__kopf-text">
+          <h3 className="security-report__titel" id="help.report.security">
+            {t("report.security.titel")}
+          </h3>
+          <p className="security-report__kopf-datum">
+            {t("report.security.kopf.erstellt", { datum: erstelltDatum })}
+          </p>
+        </div>
+      </header>
 
       {fehler && (
         <div className="security-report__fehler" role="note">
@@ -248,18 +261,16 @@ export default function SecurityReportView() {
         </div>
       ) : null}
 
-      {/* ── 3. Cockpit + 4..6 nur bei vorhandenem Scan ─────────────────────────── */}
+      {/* ── 3. Zusammenfassung + Details nur bei vorhandenem Scan ──────────────── */}
       {bericht && hatScan && score ? (
         <>
-          {/* 3a. Score-Gauge (aufklappbar) ───────────────────────────────────── */}
-          <ScoreGauge
-            score={score}
-            beitraegeOffen={beitraegeOffen}
-            onToggle={() => setBeitraegeOffen((v) => !v)}
-            t={t}
-          />
+          {/* 3.1 Einleitung: was dieser Bericht ist (Achse-B-Haltung in Klartext). */}
+          <p className="security-report__einleitung">{t("report.security.einleitung")}</p>
 
-          {/* 3b. Drei Schwere-Kennzahlen ─────────────────────────────────────── */}
+          {/* 3.2 Score-Gauge MIT Erklaerzeile direkt darunter (Zahl sofort eingeordnet). */}
+          <ScoreGauge score={score} t={t} />
+
+          {/* 3.3 Drei Schwere-Kennzahlen als kompakte Zusammenfassung. */}
           <div className="security-report__kennzahlen">
             <Kennzahl
               wert={score.criticalDevices}
@@ -278,7 +289,16 @@ export default function SecurityReportView() {
             />
           </div>
 
-          {/* 3c. Schwere-Donut (ohne Legende — Zahlen stehen oben) ───────────── */}
+          {/* 3.4 ERST DANACH die Score-Beitragsliste mit eigener Ueberschrift. Am
+              Bildschirm aufklappbar (Toggle); im Druck immer offen (CSS forciert). */}
+          <ScoreBeitraege
+            score={score}
+            beitraegeOffen={beitraegeOffen}
+            onToggle={() => setBeitraegeOffen((v) => !v)}
+            t={t}
+          />
+
+          {/* 3.5 Schwere-Donut (ohne Legende — Zahlen stehen oben) + Geraete-Balken. */}
           <SchwereDonut
             kritisch={score.criticalDevices}
             auffaellig={score.notableDevices}
@@ -286,8 +306,6 @@ export default function SecurityReportView() {
             deviceCount={score.deviceCount}
             t={t}
           />
-
-          {/* 3d. Geraete-Balken "Auffaelligkeiten je Geraet" ─────────────────── */}
           <GeraeteBalken geraete={geraeteBalken} t={t} />
 
           {/* ── 4. Vier Tabellen ────────────────────────────────────────────── */}
@@ -296,13 +314,26 @@ export default function SecurityReportView() {
           <NetTabelle findings={bericht.netFindings} t={t} />
           {quittierte.length > 0 ? <QuittiertTabelle zeilen={quittierte} t={t} /> : null}
 
+          {/* Rogue-DHCP-Statushinweis (dezent, kein Fehler). */}
+          <p className="security-report__rogue" role="note">
+            {rogueZeitpunkt === null
+              ? t("report.security.rogue.ungeprueft")
+              : t("report.security.rogue.geprueft", { datum: rogueZeitpunkt })}
+          </p>
+
           {/* Achse-B-Fussnote: der Bericht beschreibt und ordnet ein — kein Urteil. */}
           <p className="security-report__fussnote">{t("report.security.fussnote")}</p>
+
+          {/* Bericht-Fusszeile (UNSER Inhalt, nicht der Browser-Druckfuss): Wortmarke
+              + Erstelldatum am Dokument-Ende. */}
+          <footer className="security-report__fusszeile">
+            {t("report.security.fusszeile", { datum: erstelltDatum })}
+          </footer>
         </>
       ) : null}
 
-      {/* ── 5. Rogue-DHCP-Statushinweis (dezent, kein Fehler) ──────────────────── */}
-      {bericht ? (
+      {/* Rogue-Hinweis auch ohne Scan zeigen (Status bleibt ehrlich sichtbar). */}
+      {bericht && !hatScan ? (
         <p className="security-report__rogue" role="note">
           {rogueZeitpunkt === null
             ? t("report.security.rogue.ungeprueft")
@@ -310,7 +341,7 @@ export default function SecurityReportView() {
         </p>
       ) : null}
 
-      {/* ── 6. Aktionsleiste: Drucken ──────────────────────────────────────────── */}
+      {/* ── Aktionsleiste: Drucken (im Druck ausgeblendet) ─────────────────────── */}
       {bericht ? (
         <div className="security-report__aktionen">
           <button
@@ -328,12 +359,11 @@ export default function SecurityReportView() {
   );
 }
 
-// ── 3a. Score-Gauge ───────────────────────────────────────────────────────────
-// Halbkreis 0..100, Token-Farbe nach level. Grosse Zahl + "von 100" + Stufe.
-// Aufklappbar (aria-expanded): aufgeklappt die Beitragsliste als kleine Tabelle plus
-// Formel-Zeile und die saubere-Geraete-Zahl als Klartext. Ein-/Ausklappen aendert NUR
-// die Anzeige (kein Reload).
-function ScoreGauge({ score, beitraegeOffen, onToggle, t }) {
+// ── 3.2 Score-Gauge ───────────────────────────────────────────────────────────
+// Halbkreis 0..100, Token-Farbe nach level. Grosse Zahl + "von 100" + Stufe, darunter
+// eine ERKLAeRZEILE mit echten Zahlen, die den Score sofort einordnet (Score von 100,
+// Stufe, Anzahl bewertet/kritisch/auffaellig/ohne Befund). Reine Anzeige (kein Reload).
+function ScoreGauge({ score, t }) {
   const anteil = Math.max(0, Math.min(1, (score.score ?? 0) / 100));
   const farbe = FARBE_NACH_STUFE[score.level] ?? "var(--color-accent)";
   const ende = bogenPunkt(anteil);
@@ -382,16 +412,44 @@ function ScoreGauge({ score, beitraegeOffen, onToggle, t }) {
         </div>
       </div>
 
-      <button
-        type="button"
-        className="security-report__gauge-toggle"
-        aria-expanded={beitraegeOffen}
-        onClick={onToggle}
-      >
-        {beitraegeOffen
-          ? t("report.security.score.beitraegeZu")
-          : t("report.security.score.beitraegeAuf")}
-      </button>
+      {/* Erklaerzeile: ordnet die Zahl SOFORT mit echten Werten ein. */}
+      <p className="security-report__gauge-einordnung">
+        {t("report.security.score.einordnung", {
+          score: score.score,
+          level: t(`report.security.stufe.${score.level}`),
+          deviceCount: score.deviceCount,
+          criticalDevices: score.criticalDevices,
+          notableDevices: score.notableDevices,
+          cleanDevices: score.cleanDevices,
+        })}
+      </p>
+    </div>
+  );
+}
+
+// ── 3.4 Score-Beitragsliste ("Wie der Score zustande kommt") ──────────────────
+// Eigener Abschnitt MIT Ueberschrift, damit der Zusammenhang zur Score-Zahl klar ist.
+// Am Bildschirm aufklappbar (aria-expanded, Toggle aendert nur die Anzeige); im Druck
+// IMMER offen (CSS forciert .security-report__beitraege auf display:flex). Aufgeklappt:
+// die Beitragsliste als kleine Tabelle plus Formel-Zeile und die saubere-Geraete-Zahl.
+function ScoreBeitraege({ score, beitraegeOffen, onToggle, t }) {
+  return (
+    <section className="security-report__beitraege-abschnitt">
+      <div className="security-report__beitraege-kopf">
+        <h4 className="security-report__abschnitt-titel">
+          {t("report.security.score.beitraegeTitel")}
+        </h4>
+        <button
+          type="button"
+          className="security-report__gauge-toggle"
+          aria-expanded={beitraegeOffen}
+          onClick={onToggle}
+        >
+          {beitraegeOffen
+            ? t("report.security.score.beitraegeZu")
+            : t("report.security.score.beitraegeAuf")}
+        </button>
+      </div>
 
       {/* Aufgeklappt: im Druck IMMER sichtbar (CSS forciert das). */}
       <div
@@ -438,7 +496,7 @@ function ScoreGauge({ score, beitraegeOffen, onToggle, t }) {
           {t("report.security.score.sauber", { anzahl: score.cleanDevices })}
         </p>
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -510,16 +568,19 @@ function SchwereDonut({ kritisch, auffaellig, sauber, deviceCount, t }) {
   );
 }
 
-// ── 3d. Geraete-Balken "Auffaelligkeiten je Geraet" ───────────────────────────
-// Je Geraet mit Befund ein gestapelter Mini-Balken (kritisch + auffaellig). Top-N,
-// Rest als "+ X weitere" Klartext. Kein Geraet mit Befund -> ruhiger Leer-Hinweis.
+// ── 3.5 Geraete-Balken "Auffaelligkeiten je Geraet" ───────────────────────────
+// Je Geraet mit Befund ein gestapelter Mini-Balken (kritisch + auffaellig). Es werden
+// IMMER ALLE Geraete gerendert; am Bildschirm blendet CSS die ueber Top-6 hinausgehenden
+// Zeilen aus (Klasse --ueberzaehlig) und zeigt die "+ X weitere"-Zeile. Im Druck dreht
+// das @media print das um: ALLE Zeilen sichtbar, "+ X weitere" weg -> vollstaendige
+// Liste aufs Papier (kein Aufklappen im PDF moeglich). Keine slice-Doppellogik: die
+// Balkenbreite bezieht sich auf das Maximum ueber ALLE Geraete (auch im Druck stimmig).
 function GeraeteBalken({ geraete, t }) {
   if (geraete.length === 0) {
     return null;
   }
-  const sichtbar = geraete.slice(0, TOP_GERAETE);
-  const rest = geraete.length - sichtbar.length;
-  const maxGesamt = sichtbar.reduce((acc, g) => Math.max(acc, g.gesamt), 0) || 1;
+  const rest = geraete.length - TOP_GERAETE;
+  const maxGesamt = geraete.reduce((acc, g) => Math.max(acc, g.gesamt), 0) || 1;
 
   return (
     <div className="security-report__balken">
@@ -527,8 +588,15 @@ function GeraeteBalken({ geraete, t }) {
         {t("report.security.balken.titel")}
       </div>
       <div className="security-report__balken-liste">
-        {sichtbar.map((g, i) => (
-          <div key={`bal-${i}`} className="security-report__balken-zeile">
+        {geraete.map((g, i) => (
+          <div
+            key={`bal-${i}`}
+            className={
+              i >= TOP_GERAETE
+                ? "security-report__balken-zeile security-report__balken-zeile--ueberzaehlig"
+                : "security-report__balken-zeile"
+            }
+          >
             <span className="security-report__balken-label" title={g.label}>
               {g.label}
             </span>
@@ -581,7 +649,13 @@ function PortTabelle({ findings, t }) {
                 <td>
                   <SeverityBadge severity={p.severity} t={t} />
                 </td>
-                <td>{p.reason}</td>
+                {/* Fix 5: Der rohe Backend-reason ("...Achse-B-Regel") ist internes
+                    Entwickler-Vokabular und gehoert nicht in einen Bericht fuer Menschen.
+                    Da alle Port-Findings aktuell dieselbe uniforme, generische reason
+                    tragen, zeigen wir statt des Roh-Strings einen verstaendlichen i18n-
+                    Text (kein fragiles String-Matching). Truege reason je Fund einen
+                    spezifischen Grund, muesste man hier differenzieren — derzeit nicht. */}
+                <td>{t("report.security.portGrund")}</td>
               </tr>
             ))}
           </tbody>
@@ -593,46 +667,73 @@ function PortTabelle({ findings, t }) {
   );
 }
 
-// ── 4.2 CVE-Tabelle ───────────────────────────────────────────────────────────
+// CVE-Badge-Ton nach cvssScore: >= 9.0 dunkles kritisch-Rot, sonst auffaellig-Orange
+// (reine ANZEIGE-Einordnung des cvssScore, kein Score-Eingriff).
+function cveBadgeKlasse(cvssScore) {
+  return (cvssScore ?? 0) >= 9.0
+    ? "security-report__badge security-report__badge--kritisch"
+    : "security-report__badge security-report__badge--auffaellig";
+}
+
+// Gruppiert CVE-Befunde nach Geraet. Pro Geraet die CVEs nach cvssScore absteigend;
+// die Geraete-Reihenfolge nach hoechstem cvssScore des Geraets absteigend (schwerstes
+// Geraet zuerst), bei Gleichstand nach deviceLabel. Reine ANZEIGE-Sortierung.
+function gruppiereCvesNachGeraet(findings) {
+  const proGeraet = new Map(); // deviceLabel -> CVE-Liste
+  for (const c of findings) {
+    const liste = proGeraet.get(c.deviceLabel) ?? [];
+    liste.push(c);
+    proGeraet.set(c.deviceLabel, liste);
+  }
+  return Array.from(proGeraet.entries())
+    .map(([deviceLabel, cves]) => {
+      const sortiert = [...cves].sort((a, b) => (b.cvssScore ?? 0) - (a.cvssScore ?? 0));
+      const maxScore = sortiert.reduce((acc, c) => Math.max(acc, c.cvssScore ?? 0), 0);
+      return { deviceLabel, cves: sortiert, maxScore };
+    })
+    .sort((a, b) => b.maxScore - a.maxScore || a.deviceLabel.localeCompare(b.deviceLabel));
+}
+
+// ── 4.2 CVE-Befunde (nach Geraet gruppiert) ───────────────────────────────────
+// Pro Geraet ein Block: Geraete-Ueberschrift + kleine Tabelle (CVE-ID | CVSS-Badge |
+// Dienst | Beschreibung). Beschreibung darf umbrechen. Token-Farben, alles i18n.
 function CveTabelle({ findings, t }) {
+  const gruppen = useMemo(() => gruppiereCvesNachGeraet(findings), [findings]);
+
   return (
     <Abschnitt nummer="2" titel={t("report.security.tabelle.cve")}>
-      {findings.length > 0 ? (
-        <table className="security-report__tabelle">
-          <thead>
-            <tr>
-              <th>{t("report.security.spalte.geraet")}</th>
-              <th>{t("report.security.spalte.cve")}</th>
-              <th className="security-report__num">{t("report.security.spalte.cvss")}</th>
-              <th>{t("report.security.spalte.dienst")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {findings.map((c, i) => {
-              // CVSS-Badge-Ton: >= 9.0 dunkles kritisch-Rot, sonst auffaellig-Orange
-              // (reine ANZEIGE-Einordnung des cvssScore, kein Score-Eingriff).
-              const istKritisch = (c.cvssScore ?? 0) >= 9.0;
-              return (
-                <tr key={`cve-${i}`}>
-                  <td>{c.deviceLabel}</td>
-                  <td className="security-report__mono">{c.cveId}</td>
-                  <td className="security-report__num">
-                    <span
-                      className={
-                        istKritisch
-                          ? "security-report__badge security-report__badge--kritisch"
-                          : "security-report__badge security-report__badge--auffaellig"
-                      }
-                    >
-                      {formatLast(c.cvssScore)}
-                    </span>
-                  </td>
-                  <td>{c.service}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+      {gruppen.length > 0 ? (
+        <div className="security-report__cve-gruppen">
+          {gruppen.map((gruppe, gi) => (
+            <div key={`cve-grp-${gi}`} className="security-report__cve-gruppe">
+              <p className="security-report__cve-geraet">{gruppe.deviceLabel}</p>
+              <table className="security-report__tabelle">
+                <thead>
+                  <tr>
+                    <th>{t("report.security.spalte.cve")}</th>
+                    <th className="security-report__num">{t("report.security.spalte.cvss")}</th>
+                    <th>{t("report.security.spalte.dienst")}</th>
+                    <th>{t("report.security.spalte.beschreibung")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {gruppe.cves.map((c, i) => (
+                    <tr key={`cve-${gi}-${i}`}>
+                      <td className="security-report__mono">{c.cveId}</td>
+                      <td className="security-report__num">
+                        <span className={cveBadgeKlasse(c.cvssScore)}>
+                          {formatLast(c.cvssScore)}
+                        </span>
+                      </td>
+                      <td>{c.service}</td>
+                      <td className="security-report__cve-beschreibung">{c.description}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))}
+        </div>
       ) : (
         <p className="security-report__leer">{t("report.security.tabelle.leer")}</p>
       )}

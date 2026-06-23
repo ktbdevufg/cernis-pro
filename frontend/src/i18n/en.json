@@ -943,16 +943,21 @@
   },
   "reporting": {
     "cards": {
-      "report": {
-        "title": "Create report",
-        "subtitle": "Compile observations and findings into a report.",
+      "security": {
+        "title": "Network Security Report",
+        "subtitle": "Score, notable ports, CVE findings and network anomalies in one report.",
         "locked": ""
       }
     }
   },
   "report": {
     "security": {
-      "titel": "Security report",
+      "titel": "Network security report",
+      "kopf": {
+        "erstellt": "Created on {{datum}}"
+      },
+      "einleitung": "This report summarises the network's security state from the latest scan. It describes and contextualises the findings – it does not pass judgement.",
+      "fusszeile": "CERNIS PRO 2.0 — Professional Network Scanner & Monitor · Created on {{datum}}",
       "ladeFehler": "The security report could not be loaded.",
       "keinScan": "No scan yet – please run a network scan first.",
       "stufe": {
@@ -964,6 +969,8 @@
       "score": {
         "von": "out of 100",
         "aria": "Security score {{score}} out of 100",
+        "einordnung": "Network health: {{score}} out of 100 ({{level}}). {{deviceCount}} devices assessed; of those {{criticalDevices}} critical, {{notableDevices}} notable, {{cleanDevices}} without findings.",
+        "beitraegeTitel": "How the score is calculated",
         "beitraegeAuf": "Show contributions",
         "beitraegeZu": "Hide contributions",
         "formel": "Score = 100 × (1 − total burden {{last}} / {{geraete}} devices)",
@@ -1012,6 +1019,7 @@
         "cve": "CVE",
         "net": "Network"
       },
+      "portGrund": "Open ports flagged by CERNIS as unusual",
       "quittiertHinweis": "Acknowledged – not counted in the score.",
       "fussnote": "This report describes and contextualises – it does not pass judgement.",
       "rogue": {

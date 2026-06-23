@@ -943,16 +943,21 @@
   },
   "reporting": {
     "cards": {
-      "report": {
-        "title": "Bericht erstellen",
-        "subtitle": "Beobachtungen und Befunde als Bericht zusammenstellen.",
+      "security": {
+        "title": "Netzwerk-Sicherheitsbericht",
+        "subtitle": "Score, auffällige Ports, CVE-Befunde und Netz-Auffälligkeiten in einem Bericht.",
         "locked": ""
       }
     }
   },
   "report": {
     "security": {
-      "titel": "Sicherheitsbericht",
+      "titel": "Netzwerk-Sicherheitsbericht",
+      "kopf": {
+        "erstellt": "Erstellt am {{datum}}"
+      },
+      "einleitung": "Dieser Bericht fasst den Sicherheitszustand des Netzwerks aus dem letzten Scan zusammen. Er beschreibt und ordnet die Befunde ein – er fällt kein Urteil.",
+      "fusszeile": "CERNIS PRO 2.0 — Professional Network Scanner & Monitor · Erstellt am {{datum}}",
       "ladeFehler": "Der Sicherheitsbericht konnte nicht geladen werden.",
       "keinScan": "Noch kein Scan vorhanden – bitte zuerst einen Netzwerk-Scan durchführen.",
       "stufe": {
@@ -964,6 +969,8 @@
       "score": {
         "von": "von 100",
         "aria": "Sicherheits-Score {{score}} von 100",
+        "einordnung": "Netz-Gesundheit: {{score}} von 100 ({{level}}). Bewertet wurden {{deviceCount}} Geräte; davon {{criticalDevices}} kritisch, {{notableDevices}} auffällig, {{cleanDevices}} ohne Befund.",
+        "beitraegeTitel": "Wie der Score zustande kommt",
         "beitraegeAuf": "Beiträge anzeigen",
         "beitraegeZu": "Beiträge ausblenden",
         "formel": "Score = 100 × (1 − Gesamtlast {{last}} / {{geraete}} Geräte)",
@@ -1012,6 +1019,7 @@
         "cve": "CVE",
         "net": "Netz"
       },
+      "portGrund": "Offene Ports, die CERNIS als ungewöhnlich einstuft",
       "quittiertHinweis": "Bestätigt – nicht in der Wertung.",
       "fussnote": "Dieser Bericht beschreibt und ordnet ein – er fällt kein Urteil.",
       "rogue": {
