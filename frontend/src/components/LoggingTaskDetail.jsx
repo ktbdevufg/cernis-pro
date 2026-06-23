@@ -452,7 +452,8 @@ export default function LoggingTaskDetail({ taskId, onZurueck }) {
         </>
       )}
 
-      {/* ── Export-Zeile (PDF/CSV/JSON) ──────────────────────────────────────── */}
+      {/* ── Export-Zeile (PDF/CSV/JSON) — nur im Bericht-Reiter ──────────────── */}
+      {ansicht === "bericht" && (
       <div className="logging-detail__export">
         <span className="logging-detail__export-titel">
           <FileText size={15} aria-hidden="true" />
@@ -496,6 +497,7 @@ export default function LoggingTaskDetail({ taskId, onZurueck }) {
           </span>
         )}
       </div>
+      )}
 
       {laedt && <div className="logging-detail__laedt" aria-hidden="true" />}
     </div>
