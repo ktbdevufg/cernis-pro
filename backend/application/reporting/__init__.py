@@ -1,6 +1,13 @@
 """Use-Cases der reporting-Domaene (Sicherheitsbericht)."""
 
 from application.reporting.build_report_use_case import BuildSecurityReport
+from application.reporting.security_pdf_model import (
+    ACK_COLUMNS,
+    CVE_COLUMNS,
+    NET_COLUMNS,
+    PORT_COLUMNS,
+    SecurityPdfModel,
+)
 from application.reporting.security_report import (
     CveFinding,
     NetFinding,
@@ -18,12 +25,17 @@ from application.reporting.security_score import (
 )
 
 __all__ = [
+    "ACK_COLUMNS",
+    "CVE_COLUMNS",
+    "NET_COLUMNS",
+    "PORT_COLUMNS",
     "BuildSecurityReport",
     "CveFinding",
     "DeviceBurden",
     "NetFinding",
     "PortFinding",
     "ScoreContribution",
+    "SecurityPdfModel",
     "SecurityReport",
     "SecurityScore",
     "build_device_burdens",
