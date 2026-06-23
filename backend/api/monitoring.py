@@ -56,6 +56,7 @@ from pydantic import BaseModel
 
 from application.monitoring import (
     AddMonitorTarget,
+    BehaviorProfile,
     CheckLogVolume,
     CreateLoggingTask,
     DeleteLoggingTask,
@@ -77,11 +78,13 @@ from application.monitoring import (
     ManageSchedules,
     OutageInterval,
     PauseLoggingTask,
+    ProfileSample,
     ResumeLoggingTask,
     SeriesAnalysis,
     StartLoggingTask,
     StopLoggingTask,
     UpdateSchedule,
+    analyze_behavior,
     analyze_series,
 )
 
@@ -447,6 +450,41 @@ def _series_analysis_to_dict(analysis: SeriesAnalysis) -> dict[str, Any]:
                 "max_rtt_ms": slot.max_rtt_ms,
             }
             for slot in analysis.latency_slots
+        ],
+    }
+
+
+def _behavior_profile_to_dict(profile: BehaviorProfile) -> dict[str, Any]:
+    """``BehaviorProfile`` -> Wire-dict des Verhaltensprofils (Block 4, Etappe 2).
+
+    Projiziert das Gesamtergebnis je verschachtelten Datentraeger (Muster
+    ``_series_analysis_to_dict``: die zeitfreie Aggregation liefert die Domaenen-Daten,
+    dieser Rand baut die Wire-Form). Alle Felder ROH durchgereicht -- keine Rundung, keine
+    Anzeige-Entscheidung (``day_band``/``week_heatmap`` sind auch bei ``has_enough_data``
+    ``False`` befuellt, ueber die Anzeige entscheidet das Frontend). ``day_band`` ist die
+    ueber alle Wochentage gemittelte Tagesband-Sicht, ``week_heatmap`` die Wochen-Heatmap
+    (Wochentag x Tageszeit-Slot).
+    """
+    return {
+        "recorded_days": profile.recorded_days,
+        "has_enough_data": profile.has_enough_data,
+        "deviation_count": profile.deviation_count,
+        "day_band": [
+            {
+                "slot_start": slot.slot_start,
+                "activity_count": slot.activity_count,
+                "is_deviation": slot.is_deviation,
+            }
+            for slot in profile.day_band
+        ],
+        "week_heatmap": [
+            {
+                "weekday": slot.weekday,
+                "slot_start": slot.slot_start,
+                "activity_count": slot.activity_count,
+                "is_deviation": slot.is_deviation,
+            }
+            for slot in profile.week_heatmap
         ],
     }
 
@@ -876,6 +914,35 @@ def _enrich_rtt_local(rtt: list[Any]) -> list[EnrichedRttSample]:
     return enriched
 
 
+def _enrich_behavior_local(rtt: list[Any]) -> list[ProfileSample]:
+    """Reichert je RTT-Sample die lokalen Zeit-Felder fuer das Verhaltensprofil an.
+
+    Zwillings-Naht zu ``_enrich_rtt_local`` (Latenz-Achse), nur fuer die andere
+    Aggregation: das Verhaltensprofil (``analyze_behavior``) rechnet bewusst KEINE
+    Wanduhr (zeitfrei, ADR 0002) -- die Umrechnung Unix-``ts`` -> ``weekday``/
+    ``minute_of_day``/``day_key`` gehoert an den Router-Rand, der die Server-Zeitzone
+    nutzen DARF. ``datetime.fromtimestamp`` ohne ``tz`` ist die lokale Zeit;
+    ``weekday`` = ``date().weekday()`` (0..6, Mo=0), ``minute_of_day`` = lokale
+    Stunde*60 + Minute (0..1439), ``day_key`` = lokales ISO-Datum (``date().isoformat()``).
+    ``alive`` wird roh durchgereicht -- die Belegungs-/Aktivitaets-Zaehlung macht
+    ``analyze_behavior`` (nur ``alive``-Samples zaehlen). Die Samples kommen als rohe
+    Domaenen-Objekte herein (Typ ``Any``, wie ``_enrich_rtt_local`` -- der api-Ring
+    importiert keine ``domain``-Typen).
+    """
+    enriched: list[ProfileSample] = []
+    for sample in rtt:
+        local = datetime.fromtimestamp(sample.ts)
+        enriched.append(
+            ProfileSample(
+                weekday=local.date().weekday(),
+                minute_of_day=local.hour * 60 + local.minute,
+                day_key=local.date().isoformat(),
+                alive=sample.alive,
+            )
+        )
+    return enriched
+
+
 @router.get("/monitor/logging/{task_id}/series")
 def logging_task_series(
     task_id: str,
@@ -914,6 +981,39 @@ def logging_task_series(
         enriched_rtt,
     )
     return _series_analysis_to_dict(analysis)
+
+
+@router.get("/monitor/logging/{task_id}/behavior")
+def logging_task_behavior(
+    task_id: str,
+    get_detail: Annotated[GetLoggingTaskDetail, Depends(provide_get_logging_task_detail)],
+    get_rtt: Annotated[GetLoggingTaskRtt, Depends(provide_get_logging_task_rtt)],
+    since: Annotated[float | None, Query()] = None,
+    until: Annotated[float | None, Query()] = None,
+    slot_minutes: Annotated[int, Query(ge=15, le=60)] = 60,
+) -> dict[str, Any]:
+    """Verhaltensprofil EINER Logging-Aufgabe (Block 4, Etappe 2). 404 bei unbekannter id.
+
+    ZEIT-ACHSE: laedt Task (fuer 404) und die dichten RTT-Samples derselben Serie wie
+    ``/series`` (``since``/``until`` ueber denselben ``GetLoggingTaskRtt``). Die lokale
+    Umrechnung Unix-``ts`` -> ``weekday``/``minute_of_day``/``day_key`` macht
+    ``_enrich_behavior_local`` am Router-Rand (die zeitfreie ``analyze_behavior`` rechnet
+    keine Wanduhr); ``slot_minutes``/``min_days``/``day_min_coverage``/``deviation_factor``
+    nutzen in dieser Etappe die Funktions-Defaults (nur ``slot_minutes`` ist Query, 15..60).
+    Die Wire-Form baut ``_behavior_profile_to_dict``.
+
+    Die ZIELE-ACHSE ist bewusst auf spaeter verschoben (eigener Block): der Außenkontakte-
+    Lesepfad ist HOST-GLOBAL und erlaubt keine geraetegenaue Task-/Geraete-Zuordnung -- eine
+    Zielliste in einem geraetespezifischen Profil waere eine Scheinzuordnung (S3).
+    """
+    try:
+        get_detail(task_id)
+    except LoggingTaskNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    rtt = get_rtt(task_id, since=since, until=until)
+    samples = _enrich_behavior_local(rtt)
+    profile = analyze_behavior(samples, slot_minutes=slot_minutes)
+    return _behavior_profile_to_dict(profile)
 
 
 @router.post("/monitor/logging/{task_id}/start")
