@@ -165,7 +165,7 @@
     "overview": "Overview",
     "observe": "Observe",
     "investigate": "Investigate",
-    "export": "Export",
+    "reporting": "Reporting",
     "devices": "Devices"
   },
   "placeholder": {
@@ -940,7 +940,7 @@
       }
     }
   },
-  "export": {
+  "reporting": {
     "cards": {
       "report": {
         "title": "Create report",

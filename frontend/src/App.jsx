@@ -10,7 +10,7 @@ import TabNav, { REITER } from "./components/TabNav.jsx";
 // Die grossen Views werden erst bei Bedarf geladen (Code-Splitting), damit der
 // Haupt-Chunk klein bleibt. AppHeader/TabNav bleiben statisch (immer sichtbar).
 const DevicesView = lazy(() => import("./views/DevicesView.jsx"));
-const ExportView = lazy(() => import("./views/ExportView.jsx"));
+const ReportingView = lazy(() => import("./views/ReportingView.jsx"));
 const InvestigateView = lazy(() => import("./views/InvestigateView.jsx"));
 const ManualView = lazy(() => import("./views/ManualView.jsx"));
 const ObserveView = lazy(() => import("./views/ObserveView.jsx"));
@@ -169,7 +169,7 @@ export default function App() {
                   onFunktionGeoeffnet={() => setInvestigateFunktion(null)}
                 />
               )}
-              {activeTab === "export" && <ExportView />}
+              {activeTab === "reporting" && <ReportingView />}
               {activeTab === "devices" && <DevicesView />}
             </>
           )}

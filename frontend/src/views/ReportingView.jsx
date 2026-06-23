@@ -1,5 +1,5 @@
-// Export-Ansicht (CERNIS PRO 2.0)
-// Kachel-Übersicht der Export-Funktionen. Klick auf eine aktive Kachel öffnet
+// Reporting-Ansicht (CERNIS PRO 2.0)
+// Kachel-Übersicht der Reporting-Funktionen. Klick auf eine aktive Kachel öffnet
 // vorerst einen "in Arbeit"-Platzhalter mit Zurück-Weg.
 //
 // Funktionen:
@@ -19,7 +19,7 @@ import FunctionCard from "../components/FunctionCard.jsx";
 // Kachel-Definition: Schlüssel, Icon, Sperrstatus. Reihenfolge ist verbindlich.
 const FUNKTIONEN = [{ id: "report", icon: FileText, locked: false }];
 
-export default function ExportView() {
+export default function ReportingView() {
   const { t } = useTranslation();
   // null -> Kachel-Übersicht; sonst die geöffnete Funktion.
   const [openFunction, setOpenFunction] = useState(null);
@@ -27,7 +27,7 @@ export default function ExportView() {
   if (openFunction) {
     return (
       <FunctionShell
-        title={t(`export.cards.${openFunction}.title`)}
+        title={t(`reporting.cards.${openFunction}.title`)}
         onBack={() => setOpenFunction(null)}
       >
         <InProgress />
@@ -41,10 +41,10 @@ export default function ExportView() {
         <FunctionCard
           key={id}
           icon={icon}
-          title={t(`export.cards.${id}.title`)}
-          subtitle={t(`export.cards.${id}.subtitle`)}
+          title={t(`reporting.cards.${id}.title`)}
+          subtitle={t(`reporting.cards.${id}.subtitle`)}
           locked={locked}
-          lockedReason={locked ? t(`export.cards.${id}.locked`) : undefined}
+          lockedReason={locked ? t(`reporting.cards.${id}.locked`) : undefined}
           onOpen={() => setOpenFunction(id)}
         />
       ))}

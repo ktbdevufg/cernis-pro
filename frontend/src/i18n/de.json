@@ -165,7 +165,7 @@
     "overview": "Überblick",
     "observe": "Beobachten",
     "investigate": "Untersuchen",
-    "export": "Export",
+    "reporting": "Reporting",
     "devices": "Geräte"
   },
   "placeholder": {
@@ -940,7 +940,7 @@
       }
     }
   },
-  "export": {
+  "reporting": {
     "cards": {
       "report": {
         "title": "Bericht erstellen",
