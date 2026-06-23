@@ -1,5 +1,6 @@
 """Use-Cases der reporting-Domaene (Sicherheitsbericht)."""
 
+from application.reporting.build_report_use_case import BuildSecurityReport
 from application.reporting.security_report import (
     CveFinding,
     NetFinding,
@@ -16,6 +17,7 @@ from application.reporting.security_score import (
 )
 
 __all__ = [
+    "BuildSecurityReport",
     "CveFinding",
     "DeviceBurden",
     "NetFinding",

@@ -237,6 +237,7 @@ from application.capture import (
     StartCapture,
 )
 from application.cve import (
+    ActiveFinding,
     GetAcknowledgedFindings,
     GetActiveFindings,
     GetCveMonitorStatus,
@@ -260,6 +261,7 @@ from application.diagnostics import (
     CheckTraceroutePermission,
     DetectRogueDhcp,
     EnrichRouteOrgs,
+    GetLatestRogueDhcp,
     GrabBanner,
     ResolveDns,
     RogueDhcpPermissionError,
@@ -307,6 +309,19 @@ from application.monitoring import (
 from application.monitoring.scheduler_handler import MonitoringWindowHandler
 from application.outbound import BuildOutboundContacts, RawConnection
 from application.process import CheckProcessPermission, ListProcesses
+from application.reporting import (
+    BuildSecurityReport,
+    SecurityReport,
+)
+from application.reporting import (
+    CveFinding as ReportCveFinding,
+)
+from application.reporting import (
+    NetFinding as ReportNetFinding,
+)
+from application.reporting import (
+    PortFinding as ReportPortFinding,
+)
 from application.resolver import ResolveEndpoint, ResolvePtrBatch
 from application.scanning import (
     GetArpTable,
@@ -2910,6 +2925,182 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.include_router(dns_watch_router)
     app.dependency_overrides[provide_dns_watch] = lambda: _dns_watch
     app.dependency_overrides[provide_dns_watch_acknowledge] = lambda: _dns_watch_acknowledge
+
+    # ── Sicherheitsbericht: Fuenf-Quellen-Projektion (Etappe 2b, Regel 5/Composition Root) ──
+    # DIESE Naht KENNT alle fuenf Quell-Domaenen (analysis/cve/security/dns_watch/diagnostics)
+    # und darf laut import-linter NUR hier im Composition Root liegen. Sie ruft die fuenf
+    # echten Quellen ab, projiziert sie auf die NEUTRALEN Berichts-Typen (ReportPortFinding/
+    # ReportCveFinding/ReportNetFinding) und reicht die fertigen Listen an den duennen
+    # Use-Case ``BuildSecurityReport`` -> ``build_security_report``. KEIN HTTP-Endpunkt (das
+    # ist Etappe 2c); hier nur die ehrliche Datenseite. Die Funktion ist async (zwei Quellen
+    # -- DNS-Waechter, jueng. Scan-Helfer -- sind ohnehin async im Bestand) und gibt den
+    # fertigen ``SecurityReport`` zurueck; der spaetere Endpunkt ruft sie und serialisiert.
+    async def _build_security_report_data() -> SecurityReport:
+        # (1) JUENGSTER SCAN als Basis (analysis-Schnitt-B-Muster, list(1)->get->record.hosts,
+        # ausfallsicher). Kein Scan / kaputter Scan -> ehrlich leere Basis: leere
+        # device_labels + leere Findings -> build_security_report liefert Score 100 ueber
+        # leere Basis. Den HTTP-seitigen "kein Scan"-Hinweis macht erst Etappe 2c.
+        base_hosts: list[EnrichedHost] = []
+        summaries = scan_history_repository().list(1)
+        if summaries:
+            try:
+                record = scan_history_repository().get(summaries[0].scan_id)
+            except CorruptScanError:
+                logger.warning(
+                    "security_report.base_scan_skipped_corrupt", scan_id=summaries[0].scan_id
+                )
+                record = None
+            if record is not None:
+                base_hosts = list(record.hosts)
+
+        # device_label EINES Scan-Hosts: kuratierter Anzeigename (label) falls vorhanden,
+        # sonst hostname, sonst ip, sonst mac. EINE Quelle der Label-Bildung (auch der ARP-/
+        # DNS-/Rogue-Match-Schluessel unten nutzt ip/mac konsistent zu dieser Reihenfolge).
+        def _host_label(host: EnrichedHost) -> str:
+            return host.label or host.hostname or host.ip or host.mac
+
+        # (7) device_labels = ALLE Geraete des juengsten Scans (Basis N), unabhaengig davon ob
+        # sie Findings haben. Das ``archived``-Flag existiert noch nicht -> alle zaehlen; der
+        # archived-Ausschluss dockt spaeter GENAU HIER an (Vorfilter der base_hosts).
+        device_labels = [_host_label(host) for host in base_hosts]
+        # Schneller mac/ip -> device_label-Index der Basis fuer das Zuordnen der quellen-
+        # eigenen Schluessel (CVE liefert mac/ip, ARP ip, DNS remote_ip). Ein Quell-Befund
+        # OHNE Basis-Treffer behaelt seinen eigenen Schluessel als Label (s. Kommentar (8)).
+        label_by_mac = {host.mac: _host_label(host) for host in base_hosts if host.mac}
+        label_by_ip = {host.ip: _host_label(host) for host in base_hosts if host.ip}
+
+        # (2) PORTS: je Host die Achse-B-Bewertung ueber GENAU die vorhandenen Helfer + denselben
+        # gefilterten Provider (Single Source, Konsistenz-Invariante NICHT brechen). acked je
+        # Host aus dem Acknowledge-Repo abziehen (wie der WS-Pfad). Aus flagged_ports je Stufe
+        # ("critical"/"notable") EINEN PortFinding bauen (nur Hosts MIT geflaggten Ports).
+        # ``_flagged_ports_for_host`` zieht ``acked`` VOR der Schnittbildung ab -- ein
+        # quittierter Port wird nicht mehr geflaggt (darum entfaellt eine ack_port-Liste:
+        # quittierte Ports erscheinen schlicht nicht in den offenen flagged_ports).
+        provider = _build_filtered_provider(analysis_rule_repository(), repository())
+        acknowledged_ports = acknowledgement_repository().acknowledged_ports
+        port_findings: list[ReportPortFinding] = []
+        for host in base_hosts:
+            acked = frozenset(acknowledged_ports(host.mac)) if host.mac else frozenset()
+            flagged = _flagged_ports_for_host(host, provider, acked)
+            label = _host_label(host)
+            for severity in _FLAGGED_SEVERITIES:
+                ports = flagged.get(severity, [])
+                if not ports:
+                    continue
+                port_findings.append(
+                    ReportPortFinding(
+                        device_label=label,
+                        ports=", ".join(str(p) for p in sorted(ports)),
+                        severity=severity,
+                        # Klartext-Grund ohne Mehraufwand/Raten: die getroffenen Ports kommen
+                        # ausschliesslich aus host_remote_port-Regeln (ADR 0030) -- eine
+                        # generische, ehrliche Begruendung statt einer fragil rekonstruierten
+                        # Einzelregel-Beschreibung (kein Raten).
+                        reason="auffaellige offene Ports (Achse-B-Regel)",
+                    )
+                )
+
+        # (3) CVE: aktive Befunde -> ReportCveFinding (severity ROH mitgefuehrt, die Burden-
+        # Einstufung laeuft ueber cvss_score). Quittierte -> ack_cve (Spiegelbild). device_label
+        # via mac/ip aus der Basis, sonst der Roh-Schluessel (mac||ip) des Befunds selbst.
+        def _cve_label(mac: str, ip: str) -> str:
+            return label_by_mac.get(mac) or label_by_ip.get(ip) or mac or ip
+
+        def _project_cves(findings: list[ActiveFinding]) -> list[ReportCveFinding]:
+            return [
+                ReportCveFinding(
+                    device_label=_cve_label(f.mac, f.ip),
+                    cve_id=f.cve_id,
+                    cvss_score=f.cvss_score,
+                    severity=f.severity,
+                    service=f.service,
+                )
+                for f in findings
+            ]
+
+        cve_active = GetActiveFindings(cve_finding_repository(), cve_acknowledgement_repository())()
+        cve_acked = GetAcknowledgedFindings(
+            cve_finding_repository(), cve_acknowledgement_repository()
+        )()
+        cve_findings = _project_cves(cve_active)
+        ack_cve = _project_cves(cve_acked)
+
+        net_findings: list[ReportNetFinding] = []
+        ack_net: list[ReportNetFinding] = []
+
+        # (4) ARP: je Alert ein NetFinding. severity-Mapping ARP "high"->"critical",
+        # "medium"->"notable" (alles andere konservativ "notable"). device_label = betroffene
+        # ip (via Basis gemappt, sonst die ip selbst); description aus den echten
+        # ArpAlertRecord-Feldern (message + alte/neue MAC), kein Raten. ARP-Alerts kennen kein
+        # Quittieren (E.1: Momentaufnahme je Scan) -> nur offene net_findings.
+        arp_alerts = GetArpAlerts(arp_guard_repository())()
+        for alert in arp_alerts:
+            net_findings.append(
+                ReportNetFinding(
+                    kind="IP-Konflikt",
+                    device_label=label_by_ip.get(alert.ip) or alert.ip,
+                    description=(
+                        f"{alert.message} (alt {alert.old_mac} -> neu {alert.new_mac})"
+                        if alert.old_mac or alert.new_mac
+                        else alert.message
+                    ),
+                    severity="critical" if alert.severity == "high" else "notable",
+                )
+            )
+
+        # (5) DNS-UMGEHUNG: BuildDnsWatch-Overview ueber die schon verdrahtete _dns_watch-Naht
+        # holen (kein Re-Wiring). NUR "offen"/"moegliche_doh" werden NetFindings (kind
+        # "DNS-Umgehung"); "erwartungsgemaess" NICHT. severity konservativer Default "notable"
+        # -- HINWEIS: das DNS-Umgehungs-Severity-Mapping wird spaeter ein editierbares
+        # analysis-Setting (dann hier andocken). Quittierte (acknowledged) -> ack_net.
+        dns_category_text = {"offen": "offen", "moegliche_doh": "moegliche DoH"}
+        dns_overview = await _dns_watch()
+        for contact in dns_overview.contacts:
+            if contact.category not in dns_category_text:
+                continue
+            finding = ReportNetFinding(
+                kind="DNS-Umgehung",
+                device_label=contact.remote_ip or (contact.hostname or ""),
+                description=f"DNS-Kontakt eingestuft als {dns_category_text[contact.category]}",
+                severity="notable",
+            )
+            (ack_net if contact.acknowledged else net_findings).append(finding)
+
+        # (6) ROGUE-DHCP: letzten gespeicherten Stand lesen (kein aktiver, root-pflichtiger
+        # Probe). None -> KEIN NetFinding (Etappe 2c zeigt den "noch nie geprueft"-Hinweis).
+        # Stand mit has_unexpected True -> je UNERWARTETEM Server (is_expected False) ein
+        # NetFinding (severity "critical" -- ein fremder DHCP-Server ist ernst). checked_ts
+        # kommt aus dem GESPEICHERTEN Stand (KEINE neue Wanduhr), nur formatiert.
+        rogue = GetLatestRogueDhcp(rogue_dhcp_repository())()
+        if rogue is not None and rogue.has_unexpected:
+            checked_date = datetime.fromtimestamp(rogue.checked_ts).strftime("%Y-%m-%d %H:%M")
+            for server in rogue.servers:
+                if server.is_expected:
+                    continue
+                net_findings.append(
+                    ReportNetFinding(
+                        kind="Rogue-DHCP",
+                        device_label=server.ip,
+                        description=f"Unerwarteter DHCP-Server entdeckt (geprueft {checked_date})",
+                        severity="critical",
+                    )
+                )
+
+        # (8) ARP/DNS/Rogue-Findings, deren device_label NICHT in device_labels ist (fremdes
+        # Geraet), bleiben TROTZDEM in den Findings-Listen (echte Befunde -> erscheinen in den
+        # Berichts-Tabellen). build_device_burdens ordnet Findings per device_label den
+        # Basis-Geraeten zu: ein Finding auf einem Nicht-Basis-Label findet kein Basis-Geraet
+        # und hebt damit den Score NICHT (die Score-Basis N bleibt der Scan-Bestand) -- das ist
+        # akzeptabel und ehrlich (keine kuenstliche Basis-Erweiterung).
+        return BuildSecurityReport()(
+            device_labels=device_labels,
+            port_findings=port_findings,
+            cve_findings=cve_findings,
+            net_findings=net_findings,
+            ack_port=[],
+            ack_cve=ack_cve,
+            ack_net=ack_net,
+        )
 
     # ── Route zum Ziel (ADR 0036): traceroute-Hops + Geo/ASN, zwei getrennte Naehte ──
     # Regel 5: die Quer-Domaenen-Naht (diagnostics-Hops + resolver-Geo/RDAP) faellt
