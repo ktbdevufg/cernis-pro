@@ -60,6 +60,22 @@ Block 3:
   ``CheckTraceroutePermission``): ``is_available`` -> ``check_permission`` -> dict.
   ``ok=False`` + Text, wenn nmap fehlt ODER kein Root (Rogue-DHCP ist root-pflichtig ohne
   Alternative -- anders als traceroute KEINE rootless Methode).
+* ``GetLatestRogueDhcp`` -- duenner Lese-Pass-Through ueber den ``RogueDhcpStore`` (ADR
+  0038): liefert den letzten gespeicherten Stand (``LatestRogueDhcp``) oder ``None`` (noch
+  nie geprueft). Stil wie ``ResolveDns`` -- der Bericht liest den Stand, ohne einen aktiven
+  (root-pflichtigen) Probe auszuloesen.
+
+Block 3 / Persistenz (ADR 0038): ``DetectRogueDhcp`` bekommt einen OPTIONALEN
+``RogueDhcpStore`` injiziert und speichert nach JEDEM erfolgreichen Lauf UEBERSCHREIBEND den
+letzten Stand. Warum die Schreibnaht IM Use-Case (nicht erst am Composition Root): der
+bestehende Stil verdrahtet Persistenz-Nebenwirkungen in den Use-Case (Muster
+``RunArpScan`` -> ``ArpGuardRepository``; ``DetectRogueDhcp`` liest ohnehin schon
+``SettingsRepository``/``InterfaceDiscoveryPort``) -- so bleibt "speichere den letzten
+Lauf" eine einzige, getestete Naht statt einer am Composition Root nachgeklebten. Der Store
+ist OPTIONAL (Default ``None`` = nicht persistieren), damit reine Erkennungs-Aufrufe (und
+die bestehenden Tests) ohne Speicher weiterlaufen. ``checked_ts`` kommt als PARAMETER von
+``__call__`` herein (vom Composition Root, ``time.time()``) -- KEINE Wanduhr im Use-Case
+(Muster der zeitfreien Use-Cases ``cve.RunDripCheck(now, ...)`` / monitoring; S3-konform).
 """
 
 from collections.abc import Awaitable, Callable, Sequence
@@ -86,7 +102,9 @@ from ports.diagnostics import (
     DhcpProbe,
     DnsResolver,
     ExternalReachabilityProvider,
+    LatestRogueDhcp,
     PackageManagerDetector,
+    RogueDhcpStore,
     ToolDetector,
     TraceroutePermissionPort,
     TracerouteRunner,
@@ -493,13 +511,17 @@ class DetectRogueDhcp:
         permission: DhcpPermissionPort,
         settings_repo: SettingsRepository,
         interfaces: InterfaceDiscoveryPort,
+        store: RogueDhcpStore | None = None,
     ) -> None:
         self._probe = probe
         self._permission = permission
         self._settings_repo = settings_repo
         self._interfaces = interfaces
+        # OPTIONAL (ADR 0038): ist ein Store injiziert, wird der letzte erfolgreiche Lauf
+        # ueberschreibend gespeichert; sonst (Default None) reine Erkennung ohne Persistenz.
+        self._store = store
 
-    async def __call__(self) -> RogueDhcpResult:
+    async def __call__(self, checked_ts: float | None = None) -> RogueDhcpResult:
         """Fuehrt die Rogue-DHCP-Erkennung aus -> ``RogueDhcpResult``.
 
         Erst die Rechte-Pruefung (root-pflichtig): nmap fehlt ODER kein Root ->
@@ -507,6 +529,11 @@ class DetectRogueDhcp:
         Menge bestimmen (Setting ODER Gateway-Fallback), das DHCP DISCOVER ueber den Probe
         senden und die rohen Funde + erwartete Menge an die reine domain-Funktion
         ``classify_dhcp_servers`` uebergeben.
+
+        Persistenz (ADR 0038): ist ein ``RogueDhcpStore`` injiziert UND ``checked_ts``
+        gegeben (Unix-ts vom Composition Root, ``time.time()`` -- KEINE Wanduhr hier), wird
+        der erfolgreiche Lauf ueberschreibend gespeichert (der letzte Stand fuer den
+        spaeteren Bericht). Fehlt eins von beiden, laeuft die reine Erkennung wie bisher.
         """
         # Root-pflichtig, keine rootless Alternative -- VOR dem Discovery sperren (S3).
         if not self._permission.is_available():
@@ -518,7 +545,18 @@ class DetectRogueDhcp:
             raise RogueDhcpPermissionError(permission_error)
         expected = await self._expected_servers()
         found = await self._probe.discover()
-        return classify_dhcp_servers(found, expected)
+        result = classify_dhcp_servers(found, expected)
+        # Letzten Stand ueberschreibend speichern (nur wenn Store + Zeitstempel da sind).
+        # Port-neutral: die Domaenen-``DhcpServer`` werden in rohe (ip, mac, is_expected)-
+        # Tupel uebersetzt (der Store-Vertrag kennt keine domain-Typen).
+        if self._store is not None and checked_ts is not None:
+            self._store.save_latest(
+                [(s.ip, s.mac, s.is_expected) for s in result.servers],
+                result.expected,
+                result.has_unexpected,
+                checked_ts,
+            )
+        return result
 
     async def _expected_servers(self) -> list[str]:
         """Ermittelt die erwartete DHCP-Server-Menge: Nutzer-Setting ODER Gateway-Fallback.
@@ -551,3 +589,22 @@ class DetectRogueDhcp:
             if iface.name == primary_name and iface.gateway:
                 return [iface.gateway]
         return []
+
+
+class GetLatestRogueDhcp:
+    """Letzter Rogue-DHCP-Stand (ADR 0038): duenner Lese-Pass-Through ueber den Store.
+
+    Duenn (Muster ``ResolveDns``/``ListProcesses.flat``): den letzten gespeicherten Stand
+    ueber den ``RogueDhcpStore`` durchreichen, keine eigene Logik. ``None`` (noch nie
+    geprueft) wird unveraendert weitergereicht -- ehrliche Abwesenheit, KEIN Ersatz-Stand.
+    Der Store kommt per Constructor-Injection als Protocol-Typ herein -- nie ein konkreter
+    Adapter. Zweck: der Bericht liest den Stand, OHNE einen aktiven (root-pflichtigen) Probe
+    auszuloesen.
+    """
+
+    def __init__(self, store: RogueDhcpStore) -> None:
+        self._store = store
+
+    def __call__(self) -> LatestRogueDhcp | None:
+        """Liefert den letzten gespeicherten Stand (``LatestRogueDhcp``) oder ``None``."""
+        return self._store.load_latest()

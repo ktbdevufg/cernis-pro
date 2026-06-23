@@ -439,6 +439,7 @@ from infrastructure.resolver import (
     ResolverToolMissing,
     TlsCertReader,
 )
+from infrastructure.rogue_dhcp_repository import SqliteRogueDhcpRepository
 from infrastructure.scanning.arp_table import ArpTableAdapter
 from infrastructure.scanning.fritz_detail import FritzDetailAdapter
 from infrastructure.scanning.fritz_hosts import FritzAuthError, FritzHostsAdapter
@@ -2629,10 +2630,29 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     # wie 2b settings/secret injiziert). Vor dem Discovery prueft er die Root-Rechte
     # (LinuxDhcpPermission); ohne Root wirft er RogueDhcpPermissionError -> 403 (Handler
     # unten), der Probe laeuft NIE blind. Der Runner gibt das RogueDhcpResult als Any zurueck.
+    #
+    # Persistenz (ADR 0038): der Singleton-Store (SqliteRogueDhcpRepository, eigene
+    # rogue_dhcp_latest-Tabelle in cernis.db) wird injiziert + time.time() als checked_ts
+    # hereingereicht (KEINE Wanduhr im Use-Case, Muster ResumeActiveLoggingTasks(time.time())).
+    # Der Use-Case speichert so nach JEDEM erfolgreichen Lauf ueberschreibend den letzten
+    # Stand fuer den spaeteren Sicherheitsbericht. Schema-Init geschieht im Adapter-Konstruktor
+    # (lazy-memoisiert wie die anderen Repos -- haelt nur den db_path, zustandslos).
+    @lru_cache(maxsize=1)
+    def rogue_dhcp_repository() -> SqliteRogueDhcpRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteRogueDhcpRepository(get_db_path())
+
     async def _detect_rogue_dhcp() -> Any:
+        import time
+
         return await DetectRogueDhcp(
-            NmapDhcpProbe(), LinuxDhcpPermission(), repository(), InterfaceDiscoveryAdapter()
-        )()
+            NmapDhcpProbe(),
+            LinuxDhcpPermission(),
+            repository(),
+            InterfaceDiscoveryAdapter(),
+            rogue_dhcp_repository(),
+        )(time.time())
 
     app.dependency_overrides[provide_detect_rogue_dhcp] = lambda: _detect_rogue_dhcp
     app.dependency_overrides[provide_check_dhcp_permission] = lambda: CheckDhcpPermission(

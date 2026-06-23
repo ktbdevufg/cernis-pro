@@ -63,6 +63,27 @@ Block 3 (Rogue-DHCP-Erkennung) -- ein async DATEN-Vertrag + ein synchroner Recht
   kein stiller Fallback (S3) und keine Selbst-Eskalation (CLAUDE.md). KEIN distro-
   spezifischer Install-Befehl hier (das deckt Block 1b/``TOOL_PACKAGES`` ab).
 
+Block 3 (Persistenz des LETZTEN Rogue-DHCP-Stands, ADR 0038) -- ein synchroner Speicher-
+Vertrag + zwei frozen Lese-Datentraeger (Muster ``ports.security.ArpAlertRecord``/
+``ArpBaselineRecord``: Lese-Views als frozen dataclasses im Port-Ring, NICHT in domain):
+
+* ``RogueDhcpStore`` -- der Speicher fuer den letzten Rogue-DHCP-Stand. ``save_latest``
+  ueberschreibt IMMER denselben einen Datensatz (kein Verlauf -- YAGNI), ``load_latest``
+  liest ihn (oder ``None`` = noch nie geprueft). Synchron (lokaler SQLite-Treffer ohne Netz-
+  /Loop-I/O, Muster der uebrigen SQLite-Repos -- die rufen ihre Adapter ebenfalls synchron).
+  PORT-NEUTRALE Typen im Vertrag (keine ``domain.diagnostics``-Objekte): die Server-Liste
+  geht als ``(ip, mac|None, is_expected)``-Tupel herein und kommt als ``RogueDhcpServerRecord``
+  heraus -- analog dem security-Port, der seine Persistenz ueber eigene Record-Typen fuehrt
+  (``ArpAlertRecord``), NICHT ueber die zeitfreien Domaenentypen. ``checked_ts`` (Unix-ts,
+  float) setzt der AUFRUFER (Composition Root, ``time.time()``) -- der Store erzeugt KEINE
+  Wanduhr selbst (zeitfrei, Muster der zeitfreien Use-Cases/Adapter, S3-konform).
+* ``RogueDhcpServerRecord`` -- ein gespeicherter Server als frozen Lese-View (ip/mac/
+  is_expected). Spiegelt ``domain.DhcpServer``, ist aber bewusst ein eigener Port-Typ (der
+  Port-Vertrag bleibt domain-frei, Muster ``ArpBaselineRecord`` vs. ``ArpEntry``).
+* ``LatestRogueDhcp`` -- der gebuendelte letzte Stand als frozen Lese-View: ``servers``
+  (Liste ``RogueDhcpServerRecord``), ``expected`` (Liste str), ``has_unexpected`` (bool) +
+  ``checked_ts`` (float, WANN gemessen wurde). Was ``load_latest`` liefert (oder ``None``).
+
 Bewusste Entscheidung: KEIN ``@runtime_checkable`` (Muster wie settings/devices/
 scanning/capture/interfaces/traffic/process). Die Vertragspruefung laeuft statisch ueber
 mypy und ueber die Verdrahtung im Composition Root (``app.py``), nicht zur Laufzeit per
@@ -74,6 +95,7 @@ domain". Import von ``domain`` ist erlaubt (nur die Gegenrichtung ist verboten).
 """
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Protocol
 
 from domain.diagnostics import (
@@ -282,5 +304,84 @@ class DhcpPermissionPort(Protocol):
         (kein stiller Fallback, S3); KEINE Selbst-Eskalation. KEIN distro-spezifischer
         Install-Befehl hier (das deckt Block 1b/``TOOL_PACKAGES`` ab). Schnelle lokale
         Pruefung, daher synchron.
+        """
+        ...
+
+
+# ── Block 3: Persistenz des letzten Rogue-DHCP-Stands (ADR 0038) ───────────────
+
+
+@dataclass(frozen=True)
+class RogueDhcpServerRecord:
+    """Ein gespeicherter DHCP-Server als frozen Lese-View (ADR 0038).
+
+    Spiegelt ``domain.diagnostics.DhcpServer`` (ip/mac/is_expected), ist aber bewusst ein
+    EIGENER Port-Typ -- der Port-Vertrag bleibt domain-frei (Muster ``ArpBaselineRecord``
+    vs. ``ArpEntry``: der security-Port fuehrt seine Persistenz ueber eigene Record-Typen,
+    NICHT ueber die Domaenentypen). ``mac`` ist ehrlich ``None``, wenn nmap sie nicht
+    lieferte (kein erfundener Wert -- die None-Semantik ueberlebt den Round-trip).
+    """
+
+    ip: str
+    mac: str | None
+    is_expected: bool
+
+
+@dataclass(frozen=True)
+class LatestRogueDhcp:
+    """Der letzte bekannte Rogue-DHCP-Stand als frozen Lese-View (ADR 0038).
+
+    Was ``RogueDhcpStore.load_latest`` liefert (oder ``None`` = noch nie geprueft).
+    ``servers`` sind die gefundenen Server (``RogueDhcpServerRecord``), ``expected`` die
+    zugrunde gelegte Erwartungsmenge (str-Liste), ``has_unexpected`` ob mindestens ein
+    gefundener Server nicht erwartet war -- 1:1 zum ``RogueDhcpResult`` der Domaene, ergaenzt
+    um ``checked_ts`` (Unix-ts, float: WANN gemessen wurde). Der spaetere Sicherheitsbericht
+    rendert den Stand samt Datum, OHNE selbst einen root-pflichtigen Probe auszuloesen.
+    """
+
+    servers: tuple[RogueDhcpServerRecord, ...]
+    expected: tuple[str, ...]
+    has_unexpected: bool
+    checked_ts: float
+
+
+class RogueDhcpStore(Protocol):
+    """Persistenz des LETZTEN Rogue-DHCP-Stands (ADR 0038) -- ein Datensatz, ueberschreibend.
+
+    Speichert IMMER nur den letzten Lauf (kein Verlauf -- YAGNI): ``save_latest``
+    ueberschreibt denselben einen Datensatz, ``load_latest`` liest ihn. Zweck: der spaetere
+    Sicherheitsbericht zeigt den letzten bekannten Stand mit Datum, ohne selbst einen aktiven
+    (root-pflichtigen) DHCP-Probe auszuloesen.
+
+    Synchron (lokaler SQLite-Treffer ohne Netz-/Loop-I/O, Muster der uebrigen SQLite-Repos).
+    PORT-NEUTRALE Typen im Vertrag (keine ``domain.diagnostics``-Objekte): die Server gehen
+    als rohe ``(ip, mac|None, is_expected)``-Tupel herein und kommen als
+    ``RogueDhcpServerRecord`` heraus.
+    """
+
+    def save_latest(
+        self,
+        result_servers: Sequence[tuple[str, str | None, bool]],
+        result_expected: Sequence[str],
+        has_unexpected: bool,
+        checked_ts: float,
+    ) -> None:
+        """Speichert den letzten Stand UEBERSCHREIBEND (genau ein Datensatz).
+
+        ``result_servers`` sind die gefundenen Server als rohe ``(ip, mac|None,
+        is_expected)``-Tupel (port-neutral -- kein Domaenentyp), ``result_expected`` die
+        zugrunde gelegte Erwartungsmenge (str-Liste), ``has_unexpected`` ob mindestens einer
+        unerwartet war. ``checked_ts`` (Unix-ts, float) setzt der AUFRUFER (Composition Root,
+        ``time.time()``) -- der Store erzeugt KEINE Wanduhr selbst (zeitfrei, S3-konform).
+        Ein bereits vorhandener Stand wird ersetzt (kein Verlauf).
+        """
+        ...
+
+    def load_latest(self) -> LatestRogueDhcp | None:
+        """Liest den letzten gespeicherten Stand -> ``LatestRogueDhcp`` oder ``None``.
+
+        ``None`` heisst "noch nie geprueft" (leerer Speicher) -- ehrliche Abwesenheit, KEIN
+        leerer Ersatz-Stand. Sonst der letzte Stand inkl. ``checked_ts`` (WANN gemessen
+        wurde); die ``mac=None``-Semantik der Server ueberlebt den Round-trip.
         """
         ...

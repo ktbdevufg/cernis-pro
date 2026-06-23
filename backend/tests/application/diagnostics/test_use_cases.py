@@ -22,6 +22,7 @@ from application.diagnostics import (
     DetectRogueDhcp,
     EnrichRouteOrgs,
     ExternalCheckError,
+    GetLatestRogueDhcp,
     GrabBanner,
     ResolveDns,
     RogueDhcpPermissionError,
@@ -41,6 +42,7 @@ from domain.diagnostics import (
 )
 from domain.interfaces import NetworkInterface
 from domain.settings import Setting, SettingValue
+from ports.diagnostics import LatestRogueDhcp, RogueDhcpServerRecord
 
 # ── In-Memory-Fakes der Ports ────────────────────────────────────────────────
 
@@ -238,6 +240,40 @@ class FakeInterfaceDiscovery:
 
     async def discover(self) -> list[NetworkInterface]:
         return list(self._interfaces)
+
+
+class FakeRogueDhcpStore:
+    """In-Memory-Implementierung des ``RogueDhcpStore``-Protocols (ADR 0038).
+
+    ``latest`` haelt den zuletzt gespeicherten Stand (ueberschreibend wie der echte
+    Singleton-Adapter); ``saves`` zaehlt, OB/wie oft gespeichert wurde (fuer die
+    Schreibnaht-Behauptung). ``preload`` setzt einen Anfangs-Stand fuer die Lese-Tests.
+    """
+
+    def __init__(self, preload: LatestRogueDhcp | None = None) -> None:
+        self.latest = preload
+        self.saves = 0
+
+    def save_latest(
+        self,
+        result_servers: Sequence[tuple[str, str | None, bool]],
+        result_expected: Sequence[str],
+        has_unexpected: bool,
+        checked_ts: float,
+    ) -> None:
+        self.saves += 1
+        self.latest = LatestRogueDhcp(
+            servers=tuple(
+                RogueDhcpServerRecord(ip=ip, mac=mac, is_expected=is_expected)
+                for ip, mac, is_expected in result_servers
+            ),
+            expected=tuple(result_expected),
+            has_unexpected=has_unexpected,
+            checked_ts=checked_ts,
+        )
+
+    def load_latest(self) -> LatestRogueDhcp | None:
+        return self.latest
 
 
 # ── ResolveDns ───────────────────────────────────────────────────────────────
@@ -669,6 +705,95 @@ def test_detect_blocks_when_nmap_missing_probe_not_called() -> None:
     with pytest.raises(RogueDhcpPermissionError):
         asyncio.run(uc())
     assert probe.calls == 0
+
+
+# ── DetectRogueDhcp Persistenz-Schreibnaht (ADR 0038) ──────────────────────────
+
+
+def test_detect_saves_latest_after_successful_run() -> None:
+    # Nach einem erfolgreichen Lauf wird der letzte Stand UEBERSCHREIBEND gespeichert
+    # (Store injiziert + checked_ts hereingereicht -- KEINE Wanduhr im Use-Case).
+    probe = FakeDhcpProbe(offers=[("192.168.1.1", None), ("192.168.1.66", "aa:bb:cc:dd:ee:ff")])
+    store = FakeRogueDhcpStore()
+    uc = DetectRogueDhcp(
+        probe,
+        FakeDhcpPermission(available=True, permission_error=None),
+        FakeSettingsRepository({"expected_dhcp_servers": ["192.168.1.1"]}),
+        FakeInterfaceDiscovery(),
+        store,
+    )
+    result = asyncio.run(uc(1_700_000_000.0))
+    assert store.saves == 1
+    assert store.latest is not None
+    # Der gespeicherte Stand spiegelt das Ergebnis 1:1 (samt mac=None und ts).
+    assert store.latest.expected == ("192.168.1.1",)
+    assert store.latest.has_unexpected is result.has_unexpected
+    assert store.latest.checked_ts == 1_700_000_000.0
+    by_ip = {s.ip: (s.mac, s.is_expected) for s in store.latest.servers}
+    assert by_ip == {
+        "192.168.1.1": (None, True),
+        "192.168.1.66": ("aa:bb:cc:dd:ee:ff", False),
+    }
+
+
+def test_detect_does_not_save_when_blocked() -> None:
+    # Sperre (kein Root) -> kein Discovery, kein Speichern (nur erfolgreiche Laeufe).
+    probe = FakeDhcpProbe(offers=[("192.168.1.1", None)])
+    store = FakeRogueDhcpStore()
+    uc = DetectRogueDhcp(
+        probe,
+        FakeDhcpPermission(available=True, permission_error="braucht Root"),
+        FakeSettingsRepository(),
+        FakeInterfaceDiscovery(),
+        store,
+    )
+    with pytest.raises(RogueDhcpPermissionError):
+        asyncio.run(uc(1.0))
+    assert store.saves == 0
+
+
+def test_detect_without_store_or_ts_does_not_persist() -> None:
+    # Ohne Store (Default) laeuft die reine Erkennung -- kein Speicher-Zwang, kein Fehler.
+    probe = FakeDhcpProbe(offers=[("192.168.1.1", None)])
+    uc = _detect_uc(probe, settings={"expected_dhcp_servers": ["192.168.1.1"]})
+    result = asyncio.run(uc())  # kein checked_ts noetig (rueckwaertskompatibel)
+    assert result.servers[0].ip == "192.168.1.1"
+
+
+def test_detect_with_store_but_no_ts_does_not_save() -> None:
+    # Store da, aber kein checked_ts -> es wird NICHT gespeichert (beides noetig).
+    probe = FakeDhcpProbe(offers=[("192.168.1.1", None)])
+    store = FakeRogueDhcpStore()
+    uc = DetectRogueDhcp(
+        probe,
+        FakeDhcpPermission(available=True, permission_error=None),
+        FakeSettingsRepository({"expected_dhcp_servers": ["192.168.1.1"]}),
+        FakeInterfaceDiscovery(),
+        store,
+    )
+    asyncio.run(uc())  # checked_ts=None
+    assert store.saves == 0
+
+
+# ── GetLatestRogueDhcp (ADR 0038): duenner Lese-Pass-Through ───────────────────
+
+
+def test_get_latest_returns_none_when_empty() -> None:
+    # Noch nie geprueft -> None (ehrliche Abwesenheit, kein Ersatz-Stand).
+    store = FakeRogueDhcpStore()
+    assert GetLatestRogueDhcp(store)() is None
+
+
+def test_get_latest_returns_stored_stand() -> None:
+    # Stand vorhanden -> unveraendert durchgereicht.
+    stand = LatestRogueDhcp(
+        servers=(RogueDhcpServerRecord(ip="192.168.1.66", mac=None, is_expected=False),),
+        expected=("192.168.1.1",),
+        has_unexpected=True,
+        checked_ts=1_700_000_000.0,
+    )
+    store = FakeRogueDhcpStore(preload=stand)
+    assert GetLatestRogueDhcp(store)() == stand
 
 
 # ── Route zum Ziel (ADR 0036): BuildRouteGeo (Hauptpfad) + EnrichRouteOrgs (Nachladung) ──
