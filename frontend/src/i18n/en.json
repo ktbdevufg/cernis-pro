@@ -182,6 +182,7 @@
       "Beobachten": "Observe",
       "Diagnose": "Diagnostics",
       "Untersuchen": "Investigate",
+      "Berichte": "Reports",
       "Einstellungen": "Settings"
     }
   },
@@ -947,6 +948,77 @@
         "subtitle": "Compile observations and findings into a report.",
         "locked": ""
       }
+    }
+  },
+  "report": {
+    "security": {
+      "titel": "Security report",
+      "ladeFehler": "The security report could not be loaded.",
+      "keinScan": "No scan yet – please run a network scan first.",
+      "stufe": {
+        "gut": "good",
+        "maessig": "moderate",
+        "kritisch": "critical",
+        "auffaellig": "notable"
+      },
+      "score": {
+        "von": "out of 100",
+        "aria": "Security score {{score}} out of 100",
+        "beitraegeAuf": "Show contributions",
+        "beitraegeZu": "Hide contributions",
+        "formel": "Score = 100 × (1 − total burden {{last}} / {{geraete}} devices)",
+        "sauber": "Remaining devices without findings: {{anzahl}}"
+      },
+      "beitraege": {
+        "geraet": "Device",
+        "befund": "Worst finding",
+        "last": "Burden",
+        "leer": "No device contributes burden to the score."
+      },
+      "kennzahl": {
+        "kritisch": "Critical",
+        "auffaellig": "Notable",
+        "ohneBefund": "No findings"
+      },
+      "donut": {
+        "geraete": "devices",
+        "aria": "Severity distribution across {{anzahl}} devices"
+      },
+      "balken": {
+        "titel": "Findings per device",
+        "weitere": "+ {{anzahl}} more"
+      },
+      "tabelle": {
+        "ports": "Hosts with notable ports",
+        "cve": "CVE findings",
+        "net": "Network anomalies",
+        "quittiert": "Already acknowledged",
+        "leer": "No entries."
+      },
+      "spalte": {
+        "geraet": "Device",
+        "ports": "Ports",
+        "schwere": "Severity",
+        "grund": "Reason",
+        "cve": "CVE",
+        "cvss": "CVSS",
+        "dienst": "Service",
+        "art": "Kind",
+        "beschreibung": "Description",
+        "quelle": "Source"
+      },
+      "quelle": {
+        "port": "Port",
+        "cve": "CVE",
+        "net": "Network"
+      },
+      "quittiertHinweis": "Acknowledged – not counted in the score.",
+      "fussnote": "This report describes and contextualises – it does not pass judgement.",
+      "rogue": {
+        "ungeprueft": "Rogue DHCP check not yet performed (requires an active check with root privileges). It can be triggered via the diagnostics / DNS watcher function.",
+        "geprueft": "Rogue DHCP last checked on {{datum}}."
+      },
+      "drucken": "Print"
     }
   },
   "geraete": {

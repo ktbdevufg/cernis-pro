@@ -12,9 +12,9 @@ import { useTranslation } from "react-i18next";
 import {
   CardGrid,
   FunctionShell,
-  InProgress,
 } from "../components/AreaShell.jsx";
 import FunctionCard from "../components/FunctionCard.jsx";
+import SecurityReportView from "../components/SecurityReportView.jsx";
 
 // Kachel-Definition: Schlüssel, Icon, Sperrstatus. Reihenfolge ist verbindlich.
 const FUNKTIONEN = [{ id: "report", icon: FileText, locked: false }];
@@ -30,7 +30,7 @@ export default function ReportingView() {
         title={t(`reporting.cards.${openFunction}.title`)}
         onBack={() => setOpenFunction(null)}
       >
-        <InProgress />
+        <SecurityReportView />
       </FunctionShell>
     );
   }

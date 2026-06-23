@@ -182,6 +182,7 @@
       "Beobachten": "Beobachten",
       "Diagnose": "Diagnose",
       "Untersuchen": "Untersuchen",
+      "Berichte": "Berichte",
       "Einstellungen": "Einstellungen"
     }
   },
@@ -947,6 +948,77 @@
         "subtitle": "Beobachtungen und Befunde als Bericht zusammenstellen.",
         "locked": ""
       }
+    }
+  },
+  "report": {
+    "security": {
+      "titel": "Sicherheitsbericht",
+      "ladeFehler": "Der Sicherheitsbericht konnte nicht geladen werden.",
+      "keinScan": "Noch kein Scan vorhanden – bitte zuerst einen Netzwerk-Scan durchführen.",
+      "stufe": {
+        "gut": "gut",
+        "maessig": "mäßig",
+        "kritisch": "kritisch",
+        "auffaellig": "auffällig"
+      },
+      "score": {
+        "von": "von 100",
+        "aria": "Sicherheits-Score {{score}} von 100",
+        "beitraegeAuf": "Beiträge anzeigen",
+        "beitraegeZu": "Beiträge ausblenden",
+        "formel": "Score = 100 × (1 − Gesamtlast {{last}} / {{geraete}} Geräte)",
+        "sauber": "Übrige Geräte ohne Befund: {{anzahl}}"
+      },
+      "beitraege": {
+        "geraet": "Gerät",
+        "befund": "Schwerster Befund",
+        "last": "Last",
+        "leer": "Kein Gerät trägt Last zum Score bei."
+      },
+      "kennzahl": {
+        "kritisch": "Kritisch",
+        "auffaellig": "Auffällig",
+        "ohneBefund": "Ohne Befund"
+      },
+      "donut": {
+        "geraete": "Geräte",
+        "aria": "Schwere-Verteilung über {{anzahl}} Geräte"
+      },
+      "balken": {
+        "titel": "Auffälligkeiten je Gerät",
+        "weitere": "+ {{anzahl}} weitere"
+      },
+      "tabelle": {
+        "ports": "Rechner mit auffälligen Ports",
+        "cve": "CVE-Befunde",
+        "net": "Netz-Auffälligkeiten",
+        "quittiert": "Bereits bestätigt",
+        "leer": "Keine Einträge."
+      },
+      "spalte": {
+        "geraet": "Gerät",
+        "ports": "Ports",
+        "schwere": "Schwere",
+        "grund": "Grund",
+        "cve": "CVE",
+        "cvss": "CVSS",
+        "dienst": "Dienst",
+        "art": "Art",
+        "beschreibung": "Beschreibung",
+        "quelle": "Quelle"
+      },
+      "quelle": {
+        "port": "Port",
+        "cve": "CVE",
+        "net": "Netz"
+      },
+      "quittiertHinweis": "Bestätigt – nicht in der Wertung.",
+      "fussnote": "Dieser Bericht beschreibt und ordnet ein – er fällt kein Urteil.",
+      "rogue": {
+        "ungeprueft": "Rogue-DHCP-Prüfung noch nicht durchgeführt (erfordert aktive Prüfung mit Root-Rechten). Sie lässt sich über die Diagnose- bzw. DNS-Wächter-Funktion anstoßen.",
+        "geprueft": "Rogue-DHCP zuletzt geprüft am {{datum}}."
+      },
+      "drucken": "Drucken"
     }
   },
   "geraete": {

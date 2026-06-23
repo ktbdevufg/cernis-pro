@@ -1,0 +1,493 @@
+/* Sicherheitsbericht — In-App-Ansicht (Etappe 3). Designsprache wie
+   LoggingProfileView/SlaChart: Card-Flaechen, --color-border, radius, accent fuer
+   "gut", severity-Token fuer kritisch/auffaellig, sev-low fuer sauber. Nur Token-
+   Variablen, nie feste Farben. Am Ende ein @media print fuer den Drucken-Knopf. */
+
+.security-report {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.security-report__mono {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+.security-report__num {
+  text-align: right;
+}
+
+/* ── 1. Titelkopf (Logo + Titel) ──────────────────────────────────────────────── */
+.security-report__kopf {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.security-report__logo {
+  height: 32px;
+  width: auto;
+  display: block;
+}
+
+.security-report__titel {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+/* Dezenter Fehlerhinweis (Ladefehler kippt die Ansicht nicht). */
+.security-report__fehler {
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--sev-med-text);
+  background: var(--sev-med-bg);
+  border: 1px solid var(--sev-med-bd);
+  border-radius: var(--radius-md);
+}
+
+/* ── 2. Kein-Scan-Leerzustand ──────────────────────────────────────────────────── */
+.security-report__leerzustand {
+  padding: 20px 18px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.security-report__leerzustand-text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--color-text-sec);
+}
+
+/* ── 3a. Score-Gauge ──────────────────────────────────────────────────────────── */
+.security-report__gauge {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.security-report__gauge-visual {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.security-report__gauge-svg {
+  width: 100%;
+  max-width: 320px;
+  height: auto;
+  display: block;
+}
+
+/* Zahl-Block sitzt unter dem Halbkreis-Scheitel. */
+.security-report__gauge-zahl {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  margin-top: -28px;
+}
+
+.security-report__gauge-wert {
+  font-size: 44px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.security-report__gauge-von {
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+.security-report__gauge-stufe {
+  margin-top: 2px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.security-report__gauge-toggle {
+  align-self: center;
+  padding: 6px 14px;
+  font-size: 13px;
+  color: var(--color-accent);
+  background: var(--color-accent-bg);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.security-report__gauge-toggle:hover {
+  background: var(--color-accent-bg-strong);
+}
+
+/* Beitragsliste: standardmaessig eingeklappt, im Druck IMMER offen (s. @media print). */
+.security-report__beitraege {
+  display: none;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.security-report__beitraege--offen {
+  display: flex;
+}
+
+.security-report__formel {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-tert);
+}
+
+.security-report__rest {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-text-sec);
+}
+
+/* ── 3b. Schwere-Kennzahlen ────────────────────────────────────────────────────── */
+.security-report__kennzahlen {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.security-report__kennzahl {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-left-width: 4px;
+  border-radius: var(--radius-md);
+}
+
+.security-report__kennzahl--kritisch {
+  border-left-color: var(--cve-crit-bd);
+}
+
+.security-report__kennzahl--auffaellig {
+  border-left-color: var(--sev-med-bd);
+}
+
+.security-report__kennzahl--sauber {
+  border-left-color: var(--sev-low-bd);
+}
+
+.security-report__kennzahl-wert {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.security-report__kennzahl-label {
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+/* ── 3c. Schwere-Donut ─────────────────────────────────────────────────────────── */
+.security-report__donut {
+  position: relative;
+  align-self: center;
+  width: 180px;
+  height: 180px;
+}
+
+.security-report__donut-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.security-report__donut-mitte {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.security-report__donut-summe {
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.security-report__donut-label {
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+/* ── 3d. Geraete-Balken ────────────────────────────────────────────────────────── */
+.security-report__balken {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 18px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.security-report__abschnitt-titel {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.security-report__balken-liste {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.security-report__balken-zeile {
+  display: grid;
+  grid-template-columns: minmax(80px, 160px) 1fr auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.security-report__balken-label {
+  font-size: 12px;
+  color: var(--color-text-sec);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.security-report__balken-bahn {
+  display: flex;
+  height: 12px;
+  background: var(--sev-low-bg);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.security-report__balken-fueller {
+  height: 100%;
+}
+
+.security-report__balken-fueller--kritisch {
+  background: var(--cve-crit-bd);
+}
+
+.security-report__balken-fueller--auffaellig {
+  background: var(--sev-med-bd);
+}
+
+.security-report__balken-zahl {
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+.security-report__balken-rest {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+/* ── 4. Tabellen-Abschnitte ────────────────────────────────────────────────────── */
+.security-report__abschnitt {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  /* Saubere Seitenumbrueche im Druck: ein Abschnitt bleibt zusammen. */
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.security-report__abschnitt-titel--num {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 6px;
+  border-bottom: 2px solid var(--color-accent);
+}
+
+.security-report__abschnitt-nummer {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-accent);
+  background: var(--color-accent-bg);
+  border-radius: 50%;
+}
+
+.security-report__tabelle {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.security-report__tabelle th {
+  text-align: left;
+  padding: 8px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--color-text-tert);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.security-report__tabelle td {
+  padding: 8px 10px;
+  color: var(--color-text);
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: top;
+}
+
+.security-report__tabelle .security-report__num {
+  text-align: right;
+}
+
+.security-report__tabelle--beitraege {
+  font-size: 12px;
+}
+
+/* Severity-Badge (klein, Token-Farben). */
+.security-report__badge {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: var(--radius-md);
+  white-space: nowrap;
+}
+
+.security-report__badge--kritisch {
+  color: var(--cve-crit-text);
+  background: var(--cve-crit-bg);
+  border: 1px solid var(--cve-crit-bd);
+}
+
+.security-report__badge--auffaellig {
+  color: var(--sev-med-text);
+  background: var(--sev-med-bg);
+  border: 1px solid var(--sev-med-bd);
+}
+
+.security-report__quittiert-hinweis {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-text-sec);
+}
+
+/* Ruhige Leer-Meldung (statt leerem Kasten). */
+.security-report__leer {
+  margin: 0;
+  padding: 16px 12px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--color-text-sec);
+}
+
+/* Achse-B-Fussnote (beschreibt und ordnet ein — kein Urteil). */
+.security-report__fussnote {
+  margin: 0;
+  font-size: 12px;
+  font-style: italic;
+  line-height: 1.5;
+  color: var(--color-text-tert);
+}
+
+/* ── 5. Rogue-DHCP-Statushinweis (dezent) ──────────────────────────────────────── */
+.security-report__rogue {
+  margin: 0;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-sec);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* ── 6. Aktionsleiste ──────────────────────────────────────────────────────────── */
+.security-report__aktionen {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.security-report__drucken {
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-bg);
+  background: var(--color-accent);
+  border: 1px solid var(--color-accent-strong);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.security-report__drucken:hover {
+  background: var(--color-accent-strong);
+}
+
+/* Dezenter Lade-Indikator (schmaler Balken oben am Container). */
+.security-report__laedt {
+  height: 2px;
+  background: var(--color-accent);
+  border-radius: var(--radius-md);
+  opacity: 0.6;
+}
+
+/* ── Druck-Stylesheet ──────────────────────────────────────────────────────────── */
+/* Beim Drucken: App-Chrome (Navigation/Reiter/Kopfzeile) und der Drucken-Knopf selbst
+   weg — nur der Bericht aufs Papier. Token-Farben drucken; -webkit-print-color-adjust
+   erzwingt die Badge-/Akzent-Flaechen. Der Score-Bereich wird AUFGEKLAPPT gezeigt,
+   damit Beitragsliste + Formel sicher mitkommen. Jeder Tabellen-Abschnitt bleibt
+   zusammen (page-break-inside: avoid liegt schon oben). */
+@media print {
+  /* Nur Farben/Hintergruende, die der Bericht braucht, exakt drucken. */
+  .security-report,
+  .security-report * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* App-Rahmen ausblenden: Kopfzeile, alle Reiter/Tab-Leisten, der Zurueck-Balken der
+     FunctionShell und der Drucken-Knopf gehoeren nicht aufs Papier. */
+  .app-header,
+  .tab-bar,
+  .tabbar,
+  [role="tablist"],
+  .function-shell__bar,
+  .security-report__aktionen,
+  .security-report__gauge-toggle,
+  .security-report__laedt {
+    display: none !important;
+  }
+
+  /* Score-Beitraege im Druck immer offen (auch wenn die Ansicht eingeklappt war). */
+  .security-report__beitraege {
+    display: flex !important;
+  }
+
+  /* Flaechen druckfreundlich neutralisieren (keine schweren Card-Hintergruende). */
+  .security-report__gauge,
+  .security-report__balken,
+  .security-report__rogue,
+  .security-report__leerzustand,
+  .security-report__kennzahl {
+    background: transparent !important;
+  }
+}
