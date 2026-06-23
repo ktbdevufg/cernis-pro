@@ -288,6 +288,21 @@
     }
   },
 
+  "help.monitor.series": {
+    "status": "final",
+    "kategorie": "Beobachten",
+    "de": {
+      "titel": "Serien-Auswertung (Muster ueber viele Tage)",
+      "kurz": "Die Serien-Auswertung verdichtet eine wiederkehrende Aufzeichnung zu einem Muster ueber viele Tage. Das Schluesselbild ist eine Heatmap nach Uhrzeit: Sie zeigt auf einen Blick, zu welcher Tageszeit ein Ziel immer wieder ausfaellt. Eine Tabelle listet jeden einzelnen Ausfall. Die Serien-Auswertung liest nur vorhandene Messungen aus und greift NICHT ins Netz ein.",
+      "lang": "Eine wiederkehrende Aufzeichnung misst Ihr Ziel Tag fuer Tag im selben Zeitfenster. Die Serien-Auswertung legt diese Tage uebereinander und sucht das wiederkehrende Muster - nicht den einzelnen Tag, sondern die Regel dahinter.\n\nDas wichtigste Bild ist die HEATMAP nach Uhrzeit: eine Tagesleiste von 00:00 bis 24:00, in der die Uhrzeiten dunkler werden, an denen ueber die Tage hinweg besonders oft ein Ausfall lag. So erkennen Sie auf einen Blick, ob ein Ziel zum Beispiel immer abends gegen 20 Uhr schwaechelt - ein Muster, das in einem einzelnen Tagesbericht untergeht.\n\nDie EINZELLINIEN zeigen jeden Tag als eigene Linie, damit Sie die Streuung von Tag zu Tag sehen. Die RANGLISTE nennt die auffaelligsten Uhrzeiten der Reihe nach: an wie vielen Tagen es dort hakte und wie lang der laengste Ausfall war. CERNIS schlaegt automatisch die passende Darstellung vor; Sie koennen jederzeit umschalten.\n\nGanz unten steht immer eine ehrliche Tabelle aller einzelnen Ausfaelle mit Beginn, Ende und Dauer - die Rohbasis, aus der die Muster entstehen. Misst der gewaehlte Aufzeichnungsmodus keine Antwortzeiten, sind die latenzbezogenen Sichten sichtbar ausgegraut. Die Serien-Auswertung ist eine reine Lesesicht: Sie wertet nur bereits aufgezeichnete Daten aus und veraendert nichts im Netzwerk."
+    },
+    "en": {
+      "titel": "Series analysis (patterns across many days)",
+      "kurz": "The series analysis condenses a recurring recording into a pattern across many days. The key picture is a heatmap by time of day: at a glance it shows at which time a target repeatedly fails. A table lists every single outage. The series analysis only reads existing measurements and does NOT touch the network.",
+      "lang": "A recurring recording measures your target day after day in the same time window. The series analysis stacks those days on top of each other and looks for the recurring pattern - not the single day, but the rule behind it.\n\nThe most important picture is the HEATMAP by time of day: a daily bar from 00:00 to 24:00 in which the times grow darker where outages clustered across the days. This lets you see at a glance whether a target, for example, always struggles around 8 pm in the evening - a pattern that gets lost in a single daily report.\n\nThe PER-DAY LINES show each day as its own line so you can see the spread from day to day. The RANKING names the most conspicuous times in order: on how many days there was trouble and how long the longest outage was. CERNIS automatically suggests the most suitable view; you can switch at any time.\n\nAt the very bottom there is always an honest table of every single outage with start, end, and duration - the raw basis the patterns grow from. If the chosen recording mode does not measure response times, the latency-related views are visibly greyed out. The series analysis is a pure reading view: it only evaluates data that was already recorded and changes nothing on the network."
+    }
+  },
+
   "help.cve.uebersicht": {
     "status": "final",
     "kategorie": "Untersuchen",

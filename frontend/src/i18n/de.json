@@ -711,7 +711,58 @@
         "messpunkte": "Messpunkte"
       },
       "keineAuswertung": "keine Auswertung",
-      "minuten": "Min"
+      "minuten": "Min",
+      "ansicht": {
+        "bericht": "Bericht",
+        "serie": "Serien-Auswertung"
+      },
+      "serie": {
+        "titel": "Serien-Auswertung",
+        "kennzahl": {
+          "verfuegbarkeit": "Verfügbarkeit",
+          "abbrueche": "Abbrüche gesamt",
+          "dauer": "Durchschnittsdauer",
+          "fenster": "Auffälligstes Fenster"
+        },
+        "wasZeigen": {
+          "titel": "Was zeigen",
+          "abbrueche": "Abbrüche",
+          "latenz": "Latenz",
+          "alles": "Alles"
+        },
+        "darstellung": {
+          "titel": "Darstellung",
+          "einzellinien": "Einzellinien",
+          "heatmap": "Heatmap",
+          "rangliste": "Rangliste",
+          "latenzLeer": "Für diese Darstellung liegen im gewählten Kontext keine Daten vor."
+        },
+        "empfehlung": "CERNIS empfiehlt: {{modus}}",
+        "wiederherstellen": "Empfehlung übernehmen",
+        "medianBand": "Median + Band (berechnet)",
+        "keineLatenz": "In diesem Aufzeichnungsmodus werden keine Antwortzeiten gemessen — die Latenz-Sichten sind daher nicht verfügbar.",
+        "tabelle": {
+          "titelAbbrueche": "Einzelne Ausfälle",
+          "von": "Von",
+          "bis": "Bis",
+          "dauer": "Dauer",
+          "nochOffen": "noch offen",
+          "leer": "Keine Ausfälle im gewählten Zeitraum."
+        },
+        "latenzTabelle": {
+          "titel": "Latenz je Uhrzeit",
+          "slot": "Uhrzeit",
+          "messpunkte": "Messpunkte",
+          "p95": "p95",
+          "max": "Max",
+          "leer": "Keine Antwortzeiten im gewählten Zeitraum."
+        },
+        "rangliste": {
+          "slot": "Uhrzeit",
+          "tage": "Betroffene Tage",
+          "laengster": "Längster Ausfall"
+        }
+      }
     },
     "lookup": {
       "title": "Gegenstelle nachschlagen",

@@ -711,7 +711,58 @@
         "messpunkte": "Data points"
       },
       "keineAuswertung": "no analysis",
-      "minuten": "min"
+      "minuten": "min",
+      "ansicht": {
+        "bericht": "Report",
+        "serie": "Series analysis"
+      },
+      "serie": {
+        "titel": "Series analysis",
+        "kennzahl": {
+          "verfuegbarkeit": "Availability",
+          "abbrueche": "Total outages",
+          "dauer": "Average duration",
+          "fenster": "Worst time of day"
+        },
+        "wasZeigen": {
+          "titel": "Show",
+          "abbrueche": "Outages",
+          "latenz": "Latency",
+          "alles": "Everything"
+        },
+        "darstellung": {
+          "titel": "View",
+          "einzellinien": "Per-day lines",
+          "heatmap": "Heatmap",
+          "rangliste": "Ranking",
+          "latenzLeer": "No data for this view in the selected context."
+        },
+        "empfehlung": "CERNIS recommends: {{modus}}",
+        "wiederherstellen": "Use recommendation",
+        "medianBand": "Median + band (computed)",
+        "keineLatenz": "This recording mode does not measure response times, so the latency views are unavailable.",
+        "tabelle": {
+          "titelAbbrueche": "Individual outages",
+          "von": "From",
+          "bis": "To",
+          "dauer": "Duration",
+          "nochOffen": "still open",
+          "leer": "No outages in the selected period."
+        },
+        "latenzTabelle": {
+          "titel": "Latency by time of day",
+          "slot": "Time of day",
+          "messpunkte": "Samples",
+          "p95": "p95",
+          "max": "Max",
+          "leer": "No response times in the selected period."
+        },
+        "rangliste": {
+          "slot": "Time of day",
+          "tage": "Days affected",
+          "laengster": "Longest outage"
+        }
+      }
     },
     "lookup": {
       "title": "Look up remote endpoint",

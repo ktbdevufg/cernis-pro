@@ -25,6 +25,8 @@
 //   POST   /api/monitor/logging/{id}/stop  -> Task-dict (409)
 //   DELETE /api/monitor/logging/{id}       -> 204 (KEIN Body)
 //   GET    /api/monitor/logging/volume     -> { count, over_threshold }
+//   GET    /api/monitor/logging/{id}/series-> { has_latency, metrics, outages,
+//                                              heatmap, ranking } (Serien-Auswertung)
 
 import { apiDownload, apiGet, apiPost, ApiError } from "./client.js";
 
@@ -416,6 +418,70 @@ export async function fetchLoggingEvents(taskId, since = null, until = null) {
   }));
 }
 
+// GET /api/monitor/logging/{id}/series -> Serien-Auswertung einer Logging-Aufgabe
+// (Block 3c, zeitfreie Lese-Aggregation). Verdichtet die Outage-Flanken zu Tag-ueber-
+// Tag-Mustern: Kennzahlen, einzelne Ausfaelle, Heatmap nach Tagesminute und eine
+// Rangliste der auffaelligsten Uhrzeiten. Reine Lesesicht — greift NICHT ins Netz ein.
+//
+// since/until (Unix-ts, optional, Default null): schraenken den Auswertungs-Zeitraum
+// auf [since, until) ein -- nur gesetzte Grenzen werden als Query-Param angehaengt
+// (Muster fetchLoggingSla). slotMinutes (int 1..60, Default 10) steuert die zeitliche
+// Koernung der Slot-Auswertung und wird IMMER mitgegeben (slot_minutes).
+//
+// Wire-Form (snake_case, aus backend/api/monitoring.py, verifiziert):
+//   has_latency: bool
+//   metrics: { availability_pct, outage_count, avg_outage_s, worst_slot_minute|null }
+//   outages: [ { start_ts, end_ts|null, duration_s, minute_of_day|null, day_key|null } ]
+//   heatmap: [ { minute_of_day, outage_count } ]
+//   ranking: [ { minute_of_day, day_count, longest_outage_s } ]
+//   latency_slots: [ { minute_of_day, sample_count, p95_rtt_ms, max_rtt_ms } ]
+// Alle Zahlen sind roh/ungerundet (die View rundet bei der Anzeige). null bleibt ehrlich
+// null (end_ts, minute_of_day, day_key, worst_slot_minute); leere Listen -> []. Die
+// latency_slots sind nur befuellt, wenn die Aufzeichnung Latenz fuehrt (has_latency true,
+// capture_mode reachability_latency); sonst leere Liste. 404 (unbekannte id) -> ApiError.
+export async function fetchLoggingSeries(taskId, since = null, until = null, slotMinutes = 10) {
+  const params = { slot_minutes: slotMinutes };
+  if (since !== null && since !== undefined) {
+    params.since = since;
+  }
+  if (until !== null && until !== undefined) {
+    params.until = until;
+  }
+  const backend = await apiGet(`/api/monitor/logging/${taskId}/series`, params);
+  const metrics = backend?.metrics ?? {};
+  return {
+    hasLatency: Boolean(backend?.has_latency),
+    metrics: {
+      availabilityPct: metrics.availability_pct ?? null,
+      outageCount: metrics.outage_count ?? 0,
+      avgOutageS: metrics.avg_outage_s ?? null,
+      worstSlotMinute: metrics.worst_slot_minute ?? null,
+    },
+    outages: (backend?.outages ?? []).map((row) => ({
+      startTs: row.start_ts,
+      endTs: row.end_ts ?? null,
+      durationS: row.duration_s,
+      minuteOfDay: row.minute_of_day ?? null,
+      dayKey: row.day_key ?? null,
+    })),
+    heatmap: (backend?.heatmap ?? []).map((row) => ({
+      minuteOfDay: row.minute_of_day,
+      outageCount: row.outage_count,
+    })),
+    ranking: (backend?.ranking ?? []).map((row) => ({
+      minuteOfDay: row.minute_of_day,
+      dayCount: row.day_count,
+      longestOutageS: row.longest_outage_s,
+    })),
+    latencySlots: (backend?.latency_slots ?? []).map((row) => ({
+      minuteOfDay: row.minute_of_day,
+      sampleCount: row.sample_count,
+      p95RttMs: row.p95_rtt_ms,
+      maxRttMs: row.max_rtt_ms,
+    })),
+  };
+}
+
 // GET /api/export/logging/{id}?format=...&since=...&until=... -> Datei-Download
 // (CSV/JSON/PDF) des Logging-Reports einer Aufgabe ueber einen Zeitraum (Schnitt 1c).
 // Nutzt apiDownload (Blob + Browser-Download). Default-Dateiname
@@ -450,4 +516,5 @@ export default {
   fetchLoggingVolume,
   fetchLoggingSla,
   fetchLoggingEvents,
+  fetchLoggingSeries,
 };

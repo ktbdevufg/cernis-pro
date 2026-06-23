@@ -26,6 +26,7 @@ import {
   fetchLoggingSla,
   fetchLoggingTask,
 } from "../api/monitoring.js";
+import LoggingSeriesView from "./LoggingSeriesView.jsx";
 import SlaChart from "./SlaChart.jsx";
 import "./LoggingTaskDetail.css";
 
@@ -96,6 +97,11 @@ export default function LoggingTaskDetail({ taskId, onZurueck }) {
 
   // Chart-Umschalter: "uptime" (Default) | "rtt".
   const [chartModus, setChartModus] = useState("uptime");
+
+  // Ansichts-Umschalter: "bericht" (Default) | "serie". Nur bei recurring sichtbar
+  // (sonst bleibt es bei "bericht" wie heute). Steuert, ob der SLA/Chart/Ereignis-
+  // Block oder die Serien-Auswertung gezeigt wird.
+  const [ansicht, setAnsicht] = useState("bericht");
 
   // Ladeflags / Fehlerzustände.
   const [laedt, setLaedt] = useState(false);
@@ -324,6 +330,47 @@ export default function LoggingTaskDetail({ taskId, onZurueck }) {
         )}
       </div>
 
+      {/* ── Ansichts-Umschalter: Bericht | Serien-Auswertung (nur recurring) ─── */}
+      {task?.operationMode === "recurring" && (
+        <div className="logging-detail__chart-tabs" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={ansicht === "bericht"}
+            className={
+              ansicht === "bericht"
+                ? "logging-detail__tab logging-detail__tab--aktiv"
+                : "logging-detail__tab"
+            }
+            onClick={() => setAnsicht("bericht")}
+          >
+            {t("beobachten.logging.ansicht.bericht")}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={ansicht === "serie"}
+            className={
+              ansicht === "serie"
+                ? "logging-detail__tab logging-detail__tab--aktiv"
+                : "logging-detail__tab"
+            }
+            onClick={() => setAnsicht("serie")}
+          >
+            {t("beobachten.logging.ansicht.serie")}
+          </button>
+        </div>
+      )}
+
+      {ansicht === "serie" ? (
+        (() => {
+          // Einmal berechnen + destrukturieren (statt grenzenBerechnen() doppelt) —
+          // Verhalten unveraendert, nur ein Aufruf.
+          const { since, until } = grenzenBerechnen();
+          return <LoggingSeriesView taskId={taskId} since={since} until={until} />;
+        })()
+      ) : (
+        <>
       {/* ── SLA-Kennzahlen ───────────────────────────────────────────────────── */}
       <div className="logging-detail__kennzahlen">
         <Kennzahl wert={uptimeWert} label={t("beobachten.logging.kennzahl.verfuegbarkeit")} />
@@ -383,6 +430,8 @@ export default function LoggingTaskDetail({ taskId, onZurueck }) {
             </li>
           ))}
         </ul>
+      )}
+        </>
       )}
 
       {/* ── Export-Zeile (PDF/CSV/JSON) ──────────────────────────────────────── */}
