@@ -1,5 +1,15 @@
 """Use-Cases der monitoring-Domaene und ihre Application-Exceptions."""
 
+from application.monitoring.behavior_profile import (
+    BehaviorProfile,
+    DayBandSlot,
+    DaySlot,
+    ProfileSample,
+    analyze_behavior,
+    build_day_band,
+    build_week_heatmap,
+    count_recorded_days,
+)
 from application.monitoring.errors import (
     LoggingTaskConflict,
     LoggingTaskNotFound,
@@ -60,8 +70,11 @@ from domain.monitoring import InvalidTaskTransition
 
 __all__ = [
     "AddMonitorTarget",
+    "BehaviorProfile",
     "CheckLogVolume",
     "CreateLoggingTask",
+    "DayBandSlot",
+    "DaySlot",
     "DeleteLoggingTask",
     "DeleteMonitorTarget",
     "EnforceLoggingRetention",
@@ -87,6 +100,7 @@ __all__ = [
     "MonitoringApplicationError",
     "OutageInterval",
     "PauseLoggingTask",
+    "ProfileSample",
     "RankEntry",
     "ResumeActiveLoggingTasks",
     "ResumeLoggingTask",
@@ -98,10 +112,14 @@ __all__ = [
     "StartLoggingTask",
     "StopLoggingTask",
     "UpdateSchedule",
+    "analyze_behavior",
     "analyze_series",
+    "build_day_band",
     "build_heatmap",
     "build_latency_slots",
     "build_outages",
     "build_ranking",
+    "build_week_heatmap",
     "compute_metrics",
+    "count_recorded_days",
 ]
