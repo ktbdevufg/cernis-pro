@@ -16,9 +16,11 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from application.monitoring.series_analysis import (
+    EnrichedRttSample,
     OutageInterval,
     analyze_series,
     build_heatmap,
+    build_latency_slots,
     build_outages,
     build_ranking,
     compute_metrics,
@@ -42,6 +44,11 @@ def _alive(ts: float) -> LoggingRttSample:
 
 def _dead(ts: float) -> LoggingRttSample:
     return LoggingRttSample(rtt_ms=-1.0, loss_pct=100.0, alive=False, ts=ts)
+
+
+def _ertt(rtt_ms: float, minute_of_day: int, alive: bool = True) -> EnrichedRttSample:
+    """Angereicherter RTT-Messpunkt (Test-Helfer fuer die Latenz-Achse)."""
+    return EnrichedRttSample(rtt_ms=rtt_ms, alive=alive, minute_of_day=minute_of_day)
 
 
 def _enrich_with(
@@ -276,6 +283,81 @@ def test_ranking_skips_unenriched_minute_of_day() -> None:
     assert build_ranking(outages, slot_minutes=60) == []
 
 
+# ── build_latency_slots: Latenz-Spitzen je Tageszeit-Slot ───────────────────
+
+
+def test_latency_slots_empty_input_is_empty() -> None:
+    assert build_latency_slots([], slot_minutes=60) == []
+
+
+def test_latency_slots_skip_sentinel_and_dead_samples() -> None:
+    # Sentinel rtt < 0 UND alive=False werden ausgespart -- nur der gueltige Punkt zaehlt.
+    enriched = [
+        _ertt(10.0, minute_of_day=5),  # gueltig
+        _ertt(-1.0, minute_of_day=5),  # Sentinel -> raus
+        _ertt(99.0, minute_of_day=5, alive=False),  # alive False -> raus
+    ]
+
+    slots = build_latency_slots(enriched, slot_minutes=60)
+
+    assert len(slots) == 1
+    assert slots[0].minute_of_day == 0
+    assert slots[0].sample_count == 1
+    assert slots[0].max_rtt_ms == 10.0
+    assert slots[0].p95_rtt_ms == 10.0
+
+
+def test_latency_slots_bucket_by_slot_minutes() -> None:
+    # slot_minutes=60: Minuten 0..59 -> Bucket 0, 60..119 -> Bucket 60.
+    enriched = [
+        _ertt(10.0, minute_of_day=10),
+        _ertt(20.0, minute_of_day=50),
+        _ertt(30.0, minute_of_day=75),
+        _ertt(40.0, minute_of_day=130),
+    ]
+
+    slots = build_latency_slots(enriched, slot_minutes=60)
+
+    # Aufsteigend nach minute_of_day; Bucket 0 hat 2 Samples (max 20), 60 eins, 120 eins.
+    assert [(s.minute_of_day, s.sample_count, s.max_rtt_ms) for s in slots] == [
+        (0, 2, 20.0),
+        (60, 1, 30.0),
+        (120, 1, 40.0),
+    ]
+
+
+def test_latency_slots_p95_nearest_rank_with_20_values() -> None:
+    # 20 Werte 1.0..20.0 in EINEM Slot. nearest-rank: Index = ceil(0.95*20) - 1
+    # = ceil(19.0) - 1 = 18 -> der vorletzte Wert (19.0). max = 20.0.
+    enriched = [_ertt(float(v), minute_of_day=5) for v in range(1, 21)]
+
+    slots = build_latency_slots(enriched, slot_minutes=60)
+
+    assert len(slots) == 1
+    assert slots[0].sample_count == 20
+    assert slots[0].p95_rtt_ms == 19.0
+    assert slots[0].max_rtt_ms == 20.0
+
+
+def test_latency_slots_p95_single_value_clamps_to_that_value() -> None:
+    # n=1: Index = ceil(0.95) - 1 = 1 - 1 = 0 -> geclamped auf [0, 0]; p95 == max == Wert.
+    slots = build_latency_slots([_ertt(7.0, minute_of_day=5)], slot_minutes=60)
+
+    assert slots[0].p95_rtt_ms == 7.0
+    assert slots[0].max_rtt_ms == 7.0
+
+
+def test_latency_slots_p95_uses_sorted_order_not_input_order() -> None:
+    # Unsortierte Eingabe: p95/max muessen auf der aufsteigend sortierten Reihe rechnen.
+    enriched = [_ertt(v, minute_of_day=5) for v in (50.0, 10.0, 30.0, 20.0, 40.0)]
+
+    slots = build_latency_slots(enriched, slot_minutes=60)
+
+    # n=5: Index = ceil(4.75) - 1 = 5 - 1 = 4 -> letzter Wert (50.0). max = 50.0.
+    assert slots[0].p95_rtt_ms == 50.0
+    assert slots[0].max_rtt_ms == 50.0
+
+
 # ── analyze_series: Orchestrierung + has_latency ────────────────────────────
 
 
@@ -343,3 +425,54 @@ def test_analyze_with_partial_enrich_keeps_unenriched_in_outages_only() -> None:
     assert [(s.minute_of_day, s.outage_count) for s in analysis.heatmap] == [(60, 1)]
     assert len(analysis.ranking) == 1
     assert analysis.ranking[0].day_count == 1
+
+
+# ── analyze_series: latency_slots-Achse ─────────────────────────────────────
+
+
+def test_analyze_with_enriched_rtt_fills_latency_slots() -> None:
+    # Zwei gueltige Samples im Bucket 0 (slot_minutes=60), ein Sentinel -> ausgespart.
+    enriched_rtt = [
+        _ertt(10.0, minute_of_day=5),
+        _ertt(30.0, minute_of_day=50),
+        _ertt(-1.0, minute_of_day=50, alive=False),
+    ]
+
+    analysis = analyze_series(
+        CaptureMode.REACHABILITY_LATENCY,
+        [],
+        [],
+        slot_minutes=60,
+        enrich=None,
+        enriched_rtt=enriched_rtt,
+    )
+
+    assert len(analysis.latency_slots) == 1
+    slot = analysis.latency_slots[0]
+    assert slot.minute_of_day == 0
+    assert slot.sample_count == 2  # der Sentinel zaehlt nicht
+    assert slot.max_rtt_ms == 30.0
+
+
+def test_analyze_without_enriched_rtt_has_empty_latency_slots_and_unchanged_rest() -> None:
+    # Default (kein enriched_rtt): latency_slots leer, alle uebrigen Pfade unveraendert.
+    events = [_down(100.0), _up(160.0)]
+    rtt = [_alive(1.0), _dead(2.0)]
+    enrich = _enrich_with({100.0: (70, "2026-06-01")})
+
+    analysis = analyze_series(
+        CaptureMode.REACHABILITY_LATENCY, rtt, events, slot_minutes=60, enrich=enrich
+    )
+
+    # Latenz-Achse leer (ehrlicher Leerzustand).
+    assert analysis.latency_slots == []
+    # Gegenprobe: Outage-/Heatmap-/Ranking-/metrics-Pfade unveraendert.
+    assert len(analysis.outages) == 1
+    assert analysis.outages[0].duration_s == 60.0
+    assert [(s.minute_of_day, s.outage_count) for s in analysis.heatmap] == [(60, 1)]
+    assert len(analysis.ranking) == 1
+    assert analysis.ranking[0].day_count == 1
+    assert analysis.metrics.outage_count == 1
+    assert analysis.metrics.worst_slot_minute == 60
+    assert analysis.metrics.availability_pct == 50.0  # 1 von 2 alive
+    assert analysis.has_latency is True

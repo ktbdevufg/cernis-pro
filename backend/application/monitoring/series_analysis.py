@@ -31,7 +31,8 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from math import ceil
 from statistics import fmean
 
 from domain.monitoring import CaptureMode, LoggingEventRow, LoggingRttSample
@@ -98,6 +99,43 @@ class RankEntry:
 
 
 @dataclass(frozen=True)
+class LatencySlot:
+    """Ein Tageszeit-Bucket der Latenz-Spitzen (zweite fachliche Achse neben Outages).
+
+    ``minute_of_day`` ist die gebucketete Tagesfenster-Minute (untere Bucket-Grenze,
+    ``(minute_of_day // slot_minutes) * slot_minutes`` -- gleiche Bucketung wie
+    ``HeatmapSlot``), ``sample_count`` die Zahl der GUELTIGEN ``alive``-Samples im Slot
+    (Sentinel ``-1.0`` und nicht erreichbare ausgespart), ``p95_rtt_ms`` das
+    95-Perzentil (nearest-rank) und ``max_rtt_ms`` das Maximum der ``rtt_ms`` dieser
+    gueltigen Samples. NICHT gerundet -- das macht Router/Frontend.
+    """
+
+    minute_of_day: int
+    sample_count: int
+    p95_rtt_ms: float
+    max_rtt_ms: float
+
+
+@dataclass(frozen=True)
+class EnrichedRttSample:
+    """Ein bereits lokal angereicherter RTT-Messpunkt fuer die Latenz-Aggregation.
+
+    ``LoggingRttSample`` traegt BEWUSST keine Anzeige-Felder (``minute_of_day``/
+    ``day_key``) und soll nicht verschmutzt werden -- darum nimmt die Latenz-Aggregation
+    die Samples NICHT roh, sondern als Liste dieser angereicherten Datentraeger entgegen.
+    Die Anreicherung (Unix-``ts`` -> ``minute_of_day`` in LOKALER Zeit) baut der Router
+    (``_enrich_rtt_local``), damit ``series_analysis`` weiter uhrfrei bleibt -- dieselbe
+    Naht wie ``enrich`` bei den Outages. ``rtt_ms``/``alive`` sind roh aus dem Sample
+    (Sentinel ``-1.0`` bleibt erhalten); die Gueltigkeitspruefung macht
+    ``build_latency_slots``.
+    """
+
+    rtt_ms: float
+    alive: bool
+    minute_of_day: int
+
+
+@dataclass(frozen=True)
 class SeriesMetrics:
     """Die verdichteten Kennzahlen der Serie.
 
@@ -123,6 +161,12 @@ class SeriesAnalysis:
     Tageszeit-Sichten (nur angereicherte Outages). ``has_latency`` sagt, ob die Serie
     RTT-Latenz fuehrt (``capture_mode == REACHABILITY_LATENCY``) -- das steuert, ob
     der Router eine Latenz-Sicht anbietet.
+
+    ``latency_slots`` ist die zweite fachliche Achse: Latenz-Spitzen je Tageszeit-Slot
+    (aus den lokal angereicherten RTT-Samples). Sie wird IMMER berechnet; bei leerer
+    Eingabe ist sie leer (ehrlicher Leerzustand) -- das Frontend zeigt sie nur, wenn
+    ``has_latency`` ``True`` ist. Default leere Liste (``field(default_factory=list)``)
+    ans Ende, damit bestehende positionsbasierte Konstruktionen gueltig bleiben.
     """
 
     metrics: SeriesMetrics
@@ -130,6 +174,7 @@ class SeriesAnalysis:
     heatmap: list[HeatmapSlot]
     ranking: list[RankEntry]
     has_latency: bool
+    latency_slots: list[LatencySlot] = field(default_factory=list)
 
 
 # ── Reine Funktionen (keine I/O, keine Uhr) ─────────────────────────────────
@@ -245,6 +290,43 @@ def build_ranking(outages: list[OutageInterval], slot_minutes: int) -> list[Rank
     return entries
 
 
+def build_latency_slots(enriched: list[EnrichedRttSample], slot_minutes: int) -> list[LatencySlot]:
+    """Verdichtet angereicherte RTT-Samples zu Latenz-Spitzen je Tageszeit-Slot.
+
+    Nur GUELTIGE Samples zaehlen: ``alive`` ``True`` UND ``rtt_ms >= 0.0`` -- der
+    Sentinel ``-1.0`` und nicht erreichbare Punkte sind keine Latenzwerte und werden
+    ausgespart (Haltung wie ``latency_threshold``: nicht erreichbar ist keine
+    Latenz-Ueberschreitung). Gruppiert nach ``(minute_of_day // slot_minutes) *
+    slot_minutes`` (gleiche Bucketung wie ``build_heatmap``, ueber ``_slot_of``). Je Slot:
+    ``sample_count`` = Zahl gueltiger Samples, ``p95_rtt_ms`` = 95-Perzentil nach
+    nearest-rank (aufsteigend sortiert, Index ``ceil(0.95 * n) - 1``, geclamped auf
+    ``[0, n-1]``), ``max_rtt_ms`` = Maximum. Leere Eingabe -> leere Liste. Aufsteigend
+    nach ``minute_of_day`` sortiert (wie ``build_heatmap``). Reine Funktion: keine I/O,
+    keine Uhr -- die lokale Anreicherung kommt vom Router (s. ``EnrichedRttSample``).
+    """
+    rtts_per_slot: dict[int, list[float]] = defaultdict(list)
+    for sample in enriched:
+        if not sample.alive or sample.rtt_ms < 0.0:
+            continue
+        rtts_per_slot[_slot_of(sample.minute_of_day, slot_minutes)].append(sample.rtt_ms)
+
+    slots: list[LatencySlot] = []
+    for slot, rtts in sorted(rtts_per_slot.items()):
+        rtts.sort()
+        n = len(rtts)
+        # nearest-rank: Index = ceil(0.95 * n) - 1, geclamped auf [0, n-1].
+        index = min(max(ceil(0.95 * n) - 1, 0), n - 1)
+        slots.append(
+            LatencySlot(
+                minute_of_day=slot,
+                sample_count=n,
+                p95_rtt_ms=rtts[index],
+                max_rtt_ms=rtts[-1],
+            )
+        )
+    return slots
+
+
 def compute_metrics(
     rtt: list[LoggingRttSample], outages: list[OutageInterval], slot_minutes: int
 ) -> SeriesMetrics:
@@ -283,6 +365,7 @@ def analyze_series(
     events: list[LoggingEventRow],
     slot_minutes: int,
     enrich: Callable[[list[OutageInterval]], list[OutageInterval]] | None,
+    enriched_rtt: list[EnrichedRttSample] | None = None,
 ) -> SeriesAnalysis:
     """Orchestriert die Auswertung EINER Serie aus RTT-Samples + Event-Flanken.
 
@@ -292,6 +375,12 @@ def analyze_series(
     rechnet keine Wanduhr). Ist ``enrich`` ``None``, bleiben beide Felder ``None`` --
     Heatmap und Ranking sind dann leer, die ``outages``-Liste trotzdem vollstaendig.
     ``has_latency`` ist ``True`` genau fuer ``CaptureMode.REACHABILITY_LATENCY``.
+
+    ``enriched_rtt`` sind die bereits lokal angereicherten RTT-Samples (Router-Naht
+    ``_enrich_rtt_local``) fuer die Latenz-Spitzen-Achse. Sie werden IMMER ueber
+    ``build_latency_slots`` verdichtet; bei leerer (Default ``None`` -> leere) Liste sind
+    die ``latency_slots`` leer (ehrlicher Leerzustand). ``has_latency`` bleibt davon
+    unberuehrt -- das Frontend zeigt die Latenz-Sicht nur, wenn ``has_latency`` ``True`` ist.
     """
     outages = build_outages(events)
     if enrich is not None:
@@ -300,6 +389,7 @@ def analyze_series(
     heatmap = build_heatmap(outages, slot_minutes)
     ranking = build_ranking(outages, slot_minutes)
     metrics = compute_metrics(rtt, outages, slot_minutes)
+    latency_slots = build_latency_slots(enriched_rtt or [], slot_minutes)
 
     return SeriesAnalysis(
         metrics=metrics,
@@ -307,4 +397,5 @@ def analyze_series(
         heatmap=heatmap,
         ranking=ranking,
         has_latency=capture_mode == CaptureMode.REACHABILITY_LATENCY,
+        latency_slots=latency_slots,
     )

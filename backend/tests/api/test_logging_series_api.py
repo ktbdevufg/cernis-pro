@@ -193,6 +193,37 @@ def test_series_open_outage_at_end_carries_null_end_ts(db_path: Path) -> None:
     assert outages[0]["duration_s"] == 0.0  # letzter bekannter Event-ts == down
 
 
+# ── latency_slots: Wire-Form der Latenz-Achse ───────────────────────────────
+
+
+def test_series_latency_slots_in_wire_form(db_path: Path) -> None:
+    # RTT-Samples mit echten ts -> latency_slots in der Wire-Form mit den vier Feldern.
+    # Sentinel/dead-Sample wird aus der Latenz-Aggregation ausgespart.
+    with TestClient(_wired_app(db_path)) as client:
+        tid = client.post("/api/monitor/logging", json=_create_body()).json()["id"]
+
+    ts = 1_700_000_000.0  # alle Samples in dieselbe Minute -> EIN latency_slot
+    rtt = SqliteLoggingRttRepository(db_path)
+    rtt.save(tid, 10.0, 0.0, True, ts)
+    rtt.save(tid, 30.0, 0.0, True, ts + 1)
+    rtt.save(tid, -1.0, 100.0, False, ts + 2)  # Sentinel -> ausgespart
+
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.get(f"/api/monitor/logging/{tid}/series?slot_minutes=60")
+    assert resp.status_code == 200
+    slots = resp.json()["latency_slots"]
+
+    expected_slot = _slot_of(_expected_local_minute(ts), 60)
+    assert slots == [
+        {
+            "minute_of_day": expected_slot,
+            "sample_count": 2,  # der Sentinel zaehlt nicht
+            "p95_rtt_ms": 30.0,  # n=2: Index = ceil(1.9)-1 = 1 -> 30.0
+            "max_rtt_ms": 30.0,
+        }
+    ]
+
+
 # ── REACHABILITY (has_latency False) ────────────────────────────────────────
 
 
@@ -210,6 +241,7 @@ def test_series_reachability_has_no_latency(db_path: Path) -> None:
     assert body["outages"] == []
     assert body["heatmap"] == []
     assert body["ranking"] == []
+    assert body["latency_slots"] == []
     assert body["metrics"]["outage_count"] == 0
     assert body["metrics"]["avg_outage_s"] == 0.0
     assert body["metrics"]["availability_pct"] == 100.0

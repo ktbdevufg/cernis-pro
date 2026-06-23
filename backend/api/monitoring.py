@@ -60,6 +60,7 @@ from application.monitoring import (
     CreateLoggingTask,
     DeleteLoggingTask,
     DeleteMonitorTarget,
+    EnrichedRttSample,
     GetAllSlaStats,
     GetLoggingTaskDetail,
     GetLoggingTaskEvents,
@@ -435,6 +436,17 @@ def _series_analysis_to_dict(analysis: SeriesAnalysis) -> dict[str, Any]:
                 "longest_outage_s": entry.longest_outage_s,
             }
             for entry in analysis.ranking
+        ],
+        # Latenz-Spitzen je Tageszeit-Slot (zweite Achse). Alle Werte ROH (keine
+        # Rundung -- das macht das Frontend). Leer, wenn keine gueltigen Samples vorliegen.
+        "latency_slots": [
+            {
+                "minute_of_day": slot.minute_of_day,
+                "sample_count": slot.sample_count,
+                "p95_rtt_ms": slot.p95_rtt_ms,
+                "max_rtt_ms": slot.max_rtt_ms,
+            }
+            for slot in analysis.latency_slots
         ],
     }
 
@@ -839,6 +851,31 @@ def _enrich_outages_local(outages: list[OutageInterval]) -> list[OutageInterval]
     return enriched
 
 
+def _enrich_rtt_local(rtt: list[Any]) -> list[EnrichedRttSample]:
+    """Reichert je RTT-Sample die lokale ``minute_of_day`` aus ``ts`` an (Latenz-Achse).
+
+    Zwillings-Naht zu ``_enrich_outages_local``: die Aggregation (``series_analysis``)
+    rechnet bewusst KEINE Wanduhr (zeitfrei, ADR 0002) -- die Umrechnung Unix-``ts`` ->
+    Tagesfenster-Minute gehoert an den Router-Rand, der die Server-Zeitzone nutzen DARF.
+    ``datetime.fromtimestamp`` ohne ``tz`` ist die lokale Zeit; ``minute_of_day`` =
+    lokale Stunde*60 + Minute (0..1439). ``rtt_ms``/``alive`` werden roh durchgereicht
+    (Sentinel ``-1.0`` bleibt erhalten) -- die Gueltigkeitspruefung macht
+    ``build_latency_slots``. Die Samples kommen als rohe Domaenen-Objekte herein (Typ
+    ``Any``, wie ``_rtt_to_dict`` -- der api-Ring importiert keine ``domain``-Typen).
+    """
+    enriched: list[EnrichedRttSample] = []
+    for sample in rtt:
+        local = datetime.fromtimestamp(sample.ts)
+        enriched.append(
+            EnrichedRttSample(
+                rtt_ms=sample.rtt_ms,
+                alive=sample.alive,
+                minute_of_day=local.hour * 60 + local.minute,
+            )
+        )
+    return enriched
+
+
 @router.get("/monitor/logging/{task_id}/series")
 def logging_task_series(
     task_id: str,
@@ -864,12 +901,17 @@ def logging_task_series(
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     events = get_events(task_id, since=since, until=until)
     rtt = get_rtt(task_id, since=since, until=until)
+    # Latenz-Achse: die rohen RTT-Samples lokal anreichern (minute_of_day), damit die
+    # zeitfreie Aggregation die Latenz-Spitzen je Tageszeit-Slot bucketet (Naht wie
+    # ``_enrich_outages_local`` bei den Outages). Als NEUES letztes Argument durchgereicht.
+    enriched_rtt = _enrich_rtt_local(rtt)
     analysis = analyze_series(
         task.capture_mode,
         rtt,
         events,
         slot_minutes,
         _enrich_outages_local,
+        enriched_rtt,
     )
     return _series_analysis_to_dict(analysis)
 
