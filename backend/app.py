@@ -3032,6 +3032,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                     cvss_score=f.cvss_score,
                     severity=f.severity,
                     service=f.service,
+                    description=f.description,
                 )
                 for f in findings
             ]
@@ -3169,6 +3170,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                     cvss_score=c.cvss_score,
                     severity=c.severity,
                     service=c.service,
+                    description=c.description,
                 )
                 for c in report.cve_findings
             ],
@@ -3197,6 +3199,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                     cvss_score=c.cvss_score,
                     severity=c.severity,
                     service=c.service,
+                    description=c.description,
                 )
                 for c in report.acknowledged_cve_findings
             ],

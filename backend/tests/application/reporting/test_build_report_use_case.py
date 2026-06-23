@@ -34,6 +34,7 @@ def test_reicht_mit_defaults_identisch_zu_build_security_report_durch() -> None:
             cvss_score=7.5,
             severity="high",
             service="http",
+            description="CVE-2021-0001",
         ),
     ]
     net_findings = [
@@ -87,6 +88,7 @@ def test_reicht_eigene_gewichte_und_schwellen_durch() -> None:
             cvss_score=7.5,
             severity="high",
             service="http",
+            description="CVE-2021-0002",
         ),
     ]
 

@@ -1,11 +1,13 @@
 // Reporting-Ansicht (CERNIS PRO 2.0)
-// Kachel-Übersicht der Reporting-Funktionen. Klick auf eine aktive Kachel öffnet
-// vorerst einen "in Arbeit"-Platzhalter mit Zurück-Weg.
+// Kachel-Übersicht der Reporting-Funktionen. Jede Bericht-Art ist eine eigene
+// Kachel; Klick auf eine aktive Kachel öffnet die zugehörige Berichts-Ansicht.
 //
 // Funktionen:
-//   "report"  Bericht erstellen (aktiv, Inhalt vorerst Platzhalter)
+//   "security"  Netzwerk-Sicherheitsbericht (aktiv)
+//   weitere Berichte folgen als eigene Kacheln (zusätzlicher FUNKTIONEN-Eintrag
+//   mit eigener id + Eintrag in KOMPONENTEN_JE_ID).
 
-import { FileText } from "lucide-react";
+import { ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -17,7 +19,13 @@ import FunctionCard from "../components/FunctionCard.jsx";
 import SecurityReportView from "../components/SecurityReportView.jsx";
 
 // Kachel-Definition: Schlüssel, Icon, Sperrstatus. Reihenfolge ist verbindlich.
-const FUNKTIONEN = [{ id: "report", icon: FileText, locked: false }];
+const FUNKTIONEN = [{ id: "security", icon: ShieldCheck, locked: false }];
+
+// Mapping id -> geöffnete Berichts-Komponente. Ein weiterer Bericht braucht nur
+// einen FUNKTIONEN-Eintrag oben und einen Eintrag hier.
+const KOMPONENTEN_JE_ID = {
+  security: SecurityReportView,
+};
 
 export default function ReportingView() {
   const { t } = useTranslation();
@@ -25,12 +33,13 @@ export default function ReportingView() {
   const [openFunction, setOpenFunction] = useState(null);
 
   if (openFunction) {
+    const Bericht = KOMPONENTEN_JE_ID[openFunction];
     return (
       <FunctionShell
         title={t(`reporting.cards.${openFunction}.title`)}
         onBack={() => setOpenFunction(null)}
       >
-        <SecurityReportView />
+        {Bericht ? <Bericht /> : null}
       </FunctionShell>
     );
   }

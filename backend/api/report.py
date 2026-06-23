@@ -78,6 +78,7 @@ class CveFindingOut(BaseModel):
     cvss_score: float
     severity: str
     service: str
+    description: str
 
 
 class NetFindingOut(BaseModel):

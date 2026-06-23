@@ -16,7 +16,7 @@
 //     port_findings: [ { device_label, ports:str, severity ("critical"/"notable"),
 //       reason } ],
 //     cve_findings: [ { device_label, cve_id, cvss_score:float, severity:str,
-//       service } ],
+//       service, description } ],
 //     net_findings: [ { kind, device_label, description,
 //       severity ("critical"/"notable") } ],
 //     acknowledged_port_findings / acknowledged_cve_findings /
@@ -71,6 +71,7 @@ function mappeCveBefund(c) {
     cvssScore: c.cvss_score,
     severity: c.severity,
     service: c.service,
+    description: c.description ?? "",
   };
 }
 

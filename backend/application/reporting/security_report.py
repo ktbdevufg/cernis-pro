@@ -65,7 +65,8 @@ class CveFinding:
     ``cvss_score`` der CVSS-Wert (fuer Sortierung UND fuer das critical/notable-
     Mapping ueber ``cvss_critical_min``), ``severity`` der ROHE severity-Text aus der
     CVE-Quelle (nur als Beleg mitgefuehrt -- die Burden-Einstufung laeuft hier ueber
-    ``cvss_score``, nicht ueber diesen Rohwert), ``service`` der betroffene Dienst.
+    ``cvss_score``, nicht ueber diesen Rohwert), ``service`` der betroffene Dienst,
+    ``description`` der Klartext der Schwachstelle (zur Anzeige, nicht zur Wertung).
     """
 
     device_label: str
@@ -73,6 +74,7 @@ class CveFinding:
     cvss_score: float
     severity: str
     service: str
+    description: str
 
 
 @dataclass(frozen=True)

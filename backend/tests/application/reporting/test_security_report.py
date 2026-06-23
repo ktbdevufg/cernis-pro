@@ -45,6 +45,7 @@ def test_burden_maximum_ueber_quellen_port_critical_plus_cve_notable() -> None:
                 cvss_score=5.0,  # < 9.0 -> notable
                 severity="medium",
                 service="http",
+                description="Beispielhafte Schwachstelle",
             ),
         ],
         net_findings=[],
@@ -66,6 +67,7 @@ def test_cve_mapping_an_der_default_schwelle() -> None:
                 cvss_score=9.0,
                 severity="critical",
                 service="ssh",
+                description="Schwachstelle A",
             ),
             CveFinding(
                 device_label="grenz-knapp",
@@ -73,6 +75,7 @@ def test_cve_mapping_an_der_default_schwelle() -> None:
                 cvss_score=8.9,
                 severity="high",
                 service="ssh",
+                description="Schwachstelle B",
             ),
         ],
         net_findings=[],
@@ -127,13 +130,28 @@ def test_sortierung_der_drei_offenen_listen() -> None:
         ],
         cve_findings=[
             CveFinding(
-                device_label="a", cve_id="C-low", cvss_score=4.0, severity="medium", service="x"
+                device_label="a",
+                cve_id="C-low",
+                cvss_score=4.0,
+                severity="medium",
+                service="x",
+                description="C-low",
             ),
             CveFinding(
-                device_label="b", cve_id="C-high", cvss_score=9.8, severity="critical", service="y"
+                device_label="b",
+                cve_id="C-high",
+                cvss_score=9.8,
+                severity="critical",
+                service="y",
+                description="C-high",
             ),
             CveFinding(
-                device_label="c", cve_id="C-mid", cvss_score=7.5, severity="high", service="z"
+                device_label="c",
+                cve_id="C-mid",
+                cvss_score=7.5,
+                severity="high",
+                service="z",
+                description="C-mid",
             ),
         ],
         net_findings=[
@@ -168,10 +186,20 @@ def test_score_integration_end_to_end_89() -> None:
     ]
     cve_findings = [
         CveFinding(
-            device_label="dev-2", cve_id="CVE-X", cvss_score=5.0, severity="medium", service="http"
+            device_label="dev-2",
+            cve_id="CVE-X",
+            cvss_score=5.0,
+            severity="medium",
+            service="http",
+            description="CVE-X",
         ),
         CveFinding(
-            device_label="dev-3", cve_id="CVE-Y", cvss_score=6.0, severity="medium", service="http"
+            device_label="dev-3",
+            cve_id="CVE-Y",
+            cvss_score=6.0,
+            severity="medium",
+            service="http",
+            description="CVE-Y",
         ),
     ]
     report = build_security_report(
@@ -197,7 +225,14 @@ def test_acknowledged_listen_unveraendert_durchgereicht() -> None:
         PortFinding(device_label="x", ports="22", severity="notable", reason="SSH"),
     ]
     ack_cve = [
-        CveFinding(device_label="x", cve_id="CVE-Z", cvss_score=3.0, severity="low", service="ssh"),
+        CveFinding(
+            device_label="x",
+            cve_id="CVE-Z",
+            cvss_score=3.0,
+            severity="low",
+            service="ssh",
+            description="CVE-Z",
+        ),
     ]
     ack_net = [
         NetFinding(kind="Rogue-DHCP", device_label="x", description="DHCP", severity="critical"),

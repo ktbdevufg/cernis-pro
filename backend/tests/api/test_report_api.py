@@ -89,6 +89,7 @@ def test_get_security_report_liefert_200_und_json_form(app: FastAPI) -> None:
                 cvss_score=9.8,
                 severity="CRITICAL",
                 service="smb",
+                description="Remote-Code-Ausfuehrung in SMB",
             )
         ],
         net_findings=[
@@ -107,6 +108,7 @@ def test_get_security_report_liefert_200_und_json_form(app: FastAPI) -> None:
                 cvss_score=5.5,
                 severity="MEDIUM",
                 service="http",
+                description="Veraltete HTTP-Bibliothek",
             )
         ],
         acknowledged_net_findings=[],
@@ -159,6 +161,7 @@ def test_get_security_report_liefert_200_und_json_form(app: FastAPI) -> None:
                 "cvss_score": 9.8,
                 "severity": "CRITICAL",
                 "service": "smb",
+                "description": "Remote-Code-Ausfuehrung in SMB",
             }
         ],
         "net_findings": [
@@ -177,6 +180,7 @@ def test_get_security_report_liefert_200_und_json_form(app: FastAPI) -> None:
                 "cvss_score": 5.5,
                 "severity": "MEDIUM",
                 "service": "http",
+                "description": "Veraltete HTTP-Bibliothek",
             }
         ],
         "acknowledged_net_findings": [],
