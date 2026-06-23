@@ -154,6 +154,15 @@ from api.outbound import OutboundContactOut, OutboundOverviewOut, provide_outbou
 from api.outbound import router as outbound_router
 from api.process import provide_check_process_permission, provide_list_processes
 from api.process import router as process_router
+from api.report import (
+    CveFindingOut,
+    NetFindingOut,
+    PortFindingOut,
+    ScoreOut,
+    SecurityReportOut,
+    provide_security_report,
+)
+from api.report import router as report_router
 from api.resolver import provide_resolve_endpoint, provide_resolve_ptr_batch
 from api.resolver import router as resolver_router
 from api.scanning import (
@@ -2934,13 +2943,20 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     # Use-Case ``BuildSecurityReport`` -> ``build_security_report``. KEIN HTTP-Endpunkt (das
     # ist Etappe 2c); hier nur die ehrliche Datenseite. Die Funktion ist async (zwei Quellen
     # -- DNS-Waechter, jueng. Scan-Helfer -- sind ohnehin async im Bestand) und gibt den
-    # fertigen ``SecurityReport`` zurueck; der spaetere Endpunkt ruft sie und serialisiert.
-    async def _build_security_report_data() -> SecurityReport:
+    # fertigen ``SecurityReport`` zurueck SAMT der zwei ehrlichen Statusfelder (has_scan,
+    # rogue_dhcp_checked_ts); der Endpunkt-Runner (Etappe 2c) projiziert sie auf die Wire-Form.
+    # Rueckgabe als kleines lokales Tupel (SecurityReport, has_scan, checked_ts): beide
+    # Statuswerte liegen HIER ohnehin vor (ob ein Scan-record als Basis vorlag, und der
+    # rogue-Stand wird unten gelesen) -- so vermeidet die Naht jede Doppelarbeit (keine
+    # zweite Scan-/Rogue-Lesung im Endpunkt-Runner, Auftrag Etappe 2c).
+    async def _build_security_report_data() -> tuple[SecurityReport, bool, float | None]:
         # (1) JUENGSTER SCAN als Basis (analysis-Schnitt-B-Muster, list(1)->get->record.hosts,
         # ausfallsicher). Kein Scan / kaputter Scan -> ehrlich leere Basis: leere
         # device_labels + leere Findings -> build_security_report liefert Score 100 ueber
-        # leere Basis. Den HTTP-seitigen "kein Scan"-Hinweis macht erst Etappe 2c.
+        # leere Basis. ``has_scan`` haelt ehrlich fest, OB ein Scan-record als Basis vorlag
+        # (record is not None) -- ein leerer, aber existierender Scan zaehlt als has_scan True.
         base_hosts: list[EnrichedHost] = []
+        has_scan = False
         summaries = scan_history_repository().list(1)
         if summaries:
             try:
@@ -2951,6 +2967,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 )
                 record = None
             if record is not None:
+                has_scan = True
                 base_hosts = list(record.hosts)
 
         # device_label EINES Scan-Hosts: kuratierter Anzeigename (label) falls vorhanden,
@@ -3072,6 +3089,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # NetFinding (severity "critical" -- ein fremder DHCP-Server ist ernst). checked_ts
         # kommt aus dem GESPEICHERTEN Stand (KEINE neue Wanduhr), nur formatiert.
         rogue = GetLatestRogueDhcp(rogue_dhcp_repository())()
+        # checked_ts des letzten gespeicherten Stands fuer das ehrliche Statusfeld
+        # (None = noch nie geprueft). Aus DERSELBEN Lesung -- keine zweite Rogue-Abfrage.
+        rogue_checked_ts = rogue.checked_ts if rogue is not None else None
         if rogue is not None and rogue.has_unexpected:
             checked_date = datetime.fromtimestamp(rogue.checked_ts).strftime("%Y-%m-%d %H:%M")
             for server in rogue.servers:
@@ -3092,7 +3112,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # Basis-Geraeten zu: ein Finding auf einem Nicht-Basis-Label findet kein Basis-Geraet
         # und hebt damit den Score NICHT (die Score-Basis N bleibt der Scan-Bestand) -- das ist
         # akzeptabel und ehrlich (keine kuenstliche Basis-Erweiterung).
-        return BuildSecurityReport()(
+        report = BuildSecurityReport()(
             device_labels=device_labels,
             port_findings=port_findings,
             cve_findings=cve_findings,
@@ -3101,6 +3121,93 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             ack_cve=ack_cve,
             ack_net=ack_net,
         )
+        # Bericht SAMT der zwei ehrlichen Statuswerte zurueck (beide hier ohnehin bekannt):
+        # has_scan (ob ein Scan-record als Basis vorlag) + rogue_checked_ts (None = nie geprueft).
+        return report, has_scan, rogue_checked_ts
+
+    # ── Sicherheitsbericht: HTTP-Endpunkt-Runner (Etappe 2c, Muster _dns_watch, Regel 4/5) ──
+    # Composition-Root-Runner fuer GET /api/report/security: ruft die schon verdrahtete
+    # Datenseite _build_security_report_data (liefert SecurityReport + has_scan + checked_ts)
+    # und PROJIZIERT den application-Typ SecurityReport auf die api-Wire-Form SecurityReportOut
+    # (Score -> ScoreOut, je Finding -> *Out). Die Projektion lebt -- wie bei _dns_watch --
+    # HIER im Composition Root, NICHT im Router (Regel 4: der api-Ring kennt application nicht).
+    # Keine Wanduhr: rogue_dhcp_checked_ts kommt aus dem GESPEICHERTEN Stand durch die Closure.
+    async def _security_report() -> SecurityReportOut:
+        report, has_scan, rogue_checked_ts = await _build_security_report_data()
+        return SecurityReportOut(
+            score=ScoreOut(
+                score=report.score.score,
+                level=report.score.level,
+                device_count=report.score.device_count,
+                total_burden=report.score.total_burden,
+                critical_devices=report.score.critical_devices,
+                notable_devices=report.score.notable_devices,
+                clean_devices=report.score.clean_devices,
+            ),
+            port_findings=[
+                PortFindingOut(
+                    device_label=p.device_label,
+                    ports=p.ports,
+                    severity=p.severity,
+                    reason=p.reason,
+                )
+                for p in report.port_findings
+            ],
+            cve_findings=[
+                CveFindingOut(
+                    device_label=c.device_label,
+                    cve_id=c.cve_id,
+                    cvss_score=c.cvss_score,
+                    severity=c.severity,
+                    service=c.service,
+                )
+                for c in report.cve_findings
+            ],
+            net_findings=[
+                NetFindingOut(
+                    kind=n.kind,
+                    device_label=n.device_label,
+                    description=n.description,
+                    severity=n.severity,
+                )
+                for n in report.net_findings
+            ],
+            acknowledged_port_findings=[
+                PortFindingOut(
+                    device_label=p.device_label,
+                    ports=p.ports,
+                    severity=p.severity,
+                    reason=p.reason,
+                )
+                for p in report.acknowledged_port_findings
+            ],
+            acknowledged_cve_findings=[
+                CveFindingOut(
+                    device_label=c.device_label,
+                    cve_id=c.cve_id,
+                    cvss_score=c.cvss_score,
+                    severity=c.severity,
+                    service=c.service,
+                )
+                for c in report.acknowledged_cve_findings
+            ],
+            acknowledged_net_findings=[
+                NetFindingOut(
+                    kind=n.kind,
+                    device_label=n.device_label,
+                    description=n.description,
+                    severity=n.severity,
+                )
+                for n in report.acknowledged_net_findings
+            ],
+            # device_count = Basis N (Anzahl beruecksichtigter Geraete) aus device_labels.
+            device_count=len(report.device_labels),
+            has_scan=has_scan,
+            rogue_dhcp_checked_ts=rogue_checked_ts,
+        )
+
+    app.include_router(report_router)
+    app.dependency_overrides[provide_security_report] = lambda: _security_report
 
     # ── Route zum Ziel (ADR 0036): traceroute-Hops + Geo/ASN, zwei getrennte Naehte ──
     # Regel 5: die Quer-Domaenen-Naht (diagnostics-Hops + resolver-Geo/RDAP) faellt
