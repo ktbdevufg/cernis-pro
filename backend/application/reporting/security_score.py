@@ -48,6 +48,24 @@ class DeviceBurden:
 
 
 @dataclass(frozen=True)
+class ScoreContribution:
+    """Der Last-Beitrag EINES belasteten Geraets zum Netz-Gesundheit-Score.
+
+    Schlankes Tripel fuer die aufklappbare Score-Liste im Frontend (Etappe 3):
+    ``device_label`` der Anzeigename/ip||mac, ``worst_severity`` genau "critical"
+    oder "notable" (saubere Geraete mit Last 0 stehen NICHT hier, ihre Zahl steht
+    in ``SecurityScore.clean_devices``), ``burden_value`` der tatsaechliche
+    Lastwert dieses Geraets -- also ``critical_weight`` bzw. ``notable_weight``,
+    so wie er auch in ``total_burden`` einfliesst. Single Source: das Frontend
+    rechnet damit nichts nach, es zeigt die Werte nur an.
+    """
+
+    device_label: str
+    worst_severity: str
+    burden_value: float
+
+
+@dataclass(frozen=True)
 class SecurityScore:
     """Das Gesamtergebnis der Score-Rechnung (alles, was der Bericht herausreicht).
 
@@ -56,6 +74,11 @@ class SecurityScore:
     (Anzahl beruecksichtigter Geraete), ``total_burden`` die aufsummierte Last,
     ``critical_devices`` / ``notable_devices`` / ``clean_devices`` die Zaehler je
     worst_severity-Stufe (critical / notable / none).
+
+    ``contributions`` ist die nach Last sortierte Beitragsliste der BELASTETEN
+    Geraete (worst_severity != "none") -- je Eintrag ein ``ScoreContribution``
+    mit dem tatsaechlichen Lastwert. Sie summiert sich auf ``total_burden`` und
+    traegt KEINE neue Rechnung: die Werte stammen direkt aus der Burden-Schleife.
     """
 
     score: int
@@ -65,6 +88,7 @@ class SecurityScore:
     critical_devices: int
     notable_devices: int
     clean_devices: int
+    contributions: list[ScoreContribution]
 
 
 # ── Reine Funktion (keine I/O, keine Uhr) ───────────────────────────────────
@@ -93,12 +117,43 @@ def compute_security_score(
     ``level``: score >= ``level_good_min`` -> "gut"; sonst score >=
     ``level_mid_min`` -> "maessig"; sonst "kritisch".
 
+    ``contributions`` wird WAEHREND der Burden-Schleife mitgebaut (keine zweite
+    Rechnung): je Burden mit "critical" -> ``burden_value = critical_weight``,
+    "notable" -> ``notable_weight``, "none" -> NICHT aufgenommen (saubere Geraete
+    stehen nur in ``clean_devices``). Danach sortiert: Schwere zuerst (critical
+    vor notable), dann ``burden_value`` absteigend, dann ``device_label``
+    aufsteigend als stabiler Tie-Breaker -- robust gegen Gewichts-Parametrisierung,
+    "kritisch zuerst" gilt unabhaengig davon, ob ``notable_weight`` ueber
+    ``critical_weight`` gesetzt wurde.
+
     Die Gewichte und Schwellen kommen als Parameter mit Defaults herein (spaeter
     aus analysis-Settings), nicht hartkodiert. Deterministisch, keine Uhr, keine I/O.
     """
-    critical_devices = sum(1 for burden in burdens if burden.worst_severity == "critical")
-    notable_devices = sum(1 for burden in burdens if burden.worst_severity == "notable")
-    clean_devices = sum(1 for burden in burdens if burden.worst_severity == "none")
+    critical_devices = 0
+    notable_devices = 0
+    clean_devices = 0
+    contributions: list[ScoreContribution] = []
+    for burden in burdens:
+        if burden.worst_severity == "critical":
+            critical_devices += 1
+            contributions.append(
+                ScoreContribution(burden.device_label, "critical", critical_weight)
+            )
+        elif burden.worst_severity == "notable":
+            notable_devices += 1
+            contributions.append(ScoreContribution(burden.device_label, "notable", notable_weight))
+        else:  # "none": sauberes Geraet, keine Last -> nicht in die Beitragsliste.
+            clean_devices += 1
+
+    # Sortierung: Schwere zuerst (critical vor notable), dann Last absteigend,
+    # dann device_label alphabetisch als stabiler Tie-Breaker. Der Severity-Rang
+    # als PRIMAERER Schluessel haelt "kritisch zuerst" UNABHAENGIG von den
+    # Gewichten -- setzt jemand notable_weight > critical_weight, stuenden sonst
+    # "notable"-Eintraege oben, ein Widerspruch zur Anzeige-Semantik.
+    _sev_order = {"critical": 0, "notable": 1}
+    contributions.sort(
+        key=lambda c: (_sev_order.get(c.worst_severity, 2), -c.burden_value, c.device_label)
+    )
 
     total_burden = critical_devices * critical_weight + notable_devices * notable_weight
     device_count = len(burdens)
@@ -126,4 +181,5 @@ def compute_security_score(
         critical_devices=critical_devices,
         notable_devices=notable_devices,
         clean_devices=clean_devices,
+        contributions=contributions,
     )

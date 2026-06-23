@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from application.reporting.security_score import (
     DeviceBurden,
+    ScoreContribution,
     SecurityScore,
     compute_security_score,
 )
@@ -49,6 +50,7 @@ def test_leere_eingabe_score_100_level_gut_zaehler_null() -> None:
         critical_devices=0,
         notable_devices=0,
         clean_devices=0,
+        contributions=[],
     )
 
 
@@ -197,3 +199,74 @@ def test_clamping_negativer_rohwert_wird_0() -> None:
     assert result.total_burden == 5.0
     assert result.score == 0
     assert result.level == "kritisch"
+
+
+# ── contributions: Beitragsliste je belastetem Geraet ───────────────────────
+
+
+def test_contributions_nur_belastete_geraete_saubere_nicht() -> None:
+    # 1 critical + 1 notable + 3 saubere: nur die zwei belasteten stehen drin,
+    # die sauberen tauchen nicht auf (ihre Zahl steht in clean_devices).
+    result = compute_security_score(
+        [_burden("critical", "nas"), _burden("notable", "drucker"), *_devices(clean=3)]
+    )
+
+    assert result.clean_devices == 3
+    assert [c.device_label for c in result.contributions] == ["nas", "drucker"]
+    assert all(c.worst_severity != "none" for c in result.contributions)
+
+
+def test_contributions_sortierung_kritisch_zuerst_dann_alphabetisch() -> None:
+    # Bewusst unsortiert hereingereicht; erwartet: critical (hoehere Last) zuerst,
+    # innerhalb gleicher Last alphabetisch nach device_label.
+    burdens = [
+        _burden("notable", "zebra"),
+        _burden("critical", "beta"),
+        _burden("notable", "alpha"),
+        _burden("critical", "alpha"),
+    ]
+    result = compute_security_score(burdens)
+
+    assert [(c.device_label, c.worst_severity) for c in result.contributions] == [
+        ("alpha", "critical"),
+        ("beta", "critical"),
+        ("alpha", "notable"),
+        ("zebra", "notable"),
+    ]
+
+
+def test_contributions_critical_zuerst_auch_wenn_notable_weight_groesser() -> None:
+    # Robustheit gegen Gewichts-Parametrisierung: notable_weight (0.9) GROESSER
+    # als critical_weight (0.2). Wuerde nur nach burden_value sortiert, stuende
+    # das notable-Geraet (Last 0.9) oben -- der Severity-Rang als primaerer
+    # Schluessel haelt das critical-Geraet (Last 0.2) trotzdem davor.
+    result = compute_security_score(
+        [_burden("notable", "drucker"), _burden("critical", "nas")],
+        critical_weight=0.2,
+        notable_weight=0.9,
+    )
+
+    assert [(c.device_label, c.worst_severity) for c in result.contributions] == [
+        ("nas", "critical"),
+        ("drucker", "notable"),
+    ]
+
+
+def test_contributions_burden_value_entspricht_gewichten() -> None:
+    # Abweichende Gewichte: burden_value je Eintrag ist genau das jeweilige Gewicht.
+    result = compute_security_score(
+        [_burden("critical", "c"), _burden("notable", "n")],
+        critical_weight=2.0,
+        notable_weight=0.5,
+    )
+
+    assert result.contributions == [
+        ScoreContribution("c", "critical", 2.0),
+        ScoreContribution("n", "notable", 0.5),
+    ]
+    # Single Source: die Beitraege summieren sich auf total_burden.
+    assert sum(c.burden_value for c in result.contributions) == result.total_burden
+
+
+def test_contributions_leeres_netz_leere_liste() -> None:
+    assert compute_security_score([]).contributions == []

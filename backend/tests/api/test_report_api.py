@@ -20,6 +20,7 @@ from api.report import (
     CveFindingOut,
     NetFindingOut,
     PortFindingOut,
+    ScoreContributionOut,
     ScoreOut,
     SecurityReportOut,
     provide_security_report,
@@ -60,6 +61,18 @@ def test_get_security_report_liefert_200_und_json_form(app: FastAPI) -> None:
             critical_devices=1,
             notable_devices=1,
             clean_devices=1,
+            contributions=[
+                ScoreContributionOut(
+                    device_label="nas",
+                    worst_severity="critical",
+                    burden_value=1.0,
+                ),
+                ScoreContributionOut(
+                    device_label="drucker",
+                    worst_severity="notable",
+                    burden_value=0.3334,
+                ),
+            ],
         ),
         port_findings=[
             PortFindingOut(
@@ -118,6 +131,18 @@ def test_get_security_report_liefert_200_und_json_form(app: FastAPI) -> None:
             "critical_devices": 1,
             "notable_devices": 1,
             "clean_devices": 1,
+            "contributions": [
+                {
+                    "device_label": "nas",
+                    "worst_severity": "critical",
+                    "burden_value": 1.0,
+                },
+                {
+                    "device_label": "drucker",
+                    "worst_severity": "notable",
+                    "burden_value": 0.3334,
+                },
+            ],
         },
         "port_findings": [
             {
@@ -175,6 +200,7 @@ def test_get_security_report_leerfall_has_scan_false(app: FastAPI) -> None:
             critical_devices=0,
             notable_devices=0,
             clean_devices=0,
+            contributions=[],
         ),
         port_findings=[],
         cve_findings=[],
@@ -202,6 +228,7 @@ def test_get_security_report_leerfall_has_scan_false(app: FastAPI) -> None:
             "critical_devices": 0,
             "notable_devices": 0,
             "clean_devices": 0,
+            "contributions": [],
         },
         "port_findings": [],
         "cve_findings": [],

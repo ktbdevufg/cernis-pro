@@ -158,6 +158,7 @@ from api.report import (
     CveFindingOut,
     NetFindingOut,
     PortFindingOut,
+    ScoreContributionOut,
     ScoreOut,
     SecurityReportOut,
     provide_security_report,
@@ -3143,6 +3144,14 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 critical_devices=report.score.critical_devices,
                 notable_devices=report.score.notable_devices,
                 clean_devices=report.score.clean_devices,
+                contributions=[
+                    ScoreContributionOut(
+                        device_label=c.device_label,
+                        worst_severity=c.worst_severity,
+                        burden_value=c.burden_value,
+                    )
+                    for c in report.score.contributions
+                ],
             ),
             port_findings=[
                 PortFindingOut(

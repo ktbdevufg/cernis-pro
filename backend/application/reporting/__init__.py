@@ -12,6 +12,7 @@ from application.reporting.security_report import (
 )
 from application.reporting.security_score import (
     DeviceBurden,
+    ScoreContribution,
     SecurityScore,
     compute_security_score,
 )
@@ -22,6 +23,7 @@ __all__ = [
     "DeviceBurden",
     "NetFinding",
     "PortFinding",
+    "ScoreContribution",
     "SecurityReport",
     "SecurityScore",
     "build_device_burdens",

@@ -35,6 +35,19 @@ router = APIRouter(prefix="/api/report", tags=["report"])
 # nicht).
 
 
+class ScoreContributionOut(BaseModel):
+    """Der Last-Beitrag EINES belasteten Geraets zum Score (Wire-Form).
+
+    ``device_label`` der Anzeigename, ``worst_severity`` "critical"/"notable",
+    ``burden_value`` der tatsaechliche Lastwert. Nur belastete Geraete; saubere
+    stehen in ``ScoreOut.clean_devices``. Single Source -- das Frontend zeigt nur an.
+    """
+
+    device_label: str
+    worst_severity: str
+    burden_value: float
+
+
 class ScoreOut(BaseModel):
     """Der Netz-Gesundheit-Score samt Einstufung und Zaehlern (Wire-Form)."""
 
@@ -45,6 +58,7 @@ class ScoreOut(BaseModel):
     critical_devices: int
     notable_devices: int
     clean_devices: int
+    contributions: list[ScoreContributionOut]
 
 
 class PortFindingOut(BaseModel):
