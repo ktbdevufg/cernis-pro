@@ -1,0 +1,232 @@
+/* Verhaltensprofil einer Logging-Aufgabe (Block 4). Designsprache wie
+   LoggingSeriesView/SlaChart: Card-Flaechen, --color-border, radius, Akzent-Token
+   fuer typisch, severity-Token fuer Abweichung. Nur Token-Variablen, nie feste Farben. */
+
+.logging-profil {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.logging-profil__mono {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+.logging-profil__titel {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+/* Dezenter Fehlerhinweis (Ladefehler kippt die Ansicht nicht). */
+.logging-profil__fehler {
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--sev-med-text);
+  background: var(--sev-med-bg);
+  border: 1px solid var(--sev-med-bd);
+  border-radius: var(--radius-md);
+}
+
+/* ── Kennzahlen (vier Kacheln, Optik wie LoggingSeriesView) ─────────────────── */
+.logging-profil__kennzahlen {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.logging-profil__kennzahl {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.logging-profil__kennzahl-wert {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.logging-profil__kennzahl-label {
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+/* ── Leerzustand (zu wenig Daten) ───────────────────────────────────────────── */
+.logging-profil__leerzustand {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px 18px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.logging-profil__leerzustand-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-text-sec);
+}
+
+.logging-profil__fortschritt {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.logging-profil__fortschritt-bahn {
+  height: 8px;
+  background: var(--color-accent-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.logging-profil__fortschritt-fueller {
+  height: 100%;
+  background: var(--color-accent);
+  border-radius: var(--radius-md);
+}
+
+.logging-profil__fortschritt-label {
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+/* ── Visualisierung ─────────────────────────────────────────────────────────── */
+.logging-profil__visual {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.logging-profil__abschnitt-titel {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.logging-profil__chart {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* Gestrecktes SVG-Feld (preserveAspectRatio="none" verzerrt — die Achsen-Texte
+   liegen darum als Overlay daneben, nicht im SVG). */
+.logging-profil__svg {
+  width: 100%;
+  height: 150px;
+  display: block;
+}
+
+/* Tageszeit-Achse unter dem SVG: HH:MM-Marken absolut positioniert. */
+.logging-profil__zeit-achse {
+  position: relative;
+  height: 14px;
+}
+
+.logging-profil__zeit-marke {
+  position: absolute;
+  transform: translateX(-50%);
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+  color: var(--color-text-tert);
+}
+
+/* ── Wochenmuster: Wochentag-Labels links neben dem gestreckten SVG ─────────── */
+.logging-profil__heatmap {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.logging-profil__wochentage {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  /* an die SVG-Hoehe ausrichten, ohne die Achsen-Zeile unten zu ueberlappen. */
+  height: 150px;
+  padding: 12px 0;
+}
+
+.logging-profil__wochentag {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  font-size: 10px;
+  color: var(--color-text-tert);
+}
+
+.logging-profil__chart--heatmap {
+  flex: 1;
+}
+
+/* ── Hinweiszeile + Legende ─────────────────────────────────────────────────── */
+.logging-profil__hinweis {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-tert);
+}
+
+.logging-profil__legende {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.logging-profil__legende-eintrag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-text-sec);
+}
+
+.logging-profil__legende-feld {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+
+.logging-profil__legende-feld--typisch {
+  background: var(--color-accent);
+}
+
+.logging-profil__legende-feld--abweichung {
+  background: var(--sev-med-bg);
+  border: 1px solid var(--sev-med-bd);
+}
+
+/* Ruhige Leer-Meldung (statt leerem Kasten). */
+.logging-profil__leer {
+  margin: 0;
+  padding: 24px 12px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--color-text-sec);
+}
+
+/* Dezenter Lade-Indikator (schmaler Balken oben am Container). */
+.logging-profil__laedt {
+  height: 2px;
+  background: var(--color-accent);
+  border-radius: var(--radius-md);
+  opacity: 0.6;
+}

@@ -26,6 +26,7 @@ import {
   fetchLoggingSla,
   fetchLoggingTask,
 } from "../api/monitoring.js";
+import LoggingProfileView from "./LoggingProfileView.jsx";
 import LoggingSeriesView from "./LoggingSeriesView.jsx";
 import SlaChart from "./SlaChart.jsx";
 import "./LoggingTaskDetail.css";
@@ -98,9 +99,9 @@ export default function LoggingTaskDetail({ taskId, onZurueck }) {
   // Chart-Umschalter: "uptime" (Default) | "rtt".
   const [chartModus, setChartModus] = useState("uptime");
 
-  // Ansichts-Umschalter: "bericht" (Default) | "serie". Nur bei recurring sichtbar
-  // (sonst bleibt es bei "bericht" wie heute). Steuert, ob der SLA/Chart/Ereignis-
-  // Block oder die Serien-Auswertung gezeigt wird.
+  // Ansichts-Umschalter: "bericht" (Default) | "serie" | "profil". Nur bei recurring
+  // sichtbar (sonst bleibt es bei "bericht" wie heute). Steuert, ob der SLA/Chart/
+  // Ereignis-Block, die Serien-Auswertung oder das Verhaltensprofil gezeigt wird.
   const [ansicht, setAnsicht] = useState("bericht");
 
   // Ladeflags / Fehlerzustände.
@@ -359,15 +360,32 @@ export default function LoggingTaskDetail({ taskId, onZurueck }) {
           >
             {t("beobachten.logging.ansicht.serie")}
           </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={ansicht === "profil"}
+            className={
+              ansicht === "profil"
+                ? "logging-detail__tab logging-detail__tab--aktiv"
+                : "logging-detail__tab"
+            }
+            onClick={() => setAnsicht("profil")}
+          >
+            {t("beobachten.logging.ansicht.profil")}
+          </button>
         </div>
       )}
 
-      {ansicht === "serie" ? (
+      {ansicht === "serie" || ansicht === "profil" ? (
         (() => {
           // Einmal berechnen + destrukturieren (statt grenzenBerechnen() doppelt) —
-          // Verhalten unveraendert, nur ein Aufruf.
+          // Verhalten unveraendert, nur ein Aufruf. since/until wie bei "serie".
           const { since, until } = grenzenBerechnen();
-          return <LoggingSeriesView taskId={taskId} since={since} until={until} />;
+          return ansicht === "profil" ? (
+            <LoggingProfileView taskId={taskId} since={since} until={until} />
+          ) : (
+            <LoggingSeriesView taskId={taskId} since={since} until={until} />
+          );
         })()
       ) : (
         <>

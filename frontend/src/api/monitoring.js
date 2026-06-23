@@ -482,6 +482,54 @@ export async function fetchLoggingSeries(taskId, since = null, until = null, slo
   };
 }
 
+// GET /api/monitor/logging/{id}/behavior -> Verhaltensprofil einer Logging-Aufgabe
+// (Block 4, zeitfreie Lese-Aggregation). Verdichtet die wiederkehrende Aufzeichnung zu
+// einem typischen Aktivitaetsmuster: Tagesband (ueber alle Wochentage gemittelt) und
+// Wochen-Heatmap (Wochentag x Tageszeit), je Slot mit Aktivitaetszahl und Abweichungs-
+// Markierung. Reine Lesesicht — greift NICHT ins Netz ein.
+//
+// since/until (Unix-ts, optional, Default null): schraenken den Auswertungs-Zeitraum auf
+// [since, until) ein -- nur gesetzte Grenzen werden als Query-Param angehaengt (Muster
+// fetchLoggingSeries). slotMinutes (int 15..60, Default 60) steuert die zeitliche Koernung
+// der Slot-Auswertung und wird IMMER mitgegeben (slot_minutes).
+//
+// Wire-Form (snake_case, aus backend/api/monitoring.py, verifiziert):
+//   recorded_days: int
+//   has_enough_data: bool
+//   deviation_count: int
+//   day_band: [ { slot_start, activity_count, is_deviation } ]
+//   week_heatmap: [ { weekday, slot_start, activity_count, is_deviation } ]
+// slot_start ist die Minute seit Mitternacht (0..1440), weekday 0..6 (Mo=0). day_band und
+// week_heatmap sind auch bei has_enough_data=false befuellt — ueber die Anzeige entscheidet
+// das Frontend. null bleibt ehrlich null; fehlende Listen -> []. 404 (unbekannte id) ->
+// ApiError.
+export async function fetchLoggingBehavior(taskId, since = null, until = null, slotMinutes = 60) {
+  const params = { slot_minutes: slotMinutes };
+  if (since !== null && since !== undefined) {
+    params.since = since;
+  }
+  if (until !== null && until !== undefined) {
+    params.until = until;
+  }
+  const backend = await apiGet(`/api/monitor/logging/${taskId}/behavior`, params);
+  return {
+    recordedDays: backend?.recorded_days ?? null,
+    hasEnoughData: Boolean(backend?.has_enough_data),
+    deviationCount: backend?.deviation_count ?? null,
+    dayBand: (backend?.day_band ?? []).map((row) => ({
+      slotStart: row.slot_start,
+      activityCount: row.activity_count,
+      isDeviation: row.is_deviation,
+    })),
+    weekHeatmap: (backend?.week_heatmap ?? []).map((row) => ({
+      weekday: row.weekday,
+      slotStart: row.slot_start,
+      activityCount: row.activity_count,
+      isDeviation: row.is_deviation,
+    })),
+  };
+}
+
 // GET /api/export/logging/{id}?format=...&since=...&until=... -> Datei-Download
 // (CSV/JSON/PDF) des Logging-Reports einer Aufgabe ueber einen Zeitraum (Schnitt 1c).
 // Nutzt apiDownload (Blob + Browser-Download). Default-Dateiname
@@ -517,4 +565,5 @@ export default {
   fetchLoggingSla,
   fetchLoggingEvents,
   fetchLoggingSeries,
+  fetchLoggingBehavior,
 };

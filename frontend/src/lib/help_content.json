@@ -303,6 +303,21 @@
     }
   },
 
+  "help.monitor.profile": {
+    "status": "final",
+    "kategorie": "Beobachten",
+    "de": {
+      "titel": "Verhaltensprofil (typische Aktivzeiten)",
+      "kurz": "Das Verhaltensprofil zeigt, wann ein Ziel ueblicherweise aktiv ist. Es entsteht ganz von selbst aus Ihrer wiederkehrenden Aufzeichnung - ein zusaetzlicher taeglicher Scan ist NICHT noetig. Zwei Bilder fassen das Muster zusammen: ein Tagesmuster ueber den Tag und ein Wochenmuster ueber die sieben Wochentage. Markierte Stellen sind Hinweise auf Musterbrueche, kein Urteil.",
+      "lang": "Ein Verhaltensprofil beschreibt das typische Aktivitaetsmuster eines Ziels: zu welcher Tageszeit und an welchen Wochentagen es ueblicherweise erreichbar und aktiv ist. Es beantwortet nicht die Frage 'Was war heute?', sondern 'Was ist hier normal?'.\n\nDas Profil entsteht aus Ihrer bereits laufenden wiederkehrenden Aufzeichnung - es braucht KEINEN eigenen taeglichen Scan und keine zusaetzliche Last. CERNIS legt die aufgezeichneten Tage uebereinander und leitet daraus das typische Muster ab.\n\nDas TAGESMUSTER zeigt ueber einen Tag von 00:00 bis 24:00, zu welchen Uhrzeiten ueblicherweise Aktivitaet liegt. Das WOCHENMUSTER zeigt dieselbe Tagesleiste fuer jeden der sieben Wochentage uebereinander, sodass Sie Unterschiede zwischen Werktagen und Wochenende auf einen Blick erkennen.\n\nFaellt eine Stelle deutlich aus dem gewohnten Muster, wird sie markiert. Eine solche Markierung ist ausdruecklich ein HINWEIS und kein Urteil - die Schwellen sind bewusst konservativ gewaehlt und spaeter anpassbar. Damit ein Muster ueberhaupt belastbar ist, braucht es mindestens zwei volle Wochen Daten. Solange das noch nicht erreicht ist, zeigt CERNIS statt halbgarer Bilder einen ehrlichen Fortschrittshinweis und sammelt weiter. Das Verhaltensprofil ist eine reine Lesesicht: Es wertet nur bereits aufgezeichnete Daten aus und veraendert nichts im Netzwerk."
+    },
+    "en": {
+      "titel": "Behavior profile (typical active times)",
+      "kurz": "The behavior profile shows when a target is usually active. It emerges all by itself from your recurring recording - no extra daily scan is required. Two pictures summarise the pattern: a daily pattern across the day and a weekly pattern across the seven weekdays. Marked spots are hints at pattern breaks, not a verdict.",
+      "lang": "A behavior profile describes a target's typical activity pattern: at which time of day and on which weekdays it is usually reachable and active. It does not answer 'What happened today?' but 'What is normal here?'.\n\nThe profile grows out of your already running recurring recording - it needs NO separate daily scan and adds no extra load. CERNIS stacks the recorded days on top of each other and derives the typical pattern from them.\n\nThe DAILY PATTERN shows, across a day from 00:00 to 24:00, at which times activity usually occurs. The WEEKLY PATTERN shows the same daily bar stacked for each of the seven weekdays, so you can spot the difference between weekdays and the weekend at a glance.\n\nIf a spot clearly stands out from the usual pattern, it is marked. Such a marking is explicitly a HINT and not a verdict - the thresholds are deliberately conservative and adjustable later. For a pattern to be reliable at all, it needs at least two full weeks of data. Until that is reached, CERNIS shows an honest progress note instead of half-baked pictures and keeps collecting. The behavior profile is a pure reading view: it only evaluates data that was already recorded and changes nothing on the network."
+    }
+  },
+
   "help.cve.uebersicht": {
     "status": "final",
     "kategorie": "Untersuchen",

@@ -714,7 +714,43 @@
       "minuten": "Min",
       "ansicht": {
         "bericht": "Bericht",
-        "serie": "Serien-Auswertung"
+        "serie": "Serien-Auswertung",
+        "profil": "Verhaltensprofil"
+      },
+      "profil": {
+        "titel": "Verhaltensprofil",
+        "kennzahl": {
+          "aktivsteZeit": "Aktivste Zeit",
+          "aktivsteTage": "Aktivste Tage",
+          "abweichungen": "Abweichungen gesamt",
+          "aufzeichnungstage": "Aufzeichnungstage"
+        },
+        "leerzustand": {
+          "text": "Noch zu wenig Daten für ein belastbares Muster. Ein Verhaltensprofil braucht mindestens zwei volle Wochen Aufzeichnung. CERNIS sammelt weiter — sobald genug Tage vorliegen, erscheint das Muster hier von selbst.",
+          "fortschritt": "{{tage}} / {{ziel}} Tage"
+        },
+        "tagesmuster": {
+          "titel": "Tagesmuster",
+          "leer": "Für das Tagesmuster liegen noch keine Daten vor."
+        },
+        "wochenmuster": {
+          "titel": "Wochenmuster",
+          "leer": "Für das Wochenmuster liegen noch keine Daten vor."
+        },
+        "hinweis": "Markierungen sind Hinweise auf Musterbrüche, kein Urteil; die Schwellen sind konservativ gewählt und anpassbar.",
+        "legende": {
+          "typisch": "Typisch",
+          "abweichung": "Abweichung"
+        },
+        "wochentag": {
+          "mo": "Mo",
+          "di": "Di",
+          "mi": "Mi",
+          "do": "Do",
+          "fr": "Fr",
+          "sa": "Sa",
+          "so": "So"
+        }
       },
       "serie": {
         "titel": "Serien-Auswertung",

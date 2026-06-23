@@ -714,7 +714,43 @@
       "minuten": "min",
       "ansicht": {
         "bericht": "Report",
-        "serie": "Series analysis"
+        "serie": "Series analysis",
+        "profil": "Behavior profile"
+      },
+      "profil": {
+        "titel": "Behavior profile",
+        "kennzahl": {
+          "aktivsteZeit": "Most active time",
+          "aktivsteTage": "Most active days",
+          "abweichungen": "Total deviations",
+          "aufzeichnungstage": "Recording days"
+        },
+        "leerzustand": {
+          "text": "Not enough data yet for a reliable pattern. A behavior profile needs at least two full weeks of recording. CERNIS keeps collecting — once enough days are available, the pattern will appear here on its own.",
+          "fortschritt": "{{tage}} / {{ziel}} days"
+        },
+        "tagesmuster": {
+          "titel": "Daily pattern",
+          "leer": "No data for the daily pattern yet."
+        },
+        "wochenmuster": {
+          "titel": "Weekly pattern",
+          "leer": "No data for the weekly pattern yet."
+        },
+        "hinweis": "Markings are hints at pattern breaks, not a verdict; the thresholds are chosen conservatively and can be adjusted.",
+        "legende": {
+          "typisch": "Typical",
+          "abweichung": "Deviation"
+        },
+        "wochentag": {
+          "mo": "Mon",
+          "di": "Tue",
+          "mi": "Wed",
+          "do": "Thu",
+          "fr": "Fri",
+          "sa": "Sat",
+          "so": "Sun"
+        }
       },
       "serie": {
         "titel": "Series analysis",
