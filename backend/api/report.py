@@ -22,7 +22,7 @@ Endpunkt:
 
 from typing import Annotated, Protocol
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/report", tags=["report"])
@@ -147,3 +147,51 @@ async def get_security_report(
     Projektion (inkl. der Statusfelder) macht der injizierte Composition-Root-Runner.
     """
     return await runner()
+
+
+# ── PDF-Download: injizierter Composition-Root-Runner ──────────────────────────
+# Muster ``SecurityReportRunner`` / ``api/export.py``: der Runner liefert ein Objekt mit den
+# drei Attributen ``content`` (bytes), ``media_type`` (str), ``filename`` (str). Der api-Ring
+# kennt diesen Ergebnis-Typ NICHT (er lebt im Composition Root) -- der Router liest nur die
+# drei Attribute per Attribut-Zugriff (``type: ignore[attr-defined]``, analog ``api/export.py``).
+# Provider-Marker: in app.py per dependency_overrides verdrahtet; ohne Verdrahtung bewusst ein
+# lauter Fehler (kein stiller Fallback, S3).
+
+
+class SecurityReportPdfRunner(Protocol):
+    """Schmaler Vertrag des injizierten PDF-Runners (liefert das fertige Download-Ergebnis)."""
+
+    async def __call__(self) -> object:
+        """Baut den Sicherheitsbericht als PDF und liefert content/media_type/filename."""
+        ...
+
+
+def provide_security_report_pdf() -> SecurityReportPdfRunner:
+    raise NotImplementedError("SecurityReportPdfRunner wird in app.py verdrahtet")
+
+
+@router.get("/security/pdf")
+async def get_security_report_pdf(
+    runner: Annotated[SecurityReportPdfRunner, Depends(provide_security_report_pdf)],
+) -> Response:
+    """Liefert den Sicherheitsbericht als PDF-Download (Bytes, ``attachment``).
+
+    Der injizierte Composition-Root-Runner baut den Bericht, projiziert ihn auf das
+    render-fertige PDF-Modell und rendert das PDF; er liefert ein Objekt mit ``content``
+    (PDF-Bytes), ``media_type`` (``application/pdf``) und ``filename``. Der Router verpackt
+    es in eine ``Response`` mit ``Content-Disposition: attachment; filename="..."`` -- so
+    laedt der Browser die Datei als Download statt sie inline anzuzeigen.
+
+    KEIN 404-Fall: liegt kein juengster Scan als Basis vor, ist das ein gueltiges PDF mit
+    Score 100 (leere Basis), kein HTTP-Fehler -- analog ``GET /api/report/security``.
+    """
+    result = await runner()
+    # result kommt aus dem Composition Root; per Attribut-Zugriff gelesen (kein Typ-Import im
+    # Router -- der api-Ring kennt nur die drei Attribute, Muster ``api/export.py``).
+    return Response(
+        content=result.content,  # type: ignore[attr-defined]
+        media_type=result.media_type,  # type: ignore[attr-defined]
+        headers={
+            "Content-Disposition": f'attachment; filename="{result.filename}"'  # type: ignore[attr-defined]
+        },
+    )

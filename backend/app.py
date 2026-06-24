@@ -13,7 +13,7 @@ import asyncio
 import sys
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager, suppress
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
@@ -162,6 +162,7 @@ from api.report import (
     ScoreOut,
     SecurityReportOut,
     provide_security_report,
+    provide_security_report_pdf,
 )
 from api.report import router as report_router
 from api.resolver import provide_resolve_endpoint, provide_resolve_ptr_batch
@@ -321,6 +322,7 @@ from application.outbound import BuildOutboundContacts, RawConnection
 from application.process import CheckProcessPermission, ListProcesses
 from application.reporting import (
     BuildSecurityReport,
+    SecurityPdfModel,
     SecurityReport,
 )
 from application.reporting import (
@@ -1293,6 +1295,194 @@ class _SpaStaticFiles(StaticFiles):
                 # SPA-Client-Route: index.html (fixer Pfad, sicherer StaticFiles-Lookup).
                 return await super().get_response("index.html", scope)
             raise
+
+
+# ── Sicherheitsbericht: PDF-Modell-Projektion (Etappe 4b, reine Funktion) ──────────────
+# Projiziert den application-Typ ``SecurityReport`` (samt der zwei ehrlichen Statuswerte) auf
+# das render-fertige ``SecurityPdfModel``. REIN und DETERMINISTISCH: KEINE Wanduhr -- das
+# Erzeugungsdatum (``generated_at_text``) und das Rogue-Pruefdatum (``pruefdatum``) kommen als
+# FERTIGE Strings herein (der Runner ``_security_report_pdf`` liest die Uhr GENAU EINMAL). Alle
+# Texte werden HIER fertig formatiert (deutsche Sprache, Dezimalkomma); der reportlab-Adapter
+# rendert sie nur. Modul-Ebene (nicht in ``create_app``), damit testbar ohne App-Bau.
+
+
+def _format_burden_de(value: float) -> str:
+    """Formatiert einen Lastwert deutsch (Dezimalkomma), schlicht und robust.
+
+    Zwei Nachkommastellen, Punkt -> Komma; eine nachlaufende Null wird NUR entfernt, wenn die
+    zweite Nachkommastelle 0 ist (1,00 -> "1,0"; 0,33 bleibt "0,33"). Mehr Kuerzung nicht --
+    bewusst schlicht (Auftrag).
+    """
+    text = f"{value:.2f}".replace(".", ",")
+    if text.endswith("0"):
+        text = text[:-1]
+    return text
+
+
+def _pdf_severity_label(severity: str) -> str:
+    """Mappt das rohe severity-Feld auf den Achse-B-Klartext ("kritisch"/"auffaellig").
+
+    "critical" -> "kritisch", alles andere ("notable") -> "auffaellig". Der Adapter faerbt die
+    Zelle/den Balken danach (Badge) -- KEIN Roh-Severity-String im Modell.
+    """
+    return "kritisch" if severity == "critical" else "auffällig"
+
+
+def _project_security_pdf_model(
+    report: SecurityReport,
+    has_scan: bool,
+    generated_at_text: str,
+    rogue_checked_ts: float | None,
+    pruefdatum: str = "",
+) -> SecurityPdfModel:
+    """Projiziert ``SecurityReport`` (+ Statuswerte) auf das render-fertige ``SecurityPdfModel``.
+
+    REIN/DETERMINISTISCH (keine Uhr): ``generated_at_text`` (Erzeugungsdatum) und ``pruefdatum``
+    (Rogue-Pruefdatum) kommen FERTIG formatiert herein. ``has_scan`` ist hier nicht
+    text-relevant (die leere Basis traegt sich ueber Score 100 + leere Listen ehrlich selbst),
+    wird aber -- analog ``_security_report`` -- mitgefuehrt, weil der Runner es ohnehin haelt.
+    """
+    score = report.score
+
+    # Score-Einordnung: fertiger deutscher Satz aus den Zaehlern (Achse-B: beschreibt/ordnet
+    # ein, KEINE Wertung angehaengt). Bei leerer Basis ehrlich der "keine Geraete"-Satz.
+    if score.device_count == 0:
+        score_einordnung = "Es wurden keine Geräte in die Bewertung einbezogen."
+    else:
+        score_einordnung = (
+            f"Von {score.device_count} bewerteten Geräten sind {score.critical_devices} "
+            f"kritisch und {score.notable_devices} auffällig belastet; "
+            f"{score.clean_devices} ohne Befund."
+        )
+
+    # Rogue-Hinweis: noch nie geprueft (ts None) -> Rechte-Hinweis; sonst das Pruefdatum
+    # (kommt als fertiger String ``pruefdatum`` herein -- HIER NICHT aus dem ts gerechnet).
+    if rogue_checked_ts is None:
+        rogue_hinweis = (
+            "Hinweis: Auf unerwartete DHCP-Server wurde noch nie geprüft "
+            "(erfordert erhöhte Rechte)."
+        )
+    else:
+        rogue_hinweis = f"Zuletzt auf unerwartete DHCP-Server geprüft am {pruefdatum}."
+
+    # Score-Beitragsliste: je belastetem Geraet ein fertiges Tripel (Label, Klartext-Schwere,
+    # Lastwert-Text mit Dezimalkomma).
+    contributions = tuple(
+        (
+            c.device_label,
+            "kritisch" if c.worst_severity == "critical" else "auffällig",
+            _format_burden_de(c.burden_value),
+        )
+        for c in score.contributions
+    )
+
+    # Geraete-Balken: je Geraet MIT Befund die Anzahl kritischer und auffaelliger OFFENER
+    # Befunde -- ueber alle drei OFFENEN Quellen gezaehlt (CVE via cvss_score: >= 9.0 kritisch).
+    # VOLLSTAENDIG (kein Top-N); nur Geraete mit crit+notable > 0. Sortiert (crit desc,
+    # notable desc, Label asc) fuer eine stabile, sinnvolle Balken-Reihenfolge.
+    crit_by_device: dict[str, int] = {}
+    notable_by_device: dict[str, int] = {}
+
+    def _bump(label: str, is_critical: bool) -> None:
+        target = crit_by_device if is_critical else notable_by_device
+        target[label] = target.get(label, 0) + 1
+        # sicherstellen, dass beide Zaehler den Schluessel kennen (fuer das Auslesen unten)
+        other = notable_by_device if is_critical else crit_by_device
+        other.setdefault(label, 0)
+
+    for p in report.port_findings:
+        _bump(p.device_label, p.severity == "critical")
+    for n in report.net_findings:
+        _bump(n.device_label, n.severity == "critical")
+    for c in report.cve_findings:
+        _bump(c.device_label, c.cvss_score >= 9.0)
+
+    geraete_balken = tuple(
+        (label, crit_by_device[label], notable_by_device[label])
+        for label in sorted(
+            crit_by_device,
+            key=lambda lbl: (-crit_by_device[lbl], -notable_by_device[lbl], lbl),
+        )
+        if crit_by_device[label] + notable_by_device[label] > 0
+    )
+
+    # port_rows (PORT_COLUMNS: Gerät, Ports, Schwere, Grund). Grund: IMMER der feste Klartext
+    # (kein Achse-B-Jargon, das rohe reason-Feld bewusst ignoriert).
+    port_rows = tuple(
+        (
+            p.device_label,
+            p.ports,
+            _pdf_severity_label(p.severity),
+            "Offene Ports, die CERNIS als ungewöhnlich einstuft",
+        )
+        for p in report.port_findings
+    )
+
+    # cve_rows (CVE_COLUMNS: Gerät, CVE, CVSS, Dienst, Beschreibung), NACH GERAET GRUPPIERT:
+    # stabil nach device_label gruppieren (gleiche Labels untereinander), innerhalb der Gruppe
+    # nach cvss_score absteigend. CVSS als Text mit Dezimalkomma.
+    cve_order: list[str] = []
+    cve_groups: dict[str, list[ReportCveFinding]] = {}
+    for c in report.cve_findings:
+        if c.device_label not in cve_groups:
+            cve_groups[c.device_label] = []
+            cve_order.append(c.device_label)
+        cve_groups[c.device_label].append(c)
+    cve_rows = tuple(
+        (
+            c.device_label,
+            c.cve_id,
+            f"{c.cvss_score:.1f}".replace(".", ","),
+            c.service,
+            c.description,
+        )
+        for label in cve_order
+        for c in sorted(cve_groups[label], key=lambda f: f.cvss_score, reverse=True)
+    )
+
+    # net_rows (NET_COLUMNS: Art, Gerät, Schwere, Beschreibung).
+    net_rows = tuple(
+        (n.kind, n.device_label, _pdf_severity_label(n.severity), n.description)
+        for n in report.net_findings
+    )
+
+    # acknowledged_rows (ACK_COLUMNS: Art, Gerät, Detail) -- alle drei quittierten Listen
+    # zusammengefuehrt, Reihenfolge: erst Ports, dann CVE, dann Netz. Leer -> leeres tuple
+    # (der Adapter laesst die Rubrik dann weg).
+    acknowledged_rows = (
+        *(("Port", p.device_label, f"Ports: {p.ports}") for p in report.acknowledged_port_findings),
+        *(
+            ("CVE", c.device_label, f"{c.cve_id} ({c.service})")
+            for c in report.acknowledged_cve_findings
+        ),
+        *((n.kind, n.device_label, n.description) for n in report.acknowledged_net_findings),
+    )
+
+    return SecurityPdfModel(
+        title="Netzwerk-Sicherheitsbericht",
+        generated_at_text=generated_at_text,
+        footer_left="CERNIS PRO 2.0 - Netzwerk-Sicherheitsbericht",
+        score_value=score.score,
+        score_level=score.level,
+        score_einordnung=score_einordnung,
+        critical_devices=score.critical_devices,
+        notable_devices=score.notable_devices,
+        clean_devices=score.clean_devices,
+        device_count=score.device_count,
+        total_burden=score.total_burden,
+        einleitung=(
+            "Dieser Bericht fasst die über CERNIS verteilten Sicherheits-Beobachtungen zu "
+            "einem Bild zusammen. Er beschreibt und ordnet ein - die Bewertung jeder "
+            "Auffälligkeit bleibt bei Ihnen."
+        ),
+        rogue_hinweis=rogue_hinweis,
+        contributions=contributions,
+        geraete_balken=geraete_balken,
+        port_rows=port_rows,
+        cve_rows=cve_rows,
+        net_rows=net_rows,
+        acknowledged_rows=acknowledged_rows,
+    )
 
 
 def create_app(config: AppConfig | None = None) -> FastAPI:
@@ -3218,8 +3408,46 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             rogue_dhcp_checked_ts=rogue_checked_ts,
         )
 
+    # ── Sicherheitsbericht: PDF-Download-Runner (Etappe 4b, Muster _export_scan, Regel 4/5) ──
+    # Composition-Root-Runner fuer GET /api/report/security/pdf: ruft die schon verdrahtete
+    # Datenseite _build_security_report_data, liest die Wanduhr GENAU HIER (der EINZIGE Ort mit
+    # Uhr -- die Projektion _project_security_pdf_model ist rein), projiziert auf das
+    # render-fertige SecurityPdfModel und rendert es ueber den zustandslosen ReportlabRenderer.
+    # Rueckgabe ist ein kleines lokales Ergebnis-Objekt (content/media_type/filename) -- der
+    # api-Ring liest nur diese drei Attribute (Muster ExportResult; Regel 4: kein Typ-Import).
+    @dataclass(frozen=True)
+    class _SecurityPdfResult:
+        content: bytes
+        media_type: str
+        filename: str
+
+    async def _security_report_pdf() -> _SecurityPdfResult:
+        report, has_scan, rogue_checked_ts = await _build_security_report_data()
+        # Wanduhr GENAU HIER lesen (einziger Ort) -- Projektion und Modell bleiben rein.
+        import time
+
+        now = time.time()
+        generated_at_text = "Erstellt am " + datetime.fromtimestamp(now).strftime("%d.%m.%Y %H:%M")
+        # Rogue-Pruefdatum aus dem GESPEICHERTEN Stand (nicht aus der Wanduhr): nur formatiert.
+        pruefdatum = (
+            datetime.fromtimestamp(rogue_checked_ts).strftime("%d.%m.%Y %H:%M")
+            if rogue_checked_ts is not None
+            else ""
+        )
+        model = _project_security_pdf_model(
+            report, has_scan, generated_at_text, rogue_checked_ts, pruefdatum
+        )
+        pdf_bytes = ReportlabRenderer().render_security_report_pdf(model)
+        datumsteil = datetime.fromtimestamp(now).strftime("%Y-%m-%d")
+        return _SecurityPdfResult(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            filename=f"CERNISPRO_Netzwerk-Sicherheitsbericht_{datumsteil}.pdf",
+        )
+
     app.include_router(report_router)
     app.dependency_overrides[provide_security_report] = lambda: _security_report
+    app.dependency_overrides[provide_security_report_pdf] = lambda: _security_report_pdf
 
     # ── Route zum Ziel (ADR 0036): traceroute-Hops + Geo/ASN, zwei getrennte Naehte ──
     # Regel 5: die Quer-Domaenen-Naht (diagnostics-Hops + resolver-Geo/RDAP) faellt
