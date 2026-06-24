@@ -35,6 +35,7 @@ from reportlab.lib.units import mm
 from reportlab.platypus import (
     Flowable,
     HRFlowable,
+    KeepTogether,
     PageBreak,
     Paragraph,
     SimpleDocTemplate,
@@ -64,7 +65,7 @@ _LEVEL_COLORS = {"gut": _ACCENT, "maessig": _NOTABLE, "kritisch": _CRIT}
 # Existiert die Datei nicht (z. B. im frozen-Build), faellt die Kopfzeile sauber auf reinen
 # Titel-Text zurueck -- KEIN gezeichnetes Ersatz-Logo (Auftrag).
 _LOGO_PATH = os.path.normpath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "public", "cernis-logo.png")
+    os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "public", "cernis-logo-pdf.png")
 )
 
 
@@ -254,50 +255,55 @@ class ReportlabRenderer:
         story.append(self._kennzahlen_table(model))
         story.append(Spacer(1, 6 * mm))
 
+        # Seitenumbruch VOR der Geraete-Verteilung: Donut + Balken beginnen luftig oben auf
+        # einer neuen Seite, statt unten an Seite 1 zu kleben.
+        story.append(PageBreak())
+
         # ── Donut: Anteile critical / notable / clean, Mitte device_count ──
-        story.append(Paragraph("Geräte-Verteilung", styles["h_section"]))
-        story.append(
+        # Ueberschrift UND Donut zusammenhalten (KeepTogether), damit der Seitenumbruch nicht
+        # zwischen Ueberschrift und Ring faellt (analog zum Balken-Block darunter).
+        donut_block: list[Flowable] = [
+            Paragraph("Geräte-Verteilung", styles["h_section"]),
             _donut_drawing(
                 model.critical_devices,
                 model.notable_devices,
                 model.clean_devices,
                 model.device_count,
-            )
-        )
+            ),
+        ]
+        story.append(KeepTogether(donut_block))
         story.append(Spacer(1, 6 * mm))
 
         # ── Geraete-Balken: VOLLSTAENDIGE Liste (kein Top-N) ──
-        story.append(Paragraph("Auffälligkeiten je Gerät", styles["h_section"]))
+        # Ueberschrift UND Balken zusammenhalten (KeepTogether), damit der Seitenumbruch nicht
+        # zwischen Ueberschrift und Balken faellt (Ueberschrift sonst unten, Balken erst naechste
+        # Seite).
+        balken_block: list[Flowable] = [Paragraph("Auffälligkeiten je Gerät", styles["h_section"])]
         if model.geraete_balken:
-            story.append(_geraete_balken_drawing(model.geraete_balken))
+            balken_block.append(_geraete_balken_drawing(model.geraete_balken))
         else:
-            story.append(Paragraph("Keine Einträge.", styles["body"]))
-
-        # ── Score-Beitragsliste (anzeige-fertige Tripel) ──
-        if model.contributions:
-            story.append(Spacer(1, 6 * mm))
-            story.append(Paragraph("Score-Beiträge der belasteten Geräte", styles["h_section"]))
-            story.append(self._contributions_table(model.contributions, styles))
+            balken_block.append(Paragraph("Keine Einträge.", styles["body"]))
+        story.append(KeepTogether(balken_block))
 
         # ── Tabellen-Rubriken: je eigene Seite (PageBreak davor) ──
         story.append(PageBreak())
         self._append_table_section(
-            story, styles, "1  Rechner mit auffälligen Ports", PORT_COLUMNS, model.port_rows
+            story, styles, "Rechner mit auffälligen Ports", PORT_COLUMNS, model.port_rows
         )
 
         story.append(PageBreak())
-        self._append_table_section(story, styles, "2  CVE-Befunde", CVE_COLUMNS, model.cve_rows)
+        self._append_table_section(story, styles, "CVE-Befunde", CVE_COLUMNS, model.cve_rows)
 
         story.append(PageBreak())
         self._append_table_section(
-            story, styles, "3  Netz-Auffälligkeiten", NET_COLUMNS, model.net_rows
+            story, styles, "Netz-Auffälligkeiten", NET_COLUMNS, model.net_rows
         )
 
         # Rubrik 4 nur, wenn nicht leer (Auftrag: sonst weglassen).
         if model.acknowledged_rows:
             story.append(PageBreak())
             self._append_table_section(
-                story, styles, "4  Bereits bestätigt", ACK_COLUMNS, model.acknowledged_rows
+                story, styles, "Bereits bestätigt", ACK_COLUMNS, model.acknowledged_rows
             )
 
         # ── Achse-B-Fussnote (invariant) + optionaler Rogue-Hinweis ──
@@ -338,7 +344,7 @@ class ReportlabRenderer:
                 fontName="Helvetica-Bold",
                 fontSize=18,
                 textColor=_TEXT,
-                spaceAfter=2,
+                spaceAfter=8,
             ),
             "sub": ParagraphStyle(
                 "sub",
@@ -346,6 +352,7 @@ class ReportlabRenderer:
                 fontName="Helvetica",
                 fontSize=9,
                 textColor=_CLEAN,
+                spaceBefore=2,
             ),
             "h_section": ParagraphStyle(
                 "h_section",
@@ -361,7 +368,7 @@ class ReportlabRenderer:
                 parent=normal,
                 fontName="Helvetica-Bold",
                 fontSize=14,
-                textColor=_TEXT,
+                textColor=_ACCENT,
                 spaceAfter=2,
             ),
             "body": ParagraphStyle(
@@ -431,25 +438,6 @@ class ReportlabRenderer:
         )
         return table
 
-    def _contributions_table(
-        self, contributions: tuple[tuple[str, str, str], ...], styles: dict[str, ParagraphStyle]
-    ) -> Table:
-        """Die Score-Beitragsliste (Geraet / Schwere / Last) als gefaerbte Tabelle.
-
-        Je belastetem Geraet eine Zeile mit anzeige-fertigem Severity-Klartext ("kritisch"/
-        "auffaellig") und dem fertigen Last-Text ("0,33"). Die Schwere-Zelle wird ueber den
-        Klartext eingefaerbt (Badge). repeatRows=1, damit der Kopf bei Umbruch mitlaeuft.
-        """
-        header = ("Gerät", "Schwere", "Last")
-        data: list[list[object]] = [list(header)]
-        for label, severity_label, last_text in contributions:
-            data.append([Paragraph(label, styles["cell"]), severity_label, last_text])
-        table = Table(data, colWidths=[100 * mm, 35 * mm, 36 * mm], repeatRows=1)
-        style = self._base_table_style(len(data))
-        _apply_severity_badges(style, data, severity_col=1)
-        table.setStyle(style)
-        return table
-
     def _append_table_section(
         self,
         story: list[Flowable],
@@ -469,7 +457,8 @@ class ReportlabRenderer:
         story.append(HRFlowable(width="100%", thickness=1.2, color=_ACCENT, spaceAfter=4))
 
         if not rows:
-            story.append(Paragraph("Keine Einträge.", styles["body"]))
+            leer_text = _EMPTY_SECTION_TEXT.get(columns, _EMPTY_FALLBACK)
+            story.append(Paragraph(leer_text, styles["body"]))
             return
 
         severity_col = columns.index("Schwere") if "Schwere" in columns else -1
@@ -534,6 +523,16 @@ _COL_WEIGHTS: dict[tuple[str, ...], tuple[float, ...]] = {
     ACK_COLUMNS: (2.4, 3.0, 5.0),
 }
 
+# Rubrikspezifischer Leertext je Tabellen-Schema (statt generisch "Keine Eintraege.").
+# Unbekannte Rubriken fallen auf _EMPTY_FALLBACK zurueck. ACK braucht keinen Eintrag, da der
+# Aufrufer leere ACK-Rubriken gar nicht erst rendert.
+_EMPTY_FALLBACK = "Keine Einträge in dieser Kategorie."
+_EMPTY_SECTION_TEXT: dict[tuple[str, ...], str] = {
+    PORT_COLUMNS: "Keine auffälligen Ports festgestellt.",
+    CVE_COLUMNS: "Keine CVE-Befunde vorhanden.",
+    NET_COLUMNS: "Keine Netz-Auffälligkeiten festgestellt.",
+}
+
 
 def _col_widths(columns: tuple[str, ...]) -> list[float]:
     """Verteilt die Druckbreite proportional auf die Spalten des Rubrik-Schemas -- in Punkten.
@@ -579,7 +578,7 @@ def _apply_severity_badges(style: TableStyle, data: list[list[object]], severity
             continue
         cell = (severity_col, row_index)
         style.add("BACKGROUND", cell, cell, color)
-        style.add("TEXTCOLOR", cell, cell, colors.white)
+        style.add("TEXTCOLOR", cell, cell, _TEXT)
         style.add("FONTNAME", cell, cell, "Helvetica-Bold")
         style.add("ALIGN", cell, cell, "CENTER")
 
