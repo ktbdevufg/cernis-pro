@@ -1032,6 +1032,10 @@
   },
   "geraete": {
     "cards": {
+      "verwaltung": {
+        "title": "Geräteverwaltung",
+        "subtitle": "Geräte anlegen, bearbeiten, archivieren und wiederherstellen."
+      },
       "fritzbox": {
         "title": "FRITZ!Box",
         "subtitle": "WAN, WLAN, verbundene Geräte und Ereignisse der FRITZ!Box."
@@ -1129,6 +1133,34 @@
         "internal": "Intern",
         "empty": "Keine Portfreigaben eingerichtet."
       }
+    },
+    "verwaltung": {
+      "spaltenLabel": "Name",
+      "spaltenMac": "MAC",
+      "spaltenIp": "IP",
+      "spaltenHerkunft": "Herkunft",
+      "spaltenGesehen": "Zuletzt gesehen",
+      "herkunftManuell": "manuell",
+      "herkunftScan": "Scan",
+      "aktionArchivieren": "Archivieren",
+      "aktionWiederherstellen": "Wiederherstellen",
+      "titelAktiv": "Aktive Geräte",
+      "titelAnlegen": "Gerät anlegen",
+      "titelArchiv": "Archiv",
+      "leerAktiv": "Noch keine aktiven Geräte im Bestand.",
+      "leerArchiv": "Das Archiv ist leer.",
+      "archivHinweis": "Archivierte Geräte sind aus Wertungen und Listen ausgenommen, bleiben aber erhalten – sie lassen sich jederzeit wiederherstellen.",
+      "feldMac": "MAC-Adresse",
+      "feldLabel": "Name",
+      "feldKategorie": "Kategorie",
+      "feldNotizen": "Notizen",
+      "feldTags": "Tags (kommagetrennt)",
+      "knopfAnlegen": "Anlegen",
+      "fehlerExistiert": "Ein Gerät mit dieser MAC-Adresse ist bereits im Bestand.",
+      "fehlerMacUngueltig": "Die MAC-Adresse ist ungültig. Bitte im Format AA:BB:CC:DD:EE:FF eingeben.",
+      "fehlerAnlegen": "Das Gerät konnte nicht angelegt werden.",
+      "laedt": "Lädt …",
+      "ladeFehler": "Die Geräte konnten nicht geladen werden."
     }
   },
   "theme": {

@@ -1032,6 +1032,10 @@
   },
   "geraete": {
     "cards": {
+      "verwaltung": {
+        "title": "Device management",
+        "subtitle": "Add, edit, archive and restore devices."
+      },
       "fritzbox": {
         "title": "FRITZ!Box",
         "subtitle": "WAN, Wi-Fi, connected devices and events of the FRITZ!Box."
@@ -1129,6 +1133,34 @@
         "internal": "Internal",
         "empty": "No port forwardings configured."
       }
+    },
+    "verwaltung": {
+      "spaltenLabel": "Name",
+      "spaltenMac": "MAC",
+      "spaltenIp": "IP",
+      "spaltenHerkunft": "Source",
+      "spaltenGesehen": "Last seen",
+      "herkunftManuell": "manual",
+      "herkunftScan": "Scan",
+      "aktionArchivieren": "Archive",
+      "aktionWiederherstellen": "Restore",
+      "titelAktiv": "Active devices",
+      "titelAnlegen": "Add device",
+      "titelArchiv": "Archive",
+      "leerAktiv": "No active devices yet.",
+      "leerArchiv": "The archive is empty.",
+      "archivHinweis": "Archived devices are excluded from ratings and lists, but are kept – they can be restored at any time.",
+      "feldMac": "MAC address",
+      "feldLabel": "Name",
+      "feldKategorie": "Category",
+      "feldNotizen": "Notes",
+      "feldTags": "Tags (comma-separated)",
+      "knopfAnlegen": "Add",
+      "fehlerExistiert": "A device with this MAC address already exists.",
+      "fehlerMacUngueltig": "The MAC address is invalid. Please use the format AA:BB:CC:DD:EE:FF.",
+      "fehlerAnlegen": "The device could not be added.",
+      "laedt": "Loading …",
+      "ladeFehler": "The devices could not be loaded."
     }
   },
   "theme": {

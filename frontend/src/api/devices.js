@@ -35,6 +35,11 @@ export function mappeDevice(wire) {
     timesSeen: wire.times_seen ?? null,
     firstSeen: wire.first_seen ?? null,
     lastSeen: wire.last_seen ?? null,
+    // Lebenszyklus-Felder (Block A): defensiv, kein erfundener Wert.
+    archived: wire.archived === true,
+    source: wire.source ?? "scan",
+    archivePromptCount: wire.archive_prompt_count ?? 0,
+    archivePromptDismissed: wire.archive_prompt_dismissed === true,
   };
 }
 
@@ -95,9 +100,69 @@ export async function dismissDevice(mac, dismissed) {
   return mappeDevice(antwort);
 }
 
+// Lädt den aktiven, nicht-archivierten Gerätebestand (GET /api/devices). Mit
+// knownOnly=true wird ?known_only=true angehängt (nur eingeordnete Geräte).
+// Liefert die gemappte View-Liste; leerer Bestand -> [].
+export async function fetchDevices(knownOnly = false) {
+  const antwort = await apiGet(
+    "/api/devices",
+    knownOnly ? { known_only: true } : undefined,
+  );
+  return (antwort ?? []).map(mappeDevice);
+}
+
+// Lädt die archivierten Geräte (GET /api/devices/archived). Liefert die
+// gemappte View-Liste; leeres Archiv -> [].
+export async function fetchArchivedDevices() {
+  const antwort = await apiGet("/api/devices/archived");
+  return (antwort ?? []).map(mappeDevice);
+}
+
+// Legt ein Gerät manuell an (POST /api/devices). tags ist ein string[] (der
+// Aufrufer wandelt Text via tagsAusText). Der Client-ApiError wird bewusst
+// UNVERÄNDERT weitergereicht — der Aufrufer unterscheidet 409 (MAC existiert)
+// und 422 (MAC ungültig) über .status. Kein try/catch hier.
+export async function createDevice({ mac, label, notes, category, tags }) {
+  const antwort = await apiPost("/api/devices", {
+    mac,
+    label,
+    notes,
+    category,
+    tags,
+  });
+  return mappeDevice(antwort);
+}
+
+// Archiviert ein Gerät (POST /api/devices/{mac}/archive). Das Gerät bleibt im
+// Bestand, wird aber aus Wertungen/Listen ausgenommen (rücknehmbar über
+// restoreDevice). Gibt das aktualisierte Gerät in View-Form zurück.
+export async function archiveDevice(mac) {
+  const antwort = await apiPost(
+    `/api/devices/${encodeURIComponent(mac)}/archive`,
+    {},
+  );
+  return mappeDevice(antwort);
+}
+
+// Holt ein archiviertes Gerät zurück in den aktiven Bestand
+// (POST /api/devices/{mac}/restore). Gibt das aktualisierte Gerät in View-Form
+// zurück.
+export async function restoreDevice(mac) {
+  const antwort = await apiPost(
+    `/api/devices/${encodeURIComponent(mac)}/restore`,
+    {},
+  );
+  return mappeDevice(antwort);
+}
+
 export default {
   updateDeviceMeta,
   setTrustState,
   fetchUnclassifiedDevices,
   dismissDevice,
+  fetchDevices,
+  fetchArchivedDevices,
+  createDevice,
+  archiveDevice,
+  restoreDevice,
 };
