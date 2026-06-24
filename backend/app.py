@@ -11,7 +11,7 @@ fastapi/starlette).
 
 import asyncio
 import sys
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, replace
 from datetime import datetime
@@ -80,13 +80,19 @@ from api.cve import (
 )
 from api.cve import router as cve_router
 from api.devices import (
+    provide_answer_archive_prompt,
+    provide_archive_device,
+    provide_create_device,
     provide_delete_device,
     provide_dismiss_device_from_watch,
+    provide_get_archive_candidates,
+    provide_get_archived_devices,
     provide_get_device,
     provide_get_device_stats,
     provide_get_devices,
     provide_get_unclassified_devices,
     provide_record_scanned_host,
+    provide_restore_device,
     provide_update_device_meta,
 )
 from api.devices import router as devices_router
@@ -255,13 +261,19 @@ from application.cve import (
     RunCveMonitor,
 )
 from application.devices import (
+    AnswerArchivePrompt,
+    ArchiveDevice,
+    CreateDevice,
     DeleteDevice,
     DismissDeviceFromWatch,
+    GetArchiveCandidates,
+    GetArchivedDevices,
     GetDevice,
     GetDevices,
     GetDeviceStats,
     GetUnclassifiedDevices,
     RecordScannedHost,
+    RestoreDevice,
     UpdateDeviceMeta,
 )
 from application.diagnostics import (
@@ -684,6 +696,11 @@ def _read_disabled_rule_ids(settings: SettingsRepository) -> frozenset[str]:
 _CVE_DEFAULT_REFRESH_HOURS = 24
 _CVE_DEFAULT_SCAN_SECONDS = 20
 
+# Default-Schwelle (Tage) fuer die Archivierungs-Nachfrage: lange nicht gesehene
+# Geraete werden ab hier als Kandidaten vorgeschlagen. Vom Setting
+# ``device_archive_prompt_days`` ueberschreibbar (s. _read_device_int_setting).
+_DEVICE_ARCHIVE_PROMPT_DEFAULT_DAYS = 30
+
 
 def _read_cve_int_setting(settings: SettingsRepository, key: str, default: int) -> int:
     """Liest einen ganzzahligen cve-Setting-Wert defensiv (S3-konform).
@@ -699,6 +716,31 @@ def _read_cve_int_setting(settings: SettingsRepository, key: str, default: int) 
         setting = settings.get(key)
     except CorruptSettingError:
         logger.warning("cve_setting_corrupt", key=key)
+        return default
+    if setting is None:
+        return default
+    value = setting.value
+    if isinstance(value, bool) or not isinstance(value, int):
+        return default
+    return max(0, value)
+
+
+def _read_device_int_setting(settings: SettingsRepository, key: str, default: int) -> int:
+    """Liest einen ganzzahligen devices-Setting-Wert defensiv (S3-konform).
+
+    Eigener Helfer statt ``_read_cve_int_setting`` wiederzuverwenden: der cve-Helfer
+    loggt mit dem festen Marker ``cve_setting_corrupt`` und gehoert fachlich zur
+    cve-Domaene -- hier wird mit ``device_setting_corrupt`` geloggt. Verhalten sonst
+    identisch: fehlender Key (frische DB ist normal -> kein Log) ODER Nicht-Zahl-Wert
+    -> ``default``; kaputtes JSON (``CorruptSettingError``) -> GELOGGTE Warnung +
+    ``default`` (eine kaputte Komfort-Einstellung darf nicht faellen); Bools
+    ausgeschlossen (``True`` ist int-Subtyp, als Schwelle sinnlos); negative Werte auf
+    0 geklemmt.
+    """
+    try:
+        setting = settings.get(key)
+    except CorruptSettingError:
+        logger.warning("device_setting_corrupt", key=key)
         return default
     if setting is None:
         return default
@@ -1703,6 +1745,30 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.dependency_overrides[provide_record_scanned_host] = lambda: RecordScannedHost(
         device_repository(), device_clock
     )
+    # Geraete-Lebenszyklus (A3): Anlegen/Archivieren/Wiederherstellen + Nachfrage.
+    app.dependency_overrides[provide_create_device] = lambda: CreateDevice(
+        device_repository(), device_clock
+    )
+    app.dependency_overrides[provide_archive_device] = lambda: ArchiveDevice(device_repository())
+    app.dependency_overrides[provide_restore_device] = lambda: RestoreDevice(device_repository())
+    app.dependency_overrides[provide_get_archived_devices] = lambda: GetArchivedDevices(
+        device_repository()
+    )
+    app.dependency_overrides[provide_answer_archive_prompt] = lambda: AnswerArchivePrompt(
+        device_repository()
+    )
+
+    # Nachfrage-Kandidaten: die Tage-Schwelle wird LIVE aus dem Setting gelesen und
+    # in den Use-Case eingesetzt, sodass der Endpunkt argumentlos aufrufen kann. Der
+    # Provider liefert daher ein Callable[[], list], nicht die Use-Case-Instanz.
+    def _build_get_archive_candidates() -> Callable[[], list[Any]]:
+        days = _read_device_int_setting(
+            repository(), "device_archive_prompt_days", _DEVICE_ARCHIVE_PROMPT_DEFAULT_DAYS
+        )
+        use_case = GetArchiveCandidates(device_repository(), device_clock)
+        return lambda: use_case(days)
+
+    app.dependency_overrides[provide_get_archive_candidates] = _build_get_archive_candidates
 
     # ── scanning-Domaene v2 verdrahten (Regel 5: ports<->infrastructure nur hier) ──
     # REST (history/vendor) ueber duenne Use-Cases im api-Ring; der WS-Handler

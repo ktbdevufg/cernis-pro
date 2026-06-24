@@ -324,6 +324,29 @@ class GetArchivedDevices:
         return self._repository.get_archived()
 
 
+class GetArchiveCandidates:
+    """Geraete, die lange nicht gesehen wurden -- die Nachfrage-Kandidaten.
+
+    Reine Lese-Orchestrierung fuer einen passiven, scan-quellen-agnostischen
+    Lese-Endpunkt: das Frontend fragt nach Scan-Abschluss ab, ob Geraete zur
+    Archivierung vorgeschlagen werden sollen. Hier wird NICHTS automatisch
+    archiviert.
+
+    Die Schwelle (Tage) kommt vom Aufrufer (der Composition Root liest das
+    Setting ``device_archive_prompt_days``); die Zeitgrenze entsteht HIER aus der
+    Uhr (Muster ``GetDeviceStats``). Das Repository filtert rein nach
+    ``last_seen <= Grenze``.
+    """
+
+    def __init__(self, repository: DeviceRepository, clock: Clock) -> None:
+        self._repository = repository
+        self._clock = clock
+
+    def __call__(self, threshold_days: int) -> list[Device]:
+        not_seen_since = self._clock.now() - timedelta(days=threshold_days)
+        return self._repository.get_archive_candidates(not_seen_since)
+
+
 class AnswerArchivePrompt:
     """Bildet die Nutzerantwort auf die Scan-Nachfrage ab.
 
