@@ -4,18 +4,20 @@
 // spitz auslaufende Unterlinie in Akzentfarbe (gefüllter SVG-Pfad).
 // Bekommt aktiven Reiter + onChange als Props.
 
-import { Activity, FileBarChart, LayoutDashboard, Router, Search } from "lucide-react";
+import { Activity, FileBarChart, LayoutDashboard, Router, Search, Wrench } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import "./TabNav.css";
 
-// Reiter-Definition: Schlüssel + Icon. Reihenfolge ist verbindlich.
+// Reiter-Definition: Schlüssel + Icon. Reihenfolge ist verbindlich. Der letzte
+// Reiter „verwaltung" steht optisch nach rechts abgesetzt (margin-left:auto, s.u.).
 export const REITER = [
   { id: "overview", icon: LayoutDashboard },
   { id: "observe", icon: Activity },
   { id: "investigate", icon: Search },
   { id: "reporting", icon: FileBarChart },
   { id: "devices", icon: Router },
+  { id: "verwaltung", icon: Wrench },
 ];
 
 export default function TabNav({ active, onChange }) {
@@ -25,11 +27,19 @@ export default function TabNav({ active, onChange }) {
     <nav className="tab-nav">
       {REITER.map(({ id, icon: Icon }) => {
         const istAktiv = id === active;
+        // Der Verwaltungs-Reiter wird nach ganz rechts abgesetzt (margin-left:auto).
+        const klassen = ["tab-nav__tab"];
+        if (istAktiv) {
+          klassen.push("tab-nav__tab--active");
+        }
+        if (id === "verwaltung") {
+          klassen.push("tab-nav__tab--rechts");
+        }
         return (
           <button
             key={id}
             type="button"
-            className={istAktiv ? "tab-nav__tab tab-nav__tab--active" : "tab-nav__tab"}
+            className={klassen.join(" ")}
             aria-current={istAktiv ? "page" : undefined}
             onClick={() => onChange(id)}
           >

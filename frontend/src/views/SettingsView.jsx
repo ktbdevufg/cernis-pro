@@ -13,7 +13,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { fetchAllRules, lookupService, parsePortliste } from "../api/analysis.js";
-import { factoryReset, resetScanData } from "../api/maintenance.js";
 import {
   fetchSettings,
   updateSetting,
@@ -21,7 +20,6 @@ import {
   secretGesetzt,
 } from "../api/settings.js";
 import { FunctionShell } from "../components/AreaShell.jsx";
-import MaintenanceDialog from "../components/MaintenanceDialog.jsx";
 import "./SettingsView.css";
 
 // Default-Portmengen der Auffälligkeits-Engine. SPIEGELT bewusst die Backend-
@@ -1538,96 +1536,6 @@ function DnsWatchSektion({ onGespeichert }) {
   );
 }
 
-// Wartungs-Sektion: EINE Zeile „Daten löschen" mit Erklärtext + Knopf, der den
-// zweistufigen Bestätigungs-Dialog öffnet. Eigener offen-State; der Backend-Aufruf
-// läuft hier (die Sektion hält das „erledigt"-Feedback über onGespeichert).
-//
-// Nach erfolgreichem Werkszustand sind alle Einstellungen (inkl. Sprache) weg —
-// dafür ein eigener, ruhiger Hinweis statt des normalen „Gespeichert". KEIN
-// automatischer Reload (laut Briefing nur der Hinweis).
-function WartungSektion({ onGespeichert }) {
-  const { t } = useTranslation();
-
-  const [dialogOffen, setDialogOffen] = useState(false);
-  // null = kein Hinweis; "scan" | "factory" = welche „erledigt"-Meldung zeigen.
-  const [erledigt, setErledigt] = useState(null);
-  const erledigtTimeout = useRef(null);
-
-  useEffect(() => {
-    return () => {
-      if (erledigtTimeout.current !== null) {
-        clearTimeout(erledigtTimeout.current);
-      }
-    };
-  }, []);
-
-  // Den ruhigen „erledigt"-Hinweis kurz zeigen. Werkszustand bleibt etwas länger
-  // stehen, da der Hinweis dort auch das Settings-Reset erklärt.
-  const zeigeErledigt = (stufe) => {
-    setErledigt(stufe);
-    if (erledigtTimeout.current !== null) {
-      clearTimeout(erledigtTimeout.current);
-    }
-    const dauer = stufe === "factory" ? 6000 : 3000;
-    erledigtTimeout.current = setTimeout(() => {
-      setErledigt(null);
-      erledigtTimeout.current = null;
-    }, dauer);
-  };
-
-  // Wird vom Dialog auf „Endgültig löschen" gerufen. Wirft bei Fehler weiter (der
-  // Dialog fängt ihn und bleibt offen); bei Erfolg Dialog schließen + Hinweis.
-  const handleBestaetigt = async (stufe, secretsEntfernen) => {
-    if (stufe === "factory") {
-      await factoryReset(secretsEntfernen);
-    } else {
-      await resetScanData();
-    }
-    setDialogOffen(false);
-    onGespeichert();
-    zeigeErledigt(stufe);
-  };
-
-  return (
-    <>
-      <SettingsSektion title={t("settings.wartung.title")}>
-        <SettingsZeile label={t("settings.wartung.rowTitle")}>
-          <div className="settings__field">
-            <button
-              type="button"
-              className="settings__button"
-              onClick={() => setDialogOffen(true)}
-            >
-              {t("settings.wartung.openButton")}
-            </button>
-          </div>
-        </SettingsZeile>
-        <p className="settings__hint settings__wartung-hint">
-          {t("settings.wartung.rowDescription")}
-        </p>
-        {erledigt ? (
-          <span
-            className="settings__hint settings__wartung-done"
-            role="status"
-            aria-live="polite"
-          >
-            {erledigt === "factory"
-              ? t("settings.wartung.doneFactory")
-              : t("settings.wartung.doneScan")}
-          </span>
-        ) : null}
-      </SettingsSektion>
-
-      {dialogOffen ? (
-        <MaintenanceDialog
-          onSchliessen={() => setDialogOffen(false)}
-          onBestaetigt={handleBestaetigt}
-        />
-      ) : null}
-    </>
-  );
-}
-
 export default function SettingsView({ lang, onLangChange, onClose }) {
   const { t } = useTranslation();
 
@@ -1663,7 +1571,6 @@ export default function SettingsView({ lang, onLangChange, onClose }) {
     { id: "fritzbox", label: t("settings.nav.fritzbox") },
     { id: "auffaelligkeit", label: t("settings.nav.auffaelligkeit") },
     { id: "dnswatch", label: t("settings.nav.dnswatch") },
-    { id: "wartung", label: t("settings.nav.wartung") },
   ];
 
   return (
@@ -1735,10 +1642,6 @@ export default function SettingsView({ lang, onLangChange, onClose }) {
 
           {rubrik === "dnswatch" ? (
             <DnsWatchSektion onGespeichert={zeigeGespeichert} />
-          ) : null}
-
-          {rubrik === "wartung" ? (
-            <WartungSektion onGespeichert={zeigeGespeichert} />
           ) : null}
         </div>
       </div>

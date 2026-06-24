@@ -16,6 +16,7 @@ const ManualView = lazy(() => import("./views/ManualView.jsx"));
 const ObserveView = lazy(() => import("./views/ObserveView.jsx"));
 const OverviewView = lazy(() => import("./views/OverviewView.jsx"));
 const SettingsView = lazy(() => import("./views/SettingsView.jsx"));
+const VerwaltungView = lazy(() => import("./views/VerwaltungView.jsx"));
 import "./App.css";
 
 const THEME_KEY = "cernis_theme";
@@ -171,6 +172,7 @@ export default function App() {
               )}
               {activeTab === "reporting" && <ReportingView />}
               {activeTab === "devices" && <DevicesView />}
+              {activeTab === "verwaltung" && <VerwaltungView />}
             </>
           )}
         </Suspense>

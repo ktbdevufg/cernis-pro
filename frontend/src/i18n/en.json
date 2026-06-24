@@ -166,7 +166,8 @@
     "observe": "Observe",
     "investigate": "Investigate",
     "reporting": "Reporting",
-    "devices": "Devices"
+    "devices": "Devices",
+    "verwaltung": "Management"
   },
   "placeholder": {
     "inProgress": "in progress"
@@ -1028,6 +1029,18 @@
       },
       "pdf": "Report as PDF",
       "pdfFehler": "The PDF could not be created. Please try again."
+    }
+  },
+  "verwaltung": {
+    "cards": {
+      "geraeteverwaltung": {
+        "title": "Device management",
+        "subtitle": "Add, edit, archive and restore devices."
+      },
+      "wartung": {
+        "title": "Delete data",
+        "subtitle": "Reset scan data or restore the factory state."
+      }
     }
   },
   "geraete": {

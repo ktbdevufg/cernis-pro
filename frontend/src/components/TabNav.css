@@ -27,6 +27,12 @@
   color: var(--color-text);
 }
 
+/* Verwaltungs-Reiter: in der Flex-Leiste nach ganz rechts geschoben und damit
+   optisch von den übrigen Reitern abgesetzt. */
+.tab-nav__tab--rechts {
+  margin-left: auto;
+}
+
 /* Aktiver Reiter: kräftigere Textfarbe + font-weight, plus die Wanne. */
 .tab-nav__tab--active {
   color: var(--color-text);

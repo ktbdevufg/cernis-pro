@@ -166,7 +166,8 @@
     "observe": "Beobachten",
     "investigate": "Untersuchen",
     "reporting": "Reporting",
-    "devices": "Geräte"
+    "devices": "Geräte",
+    "verwaltung": "Verwaltung"
   },
   "placeholder": {
     "inProgress": "in Arbeit"
@@ -1028,6 +1029,18 @@
       },
       "pdf": "Bericht als PDF",
       "pdfFehler": "Das PDF konnte nicht erstellt werden. Bitte erneut versuchen."
+    }
+  },
+  "verwaltung": {
+    "cards": {
+      "geraeteverwaltung": {
+        "title": "Geräteverwaltung",
+        "subtitle": "Geräte anlegen, bearbeiten, archivieren und wiederherstellen."
+      },
+      "wartung": {
+        "title": "Daten löschen",
+        "subtitle": "Scan-Daten zurücksetzen oder den Werkszustand herstellen."
+      }
     }
   },
   "geraete": {
