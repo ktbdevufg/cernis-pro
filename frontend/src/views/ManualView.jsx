@@ -4,13 +4,16 @@
 // Titel) wie SettingsView und bekommt onClose als Prop.
 //
 // Inhaltsquelle ist AUSSCHLIESSLICH help_content.json (Ausspielweg B: die
-// lang-Texte). Diese View rendert nur — sie hält keinen Daten-State, kein
-// useEffect, keine API. Sprache folgt der App-Sprache (i18n.language) mit
-// defensivem Fallback auf "de", obwohl Parität zugesichert ist.
+// lang-Texte). baueKategorien/kategorieAnker/springeZu und die Abschnitt-
+// Inhalte (Titel, Vorläufig, Absatz-Split, Links) bleiben unverändert. Neu in
+// V3: gerahmtes zweispaltiges Layout, mitlaufender Kapitelname (Observer),
+// persistente Schriftgröße (manual_font_scale) und eine Inline-Suche.
 
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { FunctionShell } from "../components/AreaShell.jsx";
+import { fetchSettings, updateSetting } from "../api/settings.js";
 import helpContent from "../lib/help_content.json";
 import "./ManualView.css";
 
@@ -40,6 +43,25 @@ function baueKategorien() {
 
 const KATEGORIEN = baueKategorien();
 
+// Schriftgrößen-Stufen (Ziel 3). Persistiert als manual_font_scale in der DB.
+// Wert ist der CSS-Skalierungsfaktor; unbekannte/fehlende Werte -> "normal".
+const SCHRIFT_STUFEN = {
+  klein: 0.9,
+  normal: 1.0,
+  gross: 1.2,
+};
+const SCHRIFT_DEFAULT = "normal";
+const SCHRIFT_KEY = "manual_font_scale";
+
+// Liest manual_font_scale aus dem rohen Settings-Dict; fehlt der Key oder ist er
+// unbekannt -> normal (kein lauter Fehler).
+function leseSchriftStufe(settings) {
+  const wert = settings?.[SCHRIFT_KEY];
+  return Object.prototype.hasOwnProperty.call(SCHRIFT_STUFEN, wert)
+    ? wert
+    : SCHRIFT_DEFAULT;
+}
+
 // Stabiler Anker-Id für eine Kategorie (für die Sprungliste). Die help_id-Anker
 // der Einträge tragen ihre help_id direkt; die Kategorie-Überschriften brauchen
 // einen eigenen, kollisionsfreien Id-Raum.
@@ -57,10 +79,57 @@ function springeZu(id) {
   }
 }
 
+// Zerlegt einen Text-Knoten anhand des Suchbegriffs in Fragmente und rendert
+// Treffer als <mark> — OHNE dangerouslySetInnerHTML. Jeder Treffer bekommt
+// fortlaufend einen globalen Index aus dem mitlaufenden Zähler (`zaehler.wert`),
+// damit die Treffer-Navigation über alle Abschnitte hinweg eindeutig nummeriert
+// ist. Der aktive Treffer wird zusätzlich markiert und referenziert.
+function Hervorhebung({ text, suche, zaehler, aktiverIndex, aktivRef }) {
+  if (!suche) {
+    return text;
+  }
+
+  const needle = suche.toLowerCase();
+  const haystack = text.toLowerCase();
+  const teile = [];
+  let pos = 0;
+  let schluessel = 0;
+
+  while (true) {
+    const treffer = haystack.indexOf(needle, pos);
+    if (treffer === -1) {
+      teile.push(text.slice(pos));
+      break;
+    }
+    if (treffer > pos) {
+      teile.push(text.slice(pos, treffer));
+    }
+    const globalerIndex = zaehler.wert;
+    zaehler.wert += 1;
+    const istAktiv = globalerIndex === aktiverIndex;
+    teile.push(
+      <mark
+        key={`m-${schluessel}`}
+        ref={istAktiv ? aktivRef : null}
+        className={
+          istAktiv ? "manual__mark manual__mark--aktiv" : "manual__mark"
+        }
+      >
+        {text.slice(treffer, treffer + suche.length)}
+      </mark>,
+    );
+    schluessel += 1;
+    pos = treffer + suche.length;
+  }
+
+  return teile;
+}
+
 // Ein einzelner Handbuch-Abschnitt: Titel, Vorläufig-Hinweis (falls), lang-Text
 // in Absätze gesplittet, optionale Weiterführend-Links. Reiner Text in <p> —
-// keine Markdown-Lib, kein dangerouslySetInnerHTML.
-function Abschnitt({ helpId, sprache, t }) {
+// keine Markdown-Lib, kein dangerouslySetInnerHTML. Titel und lang-Text laufen
+// bei aktiver Suche durch <Hervorhebung>.
+function Abschnitt({ helpId, sprache, t, suche, zaehler, aktiverIndex, aktivRef }) {
   const eintrag = helpContent[helpId];
   // Defensiver Sprach-Fallback auf "de" (Parität ist zugesichert, aber ein
   // fehlender Zweig darf nicht crashen).
@@ -69,7 +138,15 @@ function Abschnitt({ helpId, sprache, t }) {
 
   return (
     <section id={helpId} className="manual__section">
-      <h3 className="manual__section-title">{inhalt.titel}</h3>
+      <h3 className="manual__section-title">
+        <Hervorhebung
+          text={inhalt.titel}
+          suche={suche}
+          zaehler={zaehler}
+          aktiverIndex={aktiverIndex}
+          aktivRef={aktivRef}
+        />
+      </h3>
 
       {eintrag.status === "vorlaeufig" ? (
         <p className="manual__vorlaeufig">{t("manual.vorlaeufigHint")}</p>
@@ -77,7 +154,13 @@ function Abschnitt({ helpId, sprache, t }) {
 
       {absaetze.map((absatz, i) => (
         <p key={i} className="manual__paragraph">
-          {absatz}
+          <Hervorhebung
+            text={absatz}
+            suche={suche}
+            zaehler={zaehler}
+            aktiverIndex={aktiverIndex}
+            aktivRef={aktivRef}
+          />
         </p>
       ))}
 
@@ -104,15 +187,211 @@ function Abschnitt({ helpId, sprache, t }) {
   );
 }
 
+// Zählt die Suchtreffer im gerenderten Text (Titel + lang-Text jedes Eintrags)
+// der aktuellen Sprache. Gleiche Logik wie <Hervorhebung>, nur ohne Markup —
+// damit Treffer-Zähler und Navigation dieselbe Gesamtzahl sehen wie die Anzeige.
+function zaehleTreffer(suche, sprache) {
+  if (!suche) {
+    return 0;
+  }
+  const needle = suche.toLowerCase();
+  let summe = 0;
+  for (const { eintraege } of KATEGORIEN) {
+    for (const { helpId } of eintraege) {
+      const eintrag = helpContent[helpId];
+      const inhalt = eintrag[sprache] ?? eintrag.de;
+      const texte = [inhalt.titel, ...inhalt.lang.split("\n\n")];
+      for (const text of texte) {
+        const haystack = text.toLowerCase();
+        let pos = 0;
+        while (true) {
+          const treffer = haystack.indexOf(needle, pos);
+          if (treffer === -1) {
+            break;
+          }
+          summe += 1;
+          pos = treffer + needle.length;
+        }
+      }
+    }
+  }
+  return summe;
+}
+
 export default function ManualView({ onClose }) {
   const { t, i18n } = useTranslation();
   const sprache = i18n.language === "en" ? "en" : "de";
 
+  // Ziel 2 — mitlaufender Kapitelname (oberste sichtbare Kategorie).
+  const [aktiveKategorie, setAktiveKategorie] = useState(
+    KATEGORIEN.length > 0 ? KATEGORIEN[0].kategorie : "",
+  );
+
+  // Ziel 3 — Schriftgröße, persistent. State-Muster wie overview_sections:
+  // useState(Default) -> useEffect lädt -> Klick schreibt via updateSetting.
+  const [schriftStufe, setSchriftStufe] = useState(SCHRIFT_DEFAULT);
+  const [ladeStatus, setLadeStatus] = useState("laedt"); // laedt | bereit | fehler
+  const [speicherFehler, setSpeicherFehler] = useState(false);
+
+  // Ziel 4 — Suche.
+  const [sucheOffen, setSucheOffen] = useState(false);
+  const [suchbegriff, setSuchbegriff] = useState("");
+  const [aktiverTreffer, setAktiverTreffer] = useState(0); // 0-basiert
+  const suchfeldRef = useRef(null);
+  const aktivMarkRef = useRef(null);
+
+  // Schriftgröße einmal beim Mount laden, über den Default mischen. Fehler nicht
+  // verschlucken (console.error), in den Lade-Fehlerzustand gehen. t NICHT als
+  // Dependency.
+  useEffect(() => {
+    let aktiv = true;
+    (async () => {
+      try {
+        const settings = await fetchSettings();
+        if (!aktiv) {
+          return;
+        }
+        setSchriftStufe(leseSchriftStufe(settings));
+        setLadeStatus("bereit");
+      } catch (fehler) {
+        if (!aktiv) {
+          return;
+        }
+        console.error("Handbuch-Schriftgröße laden fehlgeschlagen:", fehler);
+        setLadeStatus("fehler");
+      }
+    })();
+    return () => {
+      aktiv = false;
+    };
+  }, []);
+
+  // Ziel 2 — IntersectionObserver über die Kategorie-Sections. Die oberste
+  // aktuell sichtbare Kategorie wird zum Kapitelnamen. Sauber beim Unmount
+  // trennen (disconnect in der Cleanup).
+  useEffect(() => {
+    const sichtbar = new Map(); // name -> intersectionRatio
+
+    const observer = new IntersectionObserver(
+      (eintraege) => {
+        for (const eintrag of eintraege) {
+          const name = eintrag.target.dataset.kategorie;
+          if (eintrag.isIntersecting) {
+            sichtbar.set(name, eintrag.intersectionRatio);
+          } else {
+            sichtbar.delete(name);
+          }
+        }
+        // Oberste sichtbare Kategorie = erste in KATEGORIEN-Reihenfolge, die
+        // gerade sichtbar ist.
+        const oberste = KATEGORIEN.find(({ kategorie }) =>
+          sichtbar.has(kategorie),
+        );
+        if (oberste) {
+          setAktiveKategorie(oberste.kategorie);
+        }
+      },
+      { rootMargin: "-10% 0px -70% 0px", threshold: [0, 1] },
+    );
+
+    for (const { kategorie } of KATEGORIEN) {
+      const el = document.getElementById(kategorieAnker(kategorie));
+      if (el) {
+        observer.observe(el);
+      }
+    }
+
+    return () => observer.disconnect();
+  }, []);
+
+  // Schriftgröße umschalten: lokal spiegeln, dann persistieren. Bei Fehler den
+  // dezenten Speicher-Fehlerzustand setzen, lokalen Zustand belassen.
+  const handleSchrift = async (stufe) => {
+    setSpeicherFehler(false);
+    setSchriftStufe(stufe);
+    try {
+      await updateSetting(SCHRIFT_KEY, stufe);
+    } catch (fehler) {
+      console.error("manual_font_scale speichern fehlgeschlagen:", fehler);
+      setSpeicherFehler(true);
+    }
+  };
+
+  // Treffer-Gesamtzahl der aktuellen Suche/Sprache. Bei jeder Eingabe neu
+  // berechnet; der mitlaufende Render-Zähler vergibt dieselben Indizes.
+  const trefferGesamt = zaehleTreffer(suchbegriff, sprache);
+
+  // Aktiven Treffer ins Bild holen, sobald er sich ändert.
+  useEffect(() => {
+    if (aktivMarkRef.current) {
+      aktivMarkRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [aktiverTreffer, suchbegriff]);
+
+  const handleSucheToggle = () => {
+    setSucheOffen((offen) => {
+      const naechste = !offen;
+      if (!naechste) {
+        setSuchbegriff("");
+        setAktiverTreffer(0);
+      }
+      return naechste;
+    });
+  };
+
+  const handleSuchEingabe = (wert) => {
+    setSuchbegriff(wert);
+    setAktiverTreffer(0);
+  };
+
+  const naechsterTreffer = () => {
+    if (trefferGesamt > 0) {
+      setAktiverTreffer((i) => (i + 1) % trefferGesamt);
+    }
+  };
+
+  const vorigerTreffer = () => {
+    if (trefferGesamt > 0) {
+      setAktiverTreffer((i) => (i - 1 + trefferGesamt) % trefferGesamt);
+    }
+  };
+
+  const handleSuchTaste = (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      naechsterTreffer();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setSucheOffen(false);
+      setSuchbegriff("");
+      setAktiverTreffer(0);
+    }
+  };
+
+  // Beim Öffnen der Suche das Feld fokussieren.
+  useEffect(() => {
+    if (sucheOffen && suchfeldRef.current) {
+      suchfeldRef.current.focus();
+    }
+  }, [sucheOffen]);
+
+  // Mitlaufender Render-Zähler: vor jedem Render zurücksetzen, <Hervorhebung>
+  // vergibt daraus die globalen Treffer-Indizes in Renderreihenfolge.
+  const zaehler = { wert: 0 };
+
+  const suche = sucheOffen ? suchbegriff : "";
+  const kapitelName = aktiveKategorie
+    ? t(`manual.kategorien.${aktiveKategorie}`, aktiveKategorie)
+    : "";
+
   return (
     <FunctionShell title={t("manual.title")} onBack={onClose}>
-      <div className="manual">
-        {/* Sprungliste: rein anker-basiert (kein neues npm-Paket), springt per
-            scrollIntoView zu den Kategorien. */}
+      <div
+        className="manual"
+        style={{ "--manual-fontscale": SCHRIFT_STUFEN[schriftStufe] }}
+      >
+        {/* Linke Spalte: vertikale Kategorie-Navigation, sticky. Der aktive
+            Eintrag (Observer) wird im Akzent hervorgehoben. */}
         <nav className="manual__toc" aria-label={t("manual.tocLabel")}>
           <span className="manual__toc-label">{t("manual.tocLabel")}</span>
           <ul className="manual__toc-list">
@@ -120,7 +399,12 @@ export default function ManualView({ onClose }) {
               <li key={kategorie}>
                 <button
                   type="button"
-                  className="manual__toc-link"
+                  className={
+                    kategorie === aktiveKategorie
+                      ? "manual__toc-link manual__toc-link--aktiv"
+                      : "manual__toc-link"
+                  }
+                  aria-current={kategorie === aktiveKategorie ? "true" : undefined}
                   onClick={() => springeZu(kategorieAnker(kategorie))}
                 >
                   {t(`manual.kategorien.${kategorie}`, kategorie)}
@@ -130,25 +414,133 @@ export default function ManualView({ onClose }) {
           </ul>
         </nav>
 
-        {KATEGORIEN.map(({ kategorie, eintraege }) => (
-          <section
-            key={kategorie}
-            id={kategorieAnker(kategorie)}
-            className="manual__category"
-          >
-            <h2 className="manual__category-title">
-              {t(`manual.kategorien.${kategorie}`, kategorie)}
-            </h2>
-            {eintraege.map(({ helpId }) => (
-              <Abschnitt
-                key={helpId}
-                helpId={helpId}
-                sprache={sprache}
-                t={t}
-              />
+        {/* Rechte Spalte: umrahmter Container mit sticky-Kopfzeile (Kapitelname
+            + Werkzeugleiste) und darunter dem Textbereich. */}
+        <div className="manual__panel">
+          <div className="manual__bar">
+            <span className="manual__chapter">{kapitelName}</span>
+
+            <div className="manual__tools">
+              {sucheOffen ? (
+                <div className="manual__search">
+                  <input
+                    ref={suchfeldRef}
+                    type="text"
+                    className="manual__search-input"
+                    placeholder={t("manual.suche.platzhalter")}
+                    value={suchbegriff}
+                    onChange={(e) => handleSuchEingabe(e.target.value)}
+                    onKeyDown={handleSuchTaste}
+                  />
+                  <span className="manual__search-count">
+                    {t("manual.suche.zaehler", {
+                      n: trefferGesamt > 0 ? aktiverTreffer + 1 : 0,
+                      m: trefferGesamt,
+                    })}
+                  </span>
+                  <button
+                    type="button"
+                    className="manual__icon-btn"
+                    aria-label={t("manual.suche.vorige")}
+                    onClick={vorigerTreffer}
+                    disabled={trefferGesamt === 0}
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    className="manual__icon-btn"
+                    aria-label={t("manual.suche.naechste")}
+                    onClick={naechsterTreffer}
+                    disabled={trefferGesamt === 0}
+                  >
+                    ↓
+                  </button>
+                  <button
+                    type="button"
+                    className="manual__icon-btn"
+                    aria-label={t("manual.suche.schliessen")}
+                    onClick={handleSucheToggle}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ) : null}
+
+              {/* Schriftgröße — A- / A / A+. Aktive Stufe im Akzent. Während des
+                  Ladens deaktiviert; Lade-Fehler kippt nicht das Layout. */}
+              <div
+                className="manual__fontsize"
+                role="group"
+                aria-label={t("manual.schrift.label")}
+              >
+                {[
+                  { stufe: "klein", zeichen: "A-", aria: "manual.schrift.klein" },
+                  { stufe: "normal", zeichen: "A", aria: "manual.schrift.normal" },
+                  { stufe: "gross", zeichen: "A+", aria: "manual.schrift.gross" },
+                ].map(({ stufe, zeichen, aria }) => (
+                  <button
+                    key={stufe}
+                    type="button"
+                    className={
+                      stufe === schriftStufe
+                        ? "manual__font-btn manual__font-btn--aktiv"
+                        : "manual__font-btn"
+                    }
+                    aria-label={t(aria)}
+                    aria-pressed={stufe === schriftStufe}
+                    disabled={ladeStatus === "laedt"}
+                    onClick={() => handleSchrift(stufe)}
+                  >
+                    {zeichen}
+                  </button>
+                ))}
+              </div>
+
+              {!sucheOffen ? (
+                <button
+                  type="button"
+                  className="manual__icon-btn"
+                  aria-label={t("manual.suche.oeffnen")}
+                  onClick={handleSucheToggle}
+                >
+                  🔍
+                </button>
+              ) : null}
+            </div>
+          </div>
+
+          {speicherFehler ? (
+            <p className="manual__save-error">{t("manual.schrift.saveError")}</p>
+          ) : null}
+
+          <div className="manual__content">
+            {KATEGORIEN.map(({ kategorie, eintraege }) => (
+              <section
+                key={kategorie}
+                id={kategorieAnker(kategorie)}
+                data-kategorie={kategorie}
+                className="manual__category"
+              >
+                <h2 className="manual__category-title">
+                  {t(`manual.kategorien.${kategorie}`, kategorie)}
+                </h2>
+                {eintraege.map(({ helpId }) => (
+                  <Abschnitt
+                    key={helpId}
+                    helpId={helpId}
+                    sprache={sprache}
+                    t={t}
+                    suche={suche}
+                    zaehler={zaehler}
+                    aktiverIndex={aktiverTreffer}
+                    aktivRef={aktivMarkRef}
+                  />
+                ))}
+              </section>
             ))}
-          </section>
-        ))}
+          </div>
+        </div>
       </div>
     </FunctionShell>
   );

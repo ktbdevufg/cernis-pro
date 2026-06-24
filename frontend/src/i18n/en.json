@@ -177,6 +177,21 @@
     "vorlaeufigHint": "This section describes the planned behaviour; the final interface is not yet fixed.",
     "linksLabel": "Further reading",
     "tocLabel": "Contents",
+    "schrift": {
+      "label": "Font size",
+      "klein": "Smaller text",
+      "normal": "Normal text",
+      "gross": "Larger text",
+      "saveError": "Could not save the font size."
+    },
+    "suche": {
+      "oeffnen": "Search the manual",
+      "platzhalter": "Search the manual …",
+      "vorige": "Previous match",
+      "naechste": "Next match",
+      "schliessen": "Close search",
+      "zaehler": "{{n}} of {{m}}"
+    },
     "kategorien": {
       "Grundlagen": "Basics",
       "Startseite": "Home screen",

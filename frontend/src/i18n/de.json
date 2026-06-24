@@ -177,6 +177,21 @@
     "vorlaeufigHint": "Dieser Abschnitt beschreibt das geplante Verhalten; die endgültige Oberfläche wird noch festgelegt.",
     "linksLabel": "Weiterführend",
     "tocLabel": "Inhalt",
+    "schrift": {
+      "label": "Schriftgröße",
+      "klein": "Schrift kleiner",
+      "normal": "Schrift normal",
+      "gross": "Schrift größer",
+      "saveError": "Schriftgröße konnte nicht gespeichert werden."
+    },
+    "suche": {
+      "oeffnen": "Im Handbuch suchen",
+      "platzhalter": "Im Handbuch suchen …",
+      "vorige": "Vorheriger Treffer",
+      "naechste": "Nächster Treffer",
+      "schliessen": "Suche schließen",
+      "zaehler": "{{n}} von {{m}}"
+    },
     "kategorien": {
       "Grundlagen": "Grundlagen",
       "Startseite": "Startseite",
