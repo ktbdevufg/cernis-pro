@@ -23,6 +23,19 @@ class DeviceNotFoundError(DevicesApplicationError):
         super().__init__(f"Kein Geraet mit MAC {mac!r}")
 
 
+class DeviceAlreadyExistsError(DevicesApplicationError):
+    """Zu der MAC existiert beim manuellen Anlegen schon ein Geraet.
+
+    Das manuelle Anlegen ist KEIN Upsert -- eine schon bekannte MAC ist ein
+    Konflikt, kein stilles Ueberschreiben. Der Aufrufer soll das vorhandene
+    Geraet stattdessen bearbeiten oder (falls archiviert) wiederherstellen.
+    """
+
+    def __init__(self, mac: str) -> None:
+        self.mac = mac
+        super().__init__(f"Geraet mit MAC {mac!r} existiert bereits")
+
+
 class InvalidTrustStateError(DevicesApplicationError):
     """Ein uebergebener ``trust_state``-Wert ist keiner der erlaubten Zustaende.
 

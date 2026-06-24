@@ -60,6 +60,18 @@ class FakeDeviceRepository:
         items = [d for d in self._devices.values() if not d.is_known and not d.watch_dismissed]
         return sorted(items, key=lambda d: d.last_seen, reverse=True)
 
+    def get_archived(self) -> list[Device]:
+        items = [d for d in self._devices.values() if d.archived]
+        return sorted(items, key=lambda d: d.last_seen, reverse=True)
+
+    def get_archive_candidates(self, not_seen_since: datetime) -> list[Device]:
+        items = [
+            d
+            for d in self._devices.values()
+            if not d.archived and not d.archive_prompt_dismissed and d.last_seen <= not_seen_since
+        ]
+        return sorted(items, key=lambda d: d.last_seen)
+
     def save(self, device: Device) -> None:
         self.save_calls += 1
         self._devices[device.mac] = device

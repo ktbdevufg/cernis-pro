@@ -281,6 +281,32 @@ class SqliteDeviceRepository:
             ).fetchall()
         return [_row_to_device(row) for row in rows]
 
+    def get_archived(self) -> list[Device]:
+        # Das Archiv: ausschliesslich archivierte Geraete (archived = 1),
+        # neueste zuerst. Gegenstueck zu get_all (das archived = 0 filtert).
+        # Leerer Bestand -> [].
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM devices WHERE archived = 1 ORDER BY last_seen DESC"
+            ).fetchall()
+        return [_row_to_device(row) for row in rows]
+
+    def get_archive_candidates(self, not_seen_since: datetime) -> list[Device]:
+        # Kandidaten der Archiv-Nachfrage: nicht archiviert (archived = 0) UND
+        # die Nachfrage nicht dauerhaft weggelegt (archive_prompt_dismissed = 0)
+        # UND seit der Schwelle nicht mehr gesehen (last_seen <= not_seen_since),
+        # am laengsten verschollene zuerst (last_seen aufsteigend). Die Zeitgrenze
+        # kommt vom Use-Case; _fmt_dt fuer den lexikografischen TEXT-Vergleich
+        # (Muster stats). Leerer Bestand -> [].
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM devices"
+                " WHERE archived = 0 AND archive_prompt_dismissed = 0 AND last_seen <= ?"
+                " ORDER BY last_seen ASC",
+                (_fmt_dt(not_seen_since),),
+            ).fetchall()
+        return [_row_to_device(row) for row in rows]
+
     def save(self, device: Device) -> None:
         with self._connect() as conn:
             conn.execute(

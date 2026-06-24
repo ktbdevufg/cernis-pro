@@ -21,9 +21,14 @@ from dataclasses import replace
 from datetime import timedelta
 from typing import Any
 
-from application.devices.errors import DeviceNotFoundError, InvalidTrustStateError
+from application.devices.errors import (
+    DeviceAlreadyExistsError,
+    DeviceNotFoundError,
+    InvalidTrustStateError,
+)
 from domain.devices import (
     Device,
+    DeviceSource,
     DeviceStats,
     DeviceWithHistory,
     IpHistoryEntry,
@@ -31,6 +36,7 @@ from domain.devices import (
     TrustState,
     merge_scan,
     normalize_mac,
+    register_archive_prompt,
     should_append_ip,
 )
 from ports.devices import Clock, DeviceRepository
@@ -212,3 +218,129 @@ class RecordScannedHost:
                 IpHistoryEntry(mac=merged.mac, ip=scanned_ip, seen_at=now)
             )
         return merged
+
+
+class CreateDevice:
+    """Legt ein Geraet von Hand an; bekannte MAC -> ``DeviceAlreadyExistsError``.
+
+    Manuelles Anlegen ist KEIN Upsert: existiert die MAC schon, ist das ein
+    Konflikt (der Aufrufer soll bearbeiten/wiederherstellen, nicht ueberschreiben).
+    Das neue Geraet startet mit ``times_seen=0``, weil es noch nie real gescannt
+    wurde -- ein spaeterer Scan derselben MAC merged ueber ``merge_scan`` (das
+    vorhandene Verhalten) und zaehlt hoch; die hier von Hand gesetzten Felder
+    (``label``/``notes``/``category``/``tags``) bleiben dabei erhalten, weil
+    ``merge_scan`` sie bewahrt. ``is_known=True``, weil ein von Hand eingetragenes
+    Geraet per Definition bewusst eingeordnet ist; ``source=MANUAL`` haelt die
+    Herkunft fest (ein Re-Scan aendert sie nicht).
+    """
+
+    def __init__(self, repository: DeviceRepository, clock: Clock) -> None:
+        self._repository = repository
+        self._clock = clock
+
+    def __call__(
+        self,
+        mac: str,
+        label: str = "",
+        notes: str = "",
+        category: str = "",
+        tags: Sequence[str] | None = None,
+    ) -> Device:
+        norm = normalize_mac(mac)
+        if self._repository.get(norm) is not None:
+            raise DeviceAlreadyExistsError(norm)
+        now = self._clock.now()
+        device = Device(
+            mac=norm,
+            first_seen=now,
+            last_seen=now,
+            last_ip=None,
+            times_seen=0,
+            is_known=True,
+            source=DeviceSource.MANUAL,
+            label=label,
+            notes=notes,
+            category=category,
+            tags=tuple(tags) if tags is not None else (),
+        )
+        self._repository.save(device)
+        return device
+
+
+class ArchiveDevice:
+    """Archiviert ein Geraet direkt; unbekannte MAC -> ``DeviceNotFoundError``.
+
+    Direktes Archivieren ueber die Geraeteverwaltung, unabhaengig vom
+    Nachfrage-Workflow (``AnswerArchivePrompt``). Read-modify-write ueber
+    ``dataclasses.replace`` mit genau EINEM Schreibpfad (``repo.save``).
+    """
+
+    def __init__(self, repository: DeviceRepository) -> None:
+        self._repository = repository
+
+    def __call__(self, mac: str) -> Device:
+        norm = normalize_mac(mac)
+        existing = self._repository.get(norm)
+        if existing is None:
+            raise DeviceNotFoundError(norm)
+        updated = replace(existing, archived=True)
+        self._repository.save(updated)
+        return updated
+
+
+class RestoreDevice:
+    """Holt ein archiviertes Geraet zurueck; unbekannte MAC -> ``DeviceNotFoundError``.
+
+    Gegenstueck zu ``ArchiveDevice``: setzt ``archived=False`` und bringt das
+    Geraet zurueck in den aktiven Bestand. Setzt den Nachfrage-Zustand bewusst
+    NICHT zurueck (``archive_prompt_count``/``archive_prompt_dismissed`` bleiben,
+    wie sie sind) -- kein erneutes Nachfrage-Karussell beim Zurueckholen.
+    """
+
+    def __init__(self, repository: DeviceRepository) -> None:
+        self._repository = repository
+
+    def __call__(self, mac: str) -> Device:
+        norm = normalize_mac(mac)
+        existing = self._repository.get(norm)
+        if existing is None:
+            raise DeviceNotFoundError(norm)
+        updated = replace(existing, archived=False)
+        self._repository.save(updated)
+        return updated
+
+
+class GetArchivedDevices:
+    """Die Archiv-Liste: alle archivierten Geraete. Reine Lese-Orchestrierung.
+
+    Filterung (``archived=1``) und Sortierung (``last_seen`` absteigend) liegen
+    im Repository. Leerer Bestand -> ``[]``.
+    """
+
+    def __init__(self, repository: DeviceRepository) -> None:
+        self._repository = repository
+
+    def __call__(self) -> list[Device]:
+        return self._repository.get_archived()
+
+
+class AnswerArchivePrompt:
+    """Bildet die Nutzerantwort auf die Scan-Nachfrage ab.
+
+    Unbekannte MAC -> ``DeviceNotFoundError``.
+    Ja -> archivieren, Nein -> Zaehler hoch, ab dem 3. Nein nicht mehr fragen.
+    Die 3x-Regel lebt in der Domaene (``register_archive_prompt``); hier nur die
+    Orchestrierung (read-modify-write, genau EIN Schreibpfad ``repo.save``).
+    """
+
+    def __init__(self, repository: DeviceRepository) -> None:
+        self._repository = repository
+
+    def __call__(self, mac: str, archive: bool) -> Device:
+        norm = normalize_mac(mac)
+        existing = self._repository.get(norm)
+        if existing is None:
+            raise DeviceNotFoundError(norm)
+        updated = register_archive_prompt(existing, archive)
+        self._repository.save(updated)
+        return updated
