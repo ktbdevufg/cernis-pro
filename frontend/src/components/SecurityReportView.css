@@ -1,7 +1,7 @@
 /* Sicherheitsbericht — In-App-Ansicht (Etappe 3). Designsprache wie
    LoggingProfileView/SlaChart: Card-Flaechen, --color-border, radius, accent fuer
    "gut", severity-Token fuer kritisch/auffaellig, sev-low fuer sauber. Nur Token-
-   Variablen, nie feste Farben. Am Ende ein @media print fuer den Drucken-Knopf. */
+   Variablen, nie feste Farben. */
 
 .security-report {
   position: relative;
@@ -162,7 +162,7 @@
   background: var(--color-accent-bg-strong);
 }
 
-/* Beitragsliste: standardmaessig eingeklappt, im Druck IMMER offen (s. @media print). */
+/* Beitragsliste: standardmaessig eingeklappt (nur Anzeige). */
 .security-report__beitraege {
   display: none;
   flex-direction: column;
@@ -314,8 +314,7 @@
 }
 
 /* Fix 4: Die Komponente rendert IMMER alle Geraete. Am Bildschirm werden die ueber
-   Top-6 hinausgehenden Zeilen ausgeblendet (kompakte Ansicht + "+ X weitere"-Hinweis);
-   im Druck blendet @media print sie wieder ein (vollstaendige Liste aufs Papier). */
+   Top-6 hinausgehenden Zeilen ausgeblendet (kompakte Ansicht + "+ X weitere"-Hinweis). */
 .security-report__balken-zeile--ueberzaehlig {
   display: none;
 }
@@ -364,7 +363,7 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
-  /* Saubere Seitenumbrueche im Druck: ein Abschnitt bleibt zusammen. */
+  /* Ein Abschnitt bleibt moeglichst zusammen (kein Umbruch mittendrin). */
   break-inside: avoid;
   page-break-inside: avoid;
 }
@@ -423,7 +422,7 @@
 }
 
 /* CVE-Befunde nach Geraet gruppiert: pro Geraet ein Block mit eigener Ueberschrift
-   und kleiner Tabelle. Bloecke bleiben im Druck moeglichst zusammen. */
+   und kleiner Tabelle. */
 .security-report__cve-gruppen {
   display: flex;
   flex-direction: column;
@@ -579,166 +578,4 @@
   background: var(--color-accent);
   border-radius: var(--radius-md);
   opacity: 0.6;
-}
-
-/* ── Druck-Stylesheet ──────────────────────────────────────────────────────────── */
-/* Beim Drucken: App-Chrome (Navigation/Reiter/Kopfzeile) und der Drucken-Knopf selbst
-   weg — nur der Bericht aufs Papier. Token-Farben drucken; -webkit-print-color-adjust
-   erzwingt die Badge-/Akzent-Flaechen. Der Score-Bereich wird AUFGEKLAPPT gezeigt,
-   damit Beitragsliste + Formel sicher mitkommen. Jeder Tabellen-Abschnitt bleibt
-   zusammen (page-break-inside: avoid liegt schon oben). */
-@media print {
-  /* Nur Farben/Hintergruende, die der Bericht braucht, exakt drucken. */
-  .security-report,
-  .security-report * {
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-  }
-
-  /* Druck-Theme: das KOMPLETTE helle Token-Set (1:1 aus tokens.css
-     [data-theme="light"]) auf dem Berichts-Container NEU definieren — exakt die
-     Tokens, die der Bericht real nutzt (per grep "var(--" verifiziert), nicht mehr.
-     So erben ALLE Bericht-Elemente druckfreundliche Farben (dunkler Text auf Weiss,
-     satte Badges, klare Linien) — unabhaengig davon, ob die App gerade im Dunkel-
-     oder Hellmodus laeuft. Keine Einzelfarben-Overrides noetig. */
-  .security-report {
-    --color-bg: #ffffff;
-    --color-card: #f7f6f2;
-    --color-text: #1a1a18;
-    --color-text-sec: #5f5e5a;
-    --color-text-tert: #888780;
-    --color-border: rgba(0, 0, 0, 0.12);
-
-    --color-accent: #107e9c;
-    --color-accent-strong: #0b6a84;
-    --color-accent-bg: #e0eff4;
-    --color-accent-bg-strong: #cee7ee;
-    --color-accent-border: #84c2d4;
-
-    --sev-med-text: #854f0b;
-    --sev-med-bd: #ef9f27;
-    --sev-med-bg: #faeeda;
-    --sev-low-bd: #b4b2a9;
-    --sev-low-bg: #f1efe8;
-
-    --cve-crit-text: #7a1414;
-    --cve-crit-bd: #b91c1c;
-    --cve-crit-bg: #f8dada;
-
-    color: var(--color-text);
-  }
-
-  /* App-Rahmen ausblenden: Kopfzeile (.app-header) und Reiterzeile (.tab-nav) sind die
-     real verwendeten Klassen (verifiziert: AppHeader.jsx / TabNav.jsx). Dazu der
-     Zurueck-Balken der FunctionShell und der Drucken-Knopf — nichts davon gehoert aufs
-     Papier. Der "+ X weitere"-Hinweis entfaellt, weil im Druck ALLE Geraete erscheinen
-     (s. unten). Die alten, nie greifenden Selektoren (.tab-bar/.tabbar/[role=tablist])
-     sind entfernt — .tab-nav ist die korrekte Reiterklasse. */
-  .app-header,
-  .tab-nav,
-  .function-shell__bar,
-  .security-report__aktionen,
-  .security-report__gauge-toggle,
-  .security-report__balken-rest,
-  .security-report__laedt {
-    display: none !important;
-  }
-
-  /* Score-Beitraege im Druck immer offen (auch wenn die Ansicht eingeklappt war). */
-  .security-report__beitraege {
-    display: flex !important;
-  }
-
-  /* Fix 4: vollstaendige Geraete-Liste aufs Papier. Am Bildschirm sind die ueber Top-6
-     hinausgehenden Zeilen ausgeblendet (.--ueberzaehlig, s.o.); im Druck werden ALLE
-     Zeilen wieder eingeblendet, da man im PDF nichts aufklappen kann. */
-  .security-report__balken-zeile--ueberzaehlig {
-    display: grid !important;
-  }
-
-  /* Kern-Fix: die Eltern-Container-Kette begrenzt am Bildschirm Hoehe + Scrolling
-     (scrollbare Box fester Hoehe). Das ist am Bildschirm korrekt, zwingt aber im
-     Druck den gesamten Bericht auf EINE Seite. Im Druck heben wir Hoehe/Overflow/
-     Flex der GANZEN Kette auf, damit der Inhalt frei ueber mehrere Druckseiten
-     umbricht. Nur hier (im @media print) ueberschrieben — der Bildschirm bleibt. */
-  html,
-  body {
-    height: auto !important;
-    overflow: visible !important;
-  }
-
-  /* App-Grundgeruest (.app: height 100%) und der scrollende Hauptcontainer
-     (.app__content: flex 1 + overflow-y auto). */
-  .app,
-  .app__content {
-    height: auto !important;
-    overflow: visible !important;
-  }
-
-  /* FunctionShell-Kette: .function-shell (height 100% + min-height 0) und
-     .function-shell__body (flex 1 + min-height 0). Im Druck als normaler Block. */
-  .function-shell,
-  .function-shell__body {
-    height: auto !important;
-    min-height: 0 !important;
-    overflow: visible !important;
-    flex: none !important;
-    display: block !important;
-  }
-
-  /* Der Bericht selbst: keine Hoehen-/Overflow-Klammer, kein position-Kontext, der
-     den Druck-Flow kappen koennte (position: relative am Bildschirm). Zusaetzlich der
-     EIGENE Inhaltsrand (Problem 1): da @page margin:0 den Blattrand auf 0 zieht (damit
-     der Browser keinen Platz fuer Kopf-/Fusszeile hat), stellen wir die Druckraender
-     hier per Padding selbst her — oben/unten etwas mehr, damit der Inhalt schoen sitzt. */
-  .security-report {
-    position: static !important;
-    height: auto !important;
-    overflow: visible !important;
-    padding: 14mm 12mm !important;
-  }
-
-  /* ── Problem 1: Browser-Druckkopf/-fuss entfernen (Chromium-Zielumgebung) ───────
-     Chromium druckt Datum, Titel, URL und Seitenzahl in die SEITENRAENDER. @page mit
-     margin:0 zieht diese Raender auf null -> es bleibt physisch KEIN Platz mehr fuer
-     die Browser-Kopf-/Fusszeile, sie verschwindet. Das ist der Mechanismus sauber
-     druckender Webseiten. html/body auf margin:0/padding:0, damit @page greift und der
-     Inhalt buendig am (nun randlosen) Blatt beginnt; den realen Inhaltsrand macht das
-     Padding an .security-report (s.o.). HINWEIS: zuverlaessig in Chromium/Chrome/Edge;
-     fuer absolut jeden Browser keine Garantie — Firefox bietet die Kopf-/Fusszeile
-     weiterhin im Dialog an. */
-  @page {
-    margin: 0;
-  }
-
-  html,
-  body {
-    margin: 0 !important;
-    padding: 0 !important;
-  }
-
-  /* ── Problem 2: Seitenumbruch je Rubrik ────────────────────────────────────────
-     Seite 1 traegt Titelkopf, Einleitung, Gauge, Kennzahlen, die Score-Beitragsliste
-     ("Wie der Score zustande kommt") und den Donut. Danach beginnt JEDE folgende
-     Haupt-Rubrik auf einer NEUEN Seite via break-before: page:
-       - "Auffaelligkeiten je Geraet" (.security-report__balken) — erster Umbruch,
-       - die vier nummerierten Tabellen-Rubriken (.security-report__abschnitt):
-         Ports, CVE, Netz, Quittiert.
-     break-before (statt break-after auf der jeweils letzten Rubrik) vermeidet eine
-     leere Schlussseite ganz automatisch — nach der letzten Rubrik kommt kein weiterer
-     erzwungener Umbruch. page-break-inside: avoid je Abschnitt bleibt (oben definiert):
-     eine Rubrik wird moeglichst nicht zerrissen. */
-  .security-report__balken,
-  .security-report__abschnitt {
-    break-before: page;
-    page-break-before: always;
-  }
-
-  /* Abschnitts-/Rubrik-Titel nie allein am Seitenende: der Titel haelt mit dem
-     folgenden Inhalt zusammen (kein verwaister Kopf). */
-  .security-report__abschnitt-titel {
-    break-after: avoid;
-    page-break-after: avoid;
-  }
-
 }
