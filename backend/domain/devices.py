@@ -16,7 +16,7 @@ NIE zurueck (bewusste Korrektur von BUG 2 der Ist-Analyse).
 
 import re
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import StrEnum
 
 
@@ -36,6 +36,19 @@ class TrustState(StrEnum):
     TRUSTED = "trusted"
     NEUTRAL = "neutral"
     WATCH = "watch"
+
+
+class DeviceSource(StrEnum):
+    """Woher der Geraete-Datensatz urspruenglich stammt.
+
+    Ein Scan-Fund ist ``SCAN`` -- so wird ein neu entdecktes Geraet angelegt.
+    Ein vom Nutzer von Hand angelegtes Geraet ist ``MANUAL``. Default ist
+    ``SCAN``, weil der weit ueberwiegende Weg ins Inventar der Scan ist; das
+    manuelle Anlegen ist die Ausnahme und wird vom Use-Case explizit gesetzt.
+    """
+
+    SCAN = "scan"
+    MANUAL = "manual"
 
 
 def normalize_mac(raw: str) -> str:
@@ -74,6 +87,19 @@ class Device:
     # solange es zugleich nicht bekannt ist (``is_known``). Allein
     # User-gesteuert -- ein Scan aendert es NIE (wie is_known/trust_state).
     watch_dismissed: bool = False
+    # Lebenszyklus: archiviert = aus allen Wertungen/Listen raus, aber NICHT
+    # geloescht (die Historie bleibt). Allein user-/lebenszyklus-gesteuert --
+    # ein Scan setzt es NIE (wie is_known/trust_state/watch_dismissed).
+    archived: bool = False
+    # Herkunft des Datensatzes: ein Scan-Fund ist SCAN (Default), ein manuell
+    # angelegtes Geraet MANUAL. Ein Re-Scan aendert die Herkunft nicht.
+    source: DeviceSource = DeviceSource.SCAN
+    # Wie oft schon nachgefragt wurde, ob archiviert werden soll (0 = noch nie).
+    # Treibt die 3x-Regel in register_archive_prompt.
+    archive_prompt_count: int = 0
+    # Dauerzustand "nicht mehr fragen": einmal True, ruht die Archiv-Nachfrage
+    # dauerhaft (z. B. ab dem 3. Nein oder per expliziter User-Entscheidung).
+    archive_prompt_dismissed: bool = False
     vendor: str = ""
     label: str = ""
     notes: str = ""
@@ -87,6 +113,8 @@ class Device:
         object.__setattr__(self, "mac", normalize_mac(self.mac))
         if self.times_seen < 0:
             raise ValueError("times_seen darf nicht negativ sein")
+        if self.archive_prompt_count < 0:
+            raise ValueError("archive_prompt_count darf nicht negativ sein")
 
 
 @dataclass(frozen=True)
@@ -185,6 +213,10 @@ def merge_scan(existing: Device | None, scanned: ScannedHost, now: datetime) -> 
         # Wertung und legt nichts weg; das kommt allein vom User ueber
         # UpdateDeviceMeta/DismissDeviceFromWatch (wie is_known). Eine
         # Neuentdeckung gehoert also frisch in die Wache (watch_dismissed=False).
+        # Ebenso werden archived/source/archive_prompt_count/
+        # archive_prompt_dismissed NICHT gesetzt -> die Defaults greifen: ein
+        # Scan-Fund ist source=SCAN, frisch und nicht archiviert (archived=False,
+        # count=0, dismissed=False). Ein Scan archiviert nie.
         return Device(
             mac=scanned.mac,
             first_seen=now,
@@ -210,6 +242,11 @@ def merge_scan(existing: Device | None, scanned: ScannedHost, now: datetime) -> 
         # category bleiben via replace erhalten -- ein Re-Scan aendert
         # watch_dismissed NIE (ein einmal Weggelegtes bleibt weggelegt, ein
         # noch nicht Weggelegtes bleibt in der Wache).
+        # Ebenso bleiben archived/source/archive_prompt_count/
+        # archive_prompt_dismissed via replace erhalten -- ein Scan aendert sie
+        # NIE: archivieren, die Herkunft und der Nachfrage-Zyklus sind allein
+        # user-/lebenszyklus-gesteuert (ein Re-Scan eines archivierten Geraets
+        # holt es nicht zurueck).
     )
 
 
@@ -228,3 +265,40 @@ def should_append_ip(existing: Device | None, scanned_ip: str | None) -> bool:
     if existing is None:
         return True
     return existing.last_ip != scanned_ip
+
+
+def is_archive_candidate(device: Device, now: datetime, threshold_days: int) -> bool:
+    """Kandidatenregel fuer die Archiv-Nachfrage (reine, zeitfreie Funktion).
+
+    True genau dann, wenn das Geraet NICHT archiviert ist UND die Nachfrage
+    nicht dauerhaft weggelegt wurde (``archive_prompt_dismissed`` False) UND es
+    seit mindestens ``threshold_days`` Tagen nicht mehr gesehen wurde
+    (``now - last_seen >= threshold_days``).
+
+    Die Domaene urteilt NUR ueber die Schwelle -- ob tatsaechlich gefragt und
+    archiviert wird, entscheidet der muendige Anwender (S3). Die Zeit kommt als
+    ``now``-Parameter herein, kein ``datetime.now()`` hier.
+    """
+    if device.archived or device.archive_prompt_dismissed:
+        return False
+    return now - device.last_seen >= timedelta(days=threshold_days)
+
+
+def register_archive_prompt(device: Device, archive: bool) -> Device:
+    """Bildet die Nutzerantwort auf eine Archiv-Nachfrage ab (reine Funktion).
+
+    - ``archive=True`` -> das Geraet wird archiviert (``archived=True``); der
+      Zaehler bleibt stehen, der Nachfrage-Zyklus endet.
+    - ``archive=False`` -> ``archive_prompt_count`` wird um 1 erhoeht. 3x-Regel:
+      ab dem 3. Nein (neuer count >= 3) wird zusaetzlich
+      ``archive_prompt_dismissed=True`` gesetzt -- danach wird nicht mehr
+      gefragt.
+    """
+    if archive:
+        return replace(device, archived=True)
+    new_count = device.archive_prompt_count + 1
+    return replace(
+        device,
+        archive_prompt_count=new_count,
+        archive_prompt_dismissed=new_count >= 3,
+    )

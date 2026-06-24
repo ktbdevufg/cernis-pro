@@ -30,7 +30,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from domain.devices import Device, DeviceStats, IpHistoryEntry, TrustState, normalize_mac
+from domain.devices import (
+    Device,
+    DeviceSource,
+    DeviceStats,
+    IpHistoryEntry,
+    TrustState,
+    normalize_mac,
+)
 
 
 class CorruptDeviceError(Exception):
@@ -106,6 +113,19 @@ def _row_to_trust_state(raw: Any) -> TrustState:
     return TrustState(raw)
 
 
+def _row_to_source(raw: Any) -> DeviceSource:
+    """TEXT-Spalte -> ``DeviceSource``. NULL/leer -> Default SCAN (defensiv).
+
+    Eine fehlende oder leere Spalte (z. B. eine vor der Migration angelegte
+    Zeile, deren ALTER-Default griffe -- hier doppelt abgesichert) faellt auf
+    SCAN zurueck. Ein nicht-leerer, aber unbekannter Wert ist hingegen KEIN
+    stiller Fallback, sondern ein Fehler ueber ``DeviceSource(...)`` (Finding S3).
+    """
+    if raw is None or raw == "":
+        return DeviceSource.SCAN
+    return DeviceSource(raw)
+
+
 def _row_to_device(row: sqlite3.Row) -> Device:
     mac = row["mac"]
     return Device(
@@ -120,6 +140,13 @@ def _row_to_device(row: sqlite3.Row) -> Device:
         # nicht (der ALTER-Default griffe -- hier doppelt abgesichert). Fehlt
         # die Spalte ganz, gilt False (in der Wache, nicht weggelegt).
         watch_dismissed=bool(_row_value(row, "watch_dismissed", 0)),
+        # Lebenszyklus-Felder, defensiv gelesen (Muster wie watch_dismissed):
+        # fehlt die Spalte ganz (Zeile aus einer Alt-Tabelle), gilt der Default
+        # -- nicht archiviert, Herkunft SCAN, noch nie nachgefragt.
+        archived=bool(_row_value(row, "archived", 0)),
+        source=_row_to_source(_row_value(row, "source", None)),
+        archive_prompt_count=_row_value(row, "archive_prompt_count", 0),
+        archive_prompt_dismissed=bool(_row_value(row, "archive_prompt_dismissed", 0)),
         vendor=row["vendor"],
         label=row["label"],
         notes=row["notes"],
@@ -166,6 +193,10 @@ class SqliteDeviceRepository:
                     is_known     INTEGER DEFAULT 0,
                     trust_state  TEXT NOT NULL DEFAULT 'neutral',
                     watch_dismissed INTEGER NOT NULL DEFAULT 0,
+                    archived     INTEGER NOT NULL DEFAULT 0,
+                    source       TEXT NOT NULL DEFAULT 'scan',
+                    archive_prompt_count INTEGER NOT NULL DEFAULT 0,
+                    archive_prompt_dismissed INTEGER NOT NULL DEFAULT 0,
                     first_seen   TEXT DEFAULT (datetime('now')),
                     last_seen    TEXT DEFAULT (datetime('now')),
                     last_ip      TEXT DEFAULT '',
@@ -199,6 +230,24 @@ class SqliteDeviceRepository:
                 conn.execute(
                     "ALTER TABLE devices ADD COLUMN watch_dismissed INTEGER NOT NULL DEFAULT 0"
                 )
+            # Weitere additive Schema-Guards (gleiches Muster): eine vor der
+            # Lebenszyklus-Etappe angelegte devices-Tabelle bekommt die vier
+            # Felder per ALTER nachgeruestet. Gleiche NOT NULL DEFAULTs wie im
+            # CREATE TABLE -> bestehende Zeilen erhalten verlustfrei den Default
+            # (nicht archiviert, Herkunft 'scan', count 0, nicht weggelegt).
+            if "archived" not in cols:
+                conn.execute("ALTER TABLE devices ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
+            if "source" not in cols:
+                conn.execute("ALTER TABLE devices ADD COLUMN source TEXT NOT NULL DEFAULT 'scan'")
+            if "archive_prompt_count" not in cols:
+                conn.execute(
+                    "ALTER TABLE devices ADD COLUMN archive_prompt_count INTEGER NOT NULL DEFAULT 0"
+                )
+            if "archive_prompt_dismissed" not in cols:
+                conn.execute(
+                    "ALTER TABLE devices ADD COLUMN"
+                    " archive_prompt_dismissed INTEGER NOT NULL DEFAULT 0"
+                )
 
     def get(self, mac: str) -> Device | None:
         with self._connect() as conn:
@@ -210,9 +259,11 @@ class SqliteDeviceRepository:
         return _row_to_device(row)
 
     def get_all(self, known_only: bool) -> list[Device]:
-        query = "SELECT * FROM devices"
+        # Archivierte Geraete sind aus der Standard-Liste raus (archived = 0).
         if known_only:
-            query += " WHERE is_known = 1"
+            query = "SELECT * FROM devices WHERE is_known = 1 AND archived = 0"
+        else:
+            query = "SELECT * FROM devices WHERE archived = 0"
         query += " ORDER BY last_seen DESC"
         with self._connect() as conn:
             rows = conn.execute(query).fetchall()
@@ -220,10 +271,12 @@ class SqliteDeviceRepository:
 
     def get_unclassified(self) -> list[Device]:
         # Die Wache: noch nicht eingeordnet (is_known=0) UND nicht weggelegt
-        # (watch_dismissed=0), neueste zuerst. Leerer Bestand -> [].
+        # (watch_dismissed=0) UND nicht archiviert (archived=0), neueste zuerst.
+        # Leerer Bestand -> [].
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM devices WHERE is_known = 0 AND watch_dismissed = 0"
+                "SELECT * FROM devices"
+                " WHERE is_known = 0 AND watch_dismissed = 0 AND archived = 0"
                 " ORDER BY last_seen DESC"
             ).fetchall()
         return [_row_to_device(row) for row in rows]
@@ -234,13 +287,17 @@ class SqliteDeviceRepository:
                 "INSERT INTO devices ("
                 " mac, vendor, label, tags, notes, category, is_known, trust_state,"
                 " watch_dismissed,"
+                " archived, source, archive_prompt_count, archive_prompt_dismissed,"
                 " first_seen, last_seen, last_ip, times_seen, open_ports, hostname, os_guess"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(mac) DO UPDATE SET"
                 " vendor = excluded.vendor, label = excluded.label, tags = excluded.tags,"
                 " notes = excluded.notes, category = excluded.category,"
                 " is_known = excluded.is_known, trust_state = excluded.trust_state,"
                 " watch_dismissed = excluded.watch_dismissed,"
+                " archived = excluded.archived, source = excluded.source,"
+                " archive_prompt_count = excluded.archive_prompt_count,"
+                " archive_prompt_dismissed = excluded.archive_prompt_dismissed,"
                 " first_seen = excluded.first_seen,"
                 " last_seen = excluded.last_seen, last_ip = excluded.last_ip,"
                 " times_seen = excluded.times_seen, open_ports = excluded.open_ports,"
@@ -255,6 +312,10 @@ class SqliteDeviceRepository:
                     int(device.is_known),
                     device.trust_state.value,
                     int(device.watch_dismissed),
+                    int(device.archived),
+                    device.source.value,
+                    device.archive_prompt_count,
+                    int(device.archive_prompt_dismissed),
                     _fmt_dt(device.first_seen),
                     _fmt_dt(device.last_seen),
                     device.last_ip,
@@ -298,11 +359,15 @@ class SqliteDeviceRepository:
         ]
 
     def stats(self, active_since: datetime) -> DeviceStats:
+        # Archivierte Geraete zaehlen in KEINER Kennzahl mit (sie sind aus den
+        # Wertungen raus) -- jede Zaehlung auf archived = 0 einschraenken.
         with self._connect() as conn:
-            total = conn.execute("SELECT COUNT(*) FROM devices").fetchone()[0]
-            known = conn.execute("SELECT COUNT(*) FROM devices WHERE is_known = 1").fetchone()[0]
+            total = conn.execute("SELECT COUNT(*) FROM devices WHERE archived = 0").fetchone()[0]
+            known = conn.execute(
+                "SELECT COUNT(*) FROM devices WHERE is_known = 1 AND archived = 0"
+            ).fetchone()[0]
             active = conn.execute(
-                "SELECT COUNT(*) FROM devices WHERE last_seen >= ?",
+                "SELECT COUNT(*) FROM devices WHERE last_seen >= ? AND archived = 0",
                 (_fmt_dt(active_since),),
             ).fetchone()[0]
         return DeviceStats(total=total, known=known, unknown=total - known, active=active)
