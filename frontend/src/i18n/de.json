@@ -1026,7 +1026,8 @@
         "ungeprueft": "Rogue-DHCP-Prüfung noch nicht durchgeführt (erfordert aktive Prüfung mit Root-Rechten). Sie lässt sich über die Diagnose- bzw. DNS-Wächter-Funktion anstoßen.",
         "geprueft": "Rogue-DHCP zuletzt geprüft am {{datum}}."
       },
-      "drucken": "Drucken"
+      "pdf": "Bericht als PDF",
+      "pdfFehler": "Das PDF konnte nicht erstellt werden. Bitte erneut versuchen."
     }
   },
   "geraete": {

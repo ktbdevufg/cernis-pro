@@ -1026,7 +1026,8 @@
         "ungeprueft": "Rogue DHCP check not yet performed (requires an active check with root privileges). It can be triggered via the diagnostics / DNS watcher function.",
         "geprueft": "Rogue DHCP last checked on {{datum}}."
       },
-      "drucken": "Print"
+      "pdf": "Report as PDF",
+      "pdfFehler": "The PDF could not be created. Please try again."
     }
   },
   "geraete": {

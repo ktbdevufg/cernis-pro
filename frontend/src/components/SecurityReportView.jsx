@@ -21,7 +21,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { fetchSecurityReport } from "../api/report.js";
+import { fetchSecurityReport, fetchSecurityReportPdf } from "../api/report.js";
 import "./SecurityReportView.css";
 
 // Wie viele Geraete der "Auffaelligkeiten je Geraet"-Balken hoechstens zeigt; der Rest
@@ -120,6 +120,26 @@ export default function SecurityReportView() {
   const [fehler, setFehler] = useState(false);
   // Aufklapp-Zustand der Score-Beitragsliste (nur Anzeige, kein Reload).
   const [beitraegeOffen, setBeitraegeOffen] = useState(false);
+  // Lokaler Zustand des PDF-Downloads: laedt schaltet den Knopf disabled, pdfFehler
+  // zeigt einen eigenen dezenten Hinweis (ueberschreibt NICHT den globalen Lade-Fehler
+  // des Berichts).
+  const [pdfLaedt, setPdfLaedt] = useState(false);
+  const [pdfFehler, setPdfFehler] = useState(false);
+
+  // PDF-Download anstossen. Setzt den lokalen Lade-/Fehler-State; bei erneutem Klick
+  // wird ein vorheriger PDF-Fehler zurueckgesetzt. Der globale fehler-State bleibt
+  // unberuehrt.
+  async function handlePdf() {
+    setPdfFehler(false);
+    setPdfLaedt(true);
+    try {
+      await fetchSecurityReportPdf();
+    } catch {
+      setPdfFehler(true);
+    } finally {
+      setPdfLaedt(false);
+    }
+  }
 
   // Laedt den Bericht einmalig. Fehler -> dezenter Hinweis, kein Absturz (Muster
   // LoggingProfileView). t BEWUSST NICHT in den Deps (neue Referenz je Render -> Loop).
@@ -341,16 +361,22 @@ export default function SecurityReportView() {
         </p>
       ) : null}
 
-      {/* ── Aktionsleiste: Drucken (im Druck ausgeblendet) ─────────────────────── */}
+      {/* ── Aktionsleiste: Bericht als PDF herunterladen ───────────────────────── */}
       {bericht ? (
         <div className="security-report__aktionen">
           <button
             type="button"
-            className="security-report__drucken"
-            onClick={() => window.print()}
+            className="security-report__pdf"
+            onClick={handlePdf}
+            disabled={pdfLaedt}
           >
-            {t("report.security.drucken")}
+            {t("report.security.pdf")}
           </button>
+          {pdfFehler ? (
+            <p className="security-report__pdf-fehler" role="alert">
+              {t("report.security.pdfFehler")}
+            </p>
+          ) : null}
         </div>
       ) : null}
 

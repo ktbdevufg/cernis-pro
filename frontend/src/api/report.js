@@ -26,7 +26,7 @@
 // KEIN 404-Fall: liegt kein Scan vor, ist das ein DATUM (has_scan false + leere
 // Listen + Score 100), kein Fehler.
 
-import { apiGet } from "./client.js";
+import { apiDownload, apiGet } from "./client.js";
 
 // Ein Score-Beitrag (belastetes Geraet) -> View-Struktur. burdenValue bleibt der
 // rohe Lastwert (die View formatiert mit zwei Nachkommastellen selbst).
@@ -107,6 +107,20 @@ export async function fetchSecurityReport() {
   };
 }
 
+// GET /api/report/security/pdf -> loest den Browser-Download des Sicherheitsberichts
+// als PDF aus (Blob via apiDownload). Der echte Dateiname kommt vom Backend ueber
+// Content-Disposition (CERNISPRO_Netzwerk-Sicherheitsbericht_<datum>.pdf); der
+// defaultName hier ist nur Fallback. Bei !ok/Netzfehler -> ApiError (die View faengt
+// das und zeigt einen dezenten PDF-Fehlerhinweis).
+export async function fetchSecurityReportPdf() {
+  return apiDownload(
+    "/api/report/security/pdf",
+    null,
+    "CERNISPRO_Netzwerk-Sicherheitsbericht.pdf",
+  );
+}
+
 export default {
   fetchSecurityReport,
+  fetchSecurityReportPdf,
 };

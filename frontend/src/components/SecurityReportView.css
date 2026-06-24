@@ -445,6 +445,36 @@
   color: var(--color-text-sec);
 }
 
+/* Feste Spaltenbreiten NUR fuer die CVE-Gruppen-Tabellen, damit alle
+   Geraete-Gruppen identisch ausgerichtet sind statt je Tabelle zu springen.
+   Gilt gezielt ueber .security-report__cve-gruppe, damit Ports/Netz-Tabellen
+   (gleiche Basisklasse) nicht betroffen sind.
+   Spalten: CVE-ID | CVSS (num) | Dienst | Beschreibung. */
+.security-report__cve-gruppe .security-report__tabelle {
+  table-layout: fixed;
+}
+.security-report__cve-gruppe .security-report__tabelle th:nth-child(1),
+.security-report__cve-gruppe .security-report__tabelle td:nth-child(1) {
+  width: 18%;
+}
+.security-report__cve-gruppe .security-report__tabelle th:nth-child(2),
+.security-report__cve-gruppe .security-report__tabelle td:nth-child(2) {
+  width: 10%;
+}
+.security-report__cve-gruppe .security-report__tabelle th:nth-child(3),
+.security-report__cve-gruppe .security-report__tabelle td:nth-child(3) {
+  width: 14%;
+}
+.security-report__cve-gruppe .security-report__tabelle th:nth-child(4),
+.security-report__cve-gruppe .security-report__tabelle td:nth-child(4) {
+  width: 58%;
+}
+/* Bei fixed-Layout sauber umbrechen, damit lange CVE-ID/Beschreibung nicht
+   ueberlaeuft (nur im CVE-Gruppen-Kontext). */
+.security-report__cve-gruppe .security-report__tabelle td {
+  overflow-wrap: anywhere;
+}
+
 /* Beschreibungs-Spalte darf umbrechen (Klartext kann lang sein). */
 .security-report__cve-beschreibung {
   color: var(--color-text-sec);
@@ -528,7 +558,7 @@
   justify-content: flex-end;
 }
 
-.security-report__drucken {
+.security-report__pdf {
   padding: 8px 18px;
   font-size: 13px;
   font-weight: 600;
@@ -539,7 +569,7 @@
   cursor: pointer;
 }
 
-.security-report__drucken:hover {
+.security-report__pdf:hover {
   background: var(--color-accent-strong);
 }
 
