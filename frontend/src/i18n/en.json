@@ -1161,6 +1161,17 @@
       "fehlerAnlegen": "The device could not be added.",
       "laedt": "Loading …",
       "ladeFehler": "The devices could not be loaded."
+    },
+    "nachfrage": {
+      "titel": "Devices not seen in a while",
+      "einleitung": "These devices have not shown up for some time. You can take them out of the active list – they then move to the archive and stay there. Nothing happens on its own; you decide per device.",
+      "spalteName": "Name",
+      "spalteMac": "MAC",
+      "zuletztGesehen": "last seen:",
+      "knopfArchivieren": "Remove from list",
+      "knopfBehalten": "Keep",
+      "knopfSpaeter": "Later",
+      "leer": "There are currently no devices to ask about."
     }
   },
   "theme": {

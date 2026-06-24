@@ -155,6 +155,28 @@ export async function restoreDevice(mac) {
   return mappeDevice(antwort);
 }
 
+// Lädt die Archiv-Kandidaten (GET /api/devices/archive-candidates): lange nicht
+// gesehene, nicht archivierte, nicht dauerhaft weggelegte Geräte (Schwelle aus
+// Setting, Default 30 Tage). Passiver Lese-Pfad, den das Frontend nach
+// Scan-Abschluss abfragt, um beim Nutzer nachzufragen. Leere Liste -> [].
+export async function fetchArchiveCandidates() {
+  const antwort = await apiGet("/api/devices/archive-candidates");
+  return (antwort ?? []).map(mappeDevice);
+}
+
+// Beantwortet die Archiv-Nachfrage für ein Gerät
+// (POST /api/devices/{mac}/archive-prompt). Ja (archive=true) archiviert das
+// Gerät; Nein (archive=false) zählt die Nachfrage hoch — ab dem 3. Nein liefert
+// archive-candidates das Gerät serverseitig nicht mehr (3x-Regel). Gibt das
+// aktualisierte Gerät in View-Form zurück.
+export async function answerArchivePrompt(mac, archive) {
+  const antwort = await apiPost(
+    `/api/devices/${encodeURIComponent(mac)}/archive-prompt`,
+    { archive },
+  );
+  return mappeDevice(antwort);
+}
+
 export default {
   updateDeviceMeta,
   setTrustState,
@@ -165,4 +187,6 @@ export default {
   createDevice,
   archiveDevice,
   restoreDevice,
+  fetchArchiveCandidates,
+  answerArchivePrompt,
 };

@@ -25,6 +25,10 @@ import {
 import { memo, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import {
+  answerArchivePrompt,
+  fetchArchiveCandidates,
+} from "../api/devices.js";
 import { fetchInterfaces, primaeresInterface } from "../api/interfaces.js";
 import {
   fetchScanDetail,
@@ -34,6 +38,7 @@ import {
 import { starteScanStream } from "../api/scanStream.js";
 import { fetchSettings, updateSetting } from "../api/settings.js";
 import { CardGrid, FunctionShell } from "../components/AreaShell.jsx";
+import ArchivePromptDialog from "../components/ArchivePromptDialog.jsx";
 import ColumnManager from "../components/ColumnManager.jsx";
 import DnsWatchView from "../components/DnsWatchView.jsx";
 import FunctionCard from "../components/FunctionCard.jsx";
@@ -114,6 +119,12 @@ function ScanInhalt() {
   // Gewähltes Gerät über seinen stabilen Schlüssel (MAC oder, ohne MAC, IP);
   // null = keins. Der Schlüssel deckt auch Hosts ohne MAC kollisionsfrei ab.
   const [gewaehlterSchluessel, setGewaehlterSchluessel] = useState(null);
+
+  // Archiv-Nachfrage nach Scan-Abschluss: die vom Backend gemeldeten Kandidaten
+  // (lange nicht gesehene Geräte) und ob der ruhige Dialog offen ist. Komfort-
+  // pfad — ein Fehler hier stört den Scan-Abschluss nicht.
+  const [nachfrageKandidaten, setNachfrageKandidaten] = useState([]);
+  const [nachfrageOffen, setNachfrageOffen] = useState(false);
 
   // Erkannte Netzwerk-Schnittstellen (aus GET /api/interfaces).
   const [interfaces, setInterfaces] = useState([]);
@@ -249,6 +260,34 @@ function ScanInhalt() {
     setCidr(iface?.networkCidr ?? "");
   };
 
+  // Nach Scan-Abschluss passiv die Archiv-Kandidaten abfragen (lange nicht
+  // gesehene Geräte). Eigene async-Funktion mit try/catch, damit der
+  // onComplete-Callback selbst nicht async wird. Bei Kandidaten den ruhigen
+  // Dialog öffnen; bei Fehler still ignorieren (console.error) — die Nachfrage
+  // ist Komfort, kein Scan-Blocker (S3: ein Fehler hier darf den Scan-Abschluss
+  // nicht stören). Bewusst KEIN useCallback/Dependency auf t — keine Render-Loop.
+  const pruefeNachfrage = async () => {
+    try {
+      const kandidaten = await fetchArchiveCandidates();
+      if (kandidaten.length > 0) {
+        setNachfrageKandidaten(kandidaten);
+        setNachfrageOffen(true);
+      }
+    } catch (fehler) {
+      console.error("Archiv-Kandidaten abfragen fehlgeschlagen", fehler);
+    }
+  };
+
+  // Antwort auf eine Dialog-Zeile: archive=true archiviert, archive=false zählt
+  // die Nachfrage hoch (3x-Regel serverseitig). Gibt das Promise von
+  // answerArchivePrompt direkt zurück — der Dialog entscheidet anhand
+  // resolve/reject, ob die Zeile verschwindet (bei Fehler bleibt sie stehen,
+  // erneut versuchbar). Kein weiterer UI-Schritt nötig: die Scan-Tabelle des
+  // laufenden Scans bleibt, der nächste Verwaltungs-Aufruf zeigt den neuen Stand.
+  const handleNachfrageAntwort = (mac, archive) => {
+    return answerArchivePrompt(mac, archive);
+  };
+
   // Startet einen Live-Scan. Bei bereits laufendem Scan ignorieren. Ohne CIDR
   // wird nicht gestartet (Fehlerhinweis). Setzt den Merge-Puffer und die
   // Anzeige zurück und öffnet den WS-Strom mit dem gewählten CIDR.
@@ -321,6 +360,9 @@ function ScanInhalt() {
           cidr: zielCidr,
           hostCount: geraeteRef.current.size,
         });
+        // Passiv die Archiv-Kandidaten abfragen (eigene async-Funktion mit
+        // try/catch — stört den Scan-Abschluss nicht).
+        pruefeNachfrage();
       },
       onError: (msg) => {
         setScanError(msg ?? t("beobachten.scan.scanError"));
@@ -541,6 +583,16 @@ function ScanInhalt() {
             )}
           </div>
         </div>
+      )}
+
+      {/* Ruhiger Nachfrage-Dialog nach Scan-Abschluss (Overlay über allem,
+          nicht in die Tabelle verschachtelt). Nur bei tatsächlichen Kandidaten. */}
+      {nachfrageOffen && nachfrageKandidaten.length > 0 && (
+        <ArchivePromptDialog
+          candidates={nachfrageKandidaten}
+          onAntwort={handleNachfrageAntwort}
+          onClose={() => setNachfrageOffen(false)}
+        />
       )}
     </div>
   );

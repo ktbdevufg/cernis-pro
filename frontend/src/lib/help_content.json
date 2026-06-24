@@ -517,5 +517,35 @@
       "kurz": "The security report sums up your network's situation into a score from 0 to 100 and lists the underlying findings. It DESCRIBES and contextualises - it does not pass judgement. Findings you have already acknowledged are shown visibly outside the score.",
       "lang": "The security report condenses everything CERNIS PRO knows about your network into a single, honest picture: a network health score from 0 to 100 and the findings that feed it.\n\nThe score derives from the burden carried by affected devices: Score = 100 x (1 - total burden / number of devices). The more devices have critical or notable findings, and the heavier those weigh, the lower the score. A high value (good) means a calm network, a middling one (moderate) some isolated anomalies, a low one (critical) a need to act. On request, the contributions list shows per device who contributes how much burden - the score is never merely asserted, it is derived.\n\nThe findings sit in four sections: hosts with notable ports, known vulnerabilities (CVE), network-wide anomalies (such as IP conflicts or DNS bypass) and - separately - already acknowledged findings. The latter explicitly do NOT count towards the score: what you have marked as settled stays visible but no longer weighs on the rating.\n\nOne principle carries the whole report: it describes and contextualises rather than judging. It states what is and how heavily it weighs - the decision on what to do stays with you. The rogue DHCP check appears only as a status note; it needs an active check with root privileges and is not started from within the report. The report is a pure reading view and changes nothing on the network; the print button puts it on paper."
     }
+  },
+
+  "help.geraete.verwaltung": {
+    "status": "final",
+    "kategorie": "Geräte",
+    "de": {
+      "titel": "Geräteverwaltung",
+      "kurz": "Die Geräteverwaltung ist Ihr Bestand: Hier sehen Sie alle Geraete, koennen sie von Hand anlegen, archivieren (aus der Liste nehmen) und aus dem Archiv wiederherstellen.",
+      "lang": "Die Geraeteverwaltung ist die zentrale Stelle fuer Ihren Geraetebestand. Sie trennt zwei Zustaende: aktive und archivierte Geraete.\n\nAktive Geraete sind der normale Bestand - sie tauchen in Listen und Wertungen auf (zum Beispiel im Netz-Gesundheit-Score). Archivierte Geraete sind beiseitegelegt: Sie bleiben vollstaendig erhalten, werden aber aus Wertungen und Listen ausgenommen. Wichtig: Archivieren loescht nichts. Es ist jederzeit umkehrbar - ueber Wiederherstellen holen Sie ein Geraet zurueck in den aktiven Bestand.\n\nGeraete koennen Sie auch von Hand anlegen, indem Sie eine MAC-Adresse eintragen (zusammen mit optionalem Namen, Kategorie, Notizen und Tags). Das ist nuetzlich fuer Geraete, die ein Scan (noch) nicht erfasst hat. Taucht spaeter ein Scan dieselbe MAC auf, ergaenzt CERNIS die automatisch ermittelten Felder - Ihre von Hand gesetzten Notizen werden dabei nicht ueberschrieben.\n\nSo bleibt der Bestand aufgeraeumt, ohne dass je etwas verloren geht: Was Sie nicht mehr sehen wollen, wandert ins Archiv und ist bei Bedarf mit einem Klick wieder da."
+    },
+    "en": {
+      "titel": "Device management",
+      "kurz": "Device management is your inventory: here you see all devices, can add them by hand, archive them (take them out of the list), and restore them from the archive.",
+      "lang": "Device management is the central place for your device inventory. It separates two states: active and archived devices.\n\nActive devices are the normal inventory - they appear in lists and ratings (for example in the network health score). Archived devices are set aside: they are kept in full, but excluded from ratings and lists. Important: archiving deletes nothing. It is reversible at any time - with restore you bring a device back into the active inventory.\n\nYou can also add devices by hand by entering a MAC address (together with an optional name, category, notes, and tags). This is useful for devices a scan has not (yet) picked up. If a later scan finds the same MAC, CERNIS fills in the automatically determined fields - your hand-set notes are not overwritten in the process.\n\nThis keeps the inventory tidy without ever losing anything: what you no longer want to see moves to the archive and is back with a single click whenever you need it."
+    }
+  },
+
+  "help.geraete.nachfrage": {
+    "status": "final",
+    "kategorie": "Geräte",
+    "de": {
+      "titel": "Archiv-Nachfrage nach dem Scan",
+      "kurz": "Nach einem Scan fragt CERNIS bei lange nicht gesehenen Geraeten ruhig nach, ob sie aus der Liste genommen werden sollen. Es passiert nichts automatisch - Sie entscheiden je Geraet.",
+      "lang": "Im Lauf der Zeit verschwinden Geraete aus einem Netz: Ein Geraet wird ausgemustert, ein Gast geht wieder, ein altes Smartphone wird nie wieder eingeschaltet. Damit Ihr Bestand nicht stillschweigend mit Karteileichen volllaeuft, fragt CERNIS nach einem Scan ruhig nach.\n\nDie Nachfrage erscheint nur fuer Geraete, die seit laengerem nicht mehr gesehen wurden. Die Schwelle liegt bei rund einem Monat und laesst sich in den Einstellungen anpassen. Pro Geraet haben Sie die Wahl: 'Aus der Liste nehmen' legt es ins Archiv (jederzeit wiederherstellbar), 'Behalten' laesst es im aktiven Bestand.\n\nNichts geschieht automatisch - es wird nie ein Geraet ohne Ihr Zutun archiviert. Und die Nachfrage draengt sich nicht auf: Waehlen Sie bei einem Geraet mehrmals 'Behalten', merkt sich CERNIS das und fragt zu diesem Geraet nicht weiter nach.\n\nAus der Liste genommene Geraete sind nicht verloren: Sie liegen im Archiv und lassen sich ueber die Geraeteverwaltung jederzeit wiederherstellen."
+    },
+    "en": {
+      "titel": "Post-scan archive prompt",
+      "kurz": "After a scan, CERNIS quietly asks about devices not seen in a while, whether they should be taken out of the list. Nothing happens automatically - you decide per device.",
+      "lang": "Over time, devices vanish from a network: a device is retired, a guest leaves, an old smartphone is never switched on again. So that your inventory does not silently fill up with dead entries, CERNIS asks quietly after a scan.\n\nThe prompt only appears for devices that have not been seen for a longer while. The threshold is around one month and can be adjusted in the settings. Per device you have the choice: 'Remove from list' moves it to the archive (restorable at any time), 'Keep' leaves it in the active inventory.\n\nNothing happens automatically - no device is ever archived without your involvement. And the prompt does not push itself on you: if you choose 'Keep' for a device several times, CERNIS remembers that and stops asking about that device.\n\nDevices taken out of the list are not lost: they sit in the archive and can be restored at any time via device management."
+    }
   }
 }

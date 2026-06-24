@@ -1161,6 +1161,17 @@
       "fehlerAnlegen": "Das Gerät konnte nicht angelegt werden.",
       "laedt": "Lädt …",
       "ladeFehler": "Die Geräte konnten nicht geladen werden."
+    },
+    "nachfrage": {
+      "titel": "Lange nicht gesehene Geräte",
+      "einleitung": "Diese Geräte sind seit einer Weile nicht mehr aufgetaucht. Sie können sie aus der aktiven Liste nehmen – sie wandern dann ins Archiv und bleiben dort erhalten. Nichts passiert von selbst; Sie entscheiden pro Gerät.",
+      "spalteName": "Name",
+      "spalteMac": "MAC",
+      "zuletztGesehen": "zuletzt gesehen:",
+      "knopfArchivieren": "Aus der Liste nehmen",
+      "knopfBehalten": "Behalten",
+      "knopfSpaeter": "Später",
+      "leer": "Derzeit gibt es keine Geräte, zu denen nachgefragt werden müsste."
     }
   },
   "theme": {
