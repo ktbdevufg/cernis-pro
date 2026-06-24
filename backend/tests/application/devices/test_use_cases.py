@@ -12,19 +12,27 @@ from typing import Any
 import pytest
 
 from application.devices import (
+    AnswerArchivePrompt,
+    ArchiveDevice,
+    CreateDevice,
     DeleteDevice,
+    DeviceAlreadyExistsError,
     DeviceNotFoundError,
     DismissDeviceFromWatch,
+    GetArchiveCandidates,
+    GetArchivedDevices,
     GetDevice,
     GetDevices,
     GetDeviceStats,
     GetUnclassifiedDevices,
     InvalidTrustStateError,
     RecordScannedHost,
+    RestoreDevice,
     UpdateDeviceMeta,
 )
 from domain.devices import (
     Device,
+    DeviceSource,
     DeviceStats,
     IpHistoryEntry,
     ScannedHost,
@@ -53,11 +61,20 @@ class FakeDeviceRepository:
         return self._devices.get(normalize_mac(mac))
 
     def get_all(self, known_only: bool) -> list[Device]:
-        items = [d for d in self._devices.values() if d.is_known or not known_only]
+        # Archivierte Geraete sind aus der Standard-Liste raus -- spiegelt den
+        # Adapter (SqliteDeviceRepository: WHERE archived = 0).
+        items = [
+            d for d in self._devices.values() if (d.is_known or not known_only) and not d.archived
+        ]
         return sorted(items, key=lambda d: d.last_seen, reverse=True)
 
     def get_unclassified(self) -> list[Device]:
-        items = [d for d in self._devices.values() if not d.is_known and not d.watch_dismissed]
+        # Wie der Adapter: zusaetzlich archivierte ausschliessen (archived = 0).
+        items = [
+            d
+            for d in self._devices.values()
+            if not d.is_known and not d.watch_dismissed and not d.archived
+        ]
         return sorted(items, key=lambda d: d.last_seen, reverse=True)
 
     def get_archived(self) -> list[Device]:
@@ -94,10 +111,13 @@ class FakeDeviceRepository:
         return items[:limit]
 
     def stats(self, active_since: datetime) -> DeviceStats:
+        # Archivierte Geraete zaehlen in KEINER Kennzahl mit -- spiegelt den
+        # Adapter (SqliteDeviceRepository: jede Zaehlung auf archived = 0).
         self.stats_active_since = active_since
-        total = len(self._devices)
-        known = sum(1 for d in self._devices.values() if d.is_known)
-        active = sum(1 for d in self._devices.values() if d.last_seen >= active_since)
+        live = [d for d in self._devices.values() if not d.archived]
+        total = len(live)
+        known = sum(1 for d in live if d.is_known)
+        active = sum(1 for d in live if d.last_seen >= active_since)
         return DeviceStats(total=total, known=known, unknown=total - known, active=active)
 
     def clear_all(self) -> None:
@@ -403,3 +423,172 @@ def test_record_preserves_is_known_bug2_end_to_end(repo: FakeDeviceRepository) -
     dev = repo.get(MAC)
     assert dev is not None
     assert dev.is_known is True
+
+
+# ── CreateDevice ─────────────────────────────────────────────────────────────
+
+
+def test_create_device_success_sets_manual_known_zero_seen(repo: FakeDeviceRepository) -> None:
+    created = CreateDevice(repo, FakeClock(NOW))(
+        MAC, label="Drucker", notes="Flur", category="printer", tags=["office", "lan"]
+    )
+    assert created.source is DeviceSource.MANUAL
+    assert created.is_known is True
+    assert created.times_seen == 0
+    assert created.label == "Drucker"
+    assert created.notes == "Flur"
+    assert created.category == "printer"
+    assert created.tags == ("office", "lan")
+    assert repo.save_calls == 1  # genau EIN Schreibpfad
+    stored = repo.get(MAC)
+    assert stored is not None
+    assert stored.source is DeviceSource.MANUAL
+    assert stored.is_known is True
+    assert stored.times_seen == 0
+
+
+def test_create_device_conflict_raises_and_no_extra_save(repo: FakeDeviceRepository) -> None:
+    repo.save(_device(is_known=True))  # save_calls == 1 (Setup)
+    with pytest.raises(DeviceAlreadyExistsError):
+        CreateDevice(repo, FakeClock(NOW))(MAC, label="x")
+    assert repo.save_calls == 1  # kein weiterer save bei Konflikt
+
+
+def test_create_device_normalizes_mac(repo: FakeDeviceRepository) -> None:
+    created = CreateDevice(repo, FakeClock(NOW))("aa-bb-cc-dd-ee-01")
+    assert created.mac == MAC
+    assert repo.get(MAC) is not None
+
+
+# ── ArchiveDevice ────────────────────────────────────────────────────────────
+
+
+def test_archive_device_sets_archived(repo: FakeDeviceRepository) -> None:
+    repo.save(_device(archived=False))  # save_calls == 1 (Setup)
+    updated = ArchiveDevice(repo)(MAC)
+    assert updated.archived is True
+    assert repo.save_calls == 2  # genau EIN zusaetzlicher Schreibpfad
+    stored = repo.get(MAC)
+    assert stored is not None
+    assert stored.archived is True
+
+
+def test_archive_device_unknown_mac_raises(repo: FakeDeviceRepository) -> None:
+    with pytest.raises(DeviceNotFoundError):
+        ArchiveDevice(repo)("AA:BB:CC:DD:EE:99")
+
+
+# ── RestoreDevice ────────────────────────────────────────────────────────────
+
+
+def test_restore_device_unarchives_and_keeps_prompt_state(repo: FakeDeviceRepository) -> None:
+    # Zurueckholen setzt den Nachfrage-Zustand NICHT zurueck (kein Reset).
+    repo.save(_device(archived=True, archive_prompt_count=3, archive_prompt_dismissed=True))
+    updated = RestoreDevice(repo)(MAC)
+    assert updated.archived is False
+    assert updated.archive_prompt_count == 3
+    assert updated.archive_prompt_dismissed is True
+
+
+def test_restore_device_unknown_mac_raises(repo: FakeDeviceRepository) -> None:
+    with pytest.raises(DeviceNotFoundError):
+        RestoreDevice(repo)("AA:BB:CC:DD:EE:99")
+
+
+# ── GetArchivedDevices ───────────────────────────────────────────────────────
+
+
+def test_get_archived_returns_only_archived_sorted_desc(repo: FakeDeviceRepository) -> None:
+    # Gemischter Bestand; erwartet nur die archivierten, last_seen absteigend.
+    repo.save(_device("AA:BB:CC:DD:EE:01", archived=False))
+    repo.save(_device("AA:BB:CC:DD:EE:02", archived=True, last_seen=NOW - timedelta(days=1)))
+    repo.save(_device("AA:BB:CC:DD:EE:03", archived=True, last_seen=NOW))
+    macs = [d.mac for d in GetArchivedDevices(repo)()]
+    assert macs == ["AA:BB:CC:DD:EE:03", "AA:BB:CC:DD:EE:02"]
+
+
+# ── AnswerArchivePrompt ──────────────────────────────────────────────────────
+
+
+def test_answer_archive_prompt_yes_archives(repo: FakeDeviceRepository) -> None:
+    repo.save(_device(archived=False))  # save_calls == 1 (Setup)
+    updated = AnswerArchivePrompt(repo)(MAC, archive=True)
+    assert updated.archived is True
+    assert repo.save_calls == 2  # genau EIN zusaetzlicher Schreibpfad
+
+
+def test_answer_archive_prompt_no_three_times_dismisses_end_to_end(
+    repo: FakeDeviceRepository,
+) -> None:
+    # 3x-Nein end-to-end ueber den Use-Case (nicht nur die Domaene).
+    repo.save(_device(archive_prompt_count=0, archive_prompt_dismissed=False))
+    uc = AnswerArchivePrompt(repo)
+    first = uc(MAC, archive=False)
+    assert first.archive_prompt_count == 1
+    assert first.archive_prompt_dismissed is False
+    second = uc(MAC, archive=False)
+    assert second.archive_prompt_count == 2
+    assert second.archive_prompt_dismissed is False
+    third = uc(MAC, archive=False)
+    assert third.archive_prompt_count == 3
+    assert third.archive_prompt_dismissed is True
+
+
+def test_answer_archive_prompt_unknown_mac_raises(repo: FakeDeviceRepository) -> None:
+    with pytest.raises(DeviceNotFoundError):
+        AnswerArchivePrompt(repo)("AA:BB:CC:DD:EE:99", archive=True)
+
+
+# ── GetArchiveCandidates ─────────────────────────────────────────────────────
+
+
+def test_get_archive_candidates_filters_and_sorts_ascending(repo: FakeDeviceRepository) -> None:
+    # Erwartet: nur alt genug, nicht archiviert, nicht dismissed; last_seen aufsteigend.
+    repo.save(_device("AA:BB:CC:DD:EE:01", last_seen=NOW - timedelta(days=40)))  # Kandidat
+    repo.save(_device("AA:BB:CC:DD:EE:02", last_seen=NOW - timedelta(days=60)))  # Kandidat
+    repo.save(_device("AA:BB:CC:DD:EE:03", last_seen=NOW - timedelta(days=5)))  # zu frisch
+    repo.save(
+        _device("AA:BB:CC:DD:EE:04", last_seen=NOW - timedelta(days=99), archived=True)
+    )  # archiviert -> raus
+    repo.save(
+        _device(
+            "AA:BB:CC:DD:EE:05",
+            last_seen=NOW - timedelta(days=99),
+            archive_prompt_dismissed=True,
+        )
+    )  # dismissed -> raus
+    result = GetArchiveCandidates(repo, FakeClock(NOW))(threshold_days=30)
+    # last_seen aufsteigend: der am laengsten verschollene (60d) zuerst.
+    assert [d.mac for d in result] == ["AA:BB:CC:DD:EE:02", "AA:BB:CC:DD:EE:01"]
+
+
+def test_get_archive_candidates_threshold_changes_result(repo: FakeDeviceRepository) -> None:
+    # Die Zeitgrenze entsteht im Use-Case: gleicher Bestand, anderer threshold ->
+    # anderes Ergebnis.
+    repo.save(_device("AA:BB:CC:DD:EE:01", last_seen=NOW - timedelta(days=40)))
+    repo.save(_device("AA:BB:CC:DD:EE:02", last_seen=NOW - timedelta(days=10)))
+    uc = GetArchiveCandidates(repo, FakeClock(NOW))
+    assert {d.mac for d in uc(threshold_days=30)} == {"AA:BB:CC:DD:EE:01"}
+    assert {d.mac for d in uc(threshold_days=5)} == {
+        "AA:BB:CC:DD:EE:01",
+        "AA:BB:CC:DD:EE:02",
+    }
+
+
+# ── Regression: Fake-Korrektur spiegelt den Adapter (archived ausgeblendet) ──
+
+
+def test_get_devices_excludes_archived(repo: FakeDeviceRepository) -> None:
+    repo.save(_device("AA:BB:CC:DD:EE:01", is_known=True, archived=False))
+    repo.save(_device("AA:BB:CC:DD:EE:02", is_known=True, archived=True))
+    macs = {d.mac for d in GetDevices(repo)(known_only=False)}
+    assert macs == {"AA:BB:CC:DD:EE:01"}
+
+
+def test_get_device_stats_excludes_archived_from_total(repo: FakeDeviceRepository) -> None:
+    repo.save(_device("AA:BB:CC:DD:EE:01", is_known=True, archived=False, last_seen=NOW))
+    repo.save(_device("AA:BB:CC:DD:EE:02", is_known=True, archived=True, last_seen=NOW))
+    stats = GetDeviceStats(repo, FakeClock(NOW))()
+    assert stats.total == 1  # archiviertes zaehlt nicht mit
+    assert stats.known == 1
+    assert stats.active == 1

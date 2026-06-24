@@ -9,7 +9,7 @@ dem Frontend-Catch-all matcht.
 """
 
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -18,22 +18,34 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from api.devices import (
+    provide_answer_archive_prompt,
+    provide_archive_device,
+    provide_create_device,
     provide_delete_device,
     provide_dismiss_device_from_watch,
+    provide_get_archive_candidates,
+    provide_get_archived_devices,
     provide_get_device,
     provide_get_device_stats,
     provide_get_devices,
     provide_get_unclassified_devices,
+    provide_restore_device,
     provide_update_device_meta,
 )
 from app import create_app
 from application.devices import (
+    AnswerArchivePrompt,
+    ArchiveDevice,
+    CreateDevice,
     DeleteDevice,
     DismissDeviceFromWatch,
+    GetArchiveCandidates,
+    GetArchivedDevices,
     GetDevice,
     GetDevices,
     GetDeviceStats,
     GetUnclassifiedDevices,
+    RestoreDevice,
     UpdateDeviceMeta,
 )
 from domain.devices import Device, IpHistoryEntry
@@ -85,6 +97,19 @@ def _wired_app(repo: SqliteDeviceRepository) -> FastAPI:
         repo
     )
     app.dependency_overrides[provide_delete_device] = lambda: DeleteDevice(repo)
+    # Geraete-Lebenszyklus (A3): Anlegen/Archivieren/Wiederherstellen + Nachfrage.
+    app.dependency_overrides[provide_create_device] = lambda: CreateDevice(repo, clock)
+    app.dependency_overrides[provide_archive_device] = lambda: ArchiveDevice(repo)
+    app.dependency_overrides[provide_restore_device] = lambda: RestoreDevice(repo)
+    app.dependency_overrides[provide_get_archived_devices] = lambda: GetArchivedDevices(repo)
+    app.dependency_overrides[provide_answer_archive_prompt] = lambda: AnswerArchivePrompt(repo)
+    # Kandidaten-Provider liefert ein fertig parametriertes Callable (wie der
+    # Composition Root): feste 30-Tage-Schwelle gegen die echte SystemClock --
+    # die Tests setzen das Test-Geraet daher mit einem WEIT alten last_seen an.
+    candidates = GetArchiveCandidates(repo, clock)
+    app.dependency_overrides[provide_get_archive_candidates] = lambda: (
+        lambda: candidates(threshold_days=30)
+    )
     return app
 
 
@@ -278,3 +303,84 @@ def test_devices_route_not_swallowed_by_frontend(client: TestClient) -> None:
     resp = client.get("/api/devices/stats")
     assert resp.status_code == 200
     assert "total" in resp.json()  # echtes JSON aus dem Router, kein index.html
+
+
+# ── POST "" (manuell anlegen): 200 / 409 / 422 ──────────────────────────────
+
+
+def test_create_device_returns_manual_known(client: TestClient) -> None:
+    resp = client.post("/api/devices", json={"mac": MAC, "label": "Drucker"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["mac"] == MAC
+    assert body["is_known"] is True
+    # source wird im Response NICHT serialisiert -> ueber GET pruefen waere noetig;
+    # hier zeigt is_known/label, dass das manuelle Geraet angelegt wurde.
+    assert body["label"] == "Drucker"
+
+
+def test_create_device_duplicate_409(client: TestClient, repo: SqliteDeviceRepository) -> None:
+    repo.save(_device(is_known=True))
+    resp = client.post("/api/devices", json={"mac": MAC})
+    assert resp.status_code == 409
+
+
+def test_create_device_invalid_mac_422(client: TestClient) -> None:
+    resp = client.post("/api/devices", json={"mac": ""})
+    assert resp.status_code == 422
+
+
+# ── Archivieren / Wiederherstellen: Liste vs. /archived ─────────────────────
+
+
+def test_archive_moves_device_out_of_list_into_archived(
+    client: TestClient, repo: SqliteDeviceRepository
+) -> None:
+    repo.save(_device(is_known=True))
+    # Frisch angelegt: in der Standard-Liste, nicht im Archiv.
+    assert [d["mac"] for d in client.get("/api/devices").json()] == [MAC]
+    assert client.get("/api/devices/archived").json() == []
+    # Archivieren -> verschwindet aus der Liste, taucht im Archiv auf.
+    assert client.post(f"/api/devices/{MAC}/archive").status_code == 200
+    assert client.get("/api/devices").json() == []
+    assert [d["mac"] for d in client.get("/api/devices/archived").json()] == [MAC]
+    # Wiederherstellen -> zurueck in der Liste, raus aus dem Archiv.
+    assert client.post(f"/api/devices/{MAC}/restore").status_code == 200
+    assert [d["mac"] for d in client.get("/api/devices").json()] == [MAC]
+    assert client.get("/api/devices/archived").json() == []
+
+
+def test_archive_unknown_device_404(client: TestClient) -> None:
+    assert client.post("/api/devices/AA:BB:CC:DD:EE:99/archive").status_code == 404
+
+
+def test_restore_unknown_device_404(client: TestClient) -> None:
+    assert client.post("/api/devices/AA:BB:CC:DD:EE:99/restore").status_code == 404
+
+
+def test_archive_prompt_unknown_device_404(client: TestClient) -> None:
+    resp = client.post("/api/devices/AA:BB:CC:DD:EE:99/archive-prompt", json={"archive": False})
+    assert resp.status_code == 404
+
+
+# ── Archiv-Nachfrage 3x-Regel end-to-end ueber HTTP ─────────────────────────
+
+
+def test_archive_prompt_three_no_removes_from_candidates(
+    client: TestClient, repo: SqliteDeviceRepository
+) -> None:
+    # Zeitfalle: die Kandidaten-Schwelle (30 Tage) misst gegen die echte
+    # SystemClock. Daher das Test-Geraet ueber die repo-Fixture mit einem WEIT
+    # alten last_seen vorab anlegen -- so ist es ueberhaupt Kandidat.
+    old = datetime.now(UTC) - timedelta(days=365)
+    repo.save(_device(is_known=False, first_seen=old, last_seen=old))
+    # Vor der Nachfrage: Kandidat.
+    before = [d["mac"] for d in client.get("/api/devices/archive-candidates").json()]
+    assert MAC in before
+    # Dreimal "Nein" -> ab dem 3. Nein dauerhaft nicht mehr fragen.
+    for _ in range(3):
+        resp = client.post(f"/api/devices/{MAC}/archive-prompt", json={"archive": False})
+        assert resp.status_code == 200
+    # Danach kein Kandidat mehr (archive_prompt_dismissed=True), obwohl alt genug.
+    after = [d["mac"] for d in client.get("/api/devices/archive-candidates").json()]
+    assert MAC not in after
