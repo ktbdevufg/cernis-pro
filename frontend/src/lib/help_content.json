@@ -11,7 +11,6 @@
       "'links' optional: vertrauenswuerdige Internet-Quellen zur Vertiefung."
     ]
   },
-
   "help.allgemein.start": {
     "status": "final",
     "kategorie": "Grundlagen",
@@ -26,7 +25,6 @@
       "lang": "CERNIS PRO is a tool for understanding and keeping an eye on your own network. It shows you which devices are connected, which programs are sending and receiving data, and whether there are signs of problems or unusual activity.\n\nThe program is aimed at technically interested users who want to see more than a simple consumer app offers - without needing an expensive professional suite.\n\nOne principle runs through the whole program: your data stays with you. CERNIS PRO does not quietly collect anything and does not send anything outward without your involvement. Where a feature needs the internet (for example to look up additional information), this is clearly marked and only happens at your explicit request."
     }
   },
-
   "help.startseite.uebersicht": {
     "status": "vorlaeufig",
     "kategorie": "Startseite",
@@ -41,7 +39,6 @@
       "lang": "The home screen is your starting point. It is deliberately calm when everything is fine, and only steps forward when there is something to show.\n\nIt consists of several sections: a status line with plain facts and a timestamp, quick-access tiles for the most important features, an area for noteworthy hints (shown only when the analysis has found something), a list of new vulnerabilities, and a slim metrics strip at the bottom with two live values: apps with traffic and active connections.\n\nYou can switch each section on or off individually in the settings - so the home screen shows exactly what matters to you.\n\nNote: This section describes the agreed concept. The final appearance will be decided during the user interface redesign."
     }
   },
-
   "help.scan.start": {
     "status": "final",
     "kategorie": "Beobachten",
@@ -50,7 +47,10 @@
       "kurz": "Ein Scan durchsucht Ihr Netz nach aktiven Geraeten, ermittelt offene Ports und versucht, die laufenden Dienste zu erkennen. Der Fortschritt erscheint live, waehrend der Scan laeuft.",
       "lang": "Ein Netzwerk-Scan ist die Grundfunktion von CERNIS PRO. Er findet heraus, welche Geraete gerade in Ihrem Netz aktiv sind, welche Netzwerk-Tueren (Ports) bei ihnen offen stehen und welche Dienste dahinter laufen.\n\nDer Ablauf in drei Schritten: Zuerst werden aktive Geraete gesucht (Host-Discovery). Dann werden bei jedem gefundenen Geraet die Ports geprueft. Zuletzt wird versucht, den jeweiligen Dienst zu benennen (zum Beispiel Webserver, Druckerdienst, Dateifreigabe).\n\nDie Ergebnisse erscheinen live, waehrend der Scan laeuft - Sie muessen nicht warten, bis alles fertig ist. Jedes neu gefundene Geraet wird sofort in die Tabelle eingetragen.\n\nManche Geraete-Informationen werden zusaetzlich aus Ihrer FRITZ!Box und aus der ARP-Tabelle Ihres Systems ergaenzt, damit das Bild vollstaendiger wird.",
       "links": [
-        { "label": "Was ist ein Port? (Wikipedia)", "url": "https://de.wikipedia.org/wiki/Port_(Protokoll)" }
+        {
+          "label": "Was ist ein Port? (Wikipedia)",
+          "url": "https://de.wikipedia.org/wiki/Port_(Protokoll)"
+        }
       ]
     },
     "en": {
@@ -58,11 +58,13 @@
       "kurz": "A scan searches your network for active devices, finds open ports, and tries to identify the running services. Progress appears live while the scan runs.",
       "lang": "A network scan is the core function of CERNIS PRO. It finds out which devices are currently active in your network, which network doors (ports) are open on them, and which services run behind those ports.\n\nThe process has three steps: first, active devices are discovered (host discovery). Then the ports of each found device are checked. Finally, the program tries to name each service (for example web server, printer service, file share).\n\nResults appear live while the scan runs - you do not have to wait for everything to finish. Each newly found device is entered into the table immediately.\n\nSome device information is additionally enriched from your FRITZ!Box and from your system's ARP table, to make the picture more complete.",
       "links": [
-        { "label": "What is a port? (Wikipedia)", "url": "https://en.wikipedia.org/wiki/Port_(computer_networking)" }
+        {
+          "label": "What is a port? (Wikipedia)",
+          "url": "https://en.wikipedia.org/wiki/Port_(computer_networking)"
+        }
       ]
     }
   },
-
   "help.scan.flags": {
     "status": "final",
     "kategorie": "Beobachten",
@@ -77,7 +79,6 @@
       "lang": "CERNIS PRO assesses your network on two independent levels - one of the program's key strengths.\n\nThe first level is pure facts from comparison with earlier scans: Is this device new? Has it changed since last time? Is a port newly open that was previously closed? These markings do not judge - they only state what is different from before. On the very first scan of a device, no markings are created here on purpose (otherwise everything would be 'new').\n\nThe second level is an assessment: the analysis engine rates individual ports as 'notable' or 'critical', for example because a port is known for backdoors or because an unusually high number of ports is open. You can adjust these rules yourself.\n\nIn the table you see both levels side by side: the assessment on the left, the facts on the right. Affected ports are individually highlighted in color (orange for notable, red for critical)."
     }
   },
-
   "help.scan.acknowledge": {
     "status": "final",
     "kategorie": "Beobachten",
@@ -92,7 +93,6 @@
       "lang": "Sometimes a port marked as notable is perfectly fine - for example a service you set up on purpose. In that case you can acknowledge the finding.\n\nAcknowledging works precisely: per device and per port. The port then disappears from the active warning list so you can focus on what is new. The device's full port list is unaffected - nothing is hidden, it is only classified as 'checked'.\n\nEvery acknowledgement is recorded in a running log and can be undone at any time. This keeps it traceable what you classified as harmless and when."
     }
   },
-
   "help.topology.uebersicht": {
     "status": "final",
     "kategorie": "Beobachten",
@@ -107,7 +107,6 @@
       "lang": "The topology graph depicts your home network visually. At the center sits the gateway - usually your router. The discovered devices arrange themselves around it.\n\nThe lines have two meanings: a solid line is an actually measured connection (the device actively identified itself). A dashed line is an assumption - CERNIS PRO assumes the device is connected through the gateway but could not measure it directly. This honest distinction prevents anything from being faked for you.\n\nYou can choose which devices are shown: only those from the last scan, or all devices ever known.\n\nIf no gateway can be identified, no center is shown - an honestly empty picture is preferred over an invented one."
     }
   },
-
   "help.traffic.uebersicht": {
     "status": "final",
     "kategorie": "Beobachten",
@@ -122,7 +121,6 @@
       "lang": "The traffic view shows you, per program (app), which network connections it currently maintains and how much data flows over them. This lets you see at a glance which application is 'talking' to where.\n\nConnections that cannot be attributed to a program (for example from other devices) are collected in a separate 'unattributable' group - they are not simply left out.\n\nYou have the choice between automatic refresh (the view updates itself) and manual refresh (you trigger each update yourself). Both are equally valid - you decide what fits your way of working.\n\nRemote endpoints are initially shown as a plain IP address. You can look up who is behind them using the resolve function."
     }
   },
-
   "help.process.uebersicht": {
     "status": "final",
     "kategorie": "Beobachten",
@@ -137,7 +135,6 @@
       "lang": "The process view shows the programs running on your system together with the path they were started from. The path is often revealing: a well-known program starting from an unusual directory can be a hint of something improper.\n\nCERNIS PRO discreetly points out when a program may be trying to pass itself off as another (masquerade). How much detail you see depends on the privileges the program runs with - this is shown honestly rather than concealing gaps.\n\nPure system background processes (kernel threads) are hidden to keep the list clear."
     }
   },
-
   "help.diagnostics.dns_traceroute": {
     "status": "final",
     "kategorie": "Diagnose",
@@ -152,7 +149,6 @@
       "lang": "Here you find two classic network tools in an understandable form.\n\nThe DNS lookup checks which IP address is behind a name (for example behind a web address). This helps detect name resolution problems.\n\nRoute tracing (traceroute) shows the path data packets take from you to a destination on the internet - station by station (so-called hops). This lets you see where a connection slows down or stalls.\n\nFor especially precise route tracing, elevated privileges are offered. The function still works without them - just in a little less detail. So there is no dead end."
     }
   },
-
   "help.diagnostics.route_geo": {
     "status": "final",
     "kategorie": "Diagnose",
@@ -167,7 +163,6 @@
       "lang": "This function makes the network path to an internet destination visible and enriches each station (hop) with two extra pieces of information: the country and the network operator number (ASN). This lets you recognize which countries and networks your connection passes through.\n\nThe stations are shown as a list, not as a map. There is a deliberate reason: the underlying data contains no precise coordinate knowledge, only the country. A map with estimated points would fake a precision that does not exist - which contradicts the principle of honesty. The country is shown as a flag instead.\n\nIf you want the exact name of the network operator, you can load it from the internet on demand. This is a deliberate internet query and switched off by default - you decide whether and when it happens."
     }
   },
-
   "help.diagnostics.external_check": {
     "status": "final",
     "kategorie": "Diagnose",
@@ -182,7 +177,6 @@
       "lang": "With this test you see your network from the outside perspective. It shows your public IP address (the address under which you appear on the internet) and can check whether a given port is reachable from outside.\n\nThis matters for security: a port open from outside can be an invitation for unauthorized access. The test tells you honestly what the outside world sees of your connection.\n\nBecause such a test only works from outside your network, CERNIS PRO uses a small external helper service for it. Only your own connection address is checked."
     }
   },
-
   "help.diagnostics.rogue_dhcp": {
     "status": "final",
     "kategorie": "Diagnose",
@@ -197,7 +191,6 @@
       "lang": "In a healthy network, normally only one device hands out addresses to all the others (the DHCP server, usually your router). If a second, unknown distributor suddenly appears, it may be harmless (a misconfigured device) - or a hint of an attack where someone wants to reroute traffic.\n\nThis test actively searches for such distributors and compares them with what you expect. You can define what you expect yourself; otherwise your gateway is taken as the reference.\n\nThe test requires elevated privileges. If they are missing, CERNIS PRO says so clearly - without quietly granting itself privileges."
     }
   },
-
   "help.sni.uebersicht": {
     "status": "final",
     "kategorie": "Beobachten",
@@ -212,7 +205,6 @@
       "lang": "When a program opens an encrypted connection to the internet, it states the desired hostname openly at the start (technically: Server Name Indication, SNI). CERNIS PRO reads these names purely passively and attributes them to the program that opened the connection.\n\nThis lets you see which application contacts which internet services - even when the actual content is encrypted. The content itself is not decrypted and not touched; only the hostname, which is openly visible anyway, is captured.\n\nFor privacy reasons these observations are deliberately not stored permanently. They exist only transiently while capture is running. The feature requires elevated privileges and must be actively started by you."
     }
   },
-
   "help.fritzbox.detail": {
     "status": "final",
     "kategorie": "Beobachten",
@@ -227,7 +219,6 @@
       "lang": "If you own a FRITZ!Box, CERNIS PRO can read many useful details directly from it and present them clearly.\n\nThese include: device model and firmware, the status of your internet connection with up- and downstream, the DSL values (such as signal-to-noise ratio and line attenuation as an indication of line quality), the active WLAN devices with signal strength, the box's event log, and configured port forwardings.\n\nConnecting to the box requires your access credentials. If they are wrong, CERNIS PRO says so clearly. If the box is currently unreachable, that is also shown honestly rather than swallowing an error."
     }
   },
-
   "help.monitor.live": {
     "status": "final",
     "kategorie": "Beobachten",
@@ -242,7 +233,6 @@
       "lang": "Live monitoring continuously observes whether certain targets are reachable and how fast they respond. By default your gateways and two well-known internet addresses are monitored; you can add or remove your own targets at any time.\n\nEach target shows a traffic light (reachable / degraded / down), the current response time, and a small history graph. If a target goes down or comes back, this is noted immediately.\n\nOptionally, a discreet sound plays on a status change. You can switch this on or off per target individually - so you only hear the tones that matter to you.\n\nLive monitoring keeps its data only transiently. For permanent recording there is long-term monitoring."
     }
   },
-
   "help.monitor.logging": {
     "status": "final",
     "kategorie": "Beobachten",
@@ -257,7 +247,6 @@
       "lang": "Unlike the transient live monitoring, long-term monitoring permanently records the measurements for a defined time window. By default nothing is stored - recording begins only when you deliberately set up a task.\n\nThere are two operating levels: a simple assistant for a quick start, and an advanced mode with more settings. The principle: advanced really can do more - it is not just the same thing presented differently.\n\nRecording is controlled like a player: start (green), pause (purple), and stop (red). In advanced mode you can choose the measurement interval (from every 5 seconds to every 5 minutes). Important: outages are always recorded, even with a large interval - otherwise you could miss a short outage.\n\nFrom the recordings, CERNIS PRO computes an availability percentage and the average response time. The data is automatically cleaned up after an appropriate time (measurement points after a month, events after a year)."
     }
   },
-
   "help.monitor.threshold": {
     "status": "final",
     "kategorie": "Beobachten",
@@ -272,7 +261,6 @@
       "lang": "A threshold alarm turns a pure recording into an active watch. You define a condition - for example 'response time above 100 milliseconds' or 'target unreachable' - and CERNIS PRO notifies you when that condition occurs.\n\nSo that a single outlier does not immediately trigger an alarm, the condition must hold for several consecutive measurements (three by default). Only then is the alarm considered real. If the target calms down again, the alarm is reset. This behavior prevents annoying constant noise.\n\nNotification can be a desktop hint and - if configured - by email. Threshold alarms are part of advanced mode."
     }
   },
-
   "help.monitor.recurring": {
     "status": "final",
     "kategorie": "Beobachten",
@@ -287,7 +275,6 @@
       "lang": "A recurring recording measures your target every day within a fixed time window. Which target you pick decides what you are really checking.\n\nA LOCAL target is something in your own network - typically your router or your own connection. If it does not answer, the fault is most likely at your home: device off, cable loose, Wi-Fi problem.\n\nAn INTERNET target is a point outside your network - the path to the outside. If it does not answer, it can still be your connection or the path leading there.\n\nTogether the two give a clear picture: if BOTH fail (local and internet), the problem is almost always your own connection. If the local target works but ONLY the internet target fails, your connection is up - the bottleneck is the path to the outside, so usually your provider. This lets you locate the fault even before you call the hotline."
     }
   },
-
   "help.monitor.series": {
     "status": "final",
     "kategorie": "Beobachten",
@@ -302,7 +289,6 @@
       "lang": "A recurring recording measures your target day after day in the same time window. The series analysis stacks those days on top of each other and looks for the recurring pattern - not the single day, but the rule behind it.\n\nThe most important picture is the HEATMAP by time of day: a daily bar from 00:00 to 24:00 in which the times grow darker where outages clustered across the days. This lets you see at a glance whether a target, for example, always struggles around 8 pm in the evening - a pattern that gets lost in a single daily report.\n\nThe PER-DAY LINES show each day as its own line so you can see the spread from day to day. The RANKING names the most conspicuous times in order: on how many days there was trouble and how long the longest outage was. CERNIS automatically suggests the most suitable view; you can switch at any time.\n\nAt the very bottom there is always an honest table of every single outage with start, end, and duration - the raw basis the patterns grow from. If the chosen recording mode does not measure response times, the latency-related views are visibly greyed out. The series analysis is a pure reading view: it only evaluates data that was already recorded and changes nothing on the network."
     }
   },
-
   "help.monitor.profile": {
     "status": "final",
     "kategorie": "Beobachten",
@@ -317,7 +303,6 @@
       "lang": "A behavior profile describes a target's typical activity pattern: at which time of day and on which weekdays it is usually reachable and active. It does not answer 'What happened today?' but 'What is normal here?'.\n\nThe profile grows out of your already running recurring recording - it needs NO separate daily scan and adds no extra load. CERNIS stacks the recorded days on top of each other and derives the typical pattern from them.\n\nThe DAILY PATTERN shows, across a day from 00:00 to 24:00, at which times activity usually occurs. The WEEKLY PATTERN shows the same daily bar stacked for each of the seven weekdays, so you can spot the difference between weekdays and the weekend at a glance.\n\nIf a spot clearly stands out from the usual pattern, it is marked. Such a marking is explicitly a HINT and not a verdict - the thresholds are deliberately conservative and adjustable later. For a pattern to be reliable at all, it needs at least two full weeks of data. Until that is reached, CERNIS shows an honest progress note instead of half-baked pictures and keeps collecting. The behavior profile is a pure reading view: it only evaluates data that was already recorded and changes nothing on the network."
     }
   },
-
   "help.cve.uebersicht": {
     "status": "final",
     "kategorie": "Untersuchen",
@@ -326,7 +311,10 @@
       "kurz": "CERNIS PRO gleicht Ihre bekannten Geraete laufend mit einer oeffentlichen Schwachstellen-Datenbank ab und meldet bekannte Sicherheitsluecken. Neue Funde werden besonders gekennzeichnet.",
       "lang": "Eine CVE ist ein oeffentlich dokumentierter Sicherheitsmangel in einer Software oder einem Geraet (die Abkuerzung steht fuer 'Common Vulnerabilities and Exposures'). CERNIS PRO gleicht Ihre bekannten Geraete und deren Dienste laufend mit einer grossen oeffentlichen Datenbank ab und zeigt, wo bekannte Luecken bestehen.\n\nDie Pruefung laeuft schonend im Hintergrund und nimmt sich immer nur ein faelliges Geraet zur Zeit vor. Geprueft wird, wenn ein Geraet neu ist, wenn sich seine offenen Ports geaendert haben, oder wenn die letzte Pruefung laenger zurueckliegt. Letzteres ist wichtig, weil staendig neue Schwachstellen bekannt werden - auch fuer Geraete, die sich gar nicht geaendert haben.\n\nGefundene Schwachstellen koennen Sie nach Schweregrad oder nach Geraet sortieren. Ganz neue Funde (aus den letzten 24 Stunden) bekommen ein zusaetzliches tuerkises 'NEU'-Abzeichen, damit Sie sie nicht uebersehen.\n\nWenn ein Befund fuer Sie geklaert ist, koennen Sie ihn ausblenden - und bei Bedarf jederzeit wieder einblenden. Ist die Datenbank einmal nicht erreichbar, erfindet CERNIS PRO nichts; das Geraet bleibt einfach als 'noch zu pruefen' vorgemerkt.",
       "links": [
-        { "label": "Was ist eine CVE? (BSI)", "url": "https://www.bsi.bund.de" }
+        {
+          "label": "Was ist eine CVE? (BSI)",
+          "url": "https://www.bsi.bund.de"
+        }
       ]
     },
     "en": {
@@ -334,11 +322,13 @@
       "kurz": "CERNIS PRO continuously compares your known devices against a public vulnerability database and reports known security flaws. New findings are specially marked.",
       "lang": "A CVE is a publicly documented security flaw in a piece of software or a device (the abbreviation stands for 'Common Vulnerabilities and Exposures'). CERNIS PRO continuously compares your known devices and their services against a large public database and shows where known flaws exist.\n\nThe check runs gently in the background and only ever takes on one due device at a time. A device is checked when it is new, when its open ports have changed, or when the last check is some time ago. The last point matters because new vulnerabilities become known all the time - even for devices that have not changed at all.\n\nYou can sort found vulnerabilities by severity or by device. Brand-new findings (from the last 24 hours) get an additional teal 'NEW' badge so you do not overlook them.\n\nWhen a finding is settled for you, you can hide it - and show it again at any time if needed. If the database is ever unreachable, CERNIS PRO invents nothing; the device simply stays flagged as 'still to be checked'.",
       "links": [
-        { "label": "What is a CVE? (MITRE)", "url": "https://www.cve.org" }
+        {
+          "label": "What is a CVE? (MITRE)",
+          "url": "https://www.cve.org"
+        }
       ]
     }
   },
-
   "help.resolve.uebersicht": {
     "status": "final",
     "kategorie": "Untersuchen",
@@ -353,7 +343,6 @@
       "lang": "When you want to know who is behind an IP address, this feature gathers facts from several independent sources: the name (via reverse DNS), the responsible network operator (via RDAP), the country (via a local database), and where applicable details from the security certificate.\n\nThe special part: each item is shown together with its source. So you not only see the result but also where it comes from - and can judge it yourself. If a source is missing, this is honestly shown as 'not available' rather than inventing something.\n\nCERNIS PRO deliberately makes no judgment here. It lays the neutral facts side by side; the assessment stays with you. This is one of the program's core characteristics."
     }
   },
-
   "help.export.uebersicht": {
     "status": "final",
     "kategorie": "Untersuchen",
@@ -368,7 +357,6 @@
       "lang": "CERNIS PRO can export its results in three formats, depending on purpose.\n\nCSV is suited for further processing in a spreadsheet and contains the key fields in a flat form. JSON is lossless and contains all details - ideal for archiving or your own analyses. PDF produces a readable report for printing or sharing.\n\nYou can export both a saved scan and the current analysis findings. For long-term monitoring, a chosen time slice can additionally be exported - the chosen period then governs report, metrics, and export together.\n\nThe files get a descriptive name with date and time so you can easily find them again later."
     }
   },
-
   "help.settings.uebersicht": {
     "status": "final",
     "kategorie": "Einstellungen",
@@ -383,7 +371,6 @@
       "lang": "The settings are a separate area, reachable via the gear icon at the top right.\n\nHere you choose the language (German or English) and the appearance (light or dark). You configure the analysis rules - such as which ports count as notable or critical and from how many open ports a warning is given. And you decide which sections of the home screen are shown.\n\nAll settings are stored safely in a database. So you do not have to edit configuration files by hand - this is a deliberate choice so that nothing accidentally breaks.\n\nIf a stored value should ever be corrupted, CERNIS PRO switches all rules on as a precaution and notes this in the log, rather than simply refusing service."
     }
   },
-
   "help.analysis.regeln": {
     "status": "final",
     "kategorie": "Einstellungen",
@@ -398,7 +385,6 @@
       "lang": "The analysis engine assesses your network according to rules - and those rules are yours. In the settings you can define which ports count as notable or critical, from how many open ports on a device a warning is given, and which individual rules should be active.\n\nThis lets you adapt the assessment to your own network: what is perfectly normal for you does not have to be marked as notable - and conversely you can check more strictly if you wish.\n\nYou can import custom port lists from a file. The import happens directly in the program with a preview before anything is applied - the file never leaves your computer in the process.\n\nThis self-determination is intentional: CERNIS PRO gives you control instead of imposing a fixed assessment."
     }
   },
-
   "help.devices.detail": {
     "status": "final",
     "kategorie": "Beobachten",
@@ -413,7 +399,6 @@
       "lang": "When you select a device in the scan table, its detail view opens. It sums up everything CERNIS PRO knows about that device.\n\nThis includes the classification against earlier scans: is the device already known, is it appearing for the first time, or has it changed since last time? This classification is based on a comparison with the stored history - on a device's very first appearance, no change marking is created on purpose.\n\nYou also see the open ports with their respective assessment and - where determinable - the network context (such as hints from address assignment). If a piece of information is missing, this is shown honestly rather than inventing a value."
     }
   },
-
   "help.diagnostics.banner": {
     "status": "final",
     "kategorie": "Diagnose",
@@ -428,7 +413,6 @@
       "lang": "When a service runs on an open port, it often voluntarily emits a short identifier when a connection is opened - such as its name and version. This identifier is called a banner.\n\nThis feature fetches the banner and thus helps you classify what actually sits behind an open port. This is useful when the automatic service detection during the scan was uncertain.\n\nThe fetch is done discreetly. Encrypted services usually emit no readable banner; this is then shown honestly as 'no banner' rather than guessing something."
     }
   },
-
   "help.traffic.ptr": {
     "status": "final",
     "kategorie": "Beobachten",
@@ -443,7 +427,6 @@
       "lang": "The traffic list initially shows remote endpoints as a plain IP address - this is fast and needs no extra queries.\n\nIf you prefer it clearer, you can have the addresses resolved into names (via reverse DNS). The names are then loaded in the background and shown in the list without you having to wait. Names already looked up are remembered for a while so the same address is not constantly re-queried.\n\nIf no name can be found for an address, the IP address stays - nothing is invented. For a deeper classification of a single endpoint, there is the 'resolve a remote endpoint' feature."
     }
   },
-
   "help.alerting.uebersicht": {
     "status": "final",
     "kategorie": "Einstellungen",
@@ -458,7 +441,6 @@
       "lang": "So that you do not have to keep watching the screen, CERNIS PRO can actively notify you of certain events - for example when a monitored target goes down or a threshold is violated.\n\nThere are two ways: a discreet hint directly on the desktop and, if you set it up, an email. For sending email you store your outgoing mail server's credentials once. These are kept securely in your operating system's key store, not in plain text.\n\nIf no email sending is configured, that path simply falls away - no error and no dead end arises."
     }
   },
-
   "help.interfaces.uebersicht": {
     "status": "final",
     "kategorie": "Beobachten",
@@ -473,7 +455,34 @@
       "lang": "Your computer usually has several network interfaces - such as cable (LAN), wireless (WLAN), and virtual interfaces. This view lists them and shows the actual operational state of each (active or not).\n\nThe primary interface - the one your main traffic runs over - is highlighted so you can orient yourself quickly. This lets you see at a glance how your computer is actually connected to the network right now."
     }
   },
-
+  "help.outbound.uebersicht": {
+    "status": "final",
+    "kategorie": "Beobachten",
+    "de": {
+      "titel": "Aussenkontakte",
+      "kurz": "Eine passive Lesesicht darauf, wohin Ihr Netz nach draussen spricht - also welche Geraete und Apps Verbindungen ins Internet aufbauen. CERNIS greift dabei nicht ein und blockiert nichts; es zeigt nur, was ohnehin laeuft.",
+      "lang": "Die Aussenkontakte buendeln die laufenden Verbindungen Ihres Netzes nach draussen zu einem einzigen Bild: wohin telefoniert mein Netz. Sie sehen auf einen Blick, welche Geraete und Apps gerade nach aussen sprechen und mit welchen Zielen.\n\nDie Liste laesst sich gruppieren - nach Zielland, nach Betreiber (der Organisation hinter dem Ziel, der ASN-Org) oder nach Geraet beziehungsweise App. Sortieren Sie nach Menge, treten nebenbei die groessten Schwaetzer hervor: Geraete, die besonders viel nach draussen sprechen, etwa gespraechige IoT-Geraete. Das ist eine reine Beobachtung, kein Urteil - viel Verkehr kann voellig normal sein.\n\nCERNIS greift hier nicht ein und blockiert nichts. Die Ansicht ist rein passiv und zeigt nur, was ohnehin laeuft: die ausgehenden Verbindungen dieses CERNIS-Hosts, so wie sie host-lokal sichtbar sind.\n\nEine ehrliche Grenze gehoert dazu: Dies ist eine Momentsicht der ausgehenden Verbindungen dieses Hosts. Sie urteilt nicht darueber, ob ein Kontakt gut oder schlecht ist - dieses Einordnen bleibt bei Ihnen. Die fruehere Idee, das Umgehen des Heim-DNS gleich hier mit anzuzeigen, wurde bewusst in einen eigenen Bereich ausgelagert: den DNS-Waechter. Dort finden Sie die Geraete, die am erwarteten DNS vorbei aufloesen."
+    },
+    "en": {
+      "titel": "Outbound contacts",
+      "kurz": "A passive reading view of where your network speaks to the outside - which devices and apps open connections to the internet. CERNIS does not intervene and blocks nothing; it only shows what is already happening.",
+      "lang": "Outbound contacts bundle your network's ongoing connections to the outside into a single picture: where is my network phoning to. At a glance you see which devices and apps are currently speaking outward and to which destinations.\n\nThe list can be grouped - by destination country, by operator (the organisation behind the destination, the ASN org) or by device or app. Sort by volume and the biggest talkers stand out along the way: devices that speak outward a lot, such as chatty IoT devices. This is pure observation, not a verdict - a lot of traffic can be entirely normal.\n\nCERNIS does not intervene here and blocks nothing. The view is purely passive and shows only what is already happening: the outbound connections of this CERNIS host, as they are visible host-locally.\n\nAn honest limit belongs here: this is a snapshot of this host's outbound connections. It does not judge whether a contact is good or bad - that contextualising stays with you. The earlier idea of showing devices bypassing the home DNS right here was deliberately moved into its own area: the DNS guard. There you will find the devices that resolve past the expected DNS."
+    }
+  },
+  "help.dns_watch.uebersicht": {
+    "status": "final",
+    "kategorie": "Beobachten",
+    "de": {
+      "titel": "DNS-Waechter",
+      "kurz": "Zeigt Geraete, die nicht den erwarteten Heim-DNS verwenden. Wer am Heim-DNS vorbei aufloest, haengt zum Beispiel einen Pi-hole-Filter ab. CERNIS greift nicht ein - der Bereich beobachtet nur und ueberlaesst Ihnen das Einordnen.",
+      "lang": "Der DNS-Waechter zeigt Geraete, die nicht den erwarteten Heim-DNS verwenden. Warum das zaehlt: Wer am Heim-DNS vorbei aufloest, haengt zum Beispiel einen Pi-hole-Filter ab - die Namensaufloesung laeuft dann an Ihren Vorgaben vorbei.\n\nZwei Erkennungsarten werden ehrlich unterschieden. Die direkte Nutzung fremder DNS-Server - also DNS-Anfragen ueber Port 53 an einen anderen als den erwarteten Server - wird sicher erkannt. DoH dagegen, also DNS ueber HTTPS, verschluesselt zu bekannten DoH-Anbietern, wird nur heuristisch vermutet und entsprechend als moeglich gekennzeichnet, nicht als gesichert.\n\nDrei Kennzahlen stehen oben: offene Umgeher, moegliche DoH und erwartungsgemaess. Der erwartete DNS ist eine editierbare Liste; voreingestellt ist Ihr Gateway, also der Router. Die Fusszeile zeigt den erwarteten DNS an und verweist auf die zugehoerige Einstellung, falls Sie die Liste anpassen moechten.\n\nStatt einzugreifen wird quittiert: Der Knopf Als bekannt markieren ordnet eine konkrete Umgehung als gewollt ein. Das wird nachvollziehbar protokolliert und laesst sich jederzeit zuruecknehmen. Bewusst ist dies nicht an den Vertrauensstatus des Geraets gekoppelt: Ein ansonsten vertrautes Geraet, das neu anfaengt zu umgehen, erscheint trotzdem als offener Befund - so lange, bis genau diese Umgehung markiert ist.\n\nDie Farben sagen das in Ruhe: Offene Umgeher sind orange hervorgehoben - hier lohnt ein Blick. Als bekannt markierte bleiben sichtbar, aber gedaempft und gruen - kenne ich, ist gewollt. Moegliche DoH bleibt neutral, weil sie nur heuristisch vermutet ist.\n\nUmgeht niemand den DNS, bleibt der Bereich ehrlich leer. Der DNS-Waechter ist rein passiv und greift nie in den Verkehr ein; eine aktive Benachrichtigung ist bewusst noch nicht enthalten."
+    },
+    "en": {
+      "titel": "DNS guard",
+      "kurz": "Shows devices that do not use the expected home DNS. Resolving past the home DNS unhooks a Pi-hole filter, for example. CERNIS does not intervene - this area only observes and leaves the contextualising to you.",
+      "lang": "The DNS guard shows devices that do not use the expected home DNS. Why this matters: resolving past the home DNS unhooks a Pi-hole filter, for example - name resolution then runs past your settings.\n\nTwo kinds of detection are distinguished honestly. The direct use of foreign DNS servers - DNS queries over port 53 to a server other than the expected one - is detected reliably. DoH on the other hand, DNS over HTTPS, encrypted to known DoH providers, is only inferred heuristically and is marked as possible accordingly, not as confirmed.\n\nThree figures sit at the top: open bypassers, possible DoH and as expected. The expected DNS is an editable list; it defaults to your gateway, that is the router. The footer shows the expected DNS and points to the matching setting, should you wish to adjust the list.\n\nRather than intervening, the guard lets you acknowledge: the Mark as known button records a specific bypass as intended. This is logged in a traceable way and can be undone at any time. Deliberately, this is not tied to the device's trust status: an otherwise trusted device that newly starts bypassing still appears as an open finding - until that specific bypass is marked.\n\nThe colours say this calmly: open bypassers are highlighted in orange - worth a look here. Those marked as known stay visible but muted and green - known to me, intended. Possible DoH stays neutral, because it is only inferred heuristically.\n\nIf nobody bypasses the DNS, the area stays honestly empty. The DNS guard is purely passive and never intervenes in the traffic; an active notification is deliberately not yet included."
+    }
+  },
   "help.diagnostics.tooling": {
     "status": "final",
     "kategorie": "Diagnose",
@@ -488,7 +497,6 @@
       "lang": "Some CERNIS PRO features rely on low-level tools that your operating system provides. Whether these are present can differ from system to system.\n\nThis function checks which tools are available. If one is missing, CERNIS PRO says so clearly and names - where useful - how you could install it. This way you know why a certain feature is currently not working or only working in a limited way, instead of being left in the dark."
     }
   },
-
   "help.rechte.root": {
     "status": "final",
     "kategorie": "Grundlagen",
@@ -503,7 +511,6 @@
       "lang": "Certain features reach so deep into the system that the operating system requires elevated privileges for them - such as reading network packets, precise route tracing, or searching for rogue DHCP servers.\n\nCERNIS PRO handles this honestly: if the privileges are missing, this is reported clearly, often with a hint on how to start the feature with the necessary privileges if needed. The program never quietly grants itself elevated privileges.\n\nImportant: even without elevated privileges, CERNIS PRO remains fully usable. The affected features are then either a little less detailed or clearly marked as unavailable - there is never a dead end without explanation."
     }
   },
-
   "help.report.security": {
     "status": "final",
     "kategorie": "Berichte",
@@ -518,7 +525,6 @@
       "lang": "The security report condenses everything CERNIS PRO knows about your network into a single, honest picture: a network health score from 0 to 100 and the findings that feed it.\n\nThe score derives from the burden carried by affected devices: Score = 100 x (1 - total burden / number of devices). The more devices have critical or notable findings, and the heavier those weigh, the lower the score. A high value (good) means a calm network, a middling one (moderate) some isolated anomalies, a low one (critical) a need to act. On request, the contributions list shows per device who contributes how much burden - the score is never merely asserted, it is derived.\n\nThe findings sit in four sections: hosts with notable ports, known vulnerabilities (CVE), network-wide anomalies (such as IP conflicts or DNS bypass) and - separately - already acknowledged findings. The latter explicitly do NOT count towards the score: what you have marked as settled stays visible but no longer weighs on the rating.\n\nOne principle carries the whole report: it describes and contextualises rather than judging. It states what is and how heavily it weighs - the decision on what to do stays with you. The rogue DHCP check appears only as a status note; it needs an active check with root privileges and is not started from within the report. The report is a pure reading view and changes nothing on the network; the print button puts it on paper."
     }
   },
-
   "help.geraete.verwaltung": {
     "status": "final",
     "kategorie": "Geräte",
@@ -533,7 +539,6 @@
       "lang": "Device management is the central place for your device inventory. It separates two states: active and archived devices.\n\nActive devices are the normal inventory - they appear in lists and ratings (for example in the network health score). Archived devices are set aside: they are kept in full, but excluded from ratings and lists. Important: archiving deletes nothing. It is reversible at any time - with restore you bring a device back into the active inventory.\n\nYou can also add devices by hand by entering a MAC address (together with an optional name, category, notes, and tags). This is useful for devices a scan has not (yet) picked up. If a later scan finds the same MAC, CERNIS fills in the automatically determined fields - your hand-set notes are not overwritten in the process.\n\nThis keeps the inventory tidy without ever losing anything: what you no longer want to see moves to the archive and is back with a single click whenever you need it."
     }
   },
-
   "help.geraete.nachfrage": {
     "status": "final",
     "kategorie": "Geräte",
