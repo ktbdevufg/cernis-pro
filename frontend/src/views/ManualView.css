@@ -264,8 +264,8 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--color-text-tert);
-  border-bottom: 1px solid var(--color-border);
+  color: var(--color-accent-strong);
+  border-bottom: 1px solid var(--color-accent-border);
 }
 
 /* Ein Handbuch-Abschnitt (ein help_content-Eintrag). */
@@ -281,7 +281,7 @@
   /* Skaliert mit der Schriftgrößen-Stufe — nur der Handbuch-Text, nicht die App. */
   font-size: calc(18px * var(--manual-fontscale));
   font-weight: 600;
-  color: var(--color-text);
+  color: var(--color-accent-strong);
 }
 
 /* Vorläufig-Hinweis: dezente Zeile, ehrlich kenntlich, kein lauter Alarm. */
