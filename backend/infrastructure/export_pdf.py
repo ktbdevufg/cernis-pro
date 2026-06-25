@@ -135,6 +135,45 @@ class SecurityPdfModelLike(Protocol):
     def acknowledged_rows(self) -> tuple[tuple[str, ...], ...]: ...
 
 
+class ManualPdfSectionLike(Protocol):
+    """Struktureller Vertrag EINES Handbuch-Abschnitts (duck-typing, KEIN Import).
+
+    Read-only Properties (das echte ``ManualPdfSection`` ist ein frozen dataclass -- siehe
+    Begruendung bei ``SecurityPdfModelLike``). Erfasst genau die drei Felder, die der Adapter
+    rendert: ``category_label`` (Kategorie-Ueberschrift), ``heading`` (Abschnitts-Titel) und
+    ``paragraphs`` (die fertigen Fliesstext-Absaetze).
+    """
+
+    @property
+    def category_label(self) -> str: ...
+    @property
+    def heading(self) -> str: ...
+    @property
+    def paragraphs(self) -> tuple[str, ...]: ...
+
+
+class ManualPdfModelLike(Protocol):
+    """Struktureller Vertrag des Handbuch-Modells (duck-typing, KEIN application-Import).
+
+    Wie ``SecurityPdfModelLike``: ``infrastructure`` darf ``application`` NICHT importieren
+    (import-linter), das reiche ``ManualPdfModel`` lebt aber in ``application/reporting``.
+    Darum nimmt der Adapter es STRUKTURELL ueber dieses ``Protocol`` entgegen. Read-only
+    Properties decken die frozen-Felder ab; ``sections`` ist ein Tupel von
+    ``ManualPdfSectionLike`` (zweites kleines Protocol oben).
+    """
+
+    @property
+    def title(self) -> str: ...
+    @property
+    def generated_at_text(self) -> str: ...
+    @property
+    def footer_left(self) -> str: ...
+    @property
+    def intro(self) -> str: ...
+    @property
+    def sections(self) -> tuple[ManualPdfSectionLike, ...]: ...
+
+
 class ReportlabRenderer:
     """Rendert ein ``PdfReportModel`` zu PDF-Bytes (``ReportRenderer``) -- schlicht, robust.
 
@@ -503,6 +542,77 @@ class ReportlabRenderer:
             ]
         )
 
+    # ── Benutzerhandbuch: eigener Render-Pfad ───────────────────────────────
+    #
+    # NEUE Methode neben render_security_report_pdf -- beide bleiben UNANGETASTET (der
+    # Sicherheitsbericht-Pfad wird nicht angefasst). Dieser Pfad rendert das schlanke
+    # ManualPdfModel (Titel + optionale Einleitung + Kategorie-gruppierte Abschnitte) mit
+    # durchgaengiger Kopf-/Fusszeile (Kopf-Titel parameterisiert ueber model.title).
+
+    def render_manual_pdf(self, model: ManualPdfModelLike) -> bytes:
+        """Rendert das ``ManualPdfModel`` zum Benutzerhandbuch-PDF (A4 hoch).
+
+        Layout: durchgaengige Kopf-/Fusszeile je Seite (onFirstPage UND onLaterPages ueber
+        EINEN gemeinsamen Callback, Kopf-Titel = ``model.title``), dann die Story -- Titel,
+        Erzeugungsdatum, optionale Einleitung, danach die Abschnitte. Eine Kategorie-
+        Ueberschrift erscheint nur EINMAL, solange sie sich nicht aendert (Muster
+        ``_append_table_section``-Rubrik). Lange Texte brechen automatisch um (Paragraph);
+        aktive XML-Zeichen werden via ``_esc`` maskiert. ``KeepTogether`` haelt eine
+        Abschnitts-Ueberschrift mit ihrem ersten Absatz zusammen.
+
+        Robust: leere ``sections`` -> nur Kopf/Titel (ehrlicher Leerfall, kein Absturz).
+        Liefert valide PDF-Bytes (Magic-Header ``%PDF``).
+        """
+        buffer = io.BytesIO()
+        document = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,  # Hochformat (Auftrag)
+            leftMargin=18 * mm,
+            rightMargin=18 * mm,
+            topMargin=32 * mm,  # Platz fuer die durchgaengige Kopfzeile
+            bottomMargin=20 * mm,  # Platz fuer die Fusszeile
+            title=model.title,
+        )
+
+        story: list[Flowable] = []
+        styles = self._security_styles()
+
+        # ── Titel + Erzeugungsdatum + optionale Einleitung ──
+        story.append(Paragraph(_esc(model.title), styles["h_title"]))
+        story.append(Paragraph(_esc(model.generated_at_text), styles["sub"]))
+        story.append(Spacer(1, 4 * mm))
+        if model.intro:
+            story.append(Paragraph(_esc(model.intro), styles["body"]))
+            story.append(Spacer(1, 6 * mm))
+
+        # ── Abschnitte, nach Kategorie gruppiert ──
+        # Die Kategorie-Ueberschrift wird nur ausgegeben, wenn sie sich gegenueber dem vorigen
+        # Abschnitt aendert (Muster: Rubrik-Ueberschrift in _append_table_section).
+        prev_category: str | None = None
+        for section in model.sections:
+            if section.category_label != prev_category:
+                story.append(Paragraph(_esc(section.category_label), styles["h_rubric"]))
+                story.append(HRFlowable(width="100%", thickness=1.2, color=_ACCENT, spaceAfter=4))
+                prev_category = section.category_label
+
+            # Ueberschrift + erster Absatz zusammenhalten, damit eine heading nicht allein
+            # unten auf einer Seite landet (Muster KeepTogether im Sicherheitsbericht).
+            head_block: list[Flowable] = [Paragraph(_esc(section.heading), styles["h_section"])]
+            if section.paragraphs:
+                head_block.append(Paragraph(_esc(section.paragraphs[0]), styles["body"]))
+            story.append(KeepTogether(head_block))
+            # Die restlichen Absaetze einzeln (jeder umbrechbar).
+            for para in section.paragraphs[1:]:
+                story.append(Paragraph(_esc(para), styles["body"]))
+            story.append(Spacer(1, 4 * mm))
+
+        document.build(
+            story,
+            onFirstPage=lambda canvas, doc: _draw_manual_header_footer(canvas, doc, model),
+            onLaterPages=lambda canvas, doc: _draw_manual_header_footer(canvas, doc, model),
+        )
+        return buffer.getvalue()
+
 
 # ── Freistehende Render-Helfer des Sicherheitsbericht-Pfads ──────────────────
 #
@@ -620,6 +730,58 @@ def _draw_header_footer(canvas: object, doc: object, model: SecurityPdfModelLike
     c.setFillColor(_TEXT)  # type: ignore[attr-defined]
     c.setFont("Helvetica-Bold", 13)  # type: ignore[attr-defined]
     c.drawString(text_x, header_baseline, "Netzwerk-Sicherheitsbericht")  # type: ignore[attr-defined]
+    # Trennlinie unter der Kopfzeile in accent-Farbe.
+    c.setStrokeColor(_ACCENT)  # type: ignore[attr-defined]
+    c.setLineWidth(1.0)  # type: ignore[attr-defined]
+    line_y = page_height - 24 * mm
+    c.line(margin, line_y, page_width - margin, line_y)  # type: ignore[attr-defined]
+
+    # ── Fusszeile ──
+    footer_y = 12 * mm
+    c.setStrokeColor(_LINE)  # type: ignore[attr-defined]
+    c.setLineWidth(0.5)  # type: ignore[attr-defined]
+    c.line(margin, footer_y + 4 * mm, page_width - margin, footer_y + 4 * mm)  # type: ignore[attr-defined]
+    c.setFillColor(_CLEAN)  # type: ignore[attr-defined]
+    c.setFont("Helvetica", 8)  # type: ignore[attr-defined]
+    c.drawString(margin, footer_y, model.footer_left)  # type: ignore[attr-defined]
+    page_no = getattr(doc, "page", 0)
+    c.drawRightString(page_width - margin, footer_y, f"Seite {page_no}")  # type: ignore[attr-defined]
+
+
+def _draw_manual_header_footer(canvas: object, doc: object, model: ManualPdfModelLike) -> None:
+    """Kopf-/Fusszeile des Handbuchs je Seite -- wie ``_draw_header_footer``, Titel parametrisch.
+
+    EIGENE Funktion (keine Aenderung an ``_draw_header_footer``, das auf den Sicherheitsbericht
+    mit festem Kopf-Titel zugeschnitten ist und unberuehrt bleibt). Identische Logik, aber der
+    Kopf-Titel ist ``model.title`` statt einer festen Zeichenkette; ``_LOGO_PATH`` wird
+    unveraendert mitgenutzt; Fuss links ``model.footer_left``, rechts "Seite X".
+
+    ``canvas``/``doc`` sind die reportlab-Objekte des onPage-Callbacks (lose als ``object``
+    typisiert -- die genutzten Methoden existieren zur Laufzeit).
+    """
+    c = canvas  # reportlab.pdfgen.canvas.Canvas
+    page_width, page_height = A4
+    margin = 18 * mm
+
+    # ── Kopfzeile ──
+    header_baseline = page_height - 20 * mm
+    text_x = margin
+    if os.path.exists(_LOGO_PATH):
+        logo_size = 12 * mm
+        c.drawImage(  # type: ignore[attr-defined]
+            _LOGO_PATH,
+            margin,
+            page_height - 22 * mm,
+            width=logo_size,
+            height=logo_size,
+            preserveAspectRatio=True,
+            mask="auto",
+        )
+        text_x = margin + logo_size + 4 * mm
+    # else: KEIN Ersatz-Logo -- nur der Titel-Text (Repo-Asset im frozen-Build evtl. nicht da).
+    c.setFillColor(_TEXT)  # type: ignore[attr-defined]
+    c.setFont("Helvetica-Bold", 13)  # type: ignore[attr-defined]
+    c.drawString(text_x, header_baseline, model.title)  # type: ignore[attr-defined]
     # Trennlinie unter der Kopfzeile in accent-Farbe.
     c.setStrokeColor(_ACCENT)  # type: ignore[attr-defined]
     c.setLineWidth(1.0)  # type: ignore[attr-defined]

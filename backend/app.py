@@ -10,6 +10,8 @@ fastapi/starlette).
 """
 
 import asyncio
+import json
+import os
 import sys
 from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager, suppress
@@ -167,6 +169,7 @@ from api.report import (
     ScoreContributionOut,
     ScoreOut,
     SecurityReportOut,
+    provide_manual_pdf,
     provide_security_report,
     provide_security_report_pdf,
 )
@@ -334,6 +337,8 @@ from application.outbound import BuildOutboundContacts, RawConnection
 from application.process import CheckProcessPermission, ListProcesses
 from application.reporting import (
     BuildSecurityReport,
+    ManualPdfModel,
+    ManualPdfSection,
     SecurityPdfModel,
     SecurityReport,
 )
@@ -1524,6 +1529,78 @@ def _project_security_pdf_model(
         cve_rows=cve_rows,
         net_rows=net_rows,
         acknowledged_rows=acknowledged_rows,
+    )
+
+
+# ── Benutzerhandbuch: PDF-Modell-Projektion + JSON-Lade-Helfer (reine Modul-Ebene) ───
+# Muster _project_security_pdf_model: REINE, deterministische Projektion (KEINE Uhr, KEINE I/O)
+# vom bereits geladenen help_content-dict auf das render-fertige ManualPdfModel. Der Runner
+# _manual_pdf liest die Uhr GENAU EINMAL und uebergibt fertige Kopf-/Fusstexte.
+
+# Pfad zur Hilfe-Quelle, relativ zu DIESEM Modul aufgeloest (app.py liegt in backend/, NICHT in
+# backend/src): von backend/ ein Verzeichnis hoch zum Repo-Root, dann frontend/src/lib/.
+# Wie _LOGO_PATH ueber os.path.normpath verifiziert. Existiert die Datei nicht (frozen-Build),
+# liefert der Lade-Helfer ein leeres dict -> das PDF hat dann nur Kopf/Titel (ehrlicher Leerfall).
+_HELP_CONTENT_PATH = os.path.normpath(
+    os.path.join(os.path.dirname(__file__), "..", "frontend", "src", "lib", "help_content.json")
+)
+
+
+def _load_help_content() -> dict[str, object]:
+    """Laedt die Hilfe-Inhalte aus ``help_content.json`` -- fehlt die Datei, leeres dict.
+
+    Composition-Root-Bootstrap-Stil (synchroner Datei-Lesezugriff). Existiert die Datei nicht
+    (z. B. im frozen-Build), wird ein leeres dict geliefert (das PDF traegt dann nur Kopf/Titel
+    -- ehrlicher Leerfall, kein Absturz). Liest mit encoding utf-8.
+    """
+    if not os.path.exists(_HELP_CONTENT_PATH):
+        return {}
+    with open(_HELP_CONTENT_PATH, encoding="utf-8") as fh:
+        data = json.load(fh)
+    return data if isinstance(data, dict) else {}
+
+
+def _project_manual_pdf_model(
+    help_data: dict[str, object],
+    lang: str,
+    generated_at_text: str,
+    footer_left: str,
+    title: str,
+) -> ManualPdfModel:
+    """Projiziert das geladene help_content-dict auf das render-fertige ``ManualPdfModel``.
+
+    REIN/DETERMINISTISCH: KEINE Uhr, KEINE I/O (das dict ist bereits geladen). Iteriert die
+    Eintraege in EINFUEGE-Reihenfolge (Python-dict ist insertion-ordered = JSON-Reihenfolge),
+    ueberspringt den Schluessel ``_meta`` und nimmt sonst ALLE Eintraege (auch den einen mit
+    status "vorlaeufig"). Pro Eintrag: Kategorie + Sprachblock[lang] (titel + an Leerzeilen
+    getrennte, gestrippte, nicht-leere Stuecke von "lang"). ``lang`` wird normalisiert (alles
+    ausser "en" -> "de").
+    """
+    normalized = "en" if lang == "en" else "de"
+
+    sections: list[ManualPdfSection] = []
+    for key, entry in help_data.items():
+        if key == "_meta" or not isinstance(entry, dict):
+            continue
+        kategorie = str(entry.get("kategorie", ""))
+        sprachblock = entry.get(normalized)
+        if not isinstance(sprachblock, dict):
+            continue
+        heading = str(sprachblock.get("titel", ""))
+        lang_text = str(sprachblock.get("lang", ""))
+        paragraphs = tuple(
+            stripped for stueck in lang_text.split("\n\n") if (stripped := stueck.strip())
+        )
+        sections.append(
+            ManualPdfSection(category_label=kategorie, heading=heading, paragraphs=paragraphs)
+        )
+
+    return ManualPdfModel(
+        title=title,
+        generated_at_text=generated_at_text,
+        footer_left=footer_left,
+        intro="",
+        sections=tuple(sections),
     )
 
 
@@ -3511,9 +3588,48 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             filename=f"CERNISPRO_Netzwerk-Sicherheitsbericht_{datumsteil}.pdf",
         )
 
+    # ── Benutzerhandbuch: PDF-Download-Runner (Muster _security_report_pdf, Regel 4/5) ──
+    # Composition-Root-Runner fuer GET /api/report/manual/pdf: laedt die Hilfe-Inhalte, liest
+    # die Wanduhr GENAU HIER (einziger Ort mit Uhr -- _project_manual_pdf_model ist rein),
+    # projiziert auf das render-fertige ManualPdfModel und rendert es ueber den zustandslosen
+    # ReportlabRenderer (derselbe Import wie der Sicherheitsbericht). Rueckgabe ist ein kleines
+    # lokales Ergebnis-Objekt (content/media_type/filename) -- der api-Ring liest nur diese drei.
+    @dataclass(frozen=True)
+    class _ManualPdfResult:
+        content: bytes
+        media_type: str
+        filename: str
+
+    async def _manual_pdf(lang: str) -> _ManualPdfResult:
+        # lang normalisieren: "en" bleibt, jeder andere Wert faellt auf "de" (Auftrag).
+        normalized = "en" if lang == "en" else "de"
+        help_data = _load_help_content()
+        # Wanduhr GENAU HIER lesen (einziger Ort) -- Projektion und Modell bleiben rein.
+        import time
+
+        now = time.time()
+        generated_at_text = "Erstellt am " + datetime.fromtimestamp(now).strftime("%d.%m.%Y %H:%M")
+        if normalized == "en":
+            title = "CERNIS PRO 2.0 - User Manual"
+            footer_left = "CERNIS PRO 2.0 - User Manual"
+        else:
+            title = "CERNIS PRO 2.0 - Benutzerhandbuch"
+            footer_left = "CERNIS PRO 2.0 - Benutzerhandbuch"
+        model = _project_manual_pdf_model(
+            help_data, normalized, generated_at_text, footer_left, title
+        )
+        pdf_bytes = ReportlabRenderer().render_manual_pdf(model)
+        datumsteil = datetime.fromtimestamp(now).strftime("%Y-%m-%d")
+        if normalized == "en":
+            filename = f"CERNISPRO_User-Manual_{datumsteil}.pdf"
+        else:
+            filename = f"CERNISPRO_Benutzerhandbuch_{datumsteil}.pdf"
+        return _ManualPdfResult(content=pdf_bytes, media_type="application/pdf", filename=filename)
+
     app.include_router(report_router)
     app.dependency_overrides[provide_security_report] = lambda: _security_report
     app.dependency_overrides[provide_security_report_pdf] = lambda: _security_report_pdf
+    app.dependency_overrides[provide_manual_pdf] = lambda: _manual_pdf
 
     # ── Route zum Ziel (ADR 0036): traceroute-Hops + Geo/ASN, zwei getrennte Naehte ──
     # Regel 5: die Quer-Domaenen-Naht (diagnostics-Hops + resolver-Geo/RDAP) faellt

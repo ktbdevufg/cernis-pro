@@ -195,3 +195,47 @@ async def get_security_report_pdf(
             "Content-Disposition": f'attachment; filename="{result.filename}"'  # type: ignore[attr-defined]
         },
     )
+
+
+# ── Handbuch-Download: injizierter Composition-Root-Runner ──────────────────────
+# Analog ``SecurityReportPdfRunner``: der Runner liefert ein Objekt mit den drei Attributen
+# ``content`` (bytes), ``media_type`` (str), ``filename`` (str). Der api-Ring kennt diesen
+# Ergebnis-Typ NICHT -- der Router liest nur die drei Attribute (``type: ignore[attr-defined]``).
+# Provider-Marker: in app.py per dependency_overrides verdrahtet; ohne Verdrahtung bewusst ein
+# lauter Fehler (kein stiller Fallback, S3).
+
+
+class ManualPdfRunner(Protocol):
+    """Schmaler Vertrag des injizierten Handbuch-PDF-Runners (liefert das Download-Ergebnis)."""
+
+    async def __call__(self, lang: str) -> object:
+        """Baut das Benutzerhandbuch als PDF und liefert content/media_type/filename."""
+        ...
+
+
+def provide_manual_pdf() -> ManualPdfRunner:
+    raise NotImplementedError("ManualPdfRunner wird in app.py verdrahtet")
+
+
+@router.get("/manual/pdf")
+async def get_manual_pdf(
+    runner: Annotated[ManualPdfRunner, Depends(provide_manual_pdf)],
+    lang: str = "de",
+) -> Response:
+    """Liefert das Benutzerhandbuch als PDF-Download (Bytes, ``attachment``).
+
+    ``lang`` ist ein einfacher Query-Parameter ("de"/"en"); jeder andere Wert faellt im
+    Composition Root auf "de" zurueck (dort behandelt, nicht im Router). Der injizierte
+    Composition-Root-Runner laedt die Hilfe-Inhalte, projiziert sie auf das render-fertige
+    Handbuch-PDF-Modell und rendert das PDF; er liefert ein Objekt mit ``content`` (PDF-Bytes),
+    ``media_type`` (``application/pdf``) und ``filename``. Der Router verpackt es in eine
+    ``Response`` mit ``Content-Disposition: attachment; filename="..."``.
+    """
+    result = await runner(lang)
+    return Response(
+        content=result.content,  # type: ignore[attr-defined]
+        media_type=result.media_type,  # type: ignore[attr-defined]
+        headers={
+            "Content-Disposition": f'attachment; filename="{result.filename}"'  # type: ignore[attr-defined]
+        },
+    )
