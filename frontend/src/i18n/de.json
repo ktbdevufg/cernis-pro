@@ -280,7 +280,7 @@
       },
       "outbound": {
         "title": "Außenkontakte",
-        "subtitle": "Mit wem dieser Rechner nach außen spricht — gebündelt nach Betreiber, Land oder Gerät.",
+        "subtitle": "Mit wem dieser Rechner nach außen spricht — gebündelt nach Betreiber, Land oder Programm.",
         "locked": ""
       },
       "dnswatch": {
@@ -476,16 +476,21 @@
     },
     "outbound": {
       "hostScopeLocal": "Kontakte dieses Rechners — passiv beobachtet, kein netzweiter Blick.",
+      "sichtbareKontakte_one": "1 Außenkontakt",
+      "sichtbareKontakte_other": "{{count}} Außenkontakte",
+      "sichtbareKontakte_zero": "Keine Außenkontakte",
+      "aufzeichnungLaeuft_one": "1 Aufzeichnung läuft",
+      "aufzeichnungLaeuft_other": "{{count}} Aufzeichnungen laufen",
       "groupByLabel": "Gruppieren nach",
       "groupBy": {
         "operator": "Betreiber",
         "country": "Land",
-        "device": "Gerät"
+        "programm": "Programm"
       },
       "showLocalToggle": "Lokale & Infrastruktur zeigen",
       "emptyGroupOperator": "Ohne Angabe",
       "emptyGroupCountry": "Ohne Angabe",
-      "emptyGroupDevice": "Nicht zugeordnet",
+      "emptyGroupProgramm": "Ohne Programm",
       "empty": "Keine Außenkontakte. Sobald dieser Rechner nach außen spricht, erscheinen sie hier.",
       "loadError": "Außenkontakte konnten nicht geladen werden.",
       "connectionsSuffix": "×{{count}}"
@@ -820,6 +825,79 @@
           "laengster": "Längster Ausfall"
         }
       }
+    },
+    "outboundlog": {
+      "leiste": {
+        "titelRuhe": "Außenkontakte aufzeichnen — keine Aufzeichnung läuft",
+        "titelAktiv": "Aufzeichnung läuft — {{label}}",
+        "knopfVerwaltung": "Aufzeichnungen"
+      },
+      "neueAufzeichnung": "Neue Aufzeichnung",
+      "bezeichnungLabel": "Bezeichnung",
+      "bezeichnungPlaceholder": "z. B. Wochenend-Beobachtung",
+      "zweckLabel": "Zweck (optional)",
+      "zweckPlaceholder": "Wozu wird aufgezeichnet?",
+      "modusLabel": "Modus",
+      "modus": {
+        "detail": "Detailverlauf",
+        "aggregate": "Sammlung"
+      },
+      "modusHinweis": {
+        "detail": "Zeichnet jeden Zeitpunkt einzeln auf — sehr genau, aber datenintensiv. Daher auf 24 Stunden begrenzt. Für längere Beobachtung die Sammel-Aufzeichnung wählen.",
+        "aggregate": "Fasst je Gegenstelle zusammen (erstmals/zuletzt/wie oft) — kompakt, zeitlich unbegrenzt."
+      },
+      "tiefeLabel": "Tiefe",
+      "tiefe": {
+        "anonymous": "Anonym",
+        "appResolved": "Mit Programm"
+      },
+      "tiefeHinweis": {
+        "anonymous": "Zeigt die Gegenstellen ohne Programm-Zuordnung.",
+        "appResolved": "Zeigt zusätzlich, welches Programm telefoniert — benötigt erweiterte Rechte (Administrator/root). Ohne diese bleibt die Programm-Spalte teils leer."
+      },
+      "intervallLabel": "Intervall",
+      "intervall": {
+        "30s": "alle 30 Sekunden",
+        "60s": "alle 60 Sekunden",
+        "300s": "alle 5 Minuten"
+      },
+      "dauerLabel": "Dauer",
+      "dauer": {
+        "1h": "1 Stunde",
+        "6h": "6 Stunden",
+        "12h": "12 Stunden",
+        "24h": "24 Stunden",
+        "custom": "benutzerdefiniert"
+      },
+      "dauerCustomLabel": "Stunden",
+      "dauerCustomHinweis": "Bitte 1 bis 24 Stunden angeben.",
+      "dauerKarte": "Dauer: {{stunden}} h",
+      "erstelltAm": "Erstellt am {{datum}}",
+      "anlegen": "Anlegen",
+      "anlegenFehler": "Aufzeichnung konnte nicht angelegt werden.",
+      "listeTitel": "Aufzeichnungen",
+      "listeLeer": "Noch keine Aufzeichnung angelegt.",
+      "ladeFehler": "Aufzeichnungen konnten nicht geladen werden.",
+      "aktionFehler": "Aktion fehlgeschlagen.",
+      "state": {
+        "created": "Angelegt",
+        "active": "Läuft",
+        "paused": "Pausiert",
+        "finished": "Beendet"
+      },
+      "aktion": {
+        "start": "Start",
+        "pause": "Pause",
+        "resume": "Fortsetzen",
+        "stop": "Stopp",
+        "loeschen": "Löschen",
+        "loeschenFrage": "Wirklich löschen?",
+        "loeschenBestaetigen": "Löschen",
+        "loeschenAbbrechen": "Abbrechen"
+      },
+      "konfliktHinweis": "Es läuft bereits eine Aufzeichnung. Es kann immer nur eine gleichzeitig aufzeichnen — bitte die laufende zuerst beenden oder pausieren.",
+      "detailHinweis": "Detail-Aufzeichnung, endet automatisch nach 24 h.",
+      "befundFolgt": "Befund zu „{{label}}“ folgt."
     },
     "lookup": {
       "title": "Gegenstelle nachschlagen",

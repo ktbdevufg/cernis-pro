@@ -1,7 +1,11 @@
 // Außenkontakte (CERNIS PRO 2.0)
 // Lese-Ansicht der Außenkontakte DIESES Rechners: mit wem dieser Host nach außen
-// spricht, gebündelt nach Betreiber / Land / Gerät. Reines Frontend gegen den
+// spricht, gebündelt nach Betreiber / Land / Programm. Reines Frontend gegen den
 // fertigen Endpunkt GET /api/outbound/contacts (api/outbound.js).
+//
+// Oben integriert: die Aufzeichnungs-Leiste (OutboundRecordingPanel) — eine
+// schlanke, immer sichtbare Leiste mit aufklappbarer Verwaltung (Anlegen +
+// Aufzeichnungs-Liste). KEINE eigene Beobachten-Kachel mehr.
 //
 // Designsprache wie die übrigen Beobachten-Komponenten (ObserveView/TrafficView):
 // dezent, flach, ruhig. Außenkontakte URTEILEN NICHT — KEINE Severity-Farben.
@@ -10,6 +14,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { fetchOutboundContacts } from "../api/outbound.js";
+import OutboundRecordingPanel from "./OutboundRecordingPanel.jsx";
 import "./OutboundView.css";
 
 // Gruppierungs-Achsen des Segmented Control. Reihenfolge ist die Anzeige-
@@ -19,7 +24,7 @@ import "./OutboundView.css";
 const ACHSEN = [
   { id: "operator", feld: "operator", leerLabel: "emptyGroupOperator" },
   { id: "country", feld: "country", leerLabel: "emptyGroupCountry" },
-  { id: "device", feld: "appName", leerLabel: "emptyGroupDevice" },
+  { id: "programm", feld: "appName", leerLabel: "emptyGroupProgramm" },
 ];
 
 // Private/loopback/link-local/mapped-Präfixe: reine String/Präfix-Prüfung, KEINE
@@ -151,6 +156,10 @@ export default function OutboundView() {
   const [achseId, setAchseId] = useState(ACHSEN[0].id);
   // Filter "Lokale & Infrastruktur zeigen" (DEFAULT AUS).
   const [zeigeLokale, setZeigeLokale] = useState(false);
+  // Anzahl host-weit gerade laufender Aufzeichnungen -- vom OutboundRecordingPanel
+  // per onAktivCount nach oben gemeldet (kein zweiter Voll-Poll hier). Treibt den
+  // Aufzeichnungs-Hinweis in der Banner-Zeile.
+  const [aktivAnzahl, setAktivAnzahl] = useState(0);
 
   // Beim Mount laden. t NIEMALS in dep-Array (react-i18next-Regel) — leeres
   // dep-Array, einmal beim Mount. Fehler tolerieren: leere Liste + ruhiger
@@ -200,10 +209,22 @@ export default function OutboundView() {
   return (
     <div className="outbound">
       {/* Ehrlicher host_scope-Banner: nur bei "local_host". Bei anderem/leerem
-          Wert weglassen (S3-ehrlich). */}
+          Wert weglassen (S3-ehrlich). Erweitert um zwei ehrliche dynamische Teile:
+          (a) Anzahl der aktuell SICHTBAREN Aussenkontakte (nach Lokale-Filter),
+          (b) ein ruhiger Aufzeichnungs-Hinweis, falls eine Aufzeichnung laeuft.
+          Eine ruhige Banner-Zeile: statischer Kern + " — " + Anzahl (+ ggf.
+          " — " + Aufzeichnungs-Hinweis). */}
       {hostScope === "local_host" && (
         <div className="outbound__scope" role="note">
           {t("beobachten.outbound.hostScopeLocal")}
+          {" — "}
+          {t("beobachten.outbound.sichtbareKontakte", { count: sichtbar.length })}
+          {aktivAnzahl > 0 && (
+            <>
+              {" — "}
+              {t("beobachten.outbound.aufzeichnungLaeuft", { count: aktivAnzahl })}
+            </>
+          )}
         </div>
       )}
 
@@ -218,6 +239,10 @@ export default function OutboundView() {
           </span>
         </div>
       )}
+
+      {/* Aufzeichnungs-Leiste (integriert): immer sichtbar, mit aufklappbarer
+          Verwaltung. Sitzt über der Steuerleiste der Live-Liste. */}
+      <OutboundRecordingPanel onAktivCount={setAktivAnzahl} />
 
       {/* Steuerleiste: Segmented Control (Gruppierung) + Filter-Schalter. */}
       <div className="outbound__controls">

@@ -139,14 +139,17 @@
   overflow-y: auto;
 }
 
-/* Eine Gruppe: Kopf (Label + Mengen-Zähler) über den Kontakten. */
+/* Eine Gruppe: Kopf (Label + Mengen-Zähler) über den Kontakten.
+   KEIN overflow:hidden — auf einem Vorfahren der scrollenden .outbound__groups
+   kappte das die letzte Kontaktzeile (gleiches Muster wie der ManualView-Sticky-
+   Bug). Die Ecken-Rundung wird stattdessen direkt am Kopf (oben) und an der
+   letzten Kontaktzeile (unten) gehalten, ohne Inhalt zu kappen. */
 .outbound-group {
   display: flex;
   flex-direction: column;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-bg);
-  overflow: hidden;
 }
 
 .outbound-group__header {
@@ -157,6 +160,9 @@
   padding: 9px 12px;
   background: var(--color-bar);
   border-bottom: 1px solid var(--color-border);
+  /* Obere Ecken folgen dem Gruppen-Rahmen (zuvor von overflow:hidden gekappt). */
+  border-top-left-radius: var(--radius-md);
+  border-top-right-radius: var(--radius-md);
 }
 
 .outbound-group__label {
@@ -193,6 +199,9 @@
 
 .outbound-contact:last-child {
   border-bottom: none;
+  /* Untere Ecken folgen dem Gruppen-Rahmen (zuvor von overflow:hidden gekappt). */
+  border-bottom-left-radius: var(--radius-md);
+  border-bottom-right-radius: var(--radius-md);
 }
 
 .outbound-contact__main {

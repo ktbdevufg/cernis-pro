@@ -280,7 +280,7 @@
       },
       "outbound": {
         "title": "Outbound contacts",
-        "subtitle": "Who this machine talks to on the outside — grouped by operator, country or device.",
+        "subtitle": "Who this machine talks to on the outside — grouped by operator, country or program.",
         "locked": ""
       },
       "dnswatch": {
@@ -476,16 +476,21 @@
     },
     "outbound": {
       "hostScopeLocal": "Contacts of this machine — passively observed, not a network-wide view.",
+      "sichtbareKontakte_one": "1 outbound contact",
+      "sichtbareKontakte_other": "{{count}} outbound contacts",
+      "sichtbareKontakte_zero": "No outbound contacts",
+      "aufzeichnungLaeuft_one": "1 recording running",
+      "aufzeichnungLaeuft_other": "{{count}} recordings running",
       "groupByLabel": "Group by",
       "groupBy": {
         "operator": "Operator",
         "country": "Country",
-        "device": "Device"
+        "programm": "Program"
       },
       "showLocalToggle": "Show local & infrastructure",
       "emptyGroupOperator": "Not specified",
       "emptyGroupCountry": "Not specified",
-      "emptyGroupDevice": "Unattributed",
+      "emptyGroupProgramm": "No program",
       "empty": "No outbound contacts. As soon as this machine talks to the outside, they show up here.",
       "loadError": "Outbound contacts could not be loaded.",
       "connectionsSuffix": "×{{count}}"
@@ -820,6 +825,79 @@
           "laengster": "Longest outage"
         }
       }
+    },
+    "outboundlog": {
+      "leiste": {
+        "titelRuhe": "Record outbound contacts — no recording running",
+        "titelAktiv": "Recording running — {{label}}",
+        "knopfVerwaltung": "Recordings"
+      },
+      "neueAufzeichnung": "New recording",
+      "bezeichnungLabel": "Name",
+      "bezeichnungPlaceholder": "e.g. weekend observation",
+      "zweckLabel": "Purpose (optional)",
+      "zweckPlaceholder": "What is this recording for?",
+      "modusLabel": "Mode",
+      "modus": {
+        "detail": "Detailed trace",
+        "aggregate": "Summary"
+      },
+      "modusHinweis": {
+        "detail": "Records every point in time individually — very precise, but data-heavy. Limited to 24 hours for this reason. For longer observation, choose the summary recording.",
+        "aggregate": "Summarises per remote endpoint (first seen / last seen / how often) — compact, no time limit."
+      },
+      "tiefeLabel": "Depth",
+      "tiefe": {
+        "anonymous": "Anonymous",
+        "appResolved": "With program"
+      },
+      "tiefeHinweis": {
+        "anonymous": "Shows the remote endpoints without program attribution.",
+        "appResolved": "Also shows which program is calling home — requires elevated rights (administrator/root). Without them the program column stays partly empty."
+      },
+      "intervallLabel": "Interval",
+      "intervall": {
+        "30s": "every 30 seconds",
+        "60s": "every 60 seconds",
+        "300s": "every 5 minutes"
+      },
+      "dauerLabel": "Duration",
+      "dauer": {
+        "1h": "1 hour",
+        "6h": "6 hours",
+        "12h": "12 hours",
+        "24h": "24 hours",
+        "custom": "custom"
+      },
+      "dauerCustomLabel": "Hours",
+      "dauerCustomHinweis": "Please enter 1 to 24 hours.",
+      "dauerKarte": "Duration: {{stunden}} h",
+      "erstelltAm": "Created {{datum}}",
+      "anlegen": "Create",
+      "anlegenFehler": "The recording could not be created.",
+      "listeTitel": "Recordings",
+      "listeLeer": "No recording created yet.",
+      "ladeFehler": "Recordings could not be loaded.",
+      "aktionFehler": "Action failed.",
+      "state": {
+        "created": "Created",
+        "active": "Running",
+        "paused": "Paused",
+        "finished": "Finished"
+      },
+      "aktion": {
+        "start": "Start",
+        "pause": "Pause",
+        "resume": "Resume",
+        "stop": "Stop",
+        "loeschen": "Delete",
+        "loeschenFrage": "Really delete?",
+        "loeschenBestaetigen": "Delete",
+        "loeschenAbbrechen": "Cancel"
+      },
+      "konfliktHinweis": "A recording is already running. Only one can record at a time — please stop or pause the running one first.",
+      "detailHinweis": "Detailed recording, ends automatically after 24 h.",
+      "befundFolgt": "Findings for “{{label}}” to follow."
     },
     "lookup": {
       "title": "Look up remote endpoint",
