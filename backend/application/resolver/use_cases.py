@@ -137,16 +137,27 @@ class ResolveEndpoint:
         """Baut ``RemoteEndpointFacts`` -- jedes Feld mit korrektem ``SourceTag``.
 
         Quellen-Zuordnung (Auftrag): ptr/forward_confirmed/dyndns -> DNS; org/netname/
-        net_range/abuse_contact/country_rdap_net/country_org_address/asn_org -> RDAP; asn
+        net_range/abuse_contact/country_rdap_net/country_org_address -> RDAP; asn_org ->
+        RDAP mit Vorrang, sonst GEODB-Fallback (F0, SourceTag ehrlich je Herkunft); asn
         (Nummer) + country_geodb -> GEODB; tls_cert -> TLS; service_hint -> DNS (lokale
         Ableitung, neutraler lokaler Tag, keine neue Quelle); banner -> leeres DNS-Fact
         (resolver befuellt es NICHT -- diagnostics-Zustaendigkeit).
         """
         tls_subject_cn = tls.subject_cn if tls is not None else None
-        # asn_org: Klartext-Org-Name aus RDAP (A1), bevorzugt das dedizierte asn_org-Feld,
-        # sonst der allgemeine Org-Name -- NICHT aus der Geo/ASN-DB (die liefert asn_org
-        # bewusst None).
-        asn_org = rdap.asn_org if rdap.asn_org is not None else rdap.org
+        # asn_org: Klartext-Org-Name -- RDAP hat VORRANG (bevorzugt das dedizierte
+        # asn_org-Feld, sonst der allgemeine Org-Name), bei RDAP-Leere greift als FALLBACK
+        # der ASN-Org-Name aus der Geo/ASN-DB-CSV (F0). Dasselbe Muster wie die
+        # country-Logik (country_rdap_net neben country_geodb): zwei Quellen, getrennt
+        # gefuehrt -- hier zusaetzlich mit Vorrang verschmolzen. Wert UND Quelle werden
+        # gemeinsam bestimmt, damit der SourceTag ehrlich bleibt: kommt der Name aus RDAP
+        # -> RDAP, kommt er als Fallback aus der GeoDB -> GEODB.
+        rdap_asn_org = rdap.asn_org if rdap.asn_org is not None else rdap.org
+        if rdap_asn_org is not None:
+            asn_org_value, asn_org_source = rdap_asn_org, SourceTag.RDAP
+        elif geo.asn_org is not None:
+            asn_org_value, asn_org_source = geo.asn_org, SourceTag.GEODB
+        else:
+            asn_org_value, asn_org_source = None, SourceTag.RDAP
 
         return RemoteEndpointFacts(
             # ── DNS ──
@@ -161,7 +172,7 @@ class ResolveEndpoint:
             org=ResolverFact(value=rdap.org, source=SourceTag.RDAP),
             netname=ResolverFact(value=rdap.netname, source=SourceTag.RDAP),
             net_range=ResolverFact(value=rdap.net_range, source=SourceTag.RDAP),
-            asn_org=ResolverFact(value=asn_org, source=SourceTag.RDAP),
+            asn_org=ResolverFact(value=asn_org_value, source=asn_org_source),
             abuse_contact=ResolverFact(value=rdap.abuse_contact, source=SourceTag.RDAP),
             country_rdap_net=ResolverFact(value=rdap.country, source=SourceTag.RDAP),
             # Org-Adresse haben wir nicht separat (kein eigenes RDAP-Feld) -> None-Fact,

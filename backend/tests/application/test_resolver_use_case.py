@@ -7,6 +7,8 @@ Behauptungen: ``ResolveEndpoint`` holt alle vier Quellen, stellt sie zu
 Quellen-Tags werden explizit geprueft. Faelle: voller Happy-Path (alle Quellen liefern,
 forward_confirmed True bei IP-Match), leerer PTR (forward_confirmed False), port=None (kein
 TLS), TLS-Fehlschlag (Fake gibt None), country_conflict True bei RDAP-Land != GeoDB-Land.
+asn_org (F0b): RDAP-Vorrang (geo ignoriert), GeoDB-CSV-Fallback bei RDAP-Leere
+(SourceTag.GEODB), beide leer -> None, rdap.org-Zwischenstufe schlaegt GeoDB.
 """
 
 import asyncio
@@ -285,3 +287,66 @@ def test_ohne_ptr_name_kein_sni_hostname() -> None:
     asyncio.run(uc.resolve("1.2.3.4", 443))
 
     assert tls.calls == [("1.2.3.4", 443, None)]  # leerer PTR -> hostname None
+
+
+# ── asn_org: RDAP-Vorrang, GeoDB-CSV als Fallback (F0b) ─────────────────────────
+
+
+def test_asn_org_rdap_hat_vorrang_geodb_wird_ignoriert() -> None:
+    """RDAP liefert asn_org -> RDAP-Wert + SourceTag.RDAP; geo.asn_org wird ignoriert."""
+    uc = ResolveEndpoint(
+        FakePtrResolver(ptr="", forward=()),
+        FakeRdapClient(RdapRawFacts(asn_org="CLOUDFLARENET", org="Cloudflare, Inc.")),
+        FakeGeoAsnDb(GeoAsnRecord(asn_org="GOOGLE")),
+        FakeTlsCertReader(None),
+    )
+
+    facts = asyncio.run(uc.resolve("1.2.3.4", None))
+
+    assert facts.asn_org.value == "CLOUDFLARENET"  # RDAP-Vorrang, geo ignoriert
+    assert facts.asn_org.source is SourceTag.RDAP
+
+
+def test_asn_org_geodb_fallback_wenn_rdap_leer() -> None:
+    """RDAP asn_org+org None, geo.asn_org gesetzt -> geo-Wert + SourceTag.GEODB."""
+    uc = ResolveEndpoint(
+        FakePtrResolver(ptr="", forward=()),
+        FakeRdapClient(RdapRawFacts(asn_org=None, org=None)),
+        FakeGeoAsnDb(GeoAsnRecord(asn_org="ARIN-PFS-SEA")),
+        FakeTlsCertReader(None),
+    )
+
+    facts = asyncio.run(uc.resolve("1.2.3.4", None))
+
+    assert facts.asn_org.value == "ARIN-PFS-SEA"  # GeoDB-CSV-Fallback (F0)
+    assert facts.asn_org.source is SourceTag.GEODB
+
+
+def test_asn_org_beide_leer_bleibt_none() -> None:
+    """Weder RDAP noch GeoDB liefern asn_org -> Wert None, SourceTag wie bisher RDAP."""
+    uc = ResolveEndpoint(
+        FakePtrResolver(ptr="", forward=()),
+        FakeRdapClient(RdapRawFacts(asn_org=None, org=None)),
+        FakeGeoAsnDb(GeoAsnRecord(asn_org=None)),
+        FakeTlsCertReader(None),
+    )
+
+    facts = asyncio.run(uc.resolve("1.2.3.4", None))
+
+    assert facts.asn_org.value is None
+    assert facts.asn_org.source is SourceTag.RDAP
+
+
+def test_asn_org_rdap_org_zwischenstufe_vor_geodb() -> None:
+    """rdap.asn_org None, rdap.org gesetzt -> rdap.org + SourceTag.RDAP (vor GeoDB-Fallback)."""
+    uc = ResolveEndpoint(
+        FakePtrResolver(ptr="", forward=()),
+        FakeRdapClient(RdapRawFacts(asn_org=None, org="ACME Networks")),
+        FakeGeoAsnDb(GeoAsnRecord(asn_org="SHOULD-NOT-WIN")),
+        FakeTlsCertReader(None),
+    )
+
+    facts = asyncio.run(uc.resolve("1.2.3.4", None))
+
+    assert facts.asn_org.value == "ACME Networks"  # rdap.org-Zwischenstufe schlaegt GeoDB
+    assert facts.asn_org.source is SourceTag.RDAP
