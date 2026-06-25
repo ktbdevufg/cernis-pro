@@ -1578,7 +1578,15 @@ def _project_manual_pdf_model(
     """
     normalized = "en" if lang == "en" else "de"
 
-    sections: list[ManualPdfSection] = []
+    # KATEGORIE-REINE GRUPPIERUNG (analog UI-Funktion ``baueKategorien`` in
+    # frontend/src/views/ManualView.jsx): Die JSON-Reihenfolge ist NICHT
+    # kategorierein, darum gruppieren wir hier. Kategorie-Reihenfolge folgt dem
+    # ERSTEN Auftreten in der JSON (nicht alphabetisch); innerhalb einer Kategorie
+    # bleiben die Eintraege in JSON-Reihenfolge. So steht jede Kategorie genau
+    # einmal als zusammenhaengender Block -- der Renderer erkennt den Gruppen-
+    # wechsel weiterhin am Wechsel des ``category_label``.
+    kategorie_reihenfolge: list[str] = []
+    gruppen: dict[str, list[ManualPdfSection]] = {}
     for key, entry in help_data.items():
         if key == "_meta" or not isinstance(entry, dict):
             continue
@@ -1591,9 +1599,16 @@ def _project_manual_pdf_model(
         paragraphs = tuple(
             stripped for stueck in lang_text.split("\n\n") if (stripped := stueck.strip())
         )
-        sections.append(
+        if kategorie not in gruppen:
+            kategorie_reihenfolge.append(kategorie)
+            gruppen[kategorie] = []
+        gruppen[kategorie].append(
             ManualPdfSection(category_label=kategorie, heading=heading, paragraphs=paragraphs)
         )
+
+    sections: list[ManualPdfSection] = []
+    for kategorie in kategorie_reihenfolge:
+        sections.extend(gruppen[kategorie])
 
     return ManualPdfModel(
         title=title,

@@ -577,6 +577,17 @@ class ReportlabRenderer:
         story: list[Flowable] = []
         styles = self._security_styles()
 
+        # Eingerueckte Varianten NUR fuers Handbuch -- lokal, NICHT in _security_styles,
+        # damit der geteilte Sicherheitsbericht-Stilsatz voellig unberuehrt bleibt. Die
+        # Einrueckung macht die Struktur "Kategorie -> darunter die Abschnitte" sichtbar:
+        # die Kategorie-Ueberschrift (h_rubric) bleibt am linken Rand, die Abschnitte
+        # ruecken dezent ein.
+        _INDENT = 11  # Punkt; dezent, aber sichtbar
+        h_section_indent = ParagraphStyle(
+            "h_section_indent", parent=styles["h_section"], leftIndent=_INDENT
+        )
+        body_indent = ParagraphStyle("body_indent", parent=styles["body"], leftIndent=_INDENT)
+
         # ── Titel + Erzeugungsdatum + optionale Einleitung ──
         story.append(Paragraph(_esc(model.title), styles["h_title"]))
         story.append(Paragraph(_esc(model.generated_at_text), styles["sub"]))
@@ -591,20 +602,27 @@ class ReportlabRenderer:
         prev_category: str | None = None
         for section in model.sections:
             if section.category_label != prev_category:
+                # Jede NEUE Kategorie beginnt auf einer eigenen Seite -- ausser der
+                # allerersten (die folgt direkt auf Titel/Einleitung, kein PageBreak).
+                if prev_category is not None:
+                    story.append(PageBreak())
                 story.append(Paragraph(_esc(section.category_label), styles["h_rubric"]))
                 story.append(HRFlowable(width="100%", thickness=1.2, color=_ACCENT, spaceAfter=4))
+                # Etwas Luft zwischen Kategorie-Ueberschrift/Trennlinie und erstem Abschnitt.
+                story.append(Spacer(1, 2 * mm))
                 prev_category = section.category_label
 
             # Ueberschrift + erster Absatz zusammenhalten, damit eine heading nicht allein
-            # unten auf einer Seite landet (Muster KeepTogether im Sicherheitsbericht).
-            head_block: list[Flowable] = [Paragraph(_esc(section.heading), styles["h_section"])]
+            # unten auf einer Seite landet (Muster KeepTogether im Sicherheitsbericht). Die
+            # Abschnitte nutzen die eingerueckten Stile (h_section_indent/body_indent).
+            head_block: list[Flowable] = [Paragraph(_esc(section.heading), h_section_indent)]
             if section.paragraphs:
-                head_block.append(Paragraph(_esc(section.paragraphs[0]), styles["body"]))
+                head_block.append(Paragraph(_esc(section.paragraphs[0]), body_indent))
             story.append(KeepTogether(head_block))
             # Die restlichen Absaetze einzeln (jeder umbrechbar).
             for para in section.paragraphs[1:]:
-                story.append(Paragraph(_esc(para), styles["body"]))
-            story.append(Spacer(1, 4 * mm))
+                story.append(Paragraph(_esc(para), body_indent))
+            story.append(Spacer(1, 6 * mm))
 
         document.build(
             story,
