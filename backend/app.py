@@ -3619,11 +3619,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             help_data, normalized, generated_at_text, footer_left, title
         )
         pdf_bytes = ReportlabRenderer().render_manual_pdf(model)
-        datumsteil = datetime.fromtimestamp(now).strftime("%Y-%m-%d")
         if normalized == "en":
-            filename = f"CERNISPRO_User-Manual_{datumsteil}.pdf"
+            filename = "CERNISPRO_User-Manual.pdf"
         else:
-            filename = f"CERNISPRO_Benutzerhandbuch_{datumsteil}.pdf"
+            filename = "CERNISPRO_Benutzerhandbuch.pdf"
         return _ManualPdfResult(content=pdf_bytes, media_type="application/pdf", filename=filename)
 
     app.include_router(report_router)

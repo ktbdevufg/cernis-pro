@@ -14,6 +14,7 @@ import { useTranslation } from "react-i18next";
 
 import { FunctionShell } from "../components/AreaShell.jsx";
 import { fetchSettings, updateSetting } from "../api/settings.js";
+import { fetchManualPdf } from "../api/report.js";
 import helpContent from "../lib/help_content.json";
 import "./ManualView.css";
 
@@ -233,6 +234,10 @@ export default function ManualView({ onClose }) {
   const [ladeStatus, setLadeStatus] = useState("laedt"); // laedt | bereit | fehler
   const [speicherFehler, setSpeicherFehler] = useState(false);
 
+  // PDF-Download (Muster wie SecurityReportView): Lade- und Fehlerzustand.
+  const [pdfLaedt, setPdfLaedt] = useState(false);
+  const [pdfFehler, setPdfFehler] = useState(false);
+
   // Ziel 4 — Suche.
   const [sucheOffen, setSucheOffen] = useState(false);
   const [suchbegriff, setSuchbegriff] = useState("");
@@ -316,6 +321,21 @@ export default function ManualView({ onClose }) {
       setSpeicherFehler(true);
     }
   };
+
+  // Handbuch als PDF in der aktuellen Sprache herunterladen. Dezenter Lade-/
+  // Fehlerzustand wie beim Sicherheitsbericht; der eigentliche Download läuft
+  // über fetchManualPdf -> apiDownload (Blob).
+  async function handlePdfDownload() {
+    setPdfFehler(false);
+    setPdfLaedt(true);
+    try {
+      await fetchManualPdf(sprache);
+    } catch {
+      setPdfFehler(true);
+    } finally {
+      setPdfLaedt(false);
+    }
+  }
 
   // Treffer-Gesamtzahl der aktuellen Suche/Sprache. Bei jeder Eingabe neu
   // berechnet; der mitlaufende Render-Zähler vergibt dieselben Indizes.
@@ -497,6 +517,18 @@ export default function ManualView({ onClose }) {
                 ))}
               </div>
 
+              {/* Handbuch als PDF (aktuelle Sprache). Gleiche Optik wie der
+                  Such-Button (manual__icon-btn). */}
+              <button
+                type="button"
+                className="manual__icon-btn"
+                aria-label={t("manual.pdf.download")}
+                disabled={pdfLaedt}
+                onClick={handlePdfDownload}
+              >
+                {pdfLaedt ? "…" : "⤓"}
+              </button>
+
               {!sucheOffen ? (
                 <button
                   type="button"
@@ -512,6 +544,10 @@ export default function ManualView({ onClose }) {
 
           {speicherFehler ? (
             <p className="manual__save-error">{t("manual.schrift.saveError")}</p>
+          ) : null}
+
+          {pdfFehler ? (
+            <p className="manual__save-error" role="alert">{t("manual.pdf.fehler")}</p>
           ) : null}
 
           <div className="manual__content">

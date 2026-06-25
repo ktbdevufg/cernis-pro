@@ -192,6 +192,10 @@
       "schliessen": "Close search",
       "zaehler": "{{n}} of {{m}}"
     },
+    "pdf": {
+      "download": "Download manual as PDF",
+      "fehler": "The PDF could not be created."
+    },
     "kategorien": {
       "Grundlagen": "Basics",
       "Startseite": "Home screen",

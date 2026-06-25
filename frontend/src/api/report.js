@@ -120,7 +120,23 @@ export async function fetchSecurityReportPdf() {
   );
 }
 
+// GET /api/report/manual/pdf?lang=de|en -> loest den Browser-Download des
+// Benutzerhandbuchs als PDF in der gewaehlten Sprache aus (Blob via apiDownload).
+// lang faellt sicher auf "de" zurueck, wenn nicht "en". Der echte Dateiname kommt
+// vom Backend ueber Content-Disposition; der defaultName hier ist nur Fallback.
+// Bei !ok/Netzfehler -> ApiError (die View faengt das und zeigt einen dezenten
+// PDF-Fehlerhinweis).
+export async function fetchManualPdf(lang) {
+  const sprache = lang === "en" ? "en" : "de";
+  return apiDownload(
+    `/api/report/manual/pdf?lang=${sprache}`,
+    null,
+    sprache === "en" ? "CERNISPRO_User-Manual.pdf" : "CERNISPRO_Benutzerhandbuch.pdf",
+  );
+}
+
 export default {
   fetchSecurityReport,
   fetchSecurityReportPdf,
+  fetchManualPdf,
 };

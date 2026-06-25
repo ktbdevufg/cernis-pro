@@ -192,6 +192,10 @@
       "schliessen": "Suche schließen",
       "zaehler": "{{n}} von {{m}}"
     },
+    "pdf": {
+      "download": "Handbuch als PDF herunterladen",
+      "fehler": "Das PDF konnte nicht erstellt werden."
+    },
     "kategorien": {
       "Grundlagen": "Grundlagen",
       "Startseite": "Startseite",
