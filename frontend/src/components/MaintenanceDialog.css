@@ -151,6 +151,93 @@
   color: var(--color-text-tert);
 }
 
+/* ── FENSTER 1b — Baukasten (gruppierte Ankreuz-Liste) ─────────────────────── */
+
+/* Eine Gruppe (Überschrift + Posten-Zeilen). */
+.maint-builder__group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.maint-builder__group-title {
+  margin: 0 0 2px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-tert);
+}
+
+/* Eine Posten-Zeile: Checkbox + (optional „+") + Label, ganzflächig klickbar. */
+.maint-builder__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 2px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.maint-builder__checkbox {
+  flex: 0 0 auto;
+  accent-color: var(--color-accent-strong);
+  cursor: pointer;
+}
+
+/* Das vorangestellte „+" der erzwungenen Posten: türkiser Akzent. */
+.maint-builder__plus {
+  flex: 0 0 auto;
+  font-weight: 700;
+  color: var(--color-accent);
+}
+
+.maint-builder__label {
+  min-width: 0;
+}
+
+/* Eingerückter Container der abgeleiteten Posten: macht die Hierarchie sichtbar
+   (Scan-Historie ist die Wurzel, die vier Posten hängen darunter). Linker Einzug
+   plus dezente Leitlinie in --color-border — rein optisch, keine Funktion. */
+.maint-builder__children {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-left: 9px;
+  padding-left: 12px;
+  border-left: 1px solid var(--color-border);
+}
+
+/* Abgeleiteter Posten als Unterpunkt der Wurzel-Zeile (nur Markierung für die
+   Einrückung; die gedämpfte Locked-Optik kommt zusätzlich darüber). */
+.maint-builder__item--child {
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+/* Erzwungener (mit-gezogener) Posten: gesperrt + gedämpft. */
+.maint-builder__item--locked {
+  cursor: default;
+}
+
+.maint-builder__item--locked .maint-builder__checkbox {
+  cursor: default;
+}
+
+.maint-builder__item--locked .maint-builder__label {
+  color: var(--color-text-tert);
+}
+
+/* Kleiner Hinweis, warum die vier abgeleiteten Posten mitgezogen werden. */
+.maint-builder__hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-text-tert);
+}
+
 /* ── FENSTER 2 — Bestätigung ───────────────────────────────────────────────── */
 
 .maint-confirm__lead {

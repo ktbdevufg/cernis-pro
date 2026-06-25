@@ -131,6 +131,7 @@
       "rowDescription": "Scan-Daten zurücksetzen oder CERNIS auf Werkszustand bringen.",
       "openButton": "Optionen anzeigen",
       "doneScan": "Scan-Daten zurückgesetzt.",
+      "doneSelected": "Ausgewählte Daten gelöscht.",
       "doneFactory": "Auf Werkszustand zurückgesetzt. Die Einstellungen wurden ebenfalls zurückgesetzt.",
       "dialog": {
         "title": "Daten löschen",
@@ -140,13 +141,33 @@
       "choice": {
         "scan": {
           "title": "Scan-Daten zurücksetzen",
-          "deletes": "Löscht: Scan-Historie, CVE-Befundstand, Baseline, Quittierungen.",
-          "keeps": "Bleibt: Einstellungen, Geräte-Gedächtnis, Monitoring-Aufzeichnungen."
+          "deletes": "Auswählen, was gelöscht wird: Scan-Historie, Befunde, Monitoring, Aufzeichnungen.",
+          "keeps": "Bleibt: Einstellungen und alles, was Sie nicht ankreuzen."
         },
         "factory": {
           "title": "Werkszustand",
           "deletes": "Löscht alle Daten – Scans, Geräte-Gedächtnis, Monitoring, Einstellungen. Verhält sich danach wie frisch installiert."
         }
+      },
+      "builder": {
+        "title": "Was soll gelöscht werden?",
+        "groupScan": "Scan & Analyse",
+        "groupMonitoring": "Monitoring",
+        "groupOutbound": "Außenkontakte-Aufzeichnungen",
+        "item": {
+          "scanHistory": "Scan-Historie",
+          "cve": "CVE-Befunde und Quittierungen",
+          "arpGuard": "ARP-Wache: Baseline und Alarme",
+          "analysisAcks": "Analyse-Quittierungen",
+          "knownHosts": "Geräte-Baseline (bekannte Geräte)",
+          "rtt": "Antwortzeit-Verlauf und Ereignisse",
+          "sla": "SLA-Messwerte",
+          "logging": "Mitschnitt-Aufgaben und deren Daten",
+          "outboundRecordings": "Außenkontakte-Aufzeichnungen"
+        },
+        "rootHint": "Die Scan-Historie zu löschen entfernt zwingend auch die daraus abgeleiteten Befunde.",
+        "deleteSelected": "Ausgewähltes löschen",
+        "nothingSelected": "Wählen Sie mindestens einen Posten aus."
       },
       "confirm": {
         "lead": "Folgendes wird unwiderruflich gelöscht:",

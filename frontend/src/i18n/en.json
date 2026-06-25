@@ -131,6 +131,7 @@
       "rowDescription": "Reset scan data or restore CERNIS to factory state.",
       "openButton": "Show options",
       "doneScan": "Scan data has been reset.",
+      "doneSelected": "Selected data has been deleted.",
       "doneFactory": "Restored to factory state. Your settings have been reset as well.",
       "dialog": {
         "title": "Delete data",
@@ -140,13 +141,33 @@
       "choice": {
         "scan": {
           "title": "Reset scan data",
-          "deletes": "Deletes: scan history, CVE findings, baseline, acknowledgements.",
-          "keeps": "Keeps: settings, device memory, monitoring recordings."
+          "deletes": "Pick what gets deleted: scan history, findings, monitoring, recordings.",
+          "keeps": "Keeps: settings and anything you don't check."
         },
         "factory": {
           "title": "Factory state",
           "deletes": "Deletes all data – scans, device memory, monitoring, settings. Behaves like a fresh install afterwards."
         }
+      },
+      "builder": {
+        "title": "What should be deleted?",
+        "groupScan": "Scan & analysis",
+        "groupMonitoring": "Monitoring",
+        "groupOutbound": "Outbound contact recordings",
+        "item": {
+          "scanHistory": "Scan history",
+          "cve": "CVE findings and acknowledgements",
+          "arpGuard": "ARP guard: baseline and alerts",
+          "analysisAcks": "Analysis acknowledgements",
+          "knownHosts": "Device baseline (known devices)",
+          "rtt": "Response-time history and events",
+          "sla": "SLA measurements",
+          "logging": "Capture tasks and their data",
+          "outboundRecordings": "Outbound contact recordings"
+        },
+        "rootHint": "Deleting the scan history necessarily removes the findings derived from it as well.",
+        "deleteSelected": "Delete selected",
+        "nothingSelected": "Select at least one item."
       },
       "confirm": {
         "lead": "The following will be irreversibly deleted:",

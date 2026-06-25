@@ -14,7 +14,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { factoryReset, resetScanData } from "../api/maintenance.js";
+import { factoryReset, resetSelected } from "../api/maintenance.js";
 import MaintenanceDialog from "./MaintenanceDialog.jsx";
 import "./WartungPanel.css";
 
@@ -22,7 +22,7 @@ export default function WartungPanel() {
   const { t } = useTranslation();
 
   const [dialogOffen, setDialogOffen] = useState(false);
-  // null = kein Hinweis; "scan" | "factory" = welche „erledigt"-Meldung zeigen.
+  // null = kein Hinweis; "selected" | "factory" = welche „erledigt"-Meldung zeigen.
   const [erledigt, setErledigt] = useState(null);
   const erledigtTimeout = useRef(null);
 
@@ -50,11 +50,13 @@ export default function WartungPanel() {
 
   // Wird vom Dialog auf „Endgültig löschen" gerufen. Wirft bei Fehler weiter (der
   // Dialog fängt ihn und bleibt offen); bei Erfolg Dialog schließen + Hinweis.
-  const handleBestaetigt = async (stufe, secretsEntfernen) => {
+  // Zwei Fälle: "factory" -> Werkszustand; "selected" -> granularer Baukasten mit
+  // der effektiven Item-Liste (Wire-Strings; erzwungene Posten schon enthalten).
+  const handleBestaetigt = async (stufe, { items, secretsEntfernen }) => {
     if (stufe === "factory") {
       await factoryReset(secretsEntfernen);
     } else {
-      await resetScanData();
+      await resetSelected(items);
     }
     setDialogOffen(false);
     zeigeErledigt(stufe);
@@ -77,7 +79,7 @@ export default function WartungPanel() {
           <span className="wp-done" role="status" aria-live="polite">
             {erledigt === "factory"
               ? t("settings.wartung.doneFactory")
-              : t("settings.wartung.doneScan")}
+              : t("settings.wartung.doneSelected")}
           </span>
         ) : null}
       </section>
