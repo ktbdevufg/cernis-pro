@@ -14,10 +14,14 @@ Composition Root via ``dependency_overrides`` als Instanz hereinreicht (Muster
 wie die devices-POST-Use-Cases, die ebenfalls als Instanz injiziert und im Router
 gerufen werden). So bleibt der konkrete Use-Case-Typ dem api-Ring verborgen.
 
-Endpunkte (Daten-Loeschung, zwei Stufen -- s. application/maintenance):
+Endpunkte (Daten-Loeschung, zwei Stufen + granularer Baukasten -- s. application/maintenance):
 
 * ``POST /api/maintenance/reset-scan-data`` -> leert NUR Scan-/CVE-/ARP-/Analyse-
   Befunde (Stufe 1) -> ``{"ok": true}``.
+* ``POST /api/maintenance/reset-selected``  -> granularer Baukasten; Body
+  ``{items: list[str]}`` -> ``{"ok": true}``. Die rohen Posten-Strings hebt der
+  Use-Case autoritativ in den Domaenen-Enum (der api-Ring kennt ihn NICHT, Regel 4);
+  ein nicht zum Vokabular passender String -> 422.
 * ``POST /api/maintenance/factory-reset``  -> Werkszustand (Stufe 2); Body
   ``{include_secrets: bool = false}`` -> ``{"ok": true}``.
 """
@@ -25,7 +29,7 @@ Endpunkte (Daten-Loeschung, zwei Stufen -- s. application/maintenance):
 from collections.abc import Callable
 from typing import Annotated, Protocol
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/maintenance", tags=["maintenance"])
@@ -47,6 +51,20 @@ class ResetScanDataRunner(Protocol):
         ...
 
 
+class DeleteSelectedRunner(Protocol):
+    """Schmaler Vertrag der injizierten Baukasten-Instanz (``application.DeleteSelectedData``).
+
+    Der Router reicht die rohen Posten-Strings durch (``items: list[str]``) -- die
+    ``str`` -> Enum-Hebung passiert AUTORITATIV im Use-Case (``run_from_wire``), darum
+    importiert der api-Ring den Domaenen-Enum NICHT (import-linter Regel 4). Ein nicht
+    zum Vokabular passender String wirft ``ValueError``, den der Endpunkt auf 422 mappt.
+    """
+
+    def run_from_wire(self, items: list[str]) -> None:
+        """Loescht die uebergebene Menge roher Posten-Strings (Hebung im Use-Case)."""
+        ...
+
+
 class FactoryResetRunner(Protocol):
     """Schmaler Vertrag der injizierten Stufe-2-Instanz (``application.FactoryReset``)."""
 
@@ -63,12 +81,30 @@ def provide_reset_scan_data() -> ResetScanDataProvider:
     raise NotImplementedError("ResetScanDataProvider wird in app.py verdrahtet")
 
 
+# Liefert den Baukasten-Runner (DeleteSelectedData-Instanz) aus dem Composition Root.
+type DeleteSelectedProvider = Callable[[], DeleteSelectedRunner]
+
+
+def provide_delete_selected() -> DeleteSelectedProvider:
+    raise NotImplementedError("DeleteSelectedProvider wird in app.py verdrahtet")
+
+
 # Liefert den Stufe-2-Runner (FactoryReset-Instanz) aus dem Composition Root.
 type FactoryResetProvider = Callable[[], FactoryResetRunner]
 
 
 def provide_factory_reset() -> FactoryResetProvider:
     raise NotImplementedError("FactoryResetProvider wird in app.py verdrahtet")
+
+
+class DeleteSelectedBody(BaseModel):
+    """POST /api/maintenance/reset-selected -- ``items`` als Liste roher Posten-Strings.
+
+    Die Vokabular-Validierung + Enum-Hebung macht der Use-Case (422 bei Fehlwert); der
+    Router reicht die Strings roh durch (kennt den Domaenen-Enum NICHT).
+    """
+
+    items: list[str]
 
 
 class FactoryResetBody(BaseModel):
@@ -86,6 +122,24 @@ def reset_scan_data(
 ) -> dict[str, bool]:
     """Stufe 1: leert die Scan-/CVE-/ARP-/Analyse-Befunde."""
     runner.run()
+    return {"ok": True}
+
+
+@router.post("/reset-selected")
+def reset_selected(
+    body: DeleteSelectedBody,
+    runner: Annotated[DeleteSelectedRunner, Depends(provide_delete_selected)],
+) -> dict[str, bool]:
+    """Granularer Baukasten: loescht die ausgewaehlten Posten (rohe Strings).
+
+    Die ``str`` -> Enum-Hebung passiert im Use-Case; ein nicht zum Vokabular passender
+    String wirft dort ``ValueError`` -> 422 (kein 500/stiller Fallback). 422 als nacktes
+    Literal (Bestandsmuster ``api/monitoring.py``).
+    """
+    try:
+        runner.run_from_wire(body.items)
+    except ValueError as exc:
+        raise HTTPException(422, detail=str(exc)) from exc
     return {"ok": True}
 
 

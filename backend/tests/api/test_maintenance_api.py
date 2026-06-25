@@ -16,10 +16,12 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from api.maintenance import (
+    provide_delete_selected,
     provide_factory_reset,
     provide_reset_scan_data,
 )
 from app import create_app
+from domain.maintenance import ScanSelection
 from infrastructure.config import AppConfig
 
 
@@ -31,6 +33,21 @@ class _FakeResetScanDataRunner:
 
     def run(self) -> None:
         self.calls += 1
+
+
+class _FakeDeleteSelectedRunner:
+    """Fake-Baukasten-Runner: hebt die rohen Strings (wie der echte Use-Case) und merkt sie.
+
+    Die Hebung via ``ScanSelection`` ist hier nachgebildet, damit der 422-Pfad (unbekannter
+    String -> ``ValueError``) im API-Test ueberhaupt entstehen kann -- der Router faengt
+    den ``ValueError`` und mappt ihn auf 422.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[set[ScanSelection]] = []
+
+    def run_from_wire(self, items: list[str]) -> None:
+        self.calls.append({ScanSelection(item) for item in items})
 
 
 class _FakeFactoryResetRunner:
@@ -60,6 +77,36 @@ def test_reset_scan_data_liefert_200_und_ruft_run(app: FastAPI) -> None:
     assert response.status_code == 200
     assert response.json() == {"ok": True}
     assert runner.calls == 1
+
+
+def test_reset_selected_liefert_200_und_hebt_die_items(app: FastAPI) -> None:
+    """``/api/maintenance/reset-selected`` mit gueltigen items -> 200 + ``{ok: True}``; gehoben."""
+    runner = _FakeDeleteSelectedRunner()
+    app.dependency_overrides[provide_delete_selected] = lambda: runner
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/maintenance/reset-selected",
+            json={"items": ["scan_history", "cve"]},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
+    assert runner.calls == [{ScanSelection.SCAN_HISTORY, ScanSelection.CVE}]
+
+
+def test_reset_selected_unbekanntes_item_liefert_422(app: FastAPI) -> None:
+    """Ein nicht zum Vokabular passender Posten -> 422 (Use-Case wirft, Router mappt)."""
+    runner = _FakeDeleteSelectedRunner()
+    app.dependency_overrides[provide_delete_selected] = lambda: runner
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/maintenance/reset-selected",
+            json={"items": ["scan_history", "nicht_im_vokabular"]},
+        )
+
+    assert response.status_code == 422
 
 
 def test_factory_reset_default_haelt_include_secrets_false(app: FastAPI) -> None:

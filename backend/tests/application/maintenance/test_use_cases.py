@@ -16,8 +16,11 @@ Kern der Behauptungen:
 
 from typing import Any
 
-from application.maintenance import FactoryReset, ResetScanData
+import pytest
+
+from application.maintenance import DeleteSelectedData, FactoryReset, ResetScanData
 from application.maintenance.use_cases import _CPNETCHECK_SECRET_KEYS
+from domain.maintenance import ScanSelection
 
 
 class _Spy:
@@ -151,6 +154,9 @@ def _make_factory_reset(
         logging_tasks=_Spy(calls, "logging_tasks"),
         logging_rtt=_Spy(calls, "logging_rtt"),
         logging_events=_Spy(calls, "logging_events"),
+        outbound_recordings=_Spy(calls, "outbound_recordings"),
+        outbound_detail=_Spy(calls, "outbound_detail"),
+        outbound_aggregate=_Spy(calls, "outbound_aggregate"),
         alert_rules=_Spy(calls, "alert_rules"),
         agents=_Spy(calls, "agents"),
         dns_watch_acknowledgements=_Spy(calls, "dns_watch_acknowledgements"),
@@ -226,11 +232,31 @@ def test_factory_reset_ruft_stufe1_und_stufe2() -> None:
         "logging_rtt.clear_all",
         "logging_events.clear_all",
         "scheduled_jobs.clear_all",
+        "outbound_recordings.clear_all",
+        "outbound_detail.clear_all",
+        "outbound_aggregate.clear_all",
         "alert_rules.clear_all",
         "agents.clear_all",
         "dns_watch_acknowledgements.clear_all",
     ]
     assert calls == expected
+
+
+def test_factory_reset_loescht_die_drei_aussenkontakte_tabellen() -> None:
+    calls: list[str] = []
+    factory = _make_factory_reset(
+        calls,
+        reset_scan_data=_make_reset_scan_data(calls),
+        schedules=_ScheduleRepoSpy(calls, rows=[]),
+        scheduler=_SchedulerSpy(calls),
+        secret_store=_SecretStoreSpy(calls),
+    )
+
+    factory.run()
+
+    assert "outbound_recordings.clear_all" in calls
+    assert "outbound_detail.clear_all" in calls
+    assert "outbound_aggregate.clear_all" in calls
 
 
 def test_factory_reset_loescht_dns_watch_quittierungen() -> None:
@@ -310,3 +336,69 @@ def test_factory_reset_meldet_jede_id_vor_clear_all_ab() -> None:
     )
     schedules_clear = calls.index("schedules.clear_all")
     assert letztes_unregister < schedules_clear
+
+
+# ── (5) Granularer Baukasten: DeleteSelectedData ──────────────────────────────
+
+
+def _make_delete_selected(calls: list[str]) -> DeleteSelectedData:
+    """Baut eine ``DeleteSelectedData`` aus reinen Spies, die in ``calls`` protokollieren."""
+    return DeleteSelectedData(
+        scan_history=_Spy(calls, "scan_history"),
+        cve_findings=_Spy(calls, "cve_findings"),
+        cve_checkstate=_Spy(calls, "cve_checkstate"),
+        cve_acknowledgements=_Spy(calls, "cve_acknowledgements"),
+        arp_guard=_Spy(calls, "arp_guard"),
+        analysis_acknowledgements=_Spy(calls, "analysis_acknowledgements"),
+        known_hosts=_Spy(calls, "known_hosts"),
+        rtt_history=_Spy(calls, "rtt_history"),
+        monitor_events=_Spy(calls, "monitor_events"),
+        sla_samples=_Spy(calls, "sla_samples"),
+        logging_tasks=_Spy(calls, "logging_tasks"),
+        logging_rtt=_Spy(calls, "logging_rtt"),
+        logging_events=_Spy(calls, "logging_events"),
+        outbound_recordings=_Spy(calls, "outbound_recordings"),
+        outbound_detail=_Spy(calls, "outbound_detail"),
+        outbound_aggregate=_Spy(calls, "outbound_aggregate"),
+    )
+
+
+def test_delete_selected_scan_history_ruft_nur_scan_history() -> None:
+    calls: list[str] = []
+    _make_delete_selected(calls).run({ScanSelection.SCAN_HISTORY})
+    assert calls == ["scan_history.clear_all"]
+
+
+def test_delete_selected_outbound_ruft_genau_die_drei_outbound_clears() -> None:
+    calls: list[str] = []
+    _make_delete_selected(calls).run({ScanSelection.OUTBOUND_RECORDINGS})
+    assert calls == [
+        "outbound_recordings.clear_all",
+        "outbound_detail.clear_all",
+        "outbound_aggregate.clear_all",
+    ]
+
+
+def test_delete_selected_leere_menge_ruft_nichts() -> None:
+    calls: list[str] = []
+    _make_delete_selected(calls).run(set())
+    assert calls == []
+
+
+def test_delete_selected_str_hebung_unbekannter_string_wirft_value_error() -> None:
+    calls: list[str] = []
+    with pytest.raises(ValueError):
+        _make_delete_selected(calls).run_from_wire(["scan_history", "nicht_im_vokabular"])
+    # Ein Fehlwert bricht die Hebung ab, BEVOR irgendetwas geloescht wird.
+    assert calls == []
+
+
+def test_delete_selected_from_wire_hebt_und_loescht() -> None:
+    calls: list[str] = []
+    _make_delete_selected(calls).run_from_wire(["cve", "sla"])
+    assert calls == [
+        "cve_findings.clear_all",
+        "cve_checkstate.clear_all",
+        "cve_acknowledgements.clear_all",
+        "sla_samples.clear_all",
+    ]

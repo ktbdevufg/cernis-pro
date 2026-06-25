@@ -127,6 +127,7 @@ from api.fritz import router as fritz_router
 from api.interfaces import provide_list_interfaces
 from api.interfaces import router as interfaces_router
 from api.maintenance import (
+    provide_delete_selected,
     provide_factory_reset,
     provide_reset_scan_data,
 )
@@ -316,7 +317,7 @@ from application.export import (
 )
 from application.fritz_detail import FritzDetailAuthError, GetFritzDetail
 from application.interfaces import ListInterfaces
-from application.maintenance import FactoryReset, ResetScanData
+from application.maintenance import DeleteSelectedData, FactoryReset, ResetScanData
 from application.metrics import ExportMetrics
 from application.monitoring import (
     AddMonitorTarget,
@@ -4350,6 +4351,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             logging_tasks=logging_task_repository(),
             logging_rtt=logging_rtt_repository(),
             logging_events=logging_event_repository(),
+            outbound_recordings=outbound_recording_repository(),
+            outbound_detail=outbound_detail_repository(),
+            outbound_aggregate=outbound_aggregate_repository(),
             alert_rules=alert_rule_repository(),
             agents=agent_repository(),
             dns_watch_acknowledgements=dns_watch_acknowledgement_repository(),
@@ -4357,8 +4361,32 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             secret_store=secret_store(),
         )
 
+    # Granularer Baukasten (Stufe 1 waehlbar): zieht alle Repos aus den BESTEHENDEN
+    # Factories -- KEINE eigenen Repos, KEINE zweiten Instanzen (Muster ResetScanData).
+    @lru_cache(maxsize=1)
+    def delete_selected_use_case() -> DeleteSelectedData:
+        return DeleteSelectedData(
+            scan_history=scan_history_repository(),
+            cve_findings=cve_finding_repository(),
+            cve_checkstate=cve_checkstate_repository(),
+            cve_acknowledgements=cve_acknowledgement_repository(),
+            arp_guard=arp_guard_repository(),
+            analysis_acknowledgements=acknowledgement_repository(),
+            known_hosts=host_history_repository(),
+            rtt_history=rtt_history_repository(),
+            monitor_events=monitor_event_repository(),
+            sla_samples=sla_sample_repository(),
+            logging_tasks=logging_task_repository(),
+            logging_rtt=logging_rtt_repository(),
+            logging_events=logging_event_repository(),
+            outbound_recordings=outbound_recording_repository(),
+            outbound_detail=outbound_detail_repository(),
+            outbound_aggregate=outbound_aggregate_repository(),
+        )
+
     app.include_router(maintenance_router)
     app.dependency_overrides[provide_reset_scan_data] = reset_scan_data_use_case
+    app.dependency_overrides[provide_delete_selected] = delete_selected_use_case
     app.dependency_overrides[provide_factory_reset] = factory_reset_use_case
 
     # ── Frontend-Serving ── MUSS als LETZTES registriert werden ──────────────────

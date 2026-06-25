@@ -8,6 +8,7 @@ Repositories/Cleaner kommen als Ports/Protocols per Constructor-Injection herein
 
 from application.maintenance.use_cases import (
     AnalysisAckCleaner,
+    DeleteSelectedData,
     FactoryReset,
     KnownHostsCleaner,
     ResetScanData,
@@ -15,6 +16,7 @@ from application.maintenance.use_cases import (
 
 __all__ = [
     "AnalysisAckCleaner",
+    "DeleteSelectedData",
     "FactoryReset",
     "KnownHostsCleaner",
     "ResetScanData",
