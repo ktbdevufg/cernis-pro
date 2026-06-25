@@ -9,6 +9,9 @@
 //   subtitle     kurzer neutraler Untertitel
 //   locked       bool — true sperrt die Kachel
 //   lockedReason Begründungstext bei gesperrter Kachel
+//   aktiv        bool — true zeigt ein ruhiges grünes "aktiv"-Kennzeichen neben dem
+//                Icon (Default false -> kein Kennzeichen; andere Views bleiben so
+//                völlig unverändert, da sie die Prop nicht setzen)
 //   onOpen       Klick-Handler (nur aktive Kachel)
 //   onInfo       Klick-Handler des Info-Icons oben rechts (Platzhalter)
 
@@ -23,6 +26,7 @@ export default function FunctionCard({
   subtitle,
   locked = false,
   lockedReason,
+  aktiv = false,
   onOpen,
   onInfo,
 }) {
@@ -55,8 +59,19 @@ export default function FunctionCard({
       }
     >
       <div className="function-card__head">
-        <span className="function-card__icon">
-          <Icon size={23} />
+        <span className="function-card__head-left">
+          <span className="function-card__icon">
+            <Icon size={23} />
+          </span>
+          {aktiv && (
+            <span className="function-card__aktiv">
+              <span
+                className="function-card__aktiv-punkt"
+                aria-hidden="true"
+              />
+              {t("cards.aktiv")}
+            </span>
+          )}
         </span>
         <button
           type="button"

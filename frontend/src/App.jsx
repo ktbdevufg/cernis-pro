@@ -90,6 +90,13 @@ export default function App() {
     setObserveFunktion("logging");
   };
 
+  const goToOutbound = () => {
+    setSettingsOffen(false);
+    setHandbuchOffen(false);
+    setActiveTab("observe");
+    setObserveFunktion("outbound");
+  };
+
   // Theme am <html> setzen und persistieren.
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -123,6 +130,7 @@ export default function App() {
           setHandbuchOffen(true);
         }}
         onGoToLogging={goToLogging}
+        onGoToOutbound={goToOutbound}
         onGoHome={() => {
           setSettingsOffen(false);
           setHandbuchOffen(false);

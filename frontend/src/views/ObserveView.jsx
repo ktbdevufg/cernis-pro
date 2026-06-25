@@ -30,6 +30,8 @@ import {
   fetchArchiveCandidates,
 } from "../api/devices.js";
 import { fetchInterfaces, primaeresInterface } from "../api/interfaces.js";
+import { fetchLoggingTasks } from "../api/monitoring.js";
+import { fetchRecordings } from "../api/outboundLog.js";
 import {
   fetchScanDetail,
   fetchScanHistory,
@@ -42,6 +44,7 @@ import ArchivePromptDialog from "../components/ArchivePromptDialog.jsx";
 import ColumnManager from "../components/ColumnManager.jsx";
 import DnsWatchView from "../components/DnsWatchView.jsx";
 import FunctionCard from "../components/FunctionCard.jsx";
+import { ZUSTAND } from "../components/loggingTask.js";
 import LoggingPanel from "../components/LoggingPanel.jsx";
 import MonitorView from "../components/MonitorView.jsx";
 import OutboundView from "../components/OutboundView.jsx";
@@ -72,6 +75,11 @@ const PHASEN_REIHENFOLGE = ["discovery", "mdns", "enrich"];
 // Settings-Key, unter dem die sichtbaren umschaltbaren Scan-Spalten persistiert
 // werden (JSON-Array der IDs; fixe Spalten stehen NICHT drin).
 const SCAN_COLUMNS_KEY = "scan_columns";
+
+// Poll-Intervall (ms) für die "aktiv"-Kennzeichen der Kachel-Übersicht (F3b).
+// Moderat (20 s) wie das Kopfzeilen-Pill — kein Sekundentakt; das reicht für ein
+// reines Status-Kennzeichen und schont das Backend.
+const AKTIV_POLL_MS = 20000;
 
 // Kachel-Definition: Schlüssel, Icon, Sperrstatus. Reihenfolge ist verbindlich.
 const FUNKTIONEN = [
@@ -614,6 +622,12 @@ export default function ObserveView({
   // Detail-Zurück redundant). LoggingPanel meldet den Wechsel via onDetailChange.
   const [loggingDetailOffen, setLoggingDetailOffen] = useState(false);
 
+  // "aktiv"-Kennzeichen der Kachel-Übersicht (F3b): true, wenn eine Aussenkontakte-
+  // Aufzeichnung bzw. eine Logging-Aufgabe gerade läuft. Beide starten false und
+  // fallen bei Fehler auf false zurück (kein erfundener Status).
+  const [outboundAktiv, setOutboundAktiv] = useState(false);
+  const [loggingAktiv, setLoggingAktiv] = useState(false);
+
   // Wechselt initialFunction (z. B. erneuter Pill-Klick bei bereits offenem
   // Beobachten-Bereich), die gewuenschte Funktion oeffnen und beim Eltern-State
   // quittieren, damit der Nutzer danach frei zur Uebersicht zurueck kann.
@@ -629,6 +643,44 @@ export default function ObserveView({
   // bei jedem openFunction-Wechsel (auch zurueck zur Kachel-Uebersicht).
   useEffect(() => {
     setLoggingDetailOffen(false);
+  }, [openFunction]);
+
+  // "aktiv"-Kennzeichen-Poll (F3b): EIN einziger Effekt pollt beim Mount und dann
+  // alle AKTIV_POLL_MS BEIDE Listen gemeinsam (Promise.allSettled — eine Liste darf
+  // scheitern, ohne die andere zu kippen) und setzt die zwei Flags. Läuft NUR in der
+  // Kachel-Übersicht (openFunction === null) — bei geöffneter Funktion braucht es die
+  // Flags nicht. Kein t/i18n im Dep-Array (keine Render-Loop). Fehler/abgebrochen ->
+  // Flag false (kein erfundener Status). Cleanup über abgebrochen-Flag + clearInterval.
+  useEffect(() => {
+    if (openFunction !== null) {
+      return undefined;
+    }
+    let abgebrochen = false;
+
+    const laden = async () => {
+      const [recordings, tasks] = await Promise.allSettled([
+        fetchRecordings(),
+        fetchLoggingTasks(),
+      ]);
+      if (abgebrochen) {
+        return;
+      }
+      setOutboundAktiv(
+        recordings.status === "fulfilled" &&
+          recordings.value.some((r) => r.state === "active"),
+      );
+      setLoggingAktiv(
+        tasks.status === "fulfilled" &&
+          tasks.value.some((task) => task.state === ZUSTAND.ACTIVE),
+      );
+    };
+
+    laden();
+    const id = setInterval(laden, AKTIV_POLL_MS);
+    return () => {
+      abgebrochen = true;
+      clearInterval(id);
+    };
   }, [openFunction]);
 
   if (openFunction === "scan") {
@@ -733,6 +785,13 @@ export default function ObserveView({
           subtitle={t(`beobachten.cards.${id}.subtitle`)}
           locked={locked}
           lockedReason={locked ? t(`beobachten.cards.${id}.locked`) : undefined}
+          aktiv={
+            id === "outbound"
+              ? outboundAktiv
+              : id === "logging"
+                ? loggingAktiv
+                : false
+          }
           onOpen={() => setOpenFunction(id)}
         />
       ))}

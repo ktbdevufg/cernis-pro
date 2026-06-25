@@ -38,9 +38,39 @@
   justify-content: space-between;
 }
 
+/* Linke Gruppe im Kopf: Icon + optionales "aktiv"-Kennzeichen. Bündelt beide,
+   damit der Info-Button rechts (space-between) nicht nach außen gedrückt wird. */
+.function-card__head-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .function-card__icon {
   display: inline-flex;
   color: var(--color-accent);
+}
+
+/* Ruhiges grünes "aktiv"-Kennzeichen (F3b): schlichtes Pill, nur Token-Farben. */
+.function-card__aktiv {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--status-active-text);
+  background: var(--status-active-bg);
+  border: 1px solid var(--status-active-bd);
+  border-radius: 999px;
+}
+
+/* Kleiner statischer grüner Punkt vor dem Text (kein Puls — bewusst ruhig). */
+.function-card__aktiv-punkt {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--status-active-text);
 }
 
 .function-card__info {

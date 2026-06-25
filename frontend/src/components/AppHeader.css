@@ -37,6 +37,15 @@
   color: var(--color-text-tert);
 }
 
+/* Wrapper fuer die Kopfzeilen-Pills (rot Live-Monitoring + gelb Aussenkontakte).
+   Haelt beide mit Abstand nebeneinander, ohne dass das Header-space-between sie
+   auseinanderdrueckt. */
+.app-header__pills {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .app-header__controls {
   display: flex;
   align-items: center;

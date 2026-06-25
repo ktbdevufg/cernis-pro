@@ -55,6 +55,14 @@
   --color-ok-bg: #E1F5EE;
   --color-ok-text: #0F6E56;
 
+  /* "aktiv/online"-Kennzeichen (F3b): ruhiges, echtes Grün (klar gegen das
+     Teal/Akzent-Blau abgesetzt) für ein schlichtes Status-Badge an den Funktions-
+     Kacheln. Eigenes Set neben den sev-/status-Tokens, additiv. text = dunkles,
+     gut lesbares Grün, bg = sehr heller grüner Ton, bd = mittlerer grüner Ton. */
+  --status-active-text: #0F6E56;
+  --status-active-bd: #5DCAA5;
+  --status-active-bg: #E1F5EE;
+
   /* Status-Böppel: satter, leuchtender Grünton (aktiv) / dunkel-gedämpft (inaktiv) /
      rot (offline) / orange (degraded). */
   --status-aktiv: #16A34A;
@@ -116,6 +124,12 @@
   --color-link: #85B7EB;
   --color-ok-bg: #0c2e26;
   --color-ok-text: #9FE1CB;
+
+  /* "aktiv/online"-Kennzeichen (F3b) im Dunkelmodus: text helles Grün, bg sehr
+     dunkles Grün, bd mittleres Grün — Helligkeit/Kontrast analog zum sev-Set. */
+  --status-active-text: #5DCAA5;
+  --status-active-bd: #2C7A60;
+  --status-active-bg: #11271F;
 
   /* Status-Böppel: sattes v1-Grün (aktiv) / sehr dunkel-entsättigt (inaktiv) /
      rot (offline) / orange (degraded). */

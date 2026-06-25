@@ -9,6 +9,17 @@
     "liveOne": "Live monitoring active",
     "liveMany": "{{count}} monitorings active",
     "liveZurAnsicht": "Open logging view",
+    "outboundRecOne": "Outbound recording running",
+    "outboundRecZurAnsicht": "Go to outbound contacts",
+    "outboundRecRest": {
+      "tage": "{{value}} d",
+      "stunden": "{{value}} h",
+      "minuten": "{{value}} min",
+      "sekunden": "{{value}} s",
+      "zwei": "{{erste}} {{zweite}} left",
+      "eine": "{{erste}} left",
+      "jetzt": "ending now"
+    },
     "home": "Go to home"
   },
   "settings": {
@@ -209,7 +220,8 @@
   "cards": {
     "open": "Open",
     "back": "Back",
-    "infoLabel": "More information"
+    "infoLabel": "More information",
+    "aktiv": "active"
   },
   "overview": {
     "empty": {

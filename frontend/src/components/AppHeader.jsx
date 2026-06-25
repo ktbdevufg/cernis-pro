@@ -7,10 +7,11 @@ import { BookOpen, Settings } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import LivePill from "./LivePill.jsx";
+import OutboundRecordingPill from "./OutboundRecordingPill.jsx";
 import ThemeToggle from "./ThemeToggle.jsx";
 import "./AppHeader.css";
 
-export default function AppHeader({ theme, onThemeChange, onOpenSettings, onOpenManual, onGoToLogging, onGoHome }) {
+export default function AppHeader({ theme, onThemeChange, onOpenSettings, onOpenManual, onGoToLogging, onGoToOutbound, onGoHome }) {
   const { t } = useTranslation();
 
   return (
@@ -34,9 +35,15 @@ export default function AppHeader({ theme, onThemeChange, onOpenSettings, onOpen
         </span>
       </button>
 
-      {/* Live-Monitoring-Pill: nur sichtbar, wenn eine Logging-Aufgabe aktiv ist
-          (datengetrieben, eigener Poll). Klick fuehrt zur Logging-Ansicht. */}
-      <LivePill onOeffnen={onGoToLogging} />
+      {/* Kopfzeilen-Pills: jeweils nur sichtbar, wenn etwas aktiv ist
+          (datengetrieben, eigener Poll). Rot = Live-Monitoring (Logging-Ansicht),
+          Gelb = Aussenkontakte-Aufzeichnung. Beide koennen gleichzeitig sichtbar
+          sein -- ein Wrapper haelt sie mit Abstand nebeneinander, ohne dass das
+          Header-space-between sie auseinanderdrueckt. */}
+      <div className="app-header__pills">
+        <LivePill onOeffnen={onGoToLogging} />
+        <OutboundRecordingPill onOeffnen={onGoToOutbound} />
+      </div>
 
       <div className="app-header__controls">
         <ThemeToggle theme={theme} onChange={onThemeChange} />
