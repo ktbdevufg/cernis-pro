@@ -26,17 +26,17 @@
     }
   },
   "help.startseite.uebersicht": {
-    "status": "vorlaeufig",
+    "status": "final",
     "kategorie": "Startseite",
     "de": {
       "titel": "Die Startseite (Lage-Ueberblick)",
       "kurz": "Die Startseite fasst die Lage Ihres Netzes auf einen Blick zusammen: Status, Schnellzugriffe, beachtenswerte Hinweise, neue Schwachstellen und zwei Live-Kennzahlen. Jeder Bereich laesst sich einzeln ein- und ausblenden.",
-      "lang": "Die Startseite ist Ihr Einstiegspunkt. Sie ist bewusst ruhig gehalten, wenn alles in Ordnung ist, und tritt erst hervor, wenn es etwas zu zeigen gibt.\n\nSie besteht aus mehreren Bereichen: einer Status-Zeile mit nuechternen Fakten und Zeitbezug, Schnellzugriff-Kacheln zu den wichtigsten Funktionen, einem Bereich fuer beachtenswerte Hinweise (erscheint nur, wenn die Analyse etwas gefunden hat), einer Liste neuer Schwachstellen sowie einer schmalen Kennzahlen-Leiste am unteren Rand mit zwei Live-Werten: Apps mit Verkehr und aktive Verbindungen.\n\nAlle Bereiche koennen Sie einzeln in den Einstellungen ein- oder ausschalten - die Startseite zeigt also genau das, was fuer Sie zaehlt.\n\nHinweis: Dieser Abschnitt beschreibt das abgestimmte Konzept. Das endgueltige Aussehen wird im Rahmen der Oberflaechen-Ueberarbeitung festgelegt."
+      "lang": "Die Startseite ist Ihr Einstiegspunkt. Sie ist bewusst ruhig gehalten, wenn alles in Ordnung ist, und tritt erst hervor, wenn es etwas zu zeigen gibt.\n\nSie besteht aus mehreren Bereichen: einer Status-Zeile mit nuechternen Fakten und Zeitbezug, Schnellzugriff-Kacheln zu den wichtigsten Funktionen, einem Bereich fuer beachtenswerte Hinweise (erscheint nur, wenn die Analyse etwas gefunden hat), einer Liste neuer Schwachstellen sowie einer schmalen Kennzahlen-Leiste am unteren Rand mit zwei Live-Werten: Apps mit Verkehr und aktive Verbindungen.\n\nAlle Bereiche koennen Sie einzeln in den Einstellungen ein- oder ausschalten - die Startseite zeigt also genau das, was fuer Sie zaehlt."
     },
     "en": {
       "titel": "The Home Screen (Situation Overview)",
       "kurz": "The home screen sums up your network at a glance: status, quick access, noteworthy hints, new vulnerabilities, and two live metrics. Each section can be shown or hidden individually.",
-      "lang": "The home screen is your starting point. It is deliberately calm when everything is fine, and only steps forward when there is something to show.\n\nIt consists of several sections: a status line with plain facts and a timestamp, quick-access tiles for the most important features, an area for noteworthy hints (shown only when the analysis has found something), a list of new vulnerabilities, and a slim metrics strip at the bottom with two live values: apps with traffic and active connections.\n\nYou can switch each section on or off individually in the settings - so the home screen shows exactly what matters to you.\n\nNote: This section describes the agreed concept. The final appearance will be decided during the user interface redesign."
+      "lang": "The home screen is your starting point. It is deliberately calm when everything is fine, and only steps forward when there is something to show.\n\nIt consists of several sections: a status line with plain facts and a timestamp, quick-access tiles for the most important features, an area for noteworthy hints (shown only when the analysis has found something), a list of new vulnerabilities, and a slim metrics strip at the bottom with two live values: apps with traffic and active connections.\n\nYou can switch each section on or off individually in the settings - so the home screen shows exactly what matters to you."
     }
   },
   "help.scan.start": {
