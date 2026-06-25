@@ -4,6 +4,10 @@ from application.outbound_log.errors import (
     RecordingConflict,
     RecordingNotFound,
 )
+from application.outbound_log.recorder import (
+    ContactSnapshotProvider,
+    RunOutboundRecorder,
+)
 from application.outbound_log.use_cases import (
     CreateOutboundRecording,
     DeleteOutboundRecording,
@@ -19,6 +23,7 @@ from application.outbound_log.use_cases import (
 )
 
 __all__ = [
+    "ContactSnapshotProvider",
     "CreateOutboundRecording",
     "DeleteOutboundRecording",
     "EnforceOutboundDetailRetention",
@@ -30,6 +35,7 @@ __all__ = [
     "RecordingConflict",
     "RecordingNotFound",
     "ResumeOutboundRecording",
+    "RunOutboundRecorder",
     "StartOutboundRecording",
     "StopOutboundRecording",
 ]

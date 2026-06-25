@@ -334,6 +334,7 @@ from application.monitoring import (
 )
 from application.monitoring.scheduler_handler import MonitoringWindowHandler
 from application.outbound import BuildOutboundContacts, RawConnection
+from application.outbound_log import RunOutboundRecorder
 from application.process import CheckProcessPermission, ListProcesses
 from application.reporting import (
     BuildSecurityReport,
@@ -410,6 +411,7 @@ from domain.monitoring import (
     ThresholdCondition,
     compute_sla_stats,
 )
+from domain.outbound_log import ContactDelta
 from domain.process import classify_kind
 from domain.scanning import EnrichedHost
 from domain.scheduler.models import DailyWindow
@@ -473,6 +475,9 @@ from infrastructure.monitoring import (
     SqliteSlaSampleRepository,
     WebSocketMonitorBroadcaster,
 )
+from infrastructure.outbound_log_aggregate import SqliteOutboundAggregateRepository
+from infrastructure.outbound_log_detail import SqliteOutboundDetailRepository
+from infrastructure.outbound_log_recordings import SqliteOutboundRecordingRepository
 from infrastructure.process_linux import PsutilProcessAdapter
 from infrastructure.process_permission import ProcessPermissionAdapter
 from infrastructure.resolver import (
@@ -1688,6 +1693,15 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             run_cve_monitor_uc = _build_run_cve_monitor()
             _app.state.run_cve_monitor = run_cve_monitor_uc
             _app.state.cve_monitor_task = asyncio.create_task(run_cve_monitor_uc.run())
+            # ── Aussenkontakte-Recorder (E3b) ─────────────────────────────────
+            # Snapshot-Worker (Muster cve_monitor_task): tickt bis stop(); schreibt aber
+            # nur, wenn ueber den (in E4 kommenden) REST-Weg eine Aufzeichnung ACTIVE
+            # gesetzt wurde. Bis dahin tickt er und macht nur DETAIL-Retention (harmlos,
+            # leere DB -- ehrlicher Leerzustand, S3). Haengt an app.state; der Teardown
+            # stoppt+cancelt+awaitet ihn.
+            run_outbound_recorder_uc = _build_run_outbound_recorder()
+            _app.state.run_outbound_recorder = run_outbound_recorder_uc
+            _app.state.outbound_recorder_task = asyncio.create_task(run_outbound_recorder_uc.run())
             # ── v2-Scheduler-Worker (Block 3a, Etappe 3b) ─────────────────────
             # Lifespan-Worker (Muster cve_monitor_task): tickt bis stop(); der Task
             # haengt an app.state (kein GC). Die Handler-Registry ist in 3b LEER --
@@ -1725,6 +1739,13 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             _app.state.cve_monitor_task.cancel()
             with suppress(asyncio.CancelledError):
                 await _app.state.cve_monitor_task
+            # Aussenkontakte-Recorder (E3b): selber Teardown wie der cve_monitor_task
+            # (stop-Flag + cancel + awaiten, CancelledError unterdruecken). Laeuft immer
+            # (im bootstrap-Block gestartet).
+            run_outbound_recorder_uc.stop()
+            _app.state.outbound_recorder_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await _app.state.outbound_recorder_task
             # v2-Scheduler-Worker (Etappe 3b): selber Teardown wie der cve_monitor_task
             # (stop-Flag + cancel + awaiten, CancelledError unterdruecken). Laeuft immer
             # (im bootstrap-Block gestartet).
@@ -2100,6 +2121,26 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         from modules.db_path import get_db_path
 
         return SqliteLoggingEventRepository(get_db_path())
+
+    # Aussenkontakte-Aufzeichnung (E3b) -- drei Repos je eigener sqlite-Tabelle, Muster
+    # der logging_*-Factories oben (db_path-Factory, lru_cache-Singleton).
+    @lru_cache(maxsize=1)
+    def outbound_recording_repository() -> SqliteOutboundRecordingRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteOutboundRecordingRepository(get_db_path())
+
+    @lru_cache(maxsize=1)
+    def outbound_detail_repository() -> SqliteOutboundDetailRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteOutboundDetailRepository(get_db_path())
+
+    @lru_cache(maxsize=1)
+    def outbound_aggregate_repository() -> SqliteOutboundAggregateRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteOutboundAggregateRepository(get_db_path())
 
     @lru_cache(maxsize=1)
     def job_scheduler() -> ApschedulerJobScheduler:
@@ -3177,6 +3218,77 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 for contact in overview.contacts
             ],
             host_scope=overview.host_scope,
+        )
+
+    # Snapshot-Naht des Aussenkontakte-Recorders (E3b): liefert den AKTUELLEN Snapshot
+    # DIESES Hosts als list[ContactDelta] (eine je Remote-IP). Nutzt DIESELBE
+    # Provider-Kette wie _outbound_contacts (traffic-conns -> RawConnection, SNI+PTR-Namen,
+    # Geo/Operator) ueber denselben Use-Case BuildOutboundContacts und mappt dessen
+    # OutboundContact-Ergebnisse 1:1 auf ContactDelta -- der sauberste Reuse ohne Duplikat
+    # der Gruppierungs-/Anreicherungslogik. Unterschied zu _outbound_contacts: KEINE
+    # api-Projektion (kein OutboundOverviewOut), KEIN pid (ContactDelta fuehrt kein pid).
+    async def _outbound_contact_deltas() -> list[ContactDelta]:
+        conns = await _traffic_adapter().list_connections()
+        raws = [
+            RawConnection(
+                remote_ip=c.remote.ip,
+                remote_port=c.remote.port,
+                app_name=c.app_name,
+                pid=c.pid,
+            )
+            for c in conns
+            if c.remote is not None
+        ]
+
+        def _connections_provider() -> list[RawConnection]:
+            return raws
+
+        async def _hostname_provider(ips: Sequence[str]) -> dict[str, str | None]:
+            wanted = set(ips)
+            sni_by_ip: dict[str, str] = {}
+            for observed in GetObservedSni(sni_sniffer())():
+                if observed.remote_ip in wanted:
+                    sni_by_ip.setdefault(observed.remote_ip, observed.hostname)
+            ptr_by_ip = await resolve_ptr_batch_uc(tuple(ips))
+            return {ip: sni_by_ip.get(ip) or ptr_by_ip.get(ip) for ip in ips}
+
+        async def _geo_operator_provider(
+            ip: str,
+        ) -> tuple[str | None, str | None, str | None]:
+            facts = await _resolve_endpoint(ip, None)
+            country = facts.country_geodb.value or facts.country_rdap_net.value
+            operator = facts.asn_org.value or (f"AS{facts.asn.value}" if facts.asn.value else None)
+            asn = facts.asn.value
+            return (country, operator, asn)
+
+        overview = await BuildOutboundContacts(
+            _connections_provider, _hostname_provider, _geo_operator_provider
+        )()
+        # 1:1-Map OutboundContact -> ContactDelta (ohne pid -- ContactDelta fuehrt es nicht;
+        # die App-Zuordnung bleibt in app_name).
+        return [
+            ContactDelta(
+                remote_ip=contact.remote_ip,
+                remote_port=contact.remote_port,
+                hostname=contact.hostname,
+                country=contact.country,
+                operator=contact.operator,
+                asn=contact.asn,
+                app_name=contact.app_name,
+                connection_count=contact.connection_count,
+            )
+            for contact in overview.contacts
+        ]
+
+    # Worker-Factory des Aussenkontakte-Recorders (E3b, Muster _build_run_cve_monitor):
+    # verdrahtet die drei outbound_log-Repos + die Snapshot-Naht _outbound_contact_deltas.
+    # interval/retention bleiben Default (rec.interval_s pro Tick, 24-h-Detail-Retention).
+    def _build_run_outbound_recorder() -> RunOutboundRecorder:
+        return RunOutboundRecorder(
+            outbound_recording_repository(),
+            outbound_detail_repository(),
+            outbound_aggregate_repository(),
+            _outbound_contact_deltas,
         )
 
     app.include_router(outbound_router)
