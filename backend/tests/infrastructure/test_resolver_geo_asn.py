@@ -3,7 +3,8 @@
 Bewusst OHNE die echten CC0/PDDL-Riesen-CSVs (zu gross/langsam): je Familie 3-5 Zeilen
 werden inline in Temp-Dateien (``tmp_path``-Fixture) geschrieben und der Adapter auf
 dieses Temp-Verzeichnis gezeigt (Konstruktor-Injektion ``data_dir``). Geprueft werden der
-Lookup-Vertrag (country + ASN-Nummer, ``asn_org`` IMMER ``None``), die strenge
+Lookup-Vertrag (country + ASN-Nummer + ``asn_org`` aus Spalte 4, ``None`` nur bei keinem
+Treffer / leerem Namen), die strenge
 Leer-Toleranz (kein Treffer / ungueltige IP -> leerer Record, kein Wurf), der v6-Pfad,
 der echte Konfigurationsfehler (fehlende CSV -> ``ResolverDataMissing``) sowie die
 ``bisect``-Randfaelle der reinen Helfer.
@@ -18,6 +19,7 @@ from infrastructure.resolver.errors import ResolverDataMissing
 from infrastructure.resolver.geo_asn import (
     CsvGeoAsnDb,
     _find,
+    _find_asn,
     _parse_asn_csv,
     _parse_country_csv,
 )
@@ -32,10 +34,12 @@ _COUNTRY_V6 = (
     "2001:208::,2001:208:ffff:ffff:ffff:ffff:ffff:ffff,SG\n"
 )
 # asn_name (Spalte 4) enthaelt bewusst ein Komma -> prueft split(",", 3).
+# Letzte Zeile hat einen LEEREN Namen (trailing comma) -> asn_org muss None werden.
 _ASN_V4 = (
     "1.0.0.0,1.0.0.255,13335,CLOUDFLARENET\n"
     "8.8.8.0,8.8.8.255,15169,GOOGLE, LLC\n"
     "10.0.0.0,10.255.255.255,64512,PRIVATE-AS\n"
+    "203.0.113.0,203.0.113.255,65000,\n"
 )
 _ASN_V6 = (
     "2001:200::,2001:200:8ff:ffff:ffff:ffff:ffff:ffff,2500,WIDE-BB WIDE Project\n"
@@ -56,20 +60,30 @@ def data_dir(tmp_path: Path) -> Path:
 # ── Adapter-Lookup ────────────────────────────────────────────────────────────
 
 
-def test_ip_in_both_ranges_fills_country_and_asn(data_dir: Path) -> None:
-    """IP in Land- UND ASN-Range -> beide gesetzt, asn_org IMMER None."""
+def test_ip_in_both_ranges_fills_country_asn_and_org(data_dir: Path) -> None:
+    """IP in Land- UND ASN-Range -> country, asn UND asn_org (Spalte 4) gesetzt."""
+    db = CsvGeoAsnDb(data_dir=data_dir)
+    record = db.lookup("1.0.0.1")
+    assert record.country == "AU"
+    assert record.asn == "13335"
+    assert record.asn_org == "CLOUDFLARENET"
+
+
+def test_asn_name_with_comma_is_kept_whole(data_dir: Path) -> None:
+    """asn_name (Spalte 4) mit Komma bleibt VOLLSTAENDIG -- ASN-Nummer unverfaelscht."""
     db = CsvGeoAsnDb(data_dir=data_dir)
     record = db.lookup("8.8.8.8")
-    assert record.country == "US"
+    # "GOOGLE, LLC" darf die ASN-Nummer nicht verfaelschen UND muss komplett im Namen sein.
     assert record.asn == "15169"
-    assert record.asn_org is None
+    assert record.asn_org == "GOOGLE, LLC"
 
 
-def test_asn_name_with_comma_is_dropped(data_dir: Path) -> None:
-    """asn_name (Spalte 4) mit Komma stoert nicht -- nur die ASN-Nummer zaehlt."""
+def test_empty_asn_name_yields_none_org(data_dir: Path) -> None:
+    """ASN-Treffer mit leerem Namen (trailing comma) -> asn gesetzt, asn_org None (S3)."""
     db = CsvGeoAsnDb(data_dir=data_dir)
-    # "GOOGLE, LLC" als asn_name darf die ASN-Nummer nicht verfaelschen.
-    assert db.lookup("8.8.8.8").asn == "15169"
+    record = db.lookup("203.0.113.7")
+    assert record.asn == "65000"
+    assert record.asn_org is None
 
 
 def test_ip_only_in_country_range_leaves_asn_none(data_dir: Path) -> None:
@@ -85,7 +99,7 @@ def test_ip_only_in_country_range_leaves_asn_none(data_dir: Path) -> None:
 def test_ip_in_no_range_returns_empty_record(data_dir: Path) -> None:
     """IP in keinem Range -> leerer GeoAsnRecord (alle None)."""
     db = CsvGeoAsnDb(data_dir=data_dir)
-    assert db.lookup("203.0.113.1") == GeoAsnRecord()
+    assert db.lookup("198.51.100.1") == GeoAsnRecord()
 
 
 def test_ipv6_uses_v6_lists(data_dir: Path) -> None:
@@ -94,7 +108,7 @@ def test_ipv6_uses_v6_lists(data_dir: Path) -> None:
     record = db.lookup("2001:200::1")
     assert record.country == "JP"
     assert record.asn == "2500"
-    assert record.asn_org is None
+    assert record.asn_org == "WIDE-BB WIDE Project"
 
 
 def test_invalid_ip_returns_empty_record_without_raising(data_dir: Path) -> None:
@@ -123,10 +137,26 @@ def test_parse_country_csv_sorts_and_precomputes_ints() -> None:
     ]
 
 
-def test_parse_asn_csv_keeps_only_asn_number() -> None:
-    """_parse_asn_csv behaelt nur die ASN-Nummer (Spalte 3), verwirft asn_name."""
-    rows = _parse_asn_csv("8.8.8.0,8.8.8.255,15169,GOOGLE, LLC\n")
-    assert rows == [(0x08080800, 0x080808FF, "15169")]
+def test_parse_asn_csv_keeps_number_and_name() -> None:
+    """_parse_asn_csv behaelt ASN-Nummer (Spalte 3) UND Name (Spalte 4) als 4-Tupel.
+
+    Der Name mit Komma ("GOOGLE, LLC") muss vollstaendig erhalten bleiben (split mit
+    maxsplit=3); ein leerer Name (trailing comma) bleibt im Parser ein leerer String.
+    """
+    rows = _parse_asn_csv("8.8.8.0,8.8.8.255,15169,GOOGLE, LLC\n203.0.113.0,203.0.113.255,65000,\n")
+    assert rows == [
+        (0x08080800, 0x080808FF, "15169", "GOOGLE, LLC"),
+        (0xCB007100, 0xCB0071FF, "65000", ""),
+    ]
+
+
+def test_find_asn_returns_number_and_name_pair() -> None:
+    """_find_asn liefert das Paar (asn, asn_name) bei Treffer, None sonst -- roh."""
+    rows = _parse_asn_csv("1.0.0.0,1.0.0.255,13335,CLOUDFLARENET\n")
+    assert _find_asn(rows, 0x01000000) == ("13335", "CLOUDFLARENET")
+    assert _find_asn(rows, 0x010000FF) == ("13335", "CLOUDFLARENET")
+    assert _find_asn(rows, 0x01000100) is None
+    assert _find_asn([], 0x08080808) is None
 
 
 def test_find_exact_start_and_end_boundaries() -> None:

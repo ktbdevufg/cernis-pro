@@ -5,10 +5,12 @@ CSVs in ``backend/data`` (je Familie+Quelle: asn-country v4/v6, iptoasn-asn v4/v
 Kopfzeile, nach Range-Start aufsteigend, ueberlappungsfrei). Der Lookup ist SYNCHRON
 (kein Netz-/Loop-I/O) -- genau wie der Port es vorgibt.
 
-A1-Entscheidung: gefuellt werden ``country`` (aus asn-country) und ``asn`` = die
-ASN-NUMMER als String (aus iptoasn-asn, Spalte 3, z. B. ``"13335"``). ``asn_org`` bleibt
-BEWUSST ``None`` -- der Klartext-Org-Name kommt attributionsfrei aus RDAP (2c), nicht aus
-dieser DB. Der ``asn_name`` der CSV (Spalte 4) wird NICHT verwendet.
+Gefuellt werden ``country`` (aus asn-country) und ``asn`` = die ASN-NUMMER als String
+(aus iptoasn-asn, Spalte 3, z. B. ``"13335"``). ``asn_org`` wird seit F0 mit dem
+Betreibernamen aus Spalte 4 der iptoasn-asn-CSV durchgereicht (z. B. ``"CLOUDFLARENET"``)
+-- ROH, ohne Kosmetik (kein Trimming/Title-Case): ehrlich anzeigen, was die DB sagt. Ist
+der Name leer (trailing comma / fehlend) oder gibt es keinen ASN-Treffer, bleibt
+``asn_org`` ``None`` (kein erfundener Wert, S3).
 
 KEIN stiller Leer-Fallback wie ``modules.vendor._load_db``: fehlt eine CSV BEIM LADEN,
 ist das ein echter Konfigurationsfehler -> ``ResolverDataMissing``. Ein nicht gefundener
@@ -60,20 +62,24 @@ def _parse_country_csv(text: str) -> list[tuple[int, int, str]]:
     return rows
 
 
-def _parse_asn_csv(text: str) -> list[tuple[int, int, str]]:
-    """iptoasn-asn-CSV-Text -> nach ``start_int`` sortierte ``(start,end,asn_str)``-Liste.
+def _parse_asn_csv(text: str) -> list[tuple[int, int, str, str]]:
+    """iptoasn-asn-CSV-Text -> nach ``start_int`` sortierte ``(start,end,asn,name)``-Liste.
 
-    Spalten ``ip_range_start,ip_range_end,asn,asn_name`` ohne Kopfzeile. Nur die
-    ASN-NUMMER (Spalte 3) wird behalten -- ``asn_name`` (Spalte 4, kann Kommata
-    enthalten) wird bewusst verworfen, daher ``split(",", 3)``.
+    Spalten ``ip_range_start,ip_range_end,asn,asn_name`` ohne Kopfzeile. Seit F0 wird
+    NEBEN der ASN-NUMMER (Spalte 3) auch der Betreibername ``asn_name`` (Spalte 4)
+    behalten und als viertes Tupel-Element gefuehrt. ``asn_name`` kann selbst Kommata
+    enthalten (z. B. ``"GOOGLE, LLC"``) -- ``split(",", 3)`` mit ``maxsplit=3`` faengt das
+    ab, der Rest der Zeile landet vollstaendig im Namen. Ein leerer Name (trailing comma /
+    fehlend) bleibt hier ein leerer String; die Umsetzung zu ``None`` macht erst der
+    Lookup, NICHT der Parser.
     """
-    rows: list[tuple[int, int, str]] = []
+    rows: list[tuple[int, int, str, str]] = []
     for line in text.splitlines():
         line = line.strip()
         if not line:
             continue
-        start, end, asn, _asn_name = line.split(",", 3)
-        rows.append((_ip_int(start), _ip_int(end), asn))
+        start, end, asn, asn_name = line.split(",", 3)
+        rows.append((_ip_int(start), _ip_int(end), asn, asn_name))
     rows.sort(key=lambda row: row[0])
     return rows
 
@@ -91,6 +97,25 @@ def _find(sorted_rows: list[tuple[int, int, str]], ip_int: int) -> str | None:
     start_int, end_int, value = sorted_rows[idx]
     if start_int <= ip_int <= end_int:
         return value
+    return None
+
+
+def _find_asn(sorted_rows: list[tuple[int, int, str, str]], ip_int: int) -> tuple[str, str] | None:
+    """Wie ``_find``, aber fuer die 4-Tupel-ASN-Rows -> ``(asn_nummer, asn_name)``.
+
+    Eigene schmale Lookup-Funktion (statt ``_find`` generisch aufzuweichen), damit der
+    country-Pfad ueber 3-Tupel unveraendert und mypy-sauber bleibt. Identische
+    ``bisect``-Logik: nach ``start_int`` sortiert, Treffer wenn ``start <= ip <= end``.
+    Liefert bei Treffer das Paar ``(asn, asn_name)`` -- der ROHE Name, ohne Kosmetik;
+    die Leer-zu-``None``-Umsetzung macht erst der Aufrufer (``lookup``). Kein Treffer ->
+    ``None``.
+    """
+    idx = bisect.bisect_right(sorted_rows, (ip_int, _SENTINEL_HIGH, "", "")) - 1
+    if idx < 0:
+        return None
+    start_int, end_int, asn, asn_name = sorted_rows[idx]
+    if start_int <= ip_int <= end_int:
+        return asn, asn_name
     return None
 
 
@@ -119,7 +144,10 @@ class CsvGeoAsnDb:
 
         Reiner lokaler ``bisect``-Lookup. Ungueltige ``ip`` -> leerer Record (wirft
         NICHT). IPv4 nutzt die v4-, IPv6 die v6-Listen. Pro Familie kein Treffer ->
-        das jeweilige Feld ``None``. ``asn_org`` ist IMMER ``None`` (A1).
+        das jeweilige Feld ``None``. ``asn`` UND ``asn_org`` stammen aus demselben
+        ASN-Treffer: ``asn`` = die Nummer, ``asn_org`` = der ROHE Name aus Spalte 4 --
+        ODER ``None``, falls kein ASN-Treffer oder der Name leer ist (kein erfundener
+        Wert, S3).
         """
         try:
             ip_int = int(ipaddress.ip_address(ip))
@@ -130,10 +158,18 @@ class CsvGeoAsnDb:
         country_rows = self._country_v6 if is_v6 else self._country_v4
         asn_rows = self._asn_v6 if is_v6 else self._asn_v4
 
+        asn_hit = _find_asn(asn_rows, ip_int)
+        if asn_hit is None:
+            asn, asn_org = None, None
+        else:
+            asn, asn_name = asn_hit
+            # Leerer Name (trailing comma / fehlend) -> ehrlich ``None``, kein "".
+            asn_org = asn_name or None
+
         return GeoAsnRecord(
             country=_find(country_rows, ip_int),
-            asn=_find(asn_rows, ip_int),
-            asn_org=None,
+            asn=asn,
+            asn_org=asn_org,
         )
 
 
