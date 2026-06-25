@@ -312,3 +312,32 @@ def merge_contact(
         asn=_delta_or_keep(delta.asn, existing.asn),
         app_name=_delta_or_keep(delta.app_name, existing.app_name),
     )
+
+
+@dataclass(frozen=True)
+class OutboundDetailRow:
+    """Eine einzelne Zeile des rohen DETAIL-Zeitverlaufs (Lese-Datentraeger).
+
+    Der benannte Lese-Record des DETAIL-Append-Stores: EIN beobachteter Kontakt-
+    Messpunkt zu einem Zeitstempel, wie ihn der DETAIL-Adapter beim ``range`` heraus-
+    gibt. Strukturell die rohen ``save``-Felder des DETAIL-Repos, gebuendelt als
+    benannter Record statt als Tuple (Hausmuster: ``LoggingRttSample`` der monitoring-
+    Domaene -- ein Lese-Record mit mehreren Feldern wird benannt, nicht als Tuple
+    durchgereicht, und lebt in ``domain/``, nicht im ports-Ring).
+
+    ``ts`` ist Unix-ts. Die Anreicherungsfelder (``remote_port``/``hostname``/
+    ``country``/``operator``/``asn``/``app_name``/``pid``) sind ``None``, wenn fuer
+    diesen Messpunkt nicht ermittelbar; ``connection_count`` ist die in diesem Zyklus
+    gezaehlte Anzahl Verbindungen.
+    """
+
+    ts: float
+    remote_ip: str
+    remote_port: int | None
+    hostname: str | None
+    country: str | None
+    operator: str | None
+    asn: str | None
+    app_name: str | None
+    pid: int | None
+    connection_count: int
