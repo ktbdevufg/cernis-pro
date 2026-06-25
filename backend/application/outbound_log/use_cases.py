@@ -77,6 +77,12 @@ class CreateOutboundRecording:
     durchgereicht: die Domaenen-``__post_init__`` validiert (``interval_s`` in
     ``ALLOWED_INTERVALS``, DETAIL-Deckel ``1..86400``) und wirft ``ValueError`` bei
     Verstoss -- NICHT hier zusaetzlich pruefen (die Domaene ist die Wahrheit).
+
+    ``mode``/``depth`` kommen als ROHER ``str`` herein und werden HIER in die
+    Domaenen-``StrEnum`` gehoben -- so kennt der api-Rand die Domaenen-Enums NICHT
+    (import-linter: api -> nur application). Ein nicht zum Vokabular passender String
+    wirft ``ValueError`` (StrEnum-Konstruktor) -- der api-Rand mappt das auf 422. EXAKT
+    das ``capture_mode``/``operation_mode``-Muster aus ``CreateLoggingTask``.
     """
 
     def __init__(self, repo: OutboundRecordingRepository) -> None:
@@ -87,13 +93,17 @@ class CreateOutboundRecording:
         recording_id: str,
         label: str,
         purpose: str,
-        mode: RecordingMode,
-        depth: DetailDepth,
+        mode: str,
+        depth: str,
         interval_s: int,
         now: float,
         max_duration_s: int | None = None,
     ) -> OutboundRecording:
-        if mode is RecordingMode.AGGREGATE:
+        # ``str`` -> Enum-Hebung autoritativ HIER (Muster ``CaptureMode(...)``); ein
+        # Fehlwert wirft ``ValueError``, den der api-Rand auf 422 mappt.
+        mode_enum = RecordingMode(mode)
+        depth_enum = DetailDepth(depth)
+        if mode_enum is RecordingMode.AGGREGATE:
             # AGGREGATE kennt kein Zeitlimit -- einen faelschlich uebergebenen Wert
             # hart auf None zwingen (kein stiller Durchlass an die Domaene).
             effective_max_duration_s: int | None = None
@@ -106,8 +116,8 @@ class CreateOutboundRecording:
             id=recording_id,
             label=label,
             purpose=purpose,
-            mode=mode,
-            depth=depth,
+            mode=mode_enum,
+            depth=depth_enum,
             state=RecordingState.CREATED,
             interval_s=interval_s,
             created_at=now,

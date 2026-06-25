@@ -160,6 +160,19 @@ from api.monitoring import (
 from api.monitoring import router as monitoring_router
 from api.outbound import OutboundContactOut, OutboundOverviewOut, provide_outbound_contacts
 from api.outbound import router as outbound_router
+from api.outbound_log import (
+    provide_create_outbound_recording,
+    provide_delete_outbound_recording,
+    provide_get_outbound_aggregate,
+    provide_get_outbound_detail_range,
+    provide_get_outbound_recording,
+    provide_list_outbound_recordings,
+    provide_pause_outbound_recording,
+    provide_resume_outbound_recording,
+    provide_start_outbound_recording,
+    provide_stop_outbound_recording,
+)
+from api.outbound_log import router as outbound_log_router
 from api.process import provide_check_process_permission, provide_list_processes
 from api.process import router as process_router
 from api.report import (
@@ -334,7 +347,19 @@ from application.monitoring import (
 )
 from application.monitoring.scheduler_handler import MonitoringWindowHandler
 from application.outbound import BuildOutboundContacts, RawConnection
-from application.outbound_log import RunOutboundRecorder
+from application.outbound_log import (
+    CreateOutboundRecording,
+    DeleteOutboundRecording,
+    GetOutboundAggregate,
+    GetOutboundDetailRange,
+    GetOutboundRecording,
+    ListOutboundRecordings,
+    PauseOutboundRecording,
+    ResumeOutboundRecording,
+    RunOutboundRecorder,
+    StartOutboundRecording,
+    StopOutboundRecording,
+)
 from application.process import CheckProcessPermission, ListProcesses
 from application.reporting import (
     BuildSecurityReport,
@@ -3293,6 +3318,49 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     app.include_router(outbound_router)
     app.dependency_overrides[provide_outbound_contacts] = lambda: _outbound_contacts
+
+    # ── Aussenkontakte-Aufzeichnung v2 verdrahten (E4; Regel 5: Naht nur hier) ──
+    # Lifecycle-/Lese-Use-Cases ueber den drei outbound_log-Repos (E3b, db_path-Factory +
+    # lru_cache-Singleton oben). Muster wie die monitoring-Logging-Use-Cases: jeder Marker
+    # bekommt eine Lambda, die den Use-Case mit den passenden Repos baut. Der Recorder-Worker
+    # (Lifespan) ist davon getrennt -- hier NUR die REST-Endpunkte.
+    # CreateOutboundRecording/Start/Pause/Resume/Stop/List/Get arbeiten allein ueber dem
+    # Recording-Repo; GetOutboundAggregate ueber dem Aggregate-Repo, GetOutboundDetailRange
+    # ueber dem Detail-Repo. DeleteOutboundRecording braucht ALLE DREI Repos (loescht die
+    # Definition + raeumt die Aggregate; das Detail-Repo wird gehalten, s. Use-Case-Docstring).
+    app.include_router(outbound_log_router)
+    app.dependency_overrides[provide_create_outbound_recording] = lambda: CreateOutboundRecording(
+        outbound_recording_repository()
+    )
+    app.dependency_overrides[provide_start_outbound_recording] = lambda: StartOutboundRecording(
+        outbound_recording_repository()
+    )
+    app.dependency_overrides[provide_pause_outbound_recording] = lambda: PauseOutboundRecording(
+        outbound_recording_repository()
+    )
+    app.dependency_overrides[provide_resume_outbound_recording] = lambda: ResumeOutboundRecording(
+        outbound_recording_repository()
+    )
+    app.dependency_overrides[provide_stop_outbound_recording] = lambda: StopOutboundRecording(
+        outbound_recording_repository()
+    )
+    app.dependency_overrides[provide_delete_outbound_recording] = lambda: DeleteOutboundRecording(
+        outbound_recording_repository(),
+        outbound_detail_repository(),
+        outbound_aggregate_repository(),
+    )
+    app.dependency_overrides[provide_list_outbound_recordings] = lambda: ListOutboundRecordings(
+        outbound_recording_repository()
+    )
+    app.dependency_overrides[provide_get_outbound_recording] = lambda: GetOutboundRecording(
+        outbound_recording_repository()
+    )
+    app.dependency_overrides[provide_get_outbound_aggregate] = lambda: GetOutboundAggregate(
+        outbound_aggregate_repository()
+    )
+    app.dependency_overrides[provide_get_outbound_detail_range] = lambda: GetOutboundDetailRange(
+        outbound_detail_repository()
+    )
 
     # ── dns_watch-Domaene v2 verdrahten (Block 2, Etappe 2d-3; Regel 5: Naht nur hier) ──
     # Die DNS-Befund-Sicht DIESES Hosts fuehrt FUENF Quellen zusammen
