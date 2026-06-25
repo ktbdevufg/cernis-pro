@@ -371,6 +371,76 @@
       "lang": "The settings are a separate area, reachable via the gear icon at the top right.\n\nHere you choose the language (German or English) and the appearance (light or dark). You configure the analysis rules - such as which ports count as notable or critical and from how many open ports a warning is given. And you decide which sections of the home screen are shown.\n\nAll settings are stored safely in a database. So you do not have to edit configuration files by hand - this is a deliberate choice so that nothing accidentally breaks.\n\nIf a stored value should ever be corrupted, CERNIS PRO switches all rules on as a precaution and notes this in the log, rather than simply refusing service."
     }
   },
+  "help.settings.allgemein": {
+    "status": "final",
+    "kategorie": "Einstellungen",
+    "de": {
+      "titel": "Allgemein",
+      "kurz": "Unter Allgemein stellen Sie die Sprache der Oberflaeche ein und legen fest, ob sich Verkehrs-Ansichten automatisch aktualisieren.",
+      "lang": "Der Bereich Allgemein buendelt die grundlegenden Vorlieben fuer die Bedienung.\n\nSprache: Hier waehlen Sie zwischen Deutsch und Englisch. Die Umstellung greift sofort und betrifft die gesamte Oberflaeche einschliesslich dieses Handbuchs.\n\nAutomatisch aktualisieren: Diese Einstellung gehoert zu den Verkehrs-Ansichten. Ist sie eingeschaltet, frischt CERNIS PRO die angezeigten Zahlen in regelmaessigen Abstaenden von selbst auf, sodass Sie nichts von Hand neu laden muessen. Schalten Sie sie aus, bleibt die Ansicht stehen, bis Sie selbst aktualisieren - das ist ruhiger und spart Ressourcen, wenn Sie nur gelegentlich hinschauen.\n\nDas Erscheinungsbild (hell oder dunkel) stellen Sie uebrigens nicht hier ein, sondern jederzeit ueber den Umschalter oben rechts in der Kopfzeile."
+    },
+    "en": {
+      "titel": "General",
+      "kurz": "Under General you set the language of the interface and decide whether traffic views refresh automatically.",
+      "lang": "The General area bundles the basic preferences for using the program.\n\nLanguage: Here you choose between German and English. The change takes effect immediately and applies to the entire interface, including this manual.\n\nAuto refresh: This setting belongs to the traffic views. When it is on, CERNIS PRO refreshes the displayed figures by itself at regular intervals, so you do not have to reload anything by hand. When it is off, the view stays put until you refresh it yourself - which is calmer and saves resources if you only check in occasionally.\n\nThe appearance (light or dark), by the way, is not set here but at any time via the toggle at the top right of the header."
+    }
+  },
+  "help.settings.startseite": {
+    "status": "final",
+    "kategorie": "Einstellungen",
+    "de": {
+      "titel": "Startseite",
+      "kurz": "Hier bestimmen Sie, welche Bereiche die Startseite anzeigt - jeder Bereich laesst sich einzeln ein- oder ausblenden.",
+      "lang": "Die Startseite zeigt mehrere Bereiche; in diesen Einstellungen entscheiden Sie pro Bereich, ob er erscheint oder nicht. So sehen Sie auf der Startseite genau das, was Sie interessiert.\n\nWaehlbar sind: die Status-Zeile (nuechterne Lage auf einen Blick), der Schnellzugriff (Kacheln zu den wichtigsten Funktionen), die beachtenswerten Hinweise (erscheinen nur, wenn die Analyse etwas gefunden hat), die neuen Schwachstellen (CVE), die Kennzahlen-Leiste am unteren Rand sowie der Monitoring-Status.\n\nEin Bereich, den Sie ausblenden, verschwindet nur von der Startseite - die zugehoerige Funktion bleibt vollstaendig erhalten und ueber das Menue erreichbar. Sie koennen die Auswahl jederzeit aendern."
+    },
+    "en": {
+      "titel": "Home screen",
+      "kurz": "Here you decide which sections the home screen shows - each section can be shown or hidden individually.",
+      "lang": "The home screen shows several sections; in these settings you decide per section whether it appears or not. That way the home screen shows exactly what interests you.\n\nAvailable are: the status line (a plain situation at a glance), quick access (tiles for the most important features), the noteworthy hints (shown only when the analysis has found something), the new vulnerabilities (CVE), the metrics strip at the bottom, and the monitoring status.\n\nA section you hide only disappears from the home screen - the underlying feature stays fully intact and reachable via the menu. You can change the selection at any time."
+    }
+  },
+  "help.settings.fritzbox": {
+    "status": "final",
+    "kategorie": "Einstellungen",
+    "de": {
+      "titel": "FRITZ!Box",
+      "kurz": "Hinterlegen Sie hier die Zugangsdaten Ihrer FRITZ!Box, damit CERNIS PRO zusaetzliche Details direkt aus ihr auslesen kann. Die Angabe ist freiwillig.",
+      "lang": "Wenn Sie eine FRITZ!Box besitzen, kann CERNIS PRO viele nuetzliche Details direkt aus ihr auslesen - etwa Geraetemodell und Firmware, den Verbindungsstatus, die DSL-Werte, die aktiven WLAN-Geraete und die eingerichteten Portfreigaben.\n\nDamit das funktioniert, hinterlegen Sie hier drei Angaben: die Adresse der Box (Host), Ihren Benutzernamen und Ihr Passwort. Bei vielen Boxen ist die Adresse fritz.box; Benutzername und Passwort sind dieselben, mit denen Sie sich auch an der Box-Oberflaeche anmelden.\n\nDie Angabe ist vollkommen freiwillig. Lassen Sie die Felder leer, arbeitet CERNIS PRO normal weiter - es fehlen dann lediglich die zusaetzlichen Box-Details. Ihr Passwort wird sicher und getrennt gespeichert; ist eines hinterlegt, zeigt CERNIS PRO das nur als gesetzt an, ohne es im Klartext anzuzeigen. Ueber Entfernen loeschen Sie es jederzeit wieder."
+    },
+    "en": {
+      "titel": "FRITZ!Box",
+      "kurz": "Enter your FRITZ!Box credentials here so CERNIS PRO can read additional details directly from it. Providing them is optional.",
+      "lang": "If you own a FRITZ!Box, CERNIS PRO can read many useful details directly from it - such as device model and firmware, the connection status, the DSL values, the active Wi-Fi devices, and the configured port forwardings.\n\nFor this to work, you enter three things here: the address of the box (host), your user name, and your password. On many boxes the address is fritz.box; user name and password are the same ones you use to log in to the box's own interface.\n\nProviding this is entirely optional. If you leave the fields empty, CERNIS PRO carries on normally - only the additional box details are then missing. Your password is stored securely and separately; if one is set, CERNIS PRO only shows it as set, without revealing it in plain text. Via Remove you can delete it again at any time."
+    }
+  },
+  "help.settings.auffaelligkeit": {
+    "status": "final",
+    "kategorie": "Einstellungen",
+    "de": {
+      "titel": "Was ist auffaellig?",
+      "kurz": "Hier legen Sie fest, welche Ports als auffaellig oder kritisch gelten und ab wann CERNIS PRO warnt. Die fachliche Bedeutung der Regeln erklaert der Abschnitt Analyse-Regeln.",
+      "lang": "In diesem Bereich stellen Sie ein, was CERNIS PRO bei der Bewertung Ihrer Geraete als auffaellig ansieht. Es geht dabei um offene Ports - das sind die Tueren, ueber die ein Geraet im Netzwerk erreichbar ist.\n\nSie koennen einzelnen Ports eine Stufe zuweisen: auffaellig (einen Blick wert) oder kritisch (verdient besondere Aufmerksamkeit). Ausserdem laesst sich festlegen, ab welcher Anzahl offener Ports ein Geraet generell als auffaellig gilt - viele offene Tueren sind ein Hinweis, der Beachtung verdient.\n\nVoreingestellt ist ein sinnvoller Satz an Regeln, mit dem die meisten Anwender gut fahren. Ueber Zuruecksetzen kehren Sie jederzeit dorthin zurueck. Was die einzelnen Stufen fachlich bedeuten und wie CERNIS PRO daraus seine Bewertung bildet, lesen Sie ausfuehrlich im Abschnitt Analyse-Regeln."
+    },
+    "en": {
+      "titel": "What is notable?",
+      "kurz": "Here you define which ports count as notable or critical and when CERNIS PRO warns. The technical meaning of the rules is explained in the Analysis rules section.",
+      "lang": "In this area you set what CERNIS PRO regards as notable when rating your devices. It is about open ports - the doors through which a device can be reached on the network.\n\nYou can assign a level to individual ports: notable (worth a look) or critical (deserves special attention). You can also define from how many open ports a device counts as notable in general - many open doors are a sign worth noting.\n\nA sensible set of rules is preset, which works well for most users. Via Reset you can return to it at any time. What the individual levels mean technically, and how CERNIS PRO forms its rating from them, is explained in detail in the Analysis rules section."
+    }
+  },
+  "help.settings.dnswatch": {
+    "status": "final",
+    "kategorie": "Einstellungen",
+    "de": {
+      "titel": "DNS-Waechter",
+      "kurz": "Hier hinterlegen Sie, welche DNS-Server fuer Ihr Netz normal sind und welche DoH-Anbieter bekannt sind. Was der DNS-Waechter tut, erklaert sein eigener Abschnitt.",
+      "lang": "Der DNS-Waechter achtet darauf, ueber welche Server die Namensaufloesung in Ihrem Netz laeuft. In diesen Einstellungen sagen Sie ihm, was bei Ihnen normal ist.\n\nErwartete DNS-Server: Tragen Sie hier die Adressen der DNS-Server ein, die dieser Rechner regulaer nutzt. Lassen Sie die Liste leer, gilt Ihr Router als Standard - dann faellt jeder andere Resolver als offen auf.\n\nBekannte DoH-Anbieter: DoH steht fuer DNS-over-HTTPS, eine verschluesselte Form der Namensaufloesung. Hinterlegen Sie hier die Adressen bekannter Anbieter, werden Treffer nur vorsichtig als moegliches DoH markiert, nicht als auffaellig.\n\nBeide Listen pflegen Sie ueber Hinzufuegen und Entfernen; ungueltige oder doppelte Adressen weist CERNIS PRO ab. Was der DNS-Waechter im Betrieb genau beobachtet und meldet, lesen Sie in seinem eigenen Abschnitt."
+    },
+    "en": {
+      "titel": "DNS watch",
+      "kurz": "Here you record which DNS servers are normal for your network and which DoH providers are known. What the DNS watch does is explained in its own section.",
+      "lang": "The DNS watch keeps an eye on which servers handle name resolution in your network. In these settings you tell it what is normal for you.\n\nExpected DNS servers: Enter the addresses of the DNS servers this computer regularly uses. If you leave the list empty, your router counts as the default - then any other resolver stands out as open.\n\nKnown DoH providers: DoH stands for DNS-over-HTTPS, an encrypted form of name resolution. If you record the addresses of known providers here, matches are only cautiously marked as possible DoH, not as notable.\n\nYou maintain both lists via Add and Remove; invalid or duplicate addresses are rejected by CERNIS PRO. What the DNS watch observes and reports in operation is explained in its own section."
+    }
+  },
   "help.analysis.regeln": {
     "status": "final",
     "kategorie": "Einstellungen",
