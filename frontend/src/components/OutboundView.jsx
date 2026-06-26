@@ -14,8 +14,14 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { fetchOutboundContacts } from "../api/outbound.js";
+import { matchContacts } from "../api/blocklist.js";
 import OutboundRecordingPanel from "./OutboundRecordingPanel.jsx";
 import "./OutboundView.css";
+
+// Reihenfolge/Erlaubte Gruppen der Blocklist-Badges. tracker_ads zuerst (häufiger,
+// harmloser), threat zuletzt (zurückhaltend hervorgehoben). Unbekannte Gruppen-
+// Strings werden NICHT als Badge gezeigt (kein roher Wire-String an den Nutzer).
+const BADGE_GRUPPEN = ["tracker_ads", "threat"];
 
 // Gruppierungs-Achsen des Segmented Control. Reihenfolge ist die Anzeige-
 // reihenfolge; DEFAULT = der erste Eintrag (Betreiber). feld zeigt auf das
@@ -78,10 +84,38 @@ function gruppiere(kontakte, achse, t) {
   return [...gruppen.values()].sort((a, b) => b.menge - a.menge);
 }
 
+// Bündelt die Blocklist-Treffer EINES Kontakts nach GRUPPE. Pro erlaubter Gruppe
+// (BADGE_GRUPPEN) ein Eintrag mit den getroffenen Quellen (dedupliziert über
+// sourceId); mehrere Threat-Listen ergeben EINE threat-Gruppe. Unbekannte Gruppen
+// werden ausgelassen (kein roher Wire-String). Rückgabe in fester BADGE_GRUPPEN-
+// Reihenfolge.
+function gruppiereTreffer(treffer) {
+  const proGruppe = new Map();
+  for (const m of treffer) {
+    if (!BADGE_GRUPPEN.includes(m.group)) {
+      continue;
+    }
+    let eintrag = proGruppe.get(m.group);
+    if (!eintrag) {
+      eintrag = { group: m.group, quellen: [], gesehen: new Set() };
+      proGruppe.set(m.group, eintrag);
+    }
+    // Quellen über sourceId deduplizieren (eine Quelle kann mehrfach treffen).
+    if (!eintrag.gesehen.has(m.sourceId)) {
+      eintrag.gesehen.add(m.sourceId);
+      eintrag.quellen.push({ sourceName: m.sourceName, matchedOn: m.matchedOn });
+    }
+  }
+  return BADGE_GRUPPEN.filter((g) => proGruppe.has(g)).map((g) =>
+    proGruppe.get(g),
+  );
+}
+
 // Eine Kontakt-Zeile: hostname (sonst remoteIp als ehrlicher Fallback), darunter
 // klein remoteIp + operator + ASN (vorhandene Felder; fehlende weglassen), rechts
-// appName-Pille (falls vorhanden) + "×connectionCount".
-function KontaktZeile({ kontakt }) {
+// appName-Pille (falls vorhanden) + "×connectionCount". treffer = die Blocklist-
+// Treffer dieses Kontakts (matches[] || []); rein additiv, urteilt NICHT.
+function KontaktZeile({ kontakt, treffer }) {
   const { t } = useTranslation();
 
   // hostname null -> IP zeigen. Der Untertitel führt die IP dann nur, wenn der
@@ -101,6 +135,9 @@ function KontaktZeile({ kontakt }) {
     subTeile.push(kontakt.asn);
   }
 
+  // Blocklist-Treffer nach Gruppe (dedupliziert). Leer -> kein Badge-Bereich.
+  const trefferGruppen = gruppiereTreffer(treffer ?? []);
+
   return (
     <li className="outbound-contact">
       <div className="outbound-contact__main">
@@ -109,6 +146,37 @@ function KontaktZeile({ kontakt }) {
           <span className="outbound-contact__sub outbound-mono">
             {subTeile.join(" · ")}
           </span>
+        )}
+        {trefferGruppen.length > 0 && (
+          <div className="outbound-contact__listen">
+            {trefferGruppen.map((eintrag) => {
+              // Quellen-Zeilen "<Quelle> (Treffer: <matchedOn>)" — die Quellangabe
+              // ist die rote Linie: der Nutzer MUSS die Quelle erfahren können.
+              const quellTexte = eintrag.quellen.map((q) =>
+                t("beobachten.outbound.match.sourcePattern", {
+                  source: q.sourceName,
+                  matchedOn: q.matchedOn,
+                }),
+              );
+              const klasse =
+                eintrag.group === "threat"
+                  ? "outbound-badge outbound-badge--threat"
+                  : "outbound-badge outbound-badge--tracker";
+              return (
+                <div key={eintrag.group} className="outbound-listen-treffer">
+                  <span
+                    className={klasse}
+                    title={`${t("beobachten.outbound.match.badgeTitle")}\n${quellTexte.join("\n")}`}
+                  >
+                    {t(`beobachten.outbound.match.group.${eintrag.group}`)}
+                  </span>
+                  <span className="outbound-listen-quellen">
+                    {quellTexte.join(" · ")}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
       <div className="outbound-contact__meta">
@@ -126,7 +194,8 @@ function KontaktZeile({ kontakt }) {
 }
 
 // Eine Gruppe: Kopfzeile (Gruppen-Label + Mengen-Zähler), darunter die Kontakte.
-function GruppenBlock({ gruppe }) {
+// trefferMap (remoteIp -> matches[]) reicht die Blocklist-Treffer pro Zeile durch.
+function GruppenBlock({ gruppe, trefferMap }) {
   const { t } = useTranslation();
   return (
     <section className="outbound-group">
@@ -138,7 +207,11 @@ function GruppenBlock({ gruppe }) {
       </div>
       <ul className="outbound-group__contacts">
         {gruppe.kontakte.map((kontakt) => (
-          <KontaktZeile key={kontakt.remoteIp} kontakt={kontakt} />
+          <KontaktZeile
+            key={kontakt.remoteIp}
+            kontakt={kontakt}
+            treffer={trefferMap.get(kontakt.remoteIp) ?? []}
+          />
         ))}
       </ul>
     </section>
@@ -160,6 +233,10 @@ export default function OutboundView() {
   // per onAktivCount nach oben gemeldet (kein zweiter Voll-Poll hier). Treibt den
   // Aufzeichnungs-Hinweis in der Banner-Zeile.
   const [aktivAnzahl, setAktivAnzahl] = useState(0);
+  // Blocklist-Abgleich der geladenen Kontakte (matchContacts-results). Eigene,
+  // fehlertolerante Naht: schlägt der Abgleich fehl, bleibt das leer -> keine
+  // Badges, kein Hinweis, kein Absturz. Die Kontakte-Liste selbst bleibt intakt.
+  const [matchResults, setMatchResults] = useState([]);
 
   // Beim Mount laden. t NIEMALS in dep-Array (react-i18next-Regel) — leeres
   // dep-Array, einmal beim Mount. Fehler tolerieren: leere Liste + ruhiger
@@ -185,6 +262,53 @@ export default function OutboundView() {
       abgebrochen = true;
     };
   }, []);
+
+  // Zweiter Effekt: nach geladenen Kontakten die Blocklist abgleichen. Abhängig von
+  // [kontakte] (NICHT t — react-i18next-Regel). matchContacts OHNE strictness, damit
+  // das Backend die in der Verwaltung gesetzte Strenge + Gruppen-Schalter nutzt
+  // (Anzeige bleibt konsistent zur Nutzer-Einstellung). Fehler werden STILL
+  // behandelt: nur console.error, keine Badges, kein Hinweis, kein Absturz.
+  useEffect(() => {
+    if (kontakte.length === 0) {
+      setMatchResults([]);
+      return undefined;
+    }
+    let abgebrochen = false;
+    (async () => {
+      try {
+        const { results } = await matchContacts(kontakte);
+        if (!abgebrochen) {
+          setMatchResults(results);
+        }
+      } catch (fehler) {
+        // Still: Liste bleibt voll funktionsfähig, nur ohne Badges.
+        console.error("Blocklist-Abgleich fehlgeschlagen", fehler);
+        if (!abgebrochen) {
+          setMatchResults([]);
+        }
+      }
+    })();
+    return () => {
+      abgebrochen = true;
+    };
+  }, [kontakte]);
+
+  // Lookup-Map remoteIp -> matches[] über dem results-State. Aggregiert (eine IP
+  // kommt höchstens einmal); defensiv überschreibend (letzte gewinnt, egal).
+  const trefferMap = useMemo(() => {
+    const map = new Map();
+    for (const r of matchResults) {
+      map.set(r.remoteIp, r.matches);
+    }
+    return map;
+  }, [matchResults]);
+
+  // Gibt es überhaupt einen Treffer? Steuert den einmaligen Quell-Hinweis (rote
+  // Linie): nur zeigen, wenn tatsächlich Listen-Einordnungen sichtbar sind.
+  const hatTreffer = useMemo(
+    () => matchResults.some((r) => r.matches.length > 0),
+    [matchResults],
+  );
 
   const achse = ACHSEN.find((a) => a.id === achseId) ?? ACHSEN[0];
 
@@ -240,6 +364,15 @@ export default function OutboundView() {
         </div>
       )}
 
+      {/* Rote-Linie-Hinweis (einmalig, NICHT pro Zeile): nur wenn überhaupt
+          Listen-Treffer sichtbar sind. Macht die Quelle der Einordnung explizit —
+          sie stammt aus den Verwaltungs-Listen, nicht von einem CERNIS-Urteil. */}
+      {hatTreffer && (
+        <div className="outbound__listen-hinweis" role="note">
+          {t("beobachten.outbound.match.disclaimer")}
+        </div>
+      )}
+
       {/* Aufzeichnungs-Leiste (integriert): immer sichtbar, mit aufklappbarer
           Verwaltung. Sitzt über der Steuerleiste der Live-Liste. */}
       <OutboundRecordingPanel onAktivCount={setAktivAnzahl} />
@@ -286,7 +419,11 @@ export default function OutboundView() {
       ) : (
         <div className="outbound__groups">
           {gruppen.map((gruppe) => (
-            <GruppenBlock key={gruppe.schluessel} gruppe={gruppe} />
+            <GruppenBlock
+              key={gruppe.schluessel}
+              gruppe={gruppe}
+              trefferMap={trefferMap}
+            />
           ))}
         </div>
       )}

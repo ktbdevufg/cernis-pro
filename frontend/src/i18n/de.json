@@ -526,7 +526,16 @@
       "emptyGroupProgramm": "Ohne Programm",
       "empty": "Keine Außenkontakte. Sobald dieser Rechner nach außen spricht, erscheinen sie hier.",
       "loadError": "Außenkontakte konnten nicht geladen werden.",
-      "connectionsSuffix": "×{{count}}"
+      "connectionsSuffix": "×{{count}}",
+      "match": {
+        "disclaimer": "Diese Einordnungen stammen aus den in der Verwaltung gepflegten Listen, nicht von CERNIS. CERNIS bildet sie nur ab.",
+        "group": {
+          "tracker_ads": "Tracker & Werbung",
+          "threat": "Bedrohung"
+        },
+        "sourcePattern": "{{source}} (Treffer: {{matchedOn}})",
+        "badgeTitle": "Auf welchen Listen dieser Kontakt steht — die Einordnung stammt aus den Listen, nicht von CERNIS."
+      }
     },
     "dnswatch": {
       "hostScopeLocal": "Befunde dieses Rechners — passiv beobachtet, kein netzweiter Blick.",

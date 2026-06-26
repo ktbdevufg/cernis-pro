@@ -526,7 +526,16 @@
       "emptyGroupProgramm": "No program",
       "empty": "No outbound contacts. As soon as this machine talks to the outside, they show up here.",
       "loadError": "Outbound contacts could not be loaded.",
-      "connectionsSuffix": "×{{count}}"
+      "connectionsSuffix": "×{{count}}",
+      "match": {
+        "disclaimer": "These classifications come from the lists maintained in management, not from CERNIS. CERNIS only reflects them.",
+        "group": {
+          "tracker_ads": "Trackers & advertising",
+          "threat": "Threat"
+        },
+        "sourcePattern": "{{source}} (matched on: {{matchedOn}})",
+        "badgeTitle": "Which lists this contact is on — the classification comes from the lists, not from CERNIS."
+      }
     },
     "dnswatch": {
       "hostScopeLocal": "Findings of this machine — passively observed, not a network-wide view.",
