@@ -1,14 +1,15 @@
-"""Tests des manuellen ClientHello-Parsers (das Herzstueck der sni-Infrastruktur).
+"""Tests des manuellen ClientHello-Parsers (das Herzstueck des Sniff-Kerns).
 
-Reine Byte-Pruefung OHNE Netz/scapy: ein synthetisch zusammengebauter, echter
-TLS-ClientHello mit SNI -> korrekter Hostname; jede Stoerung (abgeschnitten, kein
-Handshake, ServerHello, kein SNI) -> ``None`` (kein Crash). Die Bytes folgen exakt
-RFC 8446/6066 (Aufbau wie im Spike-Selbsttest).
+ETAPPE 2: ``parse_sni`` lebt jetzt im Helfer-Sniff-Kern (``sniffd.sniff_core``), nicht
+mehr im Backend-Adapter -- der Test ist mit umgezogen. Reine Byte-Pruefung OHNE
+Netz/scapy: ein synthetisch zusammengebauter, echter TLS-ClientHello mit SNI ->
+korrekter Hostname; jede Stoerung (abgeschnitten, kein Handshake, ServerHello, kein
+SNI) -> ``None`` (kein Crash). Die Bytes folgen exakt RFC 8446/6066.
 """
 
 import struct
 
-from infrastructure.sni.sni_sniffer import parse_sni
+from infrastructure.sniffd.sniff_core import parse_sni
 
 
 def _build_client_hello(host: bytes, *, extensions: bytes | None = None) -> bytes:
