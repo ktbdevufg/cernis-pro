@@ -10,8 +10,9 @@ Framing (laengen-praefixiert, ein Frame = eine Nachricht):
 
 Jede Nachricht ist ein JSON-Objekt mit einem Schluessel ``"type"`` (einer der
 Werte aus ``MessageType``). Befehle laufen vom Backend an den Helfer (START /
-STOP / PING), Antworten und Events vom Helfer zurueck (HIT / STARTED / STOPPED /
-PONG / ERROR).
+START_PCAP / START_LLDP / EXPORT_PCAP / STOP / PING), Antworten und Events vom
+Helfer zurueck (HIT / PACKET / NEIGHBORS / EXPORTED / STARTED / STOPPED / PONG /
+ERROR).
 """
 
 import json
@@ -33,18 +34,25 @@ class ProtocolError(Exception):
 class MessageType(StrEnum):
     """Die ``"type"``-Werte der IPC-Nachrichten.
 
-    Befehle (Backend -> Helfer): ``START``, ``STOP``, ``PING``.
-    Antworten/Events (Helfer -> Backend): ``HIT``, ``STARTED``, ``STOPPED``,
-    ``PONG``, ``ERROR``.
+    Befehle (Backend -> Helfer): ``START`` (= SNI), ``START_PCAP``,
+    ``START_LLDP``, ``EXPORT_PCAP``, ``STOP``, ``PING``.
+    Antworten/Events (Helfer -> Backend): ``HIT``, ``PACKET``, ``NEIGHBORS``,
+    ``EXPORTED``, ``STARTED``, ``STOPPED``, ``PONG``, ``ERROR``.
     """
 
     # Befehle vom Backend an den Helfer.
-    START = "START"
-    STOP = "STOP"
+    START = "START"  # SNI-Dauerstrom (unveraendert).
+    START_PCAP = "START_PCAP"  # pcap-Dauerstrom (PACKET-Events bis max_packets/STOP).
+    START_LLDP = "START_LLDP"  # einmaliger, zeitbegrenzter LLDP/CDP-Sniff (-> NEIGHBORS).
+    EXPORT_PCAP = "EXPORT_PCAP"  # gesammelte Rohpakete als .pcap schreiben (-> EXPORTED).
+    STOP = "STOP"  # beendet SNI- ODER pcap-Strom.
     PING = "PING"
 
     # Antworten/Events vom Helfer an das Backend.
-    HIT = "HIT"
+    HIT = "HIT"  # ein roher SNI-Hit.
+    PACKET = "PACKET"  # ein pcap-Summary-dict.
+    NEIGHBORS = "NEIGHBORS"  # die LLDP/CDP-Nachbarliste (am Ende des Sniffs).
+    EXPORTED = "EXPORTED"  # Ergebnis eines pcap-Exports ({"ok": bool}).
     STARTED = "STARTED"
     STOPPED = "STOPPED"
     PONG = "PONG"

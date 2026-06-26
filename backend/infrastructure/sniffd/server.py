@@ -10,9 +10,28 @@ Kommandos (Backend -> Helfer): ``PING`` -> ``PONG``; ``START`` (optional
 Sniff, sonst ``start_raw_sniff`` in eigenem Thread + ``STARTED`` + je Hit eine
 ``HIT``-Nachricht; ``STOP`` -> ``stop_event`` setzen, Sniff joinen, ``STOPPED``.
 
-Thread-Sicherheit: Hit-Thread (scapy-prn ruft ``on_hit``) und Kommando-Schleife
-schreiben denselben Socket -- ``send_message`` laeuft daher unter einem
-``threading.Lock``.
+ETAPPE 3a -- drei weitere Befehle (KEIN Backend-Adapter umgestellt, app.py
+unberuehrt; der Helfer bleibt isoliert per Socket testbar):
+
+* ``START_PCAP`` (optional ``interface``/``bpf_filter``, ``max_packets``) ->
+  ``check_raw_permission``, sonst ``start_pcap_sniff`` in eigenem Thread +
+  ``STARTED`` + je Paket eine ``PACKET``-Nachricht; Rohpakete werden intern fuer
+  ``EXPORT_PCAP`` gesammelt. Bei Selbst-Ende (``max_packets``) folgt ``STOPPED``.
+  ``STOP`` beendet auch diesen Modus.
+* ``START_LLDP`` (optional ``interface``, ``duration``) -> KEIN Dauerstrom:
+  ``run_lldp_sniff`` blockierend in einem Thread; danach EINE ``NEIGHBORS``-
+  Nachricht mit der Liste.
+* ``EXPORT_PCAP`` (``path``) -> ``export_pcap`` der gesammelten Rohpakete,
+  Ergebnis als ``EXPORTED {"ok": bool}``.
+
+Defensiv bei bereits laufendem Sniff: ein erneutes ``START``/``START_PCAP``/
+``START_LLDP`` startet NICHT doppelt, sondern quittiert idempotent mit ``STARTED``
+(konsistent zum bestehenden ``START``-Verhalten -- die einfachere Variante; ein
+gleichzeitiger SNI- und pcap-Sniff in derselben Session ist nicht vorgesehen).
+
+Thread-Sicherheit: Sniff-Thread (scapy-prn ruft ``on_hit``/``on_packet``) und
+Kommando-Schleife schreiben denselben Socket -- ``send_message`` laeuft daher unter
+einem ``threading.Lock``.
 
 Signal-Handling: ``SIGTERM``/``SIGINT`` -> ``stop_event`` setzen + Socket
 aufraeumen + ``sys.exit``.
@@ -33,7 +52,13 @@ from infrastructure.sniffd.protocol import (
     recv_message,
     send_message,
 )
-from infrastructure.sniffd.sniff_core import check_raw_permission, start_raw_sniff
+from infrastructure.sniffd.sniff_core import (
+    check_raw_permission,
+    export_pcap,
+    run_lldp_sniff,
+    start_pcap_sniff,
+    start_raw_sniff,
+)
 
 _logger = structlog.get_logger(__name__)
 
@@ -51,6 +76,12 @@ class _Session:
         self._send_lock = threading.Lock()
         self._stop_event = threading.Event()
         self._sniffer: Any = None
+        # Rohpaket-Sammelliste fuer EXPORT_PCAP -- eine aktive pcap-Session pro
+        # Verbindung; START_PCAP setzt sie frisch. Der pcap-prn-Thread haengt an,
+        # die Kommando-Schleife liest sie bei EXPORT_PCAP -- der Send-Lock deckt
+        # das gemeinsame Senden ab; das blosse ``.append`` einer Liste ist unter
+        # CPython atomar genug fuer dieses Append-only-Sammeln.
+        self._raw_packets: list[Any] = []
 
     def _send(self, payload: dict[str, Any]) -> None:
         """Thread-sicheres Senden (Lock um ``send_message``)."""
@@ -60,6 +91,28 @@ class _Session:
     def _on_hit(self, hit: dict[str, Any]) -> None:
         """Sniff-Callback: rohen Hit als ``HIT``-Nachricht senden (Hit-Thread)."""
         self._send({"type": MessageType.HIT, **hit})
+
+    def _on_packet(self, summary: dict[str, Any]) -> None:
+        """pcap-Callback: Summary-dict als ``PACKET``-Nachricht senden (Sniff-Thread)."""
+        self._send({"type": MessageType.PACKET, **summary})
+
+    def _on_raw(self, pkt: Any) -> None:
+        """pcap-Callback: Roh-Paket fuer den spaeteren ``EXPORT_PCAP`` sammeln."""
+        self._raw_packets.append(pkt)
+
+    def _on_pcap_finished(self) -> None:
+        """``finished_callback`` des pcap-Sniffers: Selbst-Ende (max_packets) -> ``STOPPED``.
+
+        scapy ruft das im Sniffer-Thread, wenn der Strom von selbst endet. Der
+        Sniffer-Handle wird geleert (er hat sich selbst gestoppt), dann ein
+        ``STOPPED`` nachgereicht. Ein durch ``STOP`` ausgeloestes Ende leert
+        ``_sniffer`` bereits in ``_handle_stop`` -- dann ist hier nichts mehr zu tun
+        (kein doppeltes ``STOPPED``).
+        """
+        if self._sniffer is None:
+            return
+        self._sniffer = None
+        self._send({"type": MessageType.STOPPED})
 
     def _handle_start(self, message: dict[str, Any]) -> None:
         """``START``: Recht pruefen, dann ``start_raw_sniff`` aufspinnen + ``STARTED``.
@@ -88,6 +141,89 @@ class _Session:
             return
 
         self._send({"type": MessageType.STARTED})
+
+    def _handle_start_pcap(self, message: dict[str, Any]) -> None:
+        """``START_PCAP``: Recht pruefen, dann ``start_pcap_sniff`` aufspinnen + ``STARTED``.
+
+        Wie ``_handle_start``, aber pcap-Dauerstrom: jedes Paket geht als
+        ``PACKET``-Nachricht raus, die Rohpakete werden fuer ``EXPORT_PCAP``
+        gesammelt (``_raw_packets`` frisch gesetzt). ``max_packets``/Selbst-Ende
+        loest ueber ``_on_pcap_finished`` ein ``STOPPED`` aus. Ein bereits laufender
+        Sniff wird nicht doppelt gestartet (idempotentes ``STARTED``, konsistent zu
+        ``START``). Fehlt das Recht -> ``ERROR`` + KEIN Sniff (S3-frei).
+        """
+        if self._sniffer is not None:
+            self._send({"type": MessageType.STARTED})
+            return
+
+        permission_error = check_raw_permission()
+        if permission_error is not None:
+            self._send({"type": MessageType.ERROR, "error": permission_error})
+            return
+
+        interface = message.get("interface")
+        bpf_filter = message.get("bpf_filter", "")
+        max_packets = message.get("max_packets", 0)
+        self._raw_packets = []
+        self._stop_event.clear()
+        try:
+            self._sniffer = start_pcap_sniff(
+                self._on_packet,
+                self._on_raw,
+                interface,
+                bpf_filter,
+                max_packets,
+                self._stop_event,
+                self._on_pcap_finished,
+            )
+        except RuntimeError as exc:
+            self._sniffer = None
+            self._send({"type": MessageType.ERROR, "error": str(exc)})
+            return
+
+        self._send({"type": MessageType.STARTED})
+
+    def _handle_start_lldp(self, message: dict[str, Any]) -> None:
+        """``START_LLDP``: Recht pruefen, dann zeitbegrenzten LLDP/CDP-Sniff -> ``NEIGHBORS``.
+
+        KEIN Dauerstrom: ``run_lldp_sniff`` blockiert ``duration`` Sekunden, darf
+        die Kommando-Schleife aber NICHT blockieren -- daher in einem eigenen
+        Thread; nach dem Lauf geht EINE ``NEIGHBORS``-Nachricht mit der Liste raus.
+        Fehlt das Recht -> ``ERROR`` + KEIN Sniff (S3-frei). Ein bereits laufender
+        (pcap/SNI-)Sniff blockt auch hier idempotent (``STARTED``), um ein
+        gleichzeitiges zweites Capture zu vermeiden.
+        """
+        if self._sniffer is not None:
+            self._send({"type": MessageType.STARTED})
+            return
+
+        permission_error = check_raw_permission()
+        if permission_error is not None:
+            self._send({"type": MessageType.ERROR, "error": permission_error})
+            return
+
+        interface = message.get("interface")
+        duration = message.get("duration", 0)
+
+        def _run() -> None:
+            try:
+                neighbors = run_lldp_sniff(interface, duration)
+            except Exception as exc:  # ein Sniff-Fehler darf den Helfer nicht killen
+                _logger.warning("sniffd_lldp_failed", error=str(exc))
+                neighbors = []
+            self._send({"type": MessageType.NEIGHBORS, "neighbors": neighbors})
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _handle_export_pcap(self, message: dict[str, Any]) -> None:
+        """``EXPORT_PCAP``: gesammelte Rohpakete nach ``path`` schreiben -> ``EXPORTED``.
+
+        ``export_pcap`` ist best-effort (leere Sammlung / Fehler -> ``False``); das
+        Ergebnis geht als ``EXPORTED {"ok": bool}`` zurueck.
+        """
+        path = message.get("path", "")
+        ok = export_pcap(self._raw_packets, path)
+        self._send({"type": MessageType.EXPORTED, "ok": ok})
 
     def _handle_stop(self) -> None:
         """``STOP``: ``stop_event`` setzen, Sniff joinen, ``STOPPED`` senden."""
@@ -134,6 +270,12 @@ class _Session:
                     self._send({"type": MessageType.PONG})
                 elif msg_type == MessageType.START:
                     self._handle_start(message)
+                elif msg_type == MessageType.START_PCAP:
+                    self._handle_start_pcap(message)
+                elif msg_type == MessageType.START_LLDP:
+                    self._handle_start_lldp(message)
+                elif msg_type == MessageType.EXPORT_PCAP:
+                    self._handle_export_pcap(message)
                 elif msg_type == MessageType.STOP:
                     self._handle_stop()
                 else:

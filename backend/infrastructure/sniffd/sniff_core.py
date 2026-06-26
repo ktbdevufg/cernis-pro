@@ -7,6 +7,20 @@ billige prn-Callback, der pro Treffer ein rohes Hit-``dict`` baut. KEIN psutil,
 KEINE Prozess-Zuordnung, kein ``match_snapshot``, kein ``deque`` -- die teure
 Zuordnung bleibt im Backend.
 
+ETAPPE 3a: Zusaetzlich die pcap- und LLDP-Kerne, PORTIERT aus den Backend-Adaptern
+(``capture/packet_sniffer.py`` + ``capture/lldp_sniffer.py``), verhaltensgleich,
+aber OHNE asyncio/Domaenenmodelle -- der Helfer ist ein eigener Prozess (kein
+Eventloop) und reicht reine ``dict``s ueber IPC:
+
+* ``parse_packet`` -- ein scapy-Paket zu einem reinen Summary-``dict`` (statt
+  ``domain.PacketSummary``); fehlende Felder weggelassen, Parse-Fehler -> ``None``.
+* ``start_pcap_sniff`` -- ``AsyncSniffer``-Dauerstrom (``count=max_packets``,
+  optionaler BPF-Filter); ``on_packet(dict)`` pro Paket, ``on_raw(pkt)`` fuers
+  spaetere ``wrpcap``, ``on_finished()`` bei Selbst-Ende (max_packets).
+* ``run_lldp_sniff`` -- blockierender, zeitbegrenzter LLDP/CDP-Sniff -> Nachbar-
+  ``dict``-Liste (dedupliziert per ``source_mac``).
+* ``export_pcap`` -- gesammelte Rohpakete als ``.pcap`` schreiben (best-effort).
+
 GETEILTES scapy (kein Duplikat): die scapy-Symbole kommen aus
 ``infrastructure.capture._scapy`` -- ``_scapy`` wird hier NICHT veraendert und
 NICHT neu importiert. ``normalize_hostname`` kommt aus ``domain.sni``
@@ -43,6 +57,9 @@ _ALIVE_PROBE_SECS = 0.8
 
 # BPF-Filter wie im Original: nur TCP:443 (dort sitzt der TLS-ClientHello).
 _SNI_FILTER = "tcp port 443"
+
+# BPF-Filter AS-IS aus lldp_sniffer.py: LLDP-EtherType + CDP-Multicast-MAC.
+_LLDP_CDP_FILTER = "ether proto 0x88cc or ether dst 01:00:0c:cc:cc:cc"
 
 # Ein roher Hit ueber IPC ist exakt dieses dict.
 RawHitDict = dict[str, Any]
@@ -310,3 +327,281 @@ def start_raw_sniff(
         raise RuntimeError("raw socket not accessible -- requires CAP_NET_RAW")
 
     return sniffer
+
+
+# ── pcap-Kern (Dauerstrom) -- PORTIERT aus capture/packet_sniffer.py ───────────
+
+
+def parse_packet(pkt: Any) -> dict[str, Any] | None:
+    """scapy-Paket -> reines Summary-``dict`` (oder ``None`` bei Parse-Fehler).
+
+    Verhaltensgleich zu ``ScapyPacketSniffer._parse_packet``, aber statt eines
+    ``domain.PacketSummary`` ein reines ``dict`` mit denselben Feldern (timestamp,
+    src_mac, dst_mac, is_ipv6, src_ip, dst_ip, protocol, src_port, dst_port, info,
+    length). FEHLENDE Felder werden weggelassen (nicht ``None``-gefuellt). Ether-
+    MACs, IPv6 vor IPv4, ICMP/TCP/UDP, TCP-Flag-String, Port-Verfeinerung
+    (443->HTTPS, 80->HTTP, 22->SSH, 5353->mDNS), DNS-qname. ``timestamp`` setzt der
+    Helfer (scapy liefert keinen). Ein Parse-Fehler ergibt ``None`` (das Paket wird
+    verworfen) -- der vom Vertrag vorgesehene "uninteressantes/kaputtes Paket"-Fall,
+    KEIN S3-Fang.
+    """
+    try:
+        summary: dict[str, Any] = {"timestamp": time.time()}
+
+        if pkt.haslayer(_scapy.Ether):
+            summary["src_mac"] = pkt[_scapy.Ether].src
+            summary["dst_mac"] = pkt[_scapy.Ether].dst
+
+        if pkt.haslayer(_scapy.IPv6):
+            summary["is_ipv6"] = True
+            summary["src_ip"] = str(pkt[_scapy.IPv6].src)
+            summary["dst_ip"] = str(pkt[_scapy.IPv6].dst)
+            summary["protocol"] = "IPv6"
+        elif pkt.haslayer(_scapy.IP):
+            summary["src_ip"] = pkt[_scapy.IP].src
+            summary["dst_ip"] = pkt[_scapy.IP].dst
+            if pkt.haslayer(_scapy.ICMP):
+                summary["protocol"] = "ICMP"
+                summary["info"] = f"Type {pkt[_scapy.ICMP].type}"
+            elif pkt.haslayer(_scapy.TCP):
+                summary["protocol"] = "TCP"
+                sport = pkt[_scapy.TCP].sport
+                dport = pkt[_scapy.TCP].dport
+                summary["src_port"] = sport
+                summary["dst_port"] = dport
+                flags = pkt[_scapy.TCP].flags
+                flag_str = ""
+                if flags & 0x02:
+                    flag_str += "SYN "
+                if flags & 0x10:
+                    flag_str += "ACK "
+                if flags & 0x01:
+                    flag_str += "FIN "
+                if flags & 0x04:
+                    flag_str += "RST "
+                summary["info"] = flag_str.strip()
+                if dport == 443 or sport == 443:
+                    summary["protocol"] = "HTTPS"
+                elif dport == 80 or sport == 80:
+                    summary["protocol"] = "HTTP"
+                elif dport == 22 or sport == 22:
+                    summary["protocol"] = "SSH"
+            elif pkt.haslayer(_scapy.UDP):
+                summary["protocol"] = "UDP"
+                summary["src_port"] = pkt[_scapy.UDP].sport
+                summary["dst_port"] = pkt[_scapy.UDP].dport
+                if pkt.haslayer(_scapy.DNS):
+                    summary["protocol"] = "DNS"
+                    try:
+                        qd = pkt[_scapy.DNS].qd
+                        summary["info"] = qd.qname.decode() if qd else ""
+                    except Exception:
+                        pass
+                elif summary["dst_port"] == 5353:
+                    summary["protocol"] = "mDNS"
+        else:
+            summary["protocol"] = "L2"
+
+        summary["length"] = len(pkt)
+        return summary
+    except Exception as exc:
+        _logger.warning("packet_parse_failed", error=str(exc))
+        return None
+
+
+def start_pcap_sniff(
+    on_packet: Callable[[dict[str, Any]], None],
+    on_raw: Callable[[Any], None],
+    interface: str | None,
+    bpf_filter: str,
+    max_packets: int,
+    stop_event: threading.Event,
+    on_finished: Callable[[], None] | None = None,
+) -> Any:
+    """Startet den pcap-Dauerstrom und ruft Callbacks pro Paket / bei Selbst-Ende.
+
+    AsyncSniffer-Aufbau wie ``ScapyPacketSniffer.stream``, ABER ohne asyncio (der
+    Helfer ist ein eigener Prozess, kein Eventloop): der ``prn``-Callback parst per
+    ``parse_packet`` und reicht das ``dict`` an ``on_packet``; das ROH-Paket geht
+    an ``on_raw`` (der Server sammelt es fuer den spaeteren ``wrpcap``-Export).
+    ``promisc=False`` (wie SNI; vermeidet den VMware-Dialog). ``count=max_packets``,
+    ``filter=bpf_filter`` (nur wenn nicht leer), ``iface=interface`` oder
+    ``_pick_iface()``.
+
+    ``on_finished`` (optional) ist der ``finished_callback`` des ``AsyncSniffer``:
+    scapy ruft ihn, wenn der Sniff von SELBST endet (``max_packets`` erreicht) --
+    so kann der Server dem Strom-Ende ein ``STOPPED`` folgen lassen, ohne zu pollen.
+
+    Toter Sniffer-Thread nach der Alive-Probe -> ``RuntimeError`` mit Text "raw
+    socket not accessible -- requires CAP_NET_RAW" (Muster ``start_raw_sniff``,
+    KEINE stille Leer-Erfassung). Gibt das ``AsyncSniffer``-Handle zurueck.
+    """
+    if not _scapy.HAS_SCAPY:
+        raise RuntimeError("Packet capture requires libpcap/scapy. Install it and restart.")
+
+    iface = interface or _pick_iface()
+
+    def _on_packet(pkt: Any) -> None:
+        """scapy-Callback: parsen, ``on_raw`` + ``on_packet`` rufen. BILLIG.
+
+        Reihenfolge wie im Original (``_enqueue``): nur wenn ``parse_packet`` ein
+        dict liefert, wird das Roh-Paket gesammelt -- so passen PACKET-Strom und
+        die ``wrpcap``-Sammlung zusammen (gleiche Pakete). ``except Exception``:
+        ein einzelnes kaputtes Paket darf den Sniff-Thread nicht killen.
+        """
+        try:
+            summary = parse_packet(pkt)
+            if summary is None:
+                return
+            on_raw(pkt)
+            on_packet(summary)
+        except Exception as exc:  # ein kaputtes Paket killt den Sniff nicht
+            _logger.warning("pcap_packet_failed", error=str(exc))
+
+    kwargs: dict[str, Any] = {"prn": _on_packet, "store": 0, "count": max_packets, "promisc": False}
+    kwargs["iface"] = iface
+    if bpf_filter:
+        kwargs["filter"] = bpf_filter
+
+    try:
+        sniffer = _scapy.AsyncSniffer(**kwargs)
+        # finished_callback nach dem Bau setzen (Konstruktor-Signatur variiert).
+        if on_finished is not None:
+            sniffer.finished_callback = lambda *_args: on_finished()
+        sniffer.start()
+    except Exception as exc:
+        raise RuntimeError(f"Packet capture failed to start: {exc}") from exc
+
+    # Alive-Probe (Muster ScapyPacketSniffer): dem Thread kurz Zeit zum sofortigen
+    # Sterben geben. Das ``stop_event`` darf die Probe vorzeitig beenden.
+    stop_event.wait(_ALIVE_PROBE_SECS)
+    thread = getattr(sniffer, "thread", None)
+    if not (thread and thread.is_alive()):
+        with contextlib.suppress(Exception):
+            sniffer.stop(join=True)
+        raise RuntimeError("raw socket not accessible -- requires CAP_NET_RAW")
+
+    return sniffer
+
+
+# ── LLDP-Kern (einmalig, zeitbegrenzt) -- PORTIERT aus capture/lldp_sniffer.py ─
+
+
+def _parse_lldp_neighbor(pkt: Any) -> dict[str, Any] | None:
+    """LLDP-Paket -> Nachbar-``dict`` (AS-IS ``ScapyLldpSniffer._parse_lldp``)."""
+    try:
+        neighbor: dict[str, Any] = {
+            "source_mac": pkt[_scapy.Ether].src,
+            "protocol": "LLDP",
+        }
+        if pkt.haslayer(_scapy.LLDPDUChassisID):
+            neighbor["chassis_id"] = str(pkt[_scapy.LLDPDUChassisID].id)
+        if pkt.haslayer(_scapy.LLDPDUPortID):
+            neighbor["port_id"] = str(pkt[_scapy.LLDPDUPortID].id)
+        if pkt.haslayer(_scapy.LLDPDUSystemName):
+            neighbor["system_name"] = str(pkt[_scapy.LLDPDUSystemName].system_name)
+        if pkt.haslayer(_scapy.LLDPDUSystemDescription):
+            neighbor["system_desc"] = str(pkt[_scapy.LLDPDUSystemDescription].description)[:200]
+        if pkt.haslayer(_scapy.LLDPDUPortDescription):
+            neighbor["port_desc"] = str(pkt[_scapy.LLDPDUPortDescription].description)
+        return neighbor
+    except Exception as exc:
+        _logger.warning("lldp_parse_failed", error=str(exc))
+        return None
+
+
+def _parse_cdp_neighbor(pkt: Any) -> dict[str, Any] | None:
+    """CDP-Paket -> Nachbar-``dict`` (AS-IS ``ScapyLldpSniffer._parse_cdp``)."""
+    try:
+        src_mac = pkt[_scapy.Ether].src if pkt.haslayer(_scapy.Ether) else ""
+        neighbor: dict[str, Any] = {"source_mac": src_mac, "protocol": "CDP"}
+        if pkt.haslayer(_scapy.CDPMsgDeviceID):
+            name = str(pkt[_scapy.CDPMsgDeviceID].val)
+            neighbor["system_name"] = name
+            neighbor["chassis_id"] = name
+        if pkt.haslayer(_scapy.CDPMsgPortID):
+            neighbor["port_id"] = str(pkt[_scapy.CDPMsgPortID].val)
+        if pkt.haslayer(_scapy.CDPMsgSoftwareVersion):
+            neighbor["system_desc"] = str(pkt[_scapy.CDPMsgSoftwareVersion].val)[:200]
+        if pkt.haslayer(_scapy.CDPMsgPlatform):
+            neighbor["capabilities"] = [str(pkt[_scapy.CDPMsgPlatform].val)]
+        return neighbor
+    except Exception as exc:
+        _logger.warning("cdp_parse_failed", error=str(exc))
+        return None
+
+
+def _dispatch_neighbor(pkt: Any) -> dict[str, Any] | None:
+    """EtherType/MAC-Dispatch (AS-IS ``ScapyLldpSniffer._dispatch``).
+
+    LLDP: EtherType ``0x88cc``. CDP: Ziel-MAC ``01:00:0c:cc:cc:cc``. Andere Pakete
+    -> ``None`` (vom BPF-Filter eigentlich schon ausgeschlossen).
+    """
+    if not pkt.haslayer(_scapy.Ether):
+        return None
+    if pkt[_scapy.Ether].type == 0x88CC:
+        return _parse_lldp_neighbor(pkt)
+    if pkt[_scapy.Ether].dst.lower() == "01:00:0c:cc:cc:cc":
+        return _parse_cdp_neighbor(pkt)
+    return None
+
+
+def run_lldp_sniff(interface: str | None, duration: float) -> list[dict[str, Any]]:
+    """Blockierender, zeitbegrenzter LLDP/CDP-Sniff -> deduplizierte Nachbarliste.
+
+    AS-IS ``ScapyLldpSniffer._sniff_blocking``, aber ``dict`` statt ``LLDPNeighbor``:
+    ``_scapy.sniff(timeout=duration, filter=_LLDP_CDP_FILTER, prn=...)``, dedupliziert
+    per ``source_mac`` (LETZTER gewinnt -- AS-IS zum Altcode-dict). Fehlt
+    ``scapy.contrib`` (``HAS_SCAPY_CONTRIB`` False) -> ``[]`` + ``structlog``-Warn
+    (S3-Heilung wie Original: kein Crash, der Betreiber sieht es strukturiert).
+    Sniff-Fehler werden GELOGGT (Wire unveraendert), keine Nachbarn -> ``[]``.
+    """
+    if not (_scapy.HAS_SCAPY and _scapy.HAS_SCAPY_CONTRIB):
+        _logger.warning(
+            "lldp_capture_unavailable",
+            has_scapy=_scapy.HAS_SCAPY,
+            has_contrib=_scapy.HAS_SCAPY_CONTRIB,
+        )
+        return []
+
+    neighbors: dict[str, dict[str, Any]] = {}
+
+    def _handle(pkt: Any) -> None:
+        neighbor = _dispatch_neighbor(pkt)
+        if neighbor:
+            neighbors[neighbor["source_mac"]] = neighbor
+
+    try:
+        kwargs: dict[str, Any] = {
+            "filter": _LLDP_CDP_FILTER,
+            "timeout": duration,
+            "prn": _handle,
+            "store": 0,
+        }
+        if interface:
+            kwargs["iface"] = interface
+        _scapy.sniff(**kwargs)
+    except Exception as exc:
+        _logger.warning("lldp_capture_failed", error=str(exc))
+
+    return list(neighbors.values())
+
+
+# ── pcap-Export -- PORTIERT aus capture/packet_sniffer.py::export_pcap ─────────
+
+
+def export_pcap(raw_packets: list[Any], path: str) -> bool:
+    """Schreibt ``raw_packets`` als pcap nach ``path`` (best-effort).
+
+    ``True`` bei Erfolg, ``False`` wenn nichts zu schreiben war (scapy fehlt oder
+    leere Liste) oder das Schreiben fehlschlug (AS-IS ``ScapyPacketSniffer.export_pcap``).
+    Fehlschlag wird GELOGGT (kein stiller S3-Fang), das Ergebnis bleibt ``False``.
+    """
+    if not (_scapy.HAS_SCAPY and raw_packets):
+        return False
+    try:
+        _scapy.wrpcap(path, raw_packets)
+        return True
+    except Exception as exc:
+        _logger.warning("pcap_export_failed", path=path, error=str(exc))
+        return False
