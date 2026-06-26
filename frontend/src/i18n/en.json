@@ -1173,7 +1173,125 @@
       },
       "listen": {
         "title": "List management",
-        "subtitle": "Maintain and tune blocklists for trackers, ads and threats."
+        "subtitle": "See which outbound contacts are listed as trackers, advertising, or threats — manage sources and set what's shown."
+      }
+    },
+    "blocklist": {
+      "intro": "This feature checks your network's outbound contacts against publicly maintained lists and shows whether a remote endpoint is listed there as a tracker, advertising, or threat. Here you manage the list sources and set how much is shown.",
+      "redLine": "The classification comes from the named list, not from CERNIS. CERNIS only reflects it.",
+      "loading": "Loading lists …",
+      "never": "never",
+      "attributionRequired": "attribution required",
+      "refreshDueResult": "{{updated}} updated, {{failed}} failed.",
+      "ladeFehler": "The lists could not be loaded. Please check that the backend is running.",
+      "settingsFehler": "The setting could not be saved.",
+      "aktionFehler": "The action could not be completed.",
+      "settings": {
+        "title": "Display settings",
+        "strictnessLabel": "How strictly to show",
+        "groupTrackerAds": "Show trackers & advertising",
+        "groupThreat": "Show threats",
+        "saved": "Saved."
+      },
+      "strictness": {
+        "critical_only": {
+          "label": "Critical only",
+          "hint": "Shows only matches on threat lists (malware, phishing)."
+        },
+        "recommended": {
+          "label": "Recommended",
+          "hint": "Shows threats and trackers, keeps plain advertising quiet."
+        },
+        "all": {
+          "label": "Show everything",
+          "hint": "Shows every list match, including plain advertising."
+        }
+      },
+      "group": {
+        "tracker_ads": "Trackers & advertising",
+        "threat": "Threat"
+      },
+      "format": {
+        "hosts": "Hosts file",
+        "adblock": "Adblock filter",
+        "domain_list": "Domain list",
+        "ip_list": "IP list",
+        "csv_domain": "CSV (domains)",
+        "csv_ip": "CSV (IP addresses)"
+      },
+      "status": {
+        "never": "never loaded",
+        "ok": "loaded",
+        "broken": "broken"
+      },
+      "col": {
+        "name": "Name",
+        "group": "Group",
+        "format": "Format",
+        "status": "Status",
+        "entries": "Entries",
+        "fetched": "Last loaded",
+        "license": "License",
+        "active": "Active"
+      },
+      "sources": {
+        "title": "List sources",
+        "empty": "No lists added yet."
+      },
+      "actions": {
+        "add": "Add list",
+        "upload": "Upload list",
+        "refreshDue": "Update due lists",
+        "health": "Check lists",
+        "reset": "Reset to defaults",
+        "refresh": "Update",
+        "delete": "Delete"
+      },
+      "confirm": {
+        "resetTitle": "Reset to defaults?",
+        "resetText": "All your own lists and the entire load state will be lost; the bundled lists are recreated.",
+        "resetConfirm": "Reset",
+        "deleteText": "Delete this list?",
+        "deleteConfirm": "Delete",
+        "cancel": "Cancel"
+      },
+      "dialog": {
+        "close": "Close",
+        "cancel": "Cancel"
+      },
+      "add": {
+        "title": "Add list",
+        "lead": "Enter a publicly reachable list source. The list is loaded on the first update.",
+        "name": "Name",
+        "url": "Address (URL)",
+        "group": "Group",
+        "format": "Format",
+        "submit": "Add",
+        "successLead": "The list has been added.",
+        "licenseHint": "This source may be under a copyleft or attribution license: {{license}}. Please review its terms of use.",
+        "done": "Done",
+        "error": "The list could not be added. Please check group and format."
+      },
+      "upload": {
+        "title": "Upload list",
+        "lead": "Upload a list file or paste the list text directly. The content is read in immediately.",
+        "file": "File",
+        "text": "Or paste text",
+        "textPlaceholder": "Paste list text here …",
+        "submit": "Upload",
+        "success": "Uploaded — {{count}} entries read.",
+        "error": "The list could not be read. Please check the format."
+      },
+      "health": {
+        "title": "Check lists",
+        "lead": "These lists could not be loaded recently. You decide what should happen.",
+        "suggest": "Suggestion: use \"{{name}}\" instead.",
+        "builtinNote": "Bundled lists cannot be deleted, only disabled.",
+        "delete": "Delete broken list",
+        "activate": "Activate suggestion",
+        "close": "Close",
+        "allFine": "All lists are fine.",
+        "error": "The action could not be completed."
       }
     }
   },

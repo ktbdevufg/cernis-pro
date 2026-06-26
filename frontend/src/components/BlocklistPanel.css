@@ -8,6 +8,9 @@
   flex-direction: column;
   gap: 24px;
   min-height: 0;
+  /* Atmender Abschluss: bei langer, scrollender Liste klebt das untere Ende sonst
+     hart am Rand. Ein Abstand unten gibt der Tabelle einen ruhigen Abschluss. */
+  padding-bottom: 32px;
 }
 
 .bl-loading {

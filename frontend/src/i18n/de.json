@@ -1173,7 +1173,125 @@
       },
       "listen": {
         "title": "Listen-Verwaltung",
-        "subtitle": "Blocklists für Tracker, Werbung und Bedrohungen pflegen und einstellen."
+        "subtitle": "Erkennen, welche Außenkontakte als Tracker, Werbung oder Bedrohung gelten — Quellen pflegen und Anzeige einstellen."
+      }
+    },
+    "blocklist": {
+      "intro": "Diese Funktion gleicht die Außenkontakte Ihres Netzes mit öffentlich gepflegten Listen ab und zeigt, ob eine Gegenstelle dort als Tracker, Werbung oder Bedrohung geführt wird. Sie verwalten hier die Listenquellen und stellen ein, wie viel angezeigt wird.",
+      "redLine": "Die Einordnung stammt aus der jeweils genannten Liste, nicht von CERNIS. CERNIS bildet sie nur ab.",
+      "loading": "Listen werden geladen …",
+      "never": "noch nie",
+      "attributionRequired": "Namensnennung nötig",
+      "refreshDueResult": "{{updated}} aktualisiert, {{failed}} fehlgeschlagen.",
+      "ladeFehler": "Die Listen konnten nicht geladen werden. Bitte prüfen Sie, ob das Backend läuft.",
+      "settingsFehler": "Die Einstellung konnte nicht gespeichert werden.",
+      "aktionFehler": "Die Aktion konnte nicht ausgeführt werden.",
+      "settings": {
+        "title": "Anzeige-Einstellungen",
+        "strictnessLabel": "Wie streng angezeigt wird",
+        "groupTrackerAds": "Tracker & Werbung anzeigen",
+        "groupThreat": "Bedrohungen anzeigen",
+        "saved": "Gespeichert."
+      },
+      "strictness": {
+        "critical_only": {
+          "label": "Nur kritisch",
+          "hint": "Zeigt ausschließlich Treffer auf Bedrohungslisten (Schadsoftware, Phishing)."
+        },
+        "recommended": {
+          "label": "Empfohlen",
+          "hint": "Zeigt Bedrohungen und Tracker, lässt reine Werbung still."
+        },
+        "all": {
+          "label": "Alles zeigen",
+          "hint": "Zeigt jeden Listentreffer, auch reine Werbung."
+        }
+      },
+      "group": {
+        "tracker_ads": "Tracker & Werbung",
+        "threat": "Bedrohung"
+      },
+      "format": {
+        "hosts": "Hosts-Datei",
+        "adblock": "Adblock-Filter",
+        "domain_list": "Domain-Liste",
+        "ip_list": "IP-Liste",
+        "csv_domain": "CSV (Domains)",
+        "csv_ip": "CSV (IP-Adressen)"
+      },
+      "status": {
+        "never": "noch nie geladen",
+        "ok": "geladen",
+        "broken": "defekt"
+      },
+      "col": {
+        "name": "Name",
+        "group": "Gruppe",
+        "format": "Format",
+        "status": "Status",
+        "entries": "Einträge",
+        "fetched": "Zuletzt geladen",
+        "license": "Lizenz",
+        "active": "Aktiv"
+      },
+      "sources": {
+        "title": "Listenquellen",
+        "empty": "Es sind noch keine Listen eingetragen."
+      },
+      "actions": {
+        "add": "Liste hinzufügen",
+        "upload": "Liste hochladen",
+        "refreshDue": "Fällige aktualisieren",
+        "health": "Listen prüfen",
+        "reset": "Auf Werkszustand zurücksetzen",
+        "refresh": "Aktualisieren",
+        "delete": "Löschen"
+      },
+      "confirm": {
+        "resetTitle": "Auf Werkszustand zurücksetzen?",
+        "resetText": "Alle eigenen Listen und der gesamte Ladestand gehen verloren; die mitgelieferten Listen werden neu angelegt.",
+        "resetConfirm": "Zurücksetzen",
+        "deleteText": "Diese Liste löschen?",
+        "deleteConfirm": "Löschen",
+        "cancel": "Abbrechen"
+      },
+      "dialog": {
+        "close": "Schließen",
+        "cancel": "Abbrechen"
+      },
+      "add": {
+        "title": "Liste hinzufügen",
+        "lead": "Tragen Sie eine öffentlich erreichbare Listenquelle ein. Die Liste wird beim ersten Aktualisieren geladen.",
+        "name": "Name",
+        "url": "Adresse (URL)",
+        "group": "Gruppe",
+        "format": "Format",
+        "submit": "Hinzufügen",
+        "successLead": "Die Liste wurde angelegt.",
+        "licenseHint": "Diese Quelle steht möglicherweise unter einer Copyleft- oder Namensnennungs-Lizenz: {{license}}. Bitte prüfen Sie die Nutzungsbedingungen.",
+        "done": "Fertig",
+        "error": "Die Liste konnte nicht angelegt werden. Bitte prüfen Sie Gruppe und Format."
+      },
+      "upload": {
+        "title": "Liste hochladen",
+        "lead": "Laden Sie eine Listendatei hoch oder fügen Sie den Listentext direkt ein. Der Inhalt wird sofort eingelesen.",
+        "file": "Datei",
+        "text": "Oder Text einfügen",
+        "textPlaceholder": "Listentext hier einfügen …",
+        "submit": "Hochladen",
+        "success": "Hochgeladen — {{count}} Einträge eingelesen.",
+        "error": "Die Liste konnte nicht eingelesen werden. Bitte prüfen Sie das Format."
+      },
+      "health": {
+        "title": "Listen prüfen",
+        "lead": "Diese Listen konnten zuletzt nicht geladen werden. Sie entscheiden, was geschehen soll.",
+        "suggest": "Vorschlag: stattdessen „{{name}}“ einbinden.",
+        "builtinNote": "Mitgelieferte Listen können nicht gelöscht, nur deaktiviert werden.",
+        "delete": "Defekte Liste löschen",
+        "activate": "Vorschlag aktivieren",
+        "close": "Schließen",
+        "allFine": "Alle Listen sind in Ordnung.",
+        "error": "Die Aktion konnte nicht ausgeführt werden."
       }
     }
   },
