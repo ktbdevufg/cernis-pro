@@ -44,7 +44,7 @@ import structlog
 from domain.sni import ObservedSni, match_snapshot
 from infrastructure.sni.channel import SniffHelperChannel
 from infrastructure.sni.errors import SniError
-from infrastructure.sni.helper_channel import SubprocessSniffHelper, helper_entry_exists
+from infrastructure.sniffd_client import SniHelperClient, helper_entry_exists
 
 _logger = structlog.get_logger(__name__)
 
@@ -134,7 +134,7 @@ class ScapySniSniffer:
 
     def __init__(self, channel_factory: Callable[[], SniffHelperChannel] | None = None) -> None:
         self._channel_factory: Callable[[], SniffHelperChannel] = (
-            channel_factory if channel_factory is not None else SubprocessSniffHelper
+            channel_factory if channel_factory is not None else SniHelperClient
         )
         self._channel: SniffHelperChannel | None = None
         self._poller: threading.Thread | None = None

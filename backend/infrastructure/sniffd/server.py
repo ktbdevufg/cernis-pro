@@ -76,6 +76,14 @@ class _Session:
         self._send_lock = threading.Lock()
         self._stop_event = threading.Event()
         self._sniffer: Any = None
+        # Serialisiert die "Sniffer claimen" (lesen + nullen) gegen die STOPPED-Race:
+        # ``_on_pcap_finished`` (prn-Thread, Selbst-Ende) und ``_handle_stop``
+        # (Kommando-Schleife) koennen sonst BEIDE den Sniffer non-None sehen, nullen
+        # und je ein STOPPED senden. ``_claim_sniffer`` macht das Lesen-und-Nullen
+        # atomar -> GENAU EINER bekommt den Sniffer, also EXACTLY-ONCE STOPPED. Ein
+        # eigener, schmaler Lock (nicht ``_send_lock``), damit der HIT/PACKET-Send-
+        # Pfad nicht unter der Stop-Logik blockiert.
+        self._sniffer_lock = threading.Lock()
         # Rohpaket-Sammelliste fuer EXPORT_PCAP -- eine aktive pcap-Session pro
         # Verbindung; START_PCAP setzt sie frisch. Der pcap-prn-Thread haengt an,
         # die Kommando-Schleife liest sie bei EXPORT_PCAP -- der Send-Lock deckt
@@ -87,6 +95,20 @@ class _Session:
         """Thread-sicheres Senden (Lock um ``send_message``)."""
         with self._send_lock:
             send_message(self._conn, payload)
+
+    def _claim_sniffer(self) -> Any:
+        """Liest ``_sniffer`` und nullt ihn ATOMAR; gibt das fruehere Handle zurueck.
+
+        Der einzige Pfad, der ``_sniffer`` von non-None auf ``None`` setzt. Unter
+        ``_sniffer_lock`` -- so bekommt bei gleichzeitigem Selbst-Ende (prn-Thread)
+        und ``STOP`` (Kommando-Schleife) GENAU EINER ein non-``None``-Handle zurueck;
+        der andere bekommt ``None``. Der Gewinner stoppt den Sniff + sendet das eine
+        ``STOPPED`` (Exactly-Once), der Verlierer tut nichts.
+        """
+        with self._sniffer_lock:
+            sniffer = self._sniffer
+            self._sniffer = None
+            return sniffer
 
     def _on_hit(self, hit: dict[str, Any]) -> None:
         """Sniff-Callback: rohen Hit als ``HIT``-Nachricht senden (Hit-Thread)."""
@@ -104,14 +126,14 @@ class _Session:
         """``finished_callback`` des pcap-Sniffers: Selbst-Ende (max_packets) -> ``STOPPED``.
 
         scapy ruft das im Sniffer-Thread, wenn der Strom von selbst endet. Der
-        Sniffer-Handle wird geleert (er hat sich selbst gestoppt), dann ein
-        ``STOPPED`` nachgereicht. Ein durch ``STOP`` ausgeloestes Ende leert
-        ``_sniffer`` bereits in ``_handle_stop`` -- dann ist hier nichts mehr zu tun
-        (kein doppeltes ``STOPPED``).
+        Sniffer-Handle wird ATOMAR geleert (``_claim_sniffer``), dann ein ``STOPPED``
+        nachgereicht. Ein gleichzeitiges ``STOP`` (Kommando-Schleife) konkurriert um
+        denselben Claim -- bekommt hier (oder dort) genau EINER den Sniffer, sendet
+        nur dieser das ``STOPPED`` (Exactly-Once). Der Verlierer bekommt ``None`` und
+        tut nichts (kein doppeltes ``STOPPED``).
         """
-        if self._sniffer is None:
+        if self._claim_sniffer() is None:
             return
-        self._sniffer = None
         self._send({"type": MessageType.STOPPED})
 
     def _handle_start(self, message: dict[str, Any]) -> None:
@@ -226,22 +248,35 @@ class _Session:
         self._send({"type": MessageType.EXPORTED, "ok": ok})
 
     def _handle_stop(self) -> None:
-        """``STOP``: ``stop_event`` setzen, Sniff joinen, ``STOPPED`` senden."""
+        """``STOP``: ``stop_event`` setzen, Sniff joinen, ``STOPPED`` senden (Exactly-Once).
+
+        Claimt den Sniffer ATOMAR (``_claim_sniffer``). Bekommt dieser Pfad das
+        Handle, stoppt er den Sniff und sendet das EINE ``STOPPED``. Hat sich der
+        Strom GLEICHZEITIG selbst beendet (``_on_pcap_finished`` gewann den Claim und
+        sandte bereits ``STOPPED``), bekommt ``_handle_stop`` ``None`` -- dann ist der
+        Sniff schon beendet und das ``STOPPED`` schon raus; ein zweites wird NICHT
+        gesendet (sonst die Doppelung, die der Fix gerade verhindert). ``stop_event``
+        wird in jedem Fall gesetzt (idempotenter Stop-Schalter).
+        """
         self._stop_event.set()
-        sniffer = self._sniffer
-        self._sniffer = None
-        if sniffer is not None:
-            try:
-                sniffer.stop(join=True)
-            except Exception as exc:
-                _logger.warning("sniffd_stop_failed", error=str(exc))
+        sniffer = self._claim_sniffer()
+        if sniffer is None:
+            return  # Selbst-Ende war schneller -> STOPPED ist bereits raus.
+        try:
+            sniffer.stop(join=True)
+        except Exception as exc:
+            _logger.warning("sniffd_stop_failed", error=str(exc))
         self._send({"type": MessageType.STOPPED})
 
     def _teardown(self) -> None:
-        """Beendet einen evtl. laufenden Sniff (Verbindungsende/Signal)."""
+        """Beendet einen evtl. laufenden Sniff (Verbindungsende/Signal).
+
+        Claimt den Sniffer ATOMAR (``_claim_sniffer``) -- so kollidiert das Teardown
+        nicht mit einem gleichzeitigen Selbst-Ende. Sendet KEIN ``STOPPED`` (die
+        Verbindung endet ohnehin), stoppt nur den Sniff.
+        """
         self._stop_event.set()
-        sniffer = self._sniffer
-        self._sniffer = None
+        sniffer = self._claim_sniffer()
         if sniffer is not None:
             try:
                 sniffer.stop(join=True)

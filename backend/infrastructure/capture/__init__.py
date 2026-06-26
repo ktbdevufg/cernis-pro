@@ -1,21 +1,24 @@
-"""Infrastructure-Adapter der capture-Domaene (C.3).
+"""Infrastructure-Adapter der capture-Domaene (C.3 / Etappe 3b).
 
-v2-NATIV gegen scapy, KEIN ``modules``-Import (cve/tls-Stil, KEIN ADR 0007): der
-scapy-gebundene Kern (Parser + Sniffer-Lifecycle + Permission-Probe) ist klein und
-haengt an nichts Unportiertem; ``modules.pcap``/``modules.lldp`` zu wrappen waere
-mehr Code (Mapping der mutablen Alt-dataclasses auf die frozen Domaenenmodelle) und
-wuerde zudem den kaputten Alt-Broadcast-Pfad importieren, den C.3 gerade ersetzt.
-Darum bleibt der ``modules/``-Contract fuer capture ohne ``ignore_imports``-Eintrag.
+ETAPPE 3b (Privilege-Separation): Die Sniffer-Adapter fahren scapy NICHT mehr selbst.
+Der rohe pcap-/LLDP-Sniff lebt im on-demand gestarteten Helfer ``cernis-sniffd`` (der
+EINZIGE Prozess mit ``CAP_NET_RAW``); die Adapter sprechen ihn ueber die Helfer-Clients
+an (``infrastructure/sniffd_client/``). Das scapy-Parsen ist in den Helfer gewandert
+(``sniffd.sniff_core``); hier wird aus den rohen IPC-dicts nur noch das Domaenenmodell
+(``PacketSummary``/``LLDPNeighbor``) gebaut.
 
 Drei Adapter:
 
-* ``ScapyPacketSniffer`` -- ``PacketSnifferPort`` (Dauer-Capture als async-Strom;
-  Thread->Loop-Naht ueber ``asyncio.Queue`` + ``call_soon_threadsafe``).
-* ``ScapyLldpSniffer`` -- ``LldpSnifferPort`` (zeitbegrenzter Sniff via Executor).
+* ``ScapyPacketSniffer`` -- ``PacketSnifferPort`` (pcap-Dauer-Capture via Helfer;
+  Thread->Loop-Naht ueber ``asyncio.Queue`` + ``call_soon_threadsafe``, Quelle ist
+  jetzt der ``PcapHelperClient``-Reader-Thread statt scapy-prn).
+* ``ScapyLldpSniffer`` -- ``LldpSnifferPort`` (zeitbegrenzter Sniff via Helfer-Client,
+  blockierendes Einmal-Warten ueber ``run_in_executor``).
 * ``WebSocketCaptureBroadcaster`` -- ``CaptureBroadcasterPort`` (WS-Fan-out, M.9-Stil).
 
-``_scapy`` kapselt das gemeinsame Cache-Dir-Setup + die Verfuegbarkeits-Probe;
-``errors`` haelt ``CaptureError`` (Start-Fehler des Stroms, S3-frei).
+``_scapy`` (Cache-Dir-Setup + Verfuegbarkeits-Probe) wird nur noch vom Helfer-
+Sniff-Kern (``sniffd.sniff_core``) genutzt; ``errors`` haelt ``CaptureError``
+(Start-Fehler des Stroms, S3-frei).
 """
 
 from infrastructure.capture.broadcaster import WebSocketCaptureBroadcaster

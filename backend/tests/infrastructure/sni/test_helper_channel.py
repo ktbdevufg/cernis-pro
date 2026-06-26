@@ -1,4 +1,5 @@
-"""Tests fuer ``SubprocessSniffHelper`` -- NUR die Pfade ohne echten Subprozess.
+"""Tests fuer ``SubprocessSniffHelper`` (Alias auf ``SniHelperClient``) -- nur Pfade
+ohne echten Subprozess.
 
 Ein echter Spawn braucht den Helfer + CAP_NET_RAW + scapy/Raw-Socket -- das wird hier
 bewusst NICHT gefahren (Constraint: kein echter scapy/Raw-Socket/Subprozess in Tests).
@@ -8,6 +9,11 @@ Geprueft werden die deterministischen Naht-Punkte:
   gibt einen EHRLICHEN Fehlertext zurueck (kein Crash, S3-frei);
 * das Spawn-Kommando-Muster (frozen vs. dev);
 * ``poll_hits`` ist ohne Lauf leer; ``stop``/``is_running`` sind idempotent/ehrlich.
+
+ETAPPE 3b: Der Spawn-/Connect-Kern wohnt jetzt in ``infrastructure.sniffd_client.base``
+(``_spawn_command``/``_is_frozen`` werden DORT aufgeloest) -- die Monkeypatches zielen
+darum auf ``base``, nicht mehr auf ``helper_channel``. ``SubprocessSniffHelper`` bleibt
+ueber ``helper_channel`` importierbar (Alias auf ``SniHelperClient``).
 """
 
 import sys
@@ -15,8 +21,9 @@ from pathlib import Path
 
 import pytest
 
-from infrastructure.sni import helper_channel
-from infrastructure.sni.helper_channel import SubprocessSniffHelper, _spawn_command
+from infrastructure.sni.helper_channel import SubprocessSniffHelper
+from infrastructure.sniffd_client import base
+from infrastructure.sniffd_client.base import _spawn_command
 
 
 def test_start_returns_honest_error_when_spawn_fails(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -24,7 +31,7 @@ def test_start_returns_honest_error_when_spawn_fails(monkeypatch: pytest.MonkeyP
     mit ``FileNotFoundError`` (OSError) -- ``start()`` faengt das und gibt einen
     ehrlichen Fehlertext zurueck (kein Crash, keine stille Leer-Erfassung)."""
     monkeypatch.setattr(
-        helper_channel,
+        base,
         "_spawn_command",
         lambda socket_path: ["/nonexistent/cernis-sniffd-does-not-exist", socket_path],
     )
@@ -39,7 +46,7 @@ def test_start_returns_honest_error_when_spawn_fails(monkeypatch: pytest.MonkeyP
 
 def test_spawn_command_dev_points_at_sniffd_entry(monkeypatch: pytest.MonkeyPatch) -> None:
     """dev (nicht frozen): ``[python, <repo>/backend/sniffd.py, socket]``."""
-    monkeypatch.setattr(helper_channel, "_is_frozen", lambda: False)
+    monkeypatch.setattr(base, "_is_frozen", lambda: False)
     cmd = _spawn_command("/run/x.sock")
     assert cmd[1].endswith("sniffd.py")
     assert cmd[2] == "/run/x.sock"
@@ -49,7 +56,7 @@ def test_spawn_command_dev_points_at_sniffd_entry(monkeypatch: pytest.MonkeyPatc
 
 def test_spawn_command_frozen_points_next_to_executable(monkeypatch: pytest.MonkeyPatch) -> None:
     """frozen: ``[<exe-dir>/cernis-sniffd, socket]`` -- Binary neben sys.executable."""
-    monkeypatch.setattr(helper_channel, "_is_frozen", lambda: True)
+    monkeypatch.setattr(base, "_is_frozen", lambda: True)
     monkeypatch.setattr(sys, "executable", "/opt/cernis/cernis-backend")
     cmd = _spawn_command("/run/x.sock")
     assert cmd[0] == "/opt/cernis/cernis-sniffd"

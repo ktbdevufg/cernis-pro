@@ -1,281 +1,255 @@
-"""Adapter fuer ``PacketSnifferPort`` -- v2-nativer scapy-Dauer-Capture (C.3).
+"""Adapter fuer ``PacketSnifferPort`` -- pcap-Dauer-Capture ueber den Helfer-IPC.
 
-v2-NATIV gegen scapy, KEIN ``modules``-Import (cve/tls-Stil, KEIN ADR 0007): der
-scapy-gebundene Kern ist klein (~100 Zeilen) und haengt an nichts Unportiertem.
-Wuerde man ``modules.pcap`` wrappen, bekaeme man die mutablen Alt-dataclasses
-zurueck und muesste sie auf die frozen Domaenenmodelle mappen -- MEHR Code plus
-eine Extra-Naht. Zudem ist der Alt-Broadcast-Pfad (``_subscribers``/``prn`` mit
-stillem ``except: pass``) kaputt und SOLL ersetzt werden; ihn zu importieren waere
-das Gegenteil der C.3-Reparatur.
+ETAPPE 3b (Privilege-Separation): Der Adapter faehrt scapy NICHT mehr selbst. Der
+rohe pcap-Sniff lebt im on-demand gestarteten Helfer ``cernis-sniffd`` (der EINZIGE
+Prozess mit ``CAP_NET_RAW``); der Adapter spricht ihn ueber den ``PcapHelperClient``
+an (``infrastructure/sniffd_client/``). Das scapy-Parsen zu Summary-dicts ist in den
+Helfer gewandert (``sniffd.sniff_core.parse_packet``); hier wird aus dem rohen
+PACKET-dict nur noch ein ``domain.PacketSummary`` gebaut.
 
-THREAD->LOOP-NAHT (Variante A, abgenommen): ``AsyncSniffer.prn`` laeuft im
-Sniffer-EIGENEN Thread (scapy startet einen ``threading.Thread``). Der ``stream``-
-Generator laeuft im Eventloop. Die Bruecke ist eine ``asyncio.Queue``: ``prn``
-parst das Paket IM Thread (``_parse_packet``) und schiebt das ``PacketSummary``
-ueber ``loop.call_soon_threadsafe(q.put_nowait, ps)`` thread-sicher in die Queue;
-der Generator ``await q.get()`` zieht es im Loop heraus und yieldet es. KEIN
-``run_coroutine_threadsafe`` -- im Thread laeuft keine Coroutine, nur ein
-``put_nowait``. Broadcast/Stats/Ringpuffer treibt der Use-Case (C.5) NACH dem
-``yield``, alles im Eventloop -- der Sniffer-Thread sieht weder WS noch Stats.
+THREAD->LOOP-NAHT (unveraendert im Muster, andere Quelle): Frueher feuerte
+``AsyncSniffer.prn`` im Sniffer-Thread. Jetzt liest der ``PcapHelperClient`` die
+PACKET-Nachrichten in seinem Reader-Thread in eine thread-sichere Queue; ein
+Bruecken-Thread (``_pump``) zieht sie dort ab und schiebt jedes ``PacketSummary``
+ueber ``loop.call_soon_threadsafe(q.put_nowait, ps)`` thread-sicher in die
+``asyncio.Queue``. Der Generator ``await q.get()`` zieht es im Loop heraus und yieldet
+es -- GENAU das bestehende Thread->Loop-Muster, nur ist die Quelle der Reader-Thread
+statt scapy-prn. Strom-Ende (Helfer-``STOPPED`` -> Client-Sentinel) reicht der Pump
+das ``_SENTINEL`` nach -> der Generator endet sauber.
 
-START-FEHLER (Port-Vertrag, S3-frei): ``stream`` startet den ``AsyncSniffer``,
-wartet die Alive-Probe ab (``time.sleep(0.8)`` + ``thread.is_alive()``, AS-IS aus
-``modules/pcap.py`` Z.345-348 -- Permission-Fehler killen den Thread sofort) und
-wirft bei totem Thread ``CaptureError`` -- KEINE stille Leer-Iteration, KEINE
-scapy-Roh-Exception. Der Aufrufer prueft ``check_permission`` zusaetzlich vorher.
+START-FEHLER (Port-Vertrag, S3-frei): ``client.start`` liefert einen Fehlertext
+(Helfer-ERROR: fehlendes ``CAP_NET_RAW``/scapy kaputt, oder Spawn-Fehler) ->
+``CaptureError`` (wie zuvor der Permission-/Start-Fehler) -- KEINE stille Leer-
+Iteration. Das beobachtbare Verhalten fuer ``RunCapture``/``StartCapture`` bleibt.
 
-Plattform: NUR Linux x64. Windows/macOS-Pfade des Altcodes
-(``_resolve_windows_iface``, BPF-Glob, Npcap-Registry) sind bewusst WEGGELASSEN.
+EXPORT-REIHENFOLGE (Race mit ``RunCapture.stop``): ``RunCapture.stop`` ruft ERST
+``export_pcap``, DANN ``stop``. Solange der Client verbunden ist, haelt der Helfer die
+Rohpakete in seiner ``_Session`` und beantwortet ``EXPORT_PCAP`` -- der ``server.py``
+schliesst die Verbindung nach ``STOPPED`` NICHT (die Kommando-Schleife laeuft weiter).
+Erst ``stop`` reisst die Verbindung ab. Verifiziert am ``server.py``-Code.
+
+INJIZIERBARE SPAWN-NAHT: Der Konstruktor nimmt optional eine ``client_factory``
+(``Callable[[], PcapClient]``). Default ``None`` -> baut intern einen
+``PcapHelperClient``. Tests injizieren einen Fake-Client, der STARTED/ERROR
+kontrolliert liefert und PACKET-dicts aus einem Fremd-Thread einspeist -- KEIN echter
+Subprozess/scapy in Tests (Muster wie ``ScapySniSniffer.channel_factory``).
+
+Plattform: NUR Linux x64 (der Helfer kapselt die plattformnahe Sniff-Technik).
 """
 
 import asyncio
-import socket
-import time
-from collections.abc import AsyncIterator
-from typing import Any
+import queue
+import threading
+from collections.abc import AsyncIterator, Callable
+from typing import Any, Protocol
 
 import structlog
 
 from domain.capture import PacketSummary
-from infrastructure.capture import _scapy
 from infrastructure.capture.errors import CaptureError
+from infrastructure.sniffd_client import PcapHelperClient, helper_entry_exists
+from infrastructure.sniffd_client.pcap_client import _STREAM_END
 
 _logger = structlog.get_logger(__name__)
 
 # Sentinel: signalisiert dem Generator das Strom-Ende (Stop oder max_packets).
 _SENTINEL = object()
 
-# Alive-Probe-Fenster: dem Sniffer-Thread kurz Zeit lassen, sofort zu sterben
-# (Permission-Fehler schlagen instantan zu). AS-IS aus modules/pcap.py.
-_ALIVE_PROBE_SECS = 0.8
+# Poll-Timeout des Bruecken-Threads beim Abziehen aus der Client-Queue. Kein fester
+# Block, damit der Pump auf ein gesetztes Stop-Event zeitnah reagieren kann.
+_PUMP_POLL_SECS = 0.2
 
-# Ringpuffer-Trim macht der USE-CASE (C.5), NICHT der Adapter. Der Adapter haelt
-# nur die scapy-Rohpakete fuer wrpcap, wachsend bis max_packets (AS-IS).
+
+class PcapClient(Protocol):
+    """Schmale Naht zum pcap-Helfer-Client (Spawn/Strom/Export liegen dahinter).
+
+    Kapselt GENAU das, was der Adapter braucht: Start (Fehlertext-Naht), das Abziehen
+    der PACKET-dicts (blockierend mit Timeout, Sentinel bei Strom-Ende), den
+    pcap-Export und den Teardown. Die echte Implementierung ist ``PcapHelperClient``;
+    Tests injizieren einen Fake.
+    """
+
+    def start(self, interface: str | None, bpf_filter: str, max_packets: int) -> str | None:
+        """Startet Helfer + pcap-Sniff. ``None`` bei Erfolg, sonst der Fehlertext."""
+        ...
+
+    def next_packet(self, timeout: float | None = None) -> Any:
+        """Naechstes PACKET-dict (oder Strom-Ende-Sentinel); ``queue.Empty`` bei Timeout."""
+        ...
+
+    def export_pcap(self, path: str) -> bool:
+        """Schreibt die gesammelten Rohpakete als pcap nach ``path`` (Helfer-seitig)."""
+        ...
+
+    def stop(self) -> None:
+        """Stoppt den Strom + Helfer (idempotent), raeumt Client-seitig ab."""
+        ...
+
+    def is_running(self) -> bool:
+        """``True``, solange der Helfer-Subprozess + Reader laufen."""
+        ...
 
 
 class ScapyPacketSniffer:
-    """Erfuellt ``PacketSnifferPort`` strukturell -- haelt den ``AsyncSniffer``.
+    """Erfuellt ``PacketSnifferPort`` strukturell -- pcap-Strom ueber den Helfer-Client.
 
-    Eine Instanz haelt hoechstens einen laufenden Sniffer. ``_raw_packets`` sammelt
-    die scapy-Rohpakete des laufenden Captures fuer ``export_pcap`` (sie verlassen
-    den Adapter NIE Richtung Domaene -- die Domaene kennt nur ``PacketSummary``).
+    Eine Instanz haelt hoechstens einen laufenden Capture. Der Name bleibt aus
+    Naht-Treue (Port-Verdrahtung in ``app.py``), obwohl scapy jetzt im Helfer laeuft.
+    Die scapy-Rohpakete fuer ``export_pcap`` liegen NICHT mehr hier, sondern im Helfer
+    (``_Session._raw_packets``); ``export_pcap`` reicht den Befehl nur durch.
+
+    ``client_factory`` ist die injizierbare Spawn-Naht: Default ``None`` -> intern ein
+    ``PcapHelperClient``; Tests injizieren einen Fake-Client.
     """
 
-    def __init__(self) -> None:
-        self._sniffer: Any = None
-        self._raw_packets: list[Any] = []
-
-    def _parse_packet(self, pkt: Any) -> PacketSummary | None:
-        """scapy-Paket -> ``PacketSummary`` (laeuft IM Sniffer-Thread).
-
-        Verhaltensgleich zu ``modules/pcap._parse_packet`` (Z.78-133): Ether-MACs,
-        IPv6 vor IPv4, ICMP/TCP/UDP, TCP-Flag-String, Port-basierte Protokoll-
-        Verfeinerung (443->HTTPS, 80->HTTP, 22->SSH, 5353->mDNS), DNS-qname. Ein
-        Parse-Fehler ergibt ``None`` (das Paket wird verworfen) -- das ist KEIN
-        S3-Fang, sondern der vom Vertrag vorgesehene "uninteressantes/kaputtes
-        Paket"-Fall; ``timestamp`` setzt der Adapter (scapy liefert keinen).
-        """
-        try:
-            ps_kwargs: dict[str, Any] = {"timestamp": time.time()}
-
-            if pkt.haslayer(_scapy.Ether):
-                ps_kwargs["src_mac"] = pkt[_scapy.Ether].src
-                ps_kwargs["dst_mac"] = pkt[_scapy.Ether].dst
-
-            if pkt.haslayer(_scapy.IPv6):
-                ps_kwargs["is_ipv6"] = True
-                ps_kwargs["src_ip"] = str(pkt[_scapy.IPv6].src)
-                ps_kwargs["dst_ip"] = str(pkt[_scapy.IPv6].dst)
-                ps_kwargs["protocol"] = "IPv6"
-            elif pkt.haslayer(_scapy.IP):
-                ps_kwargs["src_ip"] = pkt[_scapy.IP].src
-                ps_kwargs["dst_ip"] = pkt[_scapy.IP].dst
-                if pkt.haslayer(_scapy.ICMP):
-                    ps_kwargs["protocol"] = "ICMP"
-                    ps_kwargs["info"] = f"Type {pkt[_scapy.ICMP].type}"
-                elif pkt.haslayer(_scapy.TCP):
-                    ps_kwargs["protocol"] = "TCP"
-                    sport = pkt[_scapy.TCP].sport
-                    dport = pkt[_scapy.TCP].dport
-                    ps_kwargs["src_port"] = sport
-                    ps_kwargs["dst_port"] = dport
-                    flags = pkt[_scapy.TCP].flags
-                    flag_str = ""
-                    if flags & 0x02:
-                        flag_str += "SYN "
-                    if flags & 0x10:
-                        flag_str += "ACK "
-                    if flags & 0x01:
-                        flag_str += "FIN "
-                    if flags & 0x04:
-                        flag_str += "RST "
-                    ps_kwargs["info"] = flag_str.strip()
-                    if dport == 443 or sport == 443:
-                        ps_kwargs["protocol"] = "HTTPS"
-                    elif dport == 80 or sport == 80:
-                        ps_kwargs["protocol"] = "HTTP"
-                    elif dport == 22 or sport == 22:
-                        ps_kwargs["protocol"] = "SSH"
-                elif pkt.haslayer(_scapy.UDP):
-                    ps_kwargs["protocol"] = "UDP"
-                    ps_kwargs["src_port"] = pkt[_scapy.UDP].sport
-                    ps_kwargs["dst_port"] = pkt[_scapy.UDP].dport
-                    if pkt.haslayer(_scapy.DNS):
-                        ps_kwargs["protocol"] = "DNS"
-                        try:
-                            qd = pkt[_scapy.DNS].qd
-                            ps_kwargs["info"] = qd.qname.decode() if qd else ""
-                        except Exception:
-                            pass
-                    elif ps_kwargs["dst_port"] == 5353:
-                        ps_kwargs["protocol"] = "mDNS"
-            else:
-                ps_kwargs["protocol"] = "L2"
-
-            ps_kwargs["length"] = len(pkt)
-            return PacketSummary(**ps_kwargs)
-        except Exception as exc:
-            _logger.warning("packet_parse_failed", error=str(exc))
-            return None
+    def __init__(self, client_factory: Callable[[], PcapClient] | None = None) -> None:
+        self._client_factory: Callable[[], PcapClient] = (
+            client_factory if client_factory is not None else PcapHelperClient
+        )
+        self._client: PcapClient | None = None
+        self._pump: threading.Thread | None = None
+        self._pump_stop = threading.Event()
 
     async def stream(
         self, interface: str | None, bpf_filter: str, max_packets: int
     ) -> AsyncIterator[PacketSummary]:
-        """Startet den Sniff und yieldet je erfasstem Paket ein ``PacketSummary``.
+        """Startet den Sniff via Helfer und yieldet je erfasstem Paket ein ``PacketSummary``.
 
-        ``prn`` (im Sniffer-Thread) parst und schiebt thread-sicher in eine
-        ``asyncio.Queue``; dieser Generator (im Eventloop) zieht heraus und yieldet.
-        Endet, wenn ``max_packets`` erreicht ist (scapy beendet den Thread -> der
-        ``finished_callback`` schiebt das Sentinel) oder ``stop`` gerufen wurde.
-        Bei totem Sniffer-Thread (Alive-Probe) -> ``CaptureError``.
+        Der ``PcapHelperClient`` liest die PACKET-dicts in seinem Reader-Thread; ein
+        Bruecken-Thread schiebt sie thread-sicher in eine ``asyncio.Queue``; dieser
+        Generator (im Loop) zieht heraus, baut ein ``PacketSummary`` und yieldet.
+        Endet bei Helfer-``STOPPED`` (max_packets/STOP -> Sentinel) oder ``stop``.
+        Ein Start-Fehler (Helfer-ERROR/Spawn) -> ``CaptureError``.
         """
-        if not _scapy.HAS_SCAPY:
-            raise CaptureError(
-                "Packet Capture requires libpcap/scapy. Install it and restart CERNIS PRO."
-            )
-
         loop = asyncio.get_running_loop()
-        queue: asyncio.Queue[Any] = asyncio.Queue()
-        self._raw_packets = []
+        aqueue: asyncio.Queue[Any] = asyncio.Queue()
 
-        def _enqueue(pkt: Any) -> None:
-            # Laeuft IM Sniffer-Thread: parsen + thread-sicher in die Queue schieben.
-            ps = self._parse_packet(pkt)
-            if ps is None:
-                return
-            self._raw_packets.append(pkt)
-            loop.call_soon_threadsafe(queue.put_nowait, ps)
+        client = self._client_factory()
+        error = client.start(interface, bpf_filter, max_packets)
+        if error is not None:
+            # Helfer/Spawn meldet einen ehrlichen Fehler -> CaptureError (kein stiller
+            # Fallback, S3). Beobachtbar wie der fruehere Start-/Permission-Fehler.
+            raise CaptureError(error)
+        self._client = client
+        self._pump_stop = threading.Event()
 
-        def _finished(*_args: Any) -> None:
-            # scapy ruft das, wenn der Sniff von selbst endet (max_packets/timeout):
-            # Sentinel thread-sicher nachreichen, damit der Generator sauber stoppt.
-            loop.call_soon_threadsafe(queue.put_nowait, _SENTINEL)
+        def _pump() -> None:
+            # Laeuft im Bruecken-Thread: zieht PACKET-dicts aus dem Client (der sie im
+            # Reader-Thread fuellt) und schiebt je ein PacketSummary thread-sicher in
+            # die asyncio.Queue. Bei JEDEM Ende (Strom-Ende-Sentinel ODER ``_pump_stop``
+            # durch ``stop()``) wird GENAU EINMAL das ``_SENTINEL`` in die asyncio.Queue
+            # nachgereicht -- so endet der wartende Generator-Getter immer sauber (kein
+            # Deadlock, wenn ``stop()`` den Pump beendet, bevor er das Helfer-STOPPED
+            # gelesen hat).
+            try:
+                while not self._pump_stop.is_set():
+                    try:
+                        item = client.next_packet(timeout=_PUMP_POLL_SECS)
+                    except queue.Empty:
+                        continue
+                    if item is _STREAM_END:
+                        return
+                    ps = self._summary_from_dict(item)
+                    if ps is not None:
+                        loop.call_soon_threadsafe(aqueue.put_nowait, ps)
+            finally:
+                loop.call_soon_threadsafe(aqueue.put_nowait, _SENTINEL)
 
-        kwargs: dict[str, Any] = {"prn": _enqueue, "store": 0, "count": max_packets}
-        if interface:
-            kwargs["iface"] = interface
-        if bpf_filter:
-            kwargs["filter"] = bpf_filter
-
-        try:
-            sniffer = _scapy.AsyncSniffer(**kwargs)
-            # finished_callback nach dem Bau setzen (Konstruktor-Signatur variiert).
-            sniffer.finished_callback = _finished
-            sniffer.start()
-        except Exception as exc:
-            self._sniffer = None
-            raise CaptureError(f"Capture failed to start: {exc}") from exc
-
-        self._sniffer = sniffer
-
-        # Alive-Probe (AS-IS): dem Thread kurz Zeit zum sofortigen Sterben geben.
-        # Blockierendes sleep in den Executor, damit der Eventloop frei bleibt.
-        await loop.run_in_executor(None, time.sleep, _ALIVE_PROBE_SECS)
-        thread = getattr(sniffer, "thread", None)
-        if not (thread and thread.is_alive()):
-            self._sniffer = None
-            raise CaptureError(
-                "Capture failed -- raw socket not accessible.\n"
-                "Fix: sudo setcap cap_net_raw+eip /usr/bin/cernis-backend"
-            )
+        self._pump = threading.Thread(target=_pump, daemon=True)
+        self._pump.start()
 
         # Strom: aus der Queue ziehen, bis das Sentinel kommt (Stop/Selbst-Ende).
         try:
             while True:
-                item = await queue.get()
+                item = await aqueue.get()
                 if item is _SENTINEL:
                     break
                 yield item
         finally:
             # Generator-Ende (auch bei GeneratorExit/Abbruch durch den Use-Case):
-            # Sniffer sicher stoppen, damit kein Thread weiterlaeuft.
+            # Client + Pump sicher stoppen, damit kein Thread weiterlaeuft.
             self.stop()
+
+    @staticmethod
+    def _summary_from_dict(packet: dict[str, Any]) -> PacketSummary | None:
+        """Baut aus einem rohen Helfer-PACKET-dict ein ``PacketSummary`` (defensiv).
+
+        Die Felder des Helfer-dicts (``sniff_core.parse_packet``) entsprechen EXAKT
+        den ``PacketSummary``-Feldern; fehlende Felder fuellt die dataclass mit ihren
+        Defaults. Ein kaputtes dict (falscher Typ / unbekanntes Feld) ergibt ``None``
+        (das Paket wird verworfen) -- ein einzelner Murks-Frame darf den Strom nicht
+        killen.
+        """
+        try:
+            return PacketSummary(**packet)
+        except (TypeError, ValueError) as exc:
+            _logger.warning("packet_summary_malformed", error=str(exc))
+            return None
 
     def stop(self) -> None:
         """Stoppt einen laufenden Capture-Strom (idempotent).
 
-        Joint den Sniffer-Thread (``stop(join=True)``). Das Sentinel kommt ueber
-        ``finished_callback`` in die Queue, sodass ein parallel laufender
-        ``stream``-Generator sauber endet. Kein laufender Strom -> No-op.
+        Haelt den Bruecken-Thread (Event setzen + joinen) und stoppt den Helfer-Client
+        (STOP an den Helfer + Teardown). Kein laufender Strom -> No-op. ``export_pcap``
+        passiert NICHT hier -- ``RunCapture.stop`` ruft ``export_pcap`` VOR ``stop``,
+        solange der Client noch verbunden ist.
         """
-        sniffer = self._sniffer
-        if sniffer is None:
+        self._pump_stop.set()
+        pump = self._pump
+        self._pump = None
+        client = self._client
+        self._client = None
+        if pump is not None and pump is not threading.current_thread():
+            pump.join(timeout=2)
+        if client is None:
             return
-        self._sniffer = None
         try:
-            sniffer.stop(join=True)
+            client.stop()
         except Exception as exc:
             _logger.warning("capture_stop_failed", error=str(exc))
 
     def is_running(self) -> bool:
-        """``True``, solange der Sniffer-Thread tatsaechlich laeuft.
-
-        Spiegelt den ECHTEN Thread-Zustand (Altcode-``.running`` blieb nach Crash
-        ``True`` -- hier ``thread.is_alive()``).
-        """
-        sniffer = self._sniffer
-        if sniffer is None:
+        """``True``, solange der Helfer-Client laeuft (delegiert an den Client)."""
+        client = self._client
+        if client is None:
             return False
-        thread = getattr(sniffer, "thread", None)
-        return bool(thread and thread.is_alive())
+        return client.is_running()
 
     def export_pcap(self, path: str) -> bool:
-        """Schreibt die gesammelten Rohpakete als pcap nach ``path`` (best-effort).
+        """Schreibt die im Helfer gesammelten Rohpakete als pcap nach ``path``.
 
-        ``True`` bei Erfolg, ``False`` wenn nichts zu schreiben war oder das
-        Schreiben fehlschlug (AS-IS ``_save_pcap``). Fehlschlag wird geloggt
-        (kein stiller S3-Fang), das Ergebnis bleibt ``False`` (Wire unveraendert).
+        Reicht ``EXPORT_PCAP{path}`` an den Helfer durch und gibt dessen
+        ``EXPORTED{ok}`` zurueck (best-effort: leere Sammlung / Schreibfehler ->
+        ``False``). MUSS aufgerufen werden, solange der Client noch verbunden ist
+        (also VOR ``stop`` -- so ruft es ``RunCapture.stop``). Kein laufender Client
+        -> ``False``.
         """
-        if not (_scapy.HAS_SCAPY and self._raw_packets):
+        client = self._client
+        if client is None:
             return False
-        try:
-            _scapy.wrpcap(path, self._raw_packets)
-            return True
-        except Exception as exc:
-            _logger.warning("pcap_export_failed", path=path, error=str(exc))
-            return False
+        return client.export_pcap(path)
 
     def check_permission(self) -> str | None:
-        """Prueft, ob Capture moeglich ist; Fehlertext oder ``None`` wenn OK.
+        """Optimistischer Verfuegbarkeits-Check -- gibt ``None`` zurueck (B-Semantik).
 
-        NUR Linux x64 (AS-IS Linux-Zweig aus ``modules/pcap._check_capture_permission``
-        Z.241-253): ``AF_PACKET``-Raw-Socket probieren. ``PermissionError`` ->
-        ``cap_net_raw``-Fix-Hinweis (kein stiller Fallback, S3). ``OSError`` ->
-        ``None`` ("inconclusive" -- KEIN Permission-Fehler, scapy darf es versuchen;
-        AS-IS und kein S3-Verstoss, da kein echter Fehler verschluckt wird).
+        ETAPPE 3b / Privilege-Separation: Das Backend traegt kein ``CAP_NET_RAW`` mehr
+        (das traegt allein der Helfer ``cernis-sniffd``). Eine Backend-seitige
+        ``AF_PACKET``-Raw-Socket-Probe wuerde faelschlich "keine Rechte" melden,
+        obwohl der Helfer sehr wohl capturen darf. Daher KEINE Backend-Probe mehr:
+        optimistisch ``None`` (= "Capture moeglich"). Die ECHTE Rechtepruefung
+        passiert beim ``stream``-Start ueber die ERROR-Naht des Helfers (der Helfer
+        haelt das Recht) -- ein echter Rechte-Fehler kommt dann als ``CaptureError``
+        aus ``stream`` heraus. Konsistent zur SNI-Naht (``ScapySniSniffer``).
         """
-        try:
-            s = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(3))
-            s.close()
-            return None
-        except PermissionError:
-            return (
-                "Permission denied -- packet capture requires root or CAP_NET_RAW.\n"
-                "Fix: sudo setcap cap_net_raw+eip /usr/bin/cernis-backend"
-            )
-        except OSError:
-            return None  # inconclusive -- kein Rechte-Fehler, scapy darf es versuchen
+        return None
 
     def is_available(self) -> bool:
-        """``True``, wenn scapy verfuegbar ist (reiner Verfuegbarkeits-Check)."""
-        return _scapy.HAS_SCAPY
+        """``True``, wenn der Helfer-Einstieg grundsaetzlich nutzbar ist (Pfad existiert).
+
+        ETAPPE 3b: scapy lebt im Helfer und ist zur Laufzeit ohne Spawn nicht pruefbar.
+        Wir pruefen daher nur, ob der Helfer-Einstieg vorhanden ist (frozen-Binary
+        ``cernis-sniffd`` neben ``sys.executable`` bzw. dev-``sniffd.py``). Fehlt er,
+        ist ein Capture ausgeschlossen -> ``False`` (ehrlich, kein stiller Fallback).
+        Konsistent zur SNI-Naht (``ScapySniSniffer.is_available``).
+        """
+        return helper_entry_exists()

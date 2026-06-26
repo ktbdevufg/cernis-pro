@@ -1,138 +1,94 @@
-"""Adapter fuer ``LldpSnifferPort`` -- zeitbegrenzter LLDP/CDP-Sniff (C.3).
+"""Adapter fuer ``LldpSnifferPort`` -- zeitbegrenzter LLDP/CDP-Sniff ueber den Helfer-IPC.
 
-v2-nativ gegen scapy, KEIN ``modules``-Import (wie ``packet_sniffer``). Die Parser
-(``_parse_lldp``/``_parse_cdp``) und der EtherType/MAC-Dispatch wandern hierher --
-sie erzeugen ``LLDPNeighbor`` aus den scapy-contrib-Layern; die Domaene kennt nur
-``LLDPNeighbor``.
+ETAPPE 3b (Privilege-Separation): Der Adapter faehrt scapy NICHT mehr selbst. Der rohe
+LLDP/CDP-Sniff lebt im on-demand gestarteten Helfer ``cernis-sniffd``; der Adapter
+spricht ihn ueber den ``LldpHelperClient`` an (``infrastructure/sniffd_client/``). Die
+Parser (``_parse_lldp``/``_parse_cdp``) und der EtherType/MAC-Dispatch sind in den
+Helfer gewandert (``sniffd.sniff_core``); hier bleibt nur die Client-Anbindung + der
+``LLDPNeighbor``-Bau aus den rohen Nachbar-dicts.
 
-Der scapy-``sniff`` ist BLOCKIEREND (mit ``timeout=duration``); ``capture`` kapselt
-ihn ueber ``run_in_executor`` und bleibt ``async`` (Port-Vertrag).
+Der Helfer-Client wartet BLOCKIEREND (mit Timeout etwas groesser als ``duration``) auf
+die EINE NEIGHBORS-Nachricht; ``capture`` kapselt das ueber ``run_in_executor`` und
+bleibt ``async`` (Port-Vertrag) -- GENAU wie zuvor der blockierende scapy-``sniff``.
 
-S3-HEILUNG (Muster i -- Wire unveraendert): Der Altcode (``modules/lldp.start_capture``)
-fing den Sniff-Fehler mit einem nackten ``print`` und gab die (ggf. leere)
-Nachbarliste zurueck. Hier wird der Fehler stattdessen GELOGGT (``structlog``-Warn)
-statt geprintet -- gleiches Aussenverhalten (leere/teilweise Liste, kein Crash),
-aber der Betreiber sieht den Fehler strukturiert. Fehlt ``scapy.contrib``
-(``HAS_SCAPY_CONTRIB`` False), kann nicht geparst werden -> ``[]`` + Warn.
+S3-HEILUNG (Wire unveraendert): Spawn-/Connect-/Helfer-ERROR-Pfad gibt der Client
+``[]`` zurueck (keine Nachbarn statt Crash); hier wird das ggf. mit einem
+``structlog``-Warn quittiert. Das Original-``capture`` gab bei Sniff-Fehler ebenfalls
+``[]`` zurueck -- gleiches Aussenverhalten, der Betreiber sieht es strukturiert.
 
-Plattform: NUR Linux x64. Interface ``None`` -> scapy-Default-Interface.
+INJIZIERBARE SPAWN-NAHT: Der Konstruktor nimmt optional eine ``client_factory``
+(Default ``None`` -> baut intern einen ``LldpHelperClient``); Tests injizieren einen
+Fake-Client -- KEIN echter Subprozess/scapy in Tests (Muster wie
+``ScapySniSniffer.channel_factory``).
+
+Plattform: NUR Linux x64 (der Helfer kapselt die plattformnahe Sniff-Technik).
 """
 
 import asyncio
-from typing import Any
+from collections.abc import Callable
+from typing import Any, Protocol
 
 import structlog
 
 from domain.capture import LLDPNeighbor
-from infrastructure.capture import _scapy
+from infrastructure.sniffd_client import LldpHelperClient
 
 _logger = structlog.get_logger(__name__)
 
-# BPF-Filter AS-IS (modules/lldp.start_capture): LLDP-EtherType + CDP-Multicast-MAC.
-_LLDP_CDP_FILTER = "ether proto 0x88cc or ether dst 01:00:0c:cc:cc:cc"
+
+class LldpClient(Protocol):
+    """Schmale Naht zum LLDP-Helfer-Client (Spawn + Einmal-Sniff liegen dahinter)."""
+
+    def capture(self, interface: str | None, duration: float) -> list[dict[str, Any]]:
+        """Blockierender Einmal-Sniff -> rohe Nachbar-dict-Liste (``[]`` bei Fehler)."""
+        ...
 
 
 class ScapyLldpSniffer:
-    """Erfuellt ``LldpSnifferPort`` strukturell -- zeitbegrenzter scapy-Sniff."""
+    """Erfuellt ``LldpSnifferPort`` strukturell -- zeitbegrenzter Sniff via Helfer-Client.
 
-    def _parse_lldp(self, pkt: Any) -> LLDPNeighbor | None:
-        """LLDP-Paket -> ``LLDPNeighbor`` (AS-IS ``modules/lldp._parse_lldp``)."""
-        try:
-            kwargs: dict[str, Any] = {
-                "source_mac": pkt[_scapy.Ether].src,
-                "protocol": "LLDP",
-            }
-            if pkt.haslayer(_scapy.LLDPDUChassisID):
-                kwargs["chassis_id"] = str(pkt[_scapy.LLDPDUChassisID].id)
-            if pkt.haslayer(_scapy.LLDPDUPortID):
-                kwargs["port_id"] = str(pkt[_scapy.LLDPDUPortID].id)
-            if pkt.haslayer(_scapy.LLDPDUSystemName):
-                kwargs["system_name"] = str(pkt[_scapy.LLDPDUSystemName].system_name)
-            if pkt.haslayer(_scapy.LLDPDUSystemDescription):
-                kwargs["system_desc"] = str(pkt[_scapy.LLDPDUSystemDescription].description)[:200]
-            if pkt.haslayer(_scapy.LLDPDUPortDescription):
-                kwargs["port_desc"] = str(pkt[_scapy.LLDPDUPortDescription].description)
-            return LLDPNeighbor(**kwargs)
-        except Exception as exc:
-            _logger.warning("lldp_parse_failed", error=str(exc))
-            return None
+    Der Name bleibt aus Naht-Treue (Port-Verdrahtung in ``app.py``), obwohl scapy
+    jetzt im Helfer laeuft. ``client_factory`` ist die injizierbare Spawn-Naht:
+    Default ``None`` -> intern ein ``LldpHelperClient``; Tests injizieren einen Fake.
+    """
 
-    def _parse_cdp(self, pkt: Any) -> LLDPNeighbor | None:
-        """CDP-Paket -> ``LLDPNeighbor`` (AS-IS ``modules/lldp._parse_cdp``)."""
-        try:
-            src_mac = pkt[_scapy.Ether].src if pkt.haslayer(_scapy.Ether) else ""
-            kwargs: dict[str, Any] = {"source_mac": src_mac, "protocol": "CDP"}
-            if pkt.haslayer(_scapy.CDPMsgDeviceID):
-                name = str(pkt[_scapy.CDPMsgDeviceID].val)
-                kwargs["system_name"] = name
-                kwargs["chassis_id"] = name
-            if pkt.haslayer(_scapy.CDPMsgPortID):
-                kwargs["port_id"] = str(pkt[_scapy.CDPMsgPortID].val)
-            if pkt.haslayer(_scapy.CDPMsgSoftwareVersion):
-                kwargs["system_desc"] = str(pkt[_scapy.CDPMsgSoftwareVersion].val)[:200]
-            if pkt.haslayer(_scapy.CDPMsgPlatform):
-                kwargs["capabilities"] = [str(pkt[_scapy.CDPMsgPlatform].val)]
-            return LLDPNeighbor(**kwargs)
-        except Exception as exc:
-            _logger.warning("cdp_parse_failed", error=str(exc))
-            return None
-
-    def _dispatch(self, pkt: Any) -> LLDPNeighbor | None:
-        """EtherType/MAC-Dispatch (AS-IS ``modules/lldp._handle_packet``).
-
-        LLDP: EtherType ``0x88cc``. CDP: Ziel-MAC ``01:00:0c:cc:cc:cc``. Andere
-        Pakete -> ``None`` (vom BPF-Filter eigentlich schon ausgeschlossen).
-        """
-        if not pkt.haslayer(_scapy.Ether):
-            return None
-        if pkt[_scapy.Ether].type == 0x88CC:
-            return self._parse_lldp(pkt)
-        if pkt[_scapy.Ether].dst.lower() == "01:00:0c:cc:cc:cc":
-            return self._parse_cdp(pkt)
-        return None
+    def __init__(self, client_factory: Callable[[], LldpClient] | None = None) -> None:
+        self._client_factory: Callable[[], LldpClient] = (
+            client_factory if client_factory is not None else LldpHelperClient
+        )
 
     async def capture(self, interface: str | None, duration: float) -> list[LLDPNeighbor]:
-        """Lauscht ``duration`` Sekunden auf LLDP/CDP und liefert die Nachbarn.
+        """Lauscht ``duration`` Sekunden auf LLDP/CDP (im Helfer) und liefert die Nachbarn.
 
-        Blockierender scapy-``sniff`` ueber ``run_in_executor``. Keine Nachbarn /
-        scapy fehlt / Sniff-Fehler -> ``[]`` (nie ``None``); Fehler werden GELOGGT
-        (S3-Heilung Muster i: vorher nacktes ``print``, Wire unveraendert).
+        Baut den Helfer-Client, ruft dessen blockierendes ``capture`` ueber
+        ``run_in_executor`` (die Methode bleibt ``async``), und baut aus jedem rohen
+        Nachbar-dict ein ``LLDPNeighbor``. Keine Nachbarn / Helfer-Fehler -> ``[]``
+        (nie ``None``); ein kaputtes Nachbar-dict wird still uebersprungen + geloggt
+        (S3-Heilung: kein Crash).
         """
-        if not (_scapy.HAS_SCAPY and _scapy.HAS_SCAPY_CONTRIB):
-            _logger.warning(
-                "lldp_capture_unavailable",
-                has_scapy=_scapy.HAS_SCAPY,
-                has_contrib=_scapy.HAS_SCAPY_CONTRIB,
-            )
-            return []
-
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, self._sniff_blocking, interface, duration)
+        client = self._client_factory()
+        raw = await loop.run_in_executor(None, client.capture, interface, duration)
 
-    def _sniff_blocking(self, interface: str | None, duration: float) -> list[LLDPNeighbor]:
-        """Blockierender Sniff (laeuft im Executor-Thread); dedupliziert per source_mac.
+        neighbors: list[LLDPNeighbor] = []
+        for entry in raw:
+            neighbor = self._neighbor_from_dict(entry)
+            if neighbor is not None:
+                neighbors.append(neighbor)
+        return neighbors
 
-        Letzter Eintrag je ``source_mac`` gewinnt -- AS-IS zum Altcode-``_neighbors``-
-        dict (``source_mac`` -> Nachbar).
+    @staticmethod
+    def _neighbor_from_dict(entry: dict[str, Any]) -> LLDPNeighbor | None:
+        """Baut aus einem rohen Helfer-Nachbar-dict ein ``LLDPNeighbor`` (defensiv).
+
+        Die Felder des Helfer-dicts (``sniff_core._parse_lldp_neighbor`` /
+        ``_parse_cdp_neighbor``) entsprechen EXAKT den ``LLDPNeighbor``-Feldern;
+        fehlende fuellt die dataclass mit Defaults. Ein kaputtes dict (falscher Typ /
+        unbekanntes Feld / fehlende ``source_mac``) ergibt ``None`` + Warn -- ein
+        einzelner Murks-Eintrag darf die Liste nicht killen.
         """
-        neighbors: dict[str, LLDPNeighbor] = {}
-
-        def _handle(pkt: Any) -> None:
-            neighbor = self._dispatch(pkt)
-            if neighbor:
-                neighbors[neighbor.source_mac] = neighbor
-
         try:
-            kwargs: dict[str, Any] = {
-                "filter": _LLDP_CDP_FILTER,
-                "timeout": duration,
-                "prn": _handle,
-                "store": 0,
-            }
-            if interface:
-                kwargs["iface"] = interface
-            _scapy.sniff(**kwargs)
-        except Exception as exc:
-            _logger.warning("lldp_capture_failed", error=str(exc))
-
-        return list(neighbors.values())
+            return LLDPNeighbor(**entry)
+        except (TypeError, ValueError) as exc:
+            _logger.warning("lldp_neighbor_malformed", error=str(exc))
+            return None
