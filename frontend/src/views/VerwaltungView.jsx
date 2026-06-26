@@ -6,12 +6,14 @@
 // Funktionen:
 //   "geraeteverwaltung" Geräteverwaltung (aktiv) -> DeviceManagementPanel.
 //   "wartung"           Daten löschen (aktiv) -> WartungPanel.
+//   "listen"            Listen-Verwaltung (aktiv) -> BlocklistPanel.
 
-import { ListChecks, Trash2 } from "lucide-react";
+import { ListChecks, ShieldAlert, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { CardGrid, FunctionShell } from "../components/AreaShell.jsx";
+import BlocklistPanel from "../components/BlocklistPanel.jsx";
 import DeviceManagementPanel from "../components/DeviceManagementPanel.jsx";
 import FunctionCard from "../components/FunctionCard.jsx";
 import WartungPanel from "../components/WartungPanel.jsx";
@@ -20,6 +22,7 @@ import WartungPanel from "../components/WartungPanel.jsx";
 const FUNKTIONEN = [
   { id: "geraeteverwaltung", icon: ListChecks, locked: false },
   { id: "wartung", icon: Trash2, locked: false },
+  { id: "listen", icon: ShieldAlert, locked: false },
 ];
 
 export default function VerwaltungView() {
@@ -45,6 +48,17 @@ export default function VerwaltungView() {
         onBack={() => setOpenFunction(null)}
       >
         <WartungPanel />
+      </FunctionShell>
+    );
+  }
+
+  if (openFunction === "listen") {
+    return (
+      <FunctionShell
+        title={t("verwaltung.cards.listen.title")}
+        onBack={() => setOpenFunction(null)}
+      >
+        <BlocklistPanel />
       </FunctionShell>
     );
   }

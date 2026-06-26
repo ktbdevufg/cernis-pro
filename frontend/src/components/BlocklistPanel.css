@@ -1,0 +1,469 @@
+/* Listen-Verwaltungs-Panel: Quellen-Tabelle, Strenge/Gruppen-Einstellung,
+   Aktionsleiste. Dezent, dunkel-tauglich, nutzt ausschliesslich die Design-Tokens
+   (gleiche Token-Sprache wie DeviceManagementPanel.css; bl-* statt dm-*). Keine
+   erfundenen Farben. */
+
+.bl-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-height: 0;
+}
+
+.bl-loading {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-sec);
+}
+
+/* ── Erklaer-Kopf ────────────────────────────────────────────────────────────── */
+
+.bl-intro {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.bl-intro__desc {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--color-text-sec);
+}
+
+/* Die „rote Linie": prominent gerahmt, getoenter Akzent — sie ist die zentrale
+   Vision-Aussage (Einordnung gehoert der Liste, nicht CERNIS). */
+.bl-intro__redline {
+  margin: 0;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.5;
+  color: var(--color-text);
+  background: var(--color-accent-bg);
+  border: 1px solid var(--color-accent-border);
+  border-left: 3px solid var(--color-accent);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+}
+
+/* Globaler Fehlerhinweis (getoenter mittlerer Severity-Ton). */
+.bl-error {
+  margin: 0;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--sev-med-text);
+  background: var(--sev-med-bg);
+  border: 1px solid var(--sev-med-bd);
+  border-radius: var(--radius-md);
+}
+
+/* ── Bereiche ────────────────────────────────────────────────────────────────── */
+
+.bl-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.bl-section__title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-tert);
+}
+
+.bl-empty {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-tert);
+}
+
+.bl-saved {
+  font-size: 13px;
+  color: var(--color-accent);
+}
+
+/* ── Strenge (Segmented) ─────────────────────────────────────────────────────── */
+
+.bl-strictness {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.bl-strictness__option {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 180px;
+  min-width: 0;
+  padding: 12px 14px;
+  text-align: left;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-border);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  cursor: pointer;
+}
+
+.bl-strictness__option:hover:not(:disabled) {
+  border-color: var(--color-accent-border);
+}
+
+.bl-strictness__option:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.bl-strictness__option:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+.bl-strictness__option--active {
+  border-left-color: var(--color-accent);
+  border-color: var(--color-accent-border);
+  background: var(--color-accent-bg);
+}
+
+.bl-strictness__name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.bl-strictness__option--active .bl-strictness__name {
+  color: var(--color-accent-strong);
+}
+
+.bl-strictness__hint {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--color-text-sec);
+}
+
+/* ── Gruppen-Feinschalter ────────────────────────────────────────────────────── */
+
+.bl-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.bl-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.bl-toggle__box {
+  flex: 0 0 auto;
+  accent-color: var(--color-accent-strong);
+  cursor: pointer;
+}
+
+/* ── Aktionsleiste ───────────────────────────────────────────────────────────── */
+
+.bl-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.bl-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text);
+  background: var(--color-accent-bg);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.bl-action:hover:not(:disabled) {
+  background: var(--color-accent);
+}
+
+.bl-action:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.bl-action:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.bl-action--danger {
+  color: var(--severity-kritisch);
+  background: color-mix(in srgb, var(--severity-kritisch) 12%, transparent);
+  border-color: var(--severity-kritisch);
+}
+
+.bl-action--danger:hover:not(:disabled) {
+  color: var(--color-bg);
+  background: var(--severity-kritisch);
+}
+
+/* Inline-Rueckfrage (Werkszustand) im Bestandsstil. */
+.bl-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--color-card);
+  border: 1px solid var(--severity-kritisch);
+  border-left: 3px solid var(--severity-kritisch);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+}
+
+.bl-confirm__text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-text);
+}
+
+.bl-confirm__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.bl-confirm__btn {
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text);
+  background: var(--color-accent-bg);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.bl-confirm__btn:hover:not(:disabled) {
+  background: var(--color-accent);
+}
+
+.bl-confirm__btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.bl-confirm__btn--danger {
+  color: var(--severity-kritisch);
+  background: color-mix(in srgb, var(--severity-kritisch) 12%, transparent);
+  border-color: var(--severity-kritisch);
+}
+
+.bl-confirm__btn--danger:hover:not(:disabled) {
+  color: var(--color-bg);
+  background: var(--severity-kritisch);
+}
+
+/* ── Quellen-Tabelle ─────────────────────────────────────────────────────────── */
+
+.bl-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+}
+
+.bl-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.bl-table__th {
+  padding: 9px 12px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-tert);
+  background: var(--color-bar);
+  border-bottom: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+.bl-table__th--num {
+  text-align: right;
+}
+
+.bl-table__th--action {
+  width: 1%;
+}
+
+.bl-table__row {
+  border-bottom: 1px solid var(--color-border);
+}
+
+.bl-table__row:last-child {
+  border-bottom: none;
+}
+
+.bl-table__cell {
+  padding: 9px 12px;
+  color: var(--color-text);
+  vertical-align: middle;
+}
+
+.bl-table__cell--nowrap {
+  white-space: nowrap;
+  color: var(--color-text-sec);
+}
+
+.bl-table__cell--num {
+  text-align: right;
+  white-space: nowrap;
+  color: var(--color-text-sec);
+}
+
+.bl-table__cell--action {
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* Lizenz-Zelle: Bezeichner + dezenter Attribution-Hinweis darunter. */
+.bl-license {
+  display: block;
+  color: var(--color-text-sec);
+}
+
+.bl-attrib {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--sev-med-text);
+}
+
+/* ── Badges ──────────────────────────────────────────────────────────────────── */
+
+.bl-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 11px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-sec);
+  background: var(--color-bar);
+  white-space: nowrap;
+}
+
+.bl-badge--group {
+  color: var(--color-accent);
+  border-color: var(--color-accent-border);
+  background: var(--color-accent-bg);
+}
+
+/* Status-Badge: OK gruen, BROKEN rot, NEVER neutral. */
+.bl-status {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-sec);
+  background: var(--color-bar);
+  white-space: nowrap;
+}
+
+.bl-status[data-status="ok"] {
+  color: var(--status-active-text);
+  border-color: var(--status-active-bd);
+  background: var(--status-active-bg);
+}
+
+.bl-status[data-status="broken"] {
+  color: var(--severity-kritisch);
+  border-color: var(--severity-kritisch);
+  background: color-mix(in srgb, var(--severity-kritisch) 12%, transparent);
+}
+
+/* ── Aktiv-Toggle (Checkbox) ─────────────────────────────────────────────────── */
+
+.bl-active {
+  display: inline-flex;
+  cursor: pointer;
+}
+
+.bl-active__box {
+  accent-color: var(--color-accent-strong);
+  cursor: pointer;
+}
+
+/* ── Zeilen-Aktionen ─────────────────────────────────────────────────────────── */
+
+.bl-row-actions,
+.bl-row-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.bl-row-confirm__text {
+  font-size: 12px;
+  color: var(--color-text-sec);
+}
+
+.bl-row-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--color-text-sec);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.bl-row-action:hover:not(:disabled) {
+  color: var(--color-accent);
+  border-color: var(--color-accent-border);
+  background: var(--color-accent-bg);
+}
+
+.bl-row-action:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.bl-row-action:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.bl-row-action--danger:hover:not(:disabled) {
+  color: var(--severity-kritisch);
+  border-color: var(--severity-kritisch);
+  background: color-mix(in srgb, var(--severity-kritisch) 12%, transparent);
+}
+
+/* Dezenter Dreh-Spinner fuer das Aktualisieren-Icon. */
+.bl-spin {
+  animation: bl-spin 0.9s linear infinite;
+}
+
+@keyframes bl-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}

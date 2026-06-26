@@ -1170,6 +1170,10 @@
       "wartung": {
         "title": "Delete data",
         "subtitle": "Reset scan data or restore the factory state."
+      },
+      "listen": {
+        "title": "List management",
+        "subtitle": "Maintain and tune blocklists for trackers, ads and threats."
       }
     }
   },
@@ -1315,6 +1319,124 @@
       "knopfBehalten": "Keep",
       "knopfSpaeter": "Later",
       "leer": "There are currently no devices to ask about."
+    },
+    "blocklist": {
+      "intro": "Here you maintain the lists CERNIS checks your devices' outbound contacts against – for example trackers, ads or known threats. You can switch built-in lists on and off, add or upload your own lists, and set how strictly matches are shown.",
+      "redLine": "The classification comes from the list named in each case, not from CERNIS. CERNIS only reflects it.",
+      "loading": "Loading …",
+      "ladeFehler": "The lists could not be loaded.",
+      "settingsFehler": "The setting could not be saved.",
+      "aktionFehler": "The action failed. Please try again later.",
+      "never": "never",
+      "attributionRequired": "attribution required",
+      "settings": {
+        "title": "Display and strictness",
+        "strictnessLabel": "How strictly matches are shown",
+        "groupTrackerAds": "Trackers & ads",
+        "groupThreat": "Threats",
+        "saved": "Saved."
+      },
+      "strictness": {
+        "critical_only": {
+          "label": "Critical only",
+          "hint": "Shows only matches from threat lists."
+        },
+        "recommended": {
+          "label": "Recommended",
+          "hint": "Shows threats as well as trackers and ads."
+        },
+        "all": {
+          "label": "Show everything",
+          "hint": "Shows all matches, including plain ads."
+        }
+      },
+      "group": {
+        "tracker_ads": "Trackers & ads",
+        "threat": "Threats"
+      },
+      "format": {
+        "hosts": "Hosts file",
+        "adblock": "Adblock syntax",
+        "domain_list": "Domain list",
+        "ip_list": "IP list",
+        "csv_domain": "CSV (domain)",
+        "csv_ip": "CSV (IP)"
+      },
+      "status": {
+        "never": "never loaded",
+        "ok": "loaded",
+        "broken": "broken"
+      },
+      "col": {
+        "name": "Name",
+        "group": "Group",
+        "format": "Format",
+        "status": "Status",
+        "entries": "Entries",
+        "fetched": "Last loaded",
+        "license": "License",
+        "active": "Active"
+      },
+      "actions": {
+        "add": "Add list",
+        "upload": "Upload list",
+        "refreshDue": "Refresh all due",
+        "health": "Check lists",
+        "reset": "Restore factory state",
+        "refresh": "Refresh",
+        "delete": "Delete"
+      },
+      "refreshDueResult": "{{updated}} refreshed, {{failed}} failed.",
+      "sources": {
+        "title": "Sources",
+        "empty": "There are no lists yet."
+      },
+      "confirm": {
+        "cancel": "Cancel",
+        "deleteText": "Really delete this list?",
+        "deleteConfirm": "Delete",
+        "resetTitle": "Restore factory state",
+        "resetText": "All lists are deleted and the bundled factory lists are recreated. Your own and uploaded lists are lost in the process.",
+        "resetConfirm": "Reset"
+      },
+      "dialog": {
+        "close": "Close",
+        "cancel": "Cancel"
+      },
+      "add": {
+        "title": "Add list",
+        "lead": "Add a list by its internet address (URL). CERNIS then downloads it.",
+        "name": "Name",
+        "url": "URL",
+        "group": "Group",
+        "format": "Format",
+        "submit": "Add",
+        "error": "The list could not be added. Please check your input.",
+        "successLead": "The list was added.",
+        "licenseHint": "This source may be under a copyleft/attribution license: {{license}}. Please review its terms of use.",
+        "done": "Done"
+      },
+      "upload": {
+        "title": "Upload list",
+        "lead": "Upload a list as a file or paste the text directly.",
+        "file": "Choose file",
+        "text": "Or paste text",
+        "textPlaceholder": "One domain or IP per line …",
+        "submit": "Upload",
+        "error": "The list could not be uploaded. Please check your input.",
+        "success": "Uploaded – {{count}} entries detected."
+      },
+      "health": {
+        "title": "Check lists",
+        "lead": "These lists could not be loaded last time. You decide what should happen – nothing happens on its own.",
+        "suggest": "Suggestion: use “{{name}}” instead?",
+        "builtinNote": "Factory lists are not deleted, only deactivated.",
+        "delete": "Delete broken list",
+        "activate": "Activate suggestion",
+        "error": "The action failed. Please try again later.",
+        "close": "Close",
+        "allFine": "All good – no broken lists."
+      }
     }
   },
   "theme": {

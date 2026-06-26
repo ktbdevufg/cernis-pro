@@ -1170,6 +1170,10 @@
       "wartung": {
         "title": "Daten löschen",
         "subtitle": "Scan-Daten zurücksetzen oder den Werkszustand herstellen."
+      },
+      "listen": {
+        "title": "Listen-Verwaltung",
+        "subtitle": "Blocklists für Tracker, Werbung und Bedrohungen pflegen und einstellen."
       }
     }
   },
@@ -1315,6 +1319,124 @@
       "knopfBehalten": "Behalten",
       "knopfSpaeter": "Später",
       "leer": "Derzeit gibt es keine Geräte, zu denen nachgefragt werden müsste."
+    },
+    "blocklist": {
+      "intro": "Hier pflegen Sie die Listen, gegen die CERNIS die Außenkontakte Ihrer Geräte abgleicht – etwa für Tracker, Werbung oder bekannte Bedrohungen. Sie können mitgelieferte Listen an- und abschalten, eigene Listen hinzufügen oder hochladen und einstellen, wie streng angezeigt wird.",
+      "redLine": "Die Einordnung stammt aus der jeweils genannten Liste, nicht von CERNIS. CERNIS bildet sie nur ab.",
+      "loading": "Lädt …",
+      "ladeFehler": "Die Listen konnten nicht geladen werden.",
+      "settingsFehler": "Die Einstellung konnte nicht gespeichert werden.",
+      "aktionFehler": "Die Aktion ist fehlgeschlagen. Bitte später erneut versuchen.",
+      "never": "noch nie",
+      "attributionRequired": "Namensnennung nötig",
+      "settings": {
+        "title": "Anzeige und Strenge",
+        "strictnessLabel": "Wie streng angezeigt wird",
+        "groupTrackerAds": "Tracker & Werbung",
+        "groupThreat": "Bedrohungen",
+        "saved": "Gespeichert."
+      },
+      "strictness": {
+        "critical_only": {
+          "label": "Nur kritisch",
+          "hint": "Zeigt nur Treffer aus Bedrohungs-Listen."
+        },
+        "recommended": {
+          "label": "Empfohlen",
+          "hint": "Zeigt Bedrohungen sowie Tracker und Werbung."
+        },
+        "all": {
+          "label": "Alles zeigen",
+          "hint": "Zeigt alle Treffer, auch reine Werbung."
+        }
+      },
+      "group": {
+        "tracker_ads": "Tracker & Werbung",
+        "threat": "Bedrohungen"
+      },
+      "format": {
+        "hosts": "Hosts-Datei",
+        "adblock": "Adblock-Syntax",
+        "domain_list": "Domain-Liste",
+        "ip_list": "IP-Liste",
+        "csv_domain": "CSV (Domain)",
+        "csv_ip": "CSV (IP)"
+      },
+      "status": {
+        "never": "noch nie geladen",
+        "ok": "geladen",
+        "broken": "defekt"
+      },
+      "col": {
+        "name": "Name",
+        "group": "Gruppe",
+        "format": "Format",
+        "status": "Status",
+        "entries": "Einträge",
+        "fetched": "Zuletzt geladen",
+        "license": "Lizenz",
+        "active": "Aktiv"
+      },
+      "actions": {
+        "add": "Liste hinzufügen",
+        "upload": "Liste hochladen",
+        "refreshDue": "Alle fälligen aktualisieren",
+        "health": "Listen prüfen",
+        "reset": "Auf Werkszustand zurücksetzen",
+        "refresh": "Aktualisieren",
+        "delete": "Löschen"
+      },
+      "refreshDueResult": "{{updated}} aktualisiert, {{failed}} fehlgeschlagen.",
+      "sources": {
+        "title": "Quellen",
+        "empty": "Es sind noch keine Listen vorhanden."
+      },
+      "confirm": {
+        "cancel": "Abbrechen",
+        "deleteText": "Diese Liste wirklich löschen?",
+        "deleteConfirm": "Löschen",
+        "resetTitle": "Auf Werkszustand zurücksetzen",
+        "resetText": "Alle Listen werden gelöscht und die mitgelieferten Werkslisten neu angelegt. Eigene und hochgeladene Listen gehen dabei verloren.",
+        "resetConfirm": "Zurücksetzen"
+      },
+      "dialog": {
+        "close": "Schließen",
+        "cancel": "Abbrechen"
+      },
+      "add": {
+        "title": "Liste hinzufügen",
+        "lead": "Fügen Sie eine Liste über ihre Internet-Adresse (URL) hinzu. CERNIS lädt sie anschließend herunter.",
+        "name": "Name",
+        "url": "URL",
+        "group": "Gruppe",
+        "format": "Format",
+        "submit": "Hinzufügen",
+        "error": "Die Liste konnte nicht angelegt werden. Bitte Eingaben prüfen.",
+        "successLead": "Die Liste wurde angelegt.",
+        "licenseHint": "Diese Quelle steht möglicherweise unter einer Copyleft-/Namensnennungs-Lizenz: {{license}}. Bitte prüfen Sie die Nutzungsbedingungen.",
+        "done": "Fertig"
+      },
+      "upload": {
+        "title": "Liste hochladen",
+        "lead": "Laden Sie eine Liste als Datei hoch oder fügen Sie den Text direkt ein.",
+        "file": "Datei wählen",
+        "text": "Oder Text einfügen",
+        "textPlaceholder": "Eine Domain oder IP pro Zeile …",
+        "submit": "Hochladen",
+        "error": "Die Liste konnte nicht hochgeladen werden. Bitte Eingaben prüfen.",
+        "success": "Hochgeladen – {{count}} Einträge erkannt."
+      },
+      "health": {
+        "title": "Listen prüfen",
+        "lead": "Diese Listen ließen sich zuletzt nicht laden. Sie entscheiden, was geschehen soll – nichts passiert von selbst.",
+        "suggest": "Vorschlag: stattdessen „{{name}}“ einbinden?",
+        "builtinNote": "Werkslisten werden nicht gelöscht, sondern nur deaktiviert.",
+        "delete": "Defekte Liste löschen",
+        "activate": "Vorschlag aktivieren",
+        "error": "Die Aktion ist fehlgeschlagen. Bitte später erneut versuchen.",
+        "close": "Schließen",
+        "allFine": "Alles in Ordnung – keine defekten Listen."
+      }
     }
   },
   "theme": {
