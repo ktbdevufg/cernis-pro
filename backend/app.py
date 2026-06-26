@@ -60,6 +60,37 @@ from api.analysis import (
     provide_service_lookup,
 )
 from api.analysis import router as analysis_router
+from api.blocklist import (
+    AddSourceBody,
+    AddSourceOut,
+    ContactMatchOut,
+    HealthIssueOut,
+    HealthOut,
+    MatchBody,
+    MatchOut,
+    MatchResultsOut,
+    RefreshDueOut,
+    RefreshOut,
+    SettingsBody,
+    SettingsOut,
+    SourceOut,
+    UpdateSourceBody,
+    UploadSourceBody,
+    UploadSourceOut,
+    provide_add_source,
+    provide_delete_source,
+    provide_health,
+    provide_list_sources,
+    provide_match,
+    provide_read_settings,
+    provide_refresh_due,
+    provide_refresh_source,
+    provide_reset_defaults,
+    provide_update_source,
+    provide_upload_source,
+    provide_write_settings,
+)
+from api.blocklist import router as blocklist_router
 from api.capture import (
     TopologySource,
     provide_build_topology,
@@ -263,6 +294,31 @@ from application.alerting import (
     UpdateAlertRule,
 )
 from application.analysis import AddUserRules, AnalyzeSnapshot, ListUserRules
+from application.blocklist import (
+    DEFAULT_GROUP_THREAT_ENABLED,
+    DEFAULT_GROUP_TRACKER_ADS_ENABLED,
+    DEFAULT_REFRESH_DAYS,
+    DEFAULT_STRICTNESS,
+    SETTING_GROUP_THREAT,
+    SETTING_GROUP_TRACKER_ADS,
+    SETTING_REFRESH_DAYS,
+    SETTING_STRICTNESS,
+    AddUserSource,
+    BlocklistError,
+    BlocklistRefreshHandler,
+    CheckBlocklistHealth,
+    ContactInput,
+    DeleteUserSource,
+    ImportUploadedSource,
+    ListBlocklistSources,
+    MatchContacts,
+    RefreshDueSources,
+    RefreshSource,
+    ResetSourcesToDefaults,
+    SeedDefaultSources,
+    UpdateUserSource,
+    strictness_from_wire,
+)
 from application.capture import (
     BuildTopology,
     CaptureLldp,
@@ -416,6 +472,7 @@ from domain.analysis import (
     service_for_port,
 )
 from domain.analysis.engine import _SEVERITY_RANK
+from domain.blocklist import BlocklistGroup, BlocklistSource, MatchStrictness
 from domain.dns_watch import doh_providers_or_default, expected_servers_or_default
 from domain.export import (
     ExportableAnalysis,
@@ -455,6 +512,9 @@ from infrastructure.analysis import BuiltinRuleProvider, StaticHelpLinkResolver
 from infrastructure.analysis_acknowledgements_db import SqliteAcknowledgementRepository
 from infrastructure.analysis_host_history_db import SqliteHostHistoryRepository
 from infrastructure.analysis_rules_db import SqliteUserRuleRepository
+from infrastructure.blocklist_entries_db import SqliteBlocklistEntryRepository
+from infrastructure.blocklist_fetcher import UrllibBlocklistFetcher
+from infrastructure.blocklist_sources_db import SqliteBlocklistSourceRepository
 from infrastructure.capture import (
     ScapyLldpSniffer,
     ScapyPacketSniffer,
@@ -1737,6 +1797,14 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             run_scheduler_uc = _build_run_scheduler()
             _app.state.run_scheduler = run_scheduler_uc
             _app.state.scheduler_task = asyncio.create_task(run_scheduler_uc.run())
+            # ── blocklist-Domaene (Ring 4+5) ─────────────────────────────────
+            # Idempotente Start-Initialisierung: fehlende Werksquellen anlegen (bestehende
+            # bleiben unangetastet -> Nutzer-Aenderungen ueberleben) UND -- falls noch keiner
+            # existiert -- den taeglich tickenden Auto-Refresh-Job (blocklist_refresh)
+            # anlegen. Beides ueber die Composition-Root-Closures (DB-Schreiben nur im
+            # bootstrap-Pfad, nie beim Import/Test ohne bootstrap_on_startup).
+            _seed_blocklist_defaults()
+            _ensure_blocklist_refresh_job()
             init_alerts_db()
             # agent (A.4+5): KEIN init_agents_db mehr -- das v2-SqliteAgentRepository
             # legt die remote_agents-Tabelle beim Bau selbst an (_ensure_schema),
@@ -2615,6 +2683,306 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.dependency_overrides[provide_scheduler_pause] = lambda: _scheduler_pause
     app.dependency_overrides[provide_scheduler_resume] = lambda: _scheduler_resume
     app.dependency_overrides[provide_scheduler_delete] = lambda: _scheduler_delete
+
+    # ── blocklist-Domaene v2 verdrahten (Ring 4+5, Regel 5: ports<->infra nur hier) ──
+    # Aussenkontakt-Bewertung gegen lokal gepflegte Blocklists. Zwei Repo-Factories
+    # (Quellen-Definitionen + geparste Eintraege) wie scheduled_job_repository(); der echte
+    # Fetcher (urllib) erfuellt das BlocklistFetcher-Protocol strukturell. Die Projektion
+    # Domaene->Wire macht der Composition Root HIER (Regel 4: der api-Ring kennt domain/
+    # application nicht). Die Settings (Strenge/Intervall/Gruppen-Schalter) liegen im
+    # bestehenden Key-Value-SettingsRepository -- KEINE neue Settings-Domaene.
+
+    @lru_cache(maxsize=1)
+    def blocklist_source_repository() -> SqliteBlocklistSourceRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteBlocklistSourceRepository(get_db_path())
+
+    @lru_cache(maxsize=1)
+    def blocklist_entry_repository() -> SqliteBlocklistEntryRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteBlocklistEntryRepository(get_db_path())
+
+    @lru_cache(maxsize=1)
+    def blocklist_fetcher() -> UrllibBlocklistFetcher:
+        return UrllibBlocklistFetcher()
+
+    # Settings-Lese-Helfer (Muster _read_cve_int_setting): Strenge (str, validiert beim
+    # Schreiben), Intervall (int, Default 7), Gruppen-Schalter (bool). Defensiv gegen
+    # fehlende/kaputte Settings -> Default (eine kaputte Komfort-Einstellung darf nicht
+    # faellen; S3-ehrlich, der Fehler ist im cve-/device-Helfer-Muster geloggt).
+    def _read_blocklist_refresh_days() -> int:
+        return _read_cve_int_setting(repository(), SETTING_REFRESH_DAYS, DEFAULT_REFRESH_DAYS)
+
+    def _read_blocklist_str_setting(key: str, default: str) -> str:
+        try:
+            setting = repository().get(key)
+        except CorruptSettingError:
+            logger.warning("blocklist_setting_corrupt", key=key)
+            return default
+        if setting is None or not isinstance(setting.value, str):
+            return default
+        return setting.value
+
+    def _read_blocklist_bool_setting(key: str, default: bool) -> bool:
+        try:
+            setting = repository().get(key)
+        except CorruptSettingError:
+            logger.warning("blocklist_setting_corrupt", key=key)
+            return default
+        if setting is None or not isinstance(setting.value, bool):
+            return default
+        return setting.value
+
+    def _read_blocklist_strictness() -> MatchStrictness:
+        # Defensiv: ein kaputter/unbekannter gespeicherter Wert faellt auf den Default
+        # zurueck (der Schreibpfad validiert; ein Altwert darf den Lesepfad nicht faellen).
+        raw = _read_blocklist_str_setting(SETTING_STRICTNESS, DEFAULT_STRICTNESS)
+        try:
+            return MatchStrictness(raw)
+        except ValueError:
+            return MatchStrictness(DEFAULT_STRICTNESS)
+
+    def _blocklist_enabled_groups() -> frozenset[BlocklistGroup]:
+        # Die zwei Gruppen-Feinschalter -> die Menge der aktiven Gruppen fuer MatchContacts.
+        groups: set[BlocklistGroup] = set()
+        if _read_blocklist_bool_setting(
+            SETTING_GROUP_TRACKER_ADS, DEFAULT_GROUP_TRACKER_ADS_ENABLED
+        ):
+            groups.add(BlocklistGroup.TRACKER_ADS)
+        if _read_blocklist_bool_setting(SETTING_GROUP_THREAT, DEFAULT_GROUP_THREAT_ENABLED):
+            groups.add(BlocklistGroup.THREAT)
+        return frozenset(groups)
+
+    # Projektion Domaene->Wire (HIER, nicht im Router). Eine Quelle / ein Treffer / ein
+    # Lade-Ergebnis -> die jeweilige *Out-Form.
+    def _blocklist_source_out(source: BlocklistSource) -> SourceOut:
+        return SourceOut(
+            id=source.id,
+            name=source.name,
+            group=source.group.value,
+            fmt=source.fmt.value,
+            origin=source.origin.value,
+            url=source.url,
+            license=source.license,
+            attribution_required=source.attribution_required,
+            enabled=source.enabled,
+            last_fetched_ts=source.last_fetched_ts,
+            status=source.status.value,
+            entry_count=source.entry_count,
+        )
+
+    def _blocklist_refresh_out(result: object) -> RefreshOut:
+        # result ist ein application.RefreshResult (frozen dataclass); per Attribut gelesen.
+        return RefreshOut(
+            source_id=result.source_id,  # type: ignore[attr-defined]
+            ok=result.ok,  # type: ignore[attr-defined]
+            entry_count=result.entry_count,  # type: ignore[attr-defined]
+            error=result.error,  # type: ignore[attr-defined]
+        )
+
+    # Lese-Runner.
+    def _blocklist_list_sources() -> list[SourceOut]:
+        sources = ListBlocklistSources(
+            blocklist_source_repository(), blocklist_entry_repository()
+        )()
+        return [_blocklist_source_out(source) for source in sources]
+
+    def _blocklist_health() -> HealthOut:
+        issues = CheckBlocklistHealth(blocklist_source_repository())()
+        return HealthOut(
+            issues=[
+                HealthIssueOut(
+                    source_id=issue.source_id,
+                    name=issue.name,
+                    group=issue.group.value,
+                    suggested_replacement_id=issue.suggested_replacement_id,
+                )
+                for issue in issues
+            ]
+        )
+
+    def _blocklist_read_settings() -> SettingsOut:
+        return SettingsOut(
+            strictness=_read_blocklist_str_setting(SETTING_STRICTNESS, DEFAULT_STRICTNESS),
+            refresh_interval_days=_read_blocklist_refresh_days(),
+            group_tracker_ads_enabled=_read_blocklist_bool_setting(
+                SETTING_GROUP_TRACKER_ADS, DEFAULT_GROUP_TRACKER_ADS_ENABLED
+            ),
+            group_threat_enabled=_read_blocklist_bool_setting(
+                SETTING_GROUP_THREAT, DEFAULT_GROUP_THREAT_ENABLED
+            ),
+        )
+
+    # Schreib-Runner.
+    def _blocklist_add_source(body: AddSourceBody) -> AddSourceOut:
+        # Ungueltige group/fmt -> BlocklistError -> ValueError (api-Rand faengt nur
+        # ValueError -> 422).
+        try:
+            result = AddUserSource(blocklist_source_repository())(
+                body.name, body.url, body.group, body.fmt
+            )
+        except BlocklistError as exc:
+            raise ValueError(str(exc)) from exc
+        return AddSourceOut(source_id=result.source_id, license_hint=result.license_hint)
+
+    def _blocklist_upload_source(body: UploadSourceBody) -> UploadSourceOut:
+        # Ungueltige group/fmt -> BlocklistError -> ValueError (api-Rand: 422).
+        try:
+            result = ImportUploadedSource(
+                blocklist_source_repository(), blocklist_entry_repository()
+            )(body.name, body.group, body.fmt, body.content)
+        except BlocklistError as exc:
+            raise ValueError(str(exc)) from exc
+        return UploadSourceOut(source_id=result.source_id, entry_count=result.entry_count)
+
+    def _blocklist_update_source(source_id: str, body: UpdateSourceBody) -> None:
+        # BlocklistError trennt "unbekannte id" (404) von "Vokabular-Fehlwert" (422). Da der
+        # Use-Case fuer beides BlocklistError wirft, unterscheidet der Composition Root: liegt
+        # die Quelle nicht vor -> KeyError (404); sonst der Vokabular-Fehler -> ValueError (422).
+        if blocklist_source_repository().get(source_id) is None:
+            raise KeyError(f"Unbekannte Quelle: {source_id!r}")
+        try:
+            UpdateUserSource(blocklist_source_repository())(
+                source_id,
+                name=body.name,
+                url=body.url,
+                group=body.group,
+                fmt=body.fmt,
+                enabled=body.enabled,
+            )
+        except BlocklistError as exc:
+            raise ValueError(str(exc)) from exc
+
+    def _blocklist_delete_source(source_id: str) -> None:
+        DeleteUserSource(blocklist_source_repository(), blocklist_entry_repository())(source_id)
+
+    def _blocklist_build_refresh_due() -> RefreshDueSources:
+        refresh = RefreshSource(
+            blocklist_source_repository(), blocklist_entry_repository(), blocklist_fetcher()
+        )
+        return RefreshDueSources(blocklist_source_repository(), refresh)
+
+    def _blocklist_refresh_source(source_id: str) -> RefreshOut:
+        # Unbekannte id / Upload-ohne-url -> BlocklistError; hier in KeyError (404) uebersetzt.
+        # Ein Download-/Parse-Fehler ist KEIN Wurf -> er kommt als RefreshResult(ok=False).
+        refresh = RefreshSource(
+            blocklist_source_repository(), blocklist_entry_repository(), blocklist_fetcher()
+        )
+        try:
+            result = refresh(source_id)
+        except BlocklistError as exc:
+            raise KeyError(str(exc)) from exc
+        return _blocklist_refresh_out(result)
+
+    def _blocklist_refresh_due() -> RefreshDueOut:
+        results = _blocklist_build_refresh_due()(_read_blocklist_refresh_days())
+        return RefreshDueOut(results=[_blocklist_refresh_out(result) for result in results])
+
+    def _blocklist_reset_defaults() -> None:
+        ResetSourcesToDefaults(blocklist_source_repository(), blocklist_entry_repository())()
+
+    def _blocklist_write_settings(body: SettingsBody) -> None:
+        # Strenge zuerst validieren (unbekannt -> UnknownStrictnessError -> ValueError -> 422),
+        # bevor irgendetwas geschrieben wird (kein halber Schreibvorgang). Geschrieben wird
+        # ueber den UpdateSetting-Use-Case (Hausstil; validiert Key, lehnt Secret-Keys ab --
+        # die blocklist-Keys sind keine Secrets).
+        write_setting = UpdateSetting(repository())
+        if body.strictness is not None:
+            # Nur Validierung; ein Fehlwert wirft BlocklistError -> in ValueError
+            # uebersetzt, damit der api-Rand (faengt nur ValueError) auf 422 mappt.
+            try:
+                strictness_from_wire(body.strictness)
+            except BlocklistError as exc:
+                raise ValueError(str(exc)) from exc
+            write_setting(SETTING_STRICTNESS, body.strictness)
+        if body.refresh_interval_days is not None:
+            write_setting(SETTING_REFRESH_DAYS, body.refresh_interval_days)
+        if body.group_tracker_ads_enabled is not None:
+            write_setting(SETTING_GROUP_TRACKER_ADS, body.group_tracker_ads_enabled)
+        if body.group_threat_enabled is not None:
+            write_setting(SETTING_GROUP_THREAT, body.group_threat_enabled)
+
+    def _blocklist_match(body: MatchBody) -> MatchResultsOut:
+        # Strenge aus dem Body (validiert) ODER aus den Settings; die Gruppen-Feinschalter
+        # aus den Settings fliessen immer ein. BlocklistError der Hebung -> ValueError
+        # (der api-Rand faengt nur ValueError -> 422).
+        if body.strictness is not None:
+            try:
+                strictness = strictness_from_wire(body.strictness)
+            except BlocklistError as exc:
+                raise ValueError(str(exc)) from exc
+        else:
+            strictness = _read_blocklist_strictness()
+        contacts = [
+            ContactInput(remote_ip=contact.remote_ip, hostname=contact.hostname)
+            for contact in body.contacts
+        ]
+        results = MatchContacts(blocklist_source_repository(), blocklist_entry_repository())(
+            contacts, strictness, _blocklist_enabled_groups()
+        )
+        return MatchResultsOut(
+            results=[
+                ContactMatchOut(
+                    remote_ip=result.remote_ip,
+                    hostname=result.hostname,
+                    matches=[
+                        MatchOut(
+                            source_id=match.source_id,
+                            source_name=match.source_name,
+                            group=match.group.value,
+                            matched_on=match.matched_on,
+                        )
+                        for match in result.matches
+                    ],
+                )
+                for result in results
+            ]
+        )
+
+    # Auto-Refresh-Handler in die Scheduler-Registry eintragen (neben monitoring_window).
+    # Der Handler liest interval_days LIVE und ruft RefreshDueSources (Faelligkeit via
+    # last_fetched_ts -- das DailyWindow tickt nur taeglich, s. scheduler_handler-Docstring).
+    _blocklist_refresh_handler = BlocklistRefreshHandler(
+        _blocklist_build_refresh_due(), _read_blocklist_refresh_days
+    )
+    scheduler_handlers[_blocklist_refresh_handler.job_type] = _blocklist_refresh_handler
+
+    # Start-Initialisierung (idempotent): die fehlenden Werksquellen anlegen UND -- falls noch
+    # keiner existiert -- den taeglich tickenden Refresh-Job (03:00-04:00 lokal, alle Tage).
+    # Wird im Lifespan-Bootstrap einmal gerufen (unten), nicht hier (kein DB-Schreiben beim
+    # Import/Test ohne bootstrap_on_startup).
+    def _seed_blocklist_defaults() -> None:
+        SeedDefaultSources(blocklist_source_repository())()
+
+    def _ensure_blocklist_refresh_job() -> None:
+        existing = ListScheduledJobs(scheduled_job_repository())()
+        if any(job.job_type == BlocklistRefreshHandler.job_type for job in existing):
+            return
+        window = DailyWindow(
+            start_minute=180,
+            end_minute=240,
+            weekdays=frozenset(),
+            from_epoch=0.0,
+            until_epoch=0.0,
+        )
+        CreateScheduledJob(scheduled_job_repository())(BlocklistRefreshHandler.job_type, (), window)
+        logger.info("blocklist_refresh_job_created")
+
+    app.include_router(blocklist_router)
+    app.dependency_overrides[provide_list_sources] = lambda: _blocklist_list_sources
+    app.dependency_overrides[provide_add_source] = lambda: _blocklist_add_source
+    app.dependency_overrides[provide_upload_source] = lambda: _blocklist_upload_source
+    app.dependency_overrides[provide_update_source] = lambda: _blocklist_update_source
+    app.dependency_overrides[provide_delete_source] = lambda: _blocklist_delete_source
+    app.dependency_overrides[provide_refresh_source] = lambda: _blocklist_refresh_source
+    app.dependency_overrides[provide_refresh_due] = lambda: _blocklist_refresh_due
+    app.dependency_overrides[provide_reset_defaults] = lambda: _blocklist_reset_defaults
+    app.dependency_overrides[provide_health] = lambda: _blocklist_health
+    app.dependency_overrides[provide_read_settings] = lambda: _blocklist_read_settings
+    app.dependency_overrides[provide_write_settings] = lambda: _blocklist_write_settings
+    app.dependency_overrides[provide_match] = lambda: _blocklist_match
 
     # ── capture-Domaene v2 verdrahten (C.4+5, Regel 5: ports<->infra nur hier) ──
     # REST (pcap/lldp) ueber duenne Use-Cases im api-Ring; der WS-Handler /ws/pcap
