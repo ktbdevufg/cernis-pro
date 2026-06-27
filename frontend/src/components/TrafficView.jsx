@@ -25,7 +25,8 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { fetchSniMap, startSni, stopSni } from "../api/sni.js";
+import { fetchSniMap } from "../api/sni.js";
+import { useSni } from "../hooks/useSni.js";
 import {
   fetchPtrNames,
   fetchTraffic,
@@ -627,9 +628,17 @@ export default function TrafficView({
   // sniError trägt einen ruhigen Hinweis (z. B. fehlende Rechte). sniMap hält die
   // beobachteten remote_ip -> hostname über Refreshes hinweg (Ref, kein State:
   // die Anreicherung steckt das Ergebnis selbst per setApps in die Liste).
-  const [sniAktiv, setSniAktiv] = useState(false);
-  const [sniStartet, setSniStartet] = useState(false);
-  const [sniError, setSniError] = useState(null);
+  // SNI-Lifecycle kommt jetzt aus dem geteilten Hook (Reference-Count über alle
+  // Ansichten). Die Namen sniAktiv/sniStartet/sniError bleiben im restlichen Code
+  // unverändert gültig — sie stammen nun aus dem Hook statt aus lokalem useState.
+  const {
+    running: sniAktiv,
+    starting: sniStartet,
+    error: sniError,
+    acquire,
+    release,
+    syncStatus,
+  } = useSni();
   const sniMap = useRef(new Map());
 
   // Spiegelt sniAktiv in eine Ref, damit der stabile Anreicherungs-Pfad
@@ -638,6 +647,12 @@ export default function TrafficView({
   // erneut feuern (Lade-Flackern, Auswahl-Reset). Der eigentliche Reload nach
   // dem Toggle wird explizit über ladeTraffic(false) angestoßen.
   const sniAktivRef = useRef(false);
+
+  // sniAktiv kommt jetzt aus dem Hook; die Ref muss bei jeder Änderung nachziehen,
+  // damit der stabile Reload-Pfad (reichereTrafficAn) den Live-Wert liest.
+  useEffect(() => {
+    sniAktivRef.current = sniAktiv;
+  }, [sniAktiv]);
 
   // Lazy, nicht-blockierende PTR-Anreicherung NACH dem Listen-Render: fragt nur
   // IPs OHNE Cache-Eintrag neu an, mischt das Ergebnis in den Cache und reichert
@@ -748,41 +763,32 @@ export default function TrafficView({
     return () => clearInterval(id);
   }, [refreshInterval, ladeTraffic]);
 
-  // SNI-Start: startet die Beobachtung. Bei Erfolg aktiv schalten, Fehler löschen
-  // und sofort einen Reload anstoßen (damit die SNI-Namen direkt einreichern).
-  // Bei Misserfolg den Fehlertext zeigen und inaktiv bleiben. setSniStartet wird
-  // IMMER am Ende zurückgesetzt (auch im Fehlerfall).
+  // SNI-Start: meldet Bedarf am geteilten Hook an (acquire — start + starting/
+  // error-Handling macht der Hook selbst) und stößt danach einen Reload an, damit
+  // die SNI-Namen sofort einreichern. starting/error kommen reaktiv über
+  // sniStartet/sniError aus dem Hook.
   const handleSniStart = useCallback(async () => {
-    setSniStartet(true);
-    try {
-      const ergebnis = await startSni();
-      if (ergebnis.ok) {
-        setSniAktiv(true);
-        sniAktivRef.current = true; // VOR dem Reload setzen, damit er anreichert.
-        setSniError(null);
-        // Reload nicht awaiten: der Effekt-Pfad reichert im Hintergrund an.
-        ladeTraffic(false);
-      } else {
-        setSniError(ergebnis.error);
-        setSniAktiv(false);
-        sniAktivRef.current = false;
-      }
-    } finally {
-      setSniStartet(false);
-    }
-  }, [ladeTraffic]);
+    await acquire();
+    sniAktivRef.current = true; // VOR dem Reload, damit er anreichert.
+    ladeTraffic(false);
+  }, [acquire, ladeTraffic]);
 
-  // SNI-Stop: best-effort stoppen (Fehler ignorieren), inaktiv schalten, die
-  // beobachtete Map leeren und einen Reload anstoßen — so verschwinden die
-  // SNI-Namen aus der Anzeige und fallen zurück auf PTR/IP.
+  // SNI-Stop: meldet Bedarf ab (release — der Hook stoppt erst beim letzten
+  // release). Die bisherige Aufräum-Logik bleibt: Map leeren und einen Reload
+  // anstoßen, damit die SNI-Namen verschwinden und auf PTR/IP zurückfallen.
   const handleSniStop = useCallback(async () => {
-    await stopSni();
-    setSniAktiv(false);
+    await release();
     sniAktivRef.current = false; // VOR dem Reload, damit er NICHT mehr anreichert.
     sniMap.current = new Map();
-    setSniError(null);
     ladeTraffic(false);
-  }, [ladeTraffic]);
+  }, [release, ladeTraffic]);
+
+  // Externen Ist-Zustand übernehmen: läuft SNI schon von einer anderen Ansicht,
+  // erkennt TrafficView das beim Mount und schaltet aktiv (ohne neu zu starten).
+  useEffect(() => {
+    syncStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Klick auf eine Zeile: wählt die App (name kann null sein -> Sentinel).
   const handleSelect = (app) => {
