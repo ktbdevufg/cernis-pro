@@ -10,12 +10,17 @@
 // Designsprache wie die übrigen Beobachten-Komponenten (ObserveView/TrafficView):
 // dezent, flach, ruhig. Außenkontakte URTEILEN NICHT — KEINE Severity-Farben.
 
+import { Globe, GlobeLock, Flag, Filter } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { fetchOutboundContacts } from "../api/outbound.js";
 import { matchContacts } from "../api/blocklist.js";
+import { fetchSniMap } from "../api/sni.js";
+import { fetchSettings, updateSetting } from "../api/settings.js";
+import { useSni } from "../hooks/useSni.js";
 import OutboundRecordingPanel from "./OutboundRecordingPanel.jsx";
+import OutboundConsentDialog from "./OutboundConsentDialog.jsx";
 import "./OutboundView.css";
 
 // Reihenfolge/Erlaubte Gruppen der Blocklist-Badges. tracker_ads zuerst (häufiger,
@@ -238,6 +243,30 @@ export default function OutboundView() {
   // Badges, kein Hinweis, kein Absturz. Die Kontakte-Liste selbst bleibt intakt.
   const [matchResults, setMatchResults] = useState([]);
 
+  // ── SNI-Block (Etappe 3b): Einwilligung + Lifecycle + Anreicherung ──────────
+  // Einwilligung in die passive SNI-Beobachtung: "granted"|"denied"|null(=unset)|
+  // "loading"(=Startwert, bis das Settings-Lesen durch ist). Steuert Lifecycle
+  // und den Hinweisstreifen.
+  const [consent, setConsent] = useState("loading");
+  // Ob der Einwilligungs-Dialog gerade offen ist.
+  const [zeigeConsentDialog, setZeigeConsentDialog] = useState(false);
+  // SNI-Map remote_ip -> hostname (Plain-Object) für die Anreicherung. Leer,
+  // solange SNI nicht läuft.
+  const [sniMap, setSniMap] = useState({});
+  // Ob der Threat-Filter aktiv ist (nur Gegenstellen auf Threat-Listen zeigen).
+  const [threatGefiltert, setThreatGefiltert] = useState(false);
+
+  // Geteilter SNI-Lifecycle-Hook: real gestartet beim ERSTEN acquire, real
+  // gestoppt erst beim LETZTEN release (Reference-Count). running/starting/error
+  // spiegeln den globalen Sniffer-Zustand.
+  const {
+    running: sniAktiv,
+    starting: sniStartet,
+    error: sniError,
+    acquire,
+    release,
+  } = useSni();
+
   // Beim Mount laden. t NIEMALS in dep-Array (react-i18next-Regel) — leeres
   // dep-Array, einmal beim Mount. Fehler tolerieren: leere Liste + ruhiger
   // Hinweis-Streifen, kein Absturz.
@@ -263,20 +292,100 @@ export default function OutboundView() {
     };
   }, []);
 
-  // Zweiter Effekt: nach geladenen Kontakten die Blocklist abgleichen. Abhängig von
-  // [kontakte] (NICHT t — react-i18next-Regel). matchContacts OHNE strictness, damit
-  // das Backend die in der Verwaltung gesetzte Strenge + Gruppen-Schalter nutzt
-  // (Anzeige bleibt konsistent zur Nutzer-Einstellung). Fehler werden STILL
-  // behandelt: nur console.error, keine Badges, kein Hinweis, kein Absturz.
+  // SNI-Block: Einwilligung beim Mount aus den Settings laden. t NICHT im
+  // dep-Array (react-i18next-Regel) — leeres dep-Array, einmal beim Mount.
+  // Fehlt der Wert (null), zeigen wir den Einwilligungs-Dialog. Fehler tolerieren:
+  // consent bleibt null, Dialog zeigen ist ok (kein Absturz).
   useEffect(() => {
-    if (kontakte.length === 0) {
+    let abgebrochen = false;
+    (async () => {
+      try {
+        const settings = await fetchSettings();
+        if (abgebrochen) {
+          return;
+        }
+        const wert = settings["outbound_sni_consent"] ?? null;
+        setConsent(wert);
+        if (wert === null) {
+          setZeigeConsentDialog(true);
+        }
+      } catch {
+        if (!abgebrochen) {
+          setConsent(null);
+          setZeigeConsentDialog(true);
+        }
+      }
+    })();
+    return () => {
+      abgebrochen = true;
+    };
+  }, []);
+
+  // SNI-Lifecycle: bei erteilter Einwilligung den geteilten Sniffer anfordern
+  // (acquire) und im Cleanup wieder freigeben (release). acquire/release sind
+  // über useCallback stabil; sie gehören dennoch ins dep-Array. Bei nicht
+  // erteilter Einwilligung passiert nichts.
+  useEffect(() => {
+    if (consent !== "granted") {
+      return undefined;
+    }
+    acquire();
+    return () => {
+      release();
+    };
+  }, [consent, acquire, release]);
+
+  // SNI-Map-Anreicherung: läuft der Sniffer, einmal die Map remote_ip -> hostname
+  // holen (fetchSniMap wirft nie). Läuft er nicht, die Map leeren. Bewusst KEIN
+  // Dauer-Poll — einmal nach Aktivierung reicht für Stufe B.
+  useEffect(() => {
+    let abgebrochen = false;
+    if (!sniAktiv) {
+      setSniMap({});
+      return undefined;
+    }
+    (async () => {
+      const map = await fetchSniMap();
+      if (!abgebrochen) {
+        setSniMap(map);
+      }
+    })();
+    return () => {
+      abgebrochen = true;
+    };
+  }, [sniAktiv]);
+
+  // Angereicherte Kontakte: hat ein Kontakt keinen hostname, aber die SNI-Map
+  // kennt einen für seine remoteIp, setzen wir ihn ein. Sonst bleibt der Kontakt
+  // unverändert. Diese Liste ersetzt im Match-/Render-Pfad die rohe kontakte-Liste,
+  // damit Domain-Blocklisten auf den echten Hostnamen greifen. MUSS vor den
+  // Effekten/Memos stehen, die sie nutzen.
+  const kontakteMitSni = useMemo(
+    () =>
+      kontakte.map((kontakt) =>
+        kontakt.hostname === null && sniMap[kontakt.remoteIp]
+          ? { ...kontakt, hostname: sniMap[kontakt.remoteIp] }
+          : kontakt,
+      ),
+    [kontakte, sniMap],
+  );
+
+  // Zweiter Effekt: nach geladenen Kontakten die Blocklist abgleichen. Abhängig von
+  // [kontakteMitSni] (NICHT t — react-i18next-Regel) — gleicht die ANGEREICHERTEN
+  // Kontakte ab, damit Domain-Blocklisten auf den SNI-Hostnamen greifen.
+  // matchContacts OHNE strictness, damit das Backend die in der Verwaltung gesetzte
+  // Strenge + Gruppen-Schalter nutzt (Anzeige bleibt konsistent zur Nutzer-
+  // Einstellung). Fehler werden STILL behandelt: nur console.error, keine Badges,
+  // kein Hinweis, kein Absturz.
+  useEffect(() => {
+    if (kontakteMitSni.length === 0) {
       setMatchResults([]);
       return undefined;
     }
     let abgebrochen = false;
     (async () => {
       try {
-        const { results } = await matchContacts(kontakte);
+        const { results } = await matchContacts(kontakteMitSni);
         if (!abgebrochen) {
           setMatchResults(results);
         }
@@ -291,7 +400,7 @@ export default function OutboundView() {
     return () => {
       abgebrochen = true;
     };
-  }, [kontakte]);
+  }, [kontakteMitSni]);
 
   // Lookup-Map remoteIp -> matches[] über dem results-State. Aggregiert (eine IP
   // kommt höchstens einmal); defensiv überschreibend (letzte gewinnt, egal).
@@ -310,17 +419,39 @@ export default function OutboundView() {
     [matchResults],
   );
 
+  // Threat-Aggregation: Anzahl der BETROFFENEN Gegenstellen (nicht einzelner
+  // matches), die mindestens einen match mit group==="threat" haben. Treibt den
+  // aggregierten Threat-Streifen.
+  const threatAnzahl = useMemo(
+    () =>
+      matchResults.filter((r) => {
+        // Lokale/Infrastruktur-Treffer (z.B. eigene FritzBox, localhost) nur
+        // mitzaehlen, wenn der Lokale-Schalter aktiv ist -- konsistent zur Liste.
+        if (!zeigeLokale && istLokaleIp(r.remoteIp)) {
+          return false;
+        }
+        return r.matches.some((m) => m.group === "threat");
+      }).length,
+    [matchResults, zeigeLokale],
+  );
+
   const achse = ACHSEN.find((a) => a.id === achseId) ?? ACHSEN[0];
 
   // Sichtbare Kontakte: per Default lokale/Infrastruktur-IPs ausblenden; mit
-  // aktivem Schalter alle zeigen.
-  const sichtbar = useMemo(
-    () =>
-      zeigeLokale
-        ? kontakte
-        : kontakte.filter((k) => !istLokaleIp(k.remoteIp)),
-    [kontakte, zeigeLokale],
-  );
+  // aktivem Schalter alle zeigen. Über den angereicherten Kontakten (SNI). Bei
+  // aktivem Threat-Filter zusätzlich nur Gegenstellen mit threat-Treffer zeigen
+  // (erst Lokale-Filter, dann ggf. Threat-Filter).
+  const sichtbar = useMemo(() => {
+    const nachLokal = zeigeLokale
+      ? kontakteMitSni
+      : kontakteMitSni.filter((k) => !istLokaleIp(k.remoteIp));
+    if (!threatGefiltert) {
+      return nachLokal;
+    }
+    return nachLokal.filter((k) =>
+      (trefferMap.get(k.remoteIp) ?? []).some((m) => m.group === "threat"),
+    );
+  }, [kontakteMitSni, zeigeLokale, threatGefiltert, trefferMap]);
 
   const gruppen = useMemo(
     () => gruppiere(sichtbar, achse, t),
@@ -330,8 +461,46 @@ export default function OutboundView() {
     [sichtbar, achse],
   );
 
+  // Einwilligung erteilt: persistieren (fehlertolerant — UI läuft auch bei
+  // Schreibfehler weiter), Zustand setzen, Dialog schließen. dontAsk wird beim
+  // Zustimmen nicht gesondert gebraucht (Zustimmen persistiert ohnehin).
+  const handleGrant = async () => {
+    try {
+      await updateSetting("outbound_sni_consent", "granted");
+    } catch (fehler) {
+      console.error("Einwilligung speichern fehlgeschlagen", fehler);
+    }
+    setConsent("granted");
+    setZeigeConsentDialog(false);
+  };
+
+  // Einwilligung abgelehnt: nur bei "Nicht mehr fragen" dauerhaft als "denied"
+  // persistieren (fehlertolerant); sonst unset lassen (consent=null) — dann fragt
+  // die Ansicht beim nächsten Mal erneut. In beiden Fällen Dialog schließen.
+  const handleDeny = async (dontAsk) => {
+    if (dontAsk) {
+      try {
+        await updateSetting("outbound_sni_consent", "denied");
+      } catch (fehler) {
+        console.error("Ablehnung speichern fehlgeschlagen", fehler);
+      }
+      setConsent("denied");
+    } else {
+      setConsent(null);
+    }
+    setZeigeConsentDialog(false);
+  };
+
+  // „Anzeigen" im Off-Streifen: Einwilligungs-Dialog erneut öffnen.
+  const handleHinweisShow = () => setZeigeConsentDialog(true);
+
   return (
     <div className="outbound">
+      {/* Einwilligungs-Dialog (SNI): zentriertes Overlay über der Ansicht. */}
+      {zeigeConsentDialog && (
+        <OutboundConsentDialog onGrant={handleGrant} onDeny={handleDeny} />
+      )}
+
       {/* Ehrlicher host_scope-Banner: nur bei "local_host". Bei anderem/leerem
           Wert weglassen (S3-ehrlich). Erweitert um zwei ehrliche dynamische Teile:
           (a) Anzahl der aktuell SICHTBAREN Aussenkontakte (nach Lokale-Filter),
@@ -364,6 +533,39 @@ export default function OutboundView() {
         </div>
       )}
 
+      {/* SNI-Hinweisstreifen bei ausgeschalteten echten Domainnamen: nur wenn
+          die Einwilligung nicht erteilt ist, der Startwert nicht mehr lädt und
+          der Dialog nicht offen ist. Rechts ein „Anzeigen"-Knopf, der den Dialog
+          erneut öffnet. */}
+      {consent !== "granted" && consent !== "loading" && !zeigeConsentDialog && (
+        <div className="outbound__sni-hinweis" role="note">
+          <GlobeLock size={16} aria-hidden="true" />
+          <span className="outbound__sni-hinweis-text">
+            {t("beobachten.outbound.sni.offHinweis")}
+          </span>
+          <button
+            type="button"
+            className="outbound__sni-hinweis-button"
+            onClick={handleHinweisShow}
+          >
+            {t("beobachten.outbound.sni.offShow")}
+          </button>
+        </div>
+      )}
+
+      {/* Start-Fehler der SNI-Beobachtung: ruhiger Hinweis (Stil Ladefehler),
+          nur bei erteilter Einwilligung und tatsächlichem Fehler. */}
+      {consent === "granted" && sniError && (
+        <div className="outbound__hinweis" role="note">
+          <span className="outbound__hinweis-title">
+            {t("beobachten.traffic.permissionTitle")}
+          </span>
+          <span className="outbound__hinweis-text">
+            {t("beobachten.outbound.sni.startError")}
+          </span>
+        </div>
+      )}
+
       {/* Rote-Linie-Hinweis (einmalig, NICHT pro Zeile): nur wenn überhaupt
           Listen-Treffer sichtbar sind. Macht die Quelle der Einordnung explizit —
           sie stammt aus den Verwaltungs-Listen, nicht von einem CERNIS-Urteil. */}
@@ -372,6 +574,54 @@ export default function OutboundView() {
           {t("beobachten.outbound.match.disclaimer")}
         </div>
       )}
+
+      {/* Aggregierter Threat-Streifen: zeigt zusammengefasst, wie viele
+          Gegenstellen auf Threat-Listen stehen. Ohne aktiven Filter ein ruhiger
+          Hinweis mit „Anzeigen"-Knopf (setzt den Threat-Filter); mit aktivem
+          Filter der gefiltert-Zustand mit „Filter aufheben". */}
+      {threatAnzahl > 0 &&
+        (threatGefiltert ? (
+          <div className="outbound__threat-gefiltert" role="note">
+            <Filter size={16} aria-hidden="true" />
+            <span className="outbound__threat-gefiltert-text">
+              {threatAnzahl === 1
+                ? t("beobachten.outbound.sni.threatFilteredOne")
+                : t("beobachten.outbound.sni.threatFilteredMany", {
+                    count: threatAnzahl,
+                  })}
+            </span>
+            <button
+              type="button"
+              className="outbound__threat-button"
+              onClick={() => setThreatGefiltert(false)}
+            >
+              {t("beobachten.outbound.sni.threatFilterClear")}
+            </button>
+          </div>
+        ) : (
+          <div className="outbound__threat-streifen" role="note">
+            <Flag size={16} aria-hidden="true" />
+            <div className="outbound__threat-streifen-body">
+              <span className="outbound__threat-streifen-text">
+                {threatAnzahl === 1
+                  ? t("beobachten.outbound.sni.threatOne")
+                  : t("beobachten.outbound.sni.threatMany", {
+                      count: threatAnzahl,
+                    })}
+              </span>
+              <span className="outbound__threat-streifen-disclaimer">
+                {t("beobachten.outbound.sni.threatDisclaimer")}
+              </span>
+            </div>
+            <button
+              type="button"
+              className="outbound__threat-button"
+              onClick={() => setThreatGefiltert(true)}
+            >
+              {t("beobachten.outbound.sni.threatShow")}
+            </button>
+          </div>
+        ))}
 
       {/* Aufzeichnungs-Leiste (integriert): immer sichtbar, mit aufklappbarer
           Verwaltung. Sitzt über der Steuerleiste der Live-Liste. */}

@@ -315,3 +315,140 @@
   background: var(--sev-med-bg);
   border-color: var(--sev-med-bd);
 }
+
+/* ── SNI-Block (Etappe 3b): Hinweis- und Threat-Streifen ───────────────────────
+   Stil an die vorhandenen note-Streifen (outbound__scope/__hinweis/__listen-
+   hinweis) angelehnt, dieselben CSS-Variablen. Threat-Ton bewusst zurückhaltend
+   über --sev-med-* (wie outbound-badge--threat), KEIN grelles Rot. */
+
+/* SNI-aus-Hinweis: einzeiliger ruhiger Streifen, Knopf rechts (margin-left:auto). */
+.outbound__sni-hinweis {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 9px 12px;
+  font-size: 12px;
+  color: var(--color-text-sec);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.outbound__sni-hinweis svg {
+  flex-shrink: 0;
+  color: var(--color-text-tert);
+}
+
+.outbound__sni-hinweis-text {
+  min-width: 0;
+}
+
+/* „Anzeigen"-Knopf im Off-Streifen: dezenter Akzent-Chip, rechtsbündig. */
+.outbound__sni-hinweis-button {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-accent-strong);
+  background: var(--color-accent-bg);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.outbound__sni-hinweis-button:hover {
+  background: var(--color-accent);
+}
+
+.outbound__sni-hinweis-button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Aggregierter Threat-Streifen: zweizeilig (Hauptzeile + Disclaimer). Icon links,
+   Knopf rechts. Zurückhaltender Warn-Ton über --sev-med-* (kein grelles Rot). */
+.outbound__threat-streifen {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 9px 12px;
+  font-size: 12px;
+  color: var(--sev-med-text);
+  background: var(--sev-med-bg);
+  border: 1px solid var(--sev-med-bd);
+  border-radius: var(--radius-md);
+}
+
+.outbound__threat-streifen svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--sev-med-text);
+}
+
+.outbound__threat-streifen-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.outbound__threat-streifen-text {
+  font-weight: 500;
+}
+
+.outbound__threat-streifen-disclaimer {
+  font-size: 11px;
+  color: var(--color-text-tert);
+}
+
+/* Gefiltert-Zustand: einzeilig, leicht hervorgehoben (--sev-med-bg), Filter-Icon
+   + „Filter aufheben"-Knopf rechts. */
+.outbound__threat-gefiltert {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 9px 12px;
+  font-size: 12px;
+  color: var(--sev-med-text);
+  background: var(--sev-med-bg);
+  border: 1px solid var(--sev-med-bd);
+  border-radius: var(--radius-md);
+}
+
+.outbound__threat-gefiltert svg {
+  flex-shrink: 0;
+  color: var(--sev-med-text);
+}
+
+.outbound__threat-gefiltert-text {
+  min-width: 0;
+  font-weight: 500;
+}
+
+/* Gemeinsamer Knopf der Threat-Streifen: rechtsbündig, dezenter neutraler Chip
+   (urteilt nicht laut). */
+.outbound__threat-button {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-sec);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.outbound__threat-button:hover {
+  border-color: var(--color-accent-border);
+}
+
+.outbound__threat-button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
