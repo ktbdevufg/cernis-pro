@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from infrastructure.capture import _scapy
+from infrastructure.sniffd import _scapy
 from infrastructure.sniffd.sniff_core import export_pcap, parse_packet, run_lldp_sniff
 
 # ── parse_packet-Robustheit (scapy-frei) ──────────────────────────────────────

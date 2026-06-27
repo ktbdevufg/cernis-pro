@@ -22,7 +22,7 @@ Eventloop) und reicht reine ``dict``s ueber IPC:
 * ``export_pcap`` -- gesammelte Rohpakete als ``.pcap`` schreiben (best-effort).
 
 GETEILTES scapy (kein Duplikat): die scapy-Symbole kommen aus
-``infrastructure.capture._scapy`` -- ``_scapy`` wird hier NICHT veraendert und
+``infrastructure.sniffd._scapy`` -- ``_scapy`` wird hier NICHT veraendert und
 NICHT neu importiert. ``normalize_hostname`` kommt aus ``domain.sni``
 (infra->domain ist contract-legal).
 
@@ -47,7 +47,7 @@ from typing import Any
 import structlog
 
 from domain.sni import normalize_hostname
-from infrastructure.capture import _scapy
+from infrastructure.sniffd import _scapy
 
 _logger = structlog.get_logger(__name__)
 

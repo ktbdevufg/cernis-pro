@@ -16,9 +16,10 @@ Drei Adapter:
   blockierendes Einmal-Warten ueber ``run_in_executor``).
 * ``WebSocketCaptureBroadcaster`` -- ``CaptureBroadcasterPort`` (WS-Fan-out, M.9-Stil).
 
-``_scapy`` (Cache-Dir-Setup + Verfuegbarkeits-Probe) wird nur noch vom Helfer-
-Sniff-Kern (``sniffd.sniff_core``) genutzt; ``errors`` haelt ``CaptureError``
-(Start-Fehler des Stroms, S3-frei).
+``_scapy`` (Cache-Dir-Setup + Verfuegbarkeits-Probe) lebt jetzt in der Helfer-
+Heimat (``infrastructure/sniffd/_scapy.py``) und wird nur noch vom Helfer-Sniff-Kern
+(``sniffd.sniff_core``) genutzt -- nicht mehr im capture-Paket; ``errors`` haelt
+``CaptureError`` (Start-Fehler des Stroms, S3-frei).
 """
 
 from infrastructure.capture.broadcaster import WebSocketCaptureBroadcaster
