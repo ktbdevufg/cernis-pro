@@ -535,6 +535,29 @@
         },
         "sourcePattern": "{{source}} (Treffer: {{matchedOn}})",
         "badgeTitle": "Auf welchen Listen dieser Kontakt steht — die Einordnung stammt aus den Listen, nicht von CERNIS."
+      },
+      "sni": {
+        "consentTitle": "Echte Domainnamen anzeigen?",
+        "consentIntro": "Oft erscheint nur der Hoster, nicht der echte Dienst dahinter. Erst der angefragte Domainname macht Tracker und Werbenetze sichtbar. CERNIS kann diese Namen passiv mitlesen:",
+        "consentPassiveTitle": "Passiv",
+        "consentPassiveText": "liest nur mit, greift nie in den Verkehr ein.",
+        "consentEphemeralTitle": "Flüchtig",
+        "consentEphemeralText": "nur solange diese Ansicht offen ist, nichts wird gespeichert.",
+        "consentPrivilegeTitle": "Erhöhte Rechte",
+        "consentPrivilegeText": "einmal eingerichtet, kein wiederkehrender Dialog.",
+        "consentDontAsk": "Nicht mehr fragen",
+        "consentDeny": "Ablehnen",
+        "consentGrant": "Zustimmen",
+        "offHinweis": "Echte Domainnamen sind aus. Tracker bleiben dadurch teils unsichtbar.",
+        "offShow": "Anzeigen",
+        "startError": "Echte Domainnamen konnten nicht gestartet werden. Vermutlich fehlen die erhöhten Rechte.",
+        "threatOne": "Eine Gegenstelle steht auf einer Bedrohungsliste",
+        "threatMany": "{{count}} Gegenstellen stehen auf Bedrohungslisten",
+        "threatDisclaimer": "Die Einordnung stammt von den gewählten Listen, nicht von CERNIS.",
+        "threatShow": "Anzeigen",
+        "threatFilteredOne": "Gefiltert: nur Gegenstellen auf Bedrohungslisten (1)",
+        "threatFilteredMany": "Gefiltert: nur Gegenstellen auf Bedrohungslisten ({{count}})",
+        "threatFilterClear": "Filter aufheben"
       }
     },
     "dnswatch": {

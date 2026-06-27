@@ -535,6 +535,29 @@
         },
         "sourcePattern": "{{source}} (matched on: {{matchedOn}})",
         "badgeTitle": "Which lists this contact is on — the classification comes from the lists, not from CERNIS."
+      },
+      "sni": {
+        "consentTitle": "Show real domain names?",
+        "consentIntro": "Often only the host appears, not the actual service behind it. The requested domain name is what makes trackers and ad networks visible. CERNIS can read these names passively:",
+        "consentPassiveTitle": "Passive",
+        "consentPassiveText": "reads along only, never interferes with traffic.",
+        "consentEphemeralTitle": "Ephemeral",
+        "consentEphemeralText": "only while this view is open, nothing is stored.",
+        "consentPrivilegeTitle": "Elevated rights",
+        "consentPrivilegeText": "set up once, no recurring dialog.",
+        "consentDontAsk": "Don't ask again",
+        "consentDeny": "Decline",
+        "consentGrant": "Allow",
+        "offHinweis": "Real domain names are off. Some trackers stay invisible as a result.",
+        "offShow": "Show",
+        "startError": "Couldn't start real domain names. Elevated rights are probably missing.",
+        "threatOne": "One peer is on a threat list",
+        "threatMany": "{{count}} peers are on threat lists",
+        "threatDisclaimer": "The classification comes from the selected lists, not from CERNIS.",
+        "threatShow": "Show",
+        "threatFilteredOne": "Filtered: only peers on threat lists (1)",
+        "threatFilteredMany": "Filtered: only peers on threat lists ({{count}})",
+        "threatFilterClear": "Clear filter"
       }
     },
     "dnswatch": {
