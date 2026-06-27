@@ -548,6 +548,7 @@
         "consentDontAsk": "Nicht mehr fragen",
         "consentDeny": "Ablehnen",
         "consentGrant": "Zustimmen",
+        "starting": "Echte Domainnamen werden gestartet …",
         "offHinweis": "Echte Domainnamen sind aus. Tracker bleiben dadurch teils unsichtbar.",
         "offShow": "Anzeigen",
         "startError": "Echte Domainnamen konnten nicht gestartet werden. Vermutlich fehlen die erhöhten Rechte.",

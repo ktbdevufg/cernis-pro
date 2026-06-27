@@ -553,6 +553,15 @@ export default function OutboundView() {
         </div>
       )}
 
+      {/* SNI-Startphase: kurzer, ruhiger Lade-Hinweis, bis der Helfer läuft. */}
+      {consent === "granted" && sniStartet && (
+        <div className="outbound__hinweis" role="note">
+          <span className="outbound__hinweis-text">
+            {t("beobachten.outbound.sni.starting")}
+          </span>
+        </div>
+      )}
+
       {/* Start-Fehler der SNI-Beobachtung: ruhiger Hinweis (Stil Ladefehler),
           nur bei erteilter Einwilligung und tatsächlichem Fehler. */}
       {consent === "granted" && sniError && (

@@ -548,6 +548,7 @@
         "consentDontAsk": "Don't ask again",
         "consentDeny": "Decline",
         "consentGrant": "Allow",
+        "starting": "Starting real domain names …",
         "offHinweis": "Real domain names are off. Some trackers stay invisible as a result.",
         "offShow": "Show",
         "startError": "Couldn't start real domain names. Elevated rights are probably missing.",
