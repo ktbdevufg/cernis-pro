@@ -324,6 +324,9 @@ class LinuxTraceroutePermission:
         kein euid-Konzept -- dort ist die privilegierte Methode nicht feststellbar, daher
         der Hinweis (defensiv, ``is_available`` riegelt ohnehin ueber das Binary ab).
         """
+        # Hinweis (ADR 0041): Nach der Privilege-Separation laeuft das Backend rootlos -> dieser
+        # Zweig greift nicht mehr. Bleibt als ehrliche Rechte-Anleitung erhalten (kein
+        # Self-Escalate).
         if hasattr(os, "geteuid") and os.geteuid() == 0:
             return None
         return (
@@ -521,6 +524,12 @@ def _run_traceroute(target: str, privileged: bool) -> str:
     ``shutil.which`` ab.
     """
     args = ["traceroute"]
+    # TOTER PFAD seit Privilege-Separation (ADR 0041): Das Backend laeuft nicht mehr als root,
+    # darum ist die privilegierte ICMP-Variable nie aktiv (check_permission gibt nie None aus
+    # geteuid()==0). Bewusst NICHT entfernt -- der privileged-Parameter zieht durch die ganze
+    # Kette (run/_run_sync/Result), und ein nativer ICMP-Traceroute im Sniff-Helfer ist ein
+    # verorteter Roadmap-Posten (gekoppelt an Topologie/Multi-Subnetz). Reaktivierung liefe
+    # kuenftig ueber cernis-sniffd, nicht ueber geteuid.
     if privileged:
         args.append("-I")  # ICMP-Echo -- genauere Root-Methode
     args.append(target)
