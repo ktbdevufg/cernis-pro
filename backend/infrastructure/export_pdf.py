@@ -60,6 +60,23 @@ _ZEBRA = colors.HexColor("#f4f3ef")  # helle Zebra-Zeile
 # Die Score-Level-Farbe der Gauge: "gut" -> Akzent, "maessig" -> auffaellig, sonst kritisch.
 _LEVEL_COLORS = {"gut": _ACCENT, "maessig": _NOTABLE, "kritisch": _CRIT}
 
+# ── CVE-Severity-Palette (Auftrag, exakte Hex) ──────────────────────────────
+# Die fuenf NVD-Severity-Stufen des CVE-Berichts als reportlab-Farben -- die GLEICHE Achse wie
+# die Live-Ansicht (Wiedererkennung). Eigene Konstanten neben der crit/notable-Achse des
+# Sicherheitsberichts (das ist die ANDERE Achse). ``_SEV_COLORS`` ist der Lookup je Stufe.
+_SEV_CRITICAL = colors.HexColor("#B91C1C")
+_SEV_HIGH = colors.HexColor("#E24B4A")
+_SEV_MEDIUM = colors.HexColor("#EF9F27")
+_SEV_LOW = colors.HexColor("#B4B2A9")
+_SEV_UNKNOWN = colors.HexColor("#D0CEC8")
+_SEV_COLORS = {
+    "CRITICAL": _SEV_CRITICAL,
+    "HIGH": _SEV_HIGH,
+    "MEDIUM": _SEV_MEDIUM,
+    "LOW": _SEV_LOW,
+    "UNKNOWN": _SEV_UNKNOWN,
+}
+
 # Repo-Asset des CERNIS-Logos (Auftrag: per find ermittelt -> frontend/public/cernis-logo.png).
 # Relativ zu diesem Modul aufgeloest (backend/infrastructure/ -> Repo-Root -> frontend/public).
 # Existiert die Datei nicht (z. B. im frozen-Build), faellt die Kopfzeile sauber auf reinen
@@ -98,6 +115,49 @@ ARCHIVED_COLUMNS: tuple[str, ...] = (
     "Hersteller",
     "Letzte IP",
     "Letzte Sichtung",
+    "Status",
+)
+
+# Spalten-Spiegel der drei CVE-Bericht-Tabellen. SPIEGEL der ``*_COLUMNS`` aus
+# ``application.reporting.cve_pdf_model`` -- der Adapter darf ``application`` NICHT importieren
+# (import-linter), darum hier als lokale Anzeige-Konstanten gefuehrt (Muster INVENTORY_COLUMNS).
+# Die Schreibweise (Umlaute) ist WOERTLICH aus cve_pdf_model.py uebernommen, damit Modell,
+# Renderer und die Spaltenbreiten-Heuristik denselben Vertrag teilen.
+_CVE_DEVICE_COLUMNS: tuple[str, ...] = (
+    "Gerät",
+    "Befunde",
+    "Höchste Severity",
+    "Höchster CVSS",
+    "Dienste",
+)
+_CVE_SERVICE_COLUMNS: tuple[str, ...] = (
+    "Dienst",
+    "Befunde",
+    "Geräte",
+    "Höchste Severity",
+    "Höchster CVSS",
+    "Älteste Veröffentlichung",
+)
+_CVE_FINDING_COLUMNS: tuple[str, ...] = (
+    "Gerät",
+    "CVE",
+    "Severity",
+    "CVSS",
+    "Dienst",
+    "Port",
+    "Erstmals gesehen",
+    "Status",
+)
+# Spalten der GRUPPIERTEN Befundliste (Sektion 4): das Geraet steht im Host-Kopf, die CVE-Zeilen
+# tragen es NICHT mehr. Lokal/zeichengleich zu application FINDING_GROUP_COLUMNS (Regel: infra
+# kennt application NICHT -> kein Import, Muster _CVE_FINDING_COLUMNS).
+_CVE_FINDING_GROUP_COLUMNS: tuple[str, ...] = (
+    "CVE",
+    "Severity",
+    "CVSS",
+    "Dienst",
+    "Port",
+    "Erstmals gesehen",
     "Status",
 )
 
@@ -238,6 +298,68 @@ class InventoryPdfModelLike(Protocol):
     def device_rows(self) -> tuple[tuple[str, ...], ...]: ...
     @property
     def archived_rows(self) -> tuple[tuple[str, ...], ...]: ...
+
+
+class _HostGroupBlockLike(Protocol):
+    """Struktureller Vertrag eines Host-Blocks der gruppierten Befundliste (duck-typing).
+
+    Deckt genau die zwei Felder ab, die der Render-Pfad liest: die fertige Kopfzeile und die
+    CVE-Zeilen in ``_CVE_FINDING_GROUP_COLUMNS``-Reihenfolge. KEIN application-Import -- das echte
+    ``HostGroupBlock`` erfuellt das Protokoll automatisch (gleiche Feldnamen/Typen).
+    """
+
+    @property
+    def header(self) -> str: ...
+    @property
+    def rows(self) -> tuple[tuple[str, ...], ...]: ...
+
+
+class CvePdfModelLike(Protocol):
+    """Struktureller Vertrag des CVE-Bericht-Modells (duck-typing, KEIN application-Import).
+
+    Wie ``InventoryPdfModelLike``: ``infrastructure`` darf ``application`` NICHT importieren
+    (import-linter), das reiche ``CvePdfModel`` lebt aber in ``application/reporting``. Darum
+    nimmt der Adapter es STRUKTURELL ueber dieses ``Protocol`` entgegen -- genau die Felder, die
+    er rendert. Read-only Properties decken die frozen-Felder ab. Das echte ``CvePdfModel``
+    erfuellt das Protokoll automatisch (gleiche Feldnamen/Typen).
+    """
+
+    @property
+    def title(self) -> str: ...
+    @property
+    def generated_at_text(self) -> str: ...
+    @property
+    def footer_left(self) -> str: ...
+    @property
+    def einleitung(self) -> str: ...
+    @property
+    def active_total(self) -> int: ...
+    @property
+    def acknowledged_total(self) -> int: ...
+    @property
+    def new_total(self) -> int: ...
+    @property
+    def affected_devices(self) -> int: ...
+    @property
+    def hosts_total(self) -> int: ...
+    @property
+    def hosts_checked(self) -> int: ...
+    @property
+    def coverage_text(self) -> str: ...
+    @property
+    def highest_severity(self) -> str: ...
+    @property
+    def oldest_published_text(self) -> str: ...
+    @property
+    def severity_rows(self) -> tuple[tuple[str, str], ...]: ...
+    @property
+    def device_rows(self) -> tuple[tuple[str, ...], ...]: ...
+    @property
+    def service_rows(self) -> tuple[tuple[str, ...], ...]: ...
+    @property
+    def finding_rows(self) -> tuple[tuple[str, ...], ...]: ...
+    @property
+    def host_groups(self) -> tuple[_HostGroupBlockLike, ...]: ...
 
 
 class ReportlabRenderer:
@@ -582,6 +704,72 @@ class ReportlabRenderer:
         table.setStyle(style)
         story.append(table)
 
+    def _append_cve_finding_groups(
+        self,
+        story: list[Flowable],
+        styles: dict[str, ParagraphStyle],
+        title: str,
+        columns: tuple[str, ...],
+        groups: tuple[_HostGroupBlockLike, ...],
+    ) -> None:
+        """Haengt die nach Host GRUPPIERTE Befundliste (Sektion 4) an -- eigener Render-Pfad.
+
+        ``_append_table_section`` kann keine Host-Trennzeilen; darum baut diese Methode EINE
+        Tabelle: erste Zeile die Spaltenkoepfe (``columns`` = ``_CVE_FINDING_GROUP_COLUMNS``),
+        dann je Host-Gruppe zuerst eine HOST-Trennzeile (eine Zelle ueber alle Spalten via SPAN,
+        grau hinterlegt, fett = ``group.header``) und darunter die CVE-Zeilen ohne IP-Wiederholung.
+        Leere ``groups`` -> Leer-Fallback wie ``_append_table_section``. ``repeatRows=1`` wiederholt
+        nur den Spaltenkopf; die Host-Trennzeilen wandern mit. Die Severity-Zelle je CVE-Zeile wird
+        in ihrer ``_SEV_COLORS``-Farbe eingefaerbt (lokal -- KEIN gemeinsamer Helfer beruehrt).
+        """
+        story.append(Paragraph(title, styles["h_rubric"]))
+        story.append(HRFlowable(width="100%", thickness=1.2, color=_ACCENT, spaceAfter=4))
+
+        if not groups:
+            leer_text = _EMPTY_SECTION_TEXT.get(columns, _EMPTY_FALLBACK)
+            story.append(Paragraph(leer_text, styles["body"]))
+            return
+
+        # Kopfzeilen-Stil fuer die Host-Trennzeile (fett, etwas groesser; umbrechbar).
+        host_kopf_stil = ParagraphStyle(
+            "cve_host_kopf",
+            parent=styles["cell"],
+            fontName="Helvetica-Bold",
+            fontSize=9,
+        )
+        severity_col = columns.index("Severity") if "Severity" in columns else -1
+
+        data: list[list[object]] = [list(columns)]
+        # Tabellen-Kommandos zusaetzlich zum Basis-Stil: je Host-Kopfzeile SPAN + grau + fett,
+        # je CVE-Zeile die Severity-Zelle in ihrer Stufenfarbe.
+        extra_cmds: list[tuple[object, ...]] = []
+        for group in groups:
+            kopf_index = len(data)
+            data.append([Paragraph(_esc(group.header), host_kopf_stil)])
+            extra_cmds.append(("SPAN", (0, kopf_index), (-1, kopf_index)))
+            extra_cmds.append(("BACKGROUND", (0, kopf_index), (-1, kopf_index), _ZEBRA))
+            for row in group.rows:
+                zeilen_index = len(data)
+                data.append([Paragraph(_esc(value), styles["cell"]) for value in row])
+                if severity_col >= 0 and severity_col < len(row):
+                    farbe = _SEV_COLORS.get(row[severity_col])
+                    if farbe is not None:
+                        extra_cmds.append(
+                            (
+                                "TEXTCOLOR",
+                                (severity_col, zeilen_index),
+                                (severity_col, zeilen_index),
+                                farbe,
+                            )
+                        )
+
+        table = Table(data, repeatRows=1, colWidths=_col_widths(columns))
+        style = self._base_table_style(len(data))
+        for cmd in extra_cmds:
+            style.add(*cmd)
+        table.setStyle(style)
+        story.append(table)
+
     @staticmethod
     def _base_table_style(row_count: int) -> TableStyle:
         """Der gemeinsame Tabellen-Stil in CERNIS-Farben (Kopf accent, Zebra hell, dezente Linien).
@@ -894,6 +1082,206 @@ class ReportlabRenderer:
         table.setStyle(self._base_table_style(len(render_data)))
         story.append(table)
 
+    # ── CVE-Bericht: eigener Render-Pfad ────────────────────────────────────
+    #
+    # NEUE Methode neben render_inventory_report_pdf -- beide bleiben UNANGETASTET. Dieser Pfad
+    # rendert das render-fertige CvePdfModel (Kennzahlen + ein Severity-Donut + drei Sektions-
+    # Tabellen) mit durchgaengiger Kopf-/Fusszeile. Kopf-Titel parametrisch ueber model.title ->
+    # dafuer wird _draw_manual_header_footer wiederverwendet (liest model.title/footer_left).
+    # Teilt dieselbe _LOGO_PATH-Konstante -- der CVE-Bericht erbt damit das verkleinerte PDF-Logo.
+
+    def render_cve_report_pdf(self, model: CvePdfModelLike) -> bytes:
+        """Rendert das ``CvePdfModel`` zum vollstaendigen CVE-Bericht-PDF (A4 hoch).
+
+        Layout (Auftrag): durchgaengige Kopf-/Fusszeile je Seite (onFirstPage UND onLaterPages
+        ueber dieselbe Funktion ``_draw_manual_header_footer``), dann die Story -- Titel +
+        Erzeugungsdatum + Einleitung, der Kennzahlen-Block, der Severity-Donut und die drei
+        Sektions-Rubriken (betroffene Geraete / Muster nach Dienst / vollstaendige Befundliste),
+        je auf eigener Seite (PageBreak davor).
+
+        Robust: leere Tabellen ziehen ihren eigenen Leer-Fallback ueber ``_append_table_section``.
+        KEINE Uhr, KEINE Rechnung -- alle Texte/Zahlen kommen fertig aus dem Modell. Liefert
+        valide PDF-Bytes (Magic-Header ``%PDF``).
+        """
+        buffer = io.BytesIO()
+        document = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,  # Hochformat (Auftrag)
+            leftMargin=18 * mm,
+            rightMargin=18 * mm,
+            topMargin=32 * mm,  # Platz fuer die durchgaengige Kopfzeile
+            bottomMargin=20 * mm,  # Platz fuer die Fusszeile
+            title=model.title,
+        )
+
+        story: list[Flowable] = []
+        styles = self._security_styles()
+
+        # ── Titel + Erzeugungsdatum + Einleitung (fertige Texte aus dem Modell) ──
+        story.append(Paragraph(model.title, styles["h_title"]))
+        story.append(Paragraph(model.generated_at_text, styles["sub"]))
+        story.append(Spacer(1, 4 * mm))
+        if model.einleitung:
+            story.append(Paragraph(model.einleitung, styles["body"]))
+            story.append(Spacer(1, 6 * mm))
+
+        # ── Sektion 1: Ueberblick (CVE-Kennzahlen) ──
+        story.append(Paragraph("CVE-Kennzahlen", styles["h_section"]))
+        story.append(self._cve_kennzahlen(model))
+        story.append(Spacer(1, 6 * mm))
+
+        # ── Severity-Donut (Ueberschrift + Donut zusammenhalten, Muster donut_block) ──
+        story.append(
+            KeepTogether(
+                [
+                    Paragraph("Schweregrad-Verteilung", styles["h_section"]),
+                    self._cve_severity_donut(model),
+                ]
+            )
+        )
+        story.append(Spacer(1, 6 * mm))
+
+        # ── Sektions-Rubriken ──
+        # (R8) KEIN PageBreak nach dem Donut -- Sektion 2 folgt direkt, damit Seite 1 nicht
+        # fast leer bleibt. _append_table_section rendert Kopf + Tabelle + leer-Fallback selbst.
+        # Die Severity-Spalte bleibt Klartext (KEINE "Schwere"-Spalte -> kein Badge).
+        self._append_table_section(
+            story, styles, "Betroffene Geräte", _CVE_DEVICE_COLUMNS, model.device_rows
+        )
+
+        # Sektion 3 + 4 je auf eigener Seite (grosse Tabellen) -- diese PageBreaks bleiben.
+        story.append(PageBreak())
+        self._append_table_section(
+            story, styles, "Muster nach Dienst", _CVE_SERVICE_COLUMNS, model.service_rows
+        )
+
+        story.append(PageBreak())
+        # (R2/R3) Sektion 4 ueber den eigenen, nach Host gruppierten Render-Pfad (Host-Kopf +
+        # CVE-Zeilen ohne IP-Wiederholung), NICHT mehr ueber die flache _append_table_section.
+        self._append_cve_finding_groups(
+            story,
+            styles,
+            "Vollständige Befundliste",
+            _CVE_FINDING_GROUP_COLUMNS,
+            model.host_groups,
+        )
+
+        # ── Achse-B-Fussnote (invariant, wie im Bestands-/Sicherheitsbericht) ──
+        story.append(Spacer(1, 8 * mm))
+        story.append(HRFlowable(width="100%", thickness=0.6, color=_LINE))
+        story.append(Spacer(1, 2 * mm))
+        story.append(
+            Paragraph(
+                "Dieser Bericht beschreibt und ordnet ein — er fällt kein Urteil.",
+                styles["footnote"],
+            )
+        )
+        # (R4) Erklaerung der Variante-C-Status-Kennzeichnung "NEU".
+        story.append(
+            Paragraph(
+                "Neu = erstmals innerhalb der letzten 24 Stunden gesehen.",
+                styles["footnote"],
+            )
+        )
+
+        # _draw_manual_header_footer ist auf ManualPdfModelLike typisiert, liest zur Laufzeit aber
+        # NUR model.title + model.footer_left -- beide hat CvePdfModelLike ebenfalls (Muster
+        # render_inventory_report_pdf): cast statt Aenderung der Kopf-/Fuss-Funktion.
+        header_model = cast(ManualPdfModelLike, model)
+        document.build(
+            story,
+            onFirstPage=lambda canvas, doc: _draw_manual_header_footer(canvas, doc, header_model),
+            onLaterPages=lambda canvas, doc: _draw_manual_header_footer(canvas, doc, header_model),
+        )
+        return buffer.getvalue()
+
+    @staticmethod
+    def _cve_kennzahlen(model: CvePdfModelLike) -> Table:
+        """Die CVE-Kennzahlen als zwei Zeilen Kennzahl-Boxen (Wert oben, Label darunter).
+
+        Reihe 1 (Zahlen): Aktive Befunde / Neu (24h) / Betroffene Geraete / Quittiert.
+        Reihe 2 (Texte): Hoechste Severity / Abdeckung / Aelteste Veroeffentlichung / "".
+        Beide Reihen liegen in EINER 4-spaltigen ``Table`` -- schlichte graue Boxen mit
+        Akzent-Wert (Muster ``_inventory_kennzahlen``). Reihe 2 traegt TEXT statt Zahlen; ihre
+        Box-Schrift ist darum kleiner (12 statt 20), damit laengere Texte lesbar bleiben. Reine
+        Anzeige der schon ermittelten Werte aus dem Modell -- keine Rechnung, keine neuen Farben.
+        """
+        oldest = model.oldest_published_text or "—"
+        data = [
+            [
+                str(model.active_total),
+                str(model.new_total),
+                str(model.affected_devices),
+                str(model.acknowledged_total),
+            ],
+            ["Aktive Befunde", "Neu (24h)", "Betroffene Geräte", "Quittiert"],
+            [model.highest_severity, model.coverage_text, oldest, ""],
+            ["Höchste Severity", "Abdeckung", "Älteste Veröffentlichung", ""],
+        ]
+        col = 174.0 / 4 * mm
+        table = Table(data, colWidths=[col, col, col, col])
+        table.setStyle(
+            TableStyle(
+                [
+                    # Dezent graue Boxen (kein neues Farbset): Hintergrund _ZEBRA, Wert in _ACCENT,
+                    # Label in _TEXT. Die leere vierte Box der zweiten Reihe bleibt ohne Fuellung.
+                    ("BACKGROUND", (0, 0), (-1, 1), _ZEBRA),
+                    ("BACKGROUND", (0, 2), (2, 3), _ZEBRA),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), _ACCENT),
+                    ("TEXTCOLOR", (0, 2), (2, 2), _ACCENT),
+                    ("TEXTCOLOR", (0, 1), (-1, 1), _TEXT),
+                    ("TEXTCOLOR", (0, 3), (2, 3), _TEXT),
+                    ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTNAME", (0, 2), (2, 2), "Helvetica-Bold"),
+                    # Reihe 1: grosse Zahl (20). Reihe 2: Text -> kleinere Schrift (12).
+                    ("FONTSIZE", (0, 0), (-1, 0), 20),
+                    ("FONTSIZE", (0, 2), (2, 2), 12),
+                    ("FONTNAME", (0, 1), (-1, 1), "Helvetica"),
+                    ("FONTNAME", (0, 3), (2, 3), "Helvetica"),
+                    ("FONTSIZE", (0, 1), (-1, 1), 9),
+                    ("FONTSIZE", (0, 3), (2, 3), 9),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("TOPPADDING", (0, 0), (-1, 0), 8),
+                    ("TOPPADDING", (0, 2), (2, 2), 8),
+                    ("BOTTOMPADDING", (0, 1), (-1, 1), 8),
+                    ("BOTTOMPADDING", (0, 3), (2, 3), 8),
+                ]
+            )
+        )
+        return table
+
+    def _cve_severity_donut(self, model: CvePdfModelLike) -> Table:
+        """Der Severity-Donut: ein Ring ueber alle fuenf Stufen (Muster ``_inventory_donut_paar``).
+
+        Baut die Segmentliste aus ``model.severity_rows`` in der gelieferten Reihenfolge
+        (SEVERITY_ORDER kommt schon so aus der Aggregation): je ``(count, _SEV_COLORS[stufe])``,
+        ``count`` aus dem ``(stufe, count_text)``-Tupel via ``int``. Die Mitte traegt die Summe
+        aller counts (aktive Befunde) + Label "Befunde". Die Legende fuehrt nur Stufen mit count
+        > 0 (kein Rauschen; 0-Segmente sind im Donut ohnehin unsichtbar). Donut + Legende
+        als 1-spaltige Table (Muster spalte_a/b). Reine Anzeige -- nur die Donut-Geometrie.
+
+        (R8) KEIN eigener "Schweregrad-Verteilung"-Titel mehr im Donut-Block -- die
+        ``h_section``-Sektionsueberschrift darueber genuegt (sonst stuende der Titel doppelt).
+        """
+        segmente: tuple[tuple[int, colors.Color], ...] = tuple(
+            (int(count_text), _SEV_COLORS[severity]) for severity, count_text in model.severity_rows
+        )
+        summe = sum(count for count, _ in segmente)
+        donut = _inventory_donut_drawing(segmente, summe, "Befunde")
+
+        # Legende: nur Stufen mit count > 0; Severity-Klartext wie in der App (Wiedererkennung).
+        legende_eintraege: tuple[tuple[str, colors.Color, int], ...] = tuple(
+            (severity, _SEV_COLORS[severity], int(count_text))
+            for severity, count_text in model.severity_rows
+            if int(count_text) > 0
+        )
+        legende = self._inventory_donut_legende(legende_eintraege)
+
+        spalte = Table([[donut], [legende]])
+        spalte.setStyle(TableStyle([("ALIGN", (0, 0), (-1, -1), "CENTER")]))
+        return spalte
+
     # ── Benutzerhandbuch: eigener Render-Pfad ───────────────────────────────
     #
     # NEUE Methode neben render_security_report_pdf -- beide bleiben UNANGETASTET (der
@@ -1006,6 +1394,14 @@ _COL_WEIGHTS: dict[tuple[str, ...], tuple[float, ...]] = {
     # Gewichte). Eigene Keys, die bestehenden Aufrufer (PORT/CVE/NET/ACK) bleiben unberuehrt.
     INVENTORY_COLUMNS: (2.6, 1.8, 1.4, 1.7, 1.7, 1.0, 1.6, 1.6),
     ARCHIVED_COLUMNS: (3.0, 2.2, 1.8, 2.0, 1.8),
+    # CVE-Bericht: Geraet/Dienst breit, die schmalen Wert-/Severity-Spalten schlank -- damit
+    # fuellen die drei CVE-Tabellen die Druckbreite lesbar (Muster der Inventory-Gewichte).
+    # Eigene Keys; die bestehenden Aufrufer bleiben unberuehrt.
+    _CVE_DEVICE_COLUMNS: (2.8, 1.2, 1.8, 1.6, 3.2),
+    _CVE_SERVICE_COLUMNS: (2.4, 1.2, 1.2, 1.8, 1.6, 2.4),
+    _CVE_FINDING_COLUMNS: (2.4, 2.0, 1.4, 1.0, 1.6, 0.9, 1.9, 1.4),
+    # Gruppierte Befundliste (ohne Geraet-Spalte -- die steht im Host-Kopf).
+    _CVE_FINDING_GROUP_COLUMNS: (2.0, 1.4, 1.0, 1.6, 0.9, 1.9, 1.6),
 }
 
 # Rubrikspezifischer Leertext je Tabellen-Schema (statt generisch "Keine Eintraege.").
@@ -1016,6 +1412,10 @@ _EMPTY_SECTION_TEXT: dict[tuple[str, ...], str] = {
     PORT_COLUMNS: "Keine auffälligen Ports festgestellt.",
     CVE_COLUMNS: "Keine CVE-Befunde vorhanden.",
     NET_COLUMNS: "Keine Netz-Auffälligkeiten festgestellt.",
+    _CVE_DEVICE_COLUMNS: "Keine betroffenen Geräte.",
+    _CVE_SERVICE_COLUMNS: "Keine Dienste mit Befunden.",
+    _CVE_FINDING_COLUMNS: "Keine CVE-Befunde vorhanden.",
+    _CVE_FINDING_GROUP_COLUMNS: "Keine CVE-Befunde vorhanden.",
 }
 
 

@@ -208,7 +208,12 @@ from api.outbound_log import router as outbound_log_router
 from api.process import provide_check_process_permission, provide_list_processes
 from api.process import router as process_router
 from api.report import (
+    CveDeviceRowOut,
     CveFindingOut,
+    CveFindingRowOut,
+    CveReportOut,
+    CveServiceRowOut,
+    CveSeverityCountOut,
     InventoryDeviceRowOut,
     InventoryDistributionOut,
     InventoryReportOut,
@@ -217,6 +222,8 @@ from api.report import (
     ScoreContributionOut,
     ScoreOut,
     SecurityReportOut,
+    provide_cve_report,
+    provide_cve_report_pdf,
     provide_inventory_report,
     provide_inventory_report_pdf,
     provide_manual_pdf,
@@ -424,8 +431,14 @@ from application.outbound_log import (
 )
 from application.process import CheckProcessPermission, ListProcesses
 from application.reporting import (
+    BuildCveReport,
     BuildInventoryReport,
     BuildSecurityReport,
+    CveFindingRow,
+    CveMonitorInput,
+    CvePdfModel,
+    CveReport,
+    HostGroupBlock,
     InventoryDeviceRow,
     InventoryPdfModel,
     InventoryReport,
@@ -482,7 +495,7 @@ from domain.analysis import (
 )
 from domain.analysis.engine import _SEVERITY_RANK
 from domain.blocklist import BlocklistGroup, BlocklistSource, MatchStrictness
-from domain.devices import Device
+from domain.devices import Device, normalize_mac
 from domain.dns_watch import doh_providers_or_default, expected_servers_or_default
 from domain.export import (
     ExportableAnalysis,
@@ -4392,12 +4405,309 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             filename=f"CERNISPRO_Netzwerk-Bestandsbericht_{datumsteil}.pdf",
         )
 
+    # ── CVE-Bericht: Datenseite (Muster _build_inventory_report_data, Regel 4/5) ──
+    # EINE Quelle: die drei schon verdrahteten CVE-Use-Cases (GENAU die Factory-Aufrufe der
+    # overrides um Zeile 2603-2615). KEINE Uhr in der Datenseite -- die Datums-Texte je Zeile sind
+    # reine Formatierung der vorhandenen first_seen_ts (kein Wanduhr-Zugriff, Muster _to_row).
+    def _build_cve_report_data() -> CveReport:
+        # (1) Die drei Use-Cases mit den EXAKTEN Factory-Aufrufen der bestehenden overrides.
+        active = GetActiveFindings(cve_finding_repository(), cve_acknowledgement_repository())()
+        acked = GetAcknowledgedFindings(
+            cve_finding_repository(), cve_acknowledgement_repository()
+        )()
+        status = GetCveMonitorStatus(
+            cve_inventory,
+            cve_checkstate_repository(),
+            cve_finding_repository(),
+            cve_acknowledgement_repository(),
+            refresh_interval_provider=_cve_refresh_interval_seconds,
+        )()
+
+        # (R1) Geraetenamen-Lookup aus der devices-Domaene (Muster Bestandsbericht): aktive
+        # UND archivierte Geraete, damit auch ein archiviertes Geraet seinen Namen behaelt.
+        geraete = GetDevices(device_repository())(known_only=False)
+        archiviert = GetArchivedDevices(device_repository())()
+
+        # MAC-Normalisierung: d.mac ist via Device.__post_init__ schon kanonisch
+        # (AA:BB:CC:DD:EE:FF). ActiveFinding.mac stammt aus dem Scan-Record (EnrichedHost.mac)
+        # und durchlaeuft KEINE erzwungene Normalisierung -- die Schreibweise KANN abweichen.
+        # Darum laufen BEIDE Seiten des Lookups durch die EINE Quelle normalize_mac (idempotent);
+        # eine nicht normalisierbare MAC (leer/Muell) faellt ehrlich auf den Rohwert zurueck
+        # (kein Absturz, kein stiller Fehl-Lookup).
+        def _mac_key(mac: str) -> str:
+            try:
+                return normalize_mac(mac)
+            except ValueError:
+                return mac
+
+        mac_to_label: dict[str, str] = {}
+        mac_to_ip: dict[str, str] = {}
+        for d in (*geraete, *archiviert):
+            label = d.label or d.hostname or (d.last_ip or "") or d.mac
+            mac_to_label[_mac_key(d.mac)] = label
+            mac_to_ip[_mac_key(d.mac)] = d.last_ip or ""
+
+        def _cve_label(f: ActiveFinding) -> str:
+            # (R1) Geraetename aus dem devices-Lookup (label||hostname||last_ip||mac), sonst die
+            # Finding-IP, sonst die mac (Pflicht, nie leer) -- erster nicht-leerer.
+            return mac_to_label.get(_mac_key(f.mac)) or f.ip or f.mac
+
+        def _cve_ip(f: ActiveFinding) -> str:
+            # IP fuer den Host-Kopf: die Finding-IP, ersatzweise die Geraete-IP aus dem Lookup.
+            return f.ip or mac_to_ip.get(_mac_key(f.mac), "")
+
+        def _to_row(f: ActiveFinding, *, acknowledged: bool) -> CveFindingRow:
+            # Reine Projektion eines ActiveFinding auf die neutrale Berichts-Zeile. acknowledged
+            # kommt aus der HERKUNFT der Liste (Parameter), nicht aus dem Befund. first_seen_text
+            # ist reine Formatierung des vorhandenen first_seen_ts (keine Wanduhr); first_seen_ts
+            # bleibt als Sortier-/Alters-Schluessel erhalten.
+            return CveFindingRow(
+                device_label=_cve_label(f),
+                mac=f.mac,
+                ip=_cve_ip(f),
+                cve_id=f.cve_id,
+                severity=f.severity,
+                cvss_score=f.cvss_score,
+                service=f.service,
+                port=f.port,
+                first_seen_text=datetime.fromtimestamp(f.first_seen_ts).strftime("%d.%m.%Y %H:%M"),
+                first_seen_ts=f.first_seen_ts,
+                published=f.published,
+                acknowledged=acknowledged,
+                is_new=f.is_new,
+            )
+
+        rows = [_to_row(f, acknowledged=False) for f in active]
+        rows += [_to_row(f, acknowledged=True) for f in acked]
+
+        # (2) status auf die neutralen Monitor-Kennzahlen projizieren (Feld zu Feld).
+        monitor = CveMonitorInput(
+            hosts_total=status.hosts_total,
+            hosts_due=status.hosts_due,
+            hosts_checked=status.hosts_checked,
+            findings_total=status.findings_total,
+            findings_active=status.findings_active,
+        )
+
+        # (3) Aggregation ueber den duennen Use-Case (Severity-Normalisierung/Sortierung rein).
+        return BuildCveReport()(status=monitor, rows=rows)
+
+    # Abdeckungs-Text aus den Host-Zaehlern (am Composition Root, NICHT in der reinen Funktion --
+    # die laesst coverage_text leer). Wird im HTTP- UND im PDF-Runner GLEICH gesetzt.
+    def _cve_coverage_text(hosts_total: int, hosts_checked: int) -> str:
+        if hosts_total <= 0:
+            return "Noch keine Hosts geprüft"
+        prozent = round(hosts_checked / hosts_total * 100)
+        return f"{hosts_checked} von {hosts_total} Hosts geprüft ({prozent} %)"
+
+    # Status-Text je Befund-Zeile, Variante C (R3): quittiert UND is_new sind ZWEI
+    # Dimensionen. Quittiert schlaegt durch ("Quittiert"); sonst zeigt ein aktiver Befund
+    # "Aktiv · NEU" wenn neu, sonst "Aktiv".
+    def _cve_status_text(row: CveFindingRow) -> str:
+        if row.acknowledged:
+            return "Quittiert"
+        if row.is_new:
+            return "Aktiv · NEU"
+        return "Aktiv"
+
+    # (R5) Datums-Helfer: NVD published ist ISO (YYYY-MM-DD oder ISO-8601 mit Zeit) ->
+    # deutsch TT.MM.JJJJ. Leer -> "—". Unerwartetes Format -> ehrlich der Rohwert (kein Absturz).
+    def _fmt_published(iso: str) -> str:
+        if not iso:
+            return "—"
+        try:
+            return datetime.strptime(iso[:10], "%Y-%m-%d").strftime("%d.%m.%Y")
+        except ValueError:
+            return iso
+
+    # (R2) Host-Gruppen-Bloecke fuer das PDF: je HostFindingGroup eine fertige Kopfzeile + die
+    # CVE-Zeilen in FINDING_GROUP_COLUMNS-Reihenfolge (ohne Geraet, das steht im Kopf).
+    def _project_cve_host_groups(report: CveReport) -> tuple[HostGroupBlock, ...]:
+        bloecke: list[HostGroupBlock] = []
+        for g in report.host_groups:
+            # Host-Kopf sauber bauen -- ohne IP-Teil (und ohne doppelten Trenner), wenn keine IP.
+            teile = [g.device_label]
+            if g.ip:
+                teile.append(g.ip)
+            teile.append(g.mac)
+            teile.append(f"{g.finding_count} Befunde, höchste {g.highest_severity}")
+            header = " · ".join(teile)
+            rows = tuple(
+                (
+                    r.cve_id,
+                    r.severity,
+                    f"{r.cvss_score:.1f}",
+                    r.service,
+                    str(r.port),
+                    r.first_seen_text,
+                    _cve_status_text(r),
+                )
+                for r in g.rows
+            )
+            bloecke.append(HostGroupBlock(header=header, rows=rows))
+        return tuple(bloecke)
+
+    # Reine Projektion CveReport -> render-fertiges CvePdfModel (Muster
+    # _project_inventory_pdf_model): KEINE Uhr -- generated_at_text/coverage_text kommen fertig.
+    def _project_cve_pdf_model(
+        report: CveReport, generated_at_text: str, coverage_text: str
+    ) -> CvePdfModel:
+        severity_rows = tuple((sc.severity, str(sc.count)) for sc in report.severity_counts)
+        device_rows = tuple(
+            (
+                r.device_label,
+                str(r.finding_count),
+                r.highest_severity,
+                f"{r.highest_cvss:.1f}",
+                r.services,
+            )
+            for r in report.device_rows
+        )
+        service_rows = tuple(
+            (
+                r.service,
+                str(r.finding_count),
+                str(r.device_count),
+                r.highest_severity,
+                f"{r.highest_cvss:.1f}",
+                _fmt_published(r.oldest_published),
+            )
+            for r in report.service_rows
+        )
+        finding_rows = tuple(
+            (
+                r.device_label,
+                r.cve_id,
+                r.severity,
+                f"{r.cvss_score:.1f}",
+                r.service,
+                str(r.port),
+                r.first_seen_text,
+                _cve_status_text(r),
+            )
+            for r in report.all_rows
+        )
+        return CvePdfModel(
+            title="CVE-Bericht",
+            generated_at_text=generated_at_text,
+            footer_left="CERNIS PRO 2.0 — CVE-Bericht",
+            einleitung=(
+                "Dieser Bericht listet die gefundenen Schwachstellen (CVEs) im Netzwerk auf. "
+                "Er beschreibt und ordnet ein — er bewertet nicht."
+            ),
+            active_total=report.active_total,
+            acknowledged_total=report.acknowledged_total,
+            new_total=report.new_total,
+            affected_devices=report.affected_devices,
+            hosts_total=report.hosts_total,
+            hosts_checked=report.hosts_checked,
+            coverage_text=coverage_text,
+            highest_severity=report.highest_severity,
+            oldest_published_text=_fmt_published(report.oldest_published),
+            severity_rows=severity_rows,
+            device_rows=device_rows,
+            service_rows=service_rows,
+            finding_rows=finding_rows,
+            host_groups=_project_cve_host_groups(report),
+        )
+
+    # ── CVE-Bericht: HTTP-Endpunkt-Runner (Muster _inventory_report, Regel 4/5) ──
+    # Ruft die Datenseite und PROJIZIERT CveReport auf die api-Wire-Form CveReportOut. Der
+    # coverage_text kommt NICHT aus report (dort leer) -- er wird hier am Root gebildet.
+    async def _cve_report() -> CveReportOut:
+        report = _build_cve_report_data()
+        coverage = _cve_coverage_text(report.hosts_total, report.hosts_checked)
+        return CveReportOut(
+            generated_findings_total=report.generated_findings_total,
+            active_total=report.active_total,
+            acknowledged_total=report.acknowledged_total,
+            new_total=report.new_total,
+            affected_devices=report.affected_devices,
+            hosts_total=report.hosts_total,
+            hosts_checked=report.hosts_checked,
+            coverage_text=coverage,
+            highest_severity=report.highest_severity,
+            oldest_published=report.oldest_published,
+            severity_counts=[
+                CveSeverityCountOut(severity=sc.severity, count=sc.count)
+                for sc in report.severity_counts
+            ],
+            device_rows=[
+                CveDeviceRowOut(
+                    device_label=r.device_label,
+                    mac=r.mac,
+                    finding_count=r.finding_count,
+                    highest_severity=r.highest_severity,
+                    highest_cvss=r.highest_cvss,
+                    services=r.services,
+                )
+                for r in report.device_rows
+            ],
+            service_rows=[
+                CveServiceRowOut(
+                    service=r.service,
+                    finding_count=r.finding_count,
+                    device_count=r.device_count,
+                    highest_severity=r.highest_severity,
+                    highest_cvss=r.highest_cvss,
+                    oldest_published=r.oldest_published,
+                )
+                for r in report.service_rows
+            ],
+            all_rows=[
+                CveFindingRowOut(
+                    device_label=r.device_label,
+                    mac=r.mac,
+                    cve_id=r.cve_id,
+                    severity=r.severity,
+                    cvss_score=r.cvss_score,
+                    service=r.service,
+                    port=r.port,
+                    first_seen_text=r.first_seen_text,
+                    first_seen_ts=r.first_seen_ts,
+                    published=r.published,
+                    acknowledged=r.acknowledged,
+                    is_new=r.is_new,
+                )
+                for r in report.all_rows
+            ],
+        )
+
+    # ── CVE-Bericht: PDF-Download-Runner (Muster _inventory_report_pdf, Regel 4/5) ──
+    # Ruft die Datenseite, liest die Wanduhr GENAU HIER (einziger Ort mit Uhr -- die Projektion
+    # _project_cve_pdf_model ist rein), projiziert auf das render-fertige CvePdfModel und rendert
+    # es ueber den zustandslosen ReportlabRenderer. Rueckgabe ein kleines lokales Ergebnis-Objekt.
+    @dataclass(frozen=True)
+    class _CvePdfResult:
+        content: bytes
+        media_type: str
+        filename: str
+
+    async def _cve_report_pdf() -> _CvePdfResult:
+        report = _build_cve_report_data()
+        # Wanduhr GENAU HIER lesen (einziger Ort) -- Projektion und Modell bleiben rein.
+        import time
+
+        now = time.time()
+        generated_at_text = "Erstellt am " + datetime.fromtimestamp(now).strftime("%d.%m.%Y %H:%M")
+        coverage = _cve_coverage_text(report.hosts_total, report.hosts_checked)
+        model = _project_cve_pdf_model(report, generated_at_text, coverage)
+        pdf_bytes = ReportlabRenderer().render_cve_report_pdf(model)
+        datumsteil = datetime.fromtimestamp(now).strftime("%Y-%m-%d")
+        return _CvePdfResult(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            filename=f"CERNISPRO_CVE-Bericht_{datumsteil}.pdf",
+        )
+
     app.include_router(report_router)
     app.dependency_overrides[provide_security_report] = lambda: _security_report
     app.dependency_overrides[provide_security_report_pdf] = lambda: _security_report_pdf
     app.dependency_overrides[provide_manual_pdf] = lambda: _manual_pdf
     app.dependency_overrides[provide_inventory_report] = lambda: _inventory_report
     app.dependency_overrides[provide_inventory_report_pdf] = lambda: _inventory_report_pdf
+    app.dependency_overrides[provide_cve_report] = lambda: _cve_report
+    app.dependency_overrides[provide_cve_report_pdf] = lambda: _cve_report_pdf
 
     # ── Route zum Ziel (ADR 0036): traceroute-Hops + Geo/ASN, zwei getrennte Naehte ──
     # Regel 5: die Quer-Domaenen-Naht (diagnostics-Hops + resolver-Geo/RDAP) faellt

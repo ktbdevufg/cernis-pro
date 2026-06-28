@@ -380,3 +380,183 @@ async def get_inventory_report_pdf(
             "Content-Disposition": f'attachment; filename="{result.filename}"'  # type: ignore[attr-defined]
         },
     )
+
+
+# ── CVE-Bericht: schmale api-Response-Modelle (eigene Wire-Form) ────────────────
+# Analog zum Sicherheits-/Bestandsbericht oben: eigene schmale pydantic-``*Out``-Modelle, die
+# die application-Sicht ``CveReport`` (samt ``SeverityCount``/``DeviceCveRow``/``ServiceCveRow``/
+# ``CveFindingRow``) spiegeln, OHNE diese Typen zu importieren (Regel 4: api kennt application
+# nicht). Der Composition-Root-Runner in ``app.py`` projiziert die application-Sicht auf genau
+# diese Form.
+
+
+class CveSeverityCountOut(BaseModel):
+    """Ein Eintrag der Severity-Verteilung (Stufe + Anzahl, Wire-Form).
+
+    ``severity`` die Stufe (CRITICAL/HIGH/MEDIUM/LOW/UNKNOWN), ``count`` die Anzahl aktiver
+    Befunde dieser Stufe (auch 0 -- es werden immer alle fuenf Stufen geliefert). Reine
+    Anzeige; der Composition-Root-Runner projiziert die application-Sicht hierher.
+    """
+
+    severity: str
+    count: int
+
+
+class CveDeviceRowOut(BaseModel):
+    """Eine Zeile je betroffenem Geraet (Sektion 2, Wire-Form).
+
+    ``device_label`` der Anzeigename, ``mac`` die MAC, ``finding_count`` die Anzahl aktiver
+    Befunde, ``highest_severity`` die hoechste Stufe, ``highest_cvss`` der hoechste CVSS,
+    ``services`` die kommaseparierte Dienste-Liste. Alle Werte kommen vom Composition-Root-
+    Runner fertig herein (api rechnet nicht).
+    """
+
+    device_label: str
+    mac: str
+    finding_count: int
+    highest_severity: str
+    highest_cvss: float
+    services: str
+
+
+class CveServiceRowOut(BaseModel):
+    """Eine Zeile je Dienst (Sektion 3, Muster nach Dienst, Wire-Form).
+
+    ``service`` der Dienst-Name, ``finding_count`` die Anzahl aktiver Befunde, ``device_count``
+    die Anzahl betroffener Geraete, ``highest_severity`` die hoechste Stufe, ``highest_cvss``
+    der hoechste CVSS, ``oldest_published`` die aelteste Veroeffentlichung als Text ("" moeglich).
+    """
+
+    service: str
+    finding_count: int
+    device_count: int
+    highest_severity: str
+    highest_cvss: float
+    oldest_published: str
+
+
+class CveFindingRowOut(BaseModel):
+    """Eine vollstaendige Befund-Zeile (Sektion 4, aktiv ODER quittiert, Wire-Form).
+
+    Alle Anzeige-Texte (``device_label``, ``first_seen_text``) sind schon vom Composition-Root-
+    Runner fertig gesetzt; ``first_seen_ts`` ist der Sortier-/Alters-Schluessel als Unix-Sekunden
+    (fuers Frontend). ``acknowledged`` trennt aktive von quittierten Zeilen, ``is_new`` ist die
+    durchgereichte Domaenen-Ableitung.
+    """
+
+    device_label: str
+    mac: str
+    cve_id: str
+    severity: str
+    cvss_score: float
+    service: str
+    port: int
+    first_seen_text: str
+    first_seen_ts: float
+    published: str
+    acknowledged: bool
+    is_new: bool
+
+
+class CveReportOut(BaseModel):
+    """Die Gesamtsicht des CVE-Berichts: Kennzahlen + Verteilung + drei Sektions-Listen.
+
+    ``generated_findings_total`` alle persistierten Befunde, ``active_total`` die aktiven,
+    ``acknowledged_total`` die quittierten, ``new_total`` die neuen, ``affected_devices`` die
+    betroffenen Geraete. ``hosts_total``/``hosts_checked`` die Host-Zaehler, ``coverage_text``
+    die fertige Prozent-Darstellung der Abdeckung (vom Composition-Root-Runner),
+    ``highest_severity`` die hoechste Stufe, ``oldest_published`` die aelteste Veroeffentlichung.
+    ``severity_counts`` die Verteilung, ``device_rows``/``service_rows``/``all_rows`` die drei
+    Sektions-Listen. KEIN 404-Fall: leerer Stand ist ein DATUM, kein HTTP-Fehler.
+    """
+
+    generated_findings_total: int
+    active_total: int
+    acknowledged_total: int
+    new_total: int
+    affected_devices: int
+    hosts_total: int
+    hosts_checked: int
+    coverage_text: str
+    highest_severity: str
+    oldest_published: str
+    severity_counts: list[CveSeverityCountOut]
+    device_rows: list[CveDeviceRowOut]
+    service_rows: list[CveServiceRowOut]
+    all_rows: list[CveFindingRowOut]
+
+
+# ── CVE-Bericht: injizierter Composition-Root-Runner ───────────────────────────
+# Provider-Marker (Muster ``InventoryReportRunner``): in app.py per dependency_overrides mit dem
+# echten Root-Runner verdrahtet. Ohne Verdrahtung bewusst ein lauter Fehler (kein stiller
+# Fallback, S3).
+
+
+class CveReportRunner(Protocol):
+    """Schmaler Vertrag des injizierten Lese-Runners (liefert die fertige CVE-Sicht)."""
+
+    async def __call__(self) -> CveReportOut:
+        """Baut den CVE-Bericht und liefert ihn api-fertig (Wire-Form)."""
+        ...
+
+
+def provide_cve_report() -> CveReportRunner:
+    raise NotImplementedError("CveReportRunner wird in app.py verdrahtet")
+
+
+@router.get("/cve")
+async def get_cve_report(
+    runner: Annotated[CveReportRunner, Depends(provide_cve_report)],
+) -> CveReportOut:
+    """Liefert den aggregierten CVE-Bericht (Kennzahlen + Verteilung + Sektions-Listen).
+
+    KEIN 404-Fall: leerer Stand ist ein DATUM (alle Zaehler 0, leere Listen), kein HTTP-Fehler.
+    Die ganze Projektion macht der injizierte Composition-Root-Runner (Regel 4: der api-Ring
+    kennt application nicht).
+    """
+    return await runner()
+
+
+# ── CVE-Bericht-PDF: injizierter Composition-Root-Runner ───────────────────────
+# Muster ``InventoryReportPdfRunner``: der Runner liefert ein Objekt mit den drei Attributen
+# ``content`` (bytes), ``media_type`` (str), ``filename`` (str). Der api-Ring kennt diesen
+# Ergebnis-Typ NICHT -- der Router liest nur die drei Attribute (``type: ignore[attr-defined]``).
+# Provider-Marker: in app.py verdrahtet; ohne Verdrahtung bewusst ein lauter Fehler (S3).
+
+
+class CveReportPdfRunner(Protocol):
+    """Schmaler Vertrag des injizierten PDF-Runners (liefert das fertige Download-Ergebnis)."""
+
+    async def __call__(self) -> object:
+        """Baut den CVE-Bericht als PDF und liefert content/media_type/filename."""
+        ...
+
+
+def provide_cve_report_pdf() -> CveReportPdfRunner:
+    raise NotImplementedError("CveReportPdfRunner wird in app.py verdrahtet")
+
+
+@router.get("/cve/pdf")
+async def get_cve_report_pdf(
+    runner: Annotated[CveReportPdfRunner, Depends(provide_cve_report_pdf)],
+) -> Response:
+    """Liefert den CVE-Bericht als PDF-Download (Bytes, ``attachment``).
+
+    Der injizierte Composition-Root-Runner baut den Bericht, projiziert ihn auf das
+    render-fertige PDF-Modell und rendert das PDF; er liefert ein Objekt mit ``content``
+    (PDF-Bytes), ``media_type`` (``application/pdf``) und ``filename``. Der Router verpackt es
+    in eine ``Response`` mit ``Content-Disposition: attachment; filename="..."``.
+
+    KEIN 404-Fall: leerer Stand ist ein gueltiges PDF (alle Zaehler 0, leere Listen), kein
+    HTTP-Fehler -- analog ``GET /api/report/cve``.
+    """
+    result = await runner()
+    # result kommt aus dem Composition Root; per Attribut-Zugriff gelesen (kein Typ-Import im
+    # Router -- der api-Ring kennt nur die drei Attribute, Muster ``get_inventory_report_pdf``).
+    return Response(
+        content=result.content,  # type: ignore[attr-defined]
+        media_type=result.media_type,  # type: ignore[attr-defined]
+        headers={
+            "Content-Disposition": f'attachment; filename="{result.filename}"'  # type: ignore[attr-defined]
+        },
+    )

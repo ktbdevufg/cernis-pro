@@ -63,7 +63,10 @@ class CveFindingRow:
     """Eine neutrale CVE-Befund-Zeile des CVE-Berichts (Aufrufer befuellt).
 
     ``device_label`` ist der schon gebildete Anzeigename (label||hostname||ip||mac --
-    die Wahl trifft der Aufrufer), ``mac`` die MAC als Gruppier-Schluessel. ``cve_id``
+    die Wahl trifft der Aufrufer), ``mac`` die MAC als Gruppier-Schluessel, ``ip`` die
+    Anzeige-IP des Hosts ("" moeglich; der Aufrufer liefert die Finding-IP, ersatzweise
+    die Geraete-IP). Die IP wird hier NICHT verrechnet -- sie dient nur dem Host-Kopf der
+    gruppierten Befundliste (``HostFindingGroup.ip``). ``cve_id``
     die CVE-Kennung, ``severity`` die ROHE NVD-Severity (wird hier via
     ``_norm_severity`` normalisiert), ``cvss_score`` der CVSS-Wert. ``service`` der
     Dienst-/Protokoll-Bezeichner (leer moeglich), ``port`` der Port. ``first_seen_text``
@@ -76,6 +79,7 @@ class CveFindingRow:
 
     device_label: str
     mac: str
+    ip: str
     cve_id: str
     severity: str
     cvss_score: float
@@ -159,6 +163,27 @@ class ServiceCveRow:
 
 
 @dataclass(frozen=True)
+class HostFindingGroup:
+    """Sektion 4 (gruppierte Sicht) -- ein Host-Block der vollstaendigen Befundliste.
+
+    Gruppiert ALLE Befunde eines Hosts (aktiv UND quittiert) unter einem Host-Kopf.
+    ``device_label`` der Anzeigename (das Label der ersten Zeile dieser ``mac`` in
+    ``all_rows``-Reihenfolge, stabil), ``mac`` die MAC, ``ip`` die IP fuer den Host-Kopf
+    (die erste nicht-leere ``ip`` der Gruppe; "" wenn alle leer). ``finding_count`` die
+    Anzahl der Befunde dieses Hosts, ``highest_severity`` die hoechste Severity nach Rang
+    ueber die Gruppe. ``rows`` die Befunde dieses Hosts, schon sortiert (Severity-Rang
+    absteigend, dann CVSS absteigend, dann Port aufsteigend, dann cve_id).
+    """
+
+    device_label: str
+    mac: str
+    ip: str
+    finding_count: int
+    highest_severity: str
+    rows: list[CveFindingRow]
+
+
+@dataclass(frozen=True)
 class CveReport:
     """Das Gesamtergebnis der CVE-Aggregation (alles fuer den api-Rand/Frontend).
 
@@ -175,6 +200,8 @@ class CveReport:
     ``SEVERITY_ORDER``-Reihenfolge (immer alle fuenf Stufen, auch count 0).
     ``device_rows`` Sektion 2, ``service_rows`` Sektion 3, ``all_rows`` Sektion 4 (ALLE
     Zeilen, aktiv UND quittiert, mit durchnormalisierter Severity, sortiert).
+    ``host_groups`` die ZUSAETZLICHE, nach Host gruppierte Sicht derselben Zeilen (fuer
+    das PDF und das spaetere Frontend); ``all_rows`` bleibt fuer JSON/Frontend erhalten.
     """
 
     generated_findings_total: int
@@ -191,6 +218,7 @@ class CveReport:
     device_rows: list[DeviceCveRow]
     service_rows: list[ServiceCveRow]
     all_rows: list[CveFindingRow]
+    host_groups: list[HostFindingGroup]
 
 
 # ── Reine Funktionen (keine I/O, keine Uhr) ─────────────────────────────────
@@ -244,6 +272,10 @@ def build_cve_report(status: CveMonitorInput, rows: list[CveFindingRow]) -> CveR
          AKTIVE Zeilen, sortiert nach ``(-highest_rang, -finding_count, service)``.
       8. ``all_rows`` (Sektion 4) = ALLE normalisierten Zeilen (aktiv UND quittiert),
          sortiert nach ``(-rang(severity), -cvss_score, device_label, cve_id)``.
+      8b. ``host_groups`` (Sektion 4, gruppierte Sicht) = dieselben Zeilen nach ``mac``
+         gruppiert; je Gruppe ein Host-Kopf + die nach ``(-rang, -cvss, port, cve_id)``
+         sortierten Zeilen. Host-Reihenfolge: gefaehrlichster zuerst, nach
+         ``(-rang(highest_severity), -max_cvss, -finding_count, device_label)``.
       9. ``coverage_text`` = "" (der PDF-/Frontend-Rand bildet die Prozentdarstellung);
          ``generated_findings_total``/``hosts_total``/``hosts_checked`` aus ``status``
          durchreichen.
@@ -322,6 +354,36 @@ def build_cve_report(status: CveMonitorInput, rows: list[CveFindingRow]) -> CveR
         key=lambda r: (-_rang(r.severity), -r.cvss_score, r.device_label, r.cve_id),
     )
 
+    # Schritt 8b: host_groups (Sektion 4, gruppierte Sicht) -- ALLE Zeilen nach mac
+    # gruppiert (aktiv UND quittiert, wie all_rows). Die Gruppierung laeuft ueber
+    # all_rows, damit "device_label/ip der ersten Zeile" stabil aus der all_rows-
+    # Reihenfolge stammt.
+    host_gruppen: dict[str, list[CveFindingRow]] = {}
+    for row in all_rows:
+        host_gruppen.setdefault(row.mac, []).append(row)
+    host_groups = [
+        HostFindingGroup(
+            device_label=gruppe[0].device_label,
+            mac=mac,
+            ip=next((r.ip for r in gruppe if r.ip), ""),
+            finding_count=len(gruppe),
+            highest_severity=_highest_severity(gruppe),
+            rows=sorted(
+                gruppe,
+                key=lambda r: (-_rang(r.severity), -r.cvss_score, r.port, r.cve_id),
+            ),
+        )
+        for mac, gruppe in host_gruppen.items()
+    ]
+    host_groups.sort(
+        key=lambda g: (
+            -_rang(g.highest_severity),
+            -max(r.cvss_score for r in g.rows),
+            -g.finding_count,
+            g.device_label,
+        )
+    )
+
     # Schritt 9: Durchreichen + leerer coverage_text.
     return CveReport(
         generated_findings_total=status.findings_total,
@@ -338,4 +400,5 @@ def build_cve_report(status: CveMonitorInput, rows: list[CveFindingRow]) -> CveR
         device_rows=device_rows,
         service_rows=service_rows,
         all_rows=all_rows,
+        host_groups=host_groups,
     )

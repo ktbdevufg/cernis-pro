@@ -8,8 +8,10 @@ from application.reporting.build_report_use_case import (
 from application.reporting.cve_pdf_model import (
     DEVICE_COLUMNS,
     FINDING_COLUMNS,
+    FINDING_GROUP_COLUMNS,
     SERVICE_COLUMNS,
     CvePdfModel,
+    HostGroupBlock,
 )
 from application.reporting.cve_report import (
     SEVERITY_ORDER,
@@ -18,6 +20,7 @@ from application.reporting.cve_report import (
     CveMonitorInput,
     CveReport,
     DeviceCveRow,
+    HostFindingGroup,
     ServiceCveRow,
     SeverityCount,
     build_cve_report,
@@ -66,6 +69,7 @@ __all__ = [
     "CVE_COLUMNS",
     "DEVICE_COLUMNS",
     "FINDING_COLUMNS",
+    "FINDING_GROUP_COLUMNS",
     "INVENTORY_COLUMNS",
     "NET_COLUMNS",
     "PORT_COLUMNS",
@@ -83,6 +87,8 @@ __all__ = [
     "DeviceBurden",
     "DeviceCveRow",
     "DistributionEntry",
+    "HostFindingGroup",
+    "HostGroupBlock",
     "InventoryDeviceRow",
     "InventoryPdfModel",
     "InventoryReport",

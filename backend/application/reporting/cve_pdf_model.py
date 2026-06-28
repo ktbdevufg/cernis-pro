@@ -54,6 +54,32 @@ FINDING_COLUMNS: tuple[str, ...] = (
     "Erstmals gesehen",
     "Status",
 )
+# Spalten der GRUPPIERTEN Befundliste (Sektion 4, neuer Render-Pfad): das Geraet steht im
+# Host-Kopf, daher tragen die CVE-Zeilen KEINE Geraet-Spalte mehr. ``FINDING_COLUMNS`` bleibt
+# fuer JSON/Referenz bestehen.
+FINDING_GROUP_COLUMNS: tuple[str, ...] = (
+    "CVE",
+    "Severity",
+    "CVSS",
+    "Dienst",
+    "Port",
+    "Erstmals gesehen",
+    "Status",
+)
+
+
+@dataclass(frozen=True)
+class HostGroupBlock:
+    """Ein Host-Block der gruppierten Befundliste (Sektion 4), render-fertig.
+
+    ``header`` die FERTIGE Host-Kopfzeile (z. B. "pi.hole · 192.168.178.155 · DC:A6:... ·
+    11 Befunde, höchste HOCH") -- der Composition Root baut sie (keine Uhr/Logik hier).
+    ``rows`` die CVE-Zeilen dieses Hosts als String-Tupel in ``FINDING_GROUP_COLUMNS``-
+    Reihenfolge (Status schon als Variante-C-Text).
+    """
+
+    header: str
+    rows: tuple[tuple[str, ...], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -82,8 +108,10 @@ class CvePdfModel:
 
     SEKTIONS-TABELLEN (fertige String-Zeilen in der jeweiligen ``*_COLUMNS``-Reihenfolge):
       ``device_rows`` (Sektion 2), ``service_rows`` (Sektion 3), ``finding_rows`` (Sektion 4
-      -- die VOLLSTAENDIGE Befundliste). Ist eine Tabelle LEER, laesst der spaetere Adapter
-      die Rubrik weg (wie beim Bestandsbericht).
+      -- die flache VOLLSTAENDIGE Befundliste, fuer JSON/Referenz erhalten). Ist eine Tabelle
+      LEER, laesst der spaetere Adapter die Rubrik weg (wie beim Bestandsbericht).
+      ``host_groups`` (Sektion 4 -- die nach Host GRUPPIERTE Sicht, die das PDF rendert):
+      je Host ein ``HostGroupBlock`` mit fertiger Kopfzeile + CVE-Zeilen.
     """
 
     title: str
@@ -106,3 +134,4 @@ class CvePdfModel:
     device_rows: tuple[tuple[str, ...], ...] = ()
     service_rows: tuple[tuple[str, ...], ...] = ()
     finding_rows: tuple[tuple[str, ...], ...] = field(default_factory=tuple)
+    host_groups: tuple[HostGroupBlock, ...] = ()
