@@ -1,0 +1,566 @@
+/* Bestandsbericht — In-App-Ansicht (Etappe 3). Eigene BEM-Klassen mit Praefix
+   inventory-report__, gleiche Designsprache/Tokens wie SecurityReportView: Card-
+   Flaechen, --color-border, radius, accent fuer bekannt/vertraut, sev-med fuer
+   unbekannt/beobachtet, sev-low fuer neutral. Nur Token-Variablen, nie feste Farben. */
+
+.inventory-report {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.inventory-report__mono {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+.inventory-report__num {
+  text-align: right;
+}
+
+/* ── 1. Bericht-Titelkopf (Logo + grosse Ueberschrift + Erstelldatum) ──────────── */
+.inventory-report__kopf {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding-bottom: 14px;
+  border-bottom: 2px solid var(--color-accent);
+}
+
+.inventory-report__logo {
+  height: 44px;
+  width: auto;
+  display: block;
+}
+
+.inventory-report__kopf-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.inventory-report__titel {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--color-text);
+}
+
+.inventory-report__kopf-datum {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-tert);
+}
+
+/* Einleitung: ruhiger Fliesstext unter dem Kopf (Achse-B-Haltung in Klartext). */
+.inventory-report__einleitung {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--color-text-sec);
+}
+
+/* Dezenter Fehlerhinweis (Ladefehler kippt die Ansicht nicht). */
+.inventory-report__fehler {
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--sev-med-text);
+  background: var(--sev-med-bg);
+  border: 1px solid var(--sev-med-bd);
+  border-radius: var(--radius-md);
+}
+
+/* ── 2. Leerzustand (kein Bestand) ─────────────────────────────────────────────── */
+.inventory-report__leerzustand {
+  padding: 20px 18px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.inventory-report__leerzustand-text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--color-text-sec);
+}
+
+/* ── 3.2 Kennzahlen (zwei Reihen) ──────────────────────────────────────────────── */
+.inventory-report__kennzahlen {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.inventory-report__kennzahl {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-left-width: 4px;
+  border-left-color: var(--color-accent);
+  border-radius: var(--radius-md);
+}
+
+.inventory-report__kennzahl-wert {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.inventory-report__kennzahl-label {
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+/* ── 3.3 Donut-Paar (zwei nebeneinander, responsive) ───────────────────────────── */
+.inventory-report__donut-paar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.inventory-report__donut-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 18px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.inventory-report__donut-titel {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.inventory-report__donut {
+  position: relative;
+  width: 160px;
+  height: 160px;
+}
+
+.inventory-report__donut-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.inventory-report__donut-mitte {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.inventory-report__donut-summe {
+  font-size: 30px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.inventory-report__donut-label {
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+/* Donut-Legende (Farbpunkt + Label + Zahl). */
+.inventory-report__legende {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  max-width: 220px;
+}
+
+.inventory-report__legende-zeile {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--color-text-sec);
+}
+
+.inventory-report__legende-punkt {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.inventory-report__legende-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inventory-report__legende-zahl {
+  color: var(--color-text-tert);
+}
+
+/* ── 3.4 Verteilung (Toggle + Balken) ──────────────────────────────────────────── */
+.inventory-report__verteilung {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 18px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.inventory-report__verteilung-kopf {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.inventory-report__abschnitt-titel {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.inventory-report__toggle {
+  display: inline-flex;
+  gap: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.inventory-report__toggle-knopf {
+  padding: 6px 14px;
+  font-size: 13px;
+  color: var(--color-text-sec);
+  background: var(--color-card);
+  border: none;
+  cursor: pointer;
+}
+
+.inventory-report__toggle-knopf:hover {
+  background: var(--color-accent-bg);
+}
+
+.inventory-report__toggle-knopf--aktiv {
+  color: var(--color-accent);
+  background: var(--color-accent-bg);
+  font-weight: 600;
+}
+
+.inventory-report__balken-liste {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.inventory-report__balken-zeile {
+  display: grid;
+  grid-template-columns: minmax(80px, 160px) 1fr auto;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Am Bildschirm werden die ueber Top-N hinausgehenden Zeilen ausgeblendet
+   (kompakte Ansicht + "+ X weitere"-Hinweis). Im Druck zeigt @media print alle. */
+.inventory-report__balken-zeile--ueberzaehlig {
+  display: none;
+}
+
+.inventory-report__balken-label {
+  font-size: 12px;
+  color: var(--color-text-sec);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inventory-report__balken-bahn {
+  display: flex;
+  height: 12px;
+  background: var(--sev-low-bg);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.inventory-report__balken-fueller {
+  height: 100%;
+  background: var(--color-accent);
+}
+
+.inventory-report__balken-zahl {
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+.inventory-report__balken-rest {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+/* ── 3.5 Geraeteliste (Abschnitt) ──────────────────────────────────────────────── */
+.inventory-report__abschnitt {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.inventory-report__abschnitt-titel--num {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 6px;
+  border-bottom: 2px solid var(--color-accent);
+}
+
+.inventory-report__abschnitt-nummer {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-accent);
+  background: var(--color-accent-bg);
+  border-radius: 50%;
+}
+
+/* Steuerleiste: Filter-Chips + Sortier-Auswahl (im Druck ausgeblendet). */
+.inventory-report__steuerung {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.inventory-report__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.inventory-report__chip {
+  padding: 5px 12px;
+  font-size: 12px;
+  color: var(--color-text-sec);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.inventory-report__chip:hover {
+  background: var(--color-accent-bg);
+}
+
+.inventory-report__chip--aktiv {
+  color: var(--color-accent);
+  background: var(--color-accent-bg);
+  border-color: var(--color-accent-border);
+  font-weight: 600;
+}
+
+.inventory-report__sortierung {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+.inventory-report__sortierung-select {
+  padding: 5px 10px;
+  font-size: 12px;
+  color: var(--color-text);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+/* ── Tabelle (Muster security-report__tabelle) ─────────────────────────────────── */
+.inventory-report__tabelle {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.inventory-report__tabelle th {
+  text-align: left;
+  padding: 8px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--color-text-tert);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.inventory-report__tabelle td {
+  padding: 8px 10px;
+  color: var(--color-text);
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: top;
+}
+
+.inventory-report__tabelle .inventory-report__num {
+  text-align: right;
+}
+
+/* Am Bildschirm werden die ueber Top-N hinausgehenden Zeilen ausgeblendet;
+   im Druck zeigt @media print alle. */
+.inventory-report__zeile--ueberzaehlig {
+  display: none;
+}
+
+/* ── Status-Badges (drei/vier Toene ueber Tokens) ──────────────────────────────── */
+.inventory-report__badge {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: var(--radius-md);
+  white-space: nowrap;
+}
+
+.inventory-report__badge--vertraut {
+  color: var(--color-accent);
+  background: var(--color-accent-bg);
+  border: 1px solid var(--color-accent-border);
+}
+
+.inventory-report__badge--beobachtet {
+  color: var(--sev-med-text);
+  background: var(--sev-med-bg);
+  border: 1px solid var(--sev-med-bd);
+}
+
+.inventory-report__badge--bekannt {
+  color: var(--color-text-sec);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+}
+
+.inventory-report__badge--unbekannt {
+  color: var(--sev-med-text);
+  background: var(--sev-med-bg);
+  border: 1px solid var(--sev-med-bd);
+}
+
+/* Ruhige Leer-Meldung (statt leerem Kasten). */
+.inventory-report__leer {
+  margin: 0;
+  padding: 16px 12px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--color-text-sec);
+}
+
+/* Achse-B-Fussnote (beschreibt und ordnet ein — kein Urteil). */
+.inventory-report__fussnote {
+  margin: 0;
+  font-size: 12px;
+  font-style: italic;
+  line-height: 1.5;
+  color: var(--color-text-tert);
+}
+
+/* Bericht-Fusszeile (UNSER Inhalt am Dokument-Ende: Wortmarke + Erstelldatum). */
+.inventory-report__fusszeile {
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+  text-align: center;
+  font-size: 11px;
+  color: var(--color-text-tert);
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+/* ── Aktionsleiste ─────────────────────────────────────────────────────────────── */
+.inventory-report__aktionen {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.inventory-report__pdf {
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-bg);
+  background: var(--color-accent);
+  border: 1px solid var(--color-accent-strong);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.inventory-report__pdf:hover {
+  background: var(--color-accent-strong);
+}
+
+.inventory-report__pdf:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.inventory-report__pdf-fehler {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--sev-med-text);
+}
+
+/* Dezenter Lade-Indikator (schmaler Balken oben am Container). */
+.inventory-report__laedt {
+  height: 2px;
+  background: var(--color-accent);
+  border-radius: var(--radius-md);
+  opacity: 0.6;
+}
+
+/* ── Druck: Balken/Tabellen vollstaendig, Bedien-Controls weg ──────────────────── */
+@media print {
+  /* Ueberzaehlige Zeilen aufs Papier holen, "weitere"-Hinweise weg. */
+  .inventory-report__balken-zeile--ueberzaehlig,
+  .inventory-report__zeile--ueberzaehlig {
+    display: grid;
+  }
+  .inventory-report__zeile--ueberzaehlig {
+    display: table-row;
+  }
+  .inventory-report__balken-rest {
+    display: none;
+  }
+
+  /* Bedien-Controls (kein Sinn auf Papier): Toggle, Filter, Sortierung, PDF-Knopf. */
+  .inventory-report__toggle,
+  .inventory-report__steuerung,
+  .inventory-report__aktionen,
+  .inventory-report__laedt {
+    display: none;
+  }
+}

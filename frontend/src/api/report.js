@@ -120,6 +120,84 @@ export async function fetchSecurityReportPdf() {
   );
 }
 
+// ── Bestandsbericht (Etappe 3) ─────────────────────────────────────────────────
+//
+// Wire-Form (aus backend/api/report.py InventoryReportOut, verifiziert, NICHT
+// aendern):
+//   GET /api/report/inventory -> {
+//     total:int, known:int, unknown:int, active_24h:int,
+//     trusted:int, watch:int, neutral:int,
+//     vendor_distribution: [ { label:str, count:int } ],
+//     category_distribution: [ { label:str, count:int } ],
+//     device_rows: [ { device_label, vendor, last_ip, first_seen_text,
+//       last_seen_text, last_seen_ts:float, times_seen:int, category,
+//       is_known:bool, trust_state ("neutral"/"trusted"/"watch"),
+//       source ("scan"/"manual"), archived:bool } ],
+//     archived_rows: [ gleiche Form wie device_rows ]
+//   }
+// KEIN 404-Fall: leerer Bestand = alle Zaehler 0 + leere Listen (kein Fehler).
+
+// Ein Verteilungs-Eintrag (Hersteller/Kategorie) -> View-Struktur. Zahlen roh.
+function mappeVerteilung(e) {
+  return {
+    label: e.label,
+    count: e.count,
+  };
+}
+
+// Eine Geraete-Zeile -> View-Struktur (camelCase). Zeitstempel/Zaehler roh
+// durchgereicht; die View formatiert selbst. Reihenfolge des Backends bleibt.
+function mappeGeraeteZeile(r) {
+  return {
+    deviceLabel: r.device_label,
+    vendor: r.vendor,
+    lastIp: r.last_ip,
+    firstSeenText: r.first_seen_text,
+    lastSeenText: r.last_seen_text,
+    lastSeenTs: r.last_seen_ts,
+    timesSeen: r.times_seen,
+    category: r.category,
+    isKnown: r.is_known,
+    trustState: r.trust_state,
+    source: r.source,
+    archived: r.archived,
+  };
+}
+
+// GET /api/report/inventory -> der aggregierte Bestandsbericht (Zaehler +
+// Verteilungen + aktive/archivierte Geraete-Zeilen). Fehlt ein Block wider
+// Erwarten, fallen Zaehler auf 0 und Listen auf [] (gefahrloses Mappen, Muster
+// fetchSecurityReport). Bei !ok/Netzfehler -> ApiError (die View faengt das und
+// zeigt den Fehlerhinweis).
+export async function fetchInventoryReport() {
+  const backend = await apiGet("/api/report/inventory");
+  return {
+    total: backend?.total ?? 0,
+    known: backend?.known ?? 0,
+    unknown: backend?.unknown ?? 0,
+    active24h: backend?.active_24h ?? 0,
+    trusted: backend?.trusted ?? 0,
+    watch: backend?.watch ?? 0,
+    neutral: backend?.neutral ?? 0,
+    vendorDistribution: (backend?.vendor_distribution ?? []).map(mappeVerteilung),
+    categoryDistribution: (backend?.category_distribution ?? []).map(mappeVerteilung),
+    deviceRows: (backend?.device_rows ?? []).map(mappeGeraeteZeile),
+    archivedRows: (backend?.archived_rows ?? []).map(mappeGeraeteZeile),
+  };
+}
+
+// GET /api/report/inventory/pdf -> loest den Browser-Download des Bestandsberichts
+// als PDF aus (Blob via apiDownload). Der echte Dateiname kommt vom Backend ueber
+// Content-Disposition; der defaultName hier ist nur Fallback. Bei !ok/Netzfehler
+// -> ApiError (die View faengt das und zeigt einen dezenten PDF-Fehlerhinweis).
+export async function fetchInventoryReportPdf() {
+  return apiDownload(
+    "/api/report/inventory/pdf",
+    null,
+    "CERNISPRO_Netzwerk-Bestandsbericht.pdf",
+  );
+}
+
 // GET /api/report/manual/pdf?lang=de|en -> loest den Browser-Download des
 // Benutzerhandbuchs als PDF in der gewaehlten Sprache aus (Blob via apiDownload).
 // lang faellt sicher auf "de" zurueck, wenn nicht "en". Der echte Dateiname kommt
@@ -138,5 +216,7 @@ export async function fetchManualPdf(lang) {
 export default {
   fetchSecurityReport,
   fetchSecurityReportPdf,
+  fetchInventoryReport,
+  fetchInventoryReportPdf,
   fetchManualPdf,
 };

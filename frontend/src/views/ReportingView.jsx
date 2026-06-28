@@ -7,7 +7,7 @@
 //   weitere Berichte folgen als eigene Kacheln (zusätzlicher FUNKTIONEN-Eintrag
 //   mit eigener id + Eintrag in KOMPONENTEN_JE_ID).
 
-import { ShieldCheck } from "lucide-react";
+import { Boxes, ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -16,15 +16,20 @@ import {
   FunctionShell,
 } from "../components/AreaShell.jsx";
 import FunctionCard from "../components/FunctionCard.jsx";
+import InventoryReportView from "../components/InventoryReportView.jsx";
 import SecurityReportView from "../components/SecurityReportView.jsx";
 
 // Kachel-Definition: Schlüssel, Icon, Sperrstatus. Reihenfolge ist verbindlich.
-const FUNKTIONEN = [{ id: "security", icon: ShieldCheck, locked: false }];
+const FUNKTIONEN = [
+  { id: "security", icon: ShieldCheck, locked: false },
+  { id: "inventory", icon: Boxes, locked: false },
+];
 
 // Mapping id -> geöffnete Berichts-Komponente. Ein weiterer Bericht braucht nur
 // einen FUNKTIONEN-Eintrag oben und einen Eintrag hier.
 const KOMPONENTEN_JE_ID = {
   security: SecurityReportView,
+  inventory: InventoryReportView,
 };
 
 export default function ReportingView() {

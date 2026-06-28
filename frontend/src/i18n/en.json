@@ -1111,6 +1111,11 @@
         "title": "Network Security Report",
         "subtitle": "Score, notable ports, CVE findings and network anomalies in one report.",
         "locked": ""
+      },
+      "inventory": {
+        "title": "Network Inventory Report",
+        "subtitle": "Device inventory with vendors, categories, trust status and sightings.",
+        "locked": ""
       }
     }
   },
@@ -1190,6 +1195,85 @@
         "ungeprueft": "Rogue DHCP check not yet performed (requires an active check with root privileges). It can be triggered via the diagnostics / DNS watcher function.",
         "geprueft": "Rogue DHCP last checked on {{datum}}."
       },
+      "pdf": "Report as PDF",
+      "pdfFehler": "The PDF could not be created. Please try again."
+    },
+    "inventory": {
+      "titel": "Network inventory report",
+      "kopf": {
+        "erstellt": "Created on {{datum}}"
+      },
+      "einleitung": "This report lists which devices have been seen on the network. It describes and contextualises the inventory – it does not judge.",
+      "fusszeile": "CERNIS PRO 2.0 — Professional Network Scanner & Monitor · Created on {{datum}}",
+      "ladeFehler": "The inventory report could not be loaded.",
+      "leerzustand": "No devices recorded yet – please run a network scan first.",
+      "kennzahl": {
+        "gesamt": "Total",
+        "bekannt": "Known",
+        "unbekannt": "Unknown",
+        "aktiv": "Active (24 h)",
+        "vertraut": "Trusted",
+        "beobachtet": "Watched",
+        "neutral": "Neutral"
+      },
+      "donut": {
+        "geraete": "devices",
+        "bekanntTitel": "Known / unknown",
+        "vertrauenTitel": "Trust status",
+        "ariaBekannt": "Known/unknown across {{anzahl}} devices",
+        "ariaVertrauen": "Trust status across {{anzahl}} devices"
+      },
+      "legende": {
+        "bekannt": "Known",
+        "unbekannt": "Unknown",
+        "vertraut": "Trusted",
+        "beobachtet": "Watched",
+        "neutral": "Neutral"
+      },
+      "verteilung": {
+        "titel": "Distribution",
+        "vendor": "Vendor",
+        "kategorie": "Category",
+        "weitere": "+ {{anzahl}} more",
+        "leer": "No entries.",
+        "ohne": "(none)"
+      },
+      "liste": {
+        "titel": "Device list",
+        "weitere": "+ {{anzahl}} more · complete in the PDF"
+      },
+      "filter": {
+        "aktiv": "Active",
+        "bekannt": "Known",
+        "unbekannt": "Unknown",
+        "archiviert": "Archived"
+      },
+      "sortierung": {
+        "label": "Sort by",
+        "lastSeen": "Last seen",
+        "name": "Name",
+        "vendor": "Vendor"
+      },
+      "spalte": {
+        "geraet": "Device",
+        "hersteller": "Vendor",
+        "ip": "Last IP",
+        "erstSichtung": "First seen",
+        "letztSichtung": "Last seen",
+        "gesehen": "Seen",
+        "kategorie": "Category",
+        "status": "Status"
+      },
+      "status": {
+        "vertraut": "Trusted",
+        "beobachtet": "Watched",
+        "bekannt": "Known",
+        "unbekannt": "Unknown"
+      },
+      "tabelle": {
+        "leer": "No devices in this selection."
+      },
+      "fussnote": "This report describes and contextualises – it does not pass judgement.",
       "pdf": "Report as PDF",
       "pdfFehler": "The PDF could not be created. Please try again."
     }

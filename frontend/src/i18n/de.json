@@ -1111,6 +1111,11 @@
         "title": "Netzwerk-Sicherheitsbericht",
         "subtitle": "Score, auffällige Ports, CVE-Befunde und Netz-Auffälligkeiten in einem Bericht.",
         "locked": ""
+      },
+      "inventory": {
+        "title": "Netzwerk-Bestandsbericht",
+        "subtitle": "Geräte-Inventar mit Herstellern, Kategorien, Vertrauensstatus und Sichtungen.",
+        "locked": ""
       }
     }
   },
@@ -1190,6 +1195,85 @@
         "ungeprueft": "Rogue-DHCP-Prüfung noch nicht durchgeführt (erfordert aktive Prüfung mit Root-Rechten). Sie lässt sich über die Diagnose- bzw. DNS-Wächter-Funktion anstoßen.",
         "geprueft": "Rogue-DHCP zuletzt geprüft am {{datum}}."
       },
+      "pdf": "Bericht als PDF",
+      "pdfFehler": "Das PDF konnte nicht erstellt werden. Bitte erneut versuchen."
+    },
+    "inventory": {
+      "titel": "Netzwerk-Bestandsbericht",
+      "kopf": {
+        "erstellt": "Erstellt am {{datum}}"
+      },
+      "einleitung": "Dieser Bericht listet auf, welche Geräte im Netzwerk gesehen wurden. Er beschreibt den Bestand und ordnet ihn ein – er bewertet nicht.",
+      "fusszeile": "CERNIS PRO 2.0 — Professional Network Scanner & Monitor · Erstellt am {{datum}}",
+      "ladeFehler": "Der Bestandsbericht konnte nicht geladen werden.",
+      "leerzustand": "Noch keine Geräte erfasst – bitte zuerst einen Netzwerk-Scan durchführen.",
+      "kennzahl": {
+        "gesamt": "Gesamt",
+        "bekannt": "Bekannt",
+        "unbekannt": "Unbekannt",
+        "aktiv": "Aktiv (24 h)",
+        "vertraut": "Vertraut",
+        "beobachtet": "Beobachtet",
+        "neutral": "Neutral"
+      },
+      "donut": {
+        "geraete": "Geräte",
+        "bekanntTitel": "Bekannt / unbekannt",
+        "vertrauenTitel": "Vertrauensstatus",
+        "ariaBekannt": "Bekannt/unbekannt über {{anzahl}} Geräte",
+        "ariaVertrauen": "Vertrauensstatus über {{anzahl}} Geräte"
+      },
+      "legende": {
+        "bekannt": "Bekannt",
+        "unbekannt": "Unbekannt",
+        "vertraut": "Vertraut",
+        "beobachtet": "Beobachtet",
+        "neutral": "Neutral"
+      },
+      "verteilung": {
+        "titel": "Verteilung",
+        "vendor": "Hersteller",
+        "kategorie": "Kategorie",
+        "weitere": "+ {{anzahl}} weitere",
+        "leer": "Keine Einträge.",
+        "ohne": "(ohne)"
+      },
+      "liste": {
+        "titel": "Geräteliste",
+        "weitere": "+ {{anzahl}} weitere · im PDF vollständig"
+      },
+      "filter": {
+        "aktiv": "Aktiv",
+        "bekannt": "Bekannt",
+        "unbekannt": "Unbekannt",
+        "archiviert": "Archiviert"
+      },
+      "sortierung": {
+        "label": "Sortieren",
+        "lastSeen": "Letzte Sichtung",
+        "name": "Name",
+        "vendor": "Hersteller"
+      },
+      "spalte": {
+        "geraet": "Gerät",
+        "hersteller": "Hersteller",
+        "ip": "Letzte IP",
+        "erstSichtung": "Erste Sichtung",
+        "letztSichtung": "Letzte Sichtung",
+        "gesehen": "Gesehen",
+        "kategorie": "Kategorie",
+        "status": "Status"
+      },
+      "status": {
+        "vertraut": "Vertraut",
+        "beobachtet": "Beobachtet",
+        "bekannt": "Bekannt",
+        "unbekannt": "Unbekannt"
+      },
+      "tabelle": {
+        "leer": "Keine Geräte in dieser Auswahl."
+      },
+      "fussnote": "Dieser Bericht beschreibt und ordnet ein – er fällt kein Urteil.",
       "pdf": "Bericht als PDF",
       "pdfFehler": "Das PDF konnte nicht erstellt werden. Bitte erneut versuchen."
     }
