@@ -1121,6 +1121,11 @@
         "title": "CVE Report",
         "subtitle": "Discovered vulnerabilities by severity, device and service – with a full findings list.",
         "locked": ""
+      },
+      "outbound": {
+        "title": "Network Outbound Contacts Report",
+        "subtitle": "Where your network reaches out – remote peers, countries, operators and notable contacts.",
+        "locked": ""
       }
     }
   },
@@ -1367,6 +1372,80 @@
         "leer": "No findings in this selection."
       },
       "neuHinweis": "New = first seen within the last 24 hours.",
+      "fussnote": "This report describes and contextualises – it does not pass judgement.",
+      "pdf": "Report as PDF",
+      "pdfFehler": "The PDF could not be created. Please try again."
+    },
+    "outbound": {
+      "titel": "Network Outbound Contacts Report",
+      "kopf": {
+        "erstellt": "Created on {{datum}}"
+      },
+      "einleitung": "This report shows which remote peers outside your network were contacted – organised by country, operator and notability. It describes and contextualises – it does not pass judgement.",
+      "fusszeile": "CERNIS PRO 2.0 — Professional Network Scanner & Monitor · Created on {{datum}}",
+      "ladeFehler": "The outbound contacts report could not be loaded.",
+      "leerzustand": "No outbound contacts recorded yet – please start a recording in the Outbound Contacts area first.",
+      "bezug": {
+        "label": "Scope",
+        "alle": "All recordings"
+      },
+      "kennzahl": {
+        "gegenstellen": "Remote peers",
+        "verbindungen": "Connections",
+        "laender": "Countries",
+        "betreiber": "Operators",
+        "auffaellig": "Notable",
+        "tracker": "Tracker",
+        "bedrohung": "Threat",
+        "lokal": "Local"
+      },
+      "verteilung": {
+        "titel": "Distribution",
+        "land": "Country",
+        "betreiber": "Operator",
+        "unbekannt": "(unknown)",
+        "weitere": "+ {{anzahl}} more",
+        "leer": "No entries."
+      },
+      "liste": {
+        "titel": "Contact list",
+        "weitere": "+ {{anzahl}} more · complete in the PDF"
+      },
+      "filter": {
+        "alle": "All",
+        "auffaellig": "Notable",
+        "lokal": "Local"
+      },
+      "sortierung": {
+        "label": "Sort",
+        "kontakte": "Contacts",
+        "name": "Name",
+        "land": "Country"
+      },
+      "schalter": {
+        "lokaleAusblenden": "Hide local"
+      },
+      "spalte": {
+        "gegenstelle": "Remote peer",
+        "name": "Name",
+        "land": "Country",
+        "betreiber": "Operator",
+        "app": "App",
+        "kontakte": "Contacts",
+        "bewertung": "Assessment"
+      },
+      "bewertung": {
+        "bedrohung": "Threat",
+        "tracker": "Tracker",
+        "keine": "—"
+      },
+      "badge": {
+        "bedrohungTitel": "Listed as a threat in: {{listen}}",
+        "trackerTitel": "Listed as a tracker in: {{listen}}"
+      },
+      "tabelle": {
+        "leer": "No contacts in this selection."
+      },
       "fussnote": "This report describes and contextualises – it does not pass judgement.",
       "pdf": "Report as PDF",
       "pdfFehler": "The PDF could not be created. Please try again."

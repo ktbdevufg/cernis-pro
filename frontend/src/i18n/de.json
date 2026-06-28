@@ -1121,6 +1121,11 @@
         "title": "CVE-Bericht",
         "subtitle": "Gefundene Schwachstellen nach Schweregrad, Gerät und Dienst – mit vollständiger Befundliste.",
         "locked": ""
+      },
+      "outbound": {
+        "title": "Netzwerk-Außenkontakte-Bericht",
+        "subtitle": "Wohin Ihr Netz nach außen spricht – Gegenstellen, Länder, Betreiber und auffällige Kontakte.",
+        "locked": ""
       }
     }
   },
@@ -1367,6 +1372,80 @@
         "leer": "Keine Befunde in dieser Auswahl."
       },
       "neuHinweis": "Neu = erstmals innerhalb der letzten 24 Stunden gesehen.",
+      "fussnote": "Dieser Bericht beschreibt und ordnet ein – er fällt kein Urteil.",
+      "pdf": "Bericht als PDF",
+      "pdfFehler": "Das PDF konnte nicht erstellt werden. Bitte erneut versuchen."
+    },
+    "outbound": {
+      "titel": "Netzwerk-Außenkontakte-Bericht",
+      "kopf": {
+        "erstellt": "Erstellt am {{datum}}"
+      },
+      "einleitung": "Dieser Bericht zeigt, mit welchen Gegenstellen außerhalb Ihres Netzes Verbindung aufgenommen wurde – nach Land, Betreiber und Auffälligkeit geordnet. Er beschreibt und ordnet ein – er fällt kein Urteil.",
+      "fusszeile": "CERNIS PRO 2.0 — Professional Network Scanner & Monitor · Erstellt am {{datum}}",
+      "ladeFehler": "Der Außenkontakte-Bericht konnte nicht geladen werden.",
+      "leerzustand": "Noch keine Außenkontakte aufgezeichnet – bitte zuerst eine Aufzeichnung im Außenkontakte-Bereich starten.",
+      "bezug": {
+        "label": "Bezug",
+        "alle": "Alle Aufzeichnungen"
+      },
+      "kennzahl": {
+        "gegenstellen": "Gegenstellen",
+        "verbindungen": "Verbindungen",
+        "laender": "Länder",
+        "betreiber": "Betreiber",
+        "auffaellig": "Auffällig",
+        "tracker": "Tracker",
+        "bedrohung": "Bedrohung",
+        "lokal": "Lokal"
+      },
+      "verteilung": {
+        "titel": "Verteilung",
+        "land": "Land",
+        "betreiber": "Betreiber",
+        "unbekannt": "(unbekannt)",
+        "weitere": "+ {{anzahl}} weitere",
+        "leer": "Keine Einträge."
+      },
+      "liste": {
+        "titel": "Kontaktliste",
+        "weitere": "+ {{anzahl}} weitere · im PDF vollständig"
+      },
+      "filter": {
+        "alle": "Alle",
+        "auffaellig": "Auffällig",
+        "lokal": "Lokal"
+      },
+      "sortierung": {
+        "label": "Sortieren",
+        "kontakte": "Kontakte",
+        "name": "Name",
+        "land": "Land"
+      },
+      "schalter": {
+        "lokaleAusblenden": "Lokale ausblenden"
+      },
+      "spalte": {
+        "gegenstelle": "Gegenstelle",
+        "name": "Name",
+        "land": "Land",
+        "betreiber": "Betreiber",
+        "app": "App",
+        "kontakte": "Kontakte",
+        "bewertung": "Bewertung"
+      },
+      "bewertung": {
+        "bedrohung": "Bedrohung",
+        "tracker": "Tracker",
+        "keine": "—"
+      },
+      "badge": {
+        "bedrohungTitel": "Als Bedrohung geführt in: {{listen}}",
+        "trackerTitel": "Als Tracker geführt in: {{listen}}"
+      },
+      "tabelle": {
+        "leer": "Keine Kontakte in dieser Auswahl."
+      },
       "fussnote": "Dieser Bericht beschreibt und ordnet ein – er fällt kein Urteil.",
       "pdf": "Bericht als PDF",
       "pdfFehler": "Das PDF konnte nicht erstellt werden. Bitte erneut versuchen."

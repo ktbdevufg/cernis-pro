@@ -324,6 +324,115 @@ export async function fetchCveReportPdf() {
   return apiDownload("/api/report/cve/pdf", null, "CERNISPRO_CVE-Bericht.pdf");
 }
 
+// ── Aussenkontakte-Bericht (Etappe 3) ──────────────────────────────────────────
+//
+// Wire-Form (aus backend/api/report.py OutboundReportOut, verifiziert, NICHT
+// aendern):
+//   GET /api/report/outbound/recordings -> [ { id:str, label:str } ]
+//   GET /api/report/outbound?recording_id=... -> {
+//     recording_label:str, recording_scope:str ("single"/"all"),
+//     contacts_total:int, remote_total:int, local_total:int,
+//     connection_total:int, countries_total:int, operators_total:int,
+//     tracker_contacts:int, threat_contacts:int, flagged_contacts:int,
+//     country_distribution: [ { country:str, count:int } ],
+//     operator_distribution: [ { operator:str, count:int } ],
+//     contact_rows: [ { remote_ip, hostname, country, operator, asn, app_name,
+//       first_seen_text, last_seen_text, first_seen_ts:float, last_seen_ts:float,
+//       total_count:int, peak_count:int, is_local:bool, tracker_lists:[str],
+//       threat_lists:[str] } ]
+//   }
+// ``recording_id`` ist OPTIONAL: leer/None = alle Aufzeichnungen zusammengefasst,
+// ein Wert = nur diese. KEIN 404-Fall: leerer Stand ist ein DATUM (alle Zaehler 0 +
+// leere Listen), kein Fehler.
+
+// Ein Land-Verteilungs-Eintrag -> View-Struktur. Zahlen roh durchgereicht.
+function mappeOutboundLand(e) {
+  return {
+    country: e.country,
+    count: e.count,
+  };
+}
+
+// Ein Betreiber-Verteilungs-Eintrag -> View-Struktur. Zahlen roh durchgereicht.
+function mappeOutboundBetreiber(e) {
+  return {
+    operator: e.operator,
+    count: e.count,
+  };
+}
+
+// Eine Aussenkontakt-Zeile -> View-Struktur (camelCase). Anzeige-Texte kommen schon
+// fertig vom Backend (Leerstring statt None); Zeitstempel/Zaehler roh durchgereicht.
+// tracker_lists/threat_lists fallen sicher auf [] (Muster der CVE-Mapper).
+function mappeOutboundKontakt(r) {
+  return {
+    remoteIp: r.remote_ip,
+    hostname: r.hostname,
+    country: r.country,
+    operator: r.operator,
+    asn: r.asn,
+    appName: r.app_name,
+    firstSeenText: r.first_seen_text,
+    lastSeenText: r.last_seen_text,
+    firstSeenTs: r.first_seen_ts,
+    lastSeenTs: r.last_seen_ts,
+    totalCount: r.total_count,
+    peakCount: r.peak_count,
+    isLocal: r.is_local,
+    trackerLists: r.tracker_lists ?? [],
+    threatLists: r.threat_lists ?? [],
+  };
+}
+
+// GET /api/report/outbound/recordings -> die waehlbaren Aufzeichnungen fuers
+// Bezugsrahmen-Dropdown (schlanke Wire-Form: id + label). Leere Liste = DATUM (noch
+// keine Aufzeichnungen), kein Fehler. Bei !ok/Netzfehler -> ApiError (die View faengt
+// das still ab und zeigt nur "Alle").
+export async function fetchOutboundReportRecordings() {
+  const backend = await apiGet("/api/report/outbound/recordings");
+  return (backend ?? []).map((r) => ({ id: r.id, label: r.label }));
+}
+
+// GET /api/report/outbound?recording_id=... -> der aggregierte Aussenkontakte-
+// Bericht (EINE Aufzeichnung oder alle). recordingId leer/null -> ohne Query (alle).
+// Fehlt ein Block wider Erwarten, fallen Zaehler auf 0 und Listen auf [] (gefahrloses
+// Mappen, Muster fetchCveReport). Bei !ok/Netzfehler -> ApiError (die View faengt das
+// und zeigt den Fehlerhinweis).
+export async function fetchOutboundReport(recordingId) {
+  const pfad = recordingId
+    ? `/api/report/outbound?recording_id=${encodeURIComponent(recordingId)}`
+    : "/api/report/outbound";
+  const backend = await apiGet(pfad);
+  return {
+    recordingLabel: backend?.recording_label ?? "",
+    recordingScope: backend?.recording_scope ?? "all",
+    contactsTotal: backend?.contacts_total ?? 0,
+    remoteTotal: backend?.remote_total ?? 0,
+    localTotal: backend?.local_total ?? 0,
+    connectionTotal: backend?.connection_total ?? 0,
+    countriesTotal: backend?.countries_total ?? 0,
+    operatorsTotal: backend?.operators_total ?? 0,
+    trackerContacts: backend?.tracker_contacts ?? 0,
+    threatContacts: backend?.threat_contacts ?? 0,
+    flaggedContacts: backend?.flagged_contacts ?? 0,
+    countryDistribution: (backend?.country_distribution ?? []).map(mappeOutboundLand),
+    operatorDistribution: (backend?.operator_distribution ?? []).map(mappeOutboundBetreiber),
+    contactRows: (backend?.contact_rows ?? []).map(mappeOutboundKontakt),
+  };
+}
+
+// GET /api/report/outbound/pdf?recording_id=... -> loest den Browser-Download des
+// Aussenkontakte-Berichts als PDF aus (Blob via apiDownload). recordingId leer/null
+// -> ohne Query (alle). Der echte Dateiname kommt vom Backend ueber Content-
+// Disposition; der defaultName hier ist nur Fallback. Bei !ok/Netzfehler -> ApiError
+// (die View faengt das und zeigt einen dezenten PDF-Fehlerhinweis).
+export async function fetchOutboundReportPdf(recordingId) {
+  const pfad = recordingId
+    ? `/api/report/outbound/pdf?recording_id=${encodeURIComponent(recordingId)}`
+    : "/api/report/outbound/pdf";
+  return apiDownload(pfad, null, "CERNISPRO_Netzwerk-Aussenkontakte-Bericht.pdf");
+}
+
 export default {
   fetchSecurityReport,
   fetchSecurityReportPdf,
@@ -332,4 +441,7 @@ export default {
   fetchCveReport,
   fetchCveReportPdf,
   fetchManualPdf,
+  fetchOutboundReportRecordings,
+  fetchOutboundReport,
+  fetchOutboundReportPdf,
 };
