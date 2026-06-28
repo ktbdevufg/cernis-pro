@@ -24,7 +24,7 @@ application/api").
 
 import io
 import os
-from typing import Protocol
+from typing import Protocol, cast
 
 from reportlab.graphics.shapes import Circle, Drawing, Rect, String, Wedge
 from reportlab.lib import colors
@@ -77,6 +77,29 @@ PORT_COLUMNS: tuple[str, ...] = ("Gerät", "Ports", "Schwere", "Grund")
 CVE_COLUMNS: tuple[str, ...] = ("Gerät", "CVE", "CVSS", "Dienst", "Beschreibung")
 NET_COLUMNS: tuple[str, ...] = ("Art", "Gerät", "Schwere", "Beschreibung")
 ACK_COLUMNS: tuple[str, ...] = ("Art", "Gerät", "Detail")
+
+# Spalten-Spiegel der beiden Bestandsbericht-Tabellen. SPIEGEL der ``*_COLUMNS`` aus
+# ``application.reporting.inventory_pdf_model`` -- der Adapter darf ``application`` NICHT
+# importieren (import-linter), darum hier als lokale Anzeige-Konstanten gefuehrt. Die
+# Schreibweise ("Gerät" mit Umlaut) ist WOERTLICH aus inventory_pdf_model.py uebernommen, damit
+# Modell, Renderer und die Spaltenbreiten-Heuristik denselben Vertrag teilen.
+INVENTORY_COLUMNS: tuple[str, ...] = (
+    "Gerät",
+    "Hersteller",
+    "Letzte IP",
+    "Erste Sichtung",
+    "Letzte Sichtung",
+    "Gesehen",
+    "Kategorie",
+    "Status",
+)
+ARCHIVED_COLUMNS: tuple[str, ...] = (
+    "Gerät",
+    "Hersteller",
+    "Letzte IP",
+    "Letzte Sichtung",
+    "Status",
+)
 
 
 class SecurityPdfModelLike(Protocol):
@@ -172,6 +195,49 @@ class ManualPdfModelLike(Protocol):
     def intro(self) -> str: ...
     @property
     def sections(self) -> tuple[ManualPdfSectionLike, ...]: ...
+
+
+class InventoryPdfModelLike(Protocol):
+    """Struktureller Vertrag des Bestandsbericht-Modells (duck-typing, KEIN application-Import).
+
+    Wie ``SecurityPdfModelLike``: ``infrastructure`` darf ``application`` NICHT importieren
+    (import-linter), das reiche ``InventoryPdfModel`` lebt aber in ``application/reporting``.
+    Darum nimmt der Adapter es STRUKTURELL ueber dieses ``Protocol`` entgegen -- genau die
+    Felder, die er rendert. Read-only Properties decken die frozen-Felder ab (siehe Begruendung
+    bei ``SecurityPdfModelLike``). Das echte ``InventoryPdfModel`` erfuellt das Protokoll
+    automatisch (gleiche Feldnamen/Typen).
+    """
+
+    @property
+    def title(self) -> str: ...
+    @property
+    def generated_at_text(self) -> str: ...
+    @property
+    def footer_left(self) -> str: ...
+    @property
+    def einleitung(self) -> str: ...
+    @property
+    def total(self) -> int: ...
+    @property
+    def known(self) -> int: ...
+    @property
+    def unknown(self) -> int: ...
+    @property
+    def active_24h(self) -> int: ...
+    @property
+    def trusted(self) -> int: ...
+    @property
+    def watch(self) -> int: ...
+    @property
+    def neutral(self) -> int: ...
+    @property
+    def vendor_rows(self) -> tuple[tuple[str, str], ...]: ...
+    @property
+    def category_rows(self) -> tuple[tuple[str, str], ...]: ...
+    @property
+    def device_rows(self) -> tuple[tuple[str, ...], ...]: ...
+    @property
+    def archived_rows(self) -> tuple[tuple[str, ...], ...]: ...
 
 
 class ReportlabRenderer:
@@ -542,6 +608,185 @@ class ReportlabRenderer:
             ]
         )
 
+    # ── Bestandsbericht: eigener Render-Pfad ────────────────────────────────
+    #
+    # NEUE Methode neben render_security_report_pdf -- beide bleiben UNANGETASTET (der
+    # Sicherheitsbericht-Pfad wird nicht angefasst). Dieser Pfad rendert das render-fertige
+    # InventoryPdfModel (Kennzahlen + zwei Verteilungs-Tabellen + zwei Geraete-Tabellen) mit
+    # durchgaengiger Kopf-/Fusszeile. Kopf-Titel parametrisch ueber model.title -> dafuer wird
+    # _draw_manual_header_footer wiederverwendet (liest model.title/footer_left; _draw_header_
+    # footer zeichnet den Sicherheitsbericht-Titel HARTKODIERT und passt darum hier nicht). Beide
+    # Kopf-/Fuss-Funktionen teilen dieselbe _LOGO_PATH-Konstante (cernis-logo-pdf.png) -- der
+    # Bestandsbericht erbt damit automatisch das verkleinerte PDF-Logo.
+
+    def render_inventory_report_pdf(self, model: InventoryPdfModelLike) -> bytes:
+        """Rendert das ``InventoryPdfModel`` zum vollstaendigen Bestandsbericht-PDF (A4 hoch).
+
+        Layout (Auftrag): durchgaengige Kopf-/Fusszeile je Seite (onFirstPage UND onLaterPages
+        ueber dieselbe Funktion ``_draw_manual_header_footer``), dann die Story -- Titel +
+        Erzeugungsdatum + Einleitung, der Kennzahlen-Block, die beiden Verteilungs-Tabellen
+        (Hersteller/Kategorie) und die beiden Geraete-Rubriken (aktiv/archiviert). Die archiviert-
+        Rubrik wird bei leerer Liste ganz weggelassen.
+
+        Robust: leere Verteilungs-Tabellen -> "Keine Eintraege." statt leerer ``Table``; die
+        Geraete-Rubriken nutzen ``_append_table_section`` (eigener leer-Fallback). KEINE Uhr,
+        KEINE Rechnung -- alle Texte/Zahlen kommen fertig aus dem Modell. Liefert valide
+        PDF-Bytes (Magic-Header ``%PDF``).
+        """
+        buffer = io.BytesIO()
+        document = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,  # Hochformat (Auftrag)
+            leftMargin=18 * mm,
+            rightMargin=18 * mm,
+            topMargin=32 * mm,  # Platz fuer die durchgaengige Kopfzeile
+            bottomMargin=20 * mm,  # Platz fuer die Fusszeile
+            title=model.title,
+        )
+
+        story: list[Flowable] = []
+        styles = self._security_styles()
+
+        # ── Titel + Erzeugungsdatum + Einleitung (fertige Texte aus dem Modell) ──
+        story.append(Paragraph(model.title, styles["h_title"]))
+        story.append(Paragraph(model.generated_at_text, styles["sub"]))
+        story.append(Spacer(1, 4 * mm))
+        if model.einleitung:
+            story.append(Paragraph(model.einleitung, styles["body"]))
+            story.append(Spacer(1, 6 * mm))
+
+        # ── Bestands-Kennzahlen ──
+        story.append(Paragraph("Bestands-Kennzahlen", styles["h_section"]))
+        story.append(self._inventory_kennzahlen(model))
+        story.append(Spacer(1, 6 * mm))
+
+        story.append(PageBreak())
+
+        # ── Verteilung nach Hersteller / Kategorie (zwei schlanke (label, count)-Tabellen) ──
+        story.append(Paragraph("Verteilung nach Hersteller", styles["h_section"]))
+        self._append_distribution_table(story, styles, ("Hersteller", "Anzahl"), model.vendor_rows)
+        story.append(Spacer(1, 6 * mm))
+
+        story.append(Paragraph("Verteilung nach Kategorie", styles["h_section"]))
+        self._append_distribution_table(story, styles, ("Kategorie", "Anzahl"), model.category_rows)
+
+        story.append(PageBreak())
+
+        # ── Geraete-Rubriken: aktive immer, archivierte nur wenn vorhanden ──
+        # _append_table_section rendert Kopf + Tabelle + leer-Fallback selbst. Die Status-Spalte
+        # ist KEINE "Schwere"-Spalte -> kein Badge-Einfaerben (korrekt, der Bestand wertet nicht).
+        self._append_table_section(story, styles, "Geräte", INVENTORY_COLUMNS, model.device_rows)
+
+        if model.archived_rows:
+            story.append(PageBreak())
+            self._append_table_section(
+                story, styles, "Archivierte Geräte", ARCHIVED_COLUMNS, model.archived_rows
+            )
+
+        # ── Achse-B-Fussnote (invariant, wie im Sicherheitsbericht) ──
+        story.append(Spacer(1, 8 * mm))
+        story.append(HRFlowable(width="100%", thickness=0.6, color=_LINE))
+        story.append(Spacer(1, 2 * mm))
+        story.append(
+            Paragraph(
+                "Dieser Bericht beschreibt und ordnet ein — er fällt kein Urteil.",
+                styles["footnote"],
+            )
+        )
+
+        # _draw_manual_header_footer ist auf ManualPdfModelLike typisiert, liest zur Laufzeit
+        # aber NUR model.title + model.footer_left -- beide hat InventoryPdfModelLike ebenfalls.
+        # cast statt Aenderung der (unveraendert bleibenden) Kopf-/Fuss-Funktion: ehrliche
+        # Strukturgleichheit fuer genau die zwei gelesenen Felder, keine Design-Entscheidung.
+        header_model = cast(ManualPdfModelLike, model)
+        document.build(
+            story,
+            onFirstPage=lambda canvas, doc: _draw_manual_header_footer(canvas, doc, header_model),
+            onLaterPages=lambda canvas, doc: _draw_manual_header_footer(canvas, doc, header_model),
+        )
+        return buffer.getvalue()
+
+    @staticmethod
+    def _inventory_kennzahlen(model: InventoryPdfModelLike) -> Table:
+        """Die Bestands-Kennzahlen als zwei Zeilen Kennzahl-Boxen (Zahl oben, Label darunter).
+
+        Reihe 1: Gesamt/Bekannt/Unbekannt/Aktiv (24h), Reihe 2: Vertraut/Beobachtet/Neutral.
+        Beide Reihen liegen in EINER 4-spaltigen ``Table`` (Reihe 2 nutzt 3 Spalten, die vierte
+        bleibt leer) -- schlichte, lesbare graue Boxen mit Akzent-Zahl. Reine Anzeige der schon
+        ermittelten Zaehler aus dem Modell -- keine Rechnung, keine neuen Farbkonstanten.
+        """
+        # Je Box ein (Zahl, Label)-Paar; die Tabelle traegt Zahlen-Zeile und Label-Zeile
+        # abwechselnd, damit die grosse Zahl ueber dem Label steht (Muster _kennzahlen_table).
+        data = [
+            [str(model.total), str(model.known), str(model.unknown), str(model.active_24h)],
+            ["Gesamt", "Bekannt", "Unbekannt", "Aktiv (24h)"],
+            [str(model.trusted), str(model.watch), str(model.neutral), ""],
+            ["Vertraut", "Beobachtet", "Neutral", ""],
+        ]
+        col = 174.0 / 4 * mm
+        table = Table(data, colWidths=[col, col, col, col])
+        table.setStyle(
+            TableStyle(
+                [
+                    # Dezent graue Boxen (kein neues Farbset): Hintergrund _ZEBRA, Zahl in _ACCENT,
+                    # Label in _TEXT. Die leere vierte Box der zweiten Reihe bleibt ohne Fuellung.
+                    ("BACKGROUND", (0, 0), (-1, 1), _ZEBRA),
+                    ("BACKGROUND", (0, 2), (2, 3), _ZEBRA),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), _ACCENT),
+                    ("TEXTCOLOR", (0, 2), (2, 2), _ACCENT),
+                    ("TEXTCOLOR", (0, 1), (-1, 1), _TEXT),
+                    ("TEXTCOLOR", (0, 3), (2, 3), _TEXT),
+                    ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTNAME", (0, 2), (2, 2), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, 0), 20),
+                    ("FONTSIZE", (0, 2), (2, 2), 20),
+                    ("FONTNAME", (0, 1), (-1, 1), "Helvetica"),
+                    ("FONTNAME", (0, 3), (2, 3), "Helvetica"),
+                    ("FONTSIZE", (0, 1), (-1, 1), 9),
+                    ("FONTSIZE", (0, 3), (2, 3), 9),
+                    ("TOPPADDING", (0, 0), (-1, 0), 8),
+                    ("TOPPADDING", (0, 2), (2, 2), 8),
+                    ("BOTTOMPADDING", (0, 1), (-1, 1), 8),
+                    ("BOTTOMPADDING", (0, 3), (2, 3), 8),
+                ]
+            )
+        )
+        return table
+
+    def _append_distribution_table(
+        self,
+        story: list[Flowable],
+        styles: dict[str, ParagraphStyle],
+        columns: tuple[str, str],
+        rows: tuple[tuple[str, str], ...],
+    ) -> None:
+        """Haengt eine schlichte (label, count)-Verteilungs-Tabelle an (Hersteller bzw. Kategorie).
+
+        Leere ``rows`` -> "Keine Eintraege." (body) statt einer leeren ``Table``. Feste
+        colWidths (Label breit, Anzahl schmal) -- nicht ueber ``_col_widths``, weil die
+        2-spaltigen Verteilungs-Schemata dort nicht hinterlegt sind. ``_base_table_style`` +
+        ``repeatRows=1`` (Kopf wiederholt sich bei Seitenumbruch), Zellen als umbrechbare
+        ``Paragraph`` (Muster ``_append_table_section``).
+        """
+        if not rows:
+            story.append(Paragraph("Keine Einträge.", styles["body"]))
+            return
+
+        content_pt = _CONTENT_WIDTH_MM * mm
+        col_widths = [content_pt * 0.78, content_pt * 0.22]
+        render_data: list[list[object]] = [list(columns)]
+        for label, count in rows:
+            render_data.append(
+                [
+                    Paragraph(_esc(label), styles["cell"]),
+                    Paragraph(_esc(count), styles["cell"]),
+                ]
+            )
+        table = Table(render_data, repeatRows=1, colWidths=col_widths)
+        table.setStyle(self._base_table_style(len(render_data)))
+        story.append(table)
+
     # ── Benutzerhandbuch: eigener Render-Pfad ───────────────────────────────
     #
     # NEUE Methode neben render_security_report_pdf -- beide bleiben UNANGETASTET (der
@@ -649,6 +894,11 @@ _COL_WEIGHTS: dict[tuple[str, ...], tuple[float, ...]] = {
     CVE_COLUMNS: (2.6, 2.2, 1.0, 2.2, 4.0),
     NET_COLUMNS: (2.2, 2.6, 1.6, 5.0),
     ACK_COLUMNS: (2.4, 3.0, 5.0),
+    # Bestandsbericht: Geraet-Spalte breiter, die schmalen Wert-Spalten (Gesehen) schlank --
+    # damit fuellt die 8-spaltige Geraete-Tabelle die Druckbreite lesbar (Muster der Security-
+    # Gewichte). Eigene Keys, die bestehenden Aufrufer (PORT/CVE/NET/ACK) bleiben unberuehrt.
+    INVENTORY_COLUMNS: (2.6, 1.8, 1.4, 1.7, 1.7, 1.0, 1.6, 1.6),
+    ARCHIVED_COLUMNS: (3.0, 2.2, 1.8, 2.0, 1.8),
 }
 
 # Rubrikspezifischer Leertext je Tabellen-Schema (statt generisch "Keine Eintraege.").

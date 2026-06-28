@@ -239,3 +239,144 @@ async def get_manual_pdf(
             "Content-Disposition": f'attachment; filename="{result.filename}"'  # type: ignore[attr-defined]
         },
     )
+
+
+# ── Bestandsbericht: schmale api-Response-Modelle (eigene Wire-Form) ────────────
+# Analog zum Sicherheitsbericht oben: eigene schmale pydantic-``*Out``-Modelle, die die
+# application-Sicht ``InventoryReport`` (samt ``DistributionEntry``/``InventoryDeviceRow``)
+# spiegeln, OHNE diese Typen zu importieren (Regel 4: api kennt application nicht). Der
+# Composition-Root-Runner in ``app.py`` projiziert die application-Sicht auf genau diese Form.
+
+
+class InventoryDistributionOut(BaseModel):
+    """Ein Eintrag einer Verteilungs-Tabelle (Hersteller bzw. Kategorie, Wire-Form).
+
+    ``label`` der Hersteller- bzw. Kategorie-Name (ein leerer wird vom Root als "(ohne)"
+    gefuehrt), ``count`` die Anzahl der Geraete dazu.
+    """
+
+    label: str
+    count: int
+
+
+class InventoryDeviceRowOut(BaseModel):
+    """Eine Geraete-Zeile des Bestandsberichts (Wire-Form).
+
+    Alle Anzeige-Texte (``device_label``, die beiden Datums-Texte, der ``last_ip``-Leerstring
+    statt None) sind schon vom Composition-Root-Runner fertig gesetzt; ``last_seen_ts`` ist die
+    letzte Sichtung als Unix-Sekunden (Sortierschluessel fuers Frontend). ``trust_state`` und
+    ``source`` sind die ROHEN StrEnum-Werte ("neutral"/"trusted"/"watch" bzw. "scan"/"manual"),
+    ``archived`` trennt aktive von archivierten Zeilen.
+    """
+
+    device_label: str
+    vendor: str
+    last_ip: str
+    first_seen_text: str
+    last_seen_text: str
+    last_seen_ts: float
+    times_seen: int
+    category: str
+    is_known: bool
+    trust_state: str
+    source: str
+    archived: bool
+
+
+class InventoryReportOut(BaseModel):
+    """Die Gesamtsicht des Bestandsberichts: Kennzahlen + Verteilungen + Geraete-Listen.
+
+    ``total``/``known``/``unknown``/``active_24h`` sind die Bestands-Grundzahlen,
+    ``trusted``/``watch``/``neutral`` die ueber ALLE Zeilen gezaehlten Vertrauens-Stufen.
+    ``vendor_distribution``/``category_distribution`` die beiden Verteilungs-Tabellen,
+    ``device_rows`` die aktiven, ``archived_rows`` die archivierten Geraete. KEIN 404-Fall:
+    leerer Bestand ist ein DATUM (alle Zaehler 0, leere Listen), kein HTTP-Fehler.
+    """
+
+    total: int
+    known: int
+    unknown: int
+    active_24h: int
+    trusted: int
+    watch: int
+    neutral: int
+    vendor_distribution: list[InventoryDistributionOut]
+    category_distribution: list[InventoryDistributionOut]
+    device_rows: list[InventoryDeviceRowOut]
+    archived_rows: list[InventoryDeviceRowOut]
+
+
+# ── Bestandsbericht: injizierter Composition-Root-Runner ───────────────────────
+# Provider-Marker (Muster ``SecurityReportRunner``): in app.py per dependency_overrides mit dem
+# echten Root-Runner verdrahtet. Ohne Verdrahtung bewusst ein lauter Fehler (kein stiller
+# Fallback, S3).
+
+
+class InventoryReportRunner(Protocol):
+    """Schmaler Vertrag des injizierten Lese-Runners (liefert die fertige Bestands-Sicht)."""
+
+    async def __call__(self) -> InventoryReportOut:
+        """Baut den Bestandsbericht und liefert ihn api-fertig (Wire-Form)."""
+        ...
+
+
+def provide_inventory_report() -> InventoryReportRunner:
+    raise NotImplementedError("InventoryReportRunner wird in app.py verdrahtet")
+
+
+@router.get("/inventory")
+async def get_inventory_report(
+    runner: Annotated[InventoryReportRunner, Depends(provide_inventory_report)],
+) -> InventoryReportOut:
+    """Liefert den aggregierten Bestandsbericht (Kennzahlen + Verteilungen + Geraete-Listen).
+
+    KEIN 404-Fall: leerer Bestand ist ein DATUM (alle Zaehler 0, leere Listen), kein
+    HTTP-Fehler. Die ganze Projektion macht der injizierte Composition-Root-Runner (Regel 4:
+    der api-Ring kennt application nicht).
+    """
+    return await runner()
+
+
+# ── Bestandsbericht-PDF: injizierter Composition-Root-Runner ───────────────────
+# Muster ``SecurityReportPdfRunner``: der Runner liefert ein Objekt mit den drei Attributen
+# ``content`` (bytes), ``media_type`` (str), ``filename`` (str). Der api-Ring kennt diesen
+# Ergebnis-Typ NICHT -- der Router liest nur die drei Attribute (``type: ignore[attr-defined]``).
+# Provider-Marker: in app.py verdrahtet; ohne Verdrahtung bewusst ein lauter Fehler (S3).
+
+
+class InventoryReportPdfRunner(Protocol):
+    """Schmaler Vertrag des injizierten PDF-Runners (liefert das fertige Download-Ergebnis)."""
+
+    async def __call__(self) -> object:
+        """Baut den Bestandsbericht als PDF und liefert content/media_type/filename."""
+        ...
+
+
+def provide_inventory_report_pdf() -> InventoryReportPdfRunner:
+    raise NotImplementedError("InventoryReportPdfRunner wird in app.py verdrahtet")
+
+
+@router.get("/inventory/pdf")
+async def get_inventory_report_pdf(
+    runner: Annotated[InventoryReportPdfRunner, Depends(provide_inventory_report_pdf)],
+) -> Response:
+    """Liefert den Bestandsbericht als PDF-Download (Bytes, ``attachment``).
+
+    Der injizierte Composition-Root-Runner baut den Bericht, projiziert ihn auf das
+    render-fertige PDF-Modell und rendert das PDF; er liefert ein Objekt mit ``content``
+    (PDF-Bytes), ``media_type`` (``application/pdf``) und ``filename``. Der Router verpackt es
+    in eine ``Response`` mit ``Content-Disposition: attachment; filename="..."``.
+
+    KEIN 404-Fall: leerer Bestand ist ein gueltiges PDF (alle Zaehler 0, leere Listen), kein
+    HTTP-Fehler -- analog ``GET /api/report/inventory``.
+    """
+    result = await runner()
+    # result kommt aus dem Composition Root; per Attribut-Zugriff gelesen (kein Typ-Import im
+    # Router -- der api-Ring kennt nur die drei Attribute, Muster ``get_security_report_pdf``).
+    return Response(
+        content=result.content,  # type: ignore[attr-defined]
+        media_type=result.media_type,  # type: ignore[attr-defined]
+        headers={
+            "Content-Disposition": f'attachment; filename="{result.filename}"'  # type: ignore[attr-defined]
+        },
+    )

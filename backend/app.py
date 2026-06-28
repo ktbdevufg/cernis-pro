@@ -209,11 +209,16 @@ from api.process import provide_check_process_permission, provide_list_processes
 from api.process import router as process_router
 from api.report import (
     CveFindingOut,
+    InventoryDeviceRowOut,
+    InventoryDistributionOut,
+    InventoryReportOut,
     NetFindingOut,
     PortFindingOut,
     ScoreContributionOut,
     ScoreOut,
     SecurityReportOut,
+    provide_inventory_report,
+    provide_inventory_report_pdf,
     provide_manual_pdf,
     provide_security_report,
     provide_security_report_pdf,
@@ -419,7 +424,11 @@ from application.outbound_log import (
 )
 from application.process import CheckProcessPermission, ListProcesses
 from application.reporting import (
+    BuildInventoryReport,
     BuildSecurityReport,
+    InventoryDeviceRow,
+    InventoryPdfModel,
+    InventoryReport,
     ManualPdfModel,
     ManualPdfSection,
     SecurityPdfModel,
@@ -473,6 +482,7 @@ from domain.analysis import (
 )
 from domain.analysis.engine import _SEVERITY_RANK
 from domain.blocklist import BlocklistGroup, BlocklistSource, MatchStrictness
+from domain.devices import Device
 from domain.dns_watch import doh_providers_or_default, expected_servers_or_default
 from domain.export import (
     ExportableAnalysis,
@@ -4189,10 +4199,205 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             filename = "CERNISPRO_Benutzerhandbuch.pdf"
         return _ManualPdfResult(content=pdf_bytes, media_type="application/pdf", filename=filename)
 
+    # ── Bestandsbericht: EINE-Quelle-Projektion (Etappe 2, Regel 5/Composition Root) ──
+    # Viel einfacher als der Sicherheitsbericht: die Datenseite liest NUR die devices-Domaene
+    # (Stats + alle Geraete + archivierte) und projiziert die echten Device-Objekte auf die
+    # NEUTRALEN Berichts-Zeilen (InventoryDeviceRow). KEINE Uhr in der Datenseite -- die
+    # 24h-Aktiv-Grenze entsteht in GetDeviceStats selbst (ueber device_clock); die Datums-Texte
+    # je Zeile sind reine Formatierung der schon vorhandenen Device-Zeitstempel (keine Wanduhr).
+    def _build_inventory_report_data() -> InventoryReport:
+        # (1) Bestands-Grundzahlen aus DeviceStats (die 24h-Grenze bildet GetDeviceStats aus
+        # device_clock selbst). device_repository()/device_clock sind die schon verdrahteten
+        # Provider-Bausteine -- Muster wie die device-overrides oben (kein zweiter Adapter).
+        stats = GetDeviceStats(device_repository(), device_clock)()
+
+        # (2) Geraete-Mengen aus ZWEI getrennten Quellen: GetDevices(known_only=False) liefert
+        # laut Repo-Vertrag NUR nicht-archivierte (get_all blendet archivierte aus), die
+        # archivierten kommen separat aus GetArchivedDevices. Die Trennung folgt der HERKUNFT
+        # der Liste, NICHT dem archived-Feld der get_all-Objekte.
+        active_devices = GetDevices(device_repository())(known_only=False)
+        archived_devices = GetArchivedDevices(device_repository())()
+
+        def _device_label(d: Device) -> str:
+            # Erster nicht-leerer: label || hostname || last_ip || mac. last_ip ist str|None ->
+            # ``or`` behandelt None/"" gleich; mac ist Pflicht (nie leer) -> sicherer Fallback.
+            return d.label or d.hostname or (d.last_ip or "") or d.mac
+
+        def _to_row(d: Device, *, archived: bool) -> InventoryDeviceRow:
+            # Reine Projektion eines Device auf die neutrale Berichts-Zeile. archived kommt aus
+            # der HERKUNFT der Liste (Parameter), nicht aus d.archived. Die Datums-Texte sind
+            # reine Formatierung der vorhandenen Zeitstempel (keine Wanduhr); last_seen_ts dient
+            # dem Sortieren im Frontend/der Aggregation.
+            return InventoryDeviceRow(
+                device_label=_device_label(d),
+                vendor=d.vendor,
+                last_ip=d.last_ip or "",
+                first_seen_text=d.first_seen.strftime("%d.%m.%Y %H:%M"),
+                last_seen_text=d.last_seen.strftime("%d.%m.%Y %H:%M"),
+                last_seen_ts=d.last_seen.timestamp(),
+                times_seen=d.times_seen,
+                category=d.category,
+                is_known=d.is_known,
+                trust_state=str(d.trust_state),
+                source=str(d.source),
+                archived=archived,
+            )
+
+        rows = [_to_row(d, archived=False) for d in active_devices]
+        rows += [_to_row(d, archived=True) for d in archived_devices]
+
+        # (3) Aggregation ueber den duennen Use-Case: Grundzahlen aus DeviceStats unveraendert
+        # durch, die Verteilungen/Sortierungen rechnet build_inventory_report rein.
+        return BuildInventoryReport()(
+            total=stats.total,
+            known=stats.known,
+            unknown=stats.unknown,
+            active_24h=stats.active,
+            rows=rows,
+        )
+
+    # Anzeige-Status je Geraete-Zeile (Klartext fuers PDF): trust_state "trusted"/"watch" sind
+    # eindeutig; "neutral" haengt davon ab, ob das Geraet bekannt ist. KEINE Wertung -- nur die
+    # Klartext-Beschriftung des vorhandenen Zustands (lokaler Helfer, Muster wie andere oben).
+    def _status_text(is_known: bool, trust_state: str) -> str:
+        if trust_state == "trusted":
+            return "Vertraut"
+        if trust_state == "watch":
+            return "Beobachtet"
+        return "Bekannt" if is_known else "Unbekannt"
+
+    # Reine Projektion InventoryReport -> render-fertiges InventoryPdfModel (Muster
+    # _project_security_pdf_model): KEINE Uhr -- generated_at_text kommt fertig formatiert herein.
+    def _project_inventory_pdf_model(
+        report: InventoryReport, generated_at_text: str
+    ) -> InventoryPdfModel:
+        # Verteilungs-Tabellen je Eintrag (label, count-als-Text). Geraete-Tabellen je Zeile ein
+        # String-Tupel in der jeweiligen *_COLUMNS-Reihenfolge (Status als Klartext via
+        # _status_text -- der Bestand wertet nicht, er beschreibt nur).
+        vendor_rows = tuple((entry.label, str(entry.count)) for entry in report.vendor_distribution)
+        category_rows = tuple(
+            (entry.label, str(entry.count)) for entry in report.category_distribution
+        )
+        device_rows = tuple(
+            (
+                r.device_label,
+                r.vendor,
+                r.last_ip,
+                r.first_seen_text,
+                r.last_seen_text,
+                str(r.times_seen),
+                r.category,
+                _status_text(r.is_known, r.trust_state),
+            )
+            for r in report.device_rows
+        )
+        archived_rows = tuple(
+            (
+                r.device_label,
+                r.vendor,
+                r.last_ip,
+                r.last_seen_text,
+                _status_text(r.is_known, r.trust_state),
+            )
+            for r in report.archived_rows
+        )
+        return InventoryPdfModel(
+            title="Netzwerk-Bestandsbericht",
+            generated_at_text=generated_at_text,
+            footer_left="CERNIS PRO 2.0 — Netzwerk-Bestandsbericht",
+            einleitung=(
+                "Dieser Bericht listet auf, welche Geräte im Netzwerk gesehen wurden. Er "
+                "beschreibt den Bestand und ordnet ihn ein — er bewertet nicht."
+            ),
+            total=report.total,
+            known=report.known,
+            unknown=report.unknown,
+            active_24h=report.active_24h,
+            trusted=report.trusted,
+            watch=report.watch,
+            neutral=report.neutral,
+            vendor_rows=vendor_rows,
+            category_rows=category_rows,
+            device_rows=device_rows,
+            archived_rows=archived_rows,
+        )
+
+    # ── Bestandsbericht: HTTP-Endpunkt-Runner (Muster _security_report, Regel 4/5) ──
+    # Ruft die Datenseite und PROJIZIERT InventoryReport auf die api-Wire-Form
+    # InventoryReportOut. async, obwohl die Datenseite sync ist (Muster-Konsistenz + die
+    # FastAPI-Signatur des InventoryReportRunner-Protocols ist async).
+    async def _inventory_report() -> InventoryReportOut:
+        report = _build_inventory_report_data()
+
+        def _row_out(r: InventoryDeviceRow) -> InventoryDeviceRowOut:
+            return InventoryDeviceRowOut(
+                device_label=r.device_label,
+                vendor=r.vendor,
+                last_ip=r.last_ip,
+                first_seen_text=r.first_seen_text,
+                last_seen_text=r.last_seen_text,
+                last_seen_ts=r.last_seen_ts,
+                times_seen=r.times_seen,
+                category=r.category,
+                is_known=r.is_known,
+                trust_state=r.trust_state,
+                source=r.source,
+                archived=r.archived,
+            )
+
+        return InventoryReportOut(
+            total=report.total,
+            known=report.known,
+            unknown=report.unknown,
+            active_24h=report.active_24h,
+            trusted=report.trusted,
+            watch=report.watch,
+            neutral=report.neutral,
+            vendor_distribution=[
+                InventoryDistributionOut(label=e.label, count=e.count)
+                for e in report.vendor_distribution
+            ],
+            category_distribution=[
+                InventoryDistributionOut(label=e.label, count=e.count)
+                for e in report.category_distribution
+            ],
+            device_rows=[_row_out(r) for r in report.device_rows],
+            archived_rows=[_row_out(r) for r in report.archived_rows],
+        )
+
+    # ── Bestandsbericht: PDF-Download-Runner (Muster _security_report_pdf, Regel 4/5) ──
+    # Ruft die Datenseite, liest die Wanduhr GENAU HIER (einziger Ort mit Uhr -- die Projektion
+    # _project_inventory_pdf_model ist rein), projiziert auf das render-fertige InventoryPdfModel
+    # und rendert es ueber den zustandslosen ReportlabRenderer. Rueckgabe ein kleines lokales
+    # Ergebnis-Objekt (content/media_type/filename) -- der api-Ring liest nur diese drei Attribute.
+    @dataclass(frozen=True)
+    class _InventoryPdfResult:
+        content: bytes
+        media_type: str
+        filename: str
+
+    async def _inventory_report_pdf() -> _InventoryPdfResult:
+        report = _build_inventory_report_data()
+        # Wanduhr GENAU HIER lesen (einziger Ort) -- Projektion und Modell bleiben rein.
+        import time
+
+        now = time.time()
+        generated_at_text = "Erstellt am " + datetime.fromtimestamp(now).strftime("%d.%m.%Y %H:%M")
+        model = _project_inventory_pdf_model(report, generated_at_text)
+        pdf_bytes = ReportlabRenderer().render_inventory_report_pdf(model)
+        datumsteil = datetime.fromtimestamp(now).strftime("%Y-%m-%d")
+        return _InventoryPdfResult(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            filename=f"CERNISPRO_Netzwerk-Bestandsbericht_{datumsteil}.pdf",
+        )
+
     app.include_router(report_router)
     app.dependency_overrides[provide_security_report] = lambda: _security_report
     app.dependency_overrides[provide_security_report_pdf] = lambda: _security_report_pdf
     app.dependency_overrides[provide_manual_pdf] = lambda: _manual_pdf
+    app.dependency_overrides[provide_inventory_report] = lambda: _inventory_report
+    app.dependency_overrides[provide_inventory_report_pdf] = lambda: _inventory_report_pdf
 
     # ── Route zum Ziel (ADR 0036): traceroute-Hops + Geo/ASN, zwei getrennte Naehte ──
     # Regel 5: die Quer-Domaenen-Naht (diagnostics-Hops + resolver-Geo/RDAP) faellt
