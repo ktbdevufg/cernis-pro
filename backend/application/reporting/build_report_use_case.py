@@ -18,6 +18,12 @@ herein (spaeter aus analysis-Settings) -- dieselbe Naht wie bei den reinen Funkt
 
 from __future__ import annotations
 
+from application.reporting.cve_report import (
+    CveFindingRow,
+    CveMonitorInput,
+    CveReport,
+    build_cve_report,
+)
 from application.reporting.inventory_report import (
     InventoryDeviceRow,
     InventoryReport,
@@ -31,7 +37,7 @@ from application.reporting.security_report import (
     build_security_report,
 )
 
-__all__ = ["BuildInventoryReport", "BuildSecurityReport"]
+__all__ = ["BuildCveReport", "BuildInventoryReport", "BuildSecurityReport"]
 
 
 class BuildSecurityReport:
@@ -112,3 +118,26 @@ class BuildInventoryReport:
             active_24h,
             rows,
         )
+
+
+class BuildCveReport:
+    """Duenner Pass-Through: neutrale Befund-Zeilen + Kennzahlen -> ``build_cve_report``.
+
+    Duenn (Muster ``BuildSecurityReport``/``BuildInventoryReport``): keine eigene Logik
+    ausser dem Durchreichen. ``__call__`` nimmt die schon NEUTRALEN CVE-Befund-Zeilen und
+    die Monitor-Kennzahlen (der Composition Root hat die echten ``ActiveFinding``-/
+    ``MonitorStatus``-Objekte darauf projiziert) und gibt den ``CveReport`` zurueck. KEINE
+    Domaenen-Importe, KEINE Repos, KEINE I/O, KEINE Uhr.
+    """
+
+    def __call__(
+        self,
+        status: CveMonitorInput,
+        rows: list[CveFindingRow],
+    ) -> CveReport:
+        """Reicht die fertigen neutralen Befund-Zeilen + Kennzahlen unveraendert durch.
+
+        Kein Eigenverhalten: ruft ``build_cve_report`` mit GENAU den hereingereichten
+        Werten und gibt dessen ``CveReport`` zurueck.
+        """
+        return build_cve_report(status, rows)
