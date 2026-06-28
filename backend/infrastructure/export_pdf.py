@@ -660,6 +660,16 @@ class ReportlabRenderer:
         story.append(self._inventory_kennzahlen(model))
         story.append(Spacer(1, 6 * mm))
 
+        # ── Zwei Donuts: Bekannt/unbekannt + Vertrauensstatus (analog Sicherheitsbericht) ──
+        # Ueberschrift UND Donut-Paar zusammenhalten (KeepTogether), damit der Seitenumbruch nicht
+        # zwischen Ueberschrift und Donuts faellt (Muster donut_block im Sicherheitsbericht).
+        donut_block: list[Flowable] = [
+            Paragraph("Geräte-Verteilung", styles["h_section"]),
+            self._inventory_donut_paar(model),
+        ]
+        story.append(KeepTogether(donut_block))
+        story.append(Spacer(1, 6 * mm))
+
         story.append(PageBreak())
 
         # ── Verteilung nach Hersteller / Kategorie (zwei schlanke (label, count)-Tabellen) ──
@@ -749,6 +759,103 @@ class ReportlabRenderer:
                     ("TOPPADDING", (0, 2), (2, 2), 8),
                     ("BOTTOMPADDING", (0, 1), (-1, 1), 8),
                     ("BOTTOMPADDING", (0, 3), (2, 3), 8),
+                ]
+            )
+        )
+        return table
+
+    def _inventory_donut_paar(self, model: InventoryPdfModelLike) -> Table:
+        """Die zwei Bestands-Donuts nebeneinander (Bekannt/unbekannt links, Vertrauen rechts).
+
+        Pro Spalte ein Block aus dezentem Titel, dem ``_inventory_donut_drawing`` und einer
+        schlichten Legende (je Segment ein farbiges Quadrat + Label + Wert). Die Farbzuordnung ist
+        BEWUSST konsistent zur In-App-Ansicht: bekannt/vertraut = ``_ACCENT``, unbekannt/beobachtet
+        = ``_NOTABLE``, neutral = ``_CLEAN``. Reine Anzeige der schon ermittelten Zaehler aus dem
+        Modell -- keine Rechnung ausser der Donut-Geometrie, keine neuen Farbkonstanten.
+
+        Die deutschen Klartext-Labels (Titel/Legende) sind invariant wie die uebrigen deutschen
+        PDF-Texte des Adapters (z. B. die Spaltenkoepfe) und werden hier lokal gesetzt.
+        """
+        styles = self._security_styles()
+        # Dezenter Donut-Titel: kleiner als h_section, weiterhin Akzentfarbe.
+        donut_titel = ParagraphStyle(
+            "inv_donut_titel",
+            parent=styles["h_section"],
+            fontSize=10,
+            alignment=TA_CENTER,
+            spaceAfter=2,
+        )
+
+        donut_a = _inventory_donut_drawing(
+            ((model.known, _ACCENT), (model.unknown, _NOTABLE)),
+            model.total,
+            "Geräte",
+        )
+        legende_a = self._inventory_donut_legende(
+            (("Bekannt", _ACCENT, model.known), ("Unbekannt", _NOTABLE, model.unknown)),
+        )
+
+        vertrauen_summe = model.trusted + model.watch + model.neutral
+        donut_b = _inventory_donut_drawing(
+            ((model.trusted, _ACCENT), (model.watch, _NOTABLE), (model.neutral, _CLEAN)),
+            vertrauen_summe,
+            "Geräte",
+        )
+        legende_b = self._inventory_donut_legende(
+            (
+                ("Vertraut", _ACCENT, model.trusted),
+                ("Beobachtet", _NOTABLE, model.watch),
+                ("Neutral", _CLEAN, model.neutral),
+            ),
+        )
+
+        # Je Spalte ein vertikaler Block (Titel / Donut / Legende) als innere 1-spaltige Table.
+        spalte_a = Table([[Paragraph("Bekannt / unbekannt", donut_titel)], [donut_a], [legende_a]])
+        spalte_b = Table([[Paragraph("Vertrauensstatus", donut_titel)], [donut_b], [legende_b]])
+        for spalte in (spalte_a, spalte_b):
+            spalte.setStyle(TableStyle([("ALIGN", (0, 0), (-1, -1), "CENTER")]))
+
+        half = _CONTENT_WIDTH_MM / 2.0 * mm
+        paar = Table([[spalte_a, spalte_b]], colWidths=[half, half])
+        paar.setStyle(
+            TableStyle(
+                [
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ]
+            )
+        )
+        return paar
+
+    @staticmethod
+    def _inventory_donut_legende(
+        eintraege: tuple[tuple[str, colors.Color, int], ...],
+    ) -> Table:
+        """Schlichte Donut-Legende: je Segment ein farbiges Quadrat + Label + Wert (eine Zeile).
+
+        Das Quadrat ist ein winziges ``Drawing`` mit ``Rect`` in Segmentfarbe (8x8), daneben Label
+        und Wert als Klartext. Robuste innere Mini-``Table`` -- nur die uebergebenen Farben (aus
+        ``_ACCENT``/``_NOTABLE``/``_CLEAN``), keine festen Farben.
+        """
+        data: list[list[object]] = []
+        for label, color, value in eintraege:
+            swatch = Drawing(10.0, 10.0)
+            swatch.add(Rect(0.0, 1.0, 8.0, 8.0, fillColor=color, strokeColor=None))
+            data.append([swatch, f"{label}: {value}"])
+
+        table = Table(data, colWidths=[14.0, None])
+        table.setStyle(
+            TableStyle(
+                [
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("ALIGN", (0, 0), (0, -1), "CENTER"),
+                    ("FONTNAME", (1, 0), (1, -1), "Helvetica"),
+                    ("FONTSIZE", (1, 0), (1, -1), 9),
+                    ("TEXTCOLOR", (1, 0), (1, -1), _TEXT),
+                    ("TOPPADDING", (0, 0), (-1, -1), 1),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 2),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 2),
                 ]
             )
         )
@@ -1200,6 +1307,71 @@ def _donut_drawing(critical: int, notable: int, clean: int, device_count: int) -
             cx,
             cy - 12,
             "Geräte",
+            fontName="Helvetica",
+            fontSize=9,
+            fillColor=_CLEAN,
+            textAnchor="middle",
+        )
+    )
+    return drawing
+
+
+def _inventory_donut_drawing(
+    segments: tuple[tuple[int, colors.Color], ...],
+    center_value: int,
+    center_label: str,
+) -> Drawing:
+    """Generischer Donut (Vektor) mit beliebigen Segmenten + frei waehlbarer Mitte-Zahl/-Label.
+
+    Wie ``_donut_drawing``, nur mit variabler Segmentliste statt fester critical/notable/clean-
+    Reihenfolge: je ``(wert, color)`` ein ``Wedge``-Sektor proportional zur Summe aller Werte; ein
+    weisser Innenkreis macht daraus den Donut, in der Mitte ``center_value`` + ``center_label``.
+    Sind ALLE Werte 0 (leeres Netz), wird ein voller grauer Ring (``_CLEAN``) gezeichnet --
+    ehrlicher Leerfall statt Division durch Null, kein leeres/kaputtes Bild.
+
+    Reine Anzeige der Segmentwerte -- keine Anteils-Rechnung ueber das Aufteilen der 360° hinaus
+    (das ist reine Geometrie, keine Domaenenlogik). Masse identisch zu ``_donut_drawing``.
+    """
+    width, height = 150.0, 110.0
+    drawing = Drawing(width, height)
+    cx, cy = width / 2.0, 52.0
+    outer_r = 46.0
+    inner_r = 27.0
+
+    total = sum(max(0, value) for value, _ in segments)
+    if total <= 0:
+        # Leeres Netz: voller grauer Ring (kein leeres Bild).
+        drawing.add(Wedge(cx, cy, outer_r, 0.0, 360.0, fillColor=_CLEAN, strokeColor=None))
+    else:
+        start = 90.0  # oben beginnen, im Uhrzeigersinn fuehlt sich natuerlich an
+        for value, color in segments:
+            if value <= 0:
+                continue
+            sweep = (value / total) * 360.0
+            end = start - sweep
+            # Intervall sortiert herein (wie _donut_drawing); start/end haelt die Reihenfolge klar.
+            lo, hi = sorted((start, end))
+            drawing.add(Wedge(cx, cy, outer_r, lo, hi, fillColor=color, strokeColor=None))
+            start = end
+
+    # Weisser Innenkreis -> Donut. Darin die Zahl + Label.
+    drawing.add(Circle(cx, cy, inner_r, fillColor=colors.white, strokeColor=None))
+    drawing.add(
+        String(
+            cx,
+            cy + 2,
+            str(center_value),
+            fontName="Helvetica-Bold",
+            fontSize=20,
+            fillColor=_TEXT,
+            textAnchor="middle",
+        )
+    )
+    drawing.add(
+        String(
+            cx,
+            cy - 12,
+            center_label,
             fontName="Helvetica",
             fontSize=9,
             fillColor=_CLEAN,
