@@ -29,6 +29,12 @@ from application.reporting.inventory_report import (
     InventoryReport,
     build_inventory_report,
 )
+from application.reporting.outbound_report import (
+    OutboundContactRow,
+    OutboundReport,
+    OutboundReportInput,
+    build_outbound_report,
+)
 from application.reporting.security_report import (
     CveFinding,
     NetFinding,
@@ -37,7 +43,7 @@ from application.reporting.security_report import (
     build_security_report,
 )
 
-__all__ = ["BuildCveReport", "BuildInventoryReport", "BuildSecurityReport"]
+__all__ = ["BuildCveReport", "BuildInventoryReport", "BuildOutboundReport", "BuildSecurityReport"]
 
 
 class BuildSecurityReport:
@@ -141,3 +147,27 @@ class BuildCveReport:
         Werten und gibt dessen ``CveReport`` zurueck.
         """
         return build_cve_report(status, rows)
+
+
+class BuildOutboundReport:
+    """Duenner Pass-Through: neutrale Kontakt-Zeilen + Bezugsrahmen -> ``build_outbound_report``.
+
+    Duenn (Muster ``BuildCveReport``/``BuildInventoryReport``): keine eigene Logik ausser
+    dem Durchreichen. ``__call__`` nimmt die schon NEUTRALEN Aussenkontakt-Zeilen und die
+    Bezugsrahmen-Kennzahlen (der Composition Root hat die echten ``AggregatedContact``-
+    Aggregate samt Blocklist-Bewertung/``is_local``/Anzeige-Texten darauf projiziert) und
+    gibt den ``OutboundReport`` zurueck. KEINE Domaenen-Importe, KEINE Repos, KEINE I/O,
+    KEINE Uhr.
+    """
+
+    def __call__(
+        self,
+        status: OutboundReportInput,
+        rows: list[OutboundContactRow],
+    ) -> OutboundReport:
+        """Reicht die fertigen neutralen Kontakt-Zeilen + Bezugsrahmen unveraendert durch.
+
+        Kein Eigenverhalten: ruft ``build_outbound_report`` mit GENAU den hereingereichten
+        Werten und gibt dessen ``OutboundReport`` zurueck.
+        """
+        return build_outbound_report(status, rows)

@@ -3,6 +3,7 @@
 from application.reporting.build_report_use_case import (
     BuildCveReport,
     BuildInventoryReport,
+    BuildOutboundReport,
     BuildSecurityReport,
 )
 from application.reporting.cve_pdf_model import (
@@ -40,6 +41,20 @@ from application.reporting.manual_pdf_model import (
     ManualPdfModel,
     ManualPdfSection,
 )
+from application.reporting.outbound_pdf_model import (
+    CONTACT_COLUMNS,
+    COUNTRY_COLUMNS,
+    OPERATOR_COLUMNS,
+    OutboundPdfModel,
+)
+from application.reporting.outbound_report import (
+    CountryCount,
+    OperatorCount,
+    OutboundContactRow,
+    OutboundReport,
+    OutboundReportInput,
+    build_outbound_report,
+)
 from application.reporting.security_pdf_model import (
     ACK_COLUMNS,
     CVE_COLUMNS,
@@ -66,19 +81,24 @@ from application.reporting.security_score import (
 __all__ = [
     "ACK_COLUMNS",
     "ARCHIVED_COLUMNS",
+    "CONTACT_COLUMNS",
+    "COUNTRY_COLUMNS",
     "CVE_COLUMNS",
     "DEVICE_COLUMNS",
     "FINDING_COLUMNS",
     "FINDING_GROUP_COLUMNS",
     "INVENTORY_COLUMNS",
     "NET_COLUMNS",
+    "OPERATOR_COLUMNS",
     "PORT_COLUMNS",
     "SERVICE_COLUMNS",
     "SEVERITY_ORDER",
     "SEVERITY_RANG",
     "BuildCveReport",
     "BuildInventoryReport",
+    "BuildOutboundReport",
     "BuildSecurityReport",
+    "CountryCount",
     "CveFinding",
     "CveFindingRow",
     "CveMonitorInput",
@@ -95,6 +115,11 @@ __all__ = [
     "ManualPdfModel",
     "ManualPdfSection",
     "NetFinding",
+    "OperatorCount",
+    "OutboundContactRow",
+    "OutboundPdfModel",
+    "OutboundReport",
+    "OutboundReportInput",
     "PortFinding",
     "ScoreContribution",
     "SecurityPdfModel",
@@ -105,6 +130,7 @@ __all__ = [
     "build_cve_report",
     "build_device_burdens",
     "build_inventory_report",
+    "build_outbound_report",
     "build_security_report",
     "compute_security_score",
     "severity_rank",
