@@ -1116,6 +1116,11 @@
         "title": "Network Inventory Report",
         "subtitle": "Device inventory with vendors, categories, trust status and sightings.",
         "locked": ""
+      },
+      "cve": {
+        "title": "CVE Report",
+        "subtitle": "Discovered vulnerabilities by severity, device and service – with a full findings list.",
+        "locked": ""
       }
     }
   },
@@ -1273,6 +1278,95 @@
       "tabelle": {
         "leer": "No devices in this selection."
       },
+      "fussnote": "This report describes and contextualises – it does not pass judgement.",
+      "pdf": "Report as PDF",
+      "pdfFehler": "The PDF could not be created. Please try again."
+    },
+    "cve": {
+      "titel": "CVE report",
+      "kopf": {
+        "erstellt": "Created on {{datum}}"
+      },
+      "einleitung": "This report lists the vulnerabilities (CVEs) found on the network. It describes and contextualises – it does not judge.",
+      "fusszeile": "CERNIS PRO 2.0 — Professional Network Scanner & Monitor · Created on {{datum}}",
+      "ladeFehler": "The CVE report could not be loaded.",
+      "leerzustand": "No CVE findings yet – please run a scan and the CVE check first.",
+      "kennzahl": {
+        "aktiv": "Active findings",
+        "neu": "New (24 h)",
+        "betroffen": "Affected devices",
+        "quittiert": "Acknowledged",
+        "hoechste": "Highest severity",
+        "abdeckung": "Coverage",
+        "aeltste": "Oldest published"
+      },
+      "donut": {
+        "befunde": "findings",
+        "aria": "Severity distribution across {{anzahl}} findings"
+      },
+      "severity": {
+        "CRITICAL": "Critical",
+        "HIGH": "High",
+        "MEDIUM": "Medium",
+        "LOW": "Low",
+        "UNKNOWN": "Unknown"
+      },
+      "muster": {
+        "titel": "Patterns",
+        "geraet": "By device",
+        "dienst": "By service",
+        "weitere": "+ {{anzahl}} more",
+        "leer": "No entries."
+      },
+      "spalteGeraet": {
+        "geraet": "Device",
+        "befunde": "Findings",
+        "hoechste": "Highest severity",
+        "cvss": "Highest CVSS",
+        "dienste": "Services"
+      },
+      "spalteDienst": {
+        "dienst": "Service",
+        "befunde": "Findings",
+        "geraete": "Devices",
+        "hoechste": "Highest severity",
+        "cvss": "Highest CVSS",
+        "aeltste": "Oldest published"
+      },
+      "liste": {
+        "titel": "Full findings list",
+        "hostBefunde": "{{anzahl}} findings, highest"
+      },
+      "spalte": {
+        "cve": "CVE",
+        "severity": "Severity",
+        "cvss": "CVSS",
+        "dienst": "Service",
+        "port": "Port",
+        "erstmals": "First seen",
+        "status": "Status"
+      },
+      "filter": {
+        "alle": "All",
+        "aktiv": "Active",
+        "quittiert": "Acknowledged",
+        "neu": "New"
+      },
+      "sortierung": {
+        "label": "Sort by",
+        "severity": "Severity",
+        "host": "Device",
+        "cvss": "CVSS"
+      },
+      "status": {
+        "aktiv": "Active",
+        "quittiert": "Acknowledged",
+        "neu": "NEW"
+      },
+      "tabelle": {
+        "leer": "No findings in this selection."
+      },
+      "neuHinweis": "New = first seen within the last 24 hours.",
       "fussnote": "This report describes and contextualises – it does not pass judgement.",
       "pdf": "Report as PDF",
       "pdfFehler": "The PDF could not be created. Please try again."

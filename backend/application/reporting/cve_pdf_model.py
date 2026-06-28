@@ -104,7 +104,10 @@ class CvePdfModel:
       Veroeffentlichungs-Text ("" erlaubt).
 
     SEVERITY-VERTEILUNG (fuer Donut + Tabelle), fertige ``(Stufe, Anzahl-als-Text)``-Tupel:
-      ``severity_rows``.
+      ``severity_rows`` -- die Stufe bleibt der ROHE technische Schluessel (Farb-Lookup
+      ``_SEV_COLORS`` im Renderer). ``severity_labels`` traegt je ``(roh_key, deutscher_text)``
+      die lokalisierten Anzeige-Texte fuer die Donut-Legende; der Renderer nimmt Farbe/Wert
+      aus ``severity_rows`` und den ANGEZEIGTEN Text aus ``severity_labels``.
 
     SEKTIONS-TABELLEN (fertige String-Zeilen in der jeweiligen ``*_COLUMNS``-Reihenfolge):
       ``device_rows`` (Sektion 2), ``service_rows`` (Sektion 3), ``finding_rows`` (Sektion 4
@@ -130,6 +133,7 @@ class CvePdfModel:
     oldest_published_text: str
 
     severity_rows: tuple[tuple[str, str], ...] = ()
+    severity_labels: tuple[tuple[str, str], ...] = ()
 
     device_rows: tuple[tuple[str, ...], ...] = ()
     service_rows: tuple[tuple[str, ...], ...] = ()

@@ -4500,6 +4500,20 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         prozent = round(hosts_checked / hosts_total * 100)
         return f"{hosts_checked} von {hosts_total} Hosts geprüft ({prozent} %)"
 
+    # (Etappe 3b) Severity-Stufen auf Deutsch fuer die ANZEIGE im rein deutschen PDF. Der
+    # ROHE NVD-Schluessel (CRITICAL/HIGH/...) bleibt der technische Schluessel (Sortierung,
+    # Farb-Lookup, JSON); hier wird AUSSCHLIESSLICH der angezeigte Text uebersetzt.
+    _SEV_DE = {
+        "CRITICAL": "Kritisch",
+        "HIGH": "Hoch",
+        "MEDIUM": "Mittel",
+        "LOW": "Niedrig",
+        "UNKNOWN": "Unbekannt",
+    }
+
+    def _sev_de(roh: str) -> str:
+        return _SEV_DE.get(roh.upper(), "Unbekannt")
+
     # Status-Text je Befund-Zeile, Variante C (R3): quittiert UND is_new sind ZWEI
     # Dimensionen. Quittiert schlaegt durch ("Quittiert"); sonst zeigt ein aktiver Befund
     # "Aktiv · NEU" wenn neu, sonst "Aktiv".
@@ -4526,16 +4540,18 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         bloecke: list[HostGroupBlock] = []
         for g in report.host_groups:
             # Host-Kopf sauber bauen -- ohne IP-Teil (und ohne doppelten Trenner), wenn keine IP.
+            # (Etappe 3b) IP nur anhaengen, wenn sie sich vom device_label UNTERSCHEIDET --
+            # bei namenlosen Geraeten ist device_label == ip (sonst doppelte IP im Kopf).
             teile = [g.device_label]
-            if g.ip:
+            if g.ip and g.ip != g.device_label:
                 teile.append(g.ip)
             teile.append(g.mac)
-            teile.append(f"{g.finding_count} Befunde, höchste {g.highest_severity}")
+            teile.append(f"{g.finding_count} Befunde, höchste {_sev_de(g.highest_severity)}")
             header = " · ".join(teile)
             rows = tuple(
                 (
                     r.cve_id,
-                    r.severity,
+                    _sev_de(r.severity),
                     f"{r.cvss_score:.1f}",
                     r.service,
                     str(r.port),
@@ -4552,12 +4568,17 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     def _project_cve_pdf_model(
         report: CveReport, generated_at_text: str, coverage_text: str
     ) -> CvePdfModel:
+        # (Etappe 3b) severity_rows BLEIBT roh (Schluessel fuer Farb-Lookup _SEV_COLORS im
+        # Renderer). severity_labels traegt je (roh_key, deutscher_text) die Legenden-Anzeige.
         severity_rows = tuple((sc.severity, str(sc.count)) for sc in report.severity_counts)
+        severity_labels = tuple(
+            (sc.severity, _sev_de(sc.severity)) for sc in report.severity_counts
+        )
         device_rows = tuple(
             (
                 r.device_label,
                 str(r.finding_count),
-                r.highest_severity,
+                _sev_de(r.highest_severity),
                 f"{r.highest_cvss:.1f}",
                 r.services,
             )
@@ -4568,7 +4589,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 r.service,
                 str(r.finding_count),
                 str(r.device_count),
-                r.highest_severity,
+                _sev_de(r.highest_severity),
                 f"{r.highest_cvss:.1f}",
                 _fmt_published(r.oldest_published),
             )
@@ -4578,7 +4599,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             (
                 r.device_label,
                 r.cve_id,
-                r.severity,
+                _sev_de(r.severity),
                 f"{r.cvss_score:.1f}",
                 r.service,
                 str(r.port),
@@ -4602,9 +4623,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             hosts_total=report.hosts_total,
             hosts_checked=report.hosts_checked,
             coverage_text=coverage_text,
-            highest_severity=report.highest_severity,
+            highest_severity=_sev_de(report.highest_severity),
             oldest_published_text=_fmt_published(report.oldest_published),
             severity_rows=severity_rows,
+            severity_labels=severity_labels,
             device_rows=device_rows,
             service_rows=service_rows,
             finding_rows=finding_rows,

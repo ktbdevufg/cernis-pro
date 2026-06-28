@@ -1,0 +1,612 @@
+/* CVE-Bericht — In-App-Ansicht (Etappe 3). Eigene BEM-Klassen mit Praefix
+   cve-report__, gleiche Designsprache/Tokens wie InventoryReportView: Card-Flaechen,
+   --color-border, radius, accent fuer Kopf/Aktionen. Severity-Badges exakt wie die
+   Live-Ansicht CveView: dieselben Token-Variablen (--cve-crit-*, --sev-high/med/low-*,
+   UNKNOWN ueber --color-bar/--color-text-tert/--color-border). Nur Token-Variablen,
+   nie feste Farben. */
+
+.cve-report {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.cve-report__mono {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+.cve-report__num {
+  text-align: right;
+}
+
+/* ── 1. Bericht-Titelkopf (Logo + grosse Ueberschrift + Erstelldatum) ──────────── */
+.cve-report__kopf {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding-bottom: 14px;
+  border-bottom: 2px solid var(--color-accent);
+}
+
+.cve-report__logo {
+  height: 44px;
+  width: auto;
+  display: block;
+}
+
+.cve-report__kopf-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cve-report__titel {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--color-text);
+}
+
+.cve-report__kopf-datum {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-tert);
+}
+
+/* Einleitung: ruhiger Fliesstext unter dem Kopf (Achse-B-Haltung in Klartext). */
+.cve-report__einleitung {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--color-text-sec);
+}
+
+/* Dezenter Fehlerhinweis (Ladefehler kippt die Ansicht nicht). */
+.cve-report__fehler {
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--sev-med-text);
+  background: var(--sev-med-bg);
+  border: 1px solid var(--sev-med-bd);
+  border-radius: var(--radius-md);
+}
+
+/* ── 2. Leerzustand (keine Befunde) ────────────────────────────────────────────── */
+.cve-report__leerzustand {
+  padding: 20px 18px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.cve-report__leerzustand-text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--color-text-sec);
+}
+
+/* ── 3.2 Kennzahlen (Zahl-Reihe + Text-Reihe) ──────────────────────────────────── */
+.cve-report__kennzahlen {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.cve-report__kennzahl {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-left-width: 4px;
+  border-left-color: var(--color-accent);
+  border-radius: var(--radius-md);
+}
+
+.cve-report__kennzahl-wert {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+/* Text-Kennzahl (Severity-Badge / Klartext statt grosser Zahl). */
+.cve-report__kennzahl-text {
+  display: flex;
+  align-items: center;
+  min-height: 28px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.cve-report__kennzahl-label {
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+/* ── 3.3 Severity-Donut ────────────────────────────────────────────────────────── */
+.cve-report__donut-paar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.cve-report__donut-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 18px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.cve-report__donut {
+  position: relative;
+  width: 160px;
+  height: 160px;
+}
+
+.cve-report__donut-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.cve-report__donut-mitte {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.cve-report__donut-summe {
+  font-size: 30px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.cve-report__donut-label {
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+/* Donut-Legende (Farbpunkt + Label + Zahl). */
+.cve-report__legende {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  max-width: 240px;
+}
+
+.cve-report__legende-zeile {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--color-text-sec);
+}
+
+.cve-report__legende-punkt {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.cve-report__legende-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cve-report__legende-zahl {
+  color: var(--color-text-tert);
+}
+
+/* ── 3.4 Muster (Toggle + Tabelle) ─────────────────────────────────────────────── */
+.cve-report__muster {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 18px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.cve-report__muster-kopf {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.cve-report__abschnitt-titel {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.cve-report__toggle {
+  display: inline-flex;
+  gap: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.cve-report__toggle-knopf {
+  padding: 6px 14px;
+  font-size: 13px;
+  color: var(--color-text-sec);
+  background: var(--color-card);
+  border: none;
+  cursor: pointer;
+}
+
+.cve-report__toggle-knopf:hover {
+  background: var(--color-accent-bg);
+}
+
+.cve-report__toggle-knopf--aktiv {
+  color: var(--color-accent);
+  background: var(--color-accent-bg);
+  font-weight: 600;
+}
+
+/* "+ X weitere"-Hinweis (Muster-Tabellen). */
+.cve-report__rest {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+/* ── 3.5 Befundliste (Abschnitt) ───────────────────────────────────────────────── */
+.cve-report__abschnitt {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cve-report__abschnitt-titel--num {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 6px;
+  border-bottom: 2px solid var(--color-accent);
+}
+
+.cve-report__abschnitt-nummer {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-accent);
+  background: var(--color-accent-bg);
+  border-radius: 50%;
+}
+
+/* Steuerleiste: Filter-Chips + Sortier-Auswahl (im Druck ausgeblendet). */
+.cve-report__steuerung {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.cve-report__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cve-report__chip {
+  padding: 5px 12px;
+  font-size: 12px;
+  color: var(--color-text-sec);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.cve-report__chip:hover {
+  background: var(--color-accent-bg);
+}
+
+.cve-report__chip--aktiv {
+  color: var(--color-accent);
+  background: var(--color-accent-bg);
+  border-color: var(--color-accent-border);
+  font-weight: 600;
+}
+
+.cve-report__sortierung {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+.cve-report__sortierung-select {
+  padding: 5px 10px;
+  font-size: 12px;
+  color: var(--color-text);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+/* Host-Gruppen der Befundliste (je Host: graue Kopfzeile + Tabelle). */
+.cve-report__gruppen {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.cve-report__gruppe {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+/* Host-Kopfzeile: graue Card-Zeile, fett, mit dezenter IP/MAC (mono) und
+   rechtsbuendigem Befund-Zaehler. */
+.cve-report__host {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  background: var(--color-bar);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.cve-report__host-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.cve-report__host-meta {
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+.cve-report__host-zaehler {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--color-text-sec);
+}
+
+/* ── Tabelle (Muster InventoryReportView.tabelle) ──────────────────────────────── */
+.cve-report__tabelle {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.cve-report__tabelle th {
+  text-align: left;
+  padding: 8px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--color-text-tert);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.cve-report__tabelle td {
+  padding: 8px 10px;
+  color: var(--color-text);
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: top;
+}
+
+.cve-report__tabelle .cve-report__num {
+  text-align: right;
+}
+
+/* Am Bildschirm werden die ueber Top-N hinausgehenden Muster-Zeilen ausgeblendet;
+   im Druck zeigt @media print alle. (Die Befundliste hat KEIN Top-N.) */
+.cve-report__zeile--ueberzaehlig {
+  display: none;
+}
+
+/* ── Severity-Badges (Optik wie CveView, dieselben Tokens) ─────────────────────── */
+.cve-report__sev {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+}
+
+.cve-report__sev[data-sev="CRITICAL"] {
+  color: var(--cve-crit-text);
+  background: var(--cve-crit-bg);
+  border-color: var(--cve-crit-bd);
+}
+
+.cve-report__sev[data-sev="HIGH"] {
+  color: var(--sev-high-text);
+  background: var(--sev-high-bg);
+  border-color: var(--sev-high-bd);
+}
+
+.cve-report__sev[data-sev="MEDIUM"] {
+  color: var(--sev-med-text);
+  background: var(--sev-med-bg);
+  border-color: var(--sev-med-bd);
+}
+
+.cve-report__sev[data-sev="LOW"] {
+  color: var(--sev-low-text);
+  background: var(--sev-low-bg);
+  border-color: var(--sev-low-bd);
+}
+
+.cve-report__sev[data-sev="UNKNOWN"] {
+  color: var(--color-text-tert);
+  background: var(--color-bar);
+  border-color: var(--color-border);
+}
+
+/* NEU-Badge (tuerkis wie CveView --cve-new-*). */
+.cve-report__neu {
+  color: var(--cve-new-text);
+  background: var(--cve-new-bg);
+  border: 1px solid var(--cve-new-bd);
+  border-radius: 999px;
+  padding: 0 6px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  margin-left: 6px;
+}
+
+/* Status-Texte (Aktiv neutral, Quittiert dezent). */
+.cve-report__status {
+  font-size: 12px;
+}
+
+.cve-report__status--aktiv {
+  color: var(--color-text-sec);
+}
+
+.cve-report__status--quittiert {
+  color: var(--color-text-tert);
+}
+
+/* Ruhige Leer-Meldung (statt leerem Kasten). */
+.cve-report__leer {
+  margin: 0;
+  padding: 16px 12px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--color-text-sec);
+}
+
+/* Neu-Erklaerung (was "NEU" bedeutet). */
+.cve-report__neu-hinweis {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-tert);
+}
+
+/* Achse-B-Fussnote (beschreibt und ordnet ein — kein Urteil). */
+.cve-report__fussnote {
+  margin: 0;
+  font-size: 12px;
+  font-style: italic;
+  line-height: 1.5;
+  color: var(--color-text-tert);
+}
+
+/* Bericht-Fusszeile (UNSER Inhalt am Dokument-Ende: Wortmarke + Erstelldatum). */
+.cve-report__fusszeile {
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+  text-align: center;
+  font-size: 11px;
+  color: var(--color-text-tert);
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+/* ── Aktionsleiste ─────────────────────────────────────────────────────────────── */
+.cve-report__aktionen {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.cve-report__pdf {
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-bg);
+  background: var(--color-accent);
+  border: 1px solid var(--color-accent-strong);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.cve-report__pdf:hover {
+  background: var(--color-accent-strong);
+}
+
+.cve-report__pdf:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.cve-report__pdf-fehler {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--sev-med-text);
+}
+
+/* Dezenter Lade-Indikator (schmaler Balken oben am Container). */
+.cve-report__laedt {
+  height: 2px;
+  background: var(--color-accent);
+  border-radius: var(--radius-md);
+  opacity: 0.6;
+}
+
+/* ── Druck: Tabellen vollstaendig, Bedien-Controls weg ─────────────────────────── */
+@media print {
+  /* Ueberzaehlige Muster-Zeilen aufs Papier holen, "weitere"-Hinweise weg. */
+  .cve-report__zeile--ueberzaehlig {
+    display: table-row;
+  }
+  .cve-report__rest {
+    display: none;
+  }
+
+  /* Bedien-Controls (kein Sinn auf Papier): Toggle, Filter, Sortierung, PDF-Knopf. */
+  .cve-report__toggle,
+  .cve-report__steuerung,
+  .cve-report__aktionen,
+  .cve-report__laedt {
+    display: none;
+  }
+}

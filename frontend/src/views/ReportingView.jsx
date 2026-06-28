@@ -7,7 +7,7 @@
 //   weitere Berichte folgen als eigene Kacheln (zusätzlicher FUNKTIONEN-Eintrag
 //   mit eigener id + Eintrag in KOMPONENTEN_JE_ID).
 
-import { Boxes, ShieldCheck } from "lucide-react";
+import { Boxes, ShieldAlert, ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -16,6 +16,7 @@ import {
   FunctionShell,
 } from "../components/AreaShell.jsx";
 import FunctionCard from "../components/FunctionCard.jsx";
+import CveReportView from "../components/CveReportView.jsx";
 import InventoryReportView from "../components/InventoryReportView.jsx";
 import SecurityReportView from "../components/SecurityReportView.jsx";
 
@@ -23,6 +24,7 @@ import SecurityReportView from "../components/SecurityReportView.jsx";
 const FUNKTIONEN = [
   { id: "security", icon: ShieldCheck, locked: false },
   { id: "inventory", icon: Boxes, locked: false },
+  { id: "cve", icon: ShieldAlert, locked: false },
 ];
 
 // Mapping id -> geöffnete Berichts-Komponente. Ein weiterer Bericht braucht nur
@@ -30,6 +32,7 @@ const FUNKTIONEN = [
 const KOMPONENTEN_JE_ID = {
   security: SecurityReportView,
   inventory: InventoryReportView,
+  cve: CveReportView,
 };
 
 export default function ReportingView() {

@@ -1116,6 +1116,11 @@
         "title": "Netzwerk-Bestandsbericht",
         "subtitle": "Geräte-Inventar mit Herstellern, Kategorien, Vertrauensstatus und Sichtungen.",
         "locked": ""
+      },
+      "cve": {
+        "title": "CVE-Bericht",
+        "subtitle": "Gefundene Schwachstellen nach Schweregrad, Gerät und Dienst – mit vollständiger Befundliste.",
+        "locked": ""
       }
     }
   },
@@ -1273,6 +1278,95 @@
       "tabelle": {
         "leer": "Keine Geräte in dieser Auswahl."
       },
+      "fussnote": "Dieser Bericht beschreibt und ordnet ein – er fällt kein Urteil.",
+      "pdf": "Bericht als PDF",
+      "pdfFehler": "Das PDF konnte nicht erstellt werden. Bitte erneut versuchen."
+    },
+    "cve": {
+      "titel": "CVE-Bericht",
+      "kopf": {
+        "erstellt": "Erstellt am {{datum}}"
+      },
+      "einleitung": "Dieser Bericht listet die gefundenen Schwachstellen (CVEs) im Netzwerk auf. Er beschreibt und ordnet ein – er bewertet nicht.",
+      "fusszeile": "CERNIS PRO 2.0 — Professional Network Scanner & Monitor · Erstellt am {{datum}}",
+      "ladeFehler": "Der CVE-Bericht konnte nicht geladen werden.",
+      "leerzustand": "Noch keine CVE-Befunde – bitte zuerst einen Scan und die CVE-Prüfung durchführen.",
+      "kennzahl": {
+        "aktiv": "Aktive Befunde",
+        "neu": "Neu (24 h)",
+        "betroffen": "Betroffene Geräte",
+        "quittiert": "Quittiert",
+        "hoechste": "Höchste Severity",
+        "abdeckung": "Abdeckung",
+        "aeltste": "Älteste Veröffentlichung"
+      },
+      "donut": {
+        "befunde": "Befunde",
+        "aria": "Schweregrad-Verteilung über {{anzahl}} Befunde"
+      },
+      "severity": {
+        "CRITICAL": "Kritisch",
+        "HIGH": "Hoch",
+        "MEDIUM": "Mittel",
+        "LOW": "Niedrig",
+        "UNKNOWN": "Unbekannt"
+      },
+      "muster": {
+        "titel": "Muster",
+        "geraet": "Nach Gerät",
+        "dienst": "Nach Dienst",
+        "weitere": "+ {{anzahl}} weitere",
+        "leer": "Keine Einträge."
+      },
+      "spalteGeraet": {
+        "geraet": "Gerät",
+        "befunde": "Befunde",
+        "hoechste": "Höchste Severity",
+        "cvss": "Höchster CVSS",
+        "dienste": "Dienste"
+      },
+      "spalteDienst": {
+        "dienst": "Dienst",
+        "befunde": "Befunde",
+        "geraete": "Geräte",
+        "hoechste": "Höchste Severity",
+        "cvss": "Höchster CVSS",
+        "aeltste": "Älteste Veröffentlichung"
+      },
+      "liste": {
+        "titel": "Vollständige Befundliste",
+        "hostBefunde": "{{anzahl}} Befunde, höchste"
+      },
+      "spalte": {
+        "cve": "CVE",
+        "severity": "Severity",
+        "cvss": "CVSS",
+        "dienst": "Dienst",
+        "port": "Port",
+        "erstmals": "Erstmals gesehen",
+        "status": "Status"
+      },
+      "filter": {
+        "alle": "Alle",
+        "aktiv": "Aktiv",
+        "quittiert": "Quittiert",
+        "neu": "Neu"
+      },
+      "sortierung": {
+        "label": "Sortieren",
+        "severity": "Schweregrad",
+        "host": "Gerät",
+        "cvss": "CVSS"
+      },
+      "status": {
+        "aktiv": "Aktiv",
+        "quittiert": "Quittiert",
+        "neu": "NEU"
+      },
+      "tabelle": {
+        "leer": "Keine Befunde in dieser Auswahl."
+      },
+      "neuHinweis": "Neu = erstmals innerhalb der letzten 24 Stunden gesehen.",
       "fussnote": "Dieser Bericht beschreibt und ordnet ein – er fällt kein Urteil.",
       "pdf": "Bericht als PDF",
       "pdfFehler": "Das PDF konnte nicht erstellt werden. Bitte erneut versuchen."

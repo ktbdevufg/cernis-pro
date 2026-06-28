@@ -213,10 +213,123 @@ export async function fetchManualPdf(lang) {
   );
 }
 
+// ── CVE-Bericht (Etappe 3) ─────────────────────────────────────────────────────
+//
+// Wire-Form (aus backend/api/report.py CveReportOut, verifiziert, NICHT aendern):
+//   GET /api/report/cve -> {
+//     generated_findings_total:int, active_total:int, acknowledged_total:int,
+//     new_total:int, affected_devices:int, hosts_total:int, hosts_checked:int,
+//     coverage_text:str, highest_severity:str, oldest_published:str,
+//     severity_counts: [ { severity:str, count:int } ]  (immer 5 Stufen),
+//     device_rows: [ { device_label, mac, finding_count:int, highest_severity,
+//       highest_cvss:float, services } ],
+//     service_rows: [ { service, finding_count:int, device_count:int,
+//       highest_severity, highest_cvss:float, oldest_published } ],
+//     all_rows: [ { device_label, mac, cve_id, severity, cvss_score:float,
+//       service, port:int, first_seen_text, first_seen_ts:float, published,
+//       acknowledged:bool, is_new:bool } ]
+//   }
+// ACHTUNG: CveFindingRowOut traegt KEIN ip-Feld (per grep verifiziert) -> es gibt
+// im JSON kein ip; der Mapper setzt ip auf "" (das device_label traegt die IP, wenn
+// kein Name vorhanden ist). KEIN 404-Fall: leerer Stand ist ein DATUM (Zaehler 0 +
+// leere Listen), kein Fehler.
+
+// Eine Severity-Verteilungs-Zahl -> View-Struktur. Stufe + Anzahl roh.
+function mappeSeverityCount(c) {
+  return {
+    severity: c.severity,
+    count: c.count,
+  };
+}
+
+// Eine Geraete-Zeile (Sektion 2) -> View-Struktur (camelCase). highestCvss roh
+// (die View formatiert mit einer Nachkommastelle). Reihenfolge des Backends bleibt.
+function mappeCveGeraet(r) {
+  return {
+    deviceLabel: r.device_label,
+    mac: r.mac,
+    findingCount: r.finding_count,
+    highestSeverity: r.highest_severity,
+    highestCvss: r.highest_cvss,
+    services: r.services,
+  };
+}
+
+// Eine Dienst-Zeile (Sektion 3) -> View-Struktur. oldestPublished roher NVD-String
+// (die View formatiert lokal). Reihenfolge des Backends bleibt.
+function mappeCveDienst(r) {
+  return {
+    service: r.service,
+    findingCount: r.finding_count,
+    deviceCount: r.device_count,
+    highestSeverity: r.highest_severity,
+    highestCvss: r.highest_cvss,
+    oldestPublished: r.oldest_published,
+  };
+}
+
+// Eine vollstaendige Befund-Zeile (Sektion 4) -> View-Struktur. ip fehlt in der
+// Wire-Form (CveFindingRowOut hat kein ip-Feld) -> sicher auf "" gemappt;
+// firstSeenText kommt schon fertig formatiert vom Backend. (Eigener Name, da der
+// Sicherheitsbericht oben bereits einen mappeCveBefund fuehrt.)
+function mappeCveBefundZeile(r) {
+  return {
+    deviceLabel: r.device_label,
+    mac: r.mac,
+    ip: r.ip ?? "",
+    cveId: r.cve_id,
+    severity: r.severity,
+    cvssScore: r.cvss_score,
+    service: r.service,
+    port: r.port,
+    firstSeenText: r.first_seen_text,
+    firstSeenTs: r.first_seen_ts,
+    published: r.published,
+    acknowledged: r.acknowledged,
+    isNew: r.is_new,
+  };
+}
+
+// GET /api/report/cve -> der aggregierte CVE-Bericht (Kennzahlen + Severity-
+// Verteilung + Geraete-/Dienst-Sektion + vollstaendige Befundliste). Fehlt ein
+// Block wider Erwarten, fallen Zaehler auf 0 und Listen auf [] (gefahrloses Mappen,
+// Muster fetchInventoryReport). Bei !ok/Netzfehler -> ApiError (die View faengt das
+// und zeigt den Fehlerhinweis).
+export async function fetchCveReport() {
+  const backend = await apiGet("/api/report/cve");
+  return {
+    generatedFindingsTotal: backend?.generated_findings_total ?? 0,
+    activeTotal: backend?.active_total ?? 0,
+    acknowledgedTotal: backend?.acknowledged_total ?? 0,
+    newTotal: backend?.new_total ?? 0,
+    affectedDevices: backend?.affected_devices ?? 0,
+    hostsTotal: backend?.hosts_total ?? 0,
+    hostsChecked: backend?.hosts_checked ?? 0,
+    coverageText: backend?.coverage_text ?? "",
+    highestSeverity: backend?.highest_severity ?? "UNKNOWN",
+    oldestPublished: backend?.oldest_published ?? "",
+    severityCounts: (backend?.severity_counts ?? []).map(mappeSeverityCount),
+    deviceRows: (backend?.device_rows ?? []).map(mappeCveGeraet),
+    serviceRows: (backend?.service_rows ?? []).map(mappeCveDienst),
+    allRows: (backend?.all_rows ?? []).map(mappeCveBefundZeile),
+  };
+}
+
+// GET /api/report/cve/pdf -> loest den Browser-Download des CVE-Berichts als PDF
+// aus (Blob via apiDownload). Der echte Dateiname kommt vom Backend ueber
+// Content-Disposition (CERNISPRO_CVE-Bericht_<datum>.pdf); der defaultName hier ist
+// nur Fallback. Bei !ok/Netzfehler -> ApiError (die View faengt das und zeigt einen
+// dezenten PDF-Fehlerhinweis).
+export async function fetchCveReportPdf() {
+  return apiDownload("/api/report/cve/pdf", null, "CERNISPRO_CVE-Bericht.pdf");
+}
+
 export default {
   fetchSecurityReport,
   fetchSecurityReportPdf,
   fetchInventoryReport,
   fetchInventoryReportPdf,
+  fetchCveReport,
+  fetchCveReportPdf,
   fetchManualPdf,
 };

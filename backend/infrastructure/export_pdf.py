@@ -353,6 +353,8 @@ class CvePdfModelLike(Protocol):
     @property
     def severity_rows(self) -> tuple[tuple[str, str], ...]: ...
     @property
+    def severity_labels(self) -> tuple[tuple[str, str], ...]: ...
+    @property
     def device_rows(self) -> tuple[tuple[str, ...], ...]: ...
     @property
     def service_rows(self) -> tuple[tuple[str, ...], ...]: ...
@@ -1167,20 +1169,25 @@ class ReportlabRenderer:
         )
 
         # ── Achse-B-Fussnote (invariant, wie im Bestands-/Sicherheitsbericht) ──
+        # (Etappe 3b) HR + beide Fussnoten als EIN KeepTogether-Block, damit sie nie getrennt
+        # umbrechen (kein PageBreak davor). Verhindert primaer das Auseinanderreissen; ein
+        # restlicher reportlab-Flow-Umbruch der ganzen Gruppe bleibt akzeptabel.
         story.append(Spacer(1, 8 * mm))
-        story.append(HRFlowable(width="100%", thickness=0.6, color=_LINE))
-        story.append(Spacer(1, 2 * mm))
         story.append(
-            Paragraph(
-                "Dieser Bericht beschreibt und ordnet ein — er fällt kein Urteil.",
-                styles["footnote"],
-            )
-        )
-        # (R4) Erklaerung der Variante-C-Status-Kennzeichnung "NEU".
-        story.append(
-            Paragraph(
-                "Neu = erstmals innerhalb der letzten 24 Stunden gesehen.",
-                styles["footnote"],
+            KeepTogether(
+                [
+                    HRFlowable(width="100%", thickness=0.6, color=_LINE),
+                    Spacer(1, 2 * mm),
+                    Paragraph(
+                        "Dieser Bericht beschreibt und ordnet ein — er fällt kein Urteil.",
+                        styles["footnote"],
+                    ),
+                    # (R4) Erklaerung der Variante-C-Status-Kennzeichnung "NEU".
+                    Paragraph(
+                        "Neu = erstmals innerhalb der letzten 24 Stunden gesehen.",
+                        styles["footnote"],
+                    ),
+                ]
             )
         )
 
@@ -1270,9 +1277,12 @@ class ReportlabRenderer:
         summe = sum(count for count, _ in segmente)
         donut = _inventory_donut_drawing(segmente, summe, "Befunde")
 
-        # Legende: nur Stufen mit count > 0; Severity-Klartext wie in der App (Wiedererkennung).
+        # Legende: nur Stufen mit count > 0. Farbe + Wert kommen aus severity_rows (roher
+        # Schluessel fuer _SEV_COLORS), der ANGEZEIGTE Text aus severity_labels (deutsch, je
+        # roh_key -> Text). Fehlt ein Label, faellt der Text ehrlich auf den Rohschluessel zurueck.
+        sev_labels = dict(model.severity_labels)
         legende_eintraege: tuple[tuple[str, colors.Color, int], ...] = tuple(
-            (severity, _SEV_COLORS[severity], int(count_text))
+            (sev_labels.get(severity, severity), _SEV_COLORS[severity], int(count_text))
             for severity, count_text in model.severity_rows
             if int(count_text) > 0
         )
