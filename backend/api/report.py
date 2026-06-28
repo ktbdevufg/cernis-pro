@@ -560,3 +560,209 @@ async def get_cve_report_pdf(
             "Content-Disposition": f'attachment; filename="{result.filename}"'  # type: ignore[attr-defined]
         },
     )
+
+
+# ── Aussenkontakte-Bericht: schmale api-Response-Modelle (eigene Wire-Form) ─────
+# Analog zum Sicherheits-/Bestands-/CVE-Bericht oben: eigene schmale pydantic-``*Out``-Modelle,
+# die die application-Sicht ``OutboundReport`` (samt ``CountryCount``/``OperatorCount``/
+# ``OutboundContactRow``) spiegeln, OHNE diese Typen zu importieren (Regel 4: api kennt
+# application nicht). Der Composition-Root-Runner in ``app.py`` projiziert die application-Sicht
+# auf genau diese Form.
+
+
+class OutboundCountryOut(BaseModel):
+    """Ein Eintrag der Land-Verteilung (Land + Anzahl Gegenstellen, Wire-Form).
+
+    ``country`` das Land (ein leeres wird vom Root als "(unbekannt)" gefuehrt), ``count`` die
+    Anzahl der nicht-lokalen Gegenstellen mit diesem Land. Reine Anzeige.
+    """
+
+    country: str
+    count: int
+
+
+class OutboundOperatorOut(BaseModel):
+    """Ein Eintrag der Betreiber-Verteilung (Betreiber + Anzahl Gegenstellen, Wire-Form).
+
+    ``operator`` der Betreiber (ein leerer wird vom Root als "(unbekannt)" gefuehrt), ``count``
+    die Anzahl der nicht-lokalen Gegenstellen mit diesem Betreiber. Reine Anzeige.
+    """
+
+    operator: str
+    count: int
+
+
+class OutboundContactRowOut(BaseModel):
+    """Eine Aussenkontakt-Zeile des Berichts (Wire-Form).
+
+    Alle Anzeige-Texte (``hostname``/``country``/``operator``/``asn``/``app_name`` als
+    Leerstring statt None, die beiden Datums-Texte) sind schon vom Composition-Root-Runner
+    fertig gesetzt; ``first_seen_ts``/``last_seen_ts`` sind die rohen Sortier-/Alters-Schluessel
+    als Unix-Sekunden (fuers Frontend). ``is_local`` markiert eine lokale/Infrastruktur-
+    Gegenstelle, ``tracker_lists``/``threat_lists`` die Namen der treffenden Blocklisten (leer =
+    kein Treffer) -- beide vom Root gesetzt.
+    """
+
+    remote_ip: str
+    hostname: str
+    country: str
+    operator: str
+    asn: str
+    app_name: str
+    first_seen_text: str
+    last_seen_text: str
+    first_seen_ts: float
+    last_seen_ts: float
+    total_count: int
+    peak_count: int
+    is_local: bool
+    tracker_lists: list[str]
+    threat_lists: list[str]
+
+
+class OutboundReportOut(BaseModel):
+    """Die Gesamtsicht des Aussenkontakte-Berichts: Bezugsrahmen, Kennzahlen, Verteilungen, Liste.
+
+    ``recording_label`` der Anzeigename der Aufzeichnung (oder die fertige "Alle
+    Aufzeichnungen"-Bezeichnung), ``recording_scope`` der rohe Bezugsrahmen-Schluessel
+    ("single"/"all"). Die neun int-Kennzahlen sind die schon ermittelten Zaehler
+    (``contacts_total``/``remote_total``/``local_total``/``connection_total``/
+    ``countries_total``/``operators_total``/``tracker_contacts``/``threat_contacts``/
+    ``flagged_contacts``). ``country_distribution``/``operator_distribution`` die beiden
+    Verteilungs-Tabellen, ``contact_rows`` die sortierte Gesamt-Kontaktliste. KEIN 404-Fall:
+    leerer Stand ist ein DATUM (alle Zaehler 0, leere Listen), kein HTTP-Fehler.
+    """
+
+    recording_label: str
+    recording_scope: str
+    contacts_total: int
+    remote_total: int
+    local_total: int
+    connection_total: int
+    countries_total: int
+    operators_total: int
+    tracker_contacts: int
+    threat_contacts: int
+    flagged_contacts: int
+    country_distribution: list[OutboundCountryOut]
+    operator_distribution: list[OutboundOperatorOut]
+    contact_rows: list[OutboundContactRowOut]
+
+
+class OutboundReportRecordingOut(BaseModel):
+    """Eine waehlbare Aufzeichnung fuers Berichts-Dropdown (schlanke Wire-Form).
+
+    ``id`` der technische Schluessel der Aufzeichnung (Query-Wert fuer ``recording_id``),
+    ``label`` der Anzeigename (vom Root auf die id zurueckgefallen, falls leer). Bewusst ein
+    EIGENER, report-spezifischer schlanker Pfad -- das Frontend fuellt damit das Dropdown, OHNE
+    den vollen ``outbound_log``-Router zu nutzen.
+    """
+
+    id: str
+    label: str
+
+
+# ── Aussenkontakte-Bericht: injizierte Composition-Root-Runner ─────────────────
+# Provider-Marker (Muster ``CveReportRunner``): in app.py per dependency_overrides mit den echten
+# Root-Runnern verdrahtet. Ohne Verdrahtung bewusst ein lauter Fehler (kein stiller Fallback, S3).
+#
+# Der Bericht laeuft ueber EINE Aufzeichnung ODER alle: ``recording_id`` ist ein optionaler
+# Query-Parameter (None bzw. leer = "alle Aufzeichnungen zusammengefasst"; ein konkreter Wert =
+# nur diese Aufzeichnung). Der dritte Runner liefert die waehlbaren Aufzeichnungen fuers Dropdown.
+
+
+class OutboundReportRunner(Protocol):
+    """Schmaler Vertrag des injizierten Lese-Runners (liefert die fertige Aussenkontakte-Sicht)."""
+
+    async def __call__(self, recording_id: str | None) -> OutboundReportOut:
+        """Baut den Aussenkontakte-Bericht (eine Aufzeichnung oder alle) Wire-fertig."""
+        ...
+
+
+def provide_outbound_report() -> OutboundReportRunner:
+    raise NotImplementedError("OutboundReportRunner wird in app.py verdrahtet")
+
+
+class OutboundReportPdfRunner(Protocol):
+    """Schmaler Vertrag des injizierten PDF-Runners (liefert das fertige Download-Ergebnis)."""
+
+    async def __call__(self, recording_id: str | None) -> object:
+        """Baut den Aussenkontakte-Bericht als PDF und liefert content/media_type/filename."""
+        ...
+
+
+def provide_outbound_report_pdf() -> OutboundReportPdfRunner:
+    raise NotImplementedError("OutboundReportPdfRunner wird in app.py verdrahtet")
+
+
+class OutboundReportRecordingsRunner(Protocol):
+    """Schmaler Vertrag des injizierten Recordings-Runners (liefert das Dropdown-Datum)."""
+
+    async def __call__(self) -> list[OutboundReportRecordingOut]:
+        """Liefert die waehlbaren Aufzeichnungen als schlanke Wire-Form (leere Liste = Datum)."""
+        ...
+
+
+def provide_outbound_report_recordings() -> OutboundReportRecordingsRunner:
+    raise NotImplementedError("OutboundReportRecordingsRunner wird in app.py verdrahtet")
+
+
+# ── Aussenkontakte-Bericht: Routen ─────────────────────────────────────────────
+# Reihenfolge (Auftrag): recordings, dann outbound, dann pdf. Alle drei haben feste, eindeutige
+# Suffixe (kein Pfad-Parameter-Konflikt), die Reihenfolge ist daher unkritisch -- aber so definiert.
+
+
+@router.get("/outbound/recordings")
+async def get_outbound_report_recordings(
+    runner: Annotated[OutboundReportRecordingsRunner, Depends(provide_outbound_report_recordings)],
+) -> list[OutboundReportRecordingOut]:
+    """Liefert die waehlbaren Aufzeichnungen fuers Berichts-Dropdown (schlanke Wire-Form).
+
+    KEIN 404-Fall: eine leere Liste ist ein DATUM (noch keine Aufzeichnungen), kein HTTP-Fehler.
+    Die Projektion macht der injizierte Composition-Root-Runner (Regel 4: api kennt application
+    nicht).
+    """
+    return await runner()
+
+
+@router.get("/outbound")
+async def get_outbound_report(
+    runner: Annotated[OutboundReportRunner, Depends(provide_outbound_report)],
+    recording_id: str | None = None,
+) -> OutboundReportOut:
+    """Liefert den aggregierten Aussenkontakte-Bericht (EINE Aufzeichnung oder alle).
+
+    ``recording_id`` ist optional: None bzw. leer = alle Aufzeichnungen zusammengefasst, ein
+    konkreter Wert = nur diese Aufzeichnung. KEIN 404-Fall: leerer Stand ist ein DATUM (alle
+    Zaehler 0, leere Listen), kein HTTP-Fehler. Die ganze Projektion macht der injizierte
+    Composition-Root-Runner (Regel 4: der api-Ring kennt application nicht).
+    """
+    return await runner(recording_id)
+
+
+@router.get("/outbound/pdf")
+async def get_outbound_report_pdf(
+    runner: Annotated[OutboundReportPdfRunner, Depends(provide_outbound_report_pdf)],
+    recording_id: str | None = None,
+) -> Response:
+    """Liefert den Aussenkontakte-Bericht als PDF-Download (Bytes, ``attachment``).
+
+    ``recording_id`` ist optional (None/leer = alle Aufzeichnungen, ein Wert = nur diese). Der
+    injizierte Composition-Root-Runner baut den Bericht, projiziert ihn auf das render-fertige
+    PDF-Modell und rendert das PDF; er liefert ein Objekt mit ``content`` (PDF-Bytes),
+    ``media_type`` (``application/pdf``) und ``filename``. Der Router verpackt es in eine
+    ``Response`` mit ``Content-Disposition: attachment; filename="..."``.
+
+    KEIN 404-Fall: leerer Stand ist ein gueltiges PDF (alle Zaehler 0, leere Listen), kein
+    HTTP-Fehler -- analog ``GET /api/report/outbound``.
+    """
+    result = await runner(recording_id)
+    # result kommt aus dem Composition Root; per Attribut-Zugriff gelesen (kein Typ-Import im
+    # Router -- der api-Ring kennt nur die drei Attribute, Muster ``get_cve_report_pdf``).
+    return Response(
+        content=result.content,  # type: ignore[attr-defined]
+        media_type=result.media_type,  # type: ignore[attr-defined]
+        headers={
+            "Content-Disposition": f'attachment; filename="{result.filename}"'  # type: ignore[attr-defined]
+        },
+    )

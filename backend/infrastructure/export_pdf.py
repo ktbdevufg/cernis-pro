@@ -161,6 +161,22 @@ _CVE_FINDING_GROUP_COLUMNS: tuple[str, ...] = (
     "Status",
 )
 
+# Spalten-Spiegel der drei Aussenkontakte-Bericht-Tabellen. SPIEGEL der ``*_COLUMNS`` aus
+# ``application.reporting.outbound_pdf_model`` -- der Adapter darf ``application`` NICHT
+# importieren (import-linter), darum hier als lokale Anzeige-Konstanten gefuehrt (Muster
+# _CVE_*_COLUMNS). Die Schreibweise (Umlaute) ist WOERTLICH aus outbound_pdf_model.py
+# uebernommen, damit Modell, Renderer und die Spaltenbreiten-Heuristik denselben Vertrag teilen.
+_OUTBOUND_CONTACT_COLUMNS: tuple[str, ...] = (
+    "Gegenstelle",
+    "Name",
+    "Land",
+    "Betreiber",
+    "Kontakte",
+    "Bewertung",
+)
+_OUTBOUND_COUNTRY_COLUMNS: tuple[str, ...] = ("Land", "Gegenstellen")
+_OUTBOUND_OPERATOR_COLUMNS: tuple[str, ...] = ("Betreiber", "Gegenstellen")
+
 
 class SecurityPdfModelLike(Protocol):
     """Struktureller Vertrag des Sicherheitsbericht-Modells (duck-typing, KEIN Import).
@@ -362,6 +378,55 @@ class CvePdfModelLike(Protocol):
     def finding_rows(self) -> tuple[tuple[str, ...], ...]: ...
     @property
     def host_groups(self) -> tuple[_HostGroupBlockLike, ...]: ...
+
+
+class OutboundPdfModelLike(Protocol):
+    """Struktureller Vertrag des Aussenkontakte-Modells (duck-typing, KEIN application-Import).
+
+    Wie ``CvePdfModelLike``: ``infrastructure`` darf ``application`` NICHT importieren
+    (import-linter), das reiche ``OutboundPdfModel`` lebt aber in ``application/reporting``. Darum
+    nimmt der Adapter es STRUKTURELL ueber dieses ``Protocol`` entgegen -- genau die Felder, die
+    er rendert. Read-only Properties decken die frozen-Felder ab (siehe Begruendung bei
+    ``SecurityPdfModelLike``). Das echte ``OutboundPdfModel`` erfuellt das Protokoll automatisch
+    (gleiche Feldnamen/Typen).
+    """
+
+    @property
+    def title(self) -> str: ...
+    @property
+    def generated_at_text(self) -> str: ...
+    @property
+    def footer_left(self) -> str: ...
+    @property
+    def einleitung(self) -> str: ...
+    @property
+    def recording_label(self) -> str: ...
+    @property
+    def scope_text(self) -> str: ...
+    @property
+    def contacts_total(self) -> int: ...
+    @property
+    def remote_total(self) -> int: ...
+    @property
+    def local_total(self) -> int: ...
+    @property
+    def connection_total(self) -> int: ...
+    @property
+    def countries_total(self) -> int: ...
+    @property
+    def operators_total(self) -> int: ...
+    @property
+    def tracker_contacts(self) -> int: ...
+    @property
+    def threat_contacts(self) -> int: ...
+    @property
+    def flagged_contacts(self) -> int: ...
+    @property
+    def country_rows(self) -> tuple[tuple[str, ...], ...]: ...
+    @property
+    def operator_rows(self) -> tuple[tuple[str, ...], ...]: ...
+    @property
+    def contact_rows(self) -> tuple[tuple[str, ...], ...]: ...
 
 
 class ReportlabRenderer:
@@ -1292,6 +1357,172 @@ class ReportlabRenderer:
         spalte.setStyle(TableStyle([("ALIGN", (0, 0), (-1, -1), "CENTER")]))
         return spalte
 
+    # ── Aussenkontakte-Bericht: eigener Render-Pfad ─────────────────────────
+    #
+    # NEUE Methode neben render_cve_report_pdf -- alle bestehenden Render-Pfade bleiben
+    # UNANGETASTET. Dieser Pfad rendert das render-fertige OutboundPdfModel (Kennzahlen + drei
+    # Tabellen) mit durchgaengiger Kopf-/Fusszeile. Kopf-Titel parametrisch ueber model.title ->
+    # dafuer wird _draw_manual_header_footer wiederverwendet (liest model.title/footer_left).
+    # ABER OHNE Donut/Severity: der Aussenkontakte-Bericht faellt kein Urteil, traegt keine
+    # Schwere-Spalte und kein Badge.
+
+    def render_outbound_report_pdf(self, model: OutboundPdfModelLike) -> bytes:
+        """Rendert das ``OutboundPdfModel`` zum vollstaendigen Aussenkontakte-Bericht-PDF (A4 hoch).
+
+        Layout (Muster render_cve_report_pdf, ABER ohne Donut/Severity): durchgaengige Kopf-/
+        Fusszeile je Seite (onFirstPage UND onLaterPages ueber dieselbe Funktion
+        ``_draw_manual_header_footer``), dann die Story -- Titel + Erzeugungsdatum + Einleitung,
+        die fertige Bezugsrahmen-Zeile (``scope_text``), der Kennzahlen-Block (zwei Reihen
+        Zahlen) und die drei Sektions-Rubriken (Verteilung nach Land / nach Betreiber /
+        Aussenkontakte im Detail, letztere auf eigener Seite, da potentiell lang).
+
+        Robust: leere Tabellen ziehen ihren eigenen Leer-Fallback ueber ``_append_table_section``.
+        Die Bewertung-Spalte ist KEINE "Schwere"-Spalte -> kein Badge (korrekt, wir wollen kein
+        Urteil). KEINE Uhr, KEINE Rechnung -- alle Texte/Zahlen kommen fertig aus dem Modell.
+        Liefert valide PDF-Bytes (Magic-Header ``%PDF``).
+        """
+        buffer = io.BytesIO()
+        document = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,  # Hochformat (Muster CVE)
+            leftMargin=18 * mm,
+            rightMargin=18 * mm,
+            topMargin=32 * mm,  # Platz fuer die durchgaengige Kopfzeile
+            bottomMargin=20 * mm,  # Platz fuer die Fusszeile
+            title=model.title,
+        )
+
+        story: list[Flowable] = []
+        styles = self._security_styles()
+
+        # ── Titel + Erzeugungsdatum + Einleitung (fertige Texte aus dem Modell) ──
+        story.append(Paragraph(model.title, styles["h_title"]))
+        story.append(Paragraph(model.generated_at_text, styles["sub"]))
+        story.append(Spacer(1, 4 * mm))
+        if model.einleitung:
+            story.append(Paragraph(model.einleitung, styles["body"]))
+            story.append(Spacer(1, 6 * mm))
+
+        # ── Bezugsrahmen-Zeile (fertig lokalisiert vom Composition Root) ──
+        story.append(Paragraph(model.scope_text, styles["sub"]))
+        story.append(Spacer(1, 4 * mm))
+
+        # ── Sektion 1: Ueberblick (Aussenkontakte-Kennzahlen, zwei Reihen Zahlen) ──
+        story.append(Paragraph("Kennzahlen", styles["h_section"]))
+        story.append(self._outbound_kennzahlen(model))
+        story.append(Spacer(1, 6 * mm))
+
+        # ── Sektions-Rubriken ueber das BESTEHENDE _append_table_section ──
+        # Die Bewertung-Spalte bleibt Klartext (KEINE "Schwere"-Spalte -> kein Badge).
+        self._append_table_section(
+            story, styles, "Verteilung nach Land", _OUTBOUND_COUNTRY_COLUMNS, model.country_rows
+        )
+        story.append(Spacer(1, 6 * mm))
+        self._append_table_section(
+            story,
+            styles,
+            "Verteilung nach Betreiber",
+            _OUTBOUND_OPERATOR_COLUMNS,
+            model.operator_rows,
+        )
+
+        # Die Detail-Liste auf eigener Seite (potentiell lang) -- PageBreak davor.
+        story.append(PageBreak())
+        self._append_table_section(
+            story,
+            styles,
+            "Außenkontakte im Detail",
+            _OUTBOUND_CONTACT_COLUMNS,
+            model.contact_rows,
+        )
+
+        # ── Achse-B-Fussnote (invariant, wie im CVE-/Bestandsbericht) ──
+        # HR + der eine Achse-B-Satz als KeepTogether-Block. KEINE "Neu (24h)"-Zeile -- die gilt
+        # nur fuer den CVE-Bericht.
+        story.append(Spacer(1, 8 * mm))
+        story.append(
+            KeepTogether(
+                [
+                    HRFlowable(width="100%", thickness=0.6, color=_LINE),
+                    Spacer(1, 2 * mm),
+                    Paragraph(
+                        "Dieser Bericht beschreibt und ordnet ein — er fällt kein Urteil.",
+                        styles["footnote"],
+                    ),
+                ]
+            )
+        )
+
+        # _draw_manual_header_footer ist auf ManualPdfModelLike typisiert, liest zur Laufzeit aber
+        # NUR model.title + model.footer_left -- beide hat OutboundPdfModelLike ebenfalls (Muster
+        # render_cve_report_pdf): cast statt Aenderung der Kopf-/Fuss-Funktion.
+        header_model = cast(ManualPdfModelLike, model)
+        document.build(
+            story,
+            onFirstPage=lambda canvas, doc: _draw_manual_header_footer(canvas, doc, header_model),
+            onLaterPages=lambda canvas, doc: _draw_manual_header_footer(canvas, doc, header_model),
+        )
+        return buffer.getvalue()
+
+    @staticmethod
+    def _outbound_kennzahlen(model: OutboundPdfModelLike) -> Table:
+        """Die Aussenkontakte-Kennzahlen als zwei Zeilen Kennzahl-Boxen (Zahl oben, Label darunter).
+
+        Reihe 1: Gegenstellen/Verbindungen/Laender/Betreiber, Reihe 2: Auffaellig/Tracker/
+        Bedrohung/Lokal. Beide Reihen liegen in EINER 4-spaltigen ``Table`` -- schlichte graue
+        Boxen mit Akzent-Zahl (Muster ``_cve_kennzahlen``/``_inventory_kennzahlen``). Anders als
+        ``_cve_kennzahlen`` traegt hier AUCH Reihe 2 ueberall Zahlen (alle acht Boxen gefuellt),
+        darum FONTSIZE 20 fuer BEIDE Wert-Reihen. Reine Anzeige der schon ermittelten Zaehler aus
+        dem Modell -- keine Rechnung, keine neuen Farben.
+        """
+        data = [
+            [
+                str(model.remote_total),
+                str(model.connection_total),
+                str(model.countries_total),
+                str(model.operators_total),
+            ],
+            ["Gegenstellen", "Verbindungen", "Länder", "Betreiber"],
+            [
+                str(model.flagged_contacts),
+                str(model.tracker_contacts),
+                str(model.threat_contacts),
+                str(model.local_total),
+            ],
+            ["Auffällig", "Tracker", "Bedrohung", "Lokal"],
+        ]
+        col = 174.0 / 4 * mm
+        table = Table(data, colWidths=[col, col, col, col])
+        table.setStyle(
+            TableStyle(
+                [
+                    # Dezent graue Boxen (kein neues Farbset): Hintergrund _ZEBRA, Zahl in _ACCENT,
+                    # Label in _TEXT. Alle acht Boxen gefuellt (anders als _cve_kennzahlen).
+                    ("BACKGROUND", (0, 0), (-1, 3), _ZEBRA),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), _ACCENT),
+                    ("TEXTCOLOR", (0, 2), (-1, 2), _ACCENT),
+                    ("TEXTCOLOR", (0, 1), (-1, 1), _TEXT),
+                    ("TEXTCOLOR", (0, 3), (-1, 3), _TEXT),
+                    ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTNAME", (0, 2), (-1, 2), "Helvetica-Bold"),
+                    # Beide Wert-Reihen tragen Zahlen -> FONTSIZE 20 fuer beide.
+                    ("FONTSIZE", (0, 0), (-1, 0), 20),
+                    ("FONTSIZE", (0, 2), (-1, 2), 20),
+                    ("FONTNAME", (0, 1), (-1, 1), "Helvetica"),
+                    ("FONTNAME", (0, 3), (-1, 3), "Helvetica"),
+                    ("FONTSIZE", (0, 1), (-1, 1), 9),
+                    ("FONTSIZE", (0, 3), (-1, 3), 9),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("TOPPADDING", (0, 0), (-1, 0), 8),
+                    ("TOPPADDING", (0, 2), (-1, 2), 8),
+                    ("BOTTOMPADDING", (0, 1), (-1, 1), 8),
+                    ("BOTTOMPADDING", (0, 3), (-1, 3), 8),
+                ]
+            )
+        )
+        return table
+
     # ── Benutzerhandbuch: eigener Render-Pfad ───────────────────────────────
     #
     # NEUE Methode neben render_security_report_pdf -- beide bleiben UNANGETASTET (der
@@ -1412,6 +1643,13 @@ _COL_WEIGHTS: dict[tuple[str, ...], tuple[float, ...]] = {
     _CVE_FINDING_COLUMNS: (2.4, 2.0, 1.4, 1.0, 1.6, 0.9, 1.9, 1.4),
     # Gruppierte Befundliste (ohne Geraet-Spalte -- die steht im Host-Kopf).
     _CVE_FINDING_GROUP_COLUMNS: (2.0, 1.4, 1.0, 1.6, 0.9, 1.9, 1.6),
+    # Aussenkontakte-Bericht: Gegenstelle/Name/Betreiber breit, die schmalen Wert-Spalten
+    # (Land/Kontakte) schlank, die Bewertung wieder breiter (Listennamen). Eigene Keys; die
+    # bestehenden Aufrufer bleiben unberuehrt. Die Verteilungs-Tabellen tragen das
+    # Inventory-Verteilungsmuster (Label breit, Anzahl schmal).
+    _OUTBOUND_CONTACT_COLUMNS: (2.4, 2.6, 1.4, 2.0, 1.0, 2.2),
+    _OUTBOUND_COUNTRY_COLUMNS: (5.0, 1.8),
+    _OUTBOUND_OPERATOR_COLUMNS: (5.0, 1.8),
 }
 
 # Rubrikspezifischer Leertext je Tabellen-Schema (statt generisch "Keine Eintraege.").
@@ -1426,6 +1664,9 @@ _EMPTY_SECTION_TEXT: dict[tuple[str, ...], str] = {
     _CVE_SERVICE_COLUMNS: "Keine Dienste mit Befunden.",
     _CVE_FINDING_COLUMNS: "Keine CVE-Befunde vorhanden.",
     _CVE_FINDING_GROUP_COLUMNS: "Keine CVE-Befunde vorhanden.",
+    _OUTBOUND_CONTACT_COLUMNS: "Keine Außenkontakte aufgezeichnet.",
+    _OUTBOUND_COUNTRY_COLUMNS: "Keine Länderdaten.",
+    _OUTBOUND_OPERATOR_COLUMNS: "Keine Betreiberdaten.",
 }
 
 

@@ -10,6 +10,7 @@ fastapi/starlette).
 """
 
 import asyncio
+import ipaddress
 import json
 import os
 import sys
@@ -218,6 +219,11 @@ from api.report import (
     InventoryDistributionOut,
     InventoryReportOut,
     NetFindingOut,
+    OutboundContactRowOut,
+    OutboundCountryOut,
+    OutboundOperatorOut,
+    OutboundReportOut,
+    OutboundReportRecordingOut,
     PortFindingOut,
     ScoreContributionOut,
     ScoreOut,
@@ -227,6 +233,9 @@ from api.report import (
     provide_inventory_report,
     provide_inventory_report_pdf,
     provide_manual_pdf,
+    provide_outbound_report,
+    provide_outbound_report_pdf,
+    provide_outbound_report_recordings,
     provide_security_report,
     provide_security_report_pdf,
 )
@@ -433,6 +442,7 @@ from application.process import CheckProcessPermission, ListProcesses
 from application.reporting import (
     BuildCveReport,
     BuildInventoryReport,
+    BuildOutboundReport,
     BuildSecurityReport,
     CveFindingRow,
     CveMonitorInput,
@@ -444,6 +454,10 @@ from application.reporting import (
     InventoryReport,
     ManualPdfModel,
     ManualPdfSection,
+    OutboundContactRow,
+    OutboundPdfModel,
+    OutboundReport,
+    OutboundReportInput,
     SecurityPdfModel,
     SecurityReport,
 )
@@ -517,7 +531,7 @@ from domain.monitoring import (
     ThresholdCondition,
     compute_sla_stats,
 )
-from domain.outbound_log import ContactDelta
+from domain.outbound_log import AggregatedContact, ContactDelta
 from domain.process import classify_kind
 from domain.scanning import EnrichedHost
 from domain.scheduler.models import DailyWindow
@@ -4722,6 +4736,262 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             filename=f"CERNISPRO_CVE-Bericht_{datumsteil}.pdf",
         )
 
+    # ── Aussenkontakte-Bericht (Etappe 2b): die Naht zu den Quell-Domaenen ──────────
+    # Regel 5: der Composition Root ist der EINZIGE Ort, der die Quell-Domaenen kennt und auf die
+    # neutralen Berichts-Zeilen PROJIZIERT. Quellen: die schon verdrahteten outbound_log-Repos
+    # (Aggregate je Aufzeichnung + Recording-Definitionen) und die blocklist-Naht (MatchContacts
+    # ueber den beiden blocklist-Repos, mit Strenge/Gruppen aus den Settings). Nichts Neues bauen.
+
+    # Neutrale is_local-Hilfe (lokale/Infrastruktur-Erkennung). S3: eine leere/ungueltige IP wird
+    # NICHT als lokal gewertet (sie bleibt sichtbar). IPv4-mapped IPv6 (::ffff:a.b.c.d) wird vor
+    # der Pruefung entpackt, damit die is_private-Logik auf der echten IPv4 greift.
+    def _ip_is_local(ip: str) -> bool:
+        if not ip:
+            return False
+        try:
+            adresse = ipaddress.ip_address(ip)
+        except ValueError:
+            return False
+        # IPv4-mapped IPv6 auf die eingebettete IPv4 reduzieren (sonst greift is_private nicht).
+        if isinstance(adresse, ipaddress.IPv6Address) and adresse.ipv4_mapped is not None:
+            adresse = adresse.ipv4_mapped
+        return (
+            adresse.is_private
+            or adresse.is_loopback
+            or adresse.is_link_local
+            or adresse.is_unspecified
+            or adresse.is_reserved
+        )
+
+    # Recordings-Runner fuer das Dropdown: die Recording-Definitionen auf die schlanke Wire-Form
+    # projizieren. Leer -> [] (ein ehrliches Datum, kein Fehler).
+    async def _outbound_report_recordings() -> list[OutboundReportRecordingOut]:
+        recordings = outbound_recording_repository().list_all()
+        return [
+            OutboundReportRecordingOut(id=rec.id, label=rec.label or rec.id) for rec in recordings
+        ]
+
+    # ── Aussenkontakte-Bericht: Datenseite (Muster _build_cve_report_data, Regel 4/5) ──
+    # Liest die Aggregate (EINE Aufzeichnung oder alle gemergt), bewertet sie gegen die
+    # Blocklisten und projiziert auf die neutralen Berichts-Zeilen. KEINE Uhr -- die Datums-Texte
+    # je Zeile sind reine Formatierung der vorhandenen first_seen/last_seen (kein Wanduhr-Zugriff,
+    # Muster _to_row im CVE-Bericht). MatchContacts ist sync; die Datenseite kann sync bleiben.
+    def _build_outbound_report_data(recording_id: str | None) -> OutboundReport:
+        # (1) Bezugsrahmen bestimmen + Aggregate sammeln.
+        if recording_id:
+            # Nur DIESE Aufzeichnung. Label aus der Recording-Definition (auf id zurueckfallen).
+            rec = outbound_recording_repository().get(recording_id)
+            recording_label = (rec.label if rec is not None else "") or recording_id
+            recording_scope = "single"
+            aggregate = outbound_aggregate_repository().list_for(recording_id)
+        else:
+            # ALLE Aufzeichnungen zusammengefasst. Der Rand/PDF setzt die "Alle Aufzeichnungen"-
+            # Anzeige -> recording_label hier bewusst leer, recording_scope = "all".
+            recording_label = ""
+            recording_scope = "all"
+            # Je remote_ip zu EINER Zeile mergen: total_count summieren, peak_count max, first_seen
+            # min, last_seen max, Anreicherungsfelder ersten nicht-leeren Wert behalten. Eine
+            # simple lokale Merge-Schleife genuegt (KEINE domain.merge_contact -- das ist der
+            # Schreibpfad; hier wird nur gelesen/zusammengefasst).
+            gemergt: dict[str, AggregatedContact] = {}
+            for rec in outbound_recording_repository().list_all():
+                for a in outbound_aggregate_repository().list_for(rec.id):
+                    vorhanden = gemergt.get(a.remote_ip)
+                    if vorhanden is None:
+                        gemergt[a.remote_ip] = a
+                        continue
+                    gemergt[a.remote_ip] = AggregatedContact(
+                        remote_ip=vorhanden.remote_ip,
+                        first_seen=min(vorhanden.first_seen, a.first_seen),
+                        last_seen=max(vorhanden.last_seen, a.last_seen),
+                        total_count=vorhanden.total_count + a.total_count,
+                        peak_count=max(vorhanden.peak_count, a.peak_count),
+                        # Anreicherung: ersten nicht-leeren Wert behalten (vorhandener Wert hat
+                        # Vorrang, sonst der neue -- ein None/"" loescht keinen Bestandswert).
+                        remote_port=vorhanden.remote_port or a.remote_port,
+                        hostname=vorhanden.hostname or a.hostname,
+                        country=vorhanden.country or a.country,
+                        operator=vorhanden.operator or a.operator,
+                        asn=vorhanden.asn or a.asn,
+                        app_name=vorhanden.app_name or a.app_name,
+                    )
+            aggregate = list(gemergt.values())
+
+        # (2) Blocklist-Bewertung ueber MatchContacts (Ergebnis in EINGABE-Reihenfolge -> per
+        # Index zuordnen). Strenge/Gruppen kommen aus den Settings (wie im _blocklist_match-Pfad).
+        contacts = [ContactInput(remote_ip=a.remote_ip, hostname=a.hostname) for a in aggregate]
+        match_results = MatchContacts(blocklist_source_repository(), blocklist_entry_repository())(
+            contacts, _read_blocklist_strictness(), _blocklist_enabled_groups()
+        )
+
+        # (3) Projektion je Aggregat -> OutboundContactRow (mit der Bewertung aus Schritt 2).
+        rows: list[OutboundContactRow] = []
+        for index, a in enumerate(aggregate):
+            result = match_results[index]
+            # Treffer nach Gruppe trennen, source_name dedupliziert + sortiert (als Tuple).
+            tracker_lists = tuple(
+                sorted(
+                    {m.source_name for m in result.matches if m.group == BlocklistGroup.TRACKER_ADS}
+                )
+            )
+            threat_lists = tuple(
+                sorted({m.source_name for m in result.matches if m.group == BlocklistGroup.THREAT})
+            )
+            rows.append(
+                OutboundContactRow(
+                    remote_ip=a.remote_ip,
+                    hostname=a.hostname or "",
+                    country=a.country or "",
+                    operator=a.operator or "",
+                    asn=a.asn or "",
+                    app_name=a.app_name or "",
+                    # Datums-Texte: reine Formatierung der vorhandenen ts (keine Wanduhr) --
+                    # SPIEGELT die Bestands-/CVE-Formatierung ("%d.%m.%Y %H:%M").
+                    first_seen_text=datetime.fromtimestamp(a.first_seen).strftime("%d.%m.%Y %H:%M"),
+                    last_seen_text=datetime.fromtimestamp(a.last_seen).strftime("%d.%m.%Y %H:%M"),
+                    first_seen_ts=a.first_seen,
+                    last_seen_ts=a.last_seen,
+                    total_count=a.total_count,
+                    peak_count=a.peak_count,
+                    is_local=_ip_is_local(a.remote_ip),
+                    tracker_lists=tracker_lists,
+                    threat_lists=threat_lists,
+                )
+            )
+
+        # (4)+(5) Bezugsrahmen-Kennzahlen setzen + ueber den reinen Use-Case aggregieren.
+        status = OutboundReportInput(
+            recording_label=recording_label, recording_scope=recording_scope
+        )
+        return BuildOutboundReport()(status=status, rows=rows)
+
+    # ── Aussenkontakte-Bericht: HTTP-Endpunkt-Runner (Muster _cve_report, Regel 4/5) ──
+    async def _outbound_report(recording_id: str | None = None) -> OutboundReportOut:
+        report = _build_outbound_report_data(recording_id)
+        return OutboundReportOut(
+            recording_label=report.recording_label,
+            recording_scope=report.recording_scope,
+            contacts_total=report.contacts_total,
+            remote_total=report.remote_total,
+            local_total=report.local_total,
+            connection_total=report.connection_total,
+            countries_total=report.countries_total,
+            operators_total=report.operators_total,
+            tracker_contacts=report.tracker_contacts,
+            threat_contacts=report.threat_contacts,
+            flagged_contacts=report.flagged_contacts,
+            country_distribution=[
+                OutboundCountryOut(country=c.country, count=c.count)
+                for c in report.country_distribution
+            ],
+            operator_distribution=[
+                OutboundOperatorOut(operator=o.operator, count=o.count)
+                for o in report.operator_distribution
+            ],
+            contact_rows=[
+                OutboundContactRowOut(
+                    remote_ip=r.remote_ip,
+                    hostname=r.hostname,
+                    country=r.country,
+                    operator=r.operator,
+                    asn=r.asn,
+                    app_name=r.app_name,
+                    first_seen_text=r.first_seen_text,
+                    last_seen_text=r.last_seen_text,
+                    first_seen_ts=r.first_seen_ts,
+                    last_seen_ts=r.last_seen_ts,
+                    total_count=r.total_count,
+                    peak_count=r.peak_count,
+                    is_local=r.is_local,
+                    tracker_lists=list(r.tracker_lists),
+                    threat_lists=list(r.threat_lists),
+                )
+                for r in report.contact_rows
+            ],
+        )
+
+    # ── Aussenkontakte-Bericht: PDF-Projektion + Download-Runner (Muster _cve_report_pdf) ──
+    # Die Bezugsrahmen-Zeile + das "Alle Aufzeichnungen"-Label werden HIER (am Rand) lokalisiert;
+    # die reine Aggregation bleibt sprach-/anzeigefrei. Die Bewertungs-Spalte je Zeile wird hier
+    # zu fertigem Text (Threat hat Vorrang in der Anzeige).
+    def _project_outbound_pdf_model(
+        report: OutboundReport, generated_at_text: str
+    ) -> OutboundPdfModel:
+        ist_einzeln = report.recording_scope == "single" and bool(report.recording_label)
+        if ist_einzeln:
+            scope_text = f"Bezug: Aufzeichnung „{report.recording_label}“"
+            recording_label_display = report.recording_label
+        else:
+            scope_text = "Bezug: Alle Aufzeichnungen"
+            recording_label_display = "Alle Aufzeichnungen"
+
+        def _bewertung(row: OutboundContactRow) -> str:
+            # Threat hat Vorrang in der Anzeige; sonst Tracker; sonst "-".
+            if row.threat_lists:
+                return "Bedrohung: " + ", ".join(row.threat_lists)
+            if row.tracker_lists:
+                return "Tracker: " + ", ".join(row.tracker_lists)
+            return "-"
+
+        country_rows = tuple((c.country, str(c.count)) for c in report.country_distribution)
+        operator_rows = tuple((o.operator, str(o.count)) for o in report.operator_distribution)
+        # Spalten-Reihenfolge: Gegenstelle, Name, Land, Betreiber, Kontakte, Bewertung.
+        contact_rows = tuple(
+            (
+                r.remote_ip,
+                r.hostname or "—",
+                r.country or "—",
+                r.operator or "—",
+                str(r.total_count),
+                _bewertung(r),
+            )
+            for r in report.contact_rows
+        )
+        return OutboundPdfModel(
+            title="Netzwerk-Außenkontakte-Bericht",
+            generated_at_text=generated_at_text,
+            footer_left="CERNIS PRO 2.0 — Netzwerk-Außenkontakte-Bericht",
+            einleitung=(
+                "Dieser Bericht fasst die aufgezeichneten Außenkontakte dieses Rechners "
+                "zusammen und ordnet sie gegen die aktiven Blocklisten ein."
+            ),
+            recording_label=recording_label_display,
+            scope_text=scope_text,
+            contacts_total=report.contacts_total,
+            remote_total=report.remote_total,
+            local_total=report.local_total,
+            connection_total=report.connection_total,
+            countries_total=report.countries_total,
+            operators_total=report.operators_total,
+            tracker_contacts=report.tracker_contacts,
+            threat_contacts=report.threat_contacts,
+            flagged_contacts=report.flagged_contacts,
+            country_rows=country_rows,
+            operator_rows=operator_rows,
+            contact_rows=contact_rows,
+        )
+
+    @dataclass(frozen=True)
+    class _OutboundPdfResult:
+        content: bytes
+        media_type: str
+        filename: str
+
+    async def _outbound_report_pdf(recording_id: str | None = None) -> _OutboundPdfResult:
+        report = _build_outbound_report_data(recording_id)
+        # Wanduhr GENAU HIER lesen (einziger Ort) -- Projektion und Modell bleiben rein.
+        import time
+
+        now = time.time()
+        generated_at_text = "Erstellt am " + datetime.fromtimestamp(now).strftime("%d.%m.%Y %H:%M")
+        model = _project_outbound_pdf_model(report, generated_at_text)
+        pdf_bytes = ReportlabRenderer().render_outbound_report_pdf(model)
+        return _OutboundPdfResult(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            filename="CERNISPRO_Netzwerk-Aussenkontakte-Bericht.pdf",
+        )
+
     app.include_router(report_router)
     app.dependency_overrides[provide_security_report] = lambda: _security_report
     app.dependency_overrides[provide_security_report_pdf] = lambda: _security_report_pdf
@@ -4730,6 +5000,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.dependency_overrides[provide_inventory_report_pdf] = lambda: _inventory_report_pdf
     app.dependency_overrides[provide_cve_report] = lambda: _cve_report
     app.dependency_overrides[provide_cve_report_pdf] = lambda: _cve_report_pdf
+    app.dependency_overrides[provide_outbound_report] = lambda: _outbound_report
+    app.dependency_overrides[provide_outbound_report_pdf] = lambda: _outbound_report_pdf
+    app.dependency_overrides[provide_outbound_report_recordings] = lambda: (
+        _outbound_report_recordings
+    )
 
     # ── Route zum Ziel (ADR 0036): traceroute-Hops + Geo/ASN, zwei getrennte Naehte ──
     # Regel 5: die Quer-Domaenen-Naht (diagnostics-Hops + resolver-Geo/RDAP) faellt
