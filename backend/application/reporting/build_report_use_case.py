@@ -18,6 +18,11 @@ herein (spaeter aus analysis-Settings) -- dieselbe Naht wie bei den reinen Funkt
 
 from __future__ import annotations
 
+from application.reporting.inventory_report import (
+    InventoryDeviceRow,
+    InventoryReport,
+    build_inventory_report,
+)
 from application.reporting.security_report import (
     CveFinding,
     NetFinding,
@@ -26,7 +31,7 @@ from application.reporting.security_report import (
     build_security_report,
 )
 
-__all__ = ["BuildSecurityReport"]
+__all__ = ["BuildInventoryReport", "BuildSecurityReport"]
 
 
 class BuildSecurityReport:
@@ -74,4 +79,36 @@ class BuildSecurityReport:
             level_good_min=level_good_min,
             level_mid_min=level_mid_min,
             cvss_critical_min=cvss_critical_min,
+        )
+
+
+class BuildInventoryReport:
+    """Duenner Pass-Through: fertige neutrale Zeilen + Grundzahlen -> ``build_inventory_report``.
+
+    Duenn (Muster ``BuildSecurityReport``/``ResolveDns``): keine eigene Logik ausser dem
+    Durchreichen. ``__call__`` nimmt die schon NEUTRALEN Geraete-Zeilen (der Composition
+    Root hat die echten Device-Objekte darauf projiziert) plus die Bestands-Grundzahlen
+    (``total``/``known``/``unknown``/``active_24h`` aus ``DeviceStats``) und gibt den
+    ``InventoryReport`` zurueck. KEINE Domaenen-Importe, KEINE Repos, KEINE I/O, KEINE Uhr.
+    """
+
+    def __call__(
+        self,
+        total: int,
+        known: int,
+        unknown: int,
+        active_24h: int,
+        rows: list[InventoryDeviceRow],
+    ) -> InventoryReport:
+        """Reicht die fertigen neutralen Zeilen + Grundzahlen unveraendert durch.
+
+        Kein Eigenverhalten: ruft ``build_inventory_report`` mit GENAU den hereingereichten
+        Werten und gibt dessen ``InventoryReport`` zurueck.
+        """
+        return build_inventory_report(
+            total,
+            known,
+            unknown,
+            active_24h,
+            rows,
         )
