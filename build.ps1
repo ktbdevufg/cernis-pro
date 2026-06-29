@@ -96,6 +96,32 @@ Copy-Item $BACKEND_BIN (Join-Path $TAURI_RELEASE "cernis-backend.exe") -Force
 
 Write-Host "      OK"
 
+# ── Schritt 4b: Sniff-Helfer (cernis-sniffd, ADR 0041) ──────
+Write-Host ""
+Write-Host "[4b/6] Sniff-Helfer Binary erstellen und bereitstellen (cernis-sniffd)..."
+Push-Location $BACKEND_DIR
+
+# dist/build NICHT erneut loeschen: enthaelt bereits cernis-backend aus Schritt 3.
+python -m PyInstaller cernis_sniffd_windows.spec --noconfirm
+if ($LASTEXITCODE -ne 0) { Write-Host "FEHLER: PyInstaller (sniffd) fehlgeschlagen" -ForegroundColor Red; exit 1 }
+
+$SNIFFD_BIN = Join-Path $BACKEND_DIR "dist\cernis-sniffd.exe"
+if (-not (Test-Path $SNIFFD_BIN)) {
+    Write-Host "FEHLER: cernis-sniffd.exe nicht gefunden!" -ForegroundColor Red
+    exit 1
+}
+Write-Host "      OK - $SNIFFD_BIN"
+Pop-Location
+
+# Triple wie das Backend (build.ps1 baut arm64): cernis-sniffd-aarch64-pc-windows-msvc.exe
+$SNIFFD_BIN_NAME = "cernis-sniffd-aarch64-pc-windows-msvc.exe"
+Copy-Item $SNIFFD_BIN (Join-Path $TAURI_SRC $SNIFFD_BIN_NAME) -Force
+
+# Auch ins selbe Release-Verzeichnis wie das Backend ablegen
+Copy-Item $SNIFFD_BIN (Join-Path $TAURI_RELEASE "cernis-sniffd.exe") -Force
+
+Write-Host "      OK"
+
 # ── Schritt 5: Tauri bauen ───────────────────────────────────
 Write-Host ""
 Write-Host "[5/6] Tauri Build (NSIS Installer)..."

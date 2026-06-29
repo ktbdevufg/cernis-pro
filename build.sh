@@ -112,6 +112,32 @@ chmod +x "$TAURI_RELEASE/cernis-backend"
 
 echo "      OK"
 
+# ── Schritt 4b: Sniff-Helfer (cernis-sniffd, ADR 0041) ───────
+echo ""
+echo "[4b] Sniff-Helfer Binary erstellen und bereitstellen (cernis-sniffd)..."
+cd "$BACKEND_DIR"
+
+# dist/ NICHT erneut loeschen: enthaelt bereits cernis-backend aus Schritt 3.
+pyinstaller cernis_sniffd_macos.spec --noconfirm
+
+SNIFFD_BIN="$BACKEND_DIR/dist/cernis-sniffd"
+if [ ! -f "$SNIFFD_BIN" ]; then
+    echo "FEHLER: cernis-sniffd Binary nicht gefunden!"
+    exit 1
+fi
+echo "      OK — $SNIFFD_BIN"
+
+# Tauri externalBin erwartet: cernis-sniffd-aarch64-apple-darwin
+SNIFFD_BIN_NAME="cernis-sniffd-aarch64-apple-darwin"
+cp "$SNIFFD_BIN" "$TAURI_SRC/$SNIFFD_BIN_NAME"
+chmod +x "$TAURI_SRC/$SNIFFD_BIN_NAME"
+
+# Auch ins selbe Release-Verzeichnis wie das Backend ablegen
+cp "$SNIFFD_BIN" "$TAURI_RELEASE/cernis-sniffd"
+chmod +x "$TAURI_RELEASE/cernis-sniffd"
+
+echo "      OK"
+
 # ── Schritt 5: Tauri bauen ────────────────────────────────────
 echo ""
 echo "[5/5] Tauri Build (.dmg)..."
