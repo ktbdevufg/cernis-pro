@@ -3,9 +3,9 @@
 // spricht, gebündelt nach Betreiber / Land / Programm. Reines Frontend gegen den
 // fertigen Endpunkt GET /api/outbound/contacts (api/outbound.js).
 //
-// Oben integriert: die Aufzeichnungs-Leiste (OutboundRecordingPanel) — eine
-// schlanke, immer sichtbare Leiste mit aufklappbarer Verwaltung (Anlegen +
-// Aufzeichnungs-Liste). KEINE eigene Beobachten-Kachel mehr.
+// Oben integriert: die Aufzeichnungs-Karte (OutboundRecordingPanel) — eine
+// selbsterklärende Karte (Ruhe-/Aktiv-Kopf + „Neue Aufzeichnung" + Liste) mit
+// Erstellen-/Detail-Modal. KEINE eigene Beobachten-Kachel mehr.
 //
 // Designsprache wie die übrigen Beobachten-Komponenten (ObserveView/TrafficView):
 // dezent, flach, ruhig. Außenkontakte URTEILEN NICHT — KEINE Severity-Farben.
@@ -632,8 +632,10 @@ export default function OutboundView() {
           </div>
         ))}
 
-      {/* Aufzeichnungs-Leiste (integriert): immer sichtbar, mit aufklappbarer
-          Verwaltung. Sitzt über der Steuerleiste der Live-Liste. */}
+      {/* Aufzeichnungs-Karte (integriert), immer sichtbar: EINE selbsterklaerende
+          Karte (Kopf mit Ruhe-/Aktiv-Status + "Neue Aufzeichnung" + Liste). Sie
+          oeffnet Erstellen-/Detail-Masken als Modal-Overlays und meldet die Anzahl
+          laufender Aufzeichnungen ueber onAktivCount nach oben (Banner-Hinweis). */}
       <OutboundRecordingPanel onAktivCount={setAktivAnzahl} />
 
       {/* Steuerleiste: Segmented Control (Gruppierung) + Filter-Schalter. */}

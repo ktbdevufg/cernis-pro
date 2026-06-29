@@ -129,14 +129,25 @@
   border-radius: var(--radius-md);
 }
 
-/* Gruppen-Liste: scrollt intern, füllt die Resthöhe. */
+/* Gruppen-Liste: zweispaltig (zwei gleichbreite Spalten, 12px Projekt-Spacing),
+   scrollt intern, füllt die Resthöhe. Grid statt flex, damit jede Gruppe eine
+   eigene Zelle ist und NICHT zwischen den Spalten zerrissen wird. align-content:
+   start, damit die Gruppen oben beginnen und nicht über die Spaltenhöhe gedehnt
+   werden. Bei schmalem Fenster (≤900px) zurück auf eine Spalte. */
 .outbound__groups {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-content: start;
+  gap: 12px;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+}
+
+@media (max-width: 900px) {
+  .outbound__groups {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* Eine Gruppe: Kopf (Label + Mengen-Zähler) über den Kontakten.

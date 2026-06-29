@@ -957,13 +957,28 @@
         "resume": "Resume",
         "stop": "Stop",
         "loeschen": "Delete",
-        "loeschenFrage": "Really delete?",
+        "loeschenModalText": "Really delete recording “{{label}}”?",
         "loeschenBestaetigen": "Delete",
         "loeschenAbbrechen": "Cancel"
       },
       "konfliktHinweis": "A recording is already running. Only one can record at a time — please stop or pause the running one first.",
       "detailHinweis": "Detailed recording, ends automatically after 24 h.",
-      "befundFolgt": "Findings for “{{label}}” to follow."
+      "befundFolgt": "Findings for “{{label}}” to follow.",
+      "detailTitel": "Recording",
+      "karte": {
+        "titel": "Recordings",
+        "statusRuhe": "No recording active.",
+        "statusAktiv": "Recording: {{label}}"
+      },
+      "details": "Details",
+      "aendern": "Edit",
+      "speichern": "Save",
+      "abbrechen": "Cancel",
+      "gesperrtTitel": "Configuration locked",
+      "gesperrtHinweis": "Mode, depth, interval and duration can only be changed while the recording has not been started yet.",
+      "aenderungFehler": "The change could not be saved.",
+      "nameVergeben": "This name is already taken. Please choose another.",
+      "schliessen": "Close"
     },
     "lookup": {
       "title": "Look up remote endpoint",

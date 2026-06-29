@@ -101,6 +101,49 @@ async function apiPostMitDetail(path) {
   return response.json();
 }
 
+// Lokaler PUT-Helfer fuer das Aendern einer Aufzeichnung (label/purpose immer,
+// Konfig nur im Zustand "created"). EXAKT analog apiPostMitDetail, nur method PUT
+// mit JSON-Body: er reicht bei einem Fehler den Backend-detail-Text durch und
+// erhaelt den HTTP-Status in der ApiError. Bei 409 (RecordingConfigLocked: Konfig-
+// Aenderung ausserhalb "created") bzw. 422 (Fehlwert) unterscheidet die View den
+// ruhigen Hinweis (status === 409/422) von anderen Fehlern. Der generische apiPut
+// aus client.js verwirft den detail-Text -- darum hier ein eigener Pfad, OHNE
+// client.js umzubauen. Bei ok -> geparstes JSON; bei !ok -> ApiError (message =
+// detail-Text bzw. Fallback, status = HTTP-Code); Netzfehler -> ApiError(.., null).
+async function apiPutMitDetail(path, payload) {
+  let response;
+  try {
+    response = await fetch(path, {
+      method: "PUT",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+  } catch (ursache) {
+    // Netzfehler (Server nicht erreichbar, DNS, Abbruch o. Ae.): kein HTTP-Status.
+    throw new ApiError(ursache?.message ?? "Netzwerkfehler", null);
+  }
+
+  if (!response.ok) {
+    // detail aus dem Fehler-Body ziehen (FastAPI: {"detail": "..."}). Schlaegt das
+    // Parsen fehl oder fehlt detail, faellt es auf eine generische Meldung zurueck.
+    let detail = null;
+    try {
+      const body = await response.json();
+      if (body && typeof body.detail === "string") {
+        detail = body.detail;
+      }
+    } catch {
+      // Kein/kein JSON-Body: detail bleibt null -> generische Meldung.
+    }
+    throw new ApiError(detail ?? `Unerwarteter HTTP-Status ${response.status}`, response.status);
+  }
+
+  return response.json();
+}
+
 // ── Mapper (Wire-dict -> View-Objekt) ───────────────────────────────────────
 
 // Ein Aufzeichnungs-Wire-dict (snake_case) -> View-Objekt (camelCase). Zahlen/null
@@ -234,6 +277,28 @@ export async function deleteRecording(id) {
   return apiDelete(`${BASIS}/${id}`);
 }
 
+// PUT "/{id}" -> 200 + geaenderte Aufzeichnung. label/purpose sind in JEDEM Zustand
+// aenderbar; mode/depth/interval_s/max_duration_s NUR im Zustand "created" (sonst
+// 409 RecordingConfigLocked bei einer ABWEICHUNG -- unveraenderte Konfig akzeptiert
+// das Backend in jedem Zustand). Der Body traegt IMMER label,mode,depth,interval_s
+// und (wie createRecording) purpose/max_duration_s nur, wenn definiert -- NIE null
+// senden, wenn der Default greifen soll. apiPutMitDetail reicht bei 409/422 den
+// Backend-detail-Text und den HTTP-Status durch.
+export async function updateRecording(
+  id,
+  { label, purpose, mode, depth, intervalS, maxDurationS },
+) {
+  const payload = { label, mode, depth, interval_s: intervalS };
+  if (purpose !== undefined && purpose !== null) {
+    payload.purpose = purpose;
+  }
+  if (maxDurationS !== undefined && maxDurationS !== null) {
+    payload.max_duration_s = maxDurationS;
+  }
+  const backend = await apiPutMitDetail(`${BASIS}/${id}`, payload);
+  return mappeRecording(backend);
+}
+
 // GET "/{id}/aggregate" -> verdichtete Gegenstellen-Liste (E5b). Wird in E5a noch
 // nicht in der UI genutzt, aber schon hier angelegt. Leer -> [].
 export async function fetchAggregate(id) {
@@ -269,6 +334,7 @@ export default {
   resumeRecording,
   stopRecording,
   deleteRecording,
+  updateRecording,
   fetchAggregate,
   fetchDetail,
 };

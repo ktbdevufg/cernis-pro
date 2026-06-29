@@ -957,13 +957,28 @@
         "resume": "Fortsetzen",
         "stop": "Stopp",
         "loeschen": "Löschen",
-        "loeschenFrage": "Wirklich löschen?",
+        "loeschenModalText": "Aufzeichnung „{{label}}“ wirklich löschen?",
         "loeschenBestaetigen": "Löschen",
         "loeschenAbbrechen": "Abbrechen"
       },
       "konfliktHinweis": "Es läuft bereits eine Aufzeichnung. Es kann immer nur eine gleichzeitig aufzeichnen — bitte die laufende zuerst beenden oder pausieren.",
       "detailHinweis": "Detail-Aufzeichnung, endet automatisch nach 24 h.",
-      "befundFolgt": "Befund zu „{{label}}“ folgt."
+      "befundFolgt": "Befund zu „{{label}}“ folgt.",
+      "detailTitel": "Aufzeichnung",
+      "karte": {
+        "titel": "Aufzeichnungen",
+        "statusRuhe": "Keine Aufzeichnung aktiv.",
+        "statusAktiv": "Zeichnet auf: {{label}}"
+      },
+      "details": "Details",
+      "aendern": "Ändern",
+      "speichern": "Speichern",
+      "abbrechen": "Abbrechen",
+      "gesperrtTitel": "Konfiguration gesperrt",
+      "gesperrtHinweis": "Modus, Tiefe, Intervall und Dauer lassen sich nur ändern, solange die Aufzeichnung noch nicht gestartet wurde.",
+      "aenderungFehler": "Die Änderung konnte nicht gespeichert werden.",
+      "nameVergeben": "Dieser Name ist bereits vergeben. Bitte einen anderen wählen.",
+      "schliessen": "Schließen"
     },
     "lookup": {
       "title": "Gegenstelle nachschlagen",
