@@ -19,7 +19,7 @@ import time
 
 import pytest
 
-from infrastructure.sni.errors import SniError
+from infrastructure.sni.errors import SniError, SniPermissionError
 from infrastructure.sni.sni_sniffer import ScapySniSniffer, _RawHit, _resolve_app_name
 
 
@@ -163,6 +163,38 @@ def test_start_error_raises_sni_error() -> None:
     sniffer = ScapySniSniffer(channel_factory=lambda: fake)
     with pytest.raises(SniError, match="CAP_NET_RAW"):
         sniffer.start(None)
+    assert sniffer.is_running() is False
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Permission denied -- SNI capture requires root or CAP_NET_RAW.",
+        "raw socket not accessible -- requires CAP_NET_RAW",
+    ],
+)
+def test_start_permission_error_raises_subclass(text: str) -> None:
+    """Enthaelt der Helfer-Fehlertext den stabilen Substring ``CAP_NET_RAW``, ist es ein
+    RECHTE-Fehler -> ``SniPermissionError`` (Subklasse von ``SniError``). Der Composition
+    Root mappt die Subklasse auf 403 (nicht 503), damit der Frontend-Rechte-Hinweis
+    greift. Beide Helfer-Varianten des Permission-Falls werden geprueft."""
+    fake = _FakeChannel(start_error=text)
+    sniffer = ScapySniSniffer(channel_factory=lambda: fake)
+    with pytest.raises(SniPermissionError, match="CAP_NET_RAW"):
+        sniffer.start(None)
+    assert sniffer.is_running() is False
+
+
+def test_start_non_permission_error_stays_base_class() -> None:
+    """Ein Start-Fehler OHNE ``CAP_NET_RAW`` (z. B. kaputter Spawn/Geraet weg) ist KEIN
+    Rechte-Fehler -> weiter ``SniError`` und gerade NICHT die ``SniPermissionError``-
+    Subklasse (sonst wuerde der globale Handler ihn faelschlich auf 403 statt 503
+    mappen)."""
+    fake = _FakeChannel(start_error="helper spawn failed -- device gone")
+    sniffer = ScapySniSniffer(channel_factory=lambda: fake)
+    with pytest.raises(SniError) as excinfo:
+        sniffer.start(None)
+    assert not isinstance(excinfo.value, SniPermissionError)
     assert sniffer.is_running() is False
 
 

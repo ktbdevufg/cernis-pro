@@ -43,7 +43,7 @@ import structlog
 
 from domain.sni import ObservedSni, match_snapshot
 from infrastructure.sni.channel import SniffHelperChannel
-from infrastructure.sni.errors import SniError
+from infrastructure.sni.errors import SniError, SniPermissionError
 from infrastructure.sniffd_client import SniHelperClient, helper_entry_exists
 
 _logger = structlog.get_logger(__name__)
@@ -231,6 +231,8 @@ class ScapySniSniffer:
             # Helfer/Spawn meldet einen ehrlichen Fehler -> SniError (kein stiller
             # Fallback, S3). Der globale Handler in app.py macht daraus eine 503.
             self._channel = None
+            if "CAP_NET_RAW" in error:
+                raise SniPermissionError(error)
             raise SniError(error)
         self._channel = channel
 

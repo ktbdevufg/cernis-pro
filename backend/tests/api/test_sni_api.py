@@ -8,7 +8,8 @@ scapy, kein Raw-Socket). Belegt die Wire-Shapes: start ok -> 200, start ohne Rec
 
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 
 from api.sni import (
@@ -21,6 +22,7 @@ from api.sni import (
 from api.sni import router as sni_router
 from application.sni import GetObservedSni, StartSniCapture
 from domain.sni import ObservedSni
+from infrastructure.sni.errors import SniError, SniPermissionError
 
 
 class _FakeSniSniffer:
@@ -122,6 +124,46 @@ def test_sni_start_not_available_403() -> None:
     resp = client.post("/api/sni/start", json={})
     assert resp.status_code == 403
     assert resp.json()["ok"] is False
+
+
+# ── Exception-Handler-Naht (app.py): SniPermissionError -> 403, SniError -> 503 ──
+# Die {ok,error}-Vorab-Naht oben greift mit dem Privilege-Separation-Helfer nicht
+# mehr; der ECHTE Rechte-Fehler kommt erst aus start() heraus. Diese App bildet die
+# beiden Handler aus app.py nach (SniPermissionError-Handler VOR dem generischen
+# SniError-Handler registriert) und belegt das richtige HTTP-Mapping.
+
+
+def _build_handler_client() -> TestClient:
+    app = FastAPI()
+
+    @app.exception_handler(SniPermissionError)
+    async def _on_perm(_request: Request, exc: SniPermissionError) -> JSONResponse:
+        return JSONResponse(status_code=403, content={"detail": str(exc)})
+
+    @app.exception_handler(SniError)
+    async def _on_sni(_request: Request, exc: SniError) -> JSONResponse:
+        return JSONResponse(status_code=503, content={"detail": str(exc)})
+
+    @app.post("/raise")
+    def _raise(kind: str) -> None:
+        if kind == "permission":
+            raise SniPermissionError(
+                "Permission denied -- SNI capture requires root or CAP_NET_RAW."
+            )
+        raise SniError("helper spawn failed -- device gone")
+
+    return TestClient(app, raise_server_exceptions=False)
+
+
+def test_sni_permission_error_maps_to_403() -> None:
+    resp = _build_handler_client().post("/raise", params={"kind": "permission"})
+    assert resp.status_code == 403
+    assert "CAP_NET_RAW" in resp.json()["detail"]
+
+
+def test_sni_generic_error_maps_to_503() -> None:
+    resp = _build_handler_client().post("/raise", params={"kind": "other"})
+    assert resp.status_code == 503
 
 
 # ── stop (idempotent) ────────────────────────────────────────────────────────────

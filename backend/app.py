@@ -634,7 +634,7 @@ from infrastructure.security import (
     TlsInspectorAdapter,
 )
 from infrastructure.settings_repository import CorruptSettingError, SqliteSettingsRepository
-from infrastructure.sni.errors import SniError
+from infrastructure.sni.errors import SniError, SniPermissionError
 from infrastructure.sni.sni_sniffer import ScapySniSniffer
 from infrastructure.traffic_linux import PsutilTrafficAdapter
 from infrastructure.traffic_permission import TrafficPermissionAdapter
@@ -3363,6 +3363,14 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.dependency_overrides[provide_start_sni_uc] = lambda: StartSniCapture(sni_sniffer())
     app.dependency_overrides[provide_sni_running] = lambda: run_sni().is_running
     app.dependency_overrides[provide_get_observed_sni] = lambda: GetObservedSni(sni_sniffer())
+
+    @app.exception_handler(SniPermissionError)
+    async def _on_sni_permission_error(_request: Request, exc: SniPermissionError) -> JSONResponse:
+        # Fehlende Rechte (CAP_NET_RAW/root) -> ehrliche 403 (nicht 503): das Frontend
+        # (api/sni.js) faengt gezielt 403 fuer den Rechte-Hinweis. Muss VOR dem
+        # generischen SniError-Handler stehen.
+        logger.warning("sni_permission_error", error=str(exc))
+        return JSONResponse(status_code=403, content={"detail": str(exc)})
 
     @app.exception_handler(SniError)
     async def _on_sni_error(_request: Request, exc: SniError) -> JSONResponse:

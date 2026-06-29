@@ -15,3 +15,10 @@ gestartet wird.
 
 class SniError(Exception):
     """SNI-Sniff konnte nicht gestartet/fortgesetzt werden (z. B. Rechte/Geraet/scapy)."""
+
+
+class SniPermissionError(SniError):
+    """SNI-Start scheiterte an fehlenden Rechten (CAP_NET_RAW/root). Wird am
+    Composition Root auf HTTP 403 gemappt (nicht 503): die {ok,error}-Vorab-Naht
+    greift mit dem Privilege-Separation-Helfer nicht mehr, der echte Rechte-Fehler
+    kommt erst aus start() heraus."""
