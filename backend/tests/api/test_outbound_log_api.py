@@ -22,6 +22,7 @@ from fastapi.testclient import TestClient
 from api.outbound_log import (
     provide_create_outbound_recording,
     provide_delete_outbound_recording,
+    provide_edit_outbound_recording,
     provide_get_outbound_aggregate,
     provide_get_outbound_detail_range,
     provide_get_outbound_recording,
@@ -35,6 +36,7 @@ from app import create_app
 from application.outbound_log import (
     CreateOutboundRecording,
     DeleteOutboundRecording,
+    EditOutboundRecording,
     GetOutboundAggregate,
     GetOutboundDetailRange,
     GetOutboundRecording,
@@ -70,6 +72,7 @@ def _wired_app(db_path: Path) -> FastAPI:
         rec
     )
     app.dependency_overrides[provide_stop_outbound_recording] = lambda: StopOutboundRecording(rec)
+    app.dependency_overrides[provide_edit_outbound_recording] = lambda: EditOutboundRecording(rec)
     app.dependency_overrides[provide_delete_outbound_recording] = lambda: DeleteOutboundRecording(
         rec, detail, agg
     )
@@ -216,6 +219,71 @@ def test_stop_from_created_returns_409_transition(db_path: Path) -> None:
         rec_id = _create_id(client)
         resp = client.post(f"/api/outbound/recordings/{rec_id}/stop")
     assert resp.status_code == 409
+
+
+# ── PUT (Aendern: label/purpose immer, Konfig nur CREATED) ───────────────────
+
+
+def test_edit_created_returns_200_and_updates_all_fields(db_path: Path) -> None:
+    with TestClient(_wired_app(db_path)) as client:
+        rec_id = _create_id(client)
+        resp = client.put(
+            f"/api/outbound/recordings/{rec_id}",
+            json=_create_body(
+                label="Neu", purpose="Anders", mode="detail", depth="app_resolved", interval_s=300
+            ),
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["label"] == "Neu"
+    assert body["purpose"] == "Anders"
+    assert body["mode"] == "detail"
+    assert body["depth"] == "app_resolved"
+    assert body["interval_s"] == 300
+    assert body["state"] == "created"
+
+
+def test_edit_unknown_returns_404(db_path: Path) -> None:
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.put("/api/outbound/recordings/nope", json=_create_body())
+    assert resp.status_code == 404
+
+
+def test_edit_config_change_on_active_returns_409(db_path: Path) -> None:
+    # Aktive Aufzeichnung: Aenderung eines Konfig-Felds (mode) -> 409 (Lock).
+    with TestClient(_wired_app(db_path)) as client:
+        rec_id = _create_id(client)
+        assert client.post(f"/api/outbound/recordings/{rec_id}/start").status_code == 200
+        resp = client.put(
+            f"/api/outbound/recordings/{rec_id}",
+            json=_create_body(mode="detail"),
+        )
+    assert resp.status_code == 409
+
+
+def test_edit_label_only_on_active_returns_200(db_path: Path) -> None:
+    # Aktive Aufzeichnung: nur label/purpose aendern (Konfig identisch) -> 200, kein Lock.
+    with TestClient(_wired_app(db_path)) as client:
+        rec_id = _create_id(client)
+        assert client.post(f"/api/outbound/recordings/{rec_id}/start").status_code == 200
+        resp = client.put(
+            f"/api/outbound/recordings/{rec_id}",
+            json=_create_body(label="Umbenannt"),
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["label"] == "Umbenannt"
+    assert body["state"] == "active"
+
+
+def test_edit_invalid_mode_returns_422(db_path: Path) -> None:
+    with TestClient(_wired_app(db_path)) as client:
+        rec_id = _create_id(client)
+        resp = client.put(
+            f"/api/outbound/recordings/{rec_id}",
+            json=_create_body(mode="bogus"),
+        )
+    assert resp.status_code == 422
 
 
 # ── DELETE (idempotent) ──────────────────────────────────────────────────────

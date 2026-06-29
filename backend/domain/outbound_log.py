@@ -86,6 +86,24 @@ class InvalidRecordingTransition(Exception):
         self.state = state
 
 
+class RecordingConfigLocked(Exception):
+    """Ein Konfig-Feld soll geaendert werden, die Aufzeichnung ist aber nicht ``CREATED``.
+
+    EIGENSTAENDIG (erbt von ``Exception``, NICHT von ``ValueError`` -- analog
+    ``InvalidRecordingTransition``): die Konfig-Felder ``mode``/``depth``/``interval_s``/
+    ``max_duration_s`` sind nur im Zustand ``CREATED`` aenderbar; jeder Aenderungsversuch
+    aus ``ACTIVE``/``PAUSED``/``FINISHED`` heraus ist gesperrt. Traegt den aktuellen
+    ``state`` im Bezug, damit der Fehler ohne Kontext-Rekonstruktion sprechend ist.
+    """
+
+    def __init__(self, state: "RecordingState") -> None:
+        super().__init__(
+            f"Konfig-Felder nur im Zustand {RecordingState.CREATED.value!r} aenderbar -- "
+            f"aktuell {state.value!r}"
+        )
+        self.state = state
+
+
 @dataclass(frozen=True)
 class OutboundRecording:
     """Eine vom Nutzer gestartete Aussenkontakte-Aufzeichnung (Datentraeger + Identitaet).
@@ -213,6 +231,54 @@ def stop(rec: OutboundRecording) -> OutboundRecording:
     if rec.state not in (RecordingState.ACTIVE, RecordingState.PAUSED):
         raise InvalidRecordingTransition("stop", rec.state)
     return dataclasses.replace(rec, state=RecordingState.FINISHED, effective_start=None)
+
+
+def edit(
+    rec: OutboundRecording,
+    label: str,
+    purpose: str,
+    mode: RecordingMode,
+    depth: DetailDepth,
+    interval_s: int,
+    max_duration_s: int | None,
+) -> OutboundRecording:
+    """Aendert die DEFINITION einer Aufzeichnung -- reine Funktion, kein Zeitbezug.
+
+    Fachregel (WAS, fest entschieden):
+    * ``label``/``purpose`` sind in JEDEM Zustand aenderbar.
+    * Die vier Konfig-Felder ``mode``/``depth``/``interval_s``/``max_duration_s`` sind
+      NUR im Zustand ``CREATED`` aenderbar.
+
+    Ist ``rec.state`` ``CREATED``: alle sechs Felder duerfen sich aendern -- ein neues
+    Objekt via ``dataclasses.replace``; ``__post_init__`` validiert ``interval_s`` und den
+    DETAIL-Deckel automatisch.
+
+    Ist ``rec.state`` NICHT ``CREATED``: weicht eines der vier Konfig-Felder vom Bestand
+    ab, wird ``RecordingConfigLocked`` geworfen (kein stilles Ignorieren). Weichen sie
+    nicht ab, werden nur ``label``/``purpose`` gesetzt (Konfig bleibt unveraendert).
+
+    Zeitfelder (``created_at``/``effective_start``) bleiben unberuehrt -- Aendern ist kein
+    Zustandsuebergang, deshalb auch kein ``now``-Parameter.
+    """
+    if rec.state is RecordingState.CREATED:
+        return dataclasses.replace(
+            rec,
+            label=label,
+            purpose=purpose,
+            mode=mode,
+            depth=depth,
+            interval_s=interval_s,
+            max_duration_s=max_duration_s,
+        )
+    config_changed = (
+        mode is not rec.mode
+        or depth is not rec.depth
+        or interval_s != rec.interval_s
+        or max_duration_s != rec.max_duration_s
+    )
+    if config_changed:
+        raise RecordingConfigLocked(rec.state)
+    return dataclasses.replace(rec, label=label, purpose=purpose)
 
 
 @dataclass(frozen=True)

@@ -16,8 +16,10 @@ from domain.outbound_log import (
     DetailDepth,
     InvalidRecordingTransition,
     OutboundRecording,
+    RecordingConfigLocked,
     RecordingMode,
     RecordingState,
+    edit,
     is_recording_active,
     merge_contact,
     pause,
@@ -260,6 +262,166 @@ def test_transition_fehler_traegt_transition_und_state() -> None:
 def test_invalid_recording_transition_ist_keine_value_error() -> None:
     # Eigenstaendiger Domaenen-Fehler -- NICHT von ValueError abgeleitet.
     assert not issubclass(InvalidRecordingTransition, ValueError)
+
+
+# --- edit ----------------------------------------------------------------------
+
+
+def test_edit_created_aendert_alle_felder() -> None:
+    # Im Zustand CREATED duerfen sich alle sechs Felder aendern.
+    rec = _make(
+        mode=RecordingMode.AGGREGATE,
+        state=RecordingState.CREATED,
+        interval_s=60,
+        max_duration_s=None,
+    )
+    edited = edit(
+        rec,
+        label="Neu",
+        purpose="Anderer Zweck",
+        mode=RecordingMode.DETAIL,
+        depth=DetailDepth.APP_RESOLVED,
+        interval_s=300,
+        max_duration_s=600,
+    )
+    assert edited.label == "Neu"
+    assert edited.purpose == "Anderer Zweck"
+    assert edited.mode is RecordingMode.DETAIL
+    assert edited.depth is DetailDepth.APP_RESOLVED
+    assert edited.interval_s == 300
+    assert edited.max_duration_s == 600
+    # Zeitfelder und Zustand bleiben unberuehrt.
+    assert edited.state is RecordingState.CREATED
+    assert edited.created_at == rec.created_at
+    assert edited.effective_start == rec.effective_start
+    # Original bleibt unveraendert (frozen).
+    assert rec.label == "Testlauf"
+
+
+@pytest.mark.parametrize(
+    "state",
+    [RecordingState.ACTIVE, RecordingState.PAUSED, RecordingState.FINISHED],
+)
+def test_edit_konfig_aenderung_ausserhalb_created_wirft(state: RecordingState) -> None:
+    # Jedes der vier Konfig-Felder loest ausserhalb CREATED den Lock aus.
+    rec = _make(
+        mode=RecordingMode.AGGREGATE,
+        state=state,
+        interval_s=60,
+        max_duration_s=None,
+    )
+    with pytest.raises(RecordingConfigLocked):
+        # mode weicht ab
+        edit(
+            rec,
+            label="Neu",
+            purpose="",
+            mode=RecordingMode.DETAIL,
+            depth=DetailDepth.ANONYMOUS,
+            interval_s=60,
+            max_duration_s=None,
+        )
+    with pytest.raises(RecordingConfigLocked):
+        # interval_s weicht ab
+        edit(
+            rec,
+            label="Neu",
+            purpose="",
+            mode=RecordingMode.AGGREGATE,
+            depth=DetailDepth.ANONYMOUS,
+            interval_s=300,
+            max_duration_s=None,
+        )
+    with pytest.raises(RecordingConfigLocked):
+        # depth weicht ab
+        edit(
+            rec,
+            label="Neu",
+            purpose="",
+            mode=RecordingMode.AGGREGATE,
+            depth=DetailDepth.APP_RESOLVED,
+            interval_s=60,
+            max_duration_s=None,
+        )
+    with pytest.raises(RecordingConfigLocked):
+        # max_duration_s weicht ab
+        edit(
+            rec,
+            label="Neu",
+            purpose="",
+            mode=RecordingMode.AGGREGATE,
+            depth=DetailDepth.ANONYMOUS,
+            interval_s=60,
+            max_duration_s=600,
+        )
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        RecordingState.CREATED,
+        RecordingState.ACTIVE,
+        RecordingState.PAUSED,
+        RecordingState.FINISHED,
+    ],
+)
+def test_edit_label_purpose_only_in_jedem_state_erlaubt(state: RecordingState) -> None:
+    # Nur label/purpose aendern -- Konfig identisch -> kein Lock, in JEDEM Zustand.
+    rec = _make(
+        mode=RecordingMode.AGGREGATE,
+        state=state,
+        interval_s=60,
+        max_duration_s=None,
+    )
+    edited = edit(
+        rec,
+        label="Geaendert",
+        purpose="Neuer Zweck",
+        mode=rec.mode,
+        depth=rec.depth,
+        interval_s=rec.interval_s,
+        max_duration_s=rec.max_duration_s,
+    )
+    assert edited.label == "Geaendert"
+    assert edited.purpose == "Neuer Zweck"
+    assert edited.state is state
+    # Konfig unveraendert.
+    assert edited.mode is rec.mode
+    assert edited.depth is rec.depth
+    assert edited.interval_s == rec.interval_s
+    assert edited.max_duration_s == rec.max_duration_s
+
+
+def test_edit_created_ungueltiges_interval_wirft_value_error() -> None:
+    # Bei CREATED greift die ``__post_init__``-Validierung des neuen Objekts.
+    rec = _make(state=RecordingState.CREATED, interval_s=60)
+    with pytest.raises(ValueError):
+        edit(
+            rec,
+            label="Neu",
+            purpose="",
+            mode=RecordingMode.AGGREGATE,
+            depth=DetailDepth.ANONYMOUS,
+            interval_s=42,  # nicht in ALLOWED_INTERVALS
+            max_duration_s=None,
+        )
+
+
+def test_recording_config_locked_traegt_state_und_ist_keine_value_error() -> None:
+    rec = _make(state=RecordingState.ACTIVE)
+    with pytest.raises(RecordingConfigLocked) as excinfo:
+        edit(
+            rec,
+            label="Neu",
+            purpose="",
+            mode=RecordingMode.DETAIL,
+            depth=DetailDepth.ANONYMOUS,
+            interval_s=60,
+            max_duration_s=None,
+        )
+    assert excinfo.value.state is RecordingState.ACTIVE
+    # Eigenstaendiger Domaenen-Fehler -- NICHT von ValueError abgeleitet.
+    assert not issubclass(RecordingConfigLocked, ValueError)
 
 
 # --- merge_contact -------------------------------------------------------------

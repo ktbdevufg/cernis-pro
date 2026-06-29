@@ -11,6 +11,7 @@ from application.outbound_log.recorder import (
 from application.outbound_log.use_cases import (
     CreateOutboundRecording,
     DeleteOutboundRecording,
+    EditOutboundRecording,
     EnforceOutboundDetailRetention,
     GetOutboundAggregate,
     GetOutboundDetailRange,
@@ -22,17 +23,19 @@ from application.outbound_log.use_cases import (
     StopOutboundRecording,
 )
 
-# Re-Export der Domaenen-Exception, damit der api-Rand sie fangen kann, OHNE
+# Re-Export der Domaenen-Exceptions, damit der api-Rand sie fangen kann, OHNE
 # ``domain`` direkt zu importieren (import-linter: api -> nur application). Die
-# Lifecycle-Use-Cases reichen ``InvalidRecordingTransition`` aus der Domaene
-# unveraendert durch; der Router mappt sie auf 409 -- darum braucht er den Namen aus
+# Use-Cases reichen ``InvalidRecordingTransition`` (falscher Zustandsuebergang) und
+# ``RecordingConfigLocked`` (Konfig-Aenderung ausserhalb CREATED) aus der Domaene
+# unveraendert durch; der Router mappt beide auf 409 -- darum braucht er die Namen aus
 # dieser Schicht (Muster ``InvalidTaskTransition`` der monitoring-Schicht).
-from domain.outbound_log import InvalidRecordingTransition
+from domain.outbound_log import InvalidRecordingTransition, RecordingConfigLocked
 
 __all__ = [
     "ContactSnapshotProvider",
     "CreateOutboundRecording",
     "DeleteOutboundRecording",
+    "EditOutboundRecording",
     "EnforceOutboundDetailRetention",
     "GetOutboundAggregate",
     "GetOutboundDetailRange",
@@ -40,6 +43,7 @@ __all__ = [
     "InvalidRecordingTransition",
     "ListOutboundRecordings",
     "PauseOutboundRecording",
+    "RecordingConfigLocked",
     "RecordingConflict",
     "RecordingNotFound",
     "ResumeOutboundRecording",

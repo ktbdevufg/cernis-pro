@@ -42,12 +42,14 @@ from pydantic import BaseModel
 from application.outbound_log import (
     CreateOutboundRecording,
     DeleteOutboundRecording,
+    EditOutboundRecording,
     GetOutboundAggregate,
     GetOutboundDetailRange,
     GetOutboundRecording,
     InvalidRecordingTransition,
     ListOutboundRecordings,
     PauseOutboundRecording,
+    RecordingConfigLocked,
     RecordingConflict,
     RecordingNotFound,
     ResumeOutboundRecording,
@@ -82,6 +84,10 @@ def provide_stop_outbound_recording() -> StopOutboundRecording:
     raise NotImplementedError("StopOutboundRecording wird in app.py verdrahtet")
 
 
+def provide_edit_outbound_recording() -> EditOutboundRecording:
+    raise NotImplementedError("EditOutboundRecording wird in app.py verdrahtet")
+
+
 def provide_delete_outbound_recording() -> DeleteOutboundRecording:
     raise NotImplementedError("DeleteOutboundRecording wird in app.py verdrahtet")
 
@@ -112,6 +118,23 @@ class CreateRecordingBody(BaseModel):
     Enum-Hebung macht der Use-Case (422 bei Fehlwert). ``interval_s`` Default 60
     (Domaenen-Default), ``max_duration_s`` optional (nur DETAIL-relevant; AGGREGATE
     erzwingt der Use-Case ohnehin auf ``None``).
+    """
+
+    label: str
+    purpose: str = ""
+    mode: str
+    depth: str
+    interval_s: int = 60
+    max_duration_s: int | None = None
+
+
+class EditRecordingBody(BaseModel):
+    """Aenderungs-Body einer Aufzeichnung -- gleiche Felder wie ``CreateRecordingBody``.
+
+    ``label``/``purpose`` sind in jedem Zustand aenderbar; die Konfig-Felder
+    ``mode``/``depth``/``interval_s``/``max_duration_s`` nur im Zustand CREATED (sonst
+    409 via ``RecordingConfigLocked``). ``mode``/``depth`` als rohe ``str`` (Enum-Hebung
+    im Use-Case, 422 bei Fehlwert).
     """
 
     label: str
@@ -297,6 +320,39 @@ def stop_recording(
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except InvalidRecordingTransition as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return _recording_to_dict(rec)
+
+
+@router.put("/{recording_id}")
+def edit_recording(
+    recording_id: str,
+    body: EditRecordingBody,
+    edit_uc: Annotated[EditOutboundRecording, Depends(provide_edit_outbound_recording)],
+) -> dict[str, Any]:
+    """Aendert eine Aufzeichnungs-DEFINITION. 404/409/422 bei Fehler.
+
+    ``label``/``purpose`` sind in jedem Zustand aenderbar; die vier Konfig-Felder nur im
+    Zustand CREATED. ``RecordingNotFound`` -> 404, ``RecordingConfigLocked`` -> 409
+    (Konfig-Aenderung ausserhalb CREATED), ``ValueError`` -> 422 (Enum-Hebung /
+    Domaenen-Invarianten: ungueltiger mode/depth/interval_s/DETAIL-Deckel).
+    """
+    try:
+        rec = edit_uc(
+            recording_id=recording_id,
+            label=body.label,
+            purpose=body.purpose,
+            mode=body.mode,
+            depth=body.depth,
+            interval_s=body.interval_s,
+            max_duration_s=body.max_duration_s,
+        )
+    except RecordingNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except RecordingConfigLocked as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ValueError as exc:
+        # 422 als nacktes Literal (Bestandsmuster wie ``create_recording``).
+        raise HTTPException(422, detail=str(exc)) from exc
     return _recording_to_dict(rec)
 
 

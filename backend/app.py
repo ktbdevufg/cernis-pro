@@ -196,6 +196,7 @@ from api.outbound import router as outbound_router
 from api.outbound_log import (
     provide_create_outbound_recording,
     provide_delete_outbound_recording,
+    provide_edit_outbound_recording,
     provide_get_outbound_aggregate,
     provide_get_outbound_detail_range,
     provide_get_outbound_recording,
@@ -428,6 +429,7 @@ from application.outbound import BuildOutboundContacts, RawConnection
 from application.outbound_log import (
     CreateOutboundRecording,
     DeleteOutboundRecording,
+    EditOutboundRecording,
     GetOutboundAggregate,
     GetOutboundDetailRange,
     GetOutboundRecording,
@@ -3748,6 +3750,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         outbound_recording_repository()
     )
     app.dependency_overrides[provide_stop_outbound_recording] = lambda: StopOutboundRecording(
+        outbound_recording_repository()
+    )
+    app.dependency_overrides[provide_edit_outbound_recording] = lambda: EditOutboundRecording(
         outbound_recording_repository()
     )
     app.dependency_overrides[provide_delete_outbound_recording] = lambda: DeleteOutboundRecording(

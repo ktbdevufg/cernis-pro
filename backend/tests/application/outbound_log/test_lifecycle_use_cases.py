@@ -22,7 +22,9 @@ import pytest
 from application.outbound_log import (
     CreateOutboundRecording,
     DeleteOutboundRecording,
+    EditOutboundRecording,
     PauseOutboundRecording,
+    RecordingConfigLocked,
     RecordingConflict,
     RecordingNotFound,
     ResumeOutboundRecording,
@@ -364,6 +366,124 @@ def test_stop_falscher_zustand_wirft_transition() -> None:
     repo = _FakeRecordingRepo([_recording("r1", state=RecordingState.CREATED)])
     with pytest.raises(InvalidRecordingTransition):
         StopOutboundRecording(repo)("r1")
+
+
+# ── EditOutboundRecording ───────────────────────────────────────────────────
+
+
+def test_edit_created_aendert_alle_felder_und_speichert() -> None:
+    repo = _FakeRecordingRepo([_recording("r1", state=RecordingState.CREATED)])
+    edited = EditOutboundRecording(repo)(
+        recording_id="r1",
+        label="Neu",
+        purpose="Anderer Zweck",
+        mode="detail",
+        depth="app_resolved",
+        interval_s=300,
+        max_duration_s=600,
+    )
+    assert edited.label == "Neu"
+    assert edited.purpose == "Anderer Zweck"
+    assert edited.mode is RecordingMode.DETAIL
+    assert edited.depth is DetailDepth.APP_RESOLVED
+    assert edited.interval_s == 300
+    assert edited.max_duration_s == 600
+    assert edited.state is RecordingState.CREATED
+    assert repo.saved == [edited]
+
+
+def test_edit_unbekannt_wirft_not_found() -> None:
+    repo = _FakeRecordingRepo()
+    with pytest.raises(RecordingNotFound) as exc:
+        EditOutboundRecording(repo)(
+            recording_id="nope",
+            label="L",
+            purpose="P",
+            mode="aggregate",
+            depth="anonymous",
+            interval_s=60,
+        )
+    assert exc.value.recording_id == "nope"
+    assert repo.saved == []
+
+
+def test_edit_created_aggregate_erzwingt_max_duration_none() -> None:
+    # Deckungsgleich zu Create: AGGREGATE zwingt einen Wert auf None.
+    repo = _FakeRecordingRepo([_recording("r1", state=RecordingState.CREATED)])
+    edited = EditOutboundRecording(repo)(
+        recording_id="r1",
+        label="L",
+        purpose="P",
+        mode="aggregate",
+        depth="anonymous",
+        interval_s=60,
+        max_duration_s=3600,
+    )
+    assert edited.max_duration_s is None
+
+
+def test_edit_created_detail_ohne_max_duration_setzt_24h_deckel() -> None:
+    repo = _FakeRecordingRepo([_recording("r1", state=RecordingState.CREATED)])
+    edited = EditOutboundRecording(repo)(
+        recording_id="r1",
+        label="L",
+        purpose="P",
+        mode="detail",
+        depth="anonymous",
+        interval_s=60,
+    )
+    assert edited.max_duration_s == MAX_DETAIL_DURATION_S
+
+
+def test_edit_fehl_mode_wirft_value_error() -> None:
+    repo = _FakeRecordingRepo([_recording("r1", state=RecordingState.CREATED)])
+    with pytest.raises(ValueError):
+        EditOutboundRecording(repo)(
+            recording_id="r1",
+            label="L",
+            purpose="P",
+            mode="unsinn",  # kein gueltiges RecordingMode-Vokabular
+            depth="anonymous",
+            interval_s=60,
+        )
+    assert repo.saved == []
+
+
+def test_edit_konfig_lock_propagiert_aus_aktiver() -> None:
+    # AGGREGATE/ACTIVE; mode->detail weicht ab -> RecordingConfigLocked propagiert.
+    repo = _FakeRecordingRepo(
+        [_recording("r1", state=RecordingState.ACTIVE, mode=RecordingMode.AGGREGATE)]
+    )
+    with pytest.raises(RecordingConfigLocked):
+        EditOutboundRecording(repo)(
+            recording_id="r1",
+            label="L",
+            purpose="P",
+            mode="detail",
+            depth="anonymous",
+            interval_s=60,
+        )
+    assert repo.saved == []
+
+
+def test_edit_label_purpose_only_in_aktiver_erlaubt() -> None:
+    # Konfig identisch (AGGREGATE, interval 60, max None) -> kein Lock trotz ACTIVE.
+    repo = _FakeRecordingRepo(
+        [_recording("r1", state=RecordingState.ACTIVE, mode=RecordingMode.AGGREGATE)]
+    )
+    edited = EditOutboundRecording(repo)(
+        recording_id="r1",
+        label="Geaendert",
+        purpose="Neuer Zweck",
+        mode="aggregate",
+        depth="anonymous",
+        interval_s=60,
+        max_duration_s=None,
+    )
+    assert edited.label == "Geaendert"
+    assert edited.purpose == "Neuer Zweck"
+    assert edited.state is RecordingState.ACTIVE
+    assert repo.saved == [edited]
 
 
 # ── DeleteOutboundRecording ─────────────────────────────────────────────────

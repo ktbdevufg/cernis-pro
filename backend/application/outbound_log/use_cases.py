@@ -29,6 +29,9 @@ from domain.outbound_log import (
     RecordingState,
 )
 from domain.outbound_log import (
+    edit as domain_edit,
+)
+from domain.outbound_log import (
     pause as domain_pause,
 )
 from domain.outbound_log import (
@@ -219,6 +222,65 @@ class StopOutboundRecording:
         finished = domain_stop(recording)
         self._repo.save(finished)
         return finished
+
+
+class EditOutboundRecording:
+    """Aendert die DEFINITION einer Aufzeichnung (``label``/``purpose`` immer, Konfig nur CREATED).
+
+    ``get`` (``None`` -> ``RecordingNotFound``), dann ``str`` -> Enum-Hebung HIER
+    (``RecordingMode(mode)``/``DetailDepth(depth)``; Fehlwert wirft ``ValueError``, den
+    der api-Rand auf 422 mappt -- EXAKT wie ``CreateOutboundRecording``). Die
+    AGGREGATE-Default-Regel ist deckungsgleich zu Create: ``AGGREGATE`` zwingt
+    ``max_duration_s`` auf ``None`` (kein Zeitlimit), ``DETAIL`` ohne Wert bekommt den
+    24-h-Deckel ``MAX_DETAIL_DURATION_S`` -- so sind Edit und Create konsistent.
+
+    Danach Domaenen-``edit``: ``label``/``purpose`` sind in jedem Zustand aenderbar, die
+    vier Konfig-Felder nur im Zustand ``CREATED``. Weicht ein Konfig-Feld aus einem
+    anderen Zustand ab, propagiert ``RecordingConfigLocked`` (NICHT gefangen, der api-Rand
+    mappt es auf 409). Die Domaenen-``__post_init__`` validiert ``interval_s``/Deckel
+    (``ValueError`` -> 422). Schliesslich ``save`` -> Rueckgabe.
+    """
+
+    def __init__(self, repo: OutboundRecordingRepository) -> None:
+        self._repo = repo
+
+    def __call__(
+        self,
+        recording_id: str,
+        label: str,
+        purpose: str,
+        mode: str,
+        depth: str,
+        interval_s: int,
+        max_duration_s: int | None = None,
+    ) -> OutboundRecording:
+        recording = self._repo.get(recording_id)
+        if recording is None:
+            raise RecordingNotFound(recording_id)
+        # ``str`` -> Enum-Hebung autoritativ HIER (Muster ``CreateOutboundRecording``);
+        # ein Fehlwert wirft ``ValueError``, den der api-Rand auf 422 mappt.
+        mode_enum = RecordingMode(mode)
+        depth_enum = DetailDepth(depth)
+        if mode_enum is RecordingMode.AGGREGATE:
+            # AGGREGATE kennt kein Zeitlimit -- faelschlich uebergebenen Wert hart auf
+            # None zwingen (deckungsgleich zu Create).
+            effective_max_duration_s: int | None = None
+        elif max_duration_s is None:
+            # DETAIL ohne Vorgabe -> voller 24-h-Deckel als Default.
+            effective_max_duration_s = MAX_DETAIL_DURATION_S
+        else:
+            effective_max_duration_s = max_duration_s
+        edited = domain_edit(
+            recording,
+            label=label,
+            purpose=purpose,
+            mode=mode_enum,
+            depth=depth_enum,
+            interval_s=interval_s,
+            max_duration_s=effective_max_duration_s,
+        )
+        self._repo.save(edited)
+        return edited
 
 
 class DeleteOutboundRecording:
