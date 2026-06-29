@@ -697,6 +697,10 @@ class ReportlabRenderer:
                 fontSize=8,
                 textColor=_TEXT,
                 leading=10,
+                # CJK erlaubt reportlab den Umbruch INNERHALB langer zusammenhaengender
+                # Tokens (langer Geraetename, MAC-Adresse) -- sauberer Zeichenumbruch statt
+                # hartem Abschneiden am Spaltenrand; normaler Text bricht weiter am Wort.
+                wordWrap="CJK",
             ),
         }
 
