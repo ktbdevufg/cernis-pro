@@ -45,3 +45,20 @@ class RecordingConflict(Exception):
             f"Es laeuft bereits die Aufzeichnung {running_id!r} (host-weit nur eine aktiv)"
         )
         self.running_id = running_id
+
+
+class RecordingNameTaken(Exception):
+    """Der (getrimmte) Aufzeichnungs-NAME ist bereits von einer ANDEREN Aufzeichnung belegt.
+
+    Ein ``label`` darf host-weit nicht doppelt vergeben werden -- verglichen wird
+    GETRIMMT + CASE-SENSITIV (``"test3"`` und ``"test3 "`` gelten als gleich, ``"test3"``
+    und ``"Test3"`` sind erlaubt). Die Belegung ist ZUSTANDSUNABHAENGIG: solange eine
+    Aufzeichnung existiert (auch ``FINISHED``), ist ihr Name belegt -- erst das Loeschen
+    gibt ihn frei. Geworfen beim Anlegen (``CreateOutboundRecording``) und beim Umbenennen
+    (``EditOutboundRecording``), wenn ``_name_taken`` einen Treffer findet. Der api-Rand
+    (E4) mappt ihn auf 409. Traegt den kollidierenden (rohen) ``label`` im Bezug.
+    """
+
+    def __init__(self, label: str) -> None:
+        super().__init__(f"Der Aufzeichnungs-Name {label!r} ist bereits vergeben")
+        self.label = label

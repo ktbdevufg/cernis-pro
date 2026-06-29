@@ -29,7 +29,9 @@ Domaenen-Exception ueber den application-Ring RE-EXPORTIERT und dort DIREKT gefa
 hier (``from application.outbound_log import InvalidRecordingTransition``), darum bleibt
 der import-linter-Contract gewahrt (der Name kommt aus ``application``, nicht aus
 ``domain``). Zusaetzlich beim Create: ``ValueError`` (Enum-Hebung / Domaenen-Invarianten:
-ungueltiger mode/depth/interval_s/DETAIL-Deckel) -> 422.
+ungueltiger mode/depth/interval_s/DETAIL-Deckel) -> 422. Beim Anlegen UND Umbenennen:
+``RecordingNameTaken`` -> 409 (der getrimmte Name ist bereits von einer anderen
+Aufzeichnung belegt -- zustandsunabhaengig).
 """
 
 import time
@@ -51,6 +53,7 @@ from application.outbound_log import (
     PauseOutboundRecording,
     RecordingConfigLocked,
     RecordingConflict,
+    RecordingNameTaken,
     RecordingNotFound,
     ResumeOutboundRecording,
     StartOutboundRecording,
@@ -227,6 +230,9 @@ def create_recording(
             now=time.time(),
             max_duration_s=body.max_duration_s,
         )
+    except RecordingNameTaken as exc:
+        # Name bereits vergeben (getrimmt) -> 409, mit dem Namen im Bezug.
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except ValueError as exc:
         # 422 als nacktes Literal (Bestandsmuster ``api/monitoring.py``); das
         # ``status.HTTP_422_*``-Symbol ist in starlette inzwischen deprecation-markiert.
@@ -332,9 +338,10 @@ def edit_recording(
     """Aendert eine Aufzeichnungs-DEFINITION. 404/409/422 bei Fehler.
 
     ``label``/``purpose`` sind in jedem Zustand aenderbar; die vier Konfig-Felder nur im
-    Zustand CREATED. ``RecordingNotFound`` -> 404, ``RecordingConfigLocked`` -> 409
-    (Konfig-Aenderung ausserhalb CREATED), ``ValueError`` -> 422 (Enum-Hebung /
-    Domaenen-Invarianten: ungueltiger mode/depth/interval_s/DETAIL-Deckel).
+    Zustand CREATED. ``RecordingNotFound`` -> 404, ``RecordingConfigLocked`` /
+    ``RecordingNameTaken`` -> 409 (Konfig-Aenderung ausserhalb CREATED bzw. Name bereits
+    vergeben), ``ValueError`` -> 422 (Enum-Hebung / Domaenen-Invarianten: ungueltiger
+    mode/depth/interval_s/DETAIL-Deckel).
     """
     try:
         rec = edit_uc(
@@ -348,7 +355,7 @@ def edit_recording(
         )
     except RecordingNotFound as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except RecordingConfigLocked as exc:
+    except (RecordingConfigLocked, RecordingNameTaken) as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except ValueError as exc:
         # 422 als nacktes Literal (Bestandsmuster wie ``create_recording``).

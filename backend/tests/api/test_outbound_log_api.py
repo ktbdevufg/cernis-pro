@@ -145,6 +145,29 @@ def test_create_invalid_interval_returns_422(db_path: Path) -> None:
     assert resp.status_code == 422
 
 
+def test_create_duplicate_name_returns_409(db_path: Path) -> None:
+    # Getrimmt + zustandsunabhaengig: ein bereits vergebener Name -> 409.
+    with TestClient(_wired_app(db_path)) as client:
+        assert (
+            client.post("/api/outbound/recordings", json=_create_body(label="name")).status_code
+            == 201
+        )
+        resp = client.post("/api/outbound/recordings", json=_create_body(label="name "))
+    assert resp.status_code == 409
+    assert "name" in resp.json()["detail"]
+
+
+def test_create_case_variant_name_returns_201(db_path: Path) -> None:
+    # Case-sensitiv: "Test3" ist trotz vorhandenem "test3" erlaubt.
+    with TestClient(_wired_app(db_path)) as client:
+        assert (
+            client.post("/api/outbound/recordings", json=_create_body(label="test3")).status_code
+            == 201
+        )
+        resp = client.post("/api/outbound/recordings", json=_create_body(label="Test3"))
+    assert resp.status_code == 201
+
+
 # ── GET (Liste + Einzel-404) ─────────────────────────────────────────────────
 
 
@@ -274,6 +297,32 @@ def test_edit_label_only_on_active_returns_200(db_path: Path) -> None:
     body = resp.json()
     assert body["label"] == "Umbenannt"
     assert body["state"] == "active"
+
+
+def test_edit_rename_to_existing_returns_409(db_path: Path) -> None:
+    # Umbenennen auf einen von einer ANDEREN Aufzeichnung belegten Namen -> 409.
+    with TestClient(_wired_app(db_path)) as client:
+        _create_id(client, label="erster")
+        second = _create_id(client, label="zweiter")
+        resp = client.put(
+            f"/api/outbound/recordings/{second}",
+            json=_create_body(label="erster"),
+        )
+    assert resp.status_code == 409
+
+
+def test_edit_keep_own_name_returns_200(db_path: Path) -> None:
+    # Eigener Name unveraendert (exclude_id greift) -> 200, kein Konflikt mit sich selbst.
+    with TestClient(_wired_app(db_path)) as client:
+        rec_id = _create_id(client, label="behalten")
+        resp = client.put(
+            f"/api/outbound/recordings/{rec_id}",
+            json=_create_body(label="behalten", purpose="Neuer Zweck"),
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["label"] == "behalten"
+    assert body["purpose"] == "Neuer Zweck"
 
 
 def test_edit_invalid_mode_returns_422(db_path: Path) -> None:

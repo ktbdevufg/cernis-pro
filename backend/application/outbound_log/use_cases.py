@@ -18,7 +18,11 @@ Aufzeichnungen sind anlegbar, der Konflikt entsteht erst, wenn eine zweite aktiv
 werden will. Geprueft via ``_find_active_recording`` gegen ``list_all``.
 """
 
-from application.outbound_log.errors import RecordingConflict, RecordingNotFound
+from application.outbound_log.errors import (
+    RecordingConflict,
+    RecordingNameTaken,
+    RecordingNotFound,
+)
 from domain.outbound_log import (
     MAX_DETAIL_DURATION_S,
     AggregatedContact,
@@ -65,6 +69,19 @@ def _find_active_recording(others: list[OutboundRecording], exclude_id: str | No
     return None
 
 
+def _name_taken(others: list[OutboundRecording], label: str, exclude_id: str | None) -> bool:
+    """``True``, wenn eine ANDERE Aufzeichnung den (getrimmten) ``label`` belegt.
+
+    Namens-Regel: GETRIMMT + CASE-SENSITIV -- ``label.strip() == other.label.strip()``
+    (``"test3"`` und ``"test3 "`` kollidieren, ``"test3"`` und ``"Test3"`` nicht). Die
+    Belegung ist ZUSTANDSUNABHAENGIG (auch ``FINISHED`` blockiert) -- darum KEIN
+    ``state``-Filter, anders als ``_find_active_recording``. ``exclude_id`` klammert die
+    eigene Aufzeichnung aus, damit das Umbenennen nicht mit sich selbst kollidiert.
+    """
+    target = label.strip()
+    return any(other.id != exclude_id and other.label.strip() == target for other in others)
+
+
 class CreateOutboundRecording:
     """Legt eine neue Aufzeichnung im Zustand ``CREATED`` an (reine Anlage).
 
@@ -102,6 +119,10 @@ class CreateOutboundRecording:
         now: float,
         max_duration_s: int | None = None,
     ) -> OutboundRecording:
+        # Namens-Eindeutigkeit VOR dem Anlegen pruefen (getrimmt, case-sensitiv,
+        # zustandsunabhaengig) -- bei Kollision ``RecordingNameTaken`` (409 am Rand).
+        if _name_taken(self._repo.list_all(), label, exclude_id=None):
+            raise RecordingNameTaken(label)
         # ``str`` -> Enum-Hebung autoritativ HIER (Muster ``CaptureMode(...)``); ein
         # Fehlwert wirft ``ValueError``, den der api-Rand auf 422 mappt.
         mode_enum = RecordingMode(mode)
@@ -257,6 +278,11 @@ class EditOutboundRecording:
         recording = self._repo.get(recording_id)
         if recording is None:
             raise RecordingNotFound(recording_id)
+        # Namens-Eindeutigkeit pruefen (getrimmt, case-sensitiv, zustandsunabhaengig);
+        # ``exclude_id`` klammert die eigene Aufzeichnung aus -- das Behalten des eigenen
+        # Namens ist erlaubt. Kollision mit einer ANDEREN -> ``RecordingNameTaken`` (409).
+        if _name_taken(self._repo.list_all(), label, exclude_id=recording_id):
+            raise RecordingNameTaken(label)
         # ``str`` -> Enum-Hebung autoritativ HIER (Muster ``CreateOutboundRecording``);
         # ein Fehlwert wirft ``ValueError``, den der api-Rand auf 422 mappt.
         mode_enum = RecordingMode(mode)

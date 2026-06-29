@@ -2,6 +2,7 @@
 
 from application.outbound_log.errors import (
     RecordingConflict,
+    RecordingNameTaken,
     RecordingNotFound,
 )
 from application.outbound_log.recorder import (
@@ -45,6 +46,7 @@ __all__ = [
     "PauseOutboundRecording",
     "RecordingConfigLocked",
     "RecordingConflict",
+    "RecordingNameTaken",
     "RecordingNotFound",
     "ResumeOutboundRecording",
     "RunOutboundRecorder",

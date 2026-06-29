@@ -26,6 +26,7 @@ from application.outbound_log import (
     PauseOutboundRecording,
     RecordingConfigLocked,
     RecordingConflict,
+    RecordingNameTaken,
     RecordingNotFound,
     ResumeOutboundRecording,
     StartOutboundRecording,
@@ -151,6 +152,27 @@ def _recording(
     )
 
 
+def _named_recording(
+    recording_id: str = "r1",
+    *,
+    label: str = "L",
+    state: RecordingState = RecordingState.CREATED,
+) -> OutboundRecording:
+    """Wie ``_recording``, aber mit frei waehlbarem ``label`` (fuer die Namens-Regel)."""
+    return OutboundRecording(
+        id=recording_id,
+        label=label,
+        purpose="P",
+        mode=RecordingMode.AGGREGATE,
+        depth=DetailDepth.ANONYMOUS,
+        state=state,
+        interval_s=60,
+        created_at=1000.0,
+        effective_start=None if state is RecordingState.CREATED else 1000.0,
+        max_duration_s=None,
+    )
+
+
 # ── CreateOutboundRecording ─────────────────────────────────────────────────
 
 
@@ -245,6 +267,57 @@ def test_create_detail_max_duration_ueber_deckel_wirft_value_error() -> None:
             interval_s=60,
             now=1.0,
             max_duration_s=MAX_DETAIL_DURATION_S + 1,
+        )
+    assert repo.saved == []
+
+
+def test_create_duplikat_name_getrimmt_wirft_name_taken() -> None:
+    # Bestehende Aufzeichnung belegt "name " -- ein neuer "name" kollidiert (getrimmt).
+    repo = _FakeRecordingRepo([_named_recording("r1", label="name ")])
+    with pytest.raises(RecordingNameTaken) as exc:
+        CreateOutboundRecording(repo)(
+            recording_id="r2",
+            label="name",
+            purpose="P",
+            mode="aggregate",
+            depth="anonymous",
+            interval_s=60,
+            now=1.0,
+        )
+    assert exc.value.label == "name"
+    assert repo.saved == []
+
+
+def test_create_erlaubt_gross_klein_variante() -> None:
+    # "test3" belegt -- "Test3" ist case-sensitiv ERLAUBT (kein Fehler).
+    repo = _FakeRecordingRepo([_named_recording("r1", label="test3")])
+    rec = CreateOutboundRecording(repo)(
+        recording_id="r2",
+        label="Test3",
+        purpose="P",
+        mode="aggregate",
+        depth="anonymous",
+        interval_s=60,
+        now=1.0,
+    )
+    assert rec.label == "Test3"
+    assert repo.saved == [rec]
+
+
+def test_create_duplikat_blockiert_auch_bei_finished() -> None:
+    # Zustandsunabhaengig: ein FINISHED-Name blockiert ebenso.
+    repo = _FakeRecordingRepo(
+        [_named_recording("r1", label="belegt", state=RecordingState.FINISHED)]
+    )
+    with pytest.raises(RecordingNameTaken):
+        CreateOutboundRecording(repo)(
+            recording_id="r2",
+            label="belegt",
+            purpose="P",
+            mode="aggregate",
+            depth="anonymous",
+            interval_s=60,
+            now=1.0,
         )
     assert repo.saved == []
 
@@ -484,6 +557,63 @@ def test_edit_label_purpose_only_in_aktiver_erlaubt() -> None:
     assert edited.purpose == "Neuer Zweck"
     assert edited.state is RecordingState.ACTIVE
     assert repo.saved == [edited]
+
+
+def test_edit_kollision_mit_anderer_wirft_name_taken() -> None:
+    # "fremd" ist von r2 belegt -- r1 darf nicht darauf umbenannt werden.
+    repo = _FakeRecordingRepo(
+        [
+            _named_recording("r1", label="eigen"),
+            _named_recording("r2", label="fremd"),
+        ]
+    )
+    with pytest.raises(RecordingNameTaken) as exc:
+        EditOutboundRecording(repo)(
+            recording_id="r1",
+            label="fremd",
+            purpose="P",
+            mode="aggregate",
+            depth="anonymous",
+            interval_s=60,
+        )
+    assert exc.value.label == "fremd"
+    assert repo.saved == []
+
+
+def test_edit_eigenen_namen_behalten_ist_erlaubt() -> None:
+    # exclude_id greift: der eigene Name kollidiert nicht mit sich selbst.
+    repo = _FakeRecordingRepo([_named_recording("r1", label="eigen")])
+    edited = EditOutboundRecording(repo)(
+        recording_id="r1",
+        label="eigen",
+        purpose="Neuer Zweck",
+        mode="aggregate",
+        depth="anonymous",
+        interval_s=60,
+    )
+    assert edited.label == "eigen"
+    assert edited.purpose == "Neuer Zweck"
+    assert repo.saved == [edited]
+
+
+def test_edit_kollision_getrimmt() -> None:
+    # Trim greift auch beim Umbenennen: "name" kollidiert mit dem belegten "name ".
+    repo = _FakeRecordingRepo(
+        [
+            _named_recording("r1", label="anders"),
+            _named_recording("r2", label="name "),
+        ]
+    )
+    with pytest.raises(RecordingNameTaken):
+        EditOutboundRecording(repo)(
+            recording_id="r1",
+            label="name",
+            purpose="P",
+            mode="aggregate",
+            depth="anonymous",
+            interval_s=60,
+        )
+    assert repo.saved == []
 
 
 # ── DeleteOutboundRecording ─────────────────────────────────────────────────
