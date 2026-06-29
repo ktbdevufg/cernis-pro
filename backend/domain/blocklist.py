@@ -361,6 +361,10 @@ DEFAULT_SOURCES: tuple[BlocklistSource, ...] = (
         status=BlocklistStatus.NEVER,
         entry_count=None,
     ),
+    # FireHOL Level 1 fuehrt bewusst private/reservierte Bogon-Netze (127/8,
+    # 192.168/16, 10/8) und wuerde eigene Infrastruktur als "Bedrohung" treffen --
+    # im Heim-/SOHO-Alltag praktisch nur Reibung statt echter Treffer. Feodo deckt
+    # aktive Threat-IPs ohne Bogon-Reibung ab. Daher mitgeliefert, aber AUS.
     BlocklistSource(
         id="firehol_level1",
         name="FireHOL Level 1",
@@ -373,7 +377,7 @@ DEFAULT_SOURCES: tuple[BlocklistSource, ...] = (
         ),
         license="MIT",
         attribution_required=False,
-        enabled=True,
+        enabled=False,
         last_fetched_ts=None,
         status=BlocklistStatus.NEVER,
         entry_count=None,

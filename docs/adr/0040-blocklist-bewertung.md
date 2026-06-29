@@ -113,3 +113,13 @@ netzfrei in normalisierte `(domains, ip_cidrs)` (dedupliziert, stabile Reihenfol
   ausgewählten Listen.
 - **Keine Frontend-Änderung in diesem Schritt:** dieser Auftrag baut Ring 4+5 + Scheduler-Handler +
   Verdrahtung; die UI-Integration folgt separat.
+
+## Nachtrag (2026-06-29): FireHOL Level 1 nachträglich deaktiviert
+
+`firehol_level1` wird nachträglich auf `enabled=False` gesetzt (mitgeliefert, aber aus). Grund ist
+**nicht** die Lizenz (MIT, robust), sondern **Bogon-Reibung**: FireHOL Level 1 führt bewusst
+private/reservierte Netze (127/8, 192.168/16, 10/8) und träfe damit eigene Infrastruktur als
+„Bedrohung“ — im Heim-/SOHO-Alltag praktisch nur Reibung statt echter Treffer. Aktive Threat-IPs
+deckt `feodo_ipblocklist` (Feodo Tracker) ohne diese Bogon-Reibung ab. Der Eintrag bleibt in der
+THREAT-Gruppe (kein Lizenz-, sondern ein Bogon-Grund) und kann vom Anwender jederzeit wieder
+aktiviert werden.

@@ -159,9 +159,12 @@ def test_default_sources_ids_eindeutig() -> None:
     assert len(ids) == len(set(ids))
 
 
-def test_default_sources_deaktivierte_sind_die_copyleft_quellen() -> None:
+def test_default_sources_deaktivierte_quellen() -> None:
+    # Zwei Gruende fuer Deaktivierung: Copyleft (easylist/easyprivacy -- erst nach
+    # Lizenzklaerung) und Bogon-Reibung (firehol_level1 -- private/reservierte Netze
+    # treffen eigene Infrastruktur; Feodo deckt Threat-IP ohne diese Reibung ab).
     deaktiviert = {src.id for src in DEFAULT_SOURCES if not src.enabled}
-    assert deaktiviert == {"easylist", "easyprivacy"}
+    assert deaktiviert == {"easylist", "easyprivacy", "firehol_level1"}
 
 
 def test_default_sources_aktive_sind_lizenzrobust() -> None:
@@ -171,7 +174,6 @@ def test_default_sources_aktive_sind_lizenzrobust() -> None:
         "oisd_small",
         "urlhaus",
         "feodo_ipblocklist",
-        "firehol_level1",
     }
 
 
