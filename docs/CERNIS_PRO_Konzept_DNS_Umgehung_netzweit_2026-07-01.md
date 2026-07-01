@@ -66,3 +66,31 @@ Bleibt (Entscheidung I). Bekommt nur ehrliche Text-/Hilfe-Korrektur ("dieser Rec
 ## 7. Offen (im Bau zu klaeren)
 CERNIS-Host-Selbstzaehlung vermeiden; Andocken an bestehende NetFinding-Naht vs. eigene
 Naht; Verhaeltnis zum Sicherheitsbericht; IPv6-DNS.
+
+## Geraete-Zuordnung: gestaffelt (Option 2 Basis + Option 3 Praezision)
+
+Der netzweite Sniff sieht Quell-IPs, keine Geraete-Identitaeten (der Bestand ist
+MAC-gefuehrt, es gibt keine IP->Geraet-Methode). Entscheidung (Karl, WAS): maximale
+sinnvolle Wahlfreiheit durch Staffelung statt einer einzelnen Stufe.
+
+* BASIS (immer, ohne Voraussetzung): Quell-IP ist der ehrliche Primaerschluessel. Ein
+  best-effort-Geraetename wird aus dem Bestand (last_ip / IP-History) beigestellt, WO
+  vorhanden, klar als Vermutung beschriftet ("evtl. Geraet X"). Verspricht keine harte
+  Identitaet. Laeuft in jedem Netz.
+* PRAEZISION (zuschaltbar, spaetere Etappe): MAC-Mit-Extraktion im DNS-Sniff
+  (DNS_QUERY um src_mac erweitern -> Recorder -> harte MAC->Geraet-Zuordnung). Hebt die
+  Zuordnung von "evtl." auf "sicher" -- ABER nur im selben L2-Segment (fremde MACs hinter
+  Switches/Routern sind unsichtbar). Ehrlich benannt: ohne MAC-Sicht IP+Vermutung, mit
+  MAC-Sicht im Segment harte Identitaet.
+
+Option 1 (nur IP) verworfen: wirft vorhandene Bestandsdaten weg. Option 3 allein
+verworfen: liefe im geswitchten Heimnetz oft leer. Die Staffelung gibt robuste Basis +
+optionale Praezision, jede Stufe ehrlich beschriftet.
+
+## DoH-Bewertung: eigene Lookup-Naht, NICHT MatchContacts
+
+MatchContacts filtert JEDEN Treffer durch strictness_allows -- und DOH kommt bei keiner
+Anzeige-Strenge durch (bewusst, E3). Der netzweite Waechter fragt die DoH-Gruppe daher
+DIREKT ab (entries.lookup_ips / lookup_domains + Filter auf aktive DOH-Quellen), NICHT
+ueber MatchContacts. So bleibt die Aussenkontakte-Strenge unberuehrt und die DoH-Achse
+eigenstaendig.
