@@ -58,6 +58,40 @@ def test_roundtrip_multiple_messages_in_order() -> None:
         b.close()
 
 
+def test_roundtrip_dns_query_message() -> None:
+    """START_DNS/DNS_QUERY gehen 1:1 durch -- ein DNS_QUERY-dict bleibt unveraendert.
+
+    Der netzweite DNS-Waechter (ADR 0042) fuegt ein neues Event ``DNS_QUERY`` mit den
+    Feldern ``src_ip``/``dst_ip``/``l4``/``monotonic_ts`` (optional ``qname``) hinzu;
+    hier wird bewiesen, dass das Framing es unveraendert serialisiert + deserialisiert.
+    """
+    a, b = socket.socketpair()
+    try:
+        messages: list[dict[str, Any]] = [
+            {"type": MessageType.START_DNS, "interface": "eth0"},
+            {"type": MessageType.STARTED},
+            {
+                "type": MessageType.DNS_QUERY,
+                "src_ip": "192.168.1.10",
+                "dst_ip": "8.8.8.8",
+                "l4": "udp",
+                "monotonic_ts": 1.5,
+                "qname": "example.com",
+            },
+            {"type": MessageType.STOPPED},
+        ]
+        for msg in messages:
+            send_message(a, msg)
+        for msg in messages:
+            received = recv_message(b)
+            assert received is not None
+            # StrEnum-Werte serialisieren als reine Strings.
+            assert received == {**msg, "type": str(msg["type"])}
+    finally:
+        a.close()
+        b.close()
+
+
 def test_recv_message_returns_none_on_clean_close() -> None:
     """Schliesst die Gegenseite sauber (EOF am Frame-Anfang), liefert recv None."""
     a, b = socket.socketpair()

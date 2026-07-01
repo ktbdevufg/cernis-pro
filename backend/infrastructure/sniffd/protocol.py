@@ -10,9 +10,12 @@ Framing (laengen-praefixiert, ein Frame = eine Nachricht):
 
 Jede Nachricht ist ein JSON-Objekt mit einem Schluessel ``"type"`` (einer der
 Werte aus ``MessageType``). Befehle laufen vom Backend an den Helfer (START /
-START_PCAP / START_LLDP / EXPORT_PCAP / STOP / PING), Antworten und Events vom
-Helfer zurueck (HIT / PACKET / NEIGHBORS / EXPORTED / STARTED / STOPPED / PONG /
-ERROR).
+START_PCAP / START_LLDP / START_DNS / EXPORT_PCAP / STOP / PING), Antworten und
+Events vom Helfer zurueck (HIT / PACKET / NEIGHBORS / DNS_QUERY / EXPORTED /
+STARTED / STOPPED / PONG / ERROR).
+
+START_DNS (Backend -> Helfer): startet den netzweiten DNS-Query-Dauerstrom.
+DNS_QUERY (Helfer -> Backend): eine passiv erkannte DNS-Anfrage.
 """
 
 import json
@@ -35,23 +38,25 @@ class MessageType(StrEnum):
     """Die ``"type"``-Werte der IPC-Nachrichten.
 
     Befehle (Backend -> Helfer): ``START`` (= SNI), ``START_PCAP``,
-    ``START_LLDP``, ``EXPORT_PCAP``, ``STOP``, ``PING``.
+    ``START_LLDP``, ``START_DNS``, ``EXPORT_PCAP``, ``STOP``, ``PING``.
     Antworten/Events (Helfer -> Backend): ``HIT``, ``PACKET``, ``NEIGHBORS``,
-    ``EXPORTED``, ``STARTED``, ``STOPPED``, ``PONG``, ``ERROR``.
+    ``DNS_QUERY``, ``EXPORTED``, ``STARTED``, ``STOPPED``, ``PONG``, ``ERROR``.
     """
 
     # Befehle vom Backend an den Helfer.
     START = "START"  # SNI-Dauerstrom (unveraendert).
     START_PCAP = "START_PCAP"  # pcap-Dauerstrom (PACKET-Events bis max_packets/STOP).
     START_LLDP = "START_LLDP"  # einmaliger, zeitbegrenzter LLDP/CDP-Sniff (-> NEIGHBORS).
+    START_DNS = "START_DNS"  # DNS-Query-Dauerstrom (DNS_QUERY-Events bis STOP).
     EXPORT_PCAP = "EXPORT_PCAP"  # gesammelte Rohpakete als .pcap schreiben (-> EXPORTED).
-    STOP = "STOP"  # beendet SNI- ODER pcap-Strom.
+    STOP = "STOP"  # beendet SNI- ODER pcap- ODER DNS-Strom.
     PING = "PING"
 
     # Antworten/Events vom Helfer an das Backend.
     HIT = "HIT"  # ein roher SNI-Hit.
     PACKET = "PACKET"  # ein pcap-Summary-dict.
     NEIGHBORS = "NEIGHBORS"  # die LLDP/CDP-Nachbarliste (am Ende des Sniffs).
+    DNS_QUERY = "DNS_QUERY"  # eine passiv erkannte DNS-Anfrage.
     EXPORTED = "EXPORTED"  # Ergebnis eines pcap-Exports ({"ok": bool}).
     STARTED = "STARTED"
     STOPPED = "STOPPED"

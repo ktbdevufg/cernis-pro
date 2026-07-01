@@ -11,12 +11,18 @@ wenn scapy lokal verfuegbar ist (``skipif``) -- in CI ohne scapy wird er uebersp
 nicht erzwungen.
 """
 
+import threading
 from typing import Any
 
 import pytest
 
 from infrastructure.sniffd import _scapy
-from infrastructure.sniffd.sniff_core import export_pcap, parse_packet, run_lldp_sniff
+from infrastructure.sniffd.sniff_core import (
+    export_pcap,
+    parse_packet,
+    run_lldp_sniff,
+    start_dns_sniff,
+)
 
 # ── parse_packet-Robustheit (scapy-frei) ──────────────────────────────────────
 
@@ -100,3 +106,92 @@ def test_parse_packet_real_tcp_https_summary() -> None:
     assert "timestamp" in summary
     # Fehlende Felder werden weggelassen, nicht None-gefuellt.
     assert "is_ipv6" not in summary
+
+
+# ── DNS-Sniff-Klassifikation (start_dns_sniff, nur mit lokal verfuegbarem scapy) ─
+
+
+class _FakeSniffer:
+    """Ersetzt ``AsyncSniffer``: faengt den prn ab, haelt einen lebenden Thread.
+
+    ``start_dns_sniff`` erwartet nach ``start()`` einen lebenden ``.thread`` (Alive-
+    Probe). Ein realer Daemon-Thread, der auf ein Event wartet, erfuellt das ohne
+    echten Raw-Socket -- so wird NUR die reine Klassifikations-Logik im prn getestet.
+    """
+
+    def __init__(self, **kwargs: Any) -> None:
+        self.prn = kwargs["prn"]
+        self.promisc = kwargs["promisc"]
+        self.filter = kwargs["filter"]
+        self._alive = threading.Event()
+        self.thread = threading.Thread(target=self._alive.wait, daemon=True)
+
+    def start(self) -> None:
+        self.thread.start()
+
+    def stop(self, join: bool = False) -> None:
+        self._alive.set()
+        if join:
+            self.thread.join(timeout=1.0)
+
+
+@pytest.mark.skipif(not _scapy.HAS_SCAPY, reason="scapy nicht verfuegbar (CI-Fall)")
+def test_start_dns_sniff_classifies_requests_and_ignores_responses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Nur ANFRAGEN (dport==53) ergeben ein ``on_query``; Antworten/Nicht-53 nicht.
+
+    Ein synthetisches UDP/53-Paket (Anfrage) -> genau ein ``on_query`` mit
+    ``src_ip``/``dst_ip``/``l4="udp"`` (+ ``qname``, weil scapy DNS parst). Ein Paket
+    mit ``sport==53`` (Antwort) und ein Nicht-53-Paket loesen KEINEN Aufruf aus.
+    Die Rohpakete werden rein im Speicher gebaut (kein Netz/Raw-Socket); der
+    ``AsyncSniffer`` ist durch ``_FakeSniffer`` ersetzt, sodass NUR die
+    Klassifikations-Logik im prn geprueft wird.
+    """
+    # DNSQR ist kein ``_scapy``-Re-Export (nur DNS); lokal unter dem skipif holen.
+    from scapy.all import DNSQR
+
+    captured: dict[str, Any] = {}
+
+    def _capture(**kwargs: Any) -> _FakeSniffer:
+        sniffer = _FakeSniffer(**kwargs)
+        captured["sniffer"] = sniffer
+        return sniffer
+
+    monkeypatch.setattr(_scapy, "AsyncSniffer", _capture)
+
+    queries: list[dict[str, Any]] = []
+    stop_event = threading.Event()
+    # Alive-Probe nicht abwarten: das Event ist gesetzt, die Probe kehrt sofort zurueck.
+    stop_event.set()
+    sniffer = start_dns_sniff(queries.append, "lo", stop_event)
+    try:
+        prn = captured["sniffer"].prn
+        # promisc=True IST der Unterschied zu SNI/pcap (ADR 0042).
+        assert captured["sniffer"].promisc is True
+
+        request = (
+            _scapy.IP(src="192.168.1.10", dst="8.8.8.8")
+            / _scapy.UDP(sport=54321, dport=53)
+            / _scapy.DNS(qd=DNSQR(qname="example.com"))
+        )
+        response = (
+            _scapy.IP(src="8.8.8.8", dst="192.168.1.10")
+            / _scapy.UDP(sport=53, dport=54321)
+            / _scapy.DNS(qr=1, qd=DNSQR(qname="example.com"))
+        )
+        non_dns = _scapy.IP(src="192.168.1.10", dst="10.0.0.2") / _scapy.TCP(sport=51000, dport=443)
+
+        prn(request)
+        prn(response)
+        prn(non_dns)
+    finally:
+        sniffer.stop(join=True)
+
+    assert len(queries) == 1
+    query = queries[0]
+    assert query["src_ip"] == "192.168.1.10"
+    assert query["dst_ip"] == "8.8.8.8"
+    assert query["l4"] == "udp"
+    assert query["qname"] == "example.com"
+    assert "monotonic_ts" in query

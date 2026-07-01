@@ -17,6 +17,7 @@ import pytest
 
 from infrastructure.sniffd.protocol import MessageType
 from infrastructure.sniffd_client import base
+from infrastructure.sniffd_client.dns_client import DnsHelperClient
 from infrastructure.sniffd_client.lldp_client import LldpHelperClient
 from infrastructure.sniffd_client.pcap_client import _STREAM_END, PcapHelperClient
 from infrastructure.sniffd_client.sni_client import SniHelperClient
@@ -45,6 +46,15 @@ def test_pcap_start_returns_honest_error_when_spawn_fails(monkeypatch: pytest.Mo
 def test_sni_start_returns_honest_error_when_spawn_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     _point_spawn_at_nonexistent(monkeypatch)
     client = SniHelperClient()
+    error = client.start(None)
+    assert error is not None
+    assert "nicht gestartet" in error
+    assert client.is_running() is False
+
+
+def test_dns_start_returns_honest_error_when_spawn_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    _point_spawn_at_nonexistent(monkeypatch)
+    client = DnsHelperClient()
     error = client.start(None)
     assert error is not None
     assert "nicht gestartet" in error
@@ -141,3 +151,29 @@ def test_sni_handle_hit_collects_into_poll_hits() -> None:
     assert hits[0]["hostname"] == "example.com"
     # poll_hits leert -- zweiter Aufruf ist leer.
     assert client.poll_hits() == []
+
+
+# ── DNS-Reader-Hook (DNS_QUERY-Sammlung) ──────────────────────────────────────
+
+
+def test_dns_handle_query_collects_into_poll_queries() -> None:
+    client = DnsHelperClient()
+    client._handle_message(
+        {
+            "type": MessageType.DNS_QUERY,
+            "src_ip": "192.168.1.10",
+            "dst_ip": "8.8.8.8",
+            "l4": "udp",
+            "monotonic_ts": 1.0,
+            "qname": "example.com",
+        }
+    )
+    # Nicht-DNS_QUERY-Nachrichten ignoriert der Lese-Pfad.
+    client._handle_message({"type": MessageType.STOPPED})
+    queries = client.poll_queries()
+    assert len(queries) == 1
+    assert "type" not in queries[0]
+    assert queries[0]["src_ip"] == "192.168.1.10"
+    assert queries[0]["qname"] == "example.com"
+    # poll_queries leert -- zweiter Aufruf ist leer.
+    assert client.poll_queries() == []

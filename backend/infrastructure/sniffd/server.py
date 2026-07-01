@@ -56,6 +56,7 @@ from infrastructure.sniffd.sniff_core import (
     check_raw_permission,
     export_pcap,
     run_lldp_sniff,
+    start_dns_sniff,
     start_pcap_sniff,
     start_raw_sniff,
 )
@@ -113,6 +114,10 @@ class _Session:
     def _on_hit(self, hit: dict[str, Any]) -> None:
         """Sniff-Callback: rohen Hit als ``HIT``-Nachricht senden (Hit-Thread)."""
         self._send({"type": MessageType.HIT, **hit})
+
+    def _on_query(self, query: dict[str, Any]) -> None:
+        """DNS-Callback: erkannte Anfrage als ``DNS_QUERY``-Nachricht senden (Sniff-Thread)."""
+        self._send({"type": MessageType.DNS_QUERY, **query})
 
     def _on_packet(self, summary: dict[str, Any]) -> None:
         """pcap-Callback: Summary-dict als ``PACKET``-Nachricht senden (Sniff-Thread)."""
@@ -237,6 +242,35 @@ class _Session:
 
         threading.Thread(target=_run, daemon=True).start()
 
+    def _handle_start_dns(self, message: dict[str, Any]) -> None:
+        """``START_DNS``: Recht pruefen, dann ``start_dns_sniff`` aufspinnen + ``STARTED``.
+
+        Wie ``_handle_start``, aber netzweiter DNS-Dauerstrom (``promisc=True``,
+        ADR 0042): jede erkannte Anfrage geht als ``DNS_QUERY``-Nachricht raus.
+        ``STOP`` beendet ihn wie den SNI-Strom. Ein bereits laufender Sniff wird
+        nicht doppelt gestartet (idempotentes ``STARTED``, konsistent zu ``START``).
+        Fehlt das Recht -> ``ERROR`` + KEIN Sniff (S3-frei).
+        """
+        if self._sniffer is not None:
+            self._send({"type": MessageType.STARTED})
+            return
+
+        permission_error = check_raw_permission()
+        if permission_error is not None:
+            self._send({"type": MessageType.ERROR, "error": permission_error})
+            return
+
+        interface = message.get("interface")
+        self._stop_event.clear()
+        try:
+            self._sniffer = start_dns_sniff(self._on_query, interface, self._stop_event)
+        except RuntimeError as exc:
+            self._sniffer = None
+            self._send({"type": MessageType.ERROR, "error": str(exc)})
+            return
+
+        self._send({"type": MessageType.STARTED})
+
     def _handle_export_pcap(self, message: dict[str, Any]) -> None:
         """``EXPORT_PCAP``: gesammelte Rohpakete nach ``path`` schreiben -> ``EXPORTED``.
 
@@ -309,6 +343,8 @@ class _Session:
                     self._handle_start_pcap(message)
                 elif msg_type == MessageType.START_LLDP:
                     self._handle_start_lldp(message)
+                elif msg_type == MessageType.START_DNS:
+                    self._handle_start_dns(message)
                 elif msg_type == MessageType.EXPORT_PCAP:
                     self._handle_export_pcap(message)
                 elif msg_type == MessageType.STOP:

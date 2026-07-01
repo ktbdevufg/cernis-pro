@@ -61,6 +61,9 @@ _SNI_FILTER = "tcp port 443"
 # BPF-Filter AS-IS aus lldp_sniffer.py: LLDP-EtherType + CDP-Multicast-MAC.
 _LLDP_CDP_FILTER = "ether proto 0x88cc or ether dst 01:00:0c:cc:cc:cc"
 
+# BPF-Filter fuer den DNS-Sniff: Port 53 (UDP und TCP -- ``port`` deckt beide L4 ab).
+_DNS_FILTER = "port 53"
+
 # Ein roher Hit ueber IPC ist exakt dieses dict.
 RawHitDict = dict[str, Any]
 
@@ -315,6 +318,119 @@ def start_raw_sniff(
         sniffer.start()
     except Exception as exc:
         raise RuntimeError(f"SNI capture failed to start: {exc}") from exc
+
+    # Alive-Probe (Muster ScapyPacketSniffer): dem Thread kurz Zeit zum sofortigen
+    # Sterben geben (Permission-Fehler schlagen instantan zu). Das ``stop_event``
+    # darf die Probe vorzeitig beenden (sauberer Stop direkt nach dem Start).
+    stop_event.wait(_ALIVE_PROBE_SECS)
+    thread = getattr(sniffer, "thread", None)
+    if not (thread and thread.is_alive()):
+        with contextlib.suppress(Exception):
+            sniffer.stop(join=True)
+        raise RuntimeError("raw socket not accessible -- requires CAP_NET_RAW")
+
+    return sniffer
+
+
+# ── DNS-Sniff-Lifecycle (netzweit, promisc=True -- ADR 0042) ──────────────────
+
+
+def start_dns_sniff(
+    on_query: Callable[[dict[str, Any]], None],
+    interface: str | None,
+    stop_event: threading.Event,
+) -> Any:
+    """Startet den passiven, netzweiten DNS-Sniff und ruft ``on_query`` pro Anfrage.
+
+    STRUKTUR wie ``start_raw_sniff`` (billiger prn, ``store=0``, Alive-Probe), nur
+    das Parsing + ``promisc`` unterscheiden sich. Der prn-Callback bestimmt Quell-/
+    Ziel-IP + L4, filtert auf ANFRAGEN (Ziel-Port 53) und reicht pro Anfrage ein
+    reines Query-``dict`` (``src_ip``/``dst_ip``/``l4``/``monotonic_ts``, optional
+    ``qname``) an ``on_query`` -- KEINE psutil-Arbeit (das wuerde den libpcap-
+    Lesepfad aushungern -- der reale Spike-Bug).
+
+    ``promisc=True`` IST der Unterschied zu SNI/pcap: der netzweite Anspruch
+    (fremde Geraete) verlangt den Promiscuous-Modus -- nur so wird fremder DNS-
+    Traffic ueberhaupt sichtbar (soweit die Netz-Position ihn durchlaesst). Das ist
+    bewusst (ADR 0042).
+
+    Toter Sniffer-Thread nach der Alive-Probe (``_ALIVE_PROBE_SECS``) ->
+    ``RuntimeError`` mit Text "raw socket not accessible -- requires CAP_NET_RAW",
+    KEINE stille Leer-Erfassung. Gibt das ``AsyncSniffer``-Handle zurueck.
+    """
+    if not _scapy.HAS_SCAPY:
+        raise RuntimeError("DNS capture requires libpcap/scapy. Install it and restart.")
+
+    iface = interface or _pick_iface()
+
+    def _on_packet(pkt: Any) -> None:
+        """scapy-Callback: DNS-Anfrage klassifizieren, ``on_query`` rufen. BILLIG.
+
+        Nur IP-Pakete mit Port-53-Beteiligung; Quell-/Ziel-IP (IPv6 vor IPv4), L4
+        + Ziel-Port. Nur ANFRAGEN (``dport == 53``) zaehlen -- Antworten
+        (``sport == 53``) werden ignoriert. ``except Exception``: ein einzelnes
+        kaputtes Paket darf den Sniff-Thread nicht killen.
+        """
+        try:
+            # Nur IP-Pakete mit Port-53-Beteiligung; Quell-IP + Ziel-IP bestimmen
+            # (IPv6 vor IPv4, Muster ScapyPacketSniffer).
+            if pkt.haslayer(_scapy.IPv6):
+                src_ip = str(pkt[_scapy.IPv6].src)
+                dst_ip = str(pkt[_scapy.IPv6].dst)
+            elif pkt.haslayer(_scapy.IP):
+                src_ip = str(pkt[_scapy.IP].src)
+                dst_ip = str(pkt[_scapy.IP].dst)
+            else:
+                return
+            # L4 + Ziel-Port ermitteln (nur Port 53 interessiert; der BPF-Filter deckt
+            # es grob ab, aber wir pruefen den ZIEL-Port sauber, damit nur ANFRAGEN
+            # (dport==53) zaehlen, keine Antworten).
+            if pkt.haslayer(_scapy.UDP):
+                l4 = "udp"
+                dport = int(pkt[_scapy.UDP].dport)
+            elif pkt.haslayer(_scapy.TCP):
+                l4 = "tcp"
+                dport = int(pkt[_scapy.TCP].dport)
+            else:
+                return
+            # Nur ANFRAGEN: Ziel-Port 53 (das Geraet fragt einen Resolver).
+            # Antworten (sport==53) ignorieren.
+            if dport != 53:
+                return
+            # Optional den abgefragten Namen mitschicken, wenn scapy DNS parst
+            # (best-effort, wie parse_packet).
+            qname = None
+            if pkt.haslayer(_scapy.DNS):
+                try:
+                    qd = pkt[_scapy.DNS].qd
+                    if qd is not None and getattr(qd, "qname", None):
+                        qname = qd.qname.decode("ascii", errors="replace").rstrip(".")
+                except Exception:
+                    qname = None
+            query: dict[str, Any] = {
+                "src_ip": src_ip,
+                "dst_ip": dst_ip,
+                "l4": l4,
+                "monotonic_ts": time.monotonic(),
+            }
+            if qname:
+                query["qname"] = qname
+            on_query(query)
+        except Exception as exc:  # ein kaputtes Paket killt den Sniff nicht
+            _logger.warning("dns_parse_failed", error=str(exc))
+
+    try:
+        # promisc=True IST der Unterschied -- netzweiter Anspruch, ADR 0042.
+        sniffer = _scapy.AsyncSniffer(
+            iface=iface,
+            filter=_DNS_FILTER,
+            prn=_on_packet,
+            store=0,
+            promisc=True,
+        )
+        sniffer.start()
+    except Exception as exc:
+        raise RuntimeError(f"DNS capture failed to start: {exc}") from exc
 
     # Alive-Probe (Muster ScapyPacketSniffer): dem Thread kurz Zeit zum sofortigen
     # Sterben geben (Permission-Fehler schlagen instantan zu). Das ``stop_event``
