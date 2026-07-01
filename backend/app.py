@@ -20,7 +20,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 
 import structlog
 from fastapi import FastAPI, Request
@@ -143,6 +143,16 @@ from api.diagnostics import (
     provide_run_traceroute,
 )
 from api.diagnostics import router as diagnostics_router
+from api.dns_bypass import (
+    DnsBypassFindingOut,
+    DnsBypassOverviewOut,
+    DnsBypassStatusOut,
+    provide_dns_bypass_start,
+    provide_dns_bypass_status,
+    provide_dns_bypass_stop,
+    provide_dns_bypass_view,
+)
+from api.dns_bypass import router as dns_bypass_router
 from api.dns_watch import (
     DNS_DOH_PROVIDERS_KEY,
     DNS_EXPECTED_SERVERS_KEY,
@@ -392,6 +402,12 @@ from application.diagnostics import (
     RogueDhcpPermissionError,
     RunTraceroute,
 )
+from application.dns_bypass import (
+    BuildDnsBypass,
+    DnsBypassRecorder,
+    StartDnsBypassRecording,
+    StopDnsBypassRecording,
+)
 from application.dns_watch import BuildDnsWatch, RawDnsConnection
 from application.export import (
     ExportAnalysis,
@@ -522,7 +538,12 @@ from domain.analysis import (
     service_for_port,
 )
 from domain.analysis.engine import _SEVERITY_RANK
-from domain.blocklist import BlocklistGroup, BlocklistSource, MatchStrictness
+from domain.blocklist import (
+    BlocklistGroup,
+    BlocklistSource,
+    MatchStrictness,
+    domain_suffix_candidates,
+)
 from domain.devices import Device, normalize_mac
 from domain.dns_watch import doh_providers_or_default, expected_servers_or_default
 from domain.export import (
@@ -1761,6 +1782,89 @@ def _project_manual_pdf_model(
     )
 
 
+# ── DNS-Umgehungs-Waechter: Composition-Root-Anreicherung (ADR 0042, Etappe 4b) ──
+# Zwei reine Anreicherungs-Nahtstellen, die die EIGENSTAENDIGE dns_bypass-Domaene
+# (independence-Contract) im Composition Root um Bestands-Wissen ergaenzen: die
+# Geraete-Zuordnung (Option 2) und die DoH-Bewertung ueber eine EIGENE Lookup-Naht
+# (NICHT MatchContacts -- das filtert alles durch die Anzeige-Strenge, DOH kommt da nie
+# durch). Beide leben als Modul-Funktionen (nicht in den view-Closures), damit sie mit
+# Fake-Repos testbar sind; aufgerufen werden sie AUSSCHLIESSLICH aus dem Root-Runner --
+# die Zuordnung faellt also nur hier, nie in domain/application dns_bypass.
+
+
+def _dns_bypass_name_by_ip(devices: list[Device]) -> dict[str, str]:
+    """Baut die best-effort Geraete-Namens-Map (Option 2): ``{last_ip: Anzeigename}``.
+
+    Die Quell-IP ist der Primaerschluessel; ein Anzeigename wird best-effort beigestellt,
+    WO die IP im Bestand passt (ueber ``Device.last_ip``), sonst spaeter ``None``. KEINE
+    harte Identitaet. Anzeige-Prioritaet ``label > hostname > mac`` (``label``/``hostname``
+    sind leere Strings, wenn ungesetzt -> dann der naechste Kandidat; ``mac`` ist immer
+    gesetzt und der sichere Fallback). Nur Geraete mit gesetzter ``last_ip`` gehen ein.
+    """
+    return {d.last_ip: (d.label or d.hostname or d.mac) for d in devices if d.last_ip}
+
+
+class _DohSourceLister(Protocol):
+    """Schmale Lese-Naht der Quellen-Definitionen fuer die DoH-Bewertung (nur ``list_all``).
+
+    Bewusst nur der eine Lookup, den ``_dns_bypass_doh_lookup`` braucht -- so bleibt die
+    Nahtstelle testbar mit schlanken Fakes (Muster ``DnsQuerySource``: narrow Protocol),
+    ohne das volle ``BlocklistSourceRepository`` nachbauen zu muessen. Der echte
+    ``SqliteBlocklistSourceRepository`` erfuellt es strukturell.
+    """
+
+    def list_all(self) -> list[BlocklistSource]:
+        """Alle Quellen-Definitionen (fuer den aktive-DOH-Filter)."""
+        ...
+
+
+class _DohEntryLookup(Protocol):
+    """Schmale Roh-Lookup-Naht der Eintraege fuer die DoH-Bewertung (IP + Domain).
+
+    Nur ``lookup_ips``/``lookup_domains`` -- die zwei Roh-Lookups, die die eigene DoH-Naht
+    nutzt (NICHT ``MatchContacts``). Der echte ``SqliteBlocklistEntryRepository`` erfuellt
+    es strukturell.
+    """
+
+    def lookup_ips(self, ip: str) -> list[tuple[str, str]]:
+        """Treffer fuer ``ip`` -> ``(source_id, matched_cidr)`` je Treffer."""
+        ...
+
+    def lookup_domains(self, candidates: list[str]) -> list[tuple[str, str]]:
+        """Treffer je Suffix-Kandidat -> ``(source_id, matched_domain)``."""
+        ...
+
+
+def _dns_bypass_doh_lookup(
+    sources: _DohSourceLister,
+    entries: _DohEntryLookup,
+    dst_ip: str,
+    qname: str,
+) -> tuple[bool, str | None]:
+    """Eigene DoH-Bewertung eines Ziels (``dst_ip``, best-effort ``qname``) -> (is_doh, name).
+
+    NICHT ``MatchContacts``: das filtert alle Treffer durch die Anzeige-Strenge
+    (``strictness_allows``), und ein ``DOH``-Treffer wird dort bewusst mit ``False``
+    beantwortet -- DoH kaeme da also nie durch. Stattdessen direkt die Roh-Lookups des
+    Eintrags-Repos abfragen (``lookup_ips`` fuer die Ziel-IP, ``lookup_domains`` fuer die
+    Suffix-Kandidaten des qname) und die Treffer auf AKTIVE Quellen der Gruppe ``DOH``
+    filtern (``enabled`` + ``group == DOH``, ueber die Quellen-Definitionen). Erster
+    Treffer, dessen ``source_id`` eine aktive DOH-Quelle ist -> ``(True, source.name)``;
+    sonst ``(False, None)``.
+    """
+    by_id = {s.id: s for s in sources.list_all()}
+    doh_ids = {s.id for s in by_id.values() if s.group == BlocklistGroup.DOH and s.enabled}
+    if not doh_ids:
+        return (False, None)
+    matches: list[tuple[str, str]] = list(entries.lookup_ips(dst_ip))
+    if qname:
+        matches += entries.lookup_domains(list(domain_suffix_candidates(qname)))
+    for source_id, _matched_on in matches:
+        if source_id in doh_ids:
+            return (True, by_id[source_id].name)
+    return (False, None)
+
+
 def create_app(config: AppConfig | None = None) -> FastAPI:
     """Baut die FastAPI-App. ``config=None`` liest die Konfiguration aus der Umgebung."""
     cfg = config or AppConfig()
@@ -1906,6 +2010,16 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 capture_task.cancel()
                 with suppress(asyncio.CancelledError):
                     await capture_task
+            # DNS-Umgehungs-Recorder (ADR 0042, Etappe 4b): laeuft NUR, wenn ueber POST
+            # /api/dns-bypass/start gestartet (ON-DEMAND, kein startup-Autostart). Beim
+            # Shutdown sauber stoppen (rec.stop() best-effort) + canceln + awaiten, falls
+            # aktiv -- selber Teardown wie der capture_task.
+            dns_bypass_task = getattr(_app.state, "dns_bypass_task", None)
+            if dns_bypass_task is not None and not dns_bypass_task.done():
+                dns_bypass_recorder().stop()
+                dns_bypass_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await dns_bypass_task
             # traffic-Poll-Loop (T.4b-2): laeuft per AUTO (oben) ODER MANUELL
             # (POST /api/traffic/poll/start). Beim Shutdown sauber stoppen + canceln,
             # falls aktiv -- selber Pfad fuer beide Modi (ein Singleton/Task).
@@ -3898,6 +4012,112 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.include_router(dns_watch_router)
     app.dependency_overrides[provide_dns_watch] = lambda: _dns_watch
     app.dependency_overrides[provide_dns_watch_acknowledge] = lambda: _dns_watch_acknowledge
+
+    # ── netzweiter DNS-Umgehungs-Waechter verdrahten (ADR 0042, Etappe 4b) ──
+    # Die netzweite Umgehungs-Sicht fuehrt HIER (Regel 5: nur Composition Root) den
+    # Recorder-Puffer (4a) ueber BuildDnsBypass (E2) zusammen, stellt je Quell-IP einen
+    # best-effort Geraetenamen aus dem Bestand bei (Option 2, _dns_bypass_name_by_ip) und
+    # bewertet je Ziel DoH ueber die EIGENE Lookup-Naht (_dns_bypass_doh_lookup, NICHT
+    # MatchContacts). Der Recorder ist ein Singleton (lru_cache), damit /start, /stop,
+    # /status und der Lese-Runner DENSELBEN halten; der Task-Handle lebt in app.state
+    # (Muster capture_task). Aufzeichnung ON-DEMAND (Muster pcap): Task erst bei /start,
+    # gecancelt bei /stop + lifespan-Shutdown -- KEIN Dauer-Mitlesen (ADR 0042).
+    @lru_cache(maxsize=1)
+    def dns_bypass_recorder() -> DnsBypassRecorder:
+        # Der DnsHelperClient erfuellt das DnsQuerySource-Protocol (4a) strukturell
+        # (start/poll_queries/stop/is_running -- is_running erbt er aus dem gemeinsamen
+        # _BaseSubprocessHelper-Kern). Lokaler Import: der infrastructure-Client bleibt
+        # aus dem App-Bau/Import heraus (wie die anderen Root-Singletons).
+        from infrastructure.sniffd_client.dns_client import DnsHelperClient
+
+        return DnsBypassRecorder(DnsHelperClient())
+
+    async def _dns_bypass_view() -> DnsBypassOverviewOut:
+        # (1) Recorder-Puffer (4a): eine KOPIE der bisher gesammelten Anfragen.
+        recorder = dns_bypass_recorder()
+        queries = recorder.snapshot_queries()
+
+        # (2) Erwartete-Resolver-Menge ueber DIESELBE Naht wie _dns_watch (EINE Quelle der
+        # Wahrheit): die editierbare Liste plus der Gateway-Default des primaeren Interface.
+        gateway = await _topology_gateway()
+        expected = expected_servers_or_default(
+            _dns_watch_read_list(DNS_EXPECTED_SERVERS_KEY), gateway
+        )
+
+        # (3) Verdichtung ueber BuildDnsBypass (E2): genau diese queries + expected herein.
+        overview = BuildDnsBypass(lambda: queries, lambda: expected)()
+
+        # (4) Anreicherung (Regel 5, faellt NUR hier): Geraete-Namens-Map einmal je Aufbau,
+        # DoH-Bewertung je Finding ueber die eigene Lookup-Naht (Ziel-IP + best-effort erstes
+        # sample_qname). Die Zuordnung liegt bewusst NICHT in domain/application dns_bypass.
+        name_by_ip = _dns_bypass_name_by_ip(GetDevices(device_repository())(known_only=False))
+        sources = blocklist_source_repository()
+        entries = blocklist_entry_repository()
+
+        findings_out: list[DnsBypassFindingOut] = []
+        for finding in overview.findings:
+            qname = finding.sample_qnames[0] if finding.sample_qnames else ""
+            is_doh, doh_source_name = _dns_bypass_doh_lookup(
+                sources, entries, finding.dst_ip, qname
+            )
+            findings_out.append(
+                DnsBypassFindingOut(
+                    src_ip=finding.src_ip,
+                    device_name=name_by_ip.get(finding.src_ip),
+                    dst_ip=finding.dst_ip,
+                    is_doh=is_doh,
+                    doh_source_name=doh_source_name,
+                    query_count=finding.query_count,
+                    sample_qnames=list(finding.sample_qnames),
+                )
+            )
+
+        return DnsBypassOverviewOut(
+            findings=findings_out,
+            expected_servers=list(overview.expected_servers),
+            queries_total=overview.queries_total,
+            bypass_total=overview.bypass_total,
+            expected_total=overview.expected_total,
+            bypass_devices=overview.bypass_devices,
+            recording=recorder.is_active(),
+        )
+
+    def _dns_bypass_start(interface: str | None) -> str | None:
+        # ON-DEMAND (Muster pcap _start_capture): clear+start ueber den Use-Case (4a); bei
+        # Erfolg (err None) und noch keinem laufenden Task den Lese-Loop als Task starten.
+        # Bereits laufender Task/aktiver Recorder -> kein zweiter Task, err None (idempotent).
+        rec = dns_bypass_recorder()
+        err = StartDnsBypassRecording(rec)(interface)
+        if err is not None:
+            return err
+        existing = getattr(app.state, "dns_bypass_task", None)
+        if existing is not None and not existing.done():
+            return None
+        app.state.dns_bypass_task = asyncio.create_task(rec.run())
+        return None
+
+    def _dns_bypass_stop() -> None:
+        # stop() ueber den Use-Case (idempotent/best-effort), dann den Task canceln
+        # (best-effort, KEIN await hier -- der lifespan-Shutdown awaitet ihn sauber).
+        rec = dns_bypass_recorder()
+        StopDnsBypassRecording(rec)()
+        task = getattr(app.state, "dns_bypass_task", None)
+        if task is not None:
+            task.cancel()
+
+    def _dns_bypass_status() -> DnsBypassStatusOut:
+        # Billiger Poll: nur der laufende Recorder-Zustand, KEINE Verdichtung.
+        rec = dns_bypass_recorder()
+        return DnsBypassStatusOut(
+            recording=rec.is_active(),
+            collected_queries=len(rec.snapshot_queries()),
+        )
+
+    app.include_router(dns_bypass_router)
+    app.dependency_overrides[provide_dns_bypass_view] = lambda: _dns_bypass_view
+    app.dependency_overrides[provide_dns_bypass_start] = lambda: _dns_bypass_start
+    app.dependency_overrides[provide_dns_bypass_stop] = lambda: _dns_bypass_stop
+    app.dependency_overrides[provide_dns_bypass_status] = lambda: _dns_bypass_status
 
     # ── Sicherheitsbericht: Fuenf-Quellen-Projektion (Etappe 2b, Regel 5/Composition Root) ──
     # DIESE Naht KENNT alle fuenf Quell-Domaenen (analysis/cve/security/dns_watch/diagnostics)
