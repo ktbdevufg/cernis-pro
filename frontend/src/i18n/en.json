@@ -623,6 +623,7 @@
         "ownNetText": "only observes your own network's traffic, nothing beyond it.",
         "prereqTitle": "Prerequisite",
         "prereqText": "needs a network view (gateway/mirror/simple network) — otherwise the view stays empty.",
+        "dontAsk": "Don't ask again",
         "deny": "Decline",
         "grant": "Agree and start"
       }

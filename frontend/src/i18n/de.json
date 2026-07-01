@@ -623,6 +623,7 @@
         "ownNetText": "liest nur den Verkehr des eigenen Netzes mit, nichts darüber hinaus.",
         "prereqTitle": "Voraussetzung",
         "prereqText": "braucht Netz-Sicht (Gateway/Mirror/einfaches Netz) — sonst bleibt die Sicht leer.",
+        "dontAsk": "Nicht mehr fragen",
         "deny": "Ablehnen",
         "grant": "Zustimmen und starten"
       }

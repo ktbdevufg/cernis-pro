@@ -14,18 +14,23 @@
 //   Nur im eigenen Netz (Network) -- liest nur den Verkehr des eigenen Netzes mit.
 //   Voraussetzung (ShieldCheck)   -- braucht Netz-Sicht (Gateway/Mirror), sonst leer.
 //
-// Anders als OutboundConsentDialog OHNE "Nicht mehr fragen"-Kaestchen: es gibt
-// keine dns_bypass-Consent-Einstellung im Backend, die Einwilligung gilt fuer
-// diesen Start (der Aufrufer haelt sie sitzungslokal). onGrant()/onDeny() ohne
-// Argument.
+// Wie OutboundConsentDialog MIT "Nicht mehr fragen"-Kaestchen (dontAsk): die
+// Einwilligung wird ueber das Setting dns_bypass_consent (granted/denied/null)
+// persistiert; der Aufrufer entscheidet anhand von dontAsk, ob eine Ablehnung
+// dauerhaft als "denied" abgelegt wird. onGrant(dontAsk)/onDeny(dontAsk).
 
 import { Network, Eye, ShieldCheck, ShieldQuestion } from "lucide-react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import "./OutboundConsentDialog.css";
 
 export default function DnsBypassConsentDialog({ onGrant, onDeny }) {
   const { t } = useTranslation();
+
+  // Lokaler Praesentations-State: das "Nicht mehr fragen"-Kaestchen. Wird beim
+  // Klick als Bool an onGrant/onDeny gereicht (der Aufrufer persistiert ggf.).
+  const [dontAsk, setDontAsk] = useState(false);
 
   return (
     <div className="outbound-consent-overlay">
@@ -71,19 +76,30 @@ export default function DnsBypassConsentDialog({ onGrant, onDeny }) {
           </span>
         </div>
 
+        {/* "Nicht mehr fragen"-Kaestchen: rein lokaler State, an die Callbacks
+            durchgereicht. */}
+        <label className="outbound-consent-dontask">
+          <input
+            type="checkbox"
+            checked={dontAsk}
+            onChange={(e) => setDontAsk(e.target.checked)}
+          />
+          {t("beobachten.dnsbypass.consent.dontAsk")}
+        </label>
+
         {/* Knopfzeile, rechtsbuendig: Ablehnen + Zustimmen. */}
         <div className="outbound-consent-actions">
           <button
             type="button"
             className="outbound-consent-button"
-            onClick={() => onDeny()}
+            onClick={() => onDeny(dontAsk)}
           >
             {t("beobachten.dnsbypass.consent.deny")}
           </button>
           <button
             type="button"
             className="outbound-consent-button outbound-consent-button--grant"
-            onClick={() => onGrant()}
+            onClick={() => onGrant(dontAsk)}
           >
             {t("beobachten.dnsbypass.consent.grant")}
           </button>

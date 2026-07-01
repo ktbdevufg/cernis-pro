@@ -27,6 +27,7 @@ import {
   startDnsBypass,
   stopDnsBypass,
 } from "../api/dnsBypass.js";
+import { fetchSettings, updateSetting } from "../api/settings.js";
 import DnsBypassConsentDialog from "./DnsBypassConsentDialog.jsx";
 import "./DnsBypassView.css";
 
@@ -124,10 +125,13 @@ export default function DnsBypassView() {
   const [ladeFehler, setLadeFehler] = useState(false);
   // Ehrlicher Start-Fehlertext (aus {ok:false, error}) oder null.
   const [startFehler, setStartFehler] = useState(null);
-  // Ob der Einwilligungs-Dialog offen ist (nur vor dem ERSTEN Start).
+  // Ob der Einwilligungs-Dialog offen ist (vor dem Start, wenn nicht erteilt).
   const [consentOffen, setConsentOffen] = useState(false);
-  // Sitzungslokale Einwilligung: einmal erteilt, kein wiederkehrender Dialog.
-  const [consentErteilt, setConsentErteilt] = useState(false);
+  // Persistierte Einwilligung ins netzweite Mitlesen: "granted"|"denied"|
+  // null(=unset)|"loading"(=Startwert, bis das Settings-Lesen durch ist). Muster
+  // OutboundView.consent -- ueber das Setting dns_bypass_consent abgelegt, kein
+  // sitzungslokaler State mehr (ein Neustart merkt die Entscheidung).
+  const [consent, setConsent] = useState("loading");
   // Ob die Sicht schon mindestens einmal (mit laufender Aufzeichnung) geladen
   // wurde -- treibt den PROMINENTEN Leerzustand nur NACH einer Aufzeichnung.
   const [schonGeladen, setSchonGeladen] = useState(false);
@@ -186,11 +190,34 @@ export default function DnsBypassView() {
     };
   }, []);
 
-  // Aufzeichnung starten. Vor dem ERSTEN Start (Einwilligung noch nicht erteilt)
-  // den Consent-Dialog oeffnen und HIER stoppen -- der eigentliche Start laeuft
-  // dann erst nach onGrant. Ist die Einwilligung schon da, direkt starten.
+  // Einwilligung beim Mount aus den Settings laden (Muster OutboundView). t NICHT
+  // im dep-Array (react-i18next-Regel) -- leeres dep-Array, einmal beim Mount.
+  // Fehlt/faellt das Lesen aus, bleibt consent null (dann fragt der Start-Knopf).
+  useEffect(() => {
+    let abgebrochen = false;
+    (async () => {
+      try {
+        const settings = await fetchSettings();
+        if (abgebrochen) {
+          return;
+        }
+        setConsent(settings["dns_bypass_consent"] ?? null);
+      } catch {
+        if (!abgebrochen) {
+          setConsent(null);
+        }
+      }
+    })();
+    return () => {
+      abgebrochen = true;
+    };
+  }, []);
+
+  // Aufzeichnung starten. Ist die Einwilligung erteilt ("granted"), direkt
+  // starten. Sonst (denied/null/loading) den Consent-Dialog oeffnen und HIER
+  // stoppen -- der eigentliche Start laeuft dann erst nach onGrant.
   const handleStart = async () => {
-    if (!consentErteilt) {
+    if (consent !== "granted") {
       setConsentOffen(true);
       return;
     }
@@ -215,14 +242,37 @@ export default function DnsBypassView() {
     }
   };
 
-  // Einwilligung erteilt: Dialog schliessen, sitzungslokal merken und sofort
-  // starten. Ablehnen: nur den Dialog schliessen (nicht starten).
-  const handleConsentGrant = async () => {
+  // Einwilligung erteilt: dauerhaft als "granted" persistieren (fehlertolerant --
+  // UI laeuft auch bei Schreibfehler weiter), Dialog schliessen und sofort starten.
+  // dontAsk wird beim Zustimmen nicht gesondert gebraucht (Zustimmen persistiert
+  // ohnehin) -- Muster OutboundView.handleGrant.
+  const handleConsentGrant = async (dontAsk) => {
+    void dontAsk;
+    try {
+      await updateSetting("dns_bypass_consent", "granted");
+    } catch (fehler) {
+      console.error("Einwilligung speichern fehlgeschlagen", fehler);
+    }
+    setConsent("granted");
     setConsentOffen(false);
-    setConsentErteilt(true);
     await starteJetzt();
   };
-  const handleConsentDeny = () => {
+
+  // Einwilligung abgelehnt: nur bei "Nicht mehr fragen" dauerhaft als "denied"
+  // persistieren (fehlertolerant); sonst unset lassen (consent=null) -- dann fragt
+  // der Start-Knopf beim naechsten Mal erneut. Dialog schliessen, NICHT starten
+  // (Muster OutboundView.handleDeny).
+  const handleConsentDeny = async (dontAsk) => {
+    if (dontAsk) {
+      try {
+        await updateSetting("dns_bypass_consent", "denied");
+      } catch (fehler) {
+        console.error("Ablehnung speichern fehlgeschlagen", fehler);
+      }
+      setConsent("denied");
+    } else {
+      setConsent(null);
+    }
     setConsentOffen(false);
   };
 

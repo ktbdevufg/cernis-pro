@@ -153,7 +153,7 @@ class _Session:
             self._send({"type": MessageType.STARTED})
             return
 
-        permission_error = check_raw_permission()
+        permission_error = check_raw_permission("SNI capture")
         if permission_error is not None:
             self._send({"type": MessageType.ERROR, "error": permission_error})
             return
@@ -183,7 +183,7 @@ class _Session:
             self._send({"type": MessageType.STARTED})
             return
 
-        permission_error = check_raw_permission()
+        permission_error = check_raw_permission("Packet capture")
         if permission_error is not None:
             self._send({"type": MessageType.ERROR, "error": permission_error})
             return
@@ -224,7 +224,7 @@ class _Session:
             self._send({"type": MessageType.STARTED})
             return
 
-        permission_error = check_raw_permission()
+        permission_error = check_raw_permission("LLDP capture")
         if permission_error is not None:
             self._send({"type": MessageType.ERROR, "error": permission_error})
             return
@@ -255,7 +255,7 @@ class _Session:
             self._send({"type": MessageType.STARTED})
             return
 
-        permission_error = check_raw_permission()
+        permission_error = check_raw_permission("DNS capture")
         if permission_error is not None:
             self._send({"type": MessageType.ERROR, "error": permission_error})
             return

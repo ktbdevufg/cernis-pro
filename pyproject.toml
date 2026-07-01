@@ -241,6 +241,7 @@ modules = [
     "domain.fritz_detail",
     "domain.cve",
     "domain.dns_watch",
+    "domain.dns_bypass",
     "domain.scheduler",
 ]
 

@@ -216,7 +216,7 @@ def _pick_iface() -> str:
 # ── Permission-Probe (AF_PACKET-Raw-Socket, wie im Original) ──────────────────
 
 
-def check_raw_permission() -> str | None:
+def check_raw_permission(zweck: str = "Packet capture") -> str | None:
     """Prueft, ob der rohe Sniff moeglich ist; Fehlertext oder ``None`` wenn OK.
 
     NUR Linux x64 (Muster ``ScapyPacketSniffer.check_permission``): ``AF_PACKET``-
@@ -226,13 +226,19 @@ def check_raw_permission() -> str | None:
 
     Der Fix-Text nennt bewusst KEINEN ``/usr/bin/cernis-backend``-Pfad mehr: die
     Cap sitzt kuenftig auf ``cernis-sniffd``, nicht auf dem Backend.
+
+    Der Fehlertext ist GETEILT: derselbe Helfer bedient SNI-, DNS-, pcap- und
+    LLDP-Sniff. ``zweck`` benennt den konkreten Aufrufer (z. B. ``"SNI capture"``,
+    ``"DNS capture"``), damit die Meldung ehrlich ist -- ein DNS-Sniff darf nicht
+    "SNI capture" melden. Der stabile Substring ``CAP_NET_RAW`` bleibt in JEDER
+    Variante erhalten (daran haengt die Rechte-Klassifikation der sni-Domaene).
     """
     try:
         s = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(3))
         s.close()
         return None
     except PermissionError:
-        return "Permission denied -- SNI capture requires root or CAP_NET_RAW."
+        return f"Permission denied -- {zweck} requires root or CAP_NET_RAW."
     except OSError:
         return None  # inconclusive -- kein Rechte-Fehler, scapy darf es versuchen
 
