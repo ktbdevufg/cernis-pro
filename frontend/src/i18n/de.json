@@ -1148,6 +1148,11 @@
         "title": "Netzwerk-Außenkontakte-Bericht",
         "subtitle": "Wohin Ihr Netz nach außen spricht – Gegenstellen, Länder, Betreiber und auffällige Kontakte.",
         "locked": ""
+      },
+      "dnswatch": {
+        "title": "DNS-Wächter-Bericht",
+        "subtitle": "DNS-relevante Außenkontakte dieses Rechners – erwartungsgemäß, offen oder möglicher DoH, mit Programm-Zuordnung.",
+        "locked": ""
       }
     }
   },
@@ -1471,6 +1476,84 @@
       "fussnote": "Dieser Bericht beschreibt und ordnet ein – er fällt kein Urteil.",
       "pdf": "Bericht als PDF",
       "pdfFehler": "Das PDF konnte nicht erstellt werden. Bitte erneut versuchen."
+    },
+    "dnsWatch": {
+      "titel": "DNS-Wächter-Bericht",
+      "kopf": {
+        "erstellt": "Erstellt am {{datum}}"
+      },
+      "einleitung": "Dieser Bericht fasst die DNS-relevanten Außenkontakte dieses Rechners zusammen und ordnet sie gegen die erwarteten DNS-Server und die bekannten DoH-Anbieter ein. Er beschreibt und ordnet ein – er urteilt nicht.",
+      "ladeFehler": "Der DNS-Wächter-Bericht konnte nicht geladen werden.",
+      "leerzustand": "Derzeit sind keine DNS-relevanten Außenkontakte erfasst.",
+      "kennzahl": {
+        "aktiv": "Aktiv",
+        "auffaellig": "Auffällig",
+        "quittiert": "Quittiert",
+        "gesamt": "Kontakte gesamt"
+      },
+      "donut": {
+        "aktiv": "Aktiv",
+        "aria": "Verteilung der aktiven DNS-Kontakte nach Kategorie: {{anzahl}} gesamt"
+      },
+      "category": {
+        "offen": "Offen (fremder Resolver)",
+        "moegliche_doh": "Möglicher DoH",
+        "erwartungsgemaess": "Erwartungsgemäß"
+      },
+      "muster": {
+        "titel": "Verteilung",
+        "kategorie": "Nach Kategorie",
+        "programm": "Nach Programm",
+        "leer": "Keine Einträge.",
+        "weitere": "+ {{anzahl}} weitere"
+      },
+      "spalteKat": {
+        "kategorie": "Kategorie",
+        "kontakte": "Kontakte"
+      },
+      "spalteApp": {
+        "programm": "Programm",
+        "kontakte": "Kontakte"
+      },
+      "filter": {
+        "alle": "Alle",
+        "auffaellig": "Nur auffällige",
+        "quittiert": "Quittiert"
+      },
+      "sortierung": {
+        "label": "Sortierung",
+        "kategorie": "Kategorie",
+        "kontakte": "Kontakte",
+        "gegenstelle": "Gegenstelle"
+      },
+      "liste": {
+        "titel": "DNS-relevante Außenkontakte"
+      },
+      "spalte": {
+        "kategorie": "Kategorie",
+        "gegenstelle": "Gegenstelle",
+        "name": "Name",
+        "programm": "Programm",
+        "kontakte": "Kontakte",
+        "status": "Status"
+      },
+      "status": {
+        "aktiv": "Aktiv",
+        "quittiert": "Quittiert"
+      },
+      "grundlage": {
+        "titel": "Grundlage der Einordnung",
+        "erwartet": "Erwartete DNS-Server",
+        "doh": "Bekannte DoH-Anbieter",
+        "keine": "(keine)"
+      },
+      "tabelle": {
+        "leer": "Keine Kontakte für diese Auswahl."
+      },
+      "fussnote": "Der Bericht beschreibt die DNS-relevanten Außenkontakte dieses Rechners und ordnet sie gegen Ihre Listen ein – er urteilt nicht. Offen bedeutet nur: ein Resolver außerhalb der erwarteten Liste.",
+      "fusszeile": "CERNIS PRO 2.0 – DNS-Wächter-Bericht · {{datum}}",
+      "pdf": "Als PDF herunterladen",
+      "pdfFehler": "Das PDF konnte nicht erstellt werden."
     }
   },
   "verwaltung": {

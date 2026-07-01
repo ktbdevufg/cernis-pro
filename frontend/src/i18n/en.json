@@ -1148,6 +1148,11 @@
         "title": "Network Outbound Contacts Report",
         "subtitle": "Where your network reaches out – remote peers, countries, operators and notable contacts.",
         "locked": ""
+      },
+      "dnswatch": {
+        "title": "DNS Watch Report",
+        "subtitle": "This computer's DNS-relevant outbound contacts – as expected, open, or possible DoH, with a program mapping.",
+        "locked": ""
       }
     }
   },
@@ -1471,6 +1476,84 @@
       "fussnote": "This report describes and contextualises – it does not pass judgement.",
       "pdf": "Report as PDF",
       "pdfFehler": "The PDF could not be created. Please try again."
+    },
+    "dnsWatch": {
+      "titel": "DNS Watch Report",
+      "kopf": {
+        "erstellt": "Created on {{datum}}"
+      },
+      "einleitung": "This report summarises this computer's DNS-relevant outbound contacts and classifies them against the expected DNS servers and the known DoH providers. It describes and contextualises – it does not judge.",
+      "ladeFehler": "The DNS watch report could not be loaded.",
+      "leerzustand": "No DNS-relevant outbound contacts are currently recorded.",
+      "kennzahl": {
+        "aktiv": "Active",
+        "auffaellig": "Notable",
+        "quittiert": "Acknowledged",
+        "gesamt": "Contacts total"
+      },
+      "donut": {
+        "aktiv": "Active",
+        "aria": "Distribution of active DNS contacts by category: {{anzahl}} total"
+      },
+      "category": {
+        "offen": "Open (foreign resolver)",
+        "moegliche_doh": "Possible DoH",
+        "erwartungsgemaess": "As expected"
+      },
+      "muster": {
+        "titel": "Distribution",
+        "kategorie": "By category",
+        "programm": "By program",
+        "leer": "No entries.",
+        "weitere": "+ {{anzahl}} more"
+      },
+      "spalteKat": {
+        "kategorie": "Category",
+        "kontakte": "Contacts"
+      },
+      "spalteApp": {
+        "programm": "Program",
+        "kontakte": "Contacts"
+      },
+      "filter": {
+        "alle": "All",
+        "auffaellig": "Notable only",
+        "quittiert": "Acknowledged"
+      },
+      "sortierung": {
+        "label": "Sort by",
+        "kategorie": "Category",
+        "kontakte": "Contacts",
+        "gegenstelle": "Remote peer"
+      },
+      "liste": {
+        "titel": "DNS-relevant outbound contacts"
+      },
+      "spalte": {
+        "kategorie": "Category",
+        "gegenstelle": "Remote peer",
+        "name": "Name",
+        "programm": "Program",
+        "kontakte": "Contacts",
+        "status": "Status"
+      },
+      "status": {
+        "aktiv": "Active",
+        "quittiert": "Acknowledged"
+      },
+      "grundlage": {
+        "titel": "Basis of the classification",
+        "erwartet": "Expected DNS servers",
+        "doh": "Known DoH providers",
+        "keine": "(none)"
+      },
+      "tabelle": {
+        "leer": "No contacts for this selection."
+      },
+      "fussnote": "The report describes this computer's DNS-relevant outbound contacts and classifies them against your lists – it does not judge. Open only means: a resolver outside the expected list.",
+      "fusszeile": "CERNIS PRO 2.0 – DNS Watch Report · {{datum}}",
+      "pdf": "Download as PDF",
+      "pdfFehler": "The PDF could not be created."
     }
   },
   "verwaltung": {

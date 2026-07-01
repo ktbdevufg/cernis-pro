@@ -433,6 +433,90 @@ export async function fetchOutboundReportPdf(recordingId) {
   return apiDownload(pfad, null, "CERNISPRO_Netzwerk-Aussenkontakte-Bericht.pdf");
 }
 
+// ── DNS-Waechter-Bericht (Etappe 3) ────────────────────────────────────────────
+//
+// Wire-Form (aus backend/api/report.py DnsWatchReportOut, verifiziert, NICHT
+// aendern):
+//   GET /api/report/dns-watch -> {
+//     host_scope:str ("local_host"),
+//     expected_servers:[str], doh_providers:[str],
+//     contacts_total:int, active_total:int, acknowledged_total:int,
+//     expected_active:int, open_active:int, doh_active:int, flagged_active:int,
+//     category_distribution: [ { category:str, count:int } ]  (immer die drei
+//       Kategorien "offen"/"moegliche_doh"/"erwartungsgemaess", auch mit count 0),
+//     app_distribution: [ { app_name:str, count:int } ],
+//     contact_rows: [ { remote_ip, hostname, category, app_name, port:int,
+//       connection_count:int, acknowledged:bool } ]
+//   }
+// hostname/app_name kommen schon fertig (Leerstring statt None) vom Backend;
+// category ist der ROHE Kategorie-Schluessel. KEIN Dropdown, KEIN recording_id --
+// genau zwei Routen wie beim Bestandsbericht. KEIN 404-Fall: leerer Stand ist ein
+// DATUM (alle Zaehler 0 + leere Listen), kein Fehler.
+
+// Ein Kategorie-Verteilungs-Eintrag -> View-Struktur. category roher Schluessel,
+// count roh durchgereicht.
+function mappeDnsKategorie(e) {
+  return {
+    category: e.category,
+    count: e.count,
+  };
+}
+
+// Ein Programm-Verteilungs-Eintrag -> View-Struktur. appName roh (Leerstring vom
+// Backend als "(ohne)" gefuehrt), count roh durchgereicht.
+function mappeDnsProgramm(e) {
+  return {
+    appName: e.app_name,
+    count: e.count,
+  };
+}
+
+// Eine DNS-relevante Kontakt-Zeile -> View-Struktur (camelCase). Anzeige-Texte
+// kommen schon fertig vom Backend (Leerstring statt None); category ist der rohe
+// Kategorie-Schluessel, Zaehler roh durchgereicht. Reihenfolge des Backends bleibt.
+function mappeDnsKontakt(r) {
+  return {
+    remoteIp: r.remote_ip,
+    hostname: r.hostname,
+    category: r.category,
+    appName: r.app_name,
+    port: r.port,
+    connectionCount: r.connection_count,
+    acknowledged: r.acknowledged,
+  };
+}
+
+// GET /api/report/dns-watch -> der aggregierte DNS-Waechter-Bericht (Bezugsrahmen +
+// Listen + Kennzahlen + Verteilungen + Kontaktliste). Fehlt ein Block wider Erwarten,
+// fallen Zaehler auf 0 und Listen auf [] (gefahrloses Mappen, Muster fetchCveReport).
+// Bei !ok/Netzfehler -> ApiError (die View faengt das und zeigt den Fehlerhinweis).
+export async function fetchDnsWatchReport() {
+  const backend = await apiGet("/api/report/dns-watch");
+  return {
+    hostScope: backend?.host_scope ?? "local_host",
+    expectedServers: backend?.expected_servers ?? [],
+    dohProviders: backend?.doh_providers ?? [],
+    contactsTotal: backend?.contacts_total ?? 0,
+    activeTotal: backend?.active_total ?? 0,
+    acknowledgedTotal: backend?.acknowledged_total ?? 0,
+    expectedActive: backend?.expected_active ?? 0,
+    openActive: backend?.open_active ?? 0,
+    dohActive: backend?.doh_active ?? 0,
+    flaggedActive: backend?.flagged_active ?? 0,
+    categoryDistribution: (backend?.category_distribution ?? []).map(mappeDnsKategorie),
+    appDistribution: (backend?.app_distribution ?? []).map(mappeDnsProgramm),
+    contactRows: (backend?.contact_rows ?? []).map(mappeDnsKontakt),
+  };
+}
+
+// GET /api/report/dns-watch/pdf -> loest den Browser-Download des DNS-Waechter-
+// Berichts als PDF aus (Blob via apiDownload). Der echte Dateiname kommt vom Backend
+// ueber Content-Disposition; der defaultName hier ist nur Fallback. Bei !ok/Netzfehler
+// -> ApiError (die View faengt das und zeigt einen dezenten PDF-Fehlerhinweis).
+export async function fetchDnsWatchReportPdf() {
+  return apiDownload("/api/report/dns-watch/pdf", null, "CERNISPRO_DNS-Waechter-Bericht.pdf");
+}
+
 export default {
   fetchSecurityReport,
   fetchSecurityReportPdf,
@@ -444,4 +528,6 @@ export default {
   fetchOutboundReportRecordings,
   fetchOutboundReport,
   fetchOutboundReportPdf,
+  fetchDnsWatchReport,
+  fetchDnsWatchReportPdf,
 };

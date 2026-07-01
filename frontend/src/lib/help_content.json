@@ -665,6 +665,20 @@
       "lang": "The outbound contacts report condenses this computer's connections to the outside into a picture: where does my computer phone to? You choose the frame of reference - all recordings combined or a single one - and then get key figures, distributions, and a contacts list.\n\nThe distribution can be switched by country or by operator (the organisation behind the target). This way you see whether your traffic mostly flows to expected destinations or whether unusual counterparts show up. The contacts list shows each counterpart individually; matches on your block lists are discreetly flagged as tracker or threat - with a source reference, so you can make sense of it yourself.\n\nYour own connections within the home network (for example to the FRITZ!Box) are marked as local and kept out of the threat counters, but can be shown. The report describes and contextualises but does not judge - a lot of traffic can be completely normal. A pure reading view, with a print button."
     }
   },
+  "help.report.dns_watch": {
+    "status": "final",
+    "kategorie": "Berichte",
+    "de": {
+      "titel": "DNS-Waechter-Bericht (Namensaufloesung nach aussen)",
+      "kurz": "Der DNS-Waechter-Bericht zeigt die DNS-relevanten Aussenkontakte dieses Rechners: erwartete Resolver, offene (fremde) Resolver und moegliche DoH-Verbindungen - mit Programm-Zuordnung. Rein beschreibend, kein Urteil.",
+      "lang": "Der DNS-Waechter-Bericht verdichtet die DNS-relevanten Verbindungen dieses Rechners: Welche Namens-Server spricht mein Rechner an? Jeder Kontakt faellt in genau eine von drei Kategorien - erwartungsgemaess (ein Resolver aus Ihrer erwarteten Liste, z. B. das Gateway), offen (ein Resolver ausserhalb dieser Liste) oder moeglicher DoH (verschluesseltes DNS ueber Port 443 zu einem bekannten Anbieter).\n\nSie sehen Kennzahlen, eine Verteilung nach Kategorie oder nach Programm sowie eine Kontaktliste, die sich filtern (alle / nur auffaellige / quittiert) und sortieren laesst. Als Grundlage werden die verwendeten Listen (erwartete DNS-Server, bekannte DoH-Anbieter) offen ausgewiesen, damit Sie die Einordnung selbst nachvollziehen koennen.\n\nWichtig: Die Sicht ist host-lokal - nur die Aussenkontakte DIESES Rechners, nicht netzweit. Der Bericht beschreibt und ordnet ein, urteilt aber nicht: 'offen' heisst nur, dass ein Resolver ausserhalb der erwarteten Liste liegt - das kann harmlos sein. Reine Lesesicht, mit Drucken-Knopf."
+    },
+    "en": {
+      "titel": "DNS watch report (name resolution to the outside)",
+      "kurz": "The DNS watch report shows this computer's DNS-relevant outbound contacts: expected resolvers, open (foreign) resolvers, and possible DoH connections - with a program mapping. Purely descriptive, no judgement.",
+      "lang": "The DNS watch report condenses this computer's DNS-relevant connections: which name servers does my computer talk to? Every contact falls into exactly one of three categories - as expected (a resolver from your expected list, e.g. the gateway), open (a resolver outside that list), or possible DoH (encrypted DNS over port 443 to a known provider).\n\nYou see key figures, a distribution by category or by program, and a contacts list that can be filtered (all / notable only / acknowledged) and sorted. As a basis, the lists used (expected DNS servers, known DoH providers) are shown openly, so you can retrace the classification yourself.\n\nImportant: the view is host-local - only THIS computer's outbound contacts, not network-wide. The report describes and contextualises but does not judge: 'open' only means that a resolver lies outside the expected list - that can be harmless. A pure reading view, with a print button."
+    }
+  },
   "help.geraete.verwaltung": {
     "status": "final",
     "kategorie": "Geräte",
