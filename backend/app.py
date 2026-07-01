@@ -216,6 +216,10 @@ from api.report import (
     CveReportOut,
     CveServiceRowOut,
     CveSeverityCountOut,
+    DnsAppCountOut,
+    DnsCategoryCountOut,
+    DnsWatchContactRowOut,
+    DnsWatchReportOut,
     InventoryDeviceRowOut,
     InventoryDistributionOut,
     InventoryReportOut,
@@ -231,6 +235,8 @@ from api.report import (
     SecurityReportOut,
     provide_cve_report,
     provide_cve_report_pdf,
+    provide_dns_watch_report,
+    provide_dns_watch_report_pdf,
     provide_inventory_report,
     provide_inventory_report_pdf,
     provide_manual_pdf,
@@ -443,6 +449,7 @@ from application.outbound_log import (
 from application.process import CheckProcessPermission, ListProcesses
 from application.reporting import (
     BuildCveReport,
+    BuildDnsWatchReport,
     BuildInventoryReport,
     BuildOutboundReport,
     BuildSecurityReport,
@@ -450,6 +457,10 @@ from application.reporting import (
     CveMonitorInput,
     CvePdfModel,
     CveReport,
+    DnsWatchContactRow,
+    DnsWatchPdfModel,
+    DnsWatchReport,
+    DnsWatchReportInput,
     HostGroupBlock,
     InventoryDeviceRow,
     InventoryPdfModel,
@@ -5005,6 +5016,153 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             filename="CERNISPRO_Netzwerk-Aussenkontakte-Bericht.pdf",
         )
 
+    # ── DNS-Waechter-Bericht: Datenseite (Muster _build_outbound_report_data, Regel 4/5) ──
+    # ASYNC, weil die schon verdrahtete Live-Naht _dns_watch() async ist -- sie wird hier
+    # WIEDERVERWENDET (NICHT neu verdrahtet; genau wie der Sicherheitsbericht "await _dns_watch()"
+    # ruft). Aus der Overview-Sicht werden die neutralen Berichts-Zeilen + Rahmen-Angaben
+    # projiziert; die reine Aggregation macht danach der Use-Case. KEINE Uhr hier.
+    async def _build_dns_watch_report_data() -> DnsWatchReport:
+        overview = await _dns_watch()
+        rows = [
+            DnsWatchContactRow(
+                remote_ip=c.remote_ip,
+                hostname=c.hostname or "",
+                category=c.category,
+                app_name=c.app_name or "",
+                port=c.remote_port or 0,
+                connection_count=c.connection_count,
+                acknowledged=c.acknowledged,
+            )
+            for c in overview.contacts
+        ]
+        status = DnsWatchReportInput(
+            host_scope=overview.host_scope,
+            expected_servers=tuple(overview.expected_servers),
+            doh_providers=tuple(overview.doh_providers),
+        )
+        return BuildDnsWatchReport()(status=status, rows=rows)
+
+    # ── DNS-Waechter-Bericht: HTTP-Endpunkt-Runner (Muster _outbound_report, Regel 4/5) ──
+    async def _dns_watch_report() -> DnsWatchReportOut:
+        report = await _build_dns_watch_report_data()
+        return DnsWatchReportOut(
+            host_scope=report.host_scope,
+            expected_servers=list(report.expected_servers),
+            doh_providers=list(report.doh_providers),
+            contacts_total=report.contacts_total,
+            active_total=report.active_total,
+            acknowledged_total=report.acknowledged_total,
+            expected_active=report.expected_active,
+            open_active=report.open_active,
+            doh_active=report.doh_active,
+            flagged_active=report.flagged_active,
+            category_distribution=[
+                DnsCategoryCountOut(category=c.category, count=c.count)
+                for c in report.category_distribution
+            ],
+            app_distribution=[
+                DnsAppCountOut(app_name=a.app_name, count=a.count) for a in report.app_distribution
+            ],
+            contact_rows=[
+                DnsWatchContactRowOut(
+                    remote_ip=r.remote_ip,
+                    hostname=r.hostname,
+                    category=r.category,
+                    app_name=r.app_name,
+                    port=r.port,
+                    connection_count=r.connection_count,
+                    acknowledged=r.acknowledged,
+                )
+                for r in report.contact_rows
+            ],
+        )
+
+    # ── DNS-Waechter-Bericht: PDF-Projektion + Download-Runner (Muster _project_outbound_pdf_model)
+    # Die Anzeige-Texte (Kategorie-Labels, die beiden Rahmen-Zeilen) werden HIER (am Rand)
+    # lokalisiert -- ECHTE Umlaute; die reine Aggregation bleibt sprach-/anzeigefrei.
+    def _project_dns_watch_pdf_model(
+        report: DnsWatchReport, generated_at_text: str
+    ) -> DnsWatchPdfModel:
+        # Kategorie-Anzeige-Labels (roher Schluessel -> Text). Unbekannte Schluessel bleiben roh.
+        kategorie_labels = {
+            "offen": "Offen (fremder Resolver)",
+            "moegliche_doh": "Möglicher DoH",
+            "erwartungsgemaess": "Erwartungsgemäß",
+        }
+
+        def _label(schluessel: str) -> str:
+            return kategorie_labels.get(schluessel, schluessel)
+
+        if report.expected_servers:
+            expected_text = "Erwartete DNS-Server: " + ", ".join(report.expected_servers)
+        else:
+            expected_text = "Erwartete DNS-Server: (keine)"
+        if report.doh_providers:
+            doh_text = "Bekannte DoH-Anbieter: " + ", ".join(report.doh_providers)
+        else:
+            doh_text = "Bekannte DoH-Anbieter: (keine)"
+
+        category_rows = tuple(
+            (_label(x.category), str(x.count)) for x in report.category_distribution
+        )
+        app_rows = tuple((x.app_name or "—", str(x.count)) for x in report.app_distribution)
+        # Spalten-Reihenfolge: Kategorie, Gegenstelle, Name, Programm, Kontakte, Status.
+        contact_rows = tuple(
+            (
+                _label(r.category),
+                r.remote_ip,
+                r.hostname or "—",
+                r.app_name or "—",
+                str(r.connection_count),
+                "Quittiert" if r.acknowledged else "Aktiv",
+            )
+            for r in report.contact_rows
+        )
+        return DnsWatchPdfModel(
+            title="DNS-Wächter-Bericht",
+            generated_at_text=generated_at_text,
+            footer_left="CERNIS PRO 2.0 — DNS-Wächter-Bericht",
+            einleitung=(
+                "Dieser Bericht fasst die DNS-relevanten Außenkontakte dieses Rechners zusammen "
+                "und ordnet sie gegen die erwarteten DNS-Server und die bekannten DoH-Anbieter "
+                "ein."
+            ),
+            scope_text="Sicht: nur dieser Rechner (nicht netzweit)",
+            expected_text=expected_text,
+            doh_text=doh_text,
+            contacts_total=report.contacts_total,
+            active_total=report.active_total,
+            acknowledged_total=report.acknowledged_total,
+            expected_active=report.expected_active,
+            open_active=report.open_active,
+            doh_active=report.doh_active,
+            flagged_active=report.flagged_active,
+            category_rows=category_rows,
+            app_rows=app_rows,
+            contact_rows=contact_rows,
+        )
+
+    @dataclass(frozen=True)
+    class _DnsWatchPdfResult:
+        content: bytes
+        media_type: str
+        filename: str
+
+    async def _dns_watch_report_pdf() -> _DnsWatchPdfResult:
+        report = await _build_dns_watch_report_data()
+        # Wanduhr GENAU HIER lesen (einziger Ort) -- Projektion und Modell bleiben rein.
+        import time
+
+        now = time.time()
+        generated_at_text = "Erstellt am " + datetime.fromtimestamp(now).strftime("%d.%m.%Y %H:%M")
+        model = _project_dns_watch_pdf_model(report, generated_at_text)
+        pdf_bytes = ReportlabRenderer().render_dns_watch_report_pdf(model)
+        return _DnsWatchPdfResult(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            filename="CERNISPRO_DNS-Waechter-Bericht.pdf",
+        )
+
     app.include_router(report_router)
     app.dependency_overrides[provide_security_report] = lambda: _security_report
     app.dependency_overrides[provide_security_report_pdf] = lambda: _security_report_pdf
@@ -5018,6 +5176,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.dependency_overrides[provide_outbound_report_recordings] = lambda: (
         _outbound_report_recordings
     )
+    app.dependency_overrides[provide_dns_watch_report] = lambda: _dns_watch_report
+    app.dependency_overrides[provide_dns_watch_report_pdf] = lambda: _dns_watch_report_pdf
 
     # ── Route zum Ziel (ADR 0036): traceroute-Hops + Geo/ASN, zwei getrennte Naehte ──
     # Regel 5: die Quer-Domaenen-Naht (diagnostics-Hops + resolver-Geo/RDAP) faellt

@@ -177,6 +177,22 @@ _OUTBOUND_CONTACT_COLUMNS: tuple[str, ...] = (
 _OUTBOUND_COUNTRY_COLUMNS: tuple[str, ...] = ("Land", "Gegenstellen")
 _OUTBOUND_OPERATOR_COLUMNS: tuple[str, ...] = ("Betreiber", "Gegenstellen")
 
+# Spalten-Spiegel der drei DNS-Waechter-Bericht-Tabellen. SPIEGEL der ``DNS_*_COLUMNS`` aus
+# ``application.reporting.dns_watch_pdf_model`` -- der Adapter darf ``application`` NICHT
+# importieren (import-linter), darum hier als lokale Anzeige-Konstanten gefuehrt (Muster
+# _OUTBOUND_*_COLUMNS). Die Schreibweise (Umlaute) ist WOERTLICH aus dns_watch_pdf_model.py
+# uebernommen, damit Modell, Renderer und die Spaltenbreiten-Heuristik denselben Vertrag teilen.
+DNS_CATEGORY_COLUMNS: tuple[str, ...] = ("Kategorie", "Kontakte")
+DNS_APP_COLUMNS: tuple[str, ...] = ("Programm", "Kontakte")
+DNS_CONTACT_COLUMNS: tuple[str, ...] = (
+    "Kategorie",
+    "Gegenstelle",
+    "Name",
+    "Programm",
+    "Kontakte",
+    "Status",
+)
+
 
 class SecurityPdfModelLike(Protocol):
     """Struktureller Vertrag des Sicherheitsbericht-Modells (duck-typing, KEIN Import).
@@ -425,6 +441,53 @@ class OutboundPdfModelLike(Protocol):
     def country_rows(self) -> tuple[tuple[str, ...], ...]: ...
     @property
     def operator_rows(self) -> tuple[tuple[str, ...], ...]: ...
+    @property
+    def contact_rows(self) -> tuple[tuple[str, ...], ...]: ...
+
+
+class DnsWatchPdfModelLike(Protocol):
+    """Struktureller Vertrag des DNS-Waechter-Modells (duck-typing, KEIN application-Import).
+
+    Wie ``OutboundPdfModelLike``: ``infrastructure`` darf ``application`` NICHT importieren
+    (import-linter), das reiche ``DnsWatchPdfModel`` lebt aber in ``application/reporting``. Darum
+    nimmt der Adapter es STRUKTURELL ueber dieses ``Protocol`` entgegen -- genau die Felder, die
+    er rendert. Read-only Properties decken die frozen-Felder ab (siehe Begruendung bei
+    ``SecurityPdfModelLike``). Das echte ``DnsWatchPdfModel`` erfuellt das Protokoll automatisch
+    (gleiche Feldnamen/Typen).
+    """
+
+    @property
+    def title(self) -> str: ...
+    @property
+    def generated_at_text(self) -> str: ...
+    @property
+    def footer_left(self) -> str: ...
+    @property
+    def einleitung(self) -> str: ...
+    @property
+    def scope_text(self) -> str: ...
+    @property
+    def expected_text(self) -> str: ...
+    @property
+    def doh_text(self) -> str: ...
+    @property
+    def contacts_total(self) -> int: ...
+    @property
+    def active_total(self) -> int: ...
+    @property
+    def acknowledged_total(self) -> int: ...
+    @property
+    def expected_active(self) -> int: ...
+    @property
+    def open_active(self) -> int: ...
+    @property
+    def doh_active(self) -> int: ...
+    @property
+    def flagged_active(self) -> int: ...
+    @property
+    def category_rows(self) -> tuple[tuple[str, ...], ...]: ...
+    @property
+    def app_rows(self) -> tuple[tuple[str, ...], ...]: ...
     @property
     def contact_rows(self) -> tuple[tuple[str, ...], ...]: ...
 
@@ -1527,6 +1590,156 @@ class ReportlabRenderer:
         )
         return table
 
+    def render_dns_watch_report_pdf(self, model: DnsWatchPdfModelLike) -> bytes:
+        """Rendert das ``DnsWatchPdfModel`` zum vollstaendigen DNS-Waechter-Bericht-PDF (A4 hoch).
+
+        Layout (Muster render_outbound_report_pdf, ABER ohne Dropdown/recording): durchgaengige
+        Kopf-/Fusszeile je Seite (onFirstPage UND onLaterPages ueber dieselbe Funktion
+        ``_draw_manual_header_footer``), dann die Story -- Titel + Erzeugungsdatum + Einleitung,
+        die fertige Sicht-Zeile (``scope_text``) und die beiden fertigen Bezugsrahmen-Zeilen
+        (``expected_text``/``doh_text``), der Kennzahlen-Block (zwei Reihen Zahlen) und die drei
+        Sektions-Rubriken (Verteilung nach Kategorie / nach Programm / DNS-relevante
+        Aussenkontakte, letztere auf eigener Seite, da potentiell lang).
+
+        Robust: leere Tabellen ziehen ihren eigenen Leer-Fallback ueber ``_append_table_section``.
+        KEINE Uhr, KEINE Rechnung -- alle Texte/Zahlen kommen fertig aus dem Modell. Liefert
+        valide PDF-Bytes (Magic-Header ``%PDF``).
+        """
+        buffer = io.BytesIO()
+        document = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,  # Hochformat (Muster Aussenkontakte)
+            leftMargin=18 * mm,
+            rightMargin=18 * mm,
+            topMargin=32 * mm,  # Platz fuer die durchgaengige Kopfzeile
+            bottomMargin=20 * mm,  # Platz fuer die Fusszeile
+            title=model.title,
+        )
+
+        story: list[Flowable] = []
+        styles = self._security_styles()
+
+        # ── Titel + Erzeugungsdatum + Einleitung (fertige Texte aus dem Modell) ──
+        story.append(Paragraph(model.title, styles["h_title"]))
+        story.append(Paragraph(model.generated_at_text, styles["sub"]))
+        story.append(Spacer(1, 4 * mm))
+        if model.einleitung:
+            story.append(Paragraph(model.einleitung, styles["body"]))
+            story.append(Spacer(1, 6 * mm))
+
+        # ── Bezugsrahmen-Zeilen (fertig lokalisiert vom Composition Root) ──
+        story.append(Paragraph(model.scope_text, styles["sub"]))
+        story.append(Paragraph(model.expected_text, styles["sub"]))
+        story.append(Paragraph(model.doh_text, styles["sub"]))
+        story.append(Spacer(1, 4 * mm))
+
+        # ── Sektion 1: Ueberblick (DNS-Waechter-Kennzahlen, zwei Reihen Zahlen) ──
+        story.append(Paragraph("Kennzahlen", styles["h_section"]))
+        story.append(self._dns_watch_kennzahlen(model))
+        story.append(Spacer(1, 6 * mm))
+
+        # ── Sektions-Rubriken ueber das BESTEHENDE _append_table_section ──
+        self._append_table_section(
+            story, styles, "Verteilung nach Kategorie", DNS_CATEGORY_COLUMNS, model.category_rows
+        )
+        story.append(Spacer(1, 6 * mm))
+        self._append_table_section(
+            story, styles, "Verteilung nach Programm", DNS_APP_COLUMNS, model.app_rows
+        )
+
+        # Die Detail-Liste auf eigener Seite (potentiell lang) -- PageBreak davor.
+        story.append(PageBreak())
+        self._append_table_section(
+            story,
+            styles,
+            "DNS-relevante Außenkontakte",
+            DNS_CONTACT_COLUMNS,
+            model.contact_rows,
+        )
+
+        # ── Achse-B-Fussnote (invariant, wie im Aussenkontakte-Bericht) ──
+        story.append(Spacer(1, 8 * mm))
+        story.append(
+            KeepTogether(
+                [
+                    HRFlowable(width="100%", thickness=0.6, color=_LINE),
+                    Spacer(1, 2 * mm),
+                    Paragraph(
+                        "Dieser Bericht beschreibt und ordnet ein — er fällt kein Urteil.",
+                        styles["footnote"],
+                    ),
+                ]
+            )
+        )
+
+        # _draw_manual_header_footer ist auf ManualPdfModelLike typisiert, liest zur Laufzeit aber
+        # NUR model.title + model.footer_left -- beide hat DnsWatchPdfModelLike ebenfalls (Muster
+        # render_outbound_report_pdf): cast statt Aenderung der Kopf-/Fuss-Funktion.
+        header_model = cast(ManualPdfModelLike, model)
+        document.build(
+            story,
+            onFirstPage=lambda canvas, doc: _draw_manual_header_footer(canvas, doc, header_model),
+            onLaterPages=lambda canvas, doc: _draw_manual_header_footer(canvas, doc, header_model),
+        )
+        return buffer.getvalue()
+
+    @staticmethod
+    def _dns_watch_kennzahlen(model: DnsWatchPdfModelLike) -> Table:
+        """Die DNS-Waechter-Kennzahlen als zwei Zeilen Kennzahl-Boxen (Zahl oben, Label darunter).
+
+        Reihe 1: Kontakte gesamt/Aktiv/Quittiert, Reihe 2: Erwartungsgemaess/Offen/Moeglicher
+        DoH/Auffaellig. Beide Reihen liegen in EINER 4-spaltigen ``Table`` -- schlichte graue Boxen
+        mit Akzent-Zahl (Muster ``_outbound_kennzahlen``). Reihe 1 traegt nur drei Zahlen (vierte
+        Box leer), Reihe 2 alle vier. Reine Anzeige der schon ermittelten Zaehler aus dem Modell --
+        keine Rechnung, keine neuen Farben.
+        """
+        data = [
+            [
+                str(model.contacts_total),
+                str(model.active_total),
+                str(model.acknowledged_total),
+                "",
+            ],
+            ["Kontakte gesamt", "Aktiv", "Quittiert", ""],
+            [
+                str(model.expected_active),
+                str(model.open_active),
+                str(model.doh_active),
+                str(model.flagged_active),
+            ],
+            ["Erwartungsgemäß", "Offen", "Möglicher DoH", "Auffällig"],
+        ]
+        col = 174.0 / 4 * mm
+        table = Table(data, colWidths=[col, col, col, col])
+        table.setStyle(
+            TableStyle(
+                [
+                    # Dezent graue Boxen (kein neues Farbset): Hintergrund _ZEBRA, Zahl in _ACCENT,
+                    # Label in _TEXT. Muster _outbound_kennzahlen (beide Wert-Reihen FONTSIZE 20).
+                    ("BACKGROUND", (0, 0), (-1, 3), _ZEBRA),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), _ACCENT),
+                    ("TEXTCOLOR", (0, 2), (-1, 2), _ACCENT),
+                    ("TEXTCOLOR", (0, 1), (-1, 1), _TEXT),
+                    ("TEXTCOLOR", (0, 3), (-1, 3), _TEXT),
+                    ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTNAME", (0, 2), (-1, 2), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, 0), 20),
+                    ("FONTSIZE", (0, 2), (-1, 2), 20),
+                    ("FONTNAME", (0, 1), (-1, 1), "Helvetica"),
+                    ("FONTNAME", (0, 3), (-1, 3), "Helvetica"),
+                    ("FONTSIZE", (0, 1), (-1, 1), 9),
+                    ("FONTSIZE", (0, 3), (-1, 3), 9),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("TOPPADDING", (0, 0), (-1, 0), 8),
+                    ("TOPPADDING", (0, 2), (-1, 2), 8),
+                    ("BOTTOMPADDING", (0, 1), (-1, 1), 8),
+                    ("BOTTOMPADDING", (0, 3), (-1, 3), 8),
+                ]
+            )
+        )
+        return table
+
     # ── Benutzerhandbuch: eigener Render-Pfad ───────────────────────────────
     #
     # NEUE Methode neben render_security_report_pdf -- beide bleiben UNANGETASTET (der
@@ -1654,6 +1867,13 @@ _COL_WEIGHTS: dict[tuple[str, ...], tuple[float, ...]] = {
     _OUTBOUND_CONTACT_COLUMNS: (2.4, 2.6, 1.4, 2.0, 1.0, 2.2),
     _OUTBOUND_COUNTRY_COLUMNS: (5.0, 1.8),
     _OUTBOUND_OPERATOR_COLUMNS: (5.0, 1.8),
+    # DNS-Waechter-Bericht: Gegenstelle/Name/Programm breit, die schmalen Wert-Spalten
+    # (Kontakte/Status) schlank, die Kategorie wieder breiter (Klartext). Eigene Keys; die
+    # bestehenden Aufrufer bleiben unberuehrt. Die Verteilungs-Tabellen tragen das
+    # Verteilungsmuster (Label breit, Anzahl schmal).
+    DNS_CONTACT_COLUMNS: (1.8, 2.4, 2.4, 2.0, 1.0, 1.4),
+    DNS_CATEGORY_COLUMNS: (5.0, 1.8),
+    DNS_APP_COLUMNS: (5.0, 1.8),
 }
 
 # Rubrikspezifischer Leertext je Tabellen-Schema (statt generisch "Keine Eintraege.").
@@ -1671,6 +1891,9 @@ _EMPTY_SECTION_TEXT: dict[tuple[str, ...], str] = {
     _OUTBOUND_CONTACT_COLUMNS: "Keine Außenkontakte aufgezeichnet.",
     _OUTBOUND_COUNTRY_COLUMNS: "Keine Länderdaten.",
     _OUTBOUND_OPERATOR_COLUMNS: "Keine Betreiberdaten.",
+    DNS_CONTACT_COLUMNS: "Keine DNS-relevanten Außenkontakte aufgezeichnet.",
+    DNS_CATEGORY_COLUMNS: "Keine Kategoriedaten.",
+    DNS_APP_COLUMNS: "Keine Programmdaten.",
 }
 
 

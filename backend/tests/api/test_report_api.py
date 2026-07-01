@@ -18,6 +18,10 @@ from fastapi.testclient import TestClient
 
 from api.report import (
     CveFindingOut,
+    DnsAppCountOut,
+    DnsCategoryCountOut,
+    DnsWatchContactRowOut,
+    DnsWatchReportOut,
     NetFindingOut,
     OutboundContactRowOut,
     OutboundCountryOut,
@@ -28,6 +32,8 @@ from api.report import (
     ScoreContributionOut,
     ScoreOut,
     SecurityReportOut,
+    provide_dns_watch_report,
+    provide_dns_watch_report_pdf,
     provide_outbound_report,
     provide_outbound_report_recordings,
     provide_security_report,
@@ -404,3 +410,129 @@ def test_get_outbound_report_recordings_liefert_dropdown_liste(app: FastAPI) -> 
         {"id": "rec-1", "label": "Büro"},
         {"id": "rec-2", "label": "Heimnetz"},
     ]
+
+
+class _FakeDnsWatchReportRunner:
+    """Fake-Runner: liefert eine feste, schon api-projizierte DNS-Waechter-Sicht."""
+
+    def __init__(self, report: DnsWatchReportOut) -> None:
+        self._report = report
+        self.calls = 0
+
+    async def __call__(self) -> DnsWatchReportOut:
+        self.calls += 1
+        return self._report
+
+
+class _FakeDnsWatchReportPdfRunner:
+    """Fake-PDF-Runner: liefert ein festes Download-Ergebnis (content/media_type/filename)."""
+
+    def __init__(self, content: bytes, media_type: str, filename: str) -> None:
+        self._content = content
+        self._media_type = media_type
+        self._filename = filename
+
+    async def __call__(self) -> object:
+        return _FakeDnsWatchPdfResult(
+            content=self._content, media_type=self._media_type, filename=self._filename
+        )
+
+
+class _FakeDnsWatchPdfResult:
+    """Schmales Ergebnis-Double: genau die drei Attribute, die der PDF-Router liest."""
+
+    def __init__(self, content: bytes, media_type: str, filename: str) -> None:
+        self.content = content
+        self.media_type = media_type
+        self.filename = filename
+
+
+def test_get_dns_watch_report_liefert_200_und_json_form(app: FastAPI) -> None:
+    """``/api/report/dns-watch`` -> 200 + erwartete JSON-Form (Rahmen, Kennzahlen, Listen)."""
+    report = DnsWatchReportOut(
+        host_scope="local_host",
+        expected_servers=["192.168.1.1"],
+        doh_providers=["cloudflare-dns.com"],
+        contacts_total=2,
+        active_total=1,
+        acknowledged_total=1,
+        expected_active=1,
+        open_active=0,
+        doh_active=0,
+        flagged_active=0,
+        category_distribution=[
+            DnsCategoryCountOut(category="offen", count=0),
+            DnsCategoryCountOut(category="moegliche_doh", count=0),
+            DnsCategoryCountOut(category="erwartungsgemaess", count=1),
+        ],
+        app_distribution=[DnsAppCountOut(app_name="systemd-resolved", count=1)],
+        contact_rows=[
+            DnsWatchContactRowOut(
+                remote_ip="192.168.1.1",
+                hostname="fritz.box",
+                category="erwartungsgemaess",
+                app_name="systemd-resolved",
+                port=53,
+                connection_count=12,
+                acknowledged=False,
+            )
+        ],
+    )
+    runner = _FakeDnsWatchReportRunner(report)
+    app.dependency_overrides[provide_dns_watch_report] = lambda: runner
+
+    with TestClient(app) as client:
+        response = client.get("/api/report/dns-watch")
+
+    assert response.status_code == 200
+    assert runner.calls == 1
+    assert response.json() == {
+        "host_scope": "local_host",
+        "expected_servers": ["192.168.1.1"],
+        "doh_providers": ["cloudflare-dns.com"],
+        "contacts_total": 2,
+        "active_total": 1,
+        "acknowledged_total": 1,
+        "expected_active": 1,
+        "open_active": 0,
+        "doh_active": 0,
+        "flagged_active": 0,
+        "category_distribution": [
+            {"category": "offen", "count": 0},
+            {"category": "moegliche_doh", "count": 0},
+            {"category": "erwartungsgemaess", "count": 1},
+        ],
+        "app_distribution": [{"app_name": "systemd-resolved", "count": 1}],
+        "contact_rows": [
+            {
+                "remote_ip": "192.168.1.1",
+                "hostname": "fritz.box",
+                "category": "erwartungsgemaess",
+                "app_name": "systemd-resolved",
+                "port": 53,
+                "connection_count": 12,
+                "acknowledged": False,
+            }
+        ],
+    }
+
+
+def test_get_dns_watch_report_pdf_liefert_attachment(app: FastAPI) -> None:
+    """``/api/report/dns-watch/pdf`` -> 200 + Content-Disposition attachment + application/pdf."""
+    runner = _FakeDnsWatchReportPdfRunner(
+        content=b"%PDF-FAKE",
+        media_type="application/pdf",
+        filename="CERNISPRO_DNS-Waechter-Bericht.pdf",
+    )
+    app.dependency_overrides[provide_dns_watch_report_pdf] = lambda: runner
+
+    with TestClient(app) as client:
+        response = client.get("/api/report/dns-watch/pdf")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/pdf")
+    assert (
+        response.headers["content-disposition"]
+        == 'attachment; filename="CERNISPRO_DNS-Waechter-Bericht.pdf"'
+    )
+    assert response.content  # nicht-leerer Body

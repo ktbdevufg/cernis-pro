@@ -766,3 +766,158 @@ async def get_outbound_report_pdf(
             "Content-Disposition": f'attachment; filename="{result.filename}"'  # type: ignore[attr-defined]
         },
     )
+
+
+# ── DNS-Waechter-Bericht: schmale api-Response-Modelle (eigene Wire-Form) ───────
+# Analog zum Bestands-/Aussenkontakte-Bericht oben: eigene schmale pydantic-``*Out``-Modelle, die
+# die application-Sicht ``DnsWatchReport`` (samt ``CategoryCount``/``AppCount``/
+# ``DnsWatchContactRow``) spiegeln, OHNE diese Typen zu importieren (Regel 4: api kennt
+# application nicht). Der Composition-Root-Runner in ``app.py`` projiziert die application-Sicht
+# auf genau diese Form. EINFACHER als der Aussenkontakte-Bericht: KEIN Dropdown, KEIN
+# ``recording_id`` -- genau zwei Routen wie beim Bestandsbericht.
+
+
+class DnsCategoryCountOut(BaseModel):
+    """Ein Eintrag der Kategorie-Verteilung (Kategorie + Anzahl aktiver Kontakte, Wire-Form).
+
+    ``category`` der ROHE Kategorie-Schluessel ("offen"/"moegliche_doh"/"erwartungsgemaess"),
+    ``count`` die Anzahl aktiver Kontakte dieser Kategorie (auch 0 -- es kommen immer alle drei).
+    Reine Anzeige.
+    """
+
+    category: str
+    count: int
+
+
+class DnsAppCountOut(BaseModel):
+    """Ein Eintrag der Programm-Verteilung (Programm + Anzahl aktiver Kontakte, Wire-Form).
+
+    ``app_name`` der Programmname (ein leerer wird vom Root als "(ohne)" gefuehrt), ``count`` die
+    Anzahl aktiver Zeilen mit diesem Programm. Reine Anzeige.
+    """
+
+    app_name: str
+    count: int
+
+
+class DnsWatchContactRowOut(BaseModel):
+    """Eine DNS-relevante Kontakt-Zeile des Berichts (Wire-Form).
+
+    Alle Anzeige-Texte (``hostname``/``app_name`` als Leerstring statt None) sind schon vom
+    Composition-Root-Runner fertig gesetzt; ``category`` der ROHE Kategorie-Schluessel, ``port``
+    der ``remote_port`` (0 = unbekannt), ``connection_count`` die Anzahl der Verbindungen dieser
+    Gegenstelle, ``acknowledged`` der Quittiert-Marker (False = aktiv, True = quittiert).
+    """
+
+    remote_ip: str
+    hostname: str
+    category: str
+    app_name: str
+    port: int
+    connection_count: int
+    acknowledged: bool
+
+
+class DnsWatchReportOut(BaseModel):
+    """Die Gesamtsicht des DNS-Waechter-Berichts: Bezugsrahmen, Kennzahlen, Verteilungen, Liste.
+
+    ``host_scope`` der rohe Bezugsrahmen-Schluessel ("local_host"), ``expected_servers`` die
+    erwarteten DNS-Server, ``doh_providers`` die bekannten DoH-Anbieter -- alle drei unveraendert
+    durchgereicht. Die sieben int-Kennzahlen sind die schon ermittelten Zaehler
+    (``contacts_total``/``active_total``/``acknowledged_total``/``expected_active``/
+    ``open_active``/``doh_active``/``flagged_active``). ``category_distribution``/
+    ``app_distribution`` die beiden Verteilungs-Tabellen, ``contact_rows`` die sortierte
+    Gesamt-Kontaktliste. KEIN 404-Fall: leerer Stand ist ein DATUM (alle Zaehler 0, leere
+    Listen), kein HTTP-Fehler.
+    """
+
+    host_scope: str
+    expected_servers: list[str]
+    doh_providers: list[str]
+    contacts_total: int
+    active_total: int
+    acknowledged_total: int
+    expected_active: int
+    open_active: int
+    doh_active: int
+    flagged_active: int
+    category_distribution: list[DnsCategoryCountOut]
+    app_distribution: list[DnsAppCountOut]
+    contact_rows: list[DnsWatchContactRowOut]
+
+
+# ── DNS-Waechter-Bericht: injizierter Composition-Root-Runner ──────────────────
+# Provider-Marker (Muster ``InventoryReportRunner``): in app.py per dependency_overrides mit dem
+# echten Root-Runner verdrahtet. Ohne Verdrahtung bewusst ein lauter Fehler (kein stiller
+# Fallback, S3).
+
+
+class DnsWatchReportRunner(Protocol):
+    """Schmaler Vertrag des injizierten Lese-Runners (liefert die fertige DNS-Waechter-Sicht)."""
+
+    async def __call__(self) -> DnsWatchReportOut:
+        """Baut den DNS-Waechter-Bericht und liefert ihn api-fertig (Wire-Form)."""
+        ...
+
+
+def provide_dns_watch_report() -> DnsWatchReportRunner:
+    raise NotImplementedError("DnsWatchReportRunner wird in app.py verdrahtet")
+
+
+@router.get("/dns-watch")
+async def get_dns_watch_report(
+    runner: Annotated[DnsWatchReportRunner, Depends(provide_dns_watch_report)],
+) -> DnsWatchReportOut:
+    """Liefert den aggregierten DNS-Waechter-Bericht (Kennzahlen + Verteilungen + Kontaktliste).
+
+    KEIN 404-Fall: leerer Stand ist ein DATUM (alle Zaehler 0, leere Listen), kein HTTP-Fehler.
+    Die ganze Projektion macht der injizierte Composition-Root-Runner (Regel 4: der api-Ring
+    kennt application nicht). Der Router-prefix ``/api/report`` ergibt ``/api/report/dns-watch``
+    -- keine Kollision mit dem Live-Router ``/api/dns-watch``.
+    """
+    return await runner()
+
+
+# ── DNS-Waechter-Bericht-PDF: injizierter Composition-Root-Runner ──────────────
+# Muster ``InventoryReportPdfRunner``: der Runner liefert ein Objekt mit den drei Attributen
+# ``content`` (bytes), ``media_type`` (str), ``filename`` (str). Der api-Ring kennt diesen
+# Ergebnis-Typ NICHT -- der Router liest nur die drei Attribute (``type: ignore[attr-defined]``).
+# Provider-Marker: in app.py verdrahtet; ohne Verdrahtung bewusst ein lauter Fehler (S3).
+
+
+class DnsWatchReportPdfRunner(Protocol):
+    """Schmaler Vertrag des injizierten PDF-Runners (liefert das fertige Download-Ergebnis)."""
+
+    async def __call__(self) -> object:
+        """Baut den DNS-Waechter-Bericht als PDF und liefert content/media_type/filename."""
+        ...
+
+
+def provide_dns_watch_report_pdf() -> DnsWatchReportPdfRunner:
+    raise NotImplementedError("DnsWatchReportPdfRunner wird in app.py verdrahtet")
+
+
+@router.get("/dns-watch/pdf")
+async def get_dns_watch_report_pdf(
+    runner: Annotated[DnsWatchReportPdfRunner, Depends(provide_dns_watch_report_pdf)],
+) -> Response:
+    """Liefert den DNS-Waechter-Bericht als PDF-Download (Bytes, ``attachment``).
+
+    Der injizierte Composition-Root-Runner baut den Bericht, projiziert ihn auf das
+    render-fertige PDF-Modell und rendert das PDF; er liefert ein Objekt mit ``content``
+    (PDF-Bytes), ``media_type`` (``application/pdf``) und ``filename``. Der Router verpackt es
+    in eine ``Response`` mit ``Content-Disposition: attachment; filename="..."``.
+
+    KEIN 404-Fall: leerer Stand ist ein gueltiges PDF (alle Zaehler 0, leere Listen), kein
+    HTTP-Fehler -- analog ``GET /api/report/dns-watch``.
+    """
+    result = await runner()
+    # result kommt aus dem Composition Root; per Attribut-Zugriff gelesen (kein Typ-Import im
+    # Router -- der api-Ring kennt nur die drei Attribute, Muster ``get_inventory_report_pdf``).
+    return Response(
+        content=result.content,  # type: ignore[attr-defined]
+        media_type=result.media_type,  # type: ignore[attr-defined]
+        headers={
+            "Content-Disposition": f'attachment; filename="{result.filename}"'  # type: ignore[attr-defined]
+        },
+    )
