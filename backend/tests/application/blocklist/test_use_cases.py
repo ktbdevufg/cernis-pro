@@ -20,6 +20,7 @@ from application.blocklist.use_cases import (
     RefreshDueSources,
     RefreshSource,
     ResetSourcesToDefaults,
+    SeedBuiltinDohContent,
     SeedDefaultSources,
     UpdateUserSource,
     strictness_from_wire,
@@ -171,6 +172,28 @@ def test_reset_to_defaults_raeumt_ab_und_legt_werksliste_neu_an() -> None:
     assert entries.count_for("user_custom") == 0
 
 
+def test_seed_builtin_doh_content_laedt_ok_und_ist_idempotent() -> None:
+    sources = _FakeSourceRepo()
+    entries = _FakeEntryRepo()
+    # Erst die Werksquellen anlegen (BUILTIN, url=None, entry_count None), dann DoH laden.
+    SeedDefaultSources(sources)()
+    SeedBuiltinDohContent(sources, entries, now_provider=lambda: 1000.0)()
+
+    for doh_id in ("doh_providers_ip", "doh_providers_domain"):
+        stored = sources.get(doh_id)
+        assert stored is not None
+        assert stored.status is BlocklistStatus.OK
+        assert stored.entry_count is not None and stored.entry_count > 0
+        assert stored.last_fetched_ts == 1000.0
+        assert entries.count_for(doh_id) == stored.entry_count
+
+    # Idempotent: ein zweiter Lauf (andere now) schreibt NICHT neu (schon geladen).
+    SeedBuiltinDohContent(sources, entries, now_provider=lambda: 2000.0)()
+    reloaded = sources.get("doh_providers_ip")
+    assert reloaded is not None
+    assert reloaded.last_fetched_ts == 1000.0
+
+
 # ── AddUserSource / ImportUploadedSource ──────────────────────────────────────
 
 
@@ -203,6 +226,18 @@ def test_add_user_source_unbekannte_gruppe_wirft_blocklist_error() -> None:
     sources = _FakeSourceRepo()
     with pytest.raises(BlocklistError):
         AddUserSource(sources)("X", "https://a.test/l", "nicht_existent", "domain_list")
+
+
+def test_add_user_source_doh_mit_hosts_setzt_group_warning() -> None:
+    sources = _FakeSourceRepo()
+    result = AddUserSource(sources)("Eigene DoH", "https://a.test/l", "doh", "hosts")
+    assert result.group_warning is not None
+
+
+def test_add_user_source_doh_mit_ip_list_ohne_group_warning() -> None:
+    sources = _FakeSourceRepo()
+    result = AddUserSource(sources)("Eigene DoH", "https://a.test/l", "doh", "ip_list")
+    assert result.group_warning is None
 
 
 def test_import_uploaded_source_parst_sofort_und_setzt_ok() -> None:

@@ -343,6 +343,7 @@ from application.blocklist import (
     RefreshDueSources,
     RefreshSource,
     ResetSourcesToDefaults,
+    SeedBuiltinDohContent,
     SeedDefaultSources,
     UpdateUserSource,
     strictness_from_wire,
@@ -3005,6 +3006,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     # Import/Test ohne bootstrap_on_startup).
     def _seed_blocklist_defaults() -> None:
         SeedDefaultSources(blocklist_source_repository())()
+        # NACH dem Anlegen der Werksquellen: den MITGELIEFERTEN Inhalt der zwei
+        # DOH-BUILTIN-Quellen (url=None -> kein URL-Refresh) idempotent laden -- nur
+        # wenn noch nie geladen (entry_count None). Muster ImportUploadedSource.
+        SeedBuiltinDohContent(blocklist_source_repository(), blocklist_entry_repository())()
 
     def _ensure_blocklist_refresh_job() -> None:
         existing = ListScheduledJobs(scheduled_job_repository())()

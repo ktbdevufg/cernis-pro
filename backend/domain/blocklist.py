@@ -42,11 +42,14 @@ class BlocklistGroup(StrEnum):
     """Die fachliche Gruppe einer Blocklist -- WAS die Liste klassifiziert.
 
     ``TRACKER_ADS`` umfasst Tracker und Werbung, ``THREAT`` umfasst Bedrohungen
-    (Malware/Botnet/Abuse). Der Wert ist direkt log-/wire-tauglich (``StrEnum``).
+    (Malware/Botnet/Abuse). ``DOH`` klassifiziert bekannte DoH-Anbieter (DNS-over-HTTPS):
+    deren Nutzung umgeht den Heim-DNS und wird vom netzweiten Waechter direkt abgefragt
+    (s. ``strictness_allows``). Der Wert ist direkt log-/wire-tauglich (``StrEnum``).
     """
 
     TRACKER_ADS = "tracker_ads"
     THREAT = "threat"
+    DOH = "doh"
 
 
 class BlocklistFormat(StrEnum):
@@ -242,6 +245,12 @@ def strictness_allows(group: BlocklistGroup, strictness: MatchStrictness) -> boo
     * ``ALL``           -> immer ``True``.
 
     KEINE Gruppen-Feinschalter (pro Gruppe an/aus) -- die liegen in Settings/Application.
+
+    BEWUSST: ``DOH`` laeuft NICHT ueber die Anzeige-Strenge. Die Strenge-Stufen gehoeren
+    den Aussenkontakten (Tracker/Threat); DoH ist eine eigene Achse. Der netzweite
+    Waechter fragt die DoH-Gruppe DIREKT ab (steht das Ziel in einer aktiven DOH-Quelle?),
+    unabhaengig von dieser Anzeige-Strenge. Ein ``DOH``-Treffer wird hier folglich mit
+    ``False`` beantwortet -- das ist KORREKT und Absicht, kein fehlender Zweig.
     """
     if strictness is MatchStrictness.ALL:
         return True
@@ -407,6 +416,39 @@ DEFAULT_SOURCES: tuple[BlocklistSource, ...] = (
         license="GPL-2.0-or-later / CC-BY-SA-3.0",
         attribution_required=True,
         enabled=False,
+        last_fetched_ts=None,
+        status=BlocklistStatus.NEVER,
+        entry_count=None,
+    ),
+    # ── DoH-Anbieter (kuratierte Eigen-Zusammenstellung) ──────────────────────
+    # Kuratierte, klartext, permissive (CC0) Eigen-Zusammenstellung bekannter
+    # oeffentlicher DoH-Endpunkte -- durch den Nutzer erweiterbar. Der KLARTEXT-Inhalt
+    # ist MITGELIEFERT (application/blocklist/doh_builtin.py), darum ``url=None`` wie bei
+    # UPLOAD: keine Refresh-URL; der Bootstrap laedt den eingebauten Inhalt direkt.
+    BlocklistSource(
+        id="doh_providers_ip",
+        name="Bekannte DoH-Anbieter (IP)",
+        group=BlocklistGroup.DOH,
+        fmt=BlocklistFormat.IP_LIST,
+        origin=SourceOrigin.BUILTIN,
+        url=None,
+        license="CC0",
+        attribution_required=False,
+        enabled=True,
+        last_fetched_ts=None,
+        status=BlocklistStatus.NEVER,
+        entry_count=None,
+    ),
+    BlocklistSource(
+        id="doh_providers_domain",
+        name="Bekannte DoH-Anbieter (Domain)",
+        group=BlocklistGroup.DOH,
+        fmt=BlocklistFormat.DOMAIN_LIST,
+        origin=SourceOrigin.BUILTIN,
+        url=None,
+        license="CC0",
+        attribution_required=False,
+        enabled=True,
         last_fetched_ts=None,
         status=BlocklistStatus.NEVER,
         entry_count=None,

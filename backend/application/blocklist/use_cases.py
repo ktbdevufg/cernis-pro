@@ -24,11 +24,13 @@ from typing import Protocol
 
 import structlog
 
+from application.blocklist.doh_builtin import BUILTIN_DOH_CONTENT
 from application.blocklist.errors import (
     BlocklistError,
     UnknownStrictnessError,
 )
 from application.blocklist.parsing import parse_blocklist
+from application.blocklist.plausibility import doh_group_format_warning
 from domain.blocklist import (
     DEFAULT_SOURCES,
     BlocklistFormat,
@@ -61,6 +63,7 @@ __all__ = [
     "RefreshResult",
     "RefreshSource",
     "ResetSourcesToDefaults",
+    "SeedBuiltinDohContent",
     "SeedDefaultSources",
     "UpdateUserSource",
     "strictness_from_wire",
@@ -98,19 +101,27 @@ class AddSourceResult:
     """Ergebnis von ``AddUserSource``: die vergebene id + der freundliche Lizenz-Hinweis.
 
     ``license_hint`` ist ``None`` oder ein HINWEIS-String (s. ``detect_license_hint``) --
-    er verweigert NICHTS, der Aufrufer zeigt ihn nur an.
+    er verweigert NICHTS, der Aufrufer zeigt ihn nur an. ``group_warning`` ist ``None``
+    oder ein Format-Plausibilitaets-HINWEIS (s. ``doh_group_format_warning``) -- ebenfalls
+    nur ein Hinweis, verweigert NICHTS.
     """
 
     source_id: str
     license_hint: str | None
+    group_warning: str | None = None
 
 
 @dataclass(frozen=True)
 class ImportResult:
-    """Ergebnis von ``ImportUploadedSource``: die vergebene id + Zahl geparster Eintraege."""
+    """Ergebnis von ``ImportUploadedSource``: die vergebene id + Zahl geparster Eintraege.
+
+    ``group_warning`` ist ``None`` oder ein Format-Plausibilitaets-HINWEIS
+    (s. ``doh_group_format_warning``) -- nur ein Hinweis, verweigert NICHTS.
+    """
 
     source_id: str
     entry_count: int
+    group_warning: str | None = None
 
 
 @dataclass(frozen=True)
@@ -307,6 +318,63 @@ class SeedDefaultSources:
             _logger.info("blocklist_default_sources_seeded", added=added)
 
 
+class SeedBuiltinDohContent:
+    """Laedt den MITGELIEFERTEN Inhalt der DOH-Werksquellen (``url=None``) -- idempotent.
+
+    Die zwei DOH-BUILTIN-Quellen (``doh_providers_ip``/``doh_providers_domain``) tragen
+    ``url=None`` -> der normale ``RefreshSource``-URL-Pfad laedt sie NICHT (und
+    ``RefreshDueSources`` ueberspringt ``url is None``). Ihr Inhalt liegt eingebaut in
+    ``BUILTIN_DOH_CONTENT``; dieser Bootstrap-Schritt parst ihn ueber ``parse_blocklist``
+    und schreibt ihn ueber ``entries.replace_entries`` -- Muster ``ImportUploadedSource``,
+    aber fuer BUILTIN-Quellen ohne URL.
+
+    IDEMPOTENT (Muster ``SeedDefaultSources``): nur laden, wenn die Quelle existiert und
+    noch NIE geladen wurde (``entry_count is None``). Bereits geladene Quellen bleiben
+    UNANGETASTET -- ein Neustart schreibt nicht neu. Wird im Bootstrap NACH
+    ``SeedDefaultSources`` gerufen (die Quellen muessen zuerst angelegt sein).
+    """
+
+    def __init__(
+        self,
+        sources: BlocklistSourceRepository,
+        entries: BlocklistEntryRepository,
+        now_provider: Callable[[], float] = time.time,
+    ) -> None:
+        self._sources = sources
+        self._entries = entries
+        self._now = now_provider
+
+    def __call__(self) -> None:
+        loaded = 0
+        for source_id, raw_text in BUILTIN_DOH_CONTENT.items():
+            source = self._sources.get(source_id)
+            # Quelle noch nicht angelegt oder schon geladen -> nichts tun (idempotent).
+            if source is None or source.entry_count is not None:
+                continue
+            domains, ip_cidrs = parse_blocklist(source.fmt, raw_text)
+            entry_count = len(domains) + len(ip_cidrs)
+            self._entries.replace_entries(source_id, domains, ip_cidrs)
+            self._sources.upsert(
+                BlocklistSource(
+                    id=source.id,
+                    name=source.name,
+                    group=source.group,
+                    fmt=source.fmt,
+                    origin=source.origin,
+                    url=source.url,
+                    license=source.license,
+                    attribution_required=source.attribution_required,
+                    enabled=source.enabled,
+                    last_fetched_ts=self._now(),
+                    status=BlocklistStatus.OK,
+                    entry_count=entry_count,
+                )
+            )
+            loaded += 1
+        if loaded:
+            _logger.info("blocklist_builtin_doh_seeded", loaded=loaded)
+
+
 class ResetSourcesToDefaults:
     """Werkszustand der Listen: leert Eintraege + Quellen, legt alle Defaults neu an.
 
@@ -363,7 +431,11 @@ class AddUserSource:
             entry_count=None,
         )
         self._sources.upsert(source)
-        return AddSourceResult(source_id=source_id, license_hint=detect_license_hint(url))
+        return AddSourceResult(
+            source_id=source_id,
+            license_hint=detect_license_hint(url),
+            group_warning=doh_group_format_warning(group_enum, fmt_enum),
+        )
 
 
 class ImportUploadedSource:
@@ -411,7 +483,11 @@ class ImportUploadedSource:
             entry_count=entry_count,
         )
         self._sources.upsert(source)
-        return ImportResult(source_id=source_id, entry_count=entry_count)
+        return ImportResult(
+            source_id=source_id,
+            entry_count=entry_count,
+            group_warning=doh_group_format_warning(group_enum, fmt_enum),
+        )
 
 
 class UpdateUserSource:

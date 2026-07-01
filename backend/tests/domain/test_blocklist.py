@@ -89,6 +89,19 @@ def test_strictness_all_immer_true() -> None:
     assert strictness_allows(BlocklistGroup.TRACKER_ADS, MatchStrictness.ALL) is True
 
 
+def test_doh_gruppe_existiert() -> None:
+    assert BlocklistGroup.DOH.value == "doh"
+
+
+def test_strictness_doh_laeuft_nicht_ueber_die_strenge() -> None:
+    # DoH ist eine eigene Achse: nur ALL (immer True) laesst DOH durch; RECOMMENDED und
+    # CRITICAL_ONLY antworten mit False -- KORREKT, weil der netzweite Waechter die
+    # DOH-Gruppe DIREKT abfragt, nicht ueber die Anzeige-Strenge.
+    assert strictness_allows(BlocklistGroup.DOH, MatchStrictness.ALL) is True
+    assert strictness_allows(BlocklistGroup.DOH, MatchStrictness.RECOMMENDED) is False
+    assert strictness_allows(BlocklistGroup.DOH, MatchStrictness.CRITICAL_ONLY) is False
+
+
 # ── ip_in_cidr (in/out/ungueltig/exakt) ───────────────────────────────────────
 
 
@@ -174,6 +187,9 @@ def test_default_sources_aktive_sind_lizenzrobust() -> None:
         "oisd_small",
         "urlhaus",
         "feodo_ipblocklist",
+        # DoH-Werkslisten (CC0, klartext) -- aktiv vorausgewaehlt.
+        "doh_providers_ip",
+        "doh_providers_domain",
     }
 
 
@@ -189,3 +205,18 @@ def test_default_sources_urlhaus_ist_hosts_format() -> None:
     urlhaus = next(src for src in DEFAULT_SOURCES if src.id == "urlhaus")
     assert urlhaus.fmt is BlocklistFormat.HOSTS
     assert urlhaus.group is BlocklistGroup.THREAT
+
+
+def test_default_sources_doh_quellen_builtin_ohne_url() -> None:
+    # Die zwei DoH-Werkslisten: Gruppe DOH, mitgeliefert (BUILTIN) ohne Refresh-URL
+    # (Inhalt kommt aus doh_builtin.py, geladen vom Bootstrap), IP- bzw. Domain-Format.
+    ip = next(src for src in DEFAULT_SOURCES if src.id == "doh_providers_ip")
+    dom = next(src for src in DEFAULT_SOURCES if src.id == "doh_providers_domain")
+    assert ip.group is BlocklistGroup.DOH
+    assert ip.fmt is BlocklistFormat.IP_LIST
+    assert ip.url is None
+    assert ip.enabled is True
+    assert dom.group is BlocklistGroup.DOH
+    assert dom.fmt is BlocklistFormat.DOMAIN_LIST
+    assert dom.url is None
+    assert dom.enabled is True
