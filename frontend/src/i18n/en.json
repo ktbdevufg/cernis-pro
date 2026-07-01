@@ -1596,6 +1596,55 @@
       "fusszeile": "CERNIS PRO 2.0 – DNS Watch Report · {{datum}}",
       "pdf": "Download as PDF",
       "pdfFehler": "The PDF could not be created."
+    },
+    "dnsBypass": {
+      "umschalter": {
+        "host": "This computer",
+        "netz": "Bypass in the network"
+      },
+      "bezug": {
+        "label": "Scope",
+        "alle": "All recordings"
+      },
+      "einleitung": "This report shows which devices in the network bypass the expected DNS – plain DNS (port 53) to a foreign resolver is detected reliably, DoH is only suspected heuristically. It describes and contextualises – it does not judge.",
+      "ladeFehler": "The network-wide DNS bypass report could not be loaded.",
+      "leerzustandKeineAufzeichnung": "No network-wide recording yet. Only what CERNIS reads along becomes visible network-wide – please start a recording in the DNS Watch (tab “Bypass in the network”) first.",
+      "leerzustandKeineUmgehung": "No bypass recorded. Only what CERNIS reads along becomes visible network-wide: this requires the network traffic to reach here (gateway/mirror port or a simple network). Without network visibility the list stays empty, even if bypassing actually happens.",
+      "kennzahl": {
+        "umgeher": "Bypassers",
+        "geraete": "Devices bypassing",
+        "anfragen": "Queries total",
+        "erwartet": "As expected"
+      },
+      "resolver": {
+        "titel": "Foreign resolvers (target IP)",
+        "spalteZiel": "Target IP",
+        "spalteAnfragen": "Queries",
+        "leer": "No foreign resolvers recorded."
+      },
+      "liste": {
+        "titel": "Bypassers in the network"
+      },
+      "spalte": {
+        "geraet": "Device",
+        "ziel": "Target IP",
+        "anfragen": "Queries",
+        "beispiele": "Sample names"
+      },
+      "dohBadge": "possible DoH",
+      "dohBadgeNamed": "possible DoH ({{quelle}})",
+      "tabelle": {
+        "leer": "No bypass in this selection."
+      },
+      "grundlage": {
+        "titel": "Basis of the classification",
+        "erwartet": "Expected DNS servers",
+        "keine": "(none)"
+      },
+      "fussnote": "The report describes network-wide which devices bypass the expected DNS, and contextualises – it does not judge. Plain DNS (port 53) is detected reliably, DoH is only suspected heuristically.",
+      "fusszeile": "CERNIS PRO 2.0 – DNS Bypass Report · {{datum}}",
+      "pdf": "Download as PDF",
+      "pdfFehler": "The PDF could not be created."
     }
   },
   "verwaltung": {

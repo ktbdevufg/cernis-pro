@@ -1596,6 +1596,55 @@
       "fusszeile": "CERNIS PRO 2.0 – DNS-Wächter-Bericht · {{datum}}",
       "pdf": "Als PDF herunterladen",
       "pdfFehler": "Das PDF konnte nicht erstellt werden."
+    },
+    "dnsBypass": {
+      "umschalter": {
+        "host": "Dieser Rechner",
+        "netz": "Umgehung im Netz"
+      },
+      "bezug": {
+        "label": "Bezug",
+        "alle": "Alle Aufzeichnungen"
+      },
+      "einleitung": "Dieser Bericht zeigt, welche Geräte im Netz den erwarteten DNS umgehen – Plain-DNS (Port 53) zu einem fremden Resolver wird sicher erkannt, DoH nur heuristisch vermutet. Er beschreibt und ordnet ein – er urteilt nicht.",
+      "ladeFehler": "Der netzweite DNS-Umgehungs-Bericht konnte nicht geladen werden.",
+      "leerzustandKeineAufzeichnung": "Noch keine netzweite Aufzeichnung vorhanden. Netzweit sichtbar wird nur, was CERNIS mitliest – bitte zuerst im DNS-Wächter (Reiter „Umgehung im Netz“) eine Aufzeichnung starten.",
+      "leerzustandKeineUmgehung": "Keine Umgehung erfasst. Netzweit sichtbar wird nur, was CERNIS mitliest: Das setzt voraus, dass der Netzverkehr hier ankommt (Gateway/Mirror-Port oder ein einfaches Netz). Ohne Netz-Sicht bleibt die Liste leer, auch wenn tatsächlich umgangen wird.",
+      "kennzahl": {
+        "umgeher": "Umgeher",
+        "geraete": "Geräte mit Umgehung",
+        "anfragen": "Anfragen gesamt",
+        "erwartet": "Erwartungsgemäß"
+      },
+      "resolver": {
+        "titel": "Fremde Resolver (Ziel-IP)",
+        "spalteZiel": "Ziel-IP",
+        "spalteAnfragen": "Anfragen",
+        "leer": "Keine fremden Resolver erfasst."
+      },
+      "liste": {
+        "titel": "Umgeher im Netz"
+      },
+      "spalte": {
+        "geraet": "Gerät",
+        "ziel": "Ziel-IP",
+        "anfragen": "Anfragen",
+        "beispiele": "Beispiel-Namen"
+      },
+      "dohBadge": "mögliche DoH",
+      "dohBadgeNamed": "mögliche DoH ({{quelle}})",
+      "tabelle": {
+        "leer": "Keine Umgehung in dieser Auswahl."
+      },
+      "grundlage": {
+        "titel": "Grundlage der Einordnung",
+        "erwartet": "Erwartete DNS-Server",
+        "keine": "(keine)"
+      },
+      "fussnote": "Der Bericht beschreibt netzweit, welche Geräte den erwarteten DNS umgehen, und ordnet ein – er urteilt nicht. Plain-DNS (Port 53) wird sicher erkannt, DoH nur heuristisch vermutet.",
+      "fusszeile": "CERNIS PRO 2.0 – DNS-Umgehungs-Bericht · {{datum}}",
+      "pdf": "Als PDF herunterladen",
+      "pdfFehler": "Das PDF konnte nicht erstellt werden."
     }
   },
   "verwaltung": {

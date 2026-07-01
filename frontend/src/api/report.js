@@ -517,6 +517,96 @@ export async function fetchDnsWatchReportPdf() {
   return apiDownload("/api/report/dns-watch/pdf", null, "CERNISPRO_DNS-Waechter-Bericht.pdf");
 }
 
+// ── DNS-Umgehungs-Bericht (netzweit, Etappe 6) ─────────────────────────────────
+//
+// Zweiter Bezugsrahmen des DNS-Waechter-Berichts: NICHT der host-lokale Bericht oben
+// (fetchDnsWatchReport), sondern die NETZWEITE Umgehung — welche Geraete im Netz den
+// erwarteten DNS umgehen. Naht wie der Aussenkontakte-Bericht: ein Recordings-Dropdown
+// (Bezugsrahmen) plus der recording_id-parametrisierte Bericht + PDF.
+//
+// Wire-Form (aus backend/api/report.py, verifiziert, NICHT aendern):
+//   GET /api/report/dns-bypass/recordings -> [ { id:str, label:str } ]
+//   GET /api/report/dns-bypass?recording_id=... -> {
+//     recording_label:str, recording_scope:str ("single"/"all"),
+//     expected_servers:[str],
+//     queries_total:int, bypass_total:int, expected_total:int, bypass_devices:int,
+//     resolver_distribution: [ { dst_ip:str, count:int } ],
+//     bypass_rows: [ { src_ip, device_name, dst_ip, is_doh:bool, doh_source_name,
+//       query_count:int, sample_qnames:[str] } ]
+//   }
+// ``recording_id`` ist OPTIONAL: leer/None = alle Aufzeichnungen zusammengefasst, ein
+// Wert = nur diese. KEIN 404-Fall: leerer Stand ist ein DATUM (alle Zaehler 0 + leere
+// Listen), kein Fehler.
+
+// Ein Resolver-Verteilungs-Eintrag (Ziel-IP + Anzahl) -> View-Struktur. Zahlen roh.
+function mappeBypassResolver(e) {
+  return {
+    dstIp: e.dst_ip,
+    count: e.count,
+  };
+}
+
+// Eine Umgeher-Zeile -> View-Struktur (camelCase). Anzeige-Texte kommen schon fertig
+// vom Backend (Leerstring statt None); deviceName/dohSourceName ehrlich als null
+// belassen, wenn nicht vorhanden (kein erfundener Fallback). sampleQnames faellt
+// sicher auf [] (Muster der Outbound-Mapper). Zaehler roh; Reihenfolge des Backends
+// bleibt.
+function mappeBypassZeile(r) {
+  return {
+    srcIp: r.src_ip,
+    deviceName: r.device_name ?? null,
+    dstIp: r.dst_ip,
+    isDoh: Boolean(r.is_doh),
+    dohSourceName: r.doh_source_name ?? null,
+    queryCount: r.query_count,
+    sampleQnames: r.sample_qnames ?? [],
+  };
+}
+
+// GET /api/report/dns-bypass/recordings -> die waehlbaren Aufzeichnungen fuers
+// Bezugsrahmen-Dropdown (schlanke Wire-Form: id + label). Leere Liste = DATUM (noch
+// keine Aufzeichnungen), kein Fehler. Bei !ok/Netzfehler -> ApiError (die View faengt
+// das still ab und zeigt nur "Alle"). Muster fetchOutboundReportRecordings.
+export async function fetchDnsBypassReportRecordings() {
+  const backend = await apiGet("/api/report/dns-bypass/recordings");
+  return (backend ?? []).map((r) => ({ id: r.id, label: r.label }));
+}
+
+// GET /api/report/dns-bypass?recording_id=... -> der aggregierte netzweite DNS-
+// Umgehungs-Bericht (EINE Aufzeichnung oder alle). recordingId leer/null -> ohne Query
+// (alle). Fehlt ein Block wider Erwarten, fallen Zaehler auf 0 und Listen auf []
+// (gefahrloses Mappen, Muster fetchOutboundReport). Bei !ok/Netzfehler -> ApiError (die
+// View faengt das und zeigt den Fehlerhinweis).
+export async function fetchDnsBypassReport(recordingId) {
+  const pfad = recordingId
+    ? `/api/report/dns-bypass?recording_id=${encodeURIComponent(recordingId)}`
+    : "/api/report/dns-bypass";
+  const backend = await apiGet(pfad);
+  return {
+    recordingLabel: backend?.recording_label ?? "",
+    recordingScope: backend?.recording_scope ?? "all",
+    expectedServers: backend?.expected_servers ?? [],
+    queriesTotal: backend?.queries_total ?? 0,
+    bypassTotal: backend?.bypass_total ?? 0,
+    expectedTotal: backend?.expected_total ?? 0,
+    bypassDevices: backend?.bypass_devices ?? 0,
+    resolverDistribution: (backend?.resolver_distribution ?? []).map(mappeBypassResolver),
+    bypassRows: (backend?.bypass_rows ?? []).map(mappeBypassZeile),
+  };
+}
+
+// GET /api/report/dns-bypass/pdf?recording_id=... -> loest den Browser-Download des
+// netzweiten DNS-Umgehungs-Berichts als PDF aus (Blob via apiDownload). recordingId
+// leer/null -> ohne Query (alle). Der echte Dateiname kommt vom Backend ueber Content-
+// Disposition; der defaultName hier ist nur Fallback. Bei !ok/Netzfehler -> ApiError
+// (die View faengt das und zeigt einen dezenten PDF-Fehlerhinweis).
+export async function fetchDnsBypassReportPdf(recordingId) {
+  const pfad = recordingId
+    ? `/api/report/dns-bypass/pdf?recording_id=${encodeURIComponent(recordingId)}`
+    : "/api/report/dns-bypass/pdf";
+  return apiDownload(pfad, null, "CERNISPRO_DNS-Umgehungs-Bericht.pdf");
+}
+
 export default {
   fetchSecurityReport,
   fetchSecurityReportPdf,
@@ -530,4 +620,7 @@ export default {
   fetchOutboundReportPdf,
   fetchDnsWatchReport,
   fetchDnsWatchReportPdf,
+  fetchDnsBypassReportRecordings,
+  fetchDnsBypassReport,
+  fetchDnsBypassReportPdf,
 };
