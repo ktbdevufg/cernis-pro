@@ -169,7 +169,7 @@ def get_dns_bypass_status(
 
 
 @router.post("/start")
-def start_dns_bypass(
+async def start_dns_bypass(
     body: StartBody,
     runner: Annotated[DnsBypassStartRunner, Depends(provide_dns_bypass_start)],
 ) -> dict[str, object]:
@@ -178,6 +178,12 @@ def start_dns_bypass(
     Der Helfer-Start kann legitim scheitern (z. B. keine Rechte): ein Fehlertext wird
     ehrlich als ``{"ok": false, "error": <text>}`` mit HTTP 200 durchgereicht -- KEIN 500,
     kein stiller Fallback (S3). Erfolg (``None``) -> ``{"ok": true}``.
+
+    BEWUSST ``async`` (Muster ``traffic.start_traffic_poll``): der Composition-Root-
+    Runner ruft ``asyncio.create_task`` -- das braucht einen laufenden Event-Loop. Ein
+    synchroner Endpunkt liefe im Starlette-Threadpool OHNE Loop (``RuntimeError: no
+    running event loop``). Der ``async``-Endpunkt laeuft im Loop; der ``runner``-Callable
+    selbst bleibt synchron und wird weiterhin OHNE ``await`` aufgerufen.
     """
     error = runner(body.interface)
     if error is not None:
