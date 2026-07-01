@@ -13,11 +13,14 @@
 //                Icon (Default false -> kein Kennzeichen; andere Views bleiben so
 //                völlig unverändert, da sie die Prop nicht setzen)
 //   onOpen       Klick-Handler (nur aktive Kachel)
-//   onInfo       Klick-Handler des Info-Icons oben rechts (Platzhalter)
+//   helpId       help_content.json-Schlüssel; gesetzt -> "?"-HelpDot-Popup oben
+//                rechts. Ohne helpId wird kein Knopf gerendert.
+//   onOpenManual onOpenManual(helpId) für den HelpDot ("Mehr im Handbuch")
 
-import { ArrowRight, Info, Lock } from "lucide-react";
+import { ArrowRight, Lock } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import HelpDot from "./HelpDot.jsx";
 import "./FunctionCard.css";
 
 export default function FunctionCard({
@@ -28,15 +31,10 @@ export default function FunctionCard({
   lockedReason,
   aktiv = false,
   onOpen,
-  onInfo,
+  helpId,
+  onOpenManual,
 }) {
   const { t } = useTranslation();
-
-  // Info-Icon nicht den Karten-Klick auslösen lassen.
-  const handleInfo = (event) => {
-    event.stopPropagation();
-    if (onInfo) onInfo();
-  };
 
   return (
     <div
@@ -73,14 +71,12 @@ export default function FunctionCard({
             </span>
           )}
         </span>
-        <button
-          type="button"
-          className="function-card__info"
-          aria-label={t("cards.infoLabel")}
-          onClick={handleInfo}
-        >
-          <Info size={16} />
-        </button>
+        {helpId ? (
+          // HelpDot-Klick darf den Karten-Klick (onOpen) nicht auslösen.
+          <span onClick={(event) => event.stopPropagation()}>
+            <HelpDot helpId={helpId} onOpenManual={onOpenManual} />
+          </span>
+        ) : null}
       </div>
 
       <h3 className="function-card__title">{title}</h3>

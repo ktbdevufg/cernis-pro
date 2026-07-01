@@ -117,7 +117,7 @@ const HOST_ICON = {
   phone: Smartphone,
 };
 
-export default function OverviewView({ onNavigate }) {
+export default function OverviewView({ onNavigate, onOpenManual }) {
   const { t } = useTranslation();
 
   // Sichtbarkeit der Bereiche (Defaults true, bis das Setting geladen ist).
@@ -313,18 +313,24 @@ export default function OverviewView({ onNavigate }) {
               title={t("beobachten.cards.scan.title")}
               subtitle={t("beobachten.cards.scan.subtitle")}
               onOpen={() => springe("observe", "scan")}
+              helpId="help.scan.start"
+              onOpenManual={onOpenManual}
             />
             <FunctionCard
               icon={Activity}
               title={t("beobachten.cards.monitor.title")}
               subtitle={t("beobachten.cards.monitor.subtitle")}
               onOpen={() => springe("observe", "monitor")}
+              helpId="help.monitor.live"
+              onOpenManual={onOpenManual}
             />
             <FunctionCard
               icon={ShieldAlert}
               title={t("untersuchen.cards.cve.title")}
               subtitle={t("untersuchen.cards.cve.subtitle")}
               onOpen={() => springe("investigate", "cve")}
+              helpId="help.cve.uebersicht"
+              onOpenManual={onOpenManual}
             />
           </CardGrid>
         </section>

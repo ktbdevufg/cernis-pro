@@ -20,12 +20,12 @@ import WartungPanel from "../components/WartungPanel.jsx";
 
 // Kachel-Definition: Schlüssel, Icon, Sperrstatus. Reihenfolge ist verbindlich.
 const FUNKTIONEN = [
-  { id: "geraeteverwaltung", icon: ListChecks, locked: false },
-  { id: "wartung", icon: Trash2, locked: false },
-  { id: "listen", icon: ShieldAlert, locked: false },
+  { id: "geraeteverwaltung", icon: ListChecks, locked: false, helpId: "help.geraete.verwaltung" },
+  { id: "wartung", icon: Trash2, locked: false, helpId: "help.wartung" },
+  { id: "listen", icon: ShieldAlert, locked: false, helpId: "help.listen" },
 ];
 
-export default function VerwaltungView() {
+export default function VerwaltungView({ onOpenManual }) {
   const { t } = useTranslation();
   // null -> Kachel-Übersicht; sonst die geöffnete Funktion.
   const [openFunction, setOpenFunction] = useState(null);
@@ -35,6 +35,8 @@ export default function VerwaltungView() {
       <FunctionShell
         title={t("verwaltung.cards.geraeteverwaltung.title")}
         onBack={() => setOpenFunction(null)}
+        helpId="help.geraete.verwaltung"
+        onOpenManual={onOpenManual}
       >
         <DeviceManagementPanel />
       </FunctionShell>
@@ -46,6 +48,8 @@ export default function VerwaltungView() {
       <FunctionShell
         title={t("verwaltung.cards.wartung.title")}
         onBack={() => setOpenFunction(null)}
+        helpId="help.wartung"
+        onOpenManual={onOpenManual}
       >
         <WartungPanel />
       </FunctionShell>
@@ -57,6 +61,8 @@ export default function VerwaltungView() {
       <FunctionShell
         title={t("verwaltung.cards.listen.title")}
         onBack={() => setOpenFunction(null)}
+        helpId="help.listen"
+        onOpenManual={onOpenManual}
       >
         <BlocklistPanel />
       </FunctionShell>
@@ -65,7 +71,7 @@ export default function VerwaltungView() {
 
   return (
     <CardGrid>
-      {FUNKTIONEN.map(({ id, icon, locked }) => (
+      {FUNKTIONEN.map(({ id, icon, locked, helpId }) => (
         <FunctionCard
           key={id}
           icon={icon}
@@ -73,6 +79,8 @@ export default function VerwaltungView() {
           subtitle={t(`verwaltung.cards.${id}.subtitle`)}
           locked={locked}
           onOpen={() => setOpenFunction(id)}
+          helpId={helpId}
+          onOpenManual={onOpenManual}
         />
       ))}
     </CardGrid>

@@ -83,15 +83,15 @@ const AKTIV_POLL_MS = 20000;
 
 // Kachel-Definition: Schlüssel, Icon, Sperrstatus. Reihenfolge ist verbindlich.
 const FUNKTIONEN = [
-  { id: "scan", icon: Radar, locked: false },
-  { id: "watch", icon: ShieldQuestion, locked: false },
-  { id: "traffic", icon: Repeat, locked: false },
-  { id: "outbound", icon: Globe, locked: false },
-  { id: "dnswatch", icon: ShieldAlert, locked: false },
-  { id: "monitor", icon: Activity, locked: false },
-  { id: "logging", icon: FileClock, locked: false },
-  { id: "topology", icon: Network, locked: false },
-  { id: "processes", icon: ListTree, locked: true },
+  { id: "scan", icon: Radar, locked: false, helpId: "help.scan.start" },
+  { id: "watch", icon: ShieldQuestion, locked: false, helpId: "help.watch.uebersicht" },
+  { id: "traffic", icon: Repeat, locked: false, helpId: "help.traffic.uebersicht" },
+  { id: "outbound", icon: Globe, locked: false, helpId: "help.outbound.uebersicht" },
+  { id: "dnswatch", icon: ShieldAlert, locked: false, helpId: "help.dns_watch.uebersicht" },
+  { id: "monitor", icon: Activity, locked: false, helpId: "help.monitor.live" },
+  { id: "logging", icon: FileClock, locked: false, helpId: "help.monitor.logging" },
+  { id: "topology", icon: Network, locked: false, helpId: "help.topology.uebersicht" },
+  { id: "processes", icon: ListTree, locked: true, helpId: "help.process.uebersicht" },
 ];
 
 // Sweep-Overlay als eigene, memoisierte Komponente OHNE Props. Dadurch rendert
@@ -702,6 +702,8 @@ export default function ObserveView({
       <FunctionShell
         title={t("beobachten.cards.watch.title")}
         onBack={() => setOpenFunction(null)}
+        helpId="help.watch.uebersicht"
+        onOpenManual={onOpenManual}
       >
         <WatchView />
       </FunctionShell>
@@ -713,6 +715,8 @@ export default function ObserveView({
       <FunctionShell
         title={t("beobachten.cards.traffic.title")}
         onBack={() => setOpenFunction(null)}
+        helpId="help.traffic.uebersicht"
+        onOpenManual={onOpenManual}
       >
         <TrafficView
           refreshInterval={refreshInterval}
@@ -727,6 +731,8 @@ export default function ObserveView({
       <FunctionShell
         title={t("beobachten.cards.outbound.title")}
         onBack={() => setOpenFunction(null)}
+        helpId="help.outbound.uebersicht"
+        onOpenManual={onOpenManual}
       >
         <OutboundView />
       </FunctionShell>
@@ -738,6 +744,8 @@ export default function ObserveView({
       <FunctionShell
         title={t("beobachten.cards.dnswatch.title")}
         onBack={() => setOpenFunction(null)}
+        helpId="help.dns_watch.uebersicht"
+        onOpenManual={onOpenManual}
       >
         <DnsWatchView />
       </FunctionShell>
@@ -749,6 +757,8 @@ export default function ObserveView({
       <FunctionShell
         title={t("beobachten.cards.monitor.title")}
         onBack={() => setOpenFunction(null)}
+        helpId="help.monitor.live"
+        onOpenManual={onOpenManual}
       >
         <MonitorView />
       </FunctionShell>
@@ -760,6 +770,8 @@ export default function ObserveView({
       <FunctionShell
         title={t("beobachten.cards.logging.title")}
         onBack={() => setOpenFunction(null)}
+        helpId="help.monitor.logging"
+        onOpenManual={onOpenManual}
         zurueckVerbergen={loggingDetailOffen}
       >
         <LoggingPanel onDetailChange={setLoggingDetailOffen} />
@@ -772,6 +784,8 @@ export default function ObserveView({
       <FunctionShell
         title={t("beobachten.cards.topology.title")}
         onBack={() => setOpenFunction(null)}
+        helpId="help.topology.uebersicht"
+        onOpenManual={onOpenManual}
       >
         <TopologyView />
       </FunctionShell>
@@ -780,7 +794,7 @@ export default function ObserveView({
 
   return (
     <CardGrid>
-      {FUNKTIONEN.map(({ id, icon, locked }) => (
+      {FUNKTIONEN.map(({ id, icon, locked, helpId }) => (
         <FunctionCard
           key={id}
           icon={icon}
@@ -796,6 +810,8 @@ export default function ObserveView({
                 : false
           }
           onOpen={() => setOpenFunction(id)}
+          helpId={helpId}
+          onOpenManual={onOpenManual}
         />
       ))}
     </CardGrid>

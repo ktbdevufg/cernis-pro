@@ -22,14 +22,15 @@ import RouteView from "../components/RouteView.jsx";
 
 // Kachel-Definition: Schlüssel, Icon, Sperrstatus. Reihenfolge ist verbindlich.
 const FUNKTIONEN = [
-  { id: "diagnose", icon: Activity, locked: false },
-  { id: "analysis", icon: ScanSearch, locked: true },
-  { id: "cve", icon: ShieldAlert, locked: false },
+  { id: "diagnose", icon: Activity, locked: false, helpId: "help.diagnostics.route_geo" },
+  { id: "analysis", icon: ScanSearch, locked: true, helpId: "help.analysis.regeln" },
+  { id: "cve", icon: ShieldAlert, locked: false, helpId: "help.cve.uebersicht" },
 ];
 
 export default function InvestigateView({
   initialFunction = null,
   onFunktionGeoeffnet,
+  onOpenManual,
 }) {
   const { t } = useTranslation();
   // null -> Kachel-Übersicht; sonst die geöffnete Funktion. Eine von aussen
@@ -54,6 +55,8 @@ export default function InvestigateView({
       <FunctionShell
         title={t(`untersuchen.cards.${openFunction}.title`)}
         onBack={() => setOpenFunction(null)}
+        helpId={FUNKTIONEN.find((f) => f.id === openFunction)?.helpId}
+        onOpenManual={onOpenManual}
       >
         {openFunction === "diagnose" ? (
           <RouteView />
@@ -68,7 +71,7 @@ export default function InvestigateView({
 
   return (
     <CardGrid>
-      {FUNKTIONEN.map(({ id, icon, locked }) => (
+      {FUNKTIONEN.map(({ id, icon, locked, helpId }) => (
         <FunctionCard
           key={id}
           icon={icon}
@@ -77,6 +80,8 @@ export default function InvestigateView({
           locked={locked}
           lockedReason={locked ? t(`untersuchen.cards.${id}.locked`) : undefined}
           onOpen={() => setOpenFunction(id)}
+          helpId={helpId}
+          onOpenManual={onOpenManual}
         />
       ))}
     </CardGrid>

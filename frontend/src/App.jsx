@@ -179,11 +179,15 @@ export default function App() {
               lang={lang}
               onLangChange={setLang}
               onClose={() => setSettingsOffen(false)}
+              onOpenManual={openManualAt}
             />
           ) : (
             <>
               {activeTab === "overview" && (
-                <OverviewView onNavigate={handleNavigate} />
+                <OverviewView
+                  onNavigate={handleNavigate}
+                  onOpenManual={openManualAt}
+                />
               )}
               {activeTab === "observe" && (
                 <ObserveView
@@ -198,11 +202,18 @@ export default function App() {
                 <InvestigateView
                   initialFunction={investigateFunktion}
                   onFunktionGeoeffnet={() => setInvestigateFunktion(null)}
+                  onOpenManual={openManualAt}
                 />
               )}
-              {activeTab === "reporting" && <ReportingView />}
-              {activeTab === "devices" && <DevicesView />}
-              {activeTab === "verwaltung" && <VerwaltungView />}
+              {activeTab === "reporting" && (
+                <ReportingView onOpenManual={openManualAt} />
+              )}
+              {activeTab === "devices" && (
+                <DevicesView onOpenManual={openManualAt} />
+              )}
+              {activeTab === "verwaltung" && (
+                <VerwaltungView onOpenManual={openManualAt} />
+              )}
             </>
           )}
         </Suspense>

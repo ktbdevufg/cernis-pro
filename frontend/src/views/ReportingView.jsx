@@ -23,10 +23,10 @@ import SecurityReportView from "../components/SecurityReportView.jsx";
 
 // Kachel-Definition: Schlüssel, Icon, Sperrstatus. Reihenfolge ist verbindlich.
 const FUNKTIONEN = [
-  { id: "security", icon: ShieldCheck, locked: false },
-  { id: "inventory", icon: Boxes, locked: false },
-  { id: "cve", icon: ShieldAlert, locked: false },
-  { id: "outbound", icon: Radar, locked: false },
+  { id: "security", icon: ShieldCheck, locked: false, helpId: "help.report.security" },
+  { id: "inventory", icon: Boxes, locked: false, helpId: "help.report.inventory" },
+  { id: "cve", icon: ShieldAlert, locked: false, helpId: "help.report.cve" },
+  { id: "outbound", icon: Radar, locked: false, helpId: "help.report.outbound" },
 ];
 
 // Mapping id -> geöffnete Berichts-Komponente. Ein weiterer Bericht braucht nur
@@ -38,7 +38,7 @@ const KOMPONENTEN_JE_ID = {
   outbound: OutboundReportView,
 };
 
-export default function ReportingView() {
+export default function ReportingView({ onOpenManual }) {
   const { t } = useTranslation();
   // null -> Kachel-Übersicht; sonst die geöffnete Funktion.
   const [openFunction, setOpenFunction] = useState(null);
@@ -49,6 +49,8 @@ export default function ReportingView() {
       <FunctionShell
         title={t(`reporting.cards.${openFunction}.title`)}
         onBack={() => setOpenFunction(null)}
+        helpId={FUNKTIONEN.find((f) => f.id === openFunction)?.helpId}
+        onOpenManual={onOpenManual}
       >
         {Bericht ? <Bericht /> : null}
       </FunctionShell>
@@ -57,7 +59,7 @@ export default function ReportingView() {
 
   return (
     <CardGrid>
-      {FUNKTIONEN.map(({ id, icon, locked }) => (
+      {FUNKTIONEN.map(({ id, icon, locked, helpId }) => (
         <FunctionCard
           key={id}
           icon={icon}
@@ -66,6 +68,8 @@ export default function ReportingView() {
           locked={locked}
           lockedReason={locked ? t(`reporting.cards.${id}.locked`) : undefined}
           onOpen={() => setOpenFunction(id)}
+          helpId={helpId}
+          onOpenManual={onOpenManual}
         />
       ))}
     </CardGrid>

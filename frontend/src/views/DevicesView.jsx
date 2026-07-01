@@ -16,10 +16,10 @@ import FunctionCard from "../components/FunctionCard.jsx";
 
 // Kachel-Definition: Schlüssel, Icon, Sperrstatus. Reihenfolge ist verbindlich.
 const FUNKTIONEN = [
-  { id: "fritzbox", icon: Router, locked: false },
+  { id: "fritzbox", icon: Router, locked: false, helpId: "help.fritzbox.detail" },
 ];
 
-export default function DevicesView() {
+export default function DevicesView({ onOpenManual }) {
   const { t } = useTranslation();
   // null -> Kachel-Übersicht; sonst die geöffnete Funktion.
   const [openFunction, setOpenFunction] = useState(null);
@@ -29,6 +29,8 @@ export default function DevicesView() {
       <FunctionShell
         title={t("geraete.cards.fritzbox.title")}
         onBack={() => setOpenFunction(null)}
+        helpId="help.fritzbox.detail"
+        onOpenManual={onOpenManual}
       >
         <FritzBoxPanel />
       </FunctionShell>
@@ -37,7 +39,7 @@ export default function DevicesView() {
 
   return (
     <CardGrid>
-      {FUNKTIONEN.map(({ id, icon, locked }) => (
+      {FUNKTIONEN.map(({ id, icon, locked, helpId }) => (
         <FunctionCard
           key={id}
           icon={icon}
@@ -45,6 +47,8 @@ export default function DevicesView() {
           subtitle={t(`geraete.cards.${id}.subtitle`)}
           locked={locked}
           onOpen={() => setOpenFunction(id)}
+          helpId={helpId}
+          onOpenManual={onOpenManual}
         />
       ))}
     </CardGrid>

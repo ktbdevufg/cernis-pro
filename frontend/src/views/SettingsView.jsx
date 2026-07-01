@@ -1536,7 +1536,7 @@ function DnsWatchSektion({ onGespeichert }) {
   );
 }
 
-export default function SettingsView({ lang, onLangChange, onClose }) {
+export default function SettingsView({ lang, onLangChange, onClose, onOpenManual }) {
   const { t } = useTranslation();
 
   // Dezentes "Gespeichert"-Feedback (rein visuell). Die Persistenz selbst bleibt
@@ -1574,7 +1574,12 @@ export default function SettingsView({ lang, onLangChange, onClose }) {
   ];
 
   return (
-    <FunctionShell title={t("settings.title")} onBack={onClose}>
+    <FunctionShell
+      title={t("settings.title")}
+      onBack={onClose}
+      helpId="help.settings.uebersicht"
+      onOpenManual={onOpenManual}
+    >
       <div className="settings settings--layout">
         {/* Linke Navigations-Spalte: Rubriken-Liste, aktive dezent hervorgehoben. */}
         <nav className="settings__nav" aria-label={t("settings.title")}>
