@@ -1,0 +1,331 @@
+/* Netzweiter DNS-Umgehungs-Waechter (Reiter 2). Designsprache wie DnsWatchView:
+   dezent, flach, ruhig. Orange (#EA580C) NUR fuer offene Umgehungs-Befunde; das
+   DoH-Badge bleibt NEUTRAL (heuristisch). Nur CSS-Tokens des Projekts. */
+
+.dnsbypass {
+  --dnsbypass-offen: #ea580c;
+
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Monospace fuer IP/Hostname/Qnames -- System-Monospace als Fallback. */
+.dnsbypass-mono {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+/* Ruhiger Hinweis-Streifen (Lade-/Steuerfehler): Stil wie dnswatch__hinweis. */
+.dnsbypass__hinweis {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex-shrink: 0;
+  padding: 9px 12px;
+  font-size: 12px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.dnsbypass__hinweis-title {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-tert);
+}
+
+.dnsbypass__hinweis-text {
+  color: var(--color-text-sec);
+}
+
+/* Steuer-Karte: EINE Aufzeichnung, Status links, Start/Stop-Knopf rechts. */
+.dnsbypass-karte {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
+  padding: 10px 14px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* Aktiv-Zustand: ruhiger Warnton (--sev-med-*), KEIN Alarm. */
+.dnsbypass-karte--aktiv {
+  background: var(--sev-med-bg);
+  border-color: var(--sev-med-bd);
+}
+
+.dnsbypass-karte__status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--color-text-sec);
+}
+
+.dnsbypass-karte__statustext {
+  font-size: 13px;
+  color: var(--color-text-sec);
+  word-break: break-word;
+}
+
+/* Aktiv-Punkt: dezent im Warnton, dauerhaft (kein Blinken). */
+.dnsbypass-karte__punkt {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--sev-med-bd);
+  flex-shrink: 0;
+}
+
+.dnsbypass-karte__knopf {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+
+/* Start: dezent akzentuiert (Akzent-Ton des Projekts, nicht grell). */
+.dnsbypass-karte__knopf--start {
+  color: var(--color-accent-strong);
+  background: var(--color-accent-bg);
+  border: 1px solid var(--color-accent-border);
+}
+
+.dnsbypass-karte__knopf--start:hover {
+  background: var(--color-accent);
+}
+
+/* Stop: neutraler Knopf. */
+.dnsbypass-karte__knopf--stop {
+  color: var(--color-text);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+}
+
+.dnsbypass-karte__knopf--stop:hover {
+  border-color: var(--color-accent-border);
+}
+
+.dnsbypass-karte__knopf:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Ehrlicher Start-Fehlertext: ruhiger Warnton-Streifen (kein Alarm). */
+.dnsbypass__fehler {
+  flex-shrink: 0;
+  padding: 9px 12px;
+  font-size: 12px;
+  color: var(--color-text-sec);
+  background: var(--sev-med-bg);
+  border: 1px solid var(--sev-med-bd);
+  border-radius: var(--radius-md);
+}
+
+/* Drei Kennzahl-Karten nebeneinander (umbrechend auf engem Raum). */
+.dnsbypass__kennzahlen {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.dnsbypass-kennzahl {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 120px;
+  padding: 12px 14px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.dnsbypass-kennzahl__zahl {
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--color-text);
+}
+
+.dnsbypass-kennzahl__label {
+  font-size: 12px;
+  color: var(--color-text-sec);
+}
+
+/* "Umgeher"-Kennzahl: Zahl und Rand im Severity-Orange -- hier lohnt ein Blick. */
+.dnsbypass-kennzahl--offen {
+  border-color: var(--dnsbypass-offen);
+}
+
+.dnsbypass-kennzahl--offen .dnsbypass-kennzahl__zahl {
+  color: var(--dnsbypass-offen);
+}
+
+/* Umgeher-Liste: scrollt intern, fuellt die Resthoehe. */
+.dnsbypass__liste {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Eine Umgeher-Zeile. Standard (neutral): fuer heuristische DoH-Befunde. */
+.dnsbypass-zeile {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 12px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* Offene Umgehung (Plain-DNS, hart erkannt): Severity-Orange-Akzent. */
+.dnsbypass-zeile--offen {
+  border-color: var(--dnsbypass-offen);
+  border-left: 3px solid var(--dnsbypass-offen);
+}
+
+.dnsbypass-zeile__main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.dnsbypass-zeile__kopf {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.dnsbypass-zeile__title {
+  font-size: 13px;
+  color: var(--color-text);
+  word-break: break-all;
+}
+
+.dnsbypass-zeile__sub {
+  font-size: 12px;
+  color: var(--color-text-tert);
+  word-break: break-word;
+}
+
+.dnsbypass-zeile__qnames {
+  font-size: 11px;
+  color: var(--color-text-tert);
+  word-break: break-all;
+  opacity: 0.85;
+}
+
+/* DoH-Badge: NEUTRAL (heuristisch) -- ruhiger, gedaempfter Chip, KEIN Warnton. */
+.dnsbypass-badge {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: var(--radius-sm);
+}
+
+.dnsbypass-badge--doh {
+  color: var(--color-text-sec);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+}
+
+/* Ruhiger Standard-Leerzustand. */
+.dnsbypass__empty {
+  margin: 0;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--color-text-sec);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* PROMINENTER Leerzustand NACH einer Aufzeichnung ohne Befunde: hebt die
+   Netz-Voraussetzung deutlich hervor (Warnton-Rahmen, aber ruhig). */
+.dnsbypass__leer-prominent {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  background: var(--sev-med-bg);
+  border: 1px solid var(--sev-med-bd);
+  border-radius: var(--radius-md);
+}
+
+.dnsbypass__leer-titel {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.dnsbypass__leer-text {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-sec);
+}
+
+/* Dezenter, dauerhafter Voraussetzungs-Hinweis (Netz sichtbar noetig). */
+.dnsbypass__voraussetzung {
+  flex-shrink: 0;
+  padding: 8px 12px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--color-text-tert);
+  background: var(--color-bg);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* Fusszeile: erwartete DNS-Server + Hinweis auf die Einstellungen. */
+.dnsbypass__footer {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex-shrink: 0;
+  padding: 9px 12px;
+  font-size: 12px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.dnsbypass__footer-servers {
+  color: var(--color-text-sec);
+  word-break: break-word;
+}
+
+.dnsbypass__footer-hint {
+  color: var(--color-text-tert);
+}

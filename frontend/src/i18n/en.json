@@ -586,6 +586,47 @@
       "loadError": "DNS watchdog could not be loaded.",
       "connectionsSuffix": "×{{count}}"
     },
+    "dnsscreen": {
+      "tabHost": "This machine",
+      "tabNetz": "Bypass on the network",
+      "erklaerHost": "What bypasses the expected DNS on THIS machine — read passively from local connections, without a network view.",
+      "erklaerNetz": "What bypasses the expected DNS ACROSS THE NETWORK — read passively from observed network traffic. Requires that CERNIS can see the network traffic (gateway/mirror/simple network)."
+    },
+    "dnsbypass": {
+      "countBypass": "Bypassers",
+      "countQueries": "Queries total",
+      "countExpected": "as expected",
+      "statusRuhe": "No recording active.",
+      "statusAktiv": "Recording … {{count}} queries collected.",
+      "start": "Start recording",
+      "stop": "Stop recording",
+      "startFehler": "Recording could not be started.",
+      "toTarget": "→ {{ziel}}",
+      "queriesSuffix": "×{{count}}",
+      "dohBadge": "possible DoH",
+      "dohBadgeNamed": "possible DoH ({{quelle}})",
+      "hinweisTitel": "Note",
+      "loadError": "Network-wide bypass view could not be loaded.",
+      "emptyIdle": "No recording yet. Start a recording to see network-wide bypasses.",
+      "emptyRecording": "Recording in progress — no bypass captured yet.",
+      "emptyProminentTitle": "No bypass captured — can CERNIS see the network?",
+      "emptyProminentText": "The recording found no bypass. Only what CERNIS observes becomes visible network-wide: this requires the network traffic to arrive here (gateway/mirror port or a simple network). Without a network view the list stays empty, even if bypassing is actually happening.",
+      "prereqHint": "Only what CERNIS observes becomes visible network-wide — this requires a network view (gateway/mirror/simple network). Plain DNS (port 53) is detected reliably, DoH is only inferred heuristically.",
+      "footerExpected": "Expected DNS servers: {{servers}}",
+      "settingsHint": "Adjustable in the settings.",
+      "consent": {
+        "title": "Observe network-wide, passively?",
+        "intro": "To see network-wide DNS bypasses, CERNIS passively observes the DNS traffic on the network. Before this starts for the first time:",
+        "passiveTitle": "Passive",
+        "passiveText": "only observes, never intervenes in the traffic and blocks nothing.",
+        "ownNetTitle": "Only your own network",
+        "ownNetText": "only observes your own network's traffic, nothing beyond it.",
+        "prereqTitle": "Prerequisite",
+        "prereqText": "needs a network view (gateway/mirror/simple network) — otherwise the view stays empty.",
+        "deny": "Decline",
+        "grant": "Agree and start"
+      }
+    },
     "monitor": {
       "zieleTitel": "Targets",
       "eventLogTitel": "Events",

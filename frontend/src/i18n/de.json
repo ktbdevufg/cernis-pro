@@ -586,6 +586,47 @@
       "loadError": "DNS-Wächter konnte nicht geladen werden.",
       "connectionsSuffix": "×{{count}}"
     },
+    "dnsscreen": {
+      "tabHost": "Dieser Rechner",
+      "tabNetz": "Umgehung im Netz",
+      "erklaerHost": "Was auf DIESEM Rechner den erwarteten DNS umgeht — passiv aus den lokalen Verbindungen gelesen, ohne Netz-Sicht.",
+      "erklaerNetz": "Was IM GANZEN NETZ den erwarteten DNS umgeht — passiv aus dem mitgelesenen Netzverkehr. Setzt voraus, dass CERNIS den Netzverkehr sieht (Gateway/Mirror/einfaches Netz)."
+    },
+    "dnsbypass": {
+      "countBypass": "Umgeher",
+      "countQueries": "Anfragen gesamt",
+      "countExpected": "erwartungsgemäß",
+      "statusRuhe": "Keine Aufzeichnung aktiv.",
+      "statusAktiv": "Zeichnet auf … {{count}} Anfragen gesammelt.",
+      "start": "Aufzeichnung starten",
+      "stop": "Aufzeichnung stoppen",
+      "startFehler": "Aufzeichnung konnte nicht gestartet werden.",
+      "toTarget": "→ {{ziel}}",
+      "queriesSuffix": "×{{count}}",
+      "dohBadge": "mögliche DoH",
+      "dohBadgeNamed": "mögliche DoH ({{quelle}})",
+      "hinweisTitel": "Hinweis",
+      "loadError": "Netzweite Umgehungs-Sicht konnte nicht geladen werden.",
+      "emptyIdle": "Noch keine Aufzeichnung. Starte eine Aufzeichnung, um netzweite Umgehungen zu sehen.",
+      "emptyRecording": "Aufzeichnung läuft — noch keine Umgehung erfasst.",
+      "emptyProminentTitle": "Keine Umgehung erfasst — sieht CERNIS das Netz?",
+      "emptyProminentText": "Die Aufzeichnung hat keine Umgehung gefunden. Netzweit sichtbar wird nur, was CERNIS mitliest: Das setzt voraus, dass der Netzverkehr hier ankommt (Gateway/Mirror-Port oder ein einfaches Netz). Ohne Netz-Sicht bleibt die Liste leer, auch wenn tatsächlich umgangen wird.",
+      "prereqHint": "Netzweit sichtbar wird nur, was CERNIS mitliest — das setzt Netz-Sicht voraus (Gateway/Mirror/einfaches Netz). Plain-DNS (Port 53) wird sicher erkannt, DoH nur heuristisch vermutet.",
+      "footerExpected": "Erwartete DNS-Server: {{servers}}",
+      "settingsHint": "In den Einstellungen anpassbar.",
+      "consent": {
+        "title": "Netzweit passiv mitlesen?",
+        "intro": "Um netzweite DNS-Umgehungen zu sehen, liest CERNIS den DNS-Verkehr im Netz passiv mit. Bevor das zum ersten Mal startet:",
+        "passiveTitle": "Passiv",
+        "passiveText": "liest nur mit, greift nie in den Verkehr ein und blockiert nichts.",
+        "ownNetTitle": "Nur im eigenen Netz",
+        "ownNetText": "liest nur den Verkehr des eigenen Netzes mit, nichts darüber hinaus.",
+        "prereqTitle": "Voraussetzung",
+        "prereqText": "braucht Netz-Sicht (Gateway/Mirror/einfaches Netz) — sonst bleibt die Sicht leer.",
+        "deny": "Ablehnen",
+        "grant": "Zustimmen und starten"
+      }
+    },
     "monitor": {
       "zieleTitel": "Ziele",
       "eventLogTitel": "Ereignisse",

@@ -1,0 +1,71 @@
+/* DNS-Waechter-Bildschirm: zwei Unterreiter + Erklaer-Block ueber dem Inhalt.
+   Dezent, flach, ruhig -- nur CSS-Tokens des Projekts. Die Reiter-Knoepfe folgen
+   dem Segmented-Control-Muster des Projekts (aktiver Reiter dezent akzentuiert). */
+
+.dnsscreen {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Reiterleiste: zwei nackte, tab-artige Knoepfe nebeneinander. */
+.dnsscreen__reiter {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.dnsscreen__reiter-knopf {
+  padding: 7px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-sec);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+
+.dnsscreen__reiter-knopf:hover {
+  border-color: var(--color-accent-border);
+}
+
+.dnsscreen__reiter-knopf:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Aktiver Reiter: dezent akzentuiert (Akzent-Ton des Projekts, nicht grell). */
+.dnsscreen__reiter-knopf--aktiv {
+  color: var(--color-accent-strong);
+  background: var(--color-accent-bg);
+  border-color: var(--color-accent-border);
+}
+
+/* Erklaer-Block: ruhiger Fliesstext, benennt den Unterschied ehrlich. */
+.dnsscreen__erklaer {
+  margin: 0;
+  flex-shrink: 0;
+  padding: 9px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-sec);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* Inhalt des aktiven Reiters: fuellt die Resthoehe (die eingebettete View scrollt
+   intern selbst). */
+.dnsscreen__inhalt {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}

@@ -42,7 +42,7 @@ import { fetchSettings, updateSetting } from "../api/settings.js";
 import { CardGrid, FunctionShell } from "../components/AreaShell.jsx";
 import ArchivePromptDialog from "../components/ArchivePromptDialog.jsx";
 import ColumnManager from "../components/ColumnManager.jsx";
-import DnsWatchView from "../components/DnsWatchView.jsx";
+import DnsWatchScreen from "../components/DnsWatchScreen.jsx";
 import FunctionCard from "../components/FunctionCard.jsx";
 import { ZUSTAND } from "../components/loggingTask.js";
 import LoggingPanel from "../components/LoggingPanel.jsx";
@@ -747,7 +747,7 @@ export default function ObserveView({
         helpId="help.dns_watch.uebersicht"
         onOpenManual={onOpenManual}
       >
-        <DnsWatchView />
+        <DnsWatchScreen />
       </FunctionShell>
     );
   }
