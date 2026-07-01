@@ -24,6 +24,12 @@ from application.reporting.cve_report import (
     CveReport,
     build_cve_report,
 )
+from application.reporting.dns_watch_report import (
+    DnsWatchContactRow,
+    DnsWatchReport,
+    DnsWatchReportInput,
+    build_dns_watch_report,
+)
 from application.reporting.inventory_report import (
     InventoryDeviceRow,
     InventoryReport,
@@ -43,7 +49,13 @@ from application.reporting.security_report import (
     build_security_report,
 )
 
-__all__ = ["BuildCveReport", "BuildInventoryReport", "BuildOutboundReport", "BuildSecurityReport"]
+__all__ = [
+    "BuildCveReport",
+    "BuildDnsWatchReport",
+    "BuildInventoryReport",
+    "BuildOutboundReport",
+    "BuildSecurityReport",
+]
 
 
 class BuildSecurityReport:
@@ -171,3 +183,26 @@ class BuildOutboundReport:
         Werten und gibt dessen ``OutboundReport`` zurueck.
         """
         return build_outbound_report(status, rows)
+
+
+class BuildDnsWatchReport:
+    """Duenner Pass-Through: neutrale Kontakt-Zeilen + Rahmen -> ``build_dns_watch_report``.
+
+    Duenn (Muster ``BuildOutboundReport``/``BuildCveReport``): keine eigene Logik ausser
+    dem Durchreichen. ``__call__`` nimmt die schon NEUTRALEN DNS-Waechter-Zeilen und die
+    Rahmen-Angaben (der Composition Root hat die echten ``DnsContact``-Objekte samt
+    Kategorie-Einordnung/Anzeige-Texten darauf projiziert) und gibt den ``DnsWatchReport``
+    zurueck. KEINE Domaenen-Importe, KEINE Repos, KEINE I/O, KEINE Uhr.
+    """
+
+    def __call__(
+        self,
+        status: DnsWatchReportInput,
+        rows: list[DnsWatchContactRow],
+    ) -> DnsWatchReport:
+        """Reicht die fertigen neutralen Kontakt-Zeilen + Rahmen unveraendert durch.
+
+        Kein Eigenverhalten: ruft ``build_dns_watch_report`` mit GENAU den hereingereichten
+        Werten und gibt dessen ``DnsWatchReport`` zurueck.
+        """
+        return build_dns_watch_report(status, rows)
