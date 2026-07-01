@@ -19,25 +19,31 @@ from application.dns_bypass.recorder import (
 )
 from application.dns_bypass.use_cases import (
     BuildDnsBypass,
+    DnsBypassReport,
     DnsQueryProvider,
     ExpectedServersProvider,
+    GetDnsBypassReport,
     StartDnsBypassRecording,
     StopDnsBypassRecording,
 )
 from domain.dns_bypass import (
+    AggregatedBypass,
     DnsBypassFinding,
     DnsBypassOverview,
     RawDnsQuery,
 )
 
 __all__ = [
+    "AggregatedBypass",
     "BuildDnsBypass",
     "DnsBypassFinding",
     "DnsBypassOverview",
     "DnsBypassRecorder",
+    "DnsBypassReport",
     "DnsQueryProvider",
     "DnsQuerySource",
     "ExpectedServersProvider",
+    "GetDnsBypassReport",
     "RawDnsQuery",
     "StartDnsBypassRecording",
     "StopDnsBypassRecording",

@@ -17,20 +17,37 @@ der erwarteten Menge (``domain.dns_watch.expected_servers_or_default``) faellt d
 """
 
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 
 from application.dns_bypass.recorder import DnsBypassRecorder
 from domain.dns_bypass import (
+    AggregatedBypass,
     DnsBypassFinding,
     DnsBypassOverview,
+    DnsBypassRecording,
+    DnsBypassRecordingState,
     RawDnsQuery,
     is_bypass,
 )
-from ports.dns_bypass import DnsQueryProvider
+from domain.dns_bypass import (
+    start as domain_start,
+)
+from domain.dns_bypass import (
+    stop as domain_stop,
+)
+from ports.dns_bypass import (
+    DnsBypassAggregateRepository,
+    DnsBypassDetailRepository,
+    DnsBypassRecordingRepository,
+    DnsQueryProvider,
+)
 
 __all__ = [
     "BuildDnsBypass",
+    "DnsBypassReport",
     "DnsQueryProvider",
     "ExpectedServersProvider",
+    "GetDnsBypassReport",
     "StartDnsBypassRecording",
     "StopDnsBypassRecording",
 ]
@@ -152,32 +169,153 @@ class BuildDnsBypass:
 
 
 class StartDnsBypassRecording:
-    """Startet eine DNS-Umgehungs-Aufzeichnung ueber den ``DnsBypassRecorder``.
+    """Legt eine BENANNTE Aufzeichnung an, startet sie und bindet sie an den Recorder.
 
-    Anders als ``StartOutboundRecording`` gibt es hier KEINE Repo-/Domaenen-Transition
-    und keine SQLite-Aufzeichnungsdefinition -- der Recorder haelt den Zustand selbst
-    (schlanke Variante, Etappe 4a). Der Use-Case leert vor dem Start den Sammelpuffer
-    (sauberer Neustart) und reicht das ``start``-Ergebnis ehrlich durch (``None`` = ok,
-    sonst der Fehlertext der Quelle).
+    Muster ``CreateOutboundRecording`` + ``StartOutboundRecording`` in einem Schritt (der
+    DNS-Waechter kennt keinen getrennten Anlege-/Start-Lebenszyklus): erzeugt eine NEUE
+    ``DnsBypassRecording`` im Zustand ``CREATED`` (``recording_id``/``now`` kommen als
+    Parameter herein -- der Rand liefert ``uuid4``/``time.time()``, der Use-Case haelt keine
+    Uhr), fuehrt den Domaenen-Uebergang ``start`` mit der ERWARTETEN-Menge-Momentaufnahme
+    durch (ehrlicher Beleg, gegen welche Menge klassifiziert wird) und legt die gestartete
+    Aufzeichnung ab (``recordings.save``).
+
+    Danach ``source.start(interface)`` ueber den Recorder, der die aktive ``recording_id``
+    setzt. Der ``start``-Fehlertext der Quelle wird EHRLICH durchgereicht (``None`` = ok,
+    sonst der Fehlertext) -- KEIN stiller Fallback. Die Aufzeichnungs-DEFINITION bleibt dann
+    zwar als ``ACTIVE`` in der DB (der Recorder ist aber NICHT aktiv, schreibt also nichts);
+    das aufzuraeumen ist Sache eines spaeteren Stop/Cleanup -- hier wird der Fehler nur
+    ehrlich gemeldet.
     """
 
-    def __init__(self, recorder: DnsBypassRecorder) -> None:
+    def __init__(
+        self,
+        recorder: DnsBypassRecorder,
+        recordings: DnsBypassRecordingRepository,
+        expected_servers_provider: Callable[[], Sequence[str]],
+        default_label: str = "DNS-Umgehungs-Aufzeichnung",
+        default_purpose: str = "",
+    ) -> None:
         self._recorder = recorder
+        self._recordings = recordings
+        self._expected_servers_provider = expected_servers_provider
+        self._default_label = default_label
+        self._default_purpose = default_purpose
 
-    def __call__(self, interface: str | None) -> str | None:
-        self._recorder.clear()
-        return self._recorder.start(interface)
+    def __call__(
+        self,
+        interface: str | None,
+        recording_id: str,
+        now: float,
+        label: str | None = None,
+        purpose: str | None = None,
+    ) -> str | None:
+        # Erwartete-Menge-Momentaufnahme fuer den Domaenen-``start`` (ehrlicher Beleg).
+        expected_servers = tuple(self._expected_servers_provider())
+        recording = DnsBypassRecording(
+            id=recording_id,
+            label=label if label is not None else self._default_label,
+            purpose=purpose if purpose is not None else self._default_purpose,
+            state=DnsBypassRecordingState.CREATED,
+            created_at=now,
+            interface=interface,
+        )
+        started = domain_start(recording, now, expected_servers)
+        self._recordings.save(started)
+        # Quelle starten + aktive recording_id im Recorder setzen; Fehlertext ehrlich durch.
+        return self._recorder.start(interface, recording_id)
 
 
 class StopDnsBypassRecording:
-    """Stoppt die DNS-Umgehungs-Aufzeichnung ueber den ``DnsBypassRecorder``.
+    """Stoppt die aktive DNS-Umgehungs-Aufzeichnung: Domaenen-``stop`` -> ``save`` -> Recorder.
 
-    Schlank wie ``StopOutboundRecording``, aber ohne Repo-/Domaenen-Transition: der
-    Recorder haelt den Zustand selbst und ``stop`` ist idempotent/best-effort.
+    Muster ``StopOutboundRecording``, aber die aktive ``recording_id`` kommt vom Recorder
+    (er haelt sie): liegt eine aktive Aufzeichnung vor, wird ihre Definition geladen, der
+    Domaenen-Uebergang ``stop`` durchgefuehrt und die beendete Definition abgelegt
+    (``recordings.save``). Danach IMMER ``recorder.stop()`` (Quelle stoppen, idempotent/
+    best-effort).
+
+    Robust gegen Randfaelle: ist keine Aufzeichnung aktiv oder ihre Definition fehlt (z. B.
+    manuell geloescht), wird KEINE Transition erzwungen -- es bleibt beim ``recorder.stop()``
+    (kein Wurf, kein stiller Fehler).
     """
 
-    def __init__(self, recorder: DnsBypassRecorder) -> None:
+    def __init__(
+        self,
+        recorder: DnsBypassRecorder,
+        recordings: DnsBypassRecordingRepository,
+    ) -> None:
         self._recorder = recorder
+        self._recordings = recordings
 
     def __call__(self) -> None:
+        recording_id = self._recorder.active_recording_id()
+        if recording_id is not None:
+            recording = self._recordings.get(recording_id)
+            if recording is not None and recording.state is DnsBypassRecordingState.ACTIVE:
+                finished = domain_stop(recording)
+                self._recordings.save(finished)
         self._recorder.stop()
+
+
+# ── Lese-Use-Case fuer den PERSISTENTEN Bericht (Etappe 3) ────────────────────
+
+
+@dataclass(frozen=True)
+class DnsBypassReport:
+    """Der aus SQLite gelesene Umgehungs-Bericht EINER Aufzeichnung (Lese-Datentraeger).
+
+    ``recording`` ist die zugrunde liegende Aufzeichnungs-Definition (``None``, wenn es noch
+    keine gibt -- dann ist alles leer). ``aggregates`` sind die verdichteten Umgehungs-
+    Datensaetze dieser Aufzeichnung (lauteste zuerst, wie vom Aggregat-Repo geliefert);
+    ``queries_total`` ist die Zahl ALLER in dieser Aufzeichnung gespeicherten DETAIL-Zeilen
+    (auch der erwarteten), damit der Rand ``expected_total = queries_total - bypass_total``
+    ehrlich bilden kann.
+    """
+
+    recording: DnsBypassRecording | None
+    aggregates: tuple[AggregatedBypass, ...]
+    queries_total: int
+
+
+class GetDnsBypassReport:
+    """Liest den persistenten Umgehungs-Bericht der aktiven bzw. juengsten Aufzeichnung.
+
+    Ersetzt den frueheren RAM-Puffer-Lesepfad (Etappe 3): der Bericht kommt jetzt aus SQLite.
+    Wahl der Aufzeichnung: die ERSTE ``ACTIVE`` (host-weit hoechstens eine); gibt es keine
+    aktive, die JUENGSTE nach ``created_at`` (``list_all`` ist aufsteigend sortiert -> das
+    letzte Element). Gibt es gar keine Aufzeichnung -> leerer Bericht.
+
+    ``aggregates`` kommen roh aus ``aggregate.list_for`` (lauteste zuerst). ``queries_total``
+    zaehlt die DETAIL-Zeilen dieser Aufzeichnung im Fenster ``[0, until)`` -- der Aufrufer
+    reicht ``until`` (die aktuelle Uhr) herein, der Use-Case haelt keine Uhr (Hausmuster).
+    """
+
+    def __init__(
+        self,
+        recordings: DnsBypassRecordingRepository,
+        detail: DnsBypassDetailRepository,
+        aggregate: DnsBypassAggregateRepository,
+    ) -> None:
+        self._recordings = recordings
+        self._detail = detail
+        self._aggregate = aggregate
+
+    def __call__(self, until: float) -> DnsBypassReport:
+        recording = self._pick_recording()
+        if recording is None:
+            return DnsBypassReport(recording=None, aggregates=(), queries_total=0)
+        aggregates = tuple(self._aggregate.list_for(recording.id))
+        queries_total = len(self._detail.range(recording.id, 0.0, until))
+        return DnsBypassReport(
+            recording=recording,
+            aggregates=aggregates,
+            queries_total=queries_total,
+        )
+
+    def _pick_recording(self) -> DnsBypassRecording | None:
+        """Erste ``ACTIVE`` Aufzeichnung, sonst die juengste, sonst ``None``."""
+        recordings = self._recordings.list_all()
+        for rec in recordings:
+            if rec.state is DnsBypassRecordingState.ACTIVE:
+                return rec
+        return recordings[-1] if recordings else None

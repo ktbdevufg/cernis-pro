@@ -403,8 +403,8 @@ from application.diagnostics import (
     RunTraceroute,
 )
 from application.dns_bypass import (
-    BuildDnsBypass,
     DnsBypassRecorder,
+    GetDnsBypassReport,
     StartDnsBypassRecording,
     StopDnsBypassRecording,
 )
@@ -611,6 +611,9 @@ from infrastructure.diagnostics_linux import (
     SocketBannerGrabber,
     SystemTracerouteRunner,
 )
+from infrastructure.dns_bypass_aggregate import SqliteDnsBypassAggregateRepository
+from infrastructure.dns_bypass_detail import SqliteDnsBypassDetailRepository
+from infrastructure.dns_bypass_recordings import SqliteDnsBypassRecordingRepository
 from infrastructure.dns_watch_acknowledgements_db import (
     SqliteDnsWatchAcknowledgementRepository,
 )
@@ -4013,81 +4016,149 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.dependency_overrides[provide_dns_watch] = lambda: _dns_watch
     app.dependency_overrides[provide_dns_watch_acknowledge] = lambda: _dns_watch_acknowledge
 
-    # ── netzweiter DNS-Umgehungs-Waechter verdrahten (ADR 0042, Etappe 4b) ──
+    # ── netzweiter DNS-Umgehungs-Waechter verdrahten (ADR 0042, Etappe 3) ──
     # Die netzweite Umgehungs-Sicht fuehrt HIER (Regel 5: nur Composition Root) den
-    # Recorder-Puffer (4a) ueber BuildDnsBypass (E2) zusammen, stellt je Quell-IP einen
-    # best-effort Geraetenamen aus dem Bestand bei (Option 2, _dns_bypass_name_by_ip) und
-    # bewertet je Ziel DoH ueber die EIGENE Lookup-Naht (_dns_bypass_doh_lookup, NICHT
-    # MatchContacts). Der Recorder ist ein Singleton (lru_cache), damit /start, /stop,
-    # /status und der Lese-Runner DENSELBEN halten; der Task-Handle lebt in app.state
-    # (Muster capture_task). Aufzeichnung ON-DEMAND (Muster pcap): Task erst bei /start,
-    # gecancelt bei /stop + lifespan-Shutdown -- KEIN Dauer-Mitlesen (ADR 0042).
+    # PERSISTENTEN Aufzeichnungs-Stand aus SQLite (Etappe 3) ueber GetDnsBypassReport
+    # zusammen, stellt je Quell-IP einen best-effort Geraetenamen aus dem Bestand bei
+    # (Option 2, _dns_bypass_name_by_ip) und bewertet je Ziel DoH ueber die EIGENE
+    # Lookup-Naht (_dns_bypass_doh_lookup, NICHT MatchContacts). Der Recorder ist ein
+    # Singleton (lru_cache), damit /start, /stop, /status und der Lese-Runner DENSELBEN
+    # halten; der Task-Handle lebt in app.state (Muster capture_task). Aufzeichnung
+    # ON-DEMAND (Muster pcap): Task erst bei /start, gecancelt bei /stop +
+    # lifespan-Shutdown -- KEIN Dauer-Mitlesen (ADR 0042).
+    #
+    # Drei SQLite-Repos je eigener Tabelle (Muster der outbound_log-Repos oben: db_path-
+    # Factory + lru_cache-Singleton), damit Recorder-Schreibpfad und Lese-Runner GENAU
+    # dieselben Stores treffen.
+    @lru_cache(maxsize=1)
+    def dns_bypass_recording_repository() -> SqliteDnsBypassRecordingRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteDnsBypassRecordingRepository(get_db_path())
+
+    @lru_cache(maxsize=1)
+    def dns_bypass_detail_repository() -> SqliteDnsBypassDetailRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteDnsBypassDetailRepository(get_db_path())
+
+    @lru_cache(maxsize=1)
+    def dns_bypass_aggregate_repository() -> SqliteDnsBypassAggregateRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteDnsBypassAggregateRepository(get_db_path())
+
+    def _dns_bypass_expected_servers() -> list[str]:
+        # SYNCHRONE erwartete-Menge fuer den Recorder-Tick (Klassifikation beim Schreiben):
+        # nur die editierbare Liste (DIESELBE Settings-Naht wie _dns_watch, EINE Quelle der
+        # Wahrheit). BEWUSSTE Wahl (dokumentiert): der Gateway-Default (_topology_gateway)
+        # bleibt HIER aussen vor -- er kommt heute nur aus einem AWAIT, der Recorder-Tick ist
+        # aber synchron und darf keinen Event-Loop treiben. Die "oder-Gateway"-Anreicherung
+        # der Anzeige faellt weiter im (async) View-Runner. Folge: eine reine Gateway-Anfrage
+        # (ohne editierte Liste) wird beim Schreiben als Umgehung gewertet -- die volle
+        # gateway-bewusste Menge zieht die Berichts-Etappe (5) nach.
+        return _dns_watch_read_list(DNS_EXPECTED_SERVERS_KEY)
+
     @lru_cache(maxsize=1)
     def dns_bypass_recorder() -> DnsBypassRecorder:
-        # Der DnsHelperClient erfuellt das DnsQuerySource-Protocol (4a) strukturell
+        # Der DnsHelperClient erfuellt das DnsQuerySource-Protocol strukturell
         # (start/poll_queries/stop/is_running -- is_running erbt er aus dem gemeinsamen
-        # _BaseSubprocessHelper-Kern). Lokaler Import: der infrastructure-Client bleibt
-        # aus dem App-Bau/Import heraus (wie die anderen Root-Singletons).
+        # _BaseSubprocessHelper-Kern). Lokaler Import: der infrastructure-Client bleibt aus
+        # dem App-Bau/Import heraus (wie die anderen Root-Singletons). Persistenz + erwartete
+        # Menge kommen als Ports/Callable herein (Etappe 3).
         from infrastructure.sniffd_client.dns_client import DnsHelperClient
 
-        return DnsBypassRecorder(DnsHelperClient())
-
-    async def _dns_bypass_view() -> DnsBypassOverviewOut:
-        # (1) Recorder-Puffer (4a): eine KOPIE der bisher gesammelten Anfragen.
-        recorder = dns_bypass_recorder()
-        queries = recorder.snapshot_queries()
-
-        # (2) Erwartete-Resolver-Menge ueber DIESELBE Naht wie _dns_watch (EINE Quelle der
-        # Wahrheit): die editierbare Liste plus der Gateway-Default des primaeren Interface.
-        gateway = await _topology_gateway()
-        expected = expected_servers_or_default(
-            _dns_watch_read_list(DNS_EXPECTED_SERVERS_KEY), gateway
+        return DnsBypassRecorder(
+            source=DnsHelperClient(),
+            recordings=dns_bypass_recording_repository(),
+            detail=dns_bypass_detail_repository(),
+            aggregate=dns_bypass_aggregate_repository(),
+            expected_servers_provider=_dns_bypass_expected_servers,
         )
 
-        # (3) Verdichtung ueber BuildDnsBypass (E2): genau diese queries + expected herein.
-        overview = BuildDnsBypass(lambda: queries, lambda: expected)()
+    async def _dns_bypass_view() -> DnsBypassOverviewOut:
+        # (1) PERSISTENTER Stand (Etappe 3): der Bericht der aktiven bzw. juengsten
+        # Aufzeichnung aus SQLite -- KEIN RAM-Puffer mehr. ``until`` = jetzt (Detail-Fenster
+        # bis zur aktuellen Uhr) fuer den ehrlichen queries_total.
+        import time
+
+        recorder = dns_bypass_recorder()
+        report = GetDnsBypassReport(
+            dns_bypass_recording_repository(),
+            dns_bypass_detail_repository(),
+            dns_bypass_aggregate_repository(),
+        )(until=time.time())
+
+        # (2) Erwartete-Resolver-Menge NUR fuer die Anzeige ueber DIESELBE Naht wie
+        # _dns_watch (EINE Quelle der Wahrheit): die editierbare Liste PLUS der
+        # Gateway-Default des primaeren Interface (hier async erlaubt, anders als im
+        # Recorder-Tick). Ist eine Aufzeichnung vorhanden, gilt aber ihr eingefrorener
+        # expected_servers-Beleg als Wahrheit (gegen den beim Schreiben klassifiziert wurde).
+        gateway = await _topology_gateway()
+        display_expected = expected_servers_or_default(
+            _dns_watch_read_list(DNS_EXPECTED_SERVERS_KEY), gateway
+        )
+        expected_servers = (
+            list(report.recording.expected_servers)
+            if report.recording is not None
+            else list(display_expected)
+        )
+
+        # (3) Kennzahlen direkt aus dem Aggregat (nur Umgehungen) + dem Detail-Gesamtstand:
+        # bypass_total = Summe der Umgehungs-Anfragen, bypass_devices = distinct Quell-IPs,
+        # expected_total = alle DETAIL-Zeilen minus die Umgehungen (ehrlich, kein Fake).
+        bypass_total = sum(agg.query_count for agg in report.aggregates)
+        bypass_devices = len({agg.src_ip for agg in report.aggregates})
+        expected_total = max(report.queries_total - bypass_total, 0)
 
         # (4) Anreicherung (Regel 5, faellt NUR hier): Geraete-Namens-Map einmal je Aufbau,
-        # DoH-Bewertung je Finding ueber die eigene Lookup-Naht (Ziel-IP + best-effort erstes
-        # sample_qname). Die Zuordnung liegt bewusst NICHT in domain/application dns_bypass.
+        # DoH-Bewertung je Datensatz ueber die eigene Lookup-Naht (Ziel-IP + best-effort
+        # erstes sample_qname). Die Zuordnung liegt bewusst NICHT in domain/application.
         name_by_ip = _dns_bypass_name_by_ip(GetDevices(device_repository())(known_only=False))
         sources = blocklist_source_repository()
         entries = blocklist_entry_repository()
 
         findings_out: list[DnsBypassFindingOut] = []
-        for finding in overview.findings:
-            qname = finding.sample_qnames[0] if finding.sample_qnames else ""
-            is_doh, doh_source_name = _dns_bypass_doh_lookup(
-                sources, entries, finding.dst_ip, qname
-            )
+        for agg in report.aggregates:
+            qname = agg.sample_qnames[0] if agg.sample_qnames else ""
+            is_doh, doh_source_name = _dns_bypass_doh_lookup(sources, entries, agg.dst_ip, qname)
             findings_out.append(
                 DnsBypassFindingOut(
-                    src_ip=finding.src_ip,
-                    device_name=name_by_ip.get(finding.src_ip),
-                    dst_ip=finding.dst_ip,
+                    src_ip=agg.src_ip,
+                    device_name=name_by_ip.get(agg.src_ip),
+                    dst_ip=agg.dst_ip,
                     is_doh=is_doh,
                     doh_source_name=doh_source_name,
-                    query_count=finding.query_count,
-                    sample_qnames=list(finding.sample_qnames),
+                    query_count=agg.query_count,
+                    sample_qnames=list(agg.sample_qnames),
                 )
             )
 
         return DnsBypassOverviewOut(
             findings=findings_out,
-            expected_servers=list(overview.expected_servers),
-            queries_total=overview.queries_total,
-            bypass_total=overview.bypass_total,
-            expected_total=overview.expected_total,
-            bypass_devices=overview.bypass_devices,
+            expected_servers=expected_servers,
+            queries_total=report.queries_total,
+            bypass_total=bypass_total,
+            expected_total=expected_total,
+            bypass_devices=bypass_devices,
             recording=recorder.is_active(),
         )
 
     def _dns_bypass_start(interface: str | None) -> str | None:
-        # ON-DEMAND (Muster pcap _start_capture): clear+start ueber den Use-Case (4a); bei
-        # Erfolg (err None) und noch keinem laufenden Task den Lese-Loop als Task starten.
-        # Bereits laufender Task/aktiver Recorder -> kein zweiter Task, err None (idempotent).
+        # ON-DEMAND (Muster pcap _start_capture): der Start-Use-Case legt eine BENANNTE
+        # Aufzeichnung an (recording_id/now kommen HIER vom Rand -- uuid4/time.time), setzt
+        # sie ACTIVE und bindet den Recorder. Bei Erfolg (err None) und noch keinem
+        # laufenden Task den Schreib-Loop als Task starten. Bereits laufender Task/aktiver
+        # Recorder -> kein zweiter Task, err None (idempotent).
+        import time
+        from uuid import uuid4
+
         rec = dns_bypass_recorder()
-        err = StartDnsBypassRecording(rec)(interface)
+        err = StartDnsBypassRecording(
+            rec,
+            dns_bypass_recording_repository(),
+            _dns_bypass_expected_servers,
+        )(interface, recording_id=str(uuid4()), now=time.time())
         if err is not None:
             return err
         existing = getattr(app.state, "dns_bypass_task", None)
@@ -4097,20 +4168,22 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         return None
 
     def _dns_bypass_stop() -> None:
-        # stop() ueber den Use-Case (idempotent/best-effort), dann den Task canceln
-        # (best-effort, KEIN await hier -- der lifespan-Shutdown awaitet ihn sauber).
+        # stop() ueber den Use-Case (setzt die aktive Aufzeichnung FINISHED + stoppt die
+        # Quelle, idempotent/best-effort), dann den Task canceln (best-effort, KEIN await
+        # hier -- der lifespan-Shutdown awaitet ihn sauber).
         rec = dns_bypass_recorder()
-        StopDnsBypassRecording(rec)()
+        StopDnsBypassRecording(rec, dns_bypass_recording_repository())()
         task = getattr(app.state, "dns_bypass_task", None)
         if task is not None:
             task.cancel()
 
     def _dns_bypass_status() -> DnsBypassStatusOut:
-        # Billiger Poll: nur der laufende Recorder-Zustand, KEINE Verdichtung.
+        # Billiger Poll: der laufende Recorder-Zustand + die Zahl bisher persistierter
+        # DETAIL-Zeilen (aus SQLite statt RAM-Puffer), KEINE Verdichtung.
         rec = dns_bypass_recorder()
         return DnsBypassStatusOut(
             recording=rec.is_active(),
-            collected_queries=len(rec.snapshot_queries()),
+            collected_queries=dns_bypass_detail_repository().count(),
         )
 
     app.include_router(dns_bypass_router)

@@ -1,37 +1,52 @@
-"""Puffer-Leerpump-Worker des netzweiten DNS-Umgehungs-Waechters (ADR 0042, Etappe 4a).
+"""Persistenter Schreibpfad-Worker des netzweiten DNS-Umgehungs-Waechters (ADR 0042, Etappe 3).
 
-Der laufende Aufzeichnungs-Kern: startet die DNS-Quelle, leert regelmaessig deren
-gepushten Query-Puffer (``poll_queries``) und akkumuliert die rohen Anfragen im Speicher,
-solange die Aufzeichnung laeuft. WICHTIGER UNTERSCHIED zum outbound_log-Recorder: der
-DNS-Sniffer PUSHT Queries in eine deque (der Quell-``poll_queries`` leert sie) -- dieser
-Recorder ist daher KEIN periodischer Snapshot-Worker, sondern ein PUFFER-LEERPUMP-Worker.
-Die Verdichtung (``BuildDnsBypass``) passiert NICHT hier, sondern erst bei Abruf in 4b.
-Schlanker als der outbound_log-Recorder: KEINE SQLite-Stores, KEINE Modi -- der laufende
-Zustand haelt die gesammelten Queries im Speicher.
+Der laufende Aufzeichnungs-Kern: startet die DNS-Quelle, leert je ``tick`` ihren gepushten
+Query-Puffer (``poll_queries``) und SCHREIBT die Anfragen in SQLite -- KEIN RAM-Puffer mehr
+(Muster ``RunOutboundRecorder``): jede gepollte Anfrage geht als DETAIL-Zeile in den Store
+(alle Anfragen, auch erwartete -- fuer den spaeteren erwartungsgemaess-vs-Umgeher-Vergleich),
+und NUR die Umgehungen (``domain.dns_bypass.is_bypass``) werden je (``src_ip``, ``dst_ip``)
+per Merge-Upsert ins Aggregat verdichtet. Am Tick-Ende laeuft IMMER die zeit-basierte
+DETAIL-Retention (``delete_older_than``). Der Bericht liest kuenftig aus SQLite, nicht mehr
+aus einem Speicher-Puffer.
+
+WICHTIGER UNTERSCHIED zum outbound_log-Recorder: der DNS-Sniffer PUSHT Queries in eine deque
+(der Quell-``poll_queries`` leert sie) -- dieser Recorder ist daher KEIN periodischer
+Snapshot-Worker, sondern ein PUFFER-LEERPUMP-Worker. Anders als outbound_log kennt er KEINE
+Modi (DETAIL/AGGREGATE) -- der DNS-Waechter schreibt IMMER Detail UND Aggregat gleichzeitig.
 
 Strukturell wie ``RunOutboundRecorder``: ``import time`` ist erlaubt (keine Domaenenlogik,
-nur die Uhr fuer den Loop, via ``now_provider`` injizierbar und so deterministisch
-testbar); ``run()`` ist nur der Rahmen ``while self._active: tick(); sleep``, die ganze
-Arbeit sitzt in ``tick``.
+nur die Uhr fuer den Loop, via ``now_provider`` injizierbar und so deterministisch testbar);
+``run()`` ist nur der Rahmen ``while self._active: tick(); sleep``, die ganze Arbeit sitzt in
+``tick``.
 
-Quellen-agnostisch: die ECHTE DNS-Quelle (der ``DnsHelperClient``) faellt erst im
-Composition Root (4b) -- der Recorder kennt nur das lokal definierte ``DnsQuerySource``-
-Protocol (Muster ``ContactSnapshotProvider``: kein Fremd-Adapter im application-Ring, der
-infrastructure-Client wird NICHT importiert).
+Quellen-agnostisch: die ECHTE DNS-Quelle (der ``DnsHelperClient``) UND die drei Repos fallen
+erst im Composition Root (Etappe 4) -- der Recorder kennt nur das lokal definierte
+``DnsQuerySource``-Protocol und die Port-Protocols (Muster ``RunOutboundRecorder``: kein
+Fremd-Adapter im application-Ring, der infrastructure-Client wird NICHT importiert).
 
 ``tick`` ist best-effort: der ganze Rumpf liegt in ``try/except``, ein Fehler wird via
-``structlog.warning`` geloggt und GESCHLUCKT, nie geworfen (Muster
-``RunOutboundRecorder.tick`` -- ein werfendes ``poll_queries`` killt den Loop nie).
+``structlog.warning`` geloggt und GESCHLUCKT, nie geworfen (Muster ``RunOutboundRecorder.tick``
+-- ein werfendes ``poll_queries``/Repo killt den Loop nie).
 """
 
 import asyncio
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any, Protocol
 
 import structlog
 
-from domain.dns_bypass import RawDnsQuery
+from domain.dns_bypass import (
+    BypassDelta,
+    RawDnsQuery,
+    is_bypass,
+    merge_bypass,
+)
+from ports.dns_bypass import (
+    DnsBypassAggregateRepository,
+    DnsBypassDetailRepository,
+    DnsBypassRecordingRepository,
+)
 
 __all__ = [
     "DnsBypassRecorder",
@@ -46,7 +61,7 @@ class DnsQuerySource(Protocol):
 
     Genau die ``DnsHelperClient``-Schnittstelle -- aber als lokales Protocol, damit der
     application-Ring den infrastructure-Client NICHT importiert. Die echte Verdrahtung
-    faellt erst im Composition Root (4b).
+    faellt erst im Composition Root (Etappe 4).
     """
 
     def start(self, interface: str | None) -> str | None:
@@ -67,45 +82,63 @@ class DnsQuerySource(Protocol):
 
 
 class DnsBypassRecorder:
-    """Puffer-Leerpump-Worker: pumpt ``poll_queries`` in einen Speicher-Puffer.
+    """Persistenter Puffer-Leerpump-Worker: pumpt ``poll_queries`` in SQLite.
 
     Quellen-AGNOSTISCH (Muster ``RunOutboundRecorder``): bekommt eine ``DnsQuerySource``
-    per Constructor-Injection -- der Recorder nennt keinen infrastructure-Client. Der
-    laufende Zustand (die gesammelten ``RawDnsQuery``) lebt im Speicher, KEIN SQLite.
+    UND die drei Persistenz-Ports per Constructor-Injection -- der Recorder nennt keinen
+    infrastructure-Adapter. Der Aufzeichnungs-ZUSTAND lebt in SQLite (Detail + Aggregat),
+    NICHT im Speicher. Der Recorder haelt nur die aktive ``recording_id`` (die Aufzeichnung,
+    in die er gerade schreibt) und das ``aktiv``-Flag.
 
-    ``run()`` ist nur der Rahmen ``while self._active: tick(); sleep`` -- die Arbeit sitzt
-    in ``tick``, best-effort: ein werfendes ``poll_queries`` wird geloggt und geschluckt,
+    ``expected_servers_provider`` liefert die aktuell erwartete Resolver-Menge (roh) fuer
+    die Umgehungs-Klassifikation -- die "erwartet-oder-Gateway"-Ableitung faellt spaeter im
+    Composition Root; hier kommt die fertige Menge herein.
+
+    ``run()`` ist nur der Rahmen ``while self._active: tick(); sleep`` -- die Arbeit sitzt in
+    ``tick``, best-effort: ein werfendes ``poll_queries``/Repo wird geloggt und geschluckt,
     der Loop laeuft weiter.
     """
 
     def __init__(
         self,
         source: DnsQuerySource,
+        recordings: DnsBypassRecordingRepository,
+        detail: DnsBypassDetailRepository,
+        aggregate: DnsBypassAggregateRepository,
+        expected_servers_provider: Callable[[], Sequence[str]],
         poll_interval_s: int = 2,
+        retention_max_age_s: int = 86400,
         now_provider: Callable[[], float] = time.time,
     ) -> None:
         self._source = source
+        self._recordings = recordings
+        self._detail = detail
+        self._aggregate = aggregate
+        self._expected_servers_provider = expected_servers_provider
         self._poll_interval_s = poll_interval_s
+        self._retention_max_age_s = retention_max_age_s
         self._now = now_provider
         self._active = False
         self._interface: str | None = None
-        self._collected: list[RawDnsQuery] = []
+        # Die Aufzeichnung, in die der Recorder gerade schreibt (``None``, solange keine
+        # laeuft). Der Start-Use-Case legt sie an und setzt sie hier ueber ``start``.
+        self._recording_id: str | None = None
 
-    def start(self, interface: str | None) -> str | None:
-        """Startet die Quelle + oeffnet die Aufzeichnung. ``None`` = ok, sonst Fehlertext.
+    def start(self, interface: str | None, recording_id: str) -> str | None:
+        """Startet die Quelle + bindet die aktive Aufzeichnung. ``None`` = ok, sonst Fehlertext.
 
         Kein Doppelstart: laeuft die Aufzeichnung schon, ``None`` zurueck. Sonst
-        ``source.start(interface)``; bei Fehlertext bleibt der Recorder NICHT aktiv und
-        gibt den Text durch. Bei Erfolg wird der Sammelpuffer geleert, ``aktiv=True``
-        gesetzt und ``None`` zurueckgegeben.
+        ``source.start(interface)``; bei Fehlertext bleibt der Recorder NICHT aktiv und gibt
+        den Text durch (keine stille Aktivierung). Bei Erfolg wird die aktive
+        ``recording_id`` gesetzt, ``aktiv=True`` gesetzt und ``None`` zurueckgegeben.
         """
         if self._active:
             return None
         error = self._source.start(interface)
         if error is not None:
             return error
-        self._collected = []
         self._interface = interface
+        self._recording_id = recording_id
         self._active = True
         return None
 
@@ -116,41 +149,74 @@ class DnsBypassRecorder:
             await asyncio.sleep(self._poll_interval_s)
 
     async def tick(self) -> None:
-        """Eine Iteration (best-effort): Query-Puffer der Quelle in den Sammelpuffer pumpen.
+        """Eine Iteration (best-effort): Query-Puffer der Quelle in SQLite schreiben + Retention.
 
-        Der GANZE Rumpf liegt in ``try/except``: ``source.poll_queries()`` abrufen, jedes
-        rohe dict auf ``RawDnsQuery`` mappen (``src_ip``/``dst_ip``/``l4`` Pflicht; ``qname``
-        optional -> ``""`` wenn fehlt) und an den Sammelpuffer anhaengen. Ein Fehler (z. B.
-        ein werfendes ``poll_queries``) wird geloggt und GESCHLUCKT, nie geworfen (Muster
-        ``RunOutboundRecorder.tick``).
+        Der GANZE Rumpf liegt in ``try/except`` (Muster ``RunOutboundRecorder.tick``):
+
+        1. ``source.poll_queries()`` abrufen, jedes rohe dict auf ``RawDnsQuery`` mappen
+           (``src_ip``/``dst_ip``/``l4`` Pflicht; ``qname`` optional -> ``""`` wenn fehlt).
+        2. ``now`` holen; die erwartete Menge normalisiert (strip + lower) als Set bilden.
+        3. Fuer JEDE Anfrage eine DETAIL-Zeile schreiben (auch erwartete -- fuer den
+           spaeteren erwartungsgemaess-vs-Umgeher-Vergleich).
+        4. NUR fuer Umgehungen (``is_bypass``) einen ``BypassDelta`` bilden, den Vorzustand
+           lesen, ``merge_bypass`` rechnen und ins Aggregat upserten.
+        5. Am ENDE IMMER die DETAIL-Retention (``delete_older_than(now - retention)``).
+
+        Solange keine Aufzeichnung aktiv ist (``recording_id`` None), wird NICHT geschrieben
+        -- die Retention laeuft aber trotzdem (Muster outbound-Recorder). Ein Fehler (z. B.
+        ein werfendes ``poll_queries``/Repo) wird geloggt und GESCHLUCKT, nie geworfen.
         """
         try:
-            for raw in self._source.poll_queries():
-                self._collected.append(
-                    RawDnsQuery(
+            now = self._now()
+            recording_id = self._recording_id
+            if recording_id is not None:
+                expected_set = {ip.strip().lower() for ip in self._expected_servers_provider()}
+                for raw in self._source.poll_queries():
+                    query = RawDnsQuery(
                         src_ip=raw["src_ip"],
                         dst_ip=raw["dst_ip"],
                         l4=raw["l4"],
                         qname=raw.get("qname", ""),
                     )
-                )
+                    # DETAIL speichert ALLE Anfragen (auch erwartete).
+                    self._detail.save(
+                        recording_id,
+                        now,
+                        query.src_ip,
+                        query.dst_ip,
+                        query.l4,
+                        query.qname,
+                    )
+                    # AGGREGAT nur fuer Umgehungen: Merge-Upsert je (src_ip, dst_ip).
+                    if is_bypass(query, expected_set):
+                        delta = BypassDelta(
+                            src_ip=query.src_ip,
+                            dst_ip=query.dst_ip,
+                            qname=query.qname,
+                            count=1,
+                        )
+                        existing = self._aggregate.get(recording_id, query.src_ip, query.dst_ip)
+                        merged = merge_bypass(existing, delta, now)
+                        self._aggregate.upsert(recording_id, merged)
+            # IMMER zum Schluss (egal ob aktiv oder nicht): DETAIL-Retention. So verfaellt
+            # roher Detail-Verlauf zuverlaessig nach ``retention_max_age_s``, auch ueber
+            # mehrere Aufzeichnungen / Neustarts hinweg (Muster outbound-Recorder).
+            cutoff = now - self._retention_max_age_s
+            self._detail.delete_older_than(cutoff)
         except Exception as exc:
             # Best-effort: ein Tick-Fehler darf den Loop nie killen.
             _logger.warning("dns_bypass_recorder_tick_failed", error=str(exc))
 
     def stop(self) -> None:
-        """Beendet die Aufzeichnung: ``aktiv=False``, dann ``source.stop()`` (best-effort)."""
+        """Beendet die Aufzeichnung: ``aktiv=False``, aktive Aufzeichnung loesen, Quelle stoppen."""
         self._active = False
+        self._recording_id = None
         self._source.stop()
-
-    def snapshot_queries(self) -> list[RawDnsQuery]:
-        """Gibt eine KOPIE des aktuellen Sammelpuffers zurueck (fuer 4b: ``BuildDnsBypass``)."""
-        return list(self._collected)
 
     def is_active(self) -> bool:
         """Ob gerade eine Aufzeichnung laeuft."""
         return self._active
 
-    def clear(self) -> None:
-        """Leert den Sammelpuffer (fuer einen sauberen Neustart einer Aufzeichnung)."""
-        self._collected = []
+    def active_recording_id(self) -> str | None:
+        """Die Aufzeichnung, in die der Recorder gerade schreibt (``None``, wenn keine)."""
+        return self._recording_id

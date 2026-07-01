@@ -200,65 +200,153 @@ def test_reihenfolge_count_absteigend_dann_src_dann_dst() -> None:
 
 # ── Steuerungs-Use-Cases (Start/StopDnsBypassRecording) ───────────────────────
 
+from domain.dns_bypass import (  # noqa: E402
+    DnsBypassRecording,
+    DnsBypassRecordingState,
+)
+
 
 class _SpyRecorder:
-    """``DnsBypassRecorder``-Spy: zeichnet ``clear``/``start``/``stop`` in Reihenfolge auf.
+    """``DnsBypassRecorder``-Spy: zeichnet ``start``/``stop`` auf, haelt die recording_id.
 
-    ``start`` gibt das konfigurierte Ergebnis zurueck (``None`` = ok, sonst Fehlertext),
-    damit ``StartDnsBypassRecording`` das Durchreichen belegt werden kann.
+    ``start`` gibt das konfigurierte Ergebnis zurueck (``None`` = ok, sonst Fehlertext) und
+    merkt sich Interface + recording_id -- so belegt der Test das Binden und das ehrliche
+    Durchreichen. ``active_recording_id`` liefert die zuletzt via ``start`` gebundene id
+    (fuer den Stop-Use-Case), ``stop`` loest sie wieder.
     """
 
     def __init__(self, start_result: str | None = None) -> None:
         self._start_result = start_result
         self.calls: list[str] = []
         self.started_interface: str | None = None
+        self._recording_id: str | None = None
 
-    def clear(self) -> None:
-        self.calls.append("clear")
-
-    def start(self, interface: str | None) -> str | None:
+    def start(self, interface: str | None, recording_id: str) -> str | None:
         self.calls.append("start")
         self.started_interface = interface
+        if self._start_result is None:
+            self._recording_id = recording_id
         return self._start_result
 
     def stop(self) -> None:
         self.calls.append("stop")
+        self._recording_id = None
+
+    def active_recording_id(self) -> str | None:
+        return self._recording_id
 
 
-def test_start_use_case_clear_vor_start_und_reicht_ergebnis_durch() -> None:
-    """StartDnsBypassRecording ruft clear VOR start und reicht das start-Ergebnis durch."""
+class _FakeRecordingRepo:
+    """In-memory ``DnsBypassRecordingRepository``-Fake: Upsert-Store ueber ``id``."""
+
+    def __init__(self) -> None:
+        self.store: dict[str, DnsBypassRecording] = {}
+        self.saved: list[DnsBypassRecording] = []
+
+    def save(self, recording: DnsBypassRecording) -> None:
+        self.store[recording.id] = recording
+        self.saved.append(recording)
+
+    def get(self, recording_id: str) -> DnsBypassRecording | None:
+        return self.store.get(recording_id)
+
+    def list_all(self) -> list[DnsBypassRecording]:
+        return list(self.store.values())
+
+    def delete(self, recording_id: str) -> None:  # pragma: no cover
+        self.store.pop(recording_id, None)
+
+    def clear_all(self) -> None:  # pragma: no cover
+        self.store = {}
+
+
+def test_start_use_case_legt_aufzeichnung_an_startet_und_bindet_recorder() -> None:
+    """Start legt eine ACTIVE-Aufzeichnung mit erwartetem-Beleg an und bindet den Recorder."""
     from application.dns_bypass import StartDnsBypassRecording
 
     recorder = _SpyRecorder(start_result=None)
-    use_case = StartDnsBypassRecording(recorder)  # type: ignore[arg-type]
+    recordings = _FakeRecordingRepo()
+    use_case = StartDnsBypassRecording(
+        recorder,  # type: ignore[arg-type]
+        recordings,
+        expected_servers_provider=lambda: ["192.168.0.1"],
+    )
 
-    result = use_case("eth0")
+    result = use_case("eth0", recording_id="rec-1", now=1000.0, label="Test", purpose="Zweck")
 
     assert result is None
-    assert recorder.calls == ["clear", "start"]
+    assert recorder.calls == ["start"]
     assert recorder.started_interface == "eth0"
+    assert recorder.active_recording_id() == "rec-1"
+    # Aufzeichnung wurde als ACTIVE mit eingefrorenem erwartetem-Beleg abgelegt.
+    saved = recordings.get("rec-1")
+    assert saved is not None
+    assert saved.state is DnsBypassRecordingState.ACTIVE
+    assert saved.label == "Test"
+    assert saved.purpose == "Zweck"
+    assert saved.effective_start == 1000.0
+    assert saved.interface == "eth0"
+    assert saved.expected_servers == ("192.168.0.1",)
 
 
 def test_start_use_case_reicht_fehlertext_durch() -> None:
-    """StartDnsBypassRecording reicht einen Fehlertext der Quelle ehrlich durch."""
+    """Start reicht einen Fehlertext der Quelle ehrlich durch (Definition bleibt gespeichert)."""
     from application.dns_bypass import StartDnsBypassRecording
 
     recorder = _SpyRecorder(start_result="DNS-Helfer nicht erreichbar")
-    use_case = StartDnsBypassRecording(recorder)  # type: ignore[arg-type]
+    recordings = _FakeRecordingRepo()
+    use_case = StartDnsBypassRecording(
+        recorder,  # type: ignore[arg-type]
+        recordings,
+        expected_servers_provider=lambda: [],
+    )
 
-    result = use_case(None)
+    result = use_case(None, recording_id="rec-1", now=1000.0)
 
     assert result == "DNS-Helfer nicht erreichbar"
-    assert recorder.calls == ["clear", "start"]
+    assert recorder.calls == ["start"]
+    # Recorder ist NICHT gebunden (start-Fehler), Definition aber angelegt.
+    assert recorder.active_recording_id() is None
+    assert recordings.get("rec-1") is not None
 
 
-def test_stop_use_case_ruft_recorder_stop() -> None:
-    """StopDnsBypassRecording ruft recorder.stop."""
+def test_stop_use_case_beendet_aktive_aufzeichnung_und_ruft_recorder_stop() -> None:
+    """Stop laedt die aktive Aufzeichnung, setzt sie auf FINISHED und ruft recorder.stop."""
+    from application.dns_bypass import StopDnsBypassRecording
+
+    recorder = _SpyRecorder(start_result=None)
+    recordings = _FakeRecordingRepo()
+    # Aktive Aufzeichnung vorbereiten (wie nach einem erfolgreichen Start).
+    recordings.save(
+        DnsBypassRecording(
+            id="rec-1",
+            label="Test",
+            purpose="",
+            state=DnsBypassRecordingState.ACTIVE,
+            created_at=1000.0,
+            effective_start=1000.0,
+        )
+    )
+    recorder.start(None, "rec-1")
+
+    use_case = StopDnsBypassRecording(recorder, recordings)  # type: ignore[arg-type]
+    use_case()
+
+    assert recorder.calls == ["start", "stop"]
+    finished = recordings.get("rec-1")
+    assert finished is not None
+    assert finished.state is DnsBypassRecordingState.FINISHED
+
+
+def test_stop_use_case_ohne_aktive_aufzeichnung_ruft_nur_recorder_stop() -> None:
+    """Ohne aktive recording_id wird KEINE Transition erzwungen -- nur recorder.stop."""
     from application.dns_bypass import StopDnsBypassRecording
 
     recorder = _SpyRecorder()
-    use_case = StopDnsBypassRecording(recorder)  # type: ignore[arg-type]
+    recordings = _FakeRecordingRepo()
+    use_case = StopDnsBypassRecording(recorder, recordings)  # type: ignore[arg-type]
 
     use_case()
 
     assert recorder.calls == ["stop"]
+    assert recordings.saved == []
