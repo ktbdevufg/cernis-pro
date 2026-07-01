@@ -15,10 +15,34 @@ from domain.dns_bypass.models import (
     DnsBypassOverview,
     RawDnsQuery,
 )
+from domain.dns_bypass.recording import (
+    MAX_SAMPLE_QNAMES,
+    AggregatedBypass,
+    BypassDelta,
+    DnsBypassDetailRow,
+    DnsBypassRecording,
+    DnsBypassRecordingState,
+    InvalidDnsBypassRecordingTransition,
+    edit,
+    merge_bypass,
+    start,
+    stop,
+)
 
 __all__ = [
+    "MAX_SAMPLE_QNAMES",
+    "AggregatedBypass",
+    "BypassDelta",
+    "DnsBypassDetailRow",
     "DnsBypassFinding",
     "DnsBypassOverview",
+    "DnsBypassRecording",
+    "DnsBypassRecordingState",
+    "InvalidDnsBypassRecordingTransition",
     "RawDnsQuery",
+    "edit",
     "is_bypass",
+    "merge_bypass",
+    "start",
+    "stop",
 ]
