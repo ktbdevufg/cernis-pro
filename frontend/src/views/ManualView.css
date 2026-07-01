@@ -252,9 +252,6 @@
   display: flex;
   flex-direction: column;
   gap: 20px;
-  /* Abstand zum Sprungziel, damit die Überschrift nicht unter der sticky-
-     Kopfzeile verschwindet bzw. bündig am Rand klebt. */
-  scroll-margin-top: 60px;
 }
 
 .manual__category-title {
@@ -273,7 +270,6 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
-  scroll-margin-top: 60px;
 }
 
 .manual__section-title {
@@ -315,7 +311,6 @@
 .manual__mark--aktiv {
   color: var(--color-text);
   background: var(--color-accent);
-  scroll-margin-top: 60px;
 }
 
 /* Weiterführend-Links: kleine Liste externer Internet-Quellen. */

@@ -70,14 +70,61 @@ function kategorieAnker(name) {
   return `manual-kat-${name}`;
 }
 
+// Sucht den ECHTEN Scroll-Container: vom Ziel aufwärts das erste Vorfahren-
+// Element, dessen overflowY "auto"/"scroll" ist UND das tatsächlich überläuft
+// (scrollHeight > clientHeight). Der früher angenommene .function-shell__body
+// hat overflow-y: visible und scrollt NICHT — der reale Scroller ist das <main>
+// .app__content. Darum den Container dynamisch statt per fester Klasse suchen.
+function findeScroller(el) {
+  let e = el.parentElement;
+  while (e) {
+    const s = getComputedStyle(e).overflowY;
+    if ((s === "auto" || s === "scroll") && e.scrollHeight > e.clientHeight) {
+      return e;
+    }
+    e = e.parentElement;
+  }
+  return null;
+}
+
+// Realer Sprung-Offset: die Unterkante des sticky-Balkens .manual__bar relativ
+// zur Oberkante des Scroll-Containers (+ kleiner Puffer). Der Balken sitzt NICHT
+// am Container-Rand, sondern tiefer — die reine Balkenhöhe als Offset war darum
+// systematisch zu klein und die Überschrift landete unter dem Balken.
+function berechneOffset(container) {
+  const balken = document.querySelector(".manual__bar");
+  if (!balken || !container) {
+    return 0;
+  }
+  const bb = balken.getBoundingClientRect();
+  const cb = container.getBoundingClientRect();
+  // Unterkante des sticky-Balkens relativ zur Container-Oberkante + kleiner Puffer.
+  return bb.bottom - cb.top + 8;
+}
+
 // Sanfter Sprung zu einem Anker per Id (getElementById statt Hash-Navigation,
 // weil die help_id-Anker Punkte enthalten und ein "#a.b.c" als CSS-Selektor
-// ungültig wäre — als reines scrollIntoView-Ziel funktioniert die Id aber).
+// ungültig wäre — als reines Ziel-Element funktioniert die Id aber).
+//
+// Der sticky .manual__bar sitzt in einem anderen Kontext, weshalb scroll-margin-
+// top an den Ankern nicht greift. Darum manuell im echten Scroll-Container
+// scrollen und den Offset (reale Balken-Unterkante, berechneOffset) selbst
+// abziehen. Fällt der Container-Fund aus, greift das alte scrollIntoView.
 function springeZu(id) {
   const ziel = document.getElementById(id);
-  if (ziel) {
-    ziel.scrollIntoView({ behavior: "smooth", block: "start" });
+  if (!ziel) {
+    return;
   }
+  const container = findeScroller(ziel);
+  if (!container) {
+    ziel.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+  const offset = berechneOffset(container);
+  const zielTop = ziel.getBoundingClientRect().top;
+  const contTop = container.getBoundingClientRect().top;
+  const neu = container.scrollTop + (zielTop - contTop) - offset;
+  container.scrollTo({ top: neu, behavior: "smooth" });
 }
 
 // Zerlegt einen Text-Knoten anhand des Suchbegriffs in Fragmente und rendert
@@ -219,7 +266,7 @@ function zaehleTreffer(suche, sprache) {
   return summe;
 }
 
-export default function ManualView({ onClose }) {
+export default function ManualView({ onClose, sprungZiel }) {
   const { t, i18n } = useTranslation();
   const sprache = i18n.language === "en" ? "en" : "de";
 
@@ -244,6 +291,13 @@ export default function ManualView({ onClose }) {
   const [aktiverTreffer, setAktiverTreffer] = useState(0); // 0-basiert
   const suchfeldRef = useRef(null);
   const aktivMarkRef = useRef(null);
+
+  // Reale Höhe der sticky-Kopfzeile .manual__bar. Wird per ResizeObserver
+  // gemessen und als CSS-Variable --manual-bar-h an den Wrapper geschrieben,
+  // damit scroll-margin-top an den Ankern der echten Balkenhöhe folgt (statt
+  // eines festen Werts, der bei anderer Auflösung/Schriftstufe/Umbruch bricht).
+  const barRef = useRef(null);
+  const [barHoehe, setBarHoehe] = useState(0);
 
   // Schriftgröße einmal beim Mount laden, über den Default mischen. Fehler nicht
   // verschlucken (console.error), in den Lade-Fehlerzustand gehen. t NICHT als
@@ -395,6 +449,70 @@ export default function ManualView({ onClose }) {
     }
   }, [sucheOffen]);
 
+  // Reale Höhe der sticky-Kopfzeile per ResizeObserver messen und in barHoehe
+  // spiegeln (initial einmal direkt messen). ResizeObserver ist in Chromium/
+  // Tauri Standard — kein Polyfill nötig. Kein t/i18n im Dep-Array (leer);
+  // Cleanup trennt den Observer sauber.
+  useEffect(() => {
+    if (!barRef.current) {
+      return undefined;
+    }
+    const messen = () => {
+      setBarHoehe(Math.round(barRef.current.getBoundingClientRect().height));
+    };
+    messen();
+    const observer = new ResizeObserver(() => messen());
+    observer.observe(barRef.current);
+    return () => observer.disconnect();
+  }, []);
+
+  // Sprung aus einem "?"-Hilfe-Popup: ist ein sprungZiel (help_id) gesetzt, zum
+  // passenden <section id={helpId}>-Anker springen. Abhängig von [sprungZiel,
+  // barHoehe], weil scroll-margin-top an der real gemessenen Balkenhöhe hängt:
+  // erst springen, wenn barHoehe steht (sonst greift der 60px-Fallback und die
+  // Überschrift rutscht unter den Balken). barHoehe===0 -> noch nicht gemessen,
+  // return; der Effekt läuft erneut, sobald der ResizeObserver sie setzt. Ein
+  // requestAnimationFrame reicht dann. t bewusst NICHT als Dependency.
+  useEffect(() => {
+    if (!sprungZiel || !barHoehe) {
+      return undefined;
+    }
+    let aktiv = true;
+    let rafId = 0;
+    // Beim Kaltstart (Öffnen übers "?"-Popup) ist der Scroll-Container
+    // .function-shell__body erst nach mehreren Frames voll gelayoutet; ein
+    // einzelnes rAF springt zu früh und scrollTop bleibt 0. Darum den Sprung
+    // pro Frame wiederholen, bis das Ziel die Sollposition erreicht hat oder das
+    // Versuchslimit (20 Frames ~ 0,3s) greift — dann aufhören, kein Endlosloop.
+    const versuch = (n) => {
+      if (!aktiv) {
+        return;
+      }
+      springeZu(sprungZiel);
+      const ziel = document.getElementById(sprungZiel);
+      const container = ziel ? findeScroller(ziel) : null;
+      if (ziel && container) {
+        const soll = berechneOffset(container);
+        const ist =
+          ziel.getBoundingClientRect().top -
+          container.getBoundingClientRect().top;
+        if (Math.abs(ist - soll) <= 2) {
+          return;
+        }
+      }
+      if (n < 20) {
+        rafId = requestAnimationFrame(() => versuch(n + 1));
+      }
+    };
+    rafId = requestAnimationFrame(() => versuch(0));
+    return () => {
+      aktiv = false;
+      if (rafId) {
+        cancelAnimationFrame(rafId);
+      }
+    };
+  }, [sprungZiel, barHoehe]);
+
   // Mitlaufender Render-Zähler: vor jedem Render zurücksetzen, <Hervorhebung>
   // vergibt daraus die globalen Treffer-Indizes in Renderreihenfolge.
   const zaehler = { wert: 0 };
@@ -437,7 +555,7 @@ export default function ManualView({ onClose }) {
         {/* Rechte Spalte: umrahmter Container mit sticky-Kopfzeile (Kapitelname
             + Werkzeugleiste) und darunter dem Textbereich. */}
         <div className="manual__panel">
-          <div className="manual__bar">
+          <div className="manual__bar" ref={barRef}>
             <span className="manual__chapter">{kapitelName}</span>
 
             <div className="manual__tools">
