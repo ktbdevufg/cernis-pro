@@ -196,3 +196,69 @@ def test_reihenfolge_count_absteigend_dann_src_dann_dst() -> None:
         ("10.0.0.5", "1.1.1.1", 1),  # count 1: src gleich, dst 1.1.1.1 < 8.8.8.8
         ("10.0.0.9", "8.8.8.8", 1),  # count 1: groesseres src zuletzt
     ]
+
+
+# ── Steuerungs-Use-Cases (Start/StopDnsBypassRecording) ───────────────────────
+
+
+class _SpyRecorder:
+    """``DnsBypassRecorder``-Spy: zeichnet ``clear``/``start``/``stop`` in Reihenfolge auf.
+
+    ``start`` gibt das konfigurierte Ergebnis zurueck (``None`` = ok, sonst Fehlertext),
+    damit ``StartDnsBypassRecording`` das Durchreichen belegt werden kann.
+    """
+
+    def __init__(self, start_result: str | None = None) -> None:
+        self._start_result = start_result
+        self.calls: list[str] = []
+        self.started_interface: str | None = None
+
+    def clear(self) -> None:
+        self.calls.append("clear")
+
+    def start(self, interface: str | None) -> str | None:
+        self.calls.append("start")
+        self.started_interface = interface
+        return self._start_result
+
+    def stop(self) -> None:
+        self.calls.append("stop")
+
+
+def test_start_use_case_clear_vor_start_und_reicht_ergebnis_durch() -> None:
+    """StartDnsBypassRecording ruft clear VOR start und reicht das start-Ergebnis durch."""
+    from application.dns_bypass import StartDnsBypassRecording
+
+    recorder = _SpyRecorder(start_result=None)
+    use_case = StartDnsBypassRecording(recorder)  # type: ignore[arg-type]
+
+    result = use_case("eth0")
+
+    assert result is None
+    assert recorder.calls == ["clear", "start"]
+    assert recorder.started_interface == "eth0"
+
+
+def test_start_use_case_reicht_fehlertext_durch() -> None:
+    """StartDnsBypassRecording reicht einen Fehlertext der Quelle ehrlich durch."""
+    from application.dns_bypass import StartDnsBypassRecording
+
+    recorder = _SpyRecorder(start_result="DNS-Helfer nicht erreichbar")
+    use_case = StartDnsBypassRecording(recorder)  # type: ignore[arg-type]
+
+    result = use_case(None)
+
+    assert result == "DNS-Helfer nicht erreichbar"
+    assert recorder.calls == ["clear", "start"]
+
+
+def test_stop_use_case_ruft_recorder_stop() -> None:
+    """StopDnsBypassRecording ruft recorder.stop."""
+    from application.dns_bypass import StopDnsBypassRecording
+
+    recorder = _SpyRecorder()
+    use_case = StopDnsBypassRecording(recorder)  # type: ignore[arg-type]
+
+    use_case()
+
+    assert recorder.calls == ["stop"]

@@ -13,10 +13,16 @@ Zuordnung Quell-IP -> Geraet und die DoH-Blocklist-Bewertung liegen NICHT hier, 
 spaeter im Composition Root (Regel 5).
 """
 
+from application.dns_bypass.recorder import (
+    DnsBypassRecorder,
+    DnsQuerySource,
+)
 from application.dns_bypass.use_cases import (
     BuildDnsBypass,
     DnsQueryProvider,
     ExpectedServersProvider,
+    StartDnsBypassRecording,
+    StopDnsBypassRecording,
 )
 from domain.dns_bypass import (
     DnsBypassFinding,
@@ -28,7 +34,11 @@ __all__ = [
     "BuildDnsBypass",
     "DnsBypassFinding",
     "DnsBypassOverview",
+    "DnsBypassRecorder",
     "DnsQueryProvider",
+    "DnsQuerySource",
     "ExpectedServersProvider",
     "RawDnsQuery",
+    "StartDnsBypassRecording",
+    "StopDnsBypassRecording",
 ]

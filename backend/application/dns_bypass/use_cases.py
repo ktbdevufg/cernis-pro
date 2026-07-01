@@ -18,6 +18,7 @@ der erwarteten Menge (``domain.dns_watch.expected_servers_or_default``) faellt d
 
 from collections.abc import Callable, Sequence
 
+from application.dns_bypass.recorder import DnsBypassRecorder
 from domain.dns_bypass import (
     DnsBypassFinding,
     DnsBypassOverview,
@@ -30,6 +31,8 @@ __all__ = [
     "BuildDnsBypass",
     "DnsQueryProvider",
     "ExpectedServersProvider",
+    "StartDnsBypassRecording",
+    "StopDnsBypassRecording",
 ]
 
 # Bis zu so viele distinct qnames werden je Befund als Beleg mitgefuehrt (gedeckelt,
@@ -143,3 +146,38 @@ class BuildDnsBypass:
             if query.qname and query.qname not in samples and len(samples) < _MAX_SAMPLE_QNAMES:
                 samples.append(query.qname)
         return grouped
+
+
+# ── Steuerungs-Use-Cases (Muster Start/StopOutboundRecording) ──
+
+
+class StartDnsBypassRecording:
+    """Startet eine DNS-Umgehungs-Aufzeichnung ueber den ``DnsBypassRecorder``.
+
+    Anders als ``StartOutboundRecording`` gibt es hier KEINE Repo-/Domaenen-Transition
+    und keine SQLite-Aufzeichnungsdefinition -- der Recorder haelt den Zustand selbst
+    (schlanke Variante, Etappe 4a). Der Use-Case leert vor dem Start den Sammelpuffer
+    (sauberer Neustart) und reicht das ``start``-Ergebnis ehrlich durch (``None`` = ok,
+    sonst der Fehlertext der Quelle).
+    """
+
+    def __init__(self, recorder: DnsBypassRecorder) -> None:
+        self._recorder = recorder
+
+    def __call__(self, interface: str | None) -> str | None:
+        self._recorder.clear()
+        return self._recorder.start(interface)
+
+
+class StopDnsBypassRecording:
+    """Stoppt die DNS-Umgehungs-Aufzeichnung ueber den ``DnsBypassRecorder``.
+
+    Schlank wie ``StopOutboundRecording``, aber ohne Repo-/Domaenen-Transition: der
+    Recorder haelt den Zustand selbst und ``stop`` ist idempotent/best-effort.
+    """
+
+    def __init__(self, recorder: DnsBypassRecorder) -> None:
+        self._recorder = recorder
+
+    def __call__(self) -> None:
+        self._recorder.stop()
