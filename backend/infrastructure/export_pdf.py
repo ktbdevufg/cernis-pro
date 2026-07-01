@@ -193,6 +193,21 @@ DNS_CONTACT_COLUMNS: tuple[str, ...] = (
     "Status",
 )
 
+# Spalten-Spiegel der zwei DNS-Umgehungs-Bericht-Tabellen. SPIEGEL der ``DNS_BYPASS_*_COLUMNS``
+# aus ``application.reporting.dns_bypass_pdf_model`` -- der Adapter darf ``application`` NICHT
+# importieren (import-linter), darum hier als lokale Anzeige-Konstanten gefuehrt (Muster
+# DNS_*_COLUMNS). Die Schreibweise (Umlaute) ist WOERTLICH aus dns_bypass_pdf_model.py
+# uebernommen, damit Modell, Renderer und die Spaltenbreiten-Heuristik denselben Vertrag teilen.
+DNS_BYPASS_RESOLVER_COLUMNS: tuple[str, ...] = ("Ziel-Resolver", "Umgehungen")
+DNS_BYPASS_ROW_COLUMNS: tuple[str, ...] = (
+    "Gerät",
+    "Quell-IP",
+    "Ziel-Resolver",
+    "DoH",
+    "Anfragen",
+    "Beispiel-Namen",
+)
+
 
 class SecurityPdfModelLike(Protocol):
     """Struktureller Vertrag des Sicherheitsbericht-Modells (duck-typing, KEIN Import).
@@ -490,6 +505,45 @@ class DnsWatchPdfModelLike(Protocol):
     def app_rows(self) -> tuple[tuple[str, ...], ...]: ...
     @property
     def contact_rows(self) -> tuple[tuple[str, ...], ...]: ...
+
+
+class DnsBypassPdfModelLike(Protocol):
+    """Struktureller Vertrag des DNS-Umgehungs-Modells (duck-typing, KEIN application-Import).
+
+    Wie ``DnsWatchPdfModelLike``: ``infrastructure`` darf ``application`` NICHT importieren
+    (import-linter), das reiche ``DnsBypassPdfModel`` lebt aber in ``application/reporting``.
+    Darum nimmt der Adapter es STRUKTURELL ueber dieses ``Protocol`` entgegen -- genau die
+    Felder, die er rendert. Read-only Properties decken die frozen-Felder ab (siehe Begruendung
+    bei ``SecurityPdfModelLike``). Das echte ``DnsBypassPdfModel`` erfuellt das Protokoll
+    automatisch (gleiche Feldnamen/Typen).
+    """
+
+    @property
+    def title(self) -> str: ...
+    @property
+    def generated_at_text(self) -> str: ...
+    @property
+    def footer_left(self) -> str: ...
+    @property
+    def einleitung(self) -> str: ...
+    @property
+    def recording_label(self) -> str: ...
+    @property
+    def scope_text(self) -> str: ...
+    @property
+    def expected_text(self) -> str: ...
+    @property
+    def queries_total(self) -> int: ...
+    @property
+    def bypass_total(self) -> int: ...
+    @property
+    def expected_total(self) -> int: ...
+    @property
+    def bypass_devices(self) -> int: ...
+    @property
+    def resolver_rows(self) -> tuple[tuple[str, ...], ...]: ...
+    @property
+    def bypass_rows(self) -> tuple[tuple[str, ...], ...]: ...
 
 
 class ReportlabRenderer:
@@ -1740,6 +1794,139 @@ class ReportlabRenderer:
         )
         return table
 
+    def render_dns_bypass_report_pdf(self, model: DnsBypassPdfModelLike) -> bytes:
+        """Rendert das ``DnsBypassPdfModel`` zum vollstaendigen DNS-Umgehungs-Bericht-PDF (A4 hoch).
+
+        Layout (Muster render_dns_watch_report_pdf, ABER netzweit statt host-lokal + mit
+        Bezugsrahmen/recording): durchgaengige Kopf-/Fusszeile je Seite (onFirstPage UND
+        onLaterPages ueber dieselbe Funktion ``_draw_manual_header_footer``), dann die Story --
+        Titel + Erzeugungsdatum + Einleitung, die fertige Bezugsrahmen-Zeile (``scope_text``) und
+        die fertige erwartete-Server-Zeile (``expected_text``), der Kennzahlen-Block (eine Reihe
+        Zahlen) und die zwei Sektions-Rubriken (Verteilung nach Ziel-Resolver / Umgehungen im
+        Detail, letztere auf eigener Seite, da potentiell lang).
+
+        Robust: leere Tabellen ziehen ihren eigenen Leer-Fallback ueber ``_append_table_section``.
+        KEINE Uhr, KEINE Rechnung -- alle Texte/Zahlen kommen fertig aus dem Modell. Liefert
+        valide PDF-Bytes (Magic-Header ``%PDF``).
+        """
+        buffer = io.BytesIO()
+        document = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,  # Hochformat (Muster DNS-Waechter)
+            leftMargin=18 * mm,
+            rightMargin=18 * mm,
+            topMargin=32 * mm,  # Platz fuer die durchgaengige Kopfzeile
+            bottomMargin=20 * mm,  # Platz fuer die Fusszeile
+            title=model.title,
+        )
+
+        story: list[Flowable] = []
+        styles = self._security_styles()
+
+        # ── Titel + Erzeugungsdatum + Einleitung (fertige Texte aus dem Modell) ──
+        story.append(Paragraph(model.title, styles["h_title"]))
+        story.append(Paragraph(model.generated_at_text, styles["sub"]))
+        story.append(Spacer(1, 4 * mm))
+        if model.einleitung:
+            story.append(Paragraph(model.einleitung, styles["body"]))
+            story.append(Spacer(1, 6 * mm))
+
+        # ── Bezugsrahmen-Zeilen (fertig lokalisiert vom Composition Root) ──
+        story.append(Paragraph(model.scope_text, styles["sub"]))
+        story.append(Paragraph(model.expected_text, styles["sub"]))
+        story.append(Spacer(1, 4 * mm))
+
+        # ── Sektion 1: Ueberblick (Umgehungs-Kennzahlen, eine Reihe Zahlen) ──
+        story.append(Paragraph("Kennzahlen", styles["h_section"]))
+        story.append(self._dns_bypass_kennzahlen(model))
+        story.append(Spacer(1, 6 * mm))
+
+        # ── Sektions-Rubriken ueber das BESTEHENDE _append_table_section ──
+        self._append_table_section(
+            story,
+            styles,
+            "Verteilung nach Ziel-Resolver",
+            DNS_BYPASS_RESOLVER_COLUMNS,
+            model.resolver_rows,
+        )
+
+        # Die Detail-Liste auf eigener Seite (potentiell lang) -- PageBreak davor.
+        story.append(PageBreak())
+        self._append_table_section(
+            story,
+            styles,
+            "Umgehungen im Detail",
+            DNS_BYPASS_ROW_COLUMNS,
+            model.bypass_rows,
+        )
+
+        # ── Achse-B-Fussnote (invariant, wie im DNS-Waechter-/Aussenkontakte-Bericht) ──
+        story.append(Spacer(1, 8 * mm))
+        story.append(
+            KeepTogether(
+                [
+                    HRFlowable(width="100%", thickness=0.6, color=_LINE),
+                    Spacer(1, 2 * mm),
+                    Paragraph(
+                        "Dieser Bericht beschreibt und ordnet ein — er fällt kein Urteil.",
+                        styles["footnote"],
+                    ),
+                ]
+            )
+        )
+
+        # _draw_manual_header_footer ist auf ManualPdfModelLike typisiert, liest zur Laufzeit aber
+        # NUR model.title + model.footer_left -- beide hat DnsBypassPdfModelLike ebenfalls (Muster
+        # render_dns_watch_report_pdf): cast statt Aenderung der Kopf-/Fuss-Funktion.
+        header_model = cast(ManualPdfModelLike, model)
+        document.build(
+            story,
+            onFirstPage=lambda canvas, doc: _draw_manual_header_footer(canvas, doc, header_model),
+            onLaterPages=lambda canvas, doc: _draw_manual_header_footer(canvas, doc, header_model),
+        )
+        return buffer.getvalue()
+
+    @staticmethod
+    def _dns_bypass_kennzahlen(model: DnsBypassPdfModelLike) -> Table:
+        """Die DNS-Umgehungs-Kennzahlen als eine Reihe Kennzahl-Boxen (Zahl oben, Label darunter).
+
+        Reihe: Anfragen gesamt/Umgehungen/Erwartungsgemaess/Geraete. Eine 4-spaltige ``Table`` --
+        schlichte graue Boxen mit Akzent-Zahl (Muster ``_dns_watch_kennzahlen``). Alle vier Boxen
+        gefuellt. Reine Anzeige der schon ermittelten Zaehler aus dem Modell -- keine Rechnung,
+        keine neuen Farben.
+        """
+        data = [
+            [
+                str(model.queries_total),
+                str(model.bypass_total),
+                str(model.expected_total),
+                str(model.bypass_devices),
+            ],
+            ["Anfragen gesamt", "Umgehungen", "Erwartungsgemäß", "Geräte"],
+        ]
+        col = 174.0 / 4 * mm
+        table = Table(data, colWidths=[col, col, col, col])
+        table.setStyle(
+            TableStyle(
+                [
+                    # Dezent graue Boxen (kein neues Farbset): Hintergrund _ZEBRA, Zahl in _ACCENT,
+                    # Label in _TEXT. Muster _dns_watch_kennzahlen (Wert-Reihe FONTSIZE 20).
+                    ("BACKGROUND", (0, 0), (-1, 1), _ZEBRA),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), _ACCENT),
+                    ("TEXTCOLOR", (0, 1), (-1, 1), _TEXT),
+                    ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, 0), 20),
+                    ("FONTNAME", (0, 1), (-1, 1), "Helvetica"),
+                    ("FONTSIZE", (0, 1), (-1, 1), 9),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("TOPPADDING", (0, 0), (-1, 0), 8),
+                    ("BOTTOMPADDING", (0, 1), (-1, 1), 8),
+                ]
+            )
+        )
+        return table
+
     # ── Benutzerhandbuch: eigener Render-Pfad ───────────────────────────────
     #
     # NEUE Methode neben render_security_report_pdf -- beide bleiben UNANGETASTET (der
@@ -1874,6 +2061,11 @@ _COL_WEIGHTS: dict[tuple[str, ...], tuple[float, ...]] = {
     DNS_CONTACT_COLUMNS: (1.8, 2.4, 2.4, 2.0, 1.0, 1.4),
     DNS_CATEGORY_COLUMNS: (5.0, 1.8),
     DNS_APP_COLUMNS: (5.0, 1.8),
+    # DNS-Umgehungs-Bericht: Geraet/Quell-IP/Ziel-Resolver/Beispiel-Namen breit, die schmalen
+    # Wert-Spalten (DoH/Anfragen) schlank. Eigene Keys; die bestehenden Aufrufer bleiben
+    # unberuehrt. Die Resolver-Verteilung traegt das Verteilungsmuster (Label breit, Anzahl schmal).
+    DNS_BYPASS_ROW_COLUMNS: (2.0, 2.0, 2.2, 0.8, 1.0, 2.6),
+    DNS_BYPASS_RESOLVER_COLUMNS: (5.0, 1.8),
 }
 
 # Rubrikspezifischer Leertext je Tabellen-Schema (statt generisch "Keine Eintraege.").
@@ -1894,6 +2086,8 @@ _EMPTY_SECTION_TEXT: dict[tuple[str, ...], str] = {
     DNS_CONTACT_COLUMNS: "Keine DNS-relevanten Außenkontakte aufgezeichnet.",
     DNS_CATEGORY_COLUMNS: "Keine Kategoriedaten.",
     DNS_APP_COLUMNS: "Keine Programmdaten.",
+    DNS_BYPASS_ROW_COLUMNS: "Keine DNS-Umgehungen aufgezeichnet.",
+    DNS_BYPASS_RESOLVER_COLUMNS: "Keine Resolver-Daten.",
 }
 
 

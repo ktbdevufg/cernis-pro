@@ -921,3 +921,193 @@ async def get_dns_watch_report_pdf(
             "Content-Disposition": f'attachment; filename="{result.filename}"'  # type: ignore[attr-defined]
         },
     )
+
+
+# ── DNS-Umgehungs-Bericht: schmale api-Response-Modelle (eigene Wire-Form) ──────
+# NEUER, EIGENER Bericht NEBEN dem host-lokalen DNS-Waechter-Bericht (der bleibt
+# UNANGETASTET): dieser liest die PERSISTIERTEN netzweiten Umgehungs-Laeufe (Etappe 3) mit
+# BEZUGSRAHMEN-Wahl (eine Aufzeichnung ODER alle zusammengefasst) -- Muster des
+# Aussenkontakte-Berichts (recording_id als optionaler Query-Parameter + Recordings-Liste).
+# Eigene schmale pydantic-``*Out``-Modelle, die die application-Sicht ``DnsBypassReport``
+# (samt ``ResolverCount``/``DnsBypassReportRow``) spiegeln, OHNE diese Typen zu importieren
+# (Regel 4: api kennt application nicht). Der Composition-Root-Runner in ``app.py`` projiziert
+# die application-Sicht auf genau diese Form. Der Router-prefix ``/api/report`` ergibt
+# ``/api/report/dns-bypass`` -- keine Kollision mit dem Live-Router ``/api/dns-bypass``.
+
+
+class DnsBypassResolverOut(BaseModel):
+    """Ein Eintrag der Ziel-Resolver-Verteilung (Ziel-IP + Anzahl Umgehungen, Wire-Form).
+
+    ``dst_ip`` der Ziel-Resolver, ``count`` die Summe der Umgehungs-Anfragen an dieses Ziel
+    (ueber alle fragenden Geraete). Reine Anzeige.
+    """
+
+    dst_ip: str
+    count: int
+
+
+class DnsBypassReportRowOut(BaseModel):
+    """Eine Umgehungs-Zeile des Berichts (Wire-Form, spiegelt die Live-View-Felder).
+
+    Alle Anzeige-/Bewertungs-Felder sind schon vom Composition-Root-Runner fertig gesetzt:
+    ``device_name`` der best-effort im Bestand aufgeloeste Anzeigename ("" statt None, wenn
+    keine IP passt), ``is_doh``/``doh_source_name`` die DoH-Bewertung des Ziels (Name der
+    treffenden aktiven DOH-Quelle, "" wenn keine). ``src_ip`` das fragende Geraet, ``dst_ip``
+    der nicht-erwartete Resolver, ``query_count`` die Anzahl Umgehungs-Anfragen dieser Gruppe,
+    ``sample_qnames`` bis zu fuenf distinct qnames als Beleg.
+    """
+
+    src_ip: str
+    device_name: str
+    dst_ip: str
+    is_doh: bool
+    doh_source_name: str
+    query_count: int
+    sample_qnames: list[str]
+
+
+class DnsBypassReportOut(BaseModel):
+    """Die Gesamtsicht des DNS-Umgehungs-Berichts: Bezugsrahmen, Kennzahlen, Verteilung, Liste.
+
+    ``recording_label`` der Anzeigename der Aufzeichnung (oder die fertige "Alle
+    Aufzeichnungen"-Bezeichnung), ``recording_scope`` der rohe Bezugsrahmen-Schluessel
+    ("single"/"all"), ``expected_servers`` die erwartete Resolver-Menge als ehrlicher Beleg.
+    Die vier int-Kennzahlen sind die schon ermittelten Zaehler (``queries_total``/
+    ``bypass_total``/``expected_total``/``bypass_devices``). ``resolver_distribution`` die
+    Ziel-Resolver-Verteilung, ``bypass_rows`` die sortierte Umgehungs-Liste. KEIN 404-Fall:
+    leerer Stand ist ein DATUM (alle Zaehler 0, leere Listen), kein HTTP-Fehler.
+    """
+
+    recording_label: str
+    recording_scope: str
+    expected_servers: list[str]
+    queries_total: int
+    bypass_total: int
+    expected_total: int
+    bypass_devices: int
+    resolver_distribution: list[DnsBypassResolverOut]
+    bypass_rows: list[DnsBypassReportRowOut]
+
+
+class DnsBypassReportRecordingOut(BaseModel):
+    """Eine waehlbare Aufzeichnung fuers Berichts-Dropdown (schlanke Wire-Form).
+
+    ``id`` der technische Schluessel der Aufzeichnung (Query-Wert fuer ``recording_id``),
+    ``label`` der Anzeigename (vom Root auf die id zurueckgefallen, falls leer). Bewusst ein
+    EIGENER, report-spezifischer schlanker Pfad (Muster ``OutboundReportRecordingOut``) -- das
+    Frontend fuellt damit das Dropdown, OHNE den vollen ``dns_bypass``-Router zu nutzen.
+    """
+
+    id: str
+    label: str
+
+
+# ── DNS-Umgehungs-Bericht: injizierte Composition-Root-Runner ──────────────────
+# Provider-Marker (Muster ``OutboundReportRunner``): in app.py per dependency_overrides mit den
+# echten Root-Runnern verdrahtet. Ohne Verdrahtung bewusst ein lauter Fehler (kein stiller
+# Fallback, S3).
+#
+# Der Bericht laeuft ueber EINE Aufzeichnung ODER alle: ``recording_id`` ist ein optionaler
+# Query-Parameter (None bzw. leer = "alle Aufzeichnungen zusammengefasst"; ein konkreter Wert =
+# nur diese Aufzeichnung). Der dritte Runner liefert die waehlbaren Aufzeichnungen fuers Dropdown.
+
+
+class DnsBypassReportRunner(Protocol):
+    """Schmaler Vertrag des injizierten Lese-Runners (liefert die fertige Umgehungs-Sicht)."""
+
+    async def __call__(self, recording_id: str | None) -> DnsBypassReportOut:
+        """Baut den DNS-Umgehungs-Bericht (eine Aufzeichnung oder alle) Wire-fertig."""
+        ...
+
+
+def provide_dns_bypass_report() -> DnsBypassReportRunner:
+    raise NotImplementedError("DnsBypassReportRunner wird in app.py verdrahtet")
+
+
+class DnsBypassReportPdfRunner(Protocol):
+    """Schmaler Vertrag des injizierten PDF-Runners (liefert das fertige Download-Ergebnis)."""
+
+    async def __call__(self, recording_id: str | None) -> object:
+        """Baut den DNS-Umgehungs-Bericht als PDF und liefert content/media_type/filename."""
+        ...
+
+
+def provide_dns_bypass_report_pdf() -> DnsBypassReportPdfRunner:
+    raise NotImplementedError("DnsBypassReportPdfRunner wird in app.py verdrahtet")
+
+
+class DnsBypassReportRecordingsRunner(Protocol):
+    """Schmaler Vertrag des injizierten Recordings-Runners (liefert das Dropdown-Datum)."""
+
+    async def __call__(self) -> list[DnsBypassReportRecordingOut]:
+        """Liefert die waehlbaren Aufzeichnungen als schlanke Wire-Form (leere Liste = Datum)."""
+        ...
+
+
+def provide_dns_bypass_report_recordings() -> DnsBypassReportRecordingsRunner:
+    raise NotImplementedError("DnsBypassReportRecordingsRunner wird in app.py verdrahtet")
+
+
+# ── DNS-Umgehungs-Bericht: Routen ──────────────────────────────────────────────
+# Reihenfolge (Muster Aussenkontakte): recordings, dann dns-bypass, dann pdf. Alle drei haben
+# feste, eindeutige Suffixe (kein Pfad-Parameter-Konflikt), die Reihenfolge ist daher unkritisch.
+
+
+@router.get("/dns-bypass/recordings")
+async def get_dns_bypass_report_recordings(
+    runner: Annotated[
+        DnsBypassReportRecordingsRunner, Depends(provide_dns_bypass_report_recordings)
+    ],
+) -> list[DnsBypassReportRecordingOut]:
+    """Liefert die waehlbaren Aufzeichnungen fuers Berichts-Dropdown (schlanke Wire-Form).
+
+    KEIN 404-Fall: eine leere Liste ist ein DATUM (noch keine Aufzeichnungen), kein HTTP-Fehler.
+    Die Projektion macht der injizierte Composition-Root-Runner (Regel 4: api kennt application
+    nicht).
+    """
+    return await runner()
+
+
+@router.get("/dns-bypass")
+async def get_dns_bypass_report(
+    runner: Annotated[DnsBypassReportRunner, Depends(provide_dns_bypass_report)],
+    recording_id: str | None = None,
+) -> DnsBypassReportOut:
+    """Liefert den aggregierten DNS-Umgehungs-Bericht (EINE Aufzeichnung oder alle).
+
+    ``recording_id`` ist optional: None bzw. leer = alle Aufzeichnungen zusammengefasst, ein
+    konkreter Wert = nur diese Aufzeichnung. KEIN 404-Fall: leerer Stand ist ein DATUM (alle
+    Zaehler 0, leere Listen), kein HTTP-Fehler. Die ganze Projektion macht der injizierte
+    Composition-Root-Runner (Regel 4: der api-Ring kennt application nicht). Der Router-prefix
+    ``/api/report`` ergibt ``/api/report/dns-bypass`` -- keine Kollision mit dem Live-Router
+    ``/api/dns-bypass``.
+    """
+    return await runner(recording_id)
+
+
+@router.get("/dns-bypass/pdf")
+async def get_dns_bypass_report_pdf(
+    runner: Annotated[DnsBypassReportPdfRunner, Depends(provide_dns_bypass_report_pdf)],
+    recording_id: str | None = None,
+) -> Response:
+    """Liefert den DNS-Umgehungs-Bericht als PDF-Download (Bytes, ``attachment``).
+
+    ``recording_id`` ist optional (None/leer = alle Aufzeichnungen, ein Wert = nur diese). Der
+    injizierte Composition-Root-Runner baut den Bericht, projiziert ihn auf das render-fertige
+    PDF-Modell und rendert das PDF; er liefert ein Objekt mit ``content`` (PDF-Bytes),
+    ``media_type`` (``application/pdf``) und ``filename``. Der Router verpackt es in eine
+    ``Response`` mit ``Content-Disposition: attachment; filename="..."``.
+
+    KEIN 404-Fall: leerer Stand ist ein gueltiges PDF (alle Zaehler 0, leere Listen), kein
+    HTTP-Fehler -- analog ``GET /api/report/dns-bypass``.
+    """
+    result = await runner(recording_id)
+    # result kommt aus dem Composition Root; per Attribut-Zugriff gelesen (kein Typ-Import im
+    # Router -- der api-Ring kennt nur die drei Attribute, Muster ``get_outbound_report_pdf``).
+    return Response(
+        content=result.content,  # type: ignore[attr-defined]
+        media_type=result.media_type,  # type: ignore[attr-defined]
+        headers={
+            "Content-Disposition": f'attachment; filename="{result.filename}"'  # type: ignore[attr-defined]
+        },
+    )

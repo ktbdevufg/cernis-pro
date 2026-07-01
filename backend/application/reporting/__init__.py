@@ -27,6 +27,18 @@ from application.reporting.cve_report import (
     SeverityCount,
     build_cve_report,
 )
+from application.reporting.dns_bypass_pdf_model import (
+    DNS_BYPASS_RESOLVER_COLUMNS,
+    DNS_BYPASS_ROW_COLUMNS,
+    DnsBypassPdfModel,
+)
+from application.reporting.dns_bypass_report import (
+    DnsBypassReport,
+    DnsBypassReportInput,
+    DnsBypassReportRow,
+    ResolverCount,
+    build_dns_bypass_report,
+)
 from application.reporting.dns_watch_pdf_model import (
     DNS_APP_COLUMNS,
     DNS_CATEGORY_COLUMNS,
@@ -109,6 +121,8 @@ __all__ = [
     "CVE_COLUMNS",
     "DEVICE_COLUMNS",
     "DNS_APP_COLUMNS",
+    "DNS_BYPASS_RESOLVER_COLUMNS",
+    "DNS_BYPASS_ROW_COLUMNS",
     "DNS_CATEGORY_COLUMNS",
     "DNS_CONTACT_COLUMNS",
     "FINDING_COLUMNS",
@@ -136,6 +150,10 @@ __all__ = [
     "DeviceBurden",
     "DeviceCveRow",
     "DistributionEntry",
+    "DnsBypassPdfModel",
+    "DnsBypassReport",
+    "DnsBypassReportInput",
+    "DnsBypassReportRow",
     "DnsWatchContactRow",
     "DnsWatchPdfModel",
     "DnsWatchReport",
@@ -154,6 +172,7 @@ __all__ = [
     "OutboundReport",
     "OutboundReportInput",
     "PortFinding",
+    "ResolverCount",
     "ScoreContribution",
     "SecurityPdfModel",
     "SecurityReport",
@@ -162,6 +181,7 @@ __all__ = [
     "SeverityCount",
     "build_cve_report",
     "build_device_burdens",
+    "build_dns_bypass_report",
     "build_dns_watch_report",
     "build_inventory_report",
     "build_outbound_report",

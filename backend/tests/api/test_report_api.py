@@ -19,6 +19,10 @@ from fastapi.testclient import TestClient
 from api.report import (
     CveFindingOut,
     DnsAppCountOut,
+    DnsBypassReportOut,
+    DnsBypassReportRecordingOut,
+    DnsBypassReportRowOut,
+    DnsBypassResolverOut,
     DnsCategoryCountOut,
     DnsWatchContactRowOut,
     DnsWatchReportOut,
@@ -32,6 +36,9 @@ from api.report import (
     ScoreContributionOut,
     ScoreOut,
     SecurityReportOut,
+    provide_dns_bypass_report,
+    provide_dns_bypass_report_pdf,
+    provide_dns_bypass_report_recordings,
     provide_dns_watch_report,
     provide_dns_watch_report_pdf,
     provide_outbound_report,
@@ -534,5 +541,167 @@ def test_get_dns_watch_report_pdf_liefert_attachment(app: FastAPI) -> None:
     assert (
         response.headers["content-disposition"]
         == 'attachment; filename="CERNISPRO_DNS-Waechter-Bericht.pdf"'
+    )
+    assert response.content  # nicht-leerer Body
+
+
+# ── DNS-Umgehungs-Bericht: schlanke Endpunkt-Tests (Etappe 5) ──────────────────
+# NEUER, EIGENER Bericht NEBEN dem host-lokalen DNS-Waechter-Bericht: BEZUGSRAHMEN-Wahl
+# (recording_id optional) + Recordings-Liste, Muster der Aussenkontakte-Bericht-Tests.
+
+
+class _FakeDnsBypassReportRunner:
+    """Fake-Runner: liefert eine feste, schon api-projizierte DNS-Umgehungs-Sicht."""
+
+    def __init__(self, report: DnsBypassReportOut) -> None:
+        self._report = report
+        self.recording_id: str | None = "noch-nicht-aufgerufen"
+
+    async def __call__(self, recording_id: str | None) -> DnsBypassReportOut:
+        self.recording_id = recording_id
+        return self._report
+
+
+class _FakeDnsBypassRecordingsRunner:
+    """Fake-Runner: liefert eine feste Dropdown-Liste (keine echten Quellen)."""
+
+    def __init__(self, recordings: list[DnsBypassReportRecordingOut]) -> None:
+        self._recordings = recordings
+
+    async def __call__(self) -> list[DnsBypassReportRecordingOut]:
+        return self._recordings
+
+
+class _FakeDnsBypassReportPdfRunner:
+    """Fake-PDF-Runner: liefert ein festes Download-Ergebnis (content/media_type/filename)."""
+
+    def __init__(self, content: bytes, media_type: str, filename: str) -> None:
+        self._content = content
+        self._media_type = media_type
+        self._filename = filename
+        self.recording_id: str | None = "noch-nicht-aufgerufen"
+
+    async def __call__(self, recording_id: str | None) -> object:
+        self.recording_id = recording_id
+        return _FakeDnsWatchPdfResult(
+            content=self._content, media_type=self._media_type, filename=self._filename
+        )
+
+
+def test_get_dns_bypass_report_liefert_200_und_json_form(app: FastAPI) -> None:
+    """``/api/report/dns-bypass?recording_id=...`` -> 200 + JSON-Form, id durchgereicht."""
+    report = DnsBypassReportOut(
+        recording_label="Büro-Lauf",
+        recording_scope="single",
+        expected_servers=["192.168.1.1"],
+        queries_total=20,
+        bypass_total=8,
+        expected_total=12,
+        bypass_devices=2,
+        resolver_distribution=[DnsBypassResolverOut(dst_ip="8.8.8.8", count=8)],
+        bypass_rows=[
+            DnsBypassReportRowOut(
+                src_ip="10.0.0.5",
+                device_name="Laptop",
+                dst_ip="8.8.8.8",
+                is_doh=False,
+                doh_source_name="",
+                query_count=8,
+                sample_qnames=["example.com", "beispiel.de"],
+            )
+        ],
+    )
+    runner = _FakeDnsBypassReportRunner(report)
+    app.dependency_overrides[provide_dns_bypass_report] = lambda: runner
+
+    with TestClient(app) as client:
+        response = client.get("/api/report/dns-bypass", params={"recording_id": "rec-1"})
+
+    assert response.status_code == 200
+    assert runner.recording_id == "rec-1"
+    assert response.json() == {
+        "recording_label": "Büro-Lauf",
+        "recording_scope": "single",
+        "expected_servers": ["192.168.1.1"],
+        "queries_total": 20,
+        "bypass_total": 8,
+        "expected_total": 12,
+        "bypass_devices": 2,
+        "resolver_distribution": [{"dst_ip": "8.8.8.8", "count": 8}],
+        "bypass_rows": [
+            {
+                "src_ip": "10.0.0.5",
+                "device_name": "Laptop",
+                "dst_ip": "8.8.8.8",
+                "is_doh": False,
+                "doh_source_name": "",
+                "query_count": 8,
+                "sample_qnames": ["example.com", "beispiel.de"],
+            }
+        ],
+    }
+
+
+def test_get_dns_bypass_report_ohne_recording_id_reicht_none_durch(app: FastAPI) -> None:
+    """Ohne ``recording_id`` -> 200 und der Runner bekommt ``None`` (alle Aufzeichnungen)."""
+    report = DnsBypassReportOut(
+        recording_label="",
+        recording_scope="all",
+        expected_servers=[],
+        queries_total=0,
+        bypass_total=0,
+        expected_total=0,
+        bypass_devices=0,
+        resolver_distribution=[],
+        bypass_rows=[],
+    )
+    runner = _FakeDnsBypassReportRunner(report)
+    app.dependency_overrides[provide_dns_bypass_report] = lambda: runner
+
+    with TestClient(app) as client:
+        response = client.get("/api/report/dns-bypass")
+
+    assert response.status_code == 200
+    assert runner.recording_id is None
+
+
+def test_get_dns_bypass_report_recordings_liefert_dropdown_liste(app: FastAPI) -> None:
+    """``/api/report/dns-bypass/recordings`` -> 200 + die schlanke Dropdown-Liste (leer = Datum)."""
+    runner = _FakeDnsBypassRecordingsRunner(
+        [
+            DnsBypassReportRecordingOut(id="rec-1", label="Büro"),
+            DnsBypassReportRecordingOut(id="rec-2", label="Heimnetz"),
+        ]
+    )
+    app.dependency_overrides[provide_dns_bypass_report_recordings] = lambda: runner
+
+    with TestClient(app) as client:
+        response = client.get("/api/report/dns-bypass/recordings")
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {"id": "rec-1", "label": "Büro"},
+        {"id": "rec-2", "label": "Heimnetz"},
+    ]
+
+
+def test_get_dns_bypass_report_pdf_liefert_attachment(app: FastAPI) -> None:
+    """``/api/report/dns-bypass/pdf?recording_id=...`` -> 200 + attachment, id durchgereicht."""
+    runner = _FakeDnsBypassReportPdfRunner(
+        content=b"%PDF-FAKE",
+        media_type="application/pdf",
+        filename="CERNISPRO_Netzwerk-DNS-Umgehungs-Bericht.pdf",
+    )
+    app.dependency_overrides[provide_dns_bypass_report_pdf] = lambda: runner
+
+    with TestClient(app) as client:
+        response = client.get("/api/report/dns-bypass/pdf", params={"recording_id": "rec-9"})
+
+    assert response.status_code == 200
+    assert runner.recording_id == "rec-9"
+    assert response.headers["content-type"].startswith("application/pdf")
+    assert (
+        response.headers["content-disposition"]
+        == 'attachment; filename="CERNISPRO_Netzwerk-DNS-Umgehungs-Bericht.pdf"'
     )
     assert response.content  # nicht-leerer Body

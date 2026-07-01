@@ -227,6 +227,10 @@ from api.report import (
     CveServiceRowOut,
     CveSeverityCountOut,
     DnsAppCountOut,
+    DnsBypassReportOut,
+    DnsBypassReportRecordingOut,
+    DnsBypassReportRowOut,
+    DnsBypassResolverOut,
     DnsCategoryCountOut,
     DnsWatchContactRowOut,
     DnsWatchReportOut,
@@ -245,6 +249,9 @@ from api.report import (
     SecurityReportOut,
     provide_cve_report,
     provide_cve_report_pdf,
+    provide_dns_bypass_report,
+    provide_dns_bypass_report_pdf,
+    provide_dns_bypass_report_recordings,
     provide_dns_watch_report,
     provide_dns_watch_report_pdf,
     provide_inventory_report,
@@ -474,6 +481,10 @@ from application.reporting import (
     CveMonitorInput,
     CvePdfModel,
     CveReport,
+    DnsBypassPdfModel,
+    DnsBypassReport,
+    DnsBypassReportInput,
+    DnsBypassReportRow,
     DnsWatchContactRow,
     DnsWatchPdfModel,
     DnsWatchReport,
@@ -490,6 +501,7 @@ from application.reporting import (
     OutboundReportInput,
     SecurityPdfModel,
     SecurityReport,
+    build_dns_bypass_report,
 )
 from application.reporting import (
     CveFinding as ReportCveFinding,
@@ -545,6 +557,7 @@ from domain.blocklist import (
     domain_suffix_candidates,
 )
 from domain.devices import Device, normalize_mac
+from domain.dns_bypass import AggregatedBypass
 from domain.dns_watch import doh_providers_or_default, expected_servers_or_default
 from domain.export import (
     ExportableAnalysis,
@@ -5461,6 +5474,216 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             filename="CERNISPRO_DNS-Waechter-Bericht.pdf",
         )
 
+    # ── DNS-Umgehungs-Bericht (Etappe 5): die Naht zu den PERSISTENTEN Umgehungs-Laeufen ──
+    # NEUER, EIGENER Bericht NEBEN dem host-lokalen _dns_watch_report (der bleibt UNANGETASTET,
+    # ehrlich getrennt -- ADR 0042). Muster _build_outbound_report_data (Bezugsrahmen-Wahl EINE
+    # Aufzeichnung ODER alle) -- aber gegen die dns_bypass-Repos (Etappe 3). Regel 5: die
+    # Anreicherung (device_name ueber _dns_bypass_name_by_ip, is_doh/doh_source_name ueber
+    # _dns_bypass_doh_lookup) faellt HIER -- DIESELBEN Nahtstellen wie im Live-View
+    # _dns_bypass_view. expected_servers als Beleg: bei "single" die eingefrorene Menge der
+    # Aufzeichnung (gegen die beim Schreiben klassifiziert wurde), bei "all" die AKTUELL
+    # erwartete Menge (editierte Liste + Gateway-Default, wie im Live-View) -- dokumentierte,
+    # ehrliche Wahl.
+
+    # Recordings-Runner fuers Dropdown: die Aufzeichnungs-Definitionen auf die schlanke
+    # Wire-Form projizieren. Leer -> [] (ein ehrliches Datum, kein Fehler).
+    async def _dns_bypass_report_recordings() -> list[DnsBypassReportRecordingOut]:
+        recordings = dns_bypass_recording_repository().list_all()
+        return [
+            DnsBypassReportRecordingOut(id=rec.id, label=rec.label or rec.id) for rec in recordings
+        ]
+
+    async def _build_dns_bypass_report_data(recording_id: str | None) -> DnsBypassReport:
+        # ASYNC, weil bei "all" die aktuell erwartete Menge ueber _topology_gateway (async)
+        # angereichert wird -- DIESELBE Naht wie im Live-View _dns_bypass_view.
+        import time
+
+        recordings_repo = dns_bypass_recording_repository()
+        aggregate_repo = dns_bypass_aggregate_repository()
+        detail_repo = dns_bypass_detail_repository()
+        until = time.time()
+
+        # (1) Bezugsrahmen bestimmen + Aggregate/queries_total/expected_servers sammeln.
+        if recording_id:
+            # Nur DIESE Aufzeichnung. Label aus der Definition (auf id zurueckfallen), Aggregate
+            # + DETAIL-Zaehler des Laufs, expected_servers = eingefrorener Beleg der Aufzeichnung.
+            rec = recordings_repo.get(recording_id)
+            recording_label = (rec.label if rec is not None else "") or recording_id
+            recording_scope = "single"
+            aggregates = list(aggregate_repo.list_for(recording_id))
+            queries_total = len(detail_repo.range(recording_id, 0.0, until))
+            expected_servers = tuple(rec.expected_servers) if rec is not None else ()
+        else:
+            # ALLE Aufzeichnungen zusammengefasst. Der Rand/PDF setzt die "Alle Aufzeichnungen"-
+            # Anzeige -> recording_label hier bewusst leer, recording_scope = "all". Je
+            # (src_ip, dst_ip) ueber alle Laeufe mergen: query_count summieren, first_seen min,
+            # last_seen max, sample_qnames distinct bis Deckel. queries_total = Summe der
+            # DETAIL-Zeilen aller Laeufe. expected_servers = AKTUELL erwartete Menge (editierte
+            # Liste + Gateway-Default, wie der Live-View sie fuer die Anzeige bildet).
+            recording_label = ""
+            recording_scope = "all"
+            gemergt: dict[tuple[str, str], AggregatedBypass] = {}
+            queries_total = 0
+            for rec in recordings_repo.list_all():
+                queries_total += len(detail_repo.range(rec.id, 0.0, until))
+                for a in aggregate_repo.list_for(rec.id):
+                    key = (a.src_ip, a.dst_ip)
+                    vorhanden = gemergt.get(key)
+                    if vorhanden is None:
+                        gemergt[key] = a
+                        continue
+                    # sample_qnames distinct zusammenfuehren, Deckel 5 (Muster Domaene).
+                    zusammen = list(vorhanden.sample_qnames)
+                    for qname in a.sample_qnames:
+                        if qname and qname not in zusammen and len(zusammen) < 5:
+                            zusammen.append(qname)
+                    gemergt[key] = AggregatedBypass(
+                        src_ip=vorhanden.src_ip,
+                        dst_ip=vorhanden.dst_ip,
+                        first_seen=min(vorhanden.first_seen, a.first_seen),
+                        last_seen=max(vorhanden.last_seen, a.last_seen),
+                        query_count=vorhanden.query_count + a.query_count,
+                        sample_qnames=tuple(zusammen),
+                    )
+            aggregates = list(gemergt.values())
+            gateway = await _topology_gateway()
+            expected_servers = tuple(
+                expected_servers_or_default(_dns_watch_read_list(DNS_EXPECTED_SERVERS_KEY), gateway)
+            )
+
+        # (2) Anreicherung (Regel 5, faellt NUR hier): Geraete-Namens-Map einmal, DoH-Bewertung
+        # je Aggregat ueber die eigene Lookup-Naht (Ziel-IP + best-effort erstes sample_qname) --
+        # DIESELBEN Nahtstellen wie im Live-View _dns_bypass_view.
+        name_by_ip = _dns_bypass_name_by_ip(GetDevices(device_repository())(known_only=False))
+        sources = blocklist_source_repository()
+        entries = blocklist_entry_repository()
+
+        rows: list[DnsBypassReportRow] = []
+        for agg in aggregates:
+            qname = agg.sample_qnames[0] if agg.sample_qnames else ""
+            is_doh, doh_source_name = _dns_bypass_doh_lookup(sources, entries, agg.dst_ip, qname)
+            rows.append(
+                DnsBypassReportRow(
+                    src_ip=agg.src_ip,
+                    # "" statt None (der Bericht traegt Leerstring, Muster outbound-Bericht).
+                    device_name=name_by_ip.get(agg.src_ip, "") or "",
+                    dst_ip=agg.dst_ip,
+                    is_doh=is_doh,
+                    doh_source_name=doh_source_name or "",
+                    query_count=agg.query_count,
+                    sample_qnames=tuple(agg.sample_qnames),
+                )
+            )
+
+        # (3) Bezugsrahmen-Kennzahlen setzen + ueber die reine Funktion aggregieren.
+        status = DnsBypassReportInput(
+            recording_label=recording_label,
+            recording_scope=recording_scope,
+            expected_servers=expected_servers,
+        )
+        return build_dns_bypass_report(status, rows, queries_total)
+
+    async def _dns_bypass_report(recording_id: str | None = None) -> DnsBypassReportOut:
+        report = await _build_dns_bypass_report_data(recording_id)
+        return DnsBypassReportOut(
+            recording_label=report.recording_label,
+            recording_scope=report.recording_scope,
+            expected_servers=list(report.expected_servers),
+            queries_total=report.queries_total,
+            bypass_total=report.bypass_total,
+            expected_total=report.expected_total,
+            bypass_devices=report.bypass_devices,
+            resolver_distribution=[
+                DnsBypassResolverOut(dst_ip=r.dst_ip, count=r.count)
+                for r in report.resolver_distribution
+            ],
+            bypass_rows=[
+                DnsBypassReportRowOut(
+                    src_ip=r.src_ip,
+                    device_name=r.device_name,
+                    dst_ip=r.dst_ip,
+                    is_doh=r.is_doh,
+                    doh_source_name=r.doh_source_name,
+                    query_count=r.query_count,
+                    sample_qnames=list(r.sample_qnames),
+                )
+                for r in report.bypass_rows
+            ],
+        )
+
+    # ── DNS-Umgehungs-Bericht: PDF-Projektion + Download-Runner (Muster _project_outbound_pdf) ──
+    # Die Bezugsrahmen-Zeile + das "Alle Aufzeichnungen"-Label + die erwartete-Server-Zeile werden
+    # HIER (am Rand) lokalisiert; die reine Aggregation bleibt sprach-/anzeigefrei.
+    def _project_dns_bypass_pdf_model(
+        report: DnsBypassReport, generated_at_text: str
+    ) -> DnsBypassPdfModel:
+        ist_einzeln = report.recording_scope == "single" and bool(report.recording_label)
+        if ist_einzeln:
+            scope_text = f"Bezug: Aufzeichnung „{report.recording_label}“"
+            recording_label_display = report.recording_label
+        else:
+            scope_text = "Bezug: Alle Aufzeichnungen"
+            recording_label_display = "Alle Aufzeichnungen"
+
+        if report.expected_servers:
+            expected_text = "Erwartete DNS-Server: " + ", ".join(report.expected_servers)
+        else:
+            expected_text = "Erwartete DNS-Server: (keine)"
+
+        resolver_rows = tuple((r.dst_ip, str(r.count)) for r in report.resolver_distribution)
+        # Spalten-Reihenfolge: Geraet, Quell-IP, Ziel-Resolver, DoH, Anfragen, Beispiel-Namen.
+        bypass_rows = tuple(
+            (
+                r.device_name or "—",
+                r.src_ip,
+                r.dst_ip,
+                (r.doh_source_name or "ja") if r.is_doh else "—",
+                str(r.query_count),
+                ", ".join(r.sample_qnames) if r.sample_qnames else "—",
+            )
+            for r in report.bypass_rows
+        )
+        return DnsBypassPdfModel(
+            title="Netzwerk-DNS-Umgehungs-Bericht",
+            generated_at_text=generated_at_text,
+            footer_left="CERNIS PRO 2.0 — Netzwerk-DNS-Umgehungs-Bericht",
+            einleitung=(
+                "Dieser Bericht fasst die aufgezeichneten netzweiten DNS-Umgehungen zusammen — "
+                "Anfragen von Geräten des Netzes an nicht-erwartete Resolver — und ordnet je Ziel "
+                "eine mögliche DoH-Nutzung ein."
+            ),
+            recording_label=recording_label_display,
+            scope_text=scope_text,
+            expected_text=expected_text,
+            queries_total=report.queries_total,
+            bypass_total=report.bypass_total,
+            expected_total=report.expected_total,
+            bypass_devices=report.bypass_devices,
+            resolver_rows=resolver_rows,
+            bypass_rows=bypass_rows,
+        )
+
+    @dataclass(frozen=True)
+    class _DnsBypassPdfResult:
+        content: bytes
+        media_type: str
+        filename: str
+
+    async def _dns_bypass_report_pdf(recording_id: str | None = None) -> _DnsBypassPdfResult:
+        report = await _build_dns_bypass_report_data(recording_id)
+        # Wanduhr GENAU HIER lesen (einziger Ort) -- Projektion und Modell bleiben rein.
+        import time
+
+        now = time.time()
+        generated_at_text = "Erstellt am " + datetime.fromtimestamp(now).strftime("%d.%m.%Y %H:%M")
+        model = _project_dns_bypass_pdf_model(report, generated_at_text)
+        pdf_bytes = ReportlabRenderer().render_dns_bypass_report_pdf(model)
+        return _DnsBypassPdfResult(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            filename="CERNISPRO_Netzwerk-DNS-Umgehungs-Bericht.pdf",
+        )
+
     app.include_router(report_router)
     app.dependency_overrides[provide_security_report] = lambda: _security_report
     app.dependency_overrides[provide_security_report_pdf] = lambda: _security_report_pdf
@@ -5476,6 +5699,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     )
     app.dependency_overrides[provide_dns_watch_report] = lambda: _dns_watch_report
     app.dependency_overrides[provide_dns_watch_report_pdf] = lambda: _dns_watch_report_pdf
+    app.dependency_overrides[provide_dns_bypass_report] = lambda: _dns_bypass_report
+    app.dependency_overrides[provide_dns_bypass_report_pdf] = lambda: _dns_bypass_report_pdf
+    app.dependency_overrides[provide_dns_bypass_report_recordings] = lambda: (
+        _dns_bypass_report_recordings
+    )
 
     # ── Route zum Ziel (ADR 0036): traceroute-Hops + Geo/ASN, zwei getrennte Naehte ──
     # Regel 5: die Quer-Domaenen-Naht (diagnostics-Hops + resolver-Geo/RDAP) faellt
