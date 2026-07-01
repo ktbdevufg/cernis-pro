@@ -25,6 +25,20 @@
       "lang": "CERNIS PRO is a tool for understanding and keeping an eye on your own network. It shows you which devices are connected, which programs are sending and receiving data, and whether there are signs of problems or unusual activity.\n\nThe program is aimed at technically interested users who want to see more than a simple consumer app offers - without needing an expensive professional suite.\n\nOne principle runs through the whole program: your data stays with you. CERNIS PRO does not quietly collect anything and does not send anything outward without your involvement. Where a feature needs the internet (for example to look up additional information), this is clearly marked and only happens at your explicit request."
     }
   },
+  "help.allgemein.einordnung": {
+    "status": "final",
+    "kategorie": "Grundlagen",
+    "de": {
+      "titel": "Einordnung & Grenzen",
+      "kurz": "CERNIS PRO zeigt Ihr eigenes Netz aus der Naehe - das, was an Ihrem Anschluss sichtbar ist. Es ist fuer Heim- und kleine Arbeitsnetze gedacht und beschreibt, was ist, statt zu urteilen.",
+      "lang": "Ein ehrlicher Blick auf das, was CERNIS PRO kann - und was nicht. Das Programm zeigt Ihr eigenes Netz aus der Naehe: die Geraete, die an Ihrem Anschluss haengen, und das, was von Ihrem Rechner aus sichtbar ist. Es schaut nicht ins offene Internet hinaus und nicht in fremde Netze hinein - es bleibt bei dem, was zu Ihrem Zuhause oder Ihrem Arbeitsplatz gehoert.\n\nGedacht ist es fuer Heimnetze und kleine Arbeitsumgebungen - vom privaten Haushalt bis zur Praxis, zum Verein oder zum Ein-Personen-Buero. Diese gehen im Alltag oft ineinander ueber, und CERNIS PRO passt fuer beide. Fuer grosse Firmennetze mit vielen Standorten ist es bewusst nicht gemacht; dort greifen andere Werkzeuge.\n\nEin Grundsatz zieht sich durch alles: CERNIS PRO beschreibt und ordnet ein, statt zu urteilen. Es sagt Ihnen, was in Ihrem Netz vorgeht und wie es einzuordnen ist - die Entscheidung, was das fuer Sie bedeutet, bleibt bei Ihnen. Es greift auch nie selbst in den Verkehr ein: Es beobachtet und zeigt, blockiert aber nichts. So bekommen Sie ein ehrliches Bild Ihres Netzes, ohne bevormundet zu werden."
+    },
+    "en": {
+      "titel": "Scope & limits",
+      "kurz": "CERNIS PRO shows your own network up close - what is visible at your connection. It is meant for home and small work networks and describes what is, rather than judging.",
+      "lang": "An honest look at what CERNIS PRO can do - and what it cannot. The program shows your own network up close: the devices attached to your connection, and what is visible from your computer. It does not look out into the open internet nor into other people's networks - it stays with what belongs to your home or your workplace.\n\nIt is meant for home networks and small work environments - from a private household to a practice, a club, or a one-person office. In everyday use these often blend into one another, and CERNIS PRO fits both. It is deliberately not made for large company networks with many sites; other tools take over there.\n\nOne principle runs through everything: CERNIS PRO describes and contextualises rather than judging. It tells you what is going on in your network and how to make sense of it - the decision on what that means for you stays with you. It also never intervenes in the traffic itself: it observes and shows, but blocks nothing. This way you get an honest picture of your network without being patronised."
+    }
+  },
   "help.startseite.uebersicht": {
     "status": "final",
     "kategorie": "Startseite",
@@ -91,6 +105,20 @@
       "titel": "Acknowledge findings",
       "kurz": "Once you have checked a marked port and judged it harmless, you can acknowledge it. It then disappears from the active warning but remains traceably logged.",
       "lang": "Sometimes a port marked as notable is perfectly fine - for example a service you set up on purpose. In that case you can acknowledge the finding.\n\nAcknowledging works precisely: per device and per port. The port then disappears from the active warning list so you can focus on what is new. The device's full port list is unaffected - nothing is hidden, it is only classified as 'checked'.\n\nEvery acknowledgement is recorded in a running log and can be undone at any time. This keeps it traceable what you classified as harmless and when."
+    }
+  },
+  "help.watch.uebersicht": {
+    "status": "final",
+    "kategorie": "Beobachten",
+    "de": {
+      "titel": "Gaeste-Wache",
+      "kurz": "Die Gaeste-Wache sammelt neu gesehene, noch nicht eingeordnete Geraete an einem ruhigen Ort - ohne Alarm. Sie ordnen jedes Geraet ein, wann es Ihnen passt: als vertraut markieren, mit einer Notiz versehen oder ausblenden.",
+      "lang": "Die Gaeste-Wache ist der ruhige Sammelplatz fuer alles Neue in Ihrem Netz. Taucht ein Geraet zum ersten Mal auf, das Sie noch nicht eingeordnet haben, landet es hier - ohne Alarm, ohne Druck. So gehen neue Geraete nicht unter, draengen sich aber auch nicht auf.\n\nZu jedem Geraet sehen Sie, wann es zuerst gesehen wurde, und wie viele neue seit Ihrem letzten Blick dazugekommen sind. Einordnen koennen Sie jederzeit - dann, wenn es Ihnen passt. Drei Wege stehen bereit: \"Vertraut\" nimmt das Geraet als bekannt an, \"Notiz\" haelt eine freie Bemerkung dazu fest, und \"Ausblenden\" nimmt es aus der Wache, ohne es zu bewerten.\n\nDer Gedanke dahinter: Ein neues Geraet ist erst einmal nur neu - nicht gut und nicht schlecht. CERNIS PRO zeigt es Ihnen und ueberlaesst Ihnen die Einordnung, statt selbst ein Urteil zu faellen. Ist die Wache leer, ist das ein gutes Zeichen: Es gibt gerade nichts Unbekanntes einzuordnen."
+    },
+    "en": {
+      "titel": "Guest watch",
+      "kurz": "The guest watch gathers newly seen, not yet classified devices in a calm place - without alarm. You classify each device whenever it suits you: mark it as trusted, add a note, or hide it.",
+      "lang": "The guest watch is the calm gathering place for everything new in your network. When a device turns up for the first time that you have not yet classified, it lands here - without alarm, without pressure. This way new devices are not lost, but do not push themselves on you either.\n\nFor each device you see when it was first seen, and how many new ones have arrived since your last look. You can classify at any time - whenever it suits you. Three ways are ready: \"Trusted\" accepts the device as known, \"Note\" holds a free remark about it, and \"Hide\" takes it out of the watch without rating it.\n\nThe idea behind it: a new device is at first only new - neither good nor bad. CERNIS PRO shows it to you and leaves the classification to you, instead of passing a judgement itself. If the watch is empty, that is a good sign: there is currently nothing unknown to classify."
     }
   },
   "help.topology.uebersicht": {
@@ -595,6 +623,48 @@
       "lang": "The security report condenses everything CERNIS PRO knows about your network into a single, honest picture: a network health score from 0 to 100 and the findings that feed it.\n\nThe score derives from the burden carried by affected devices: Score = 100 x (1 - total burden / number of devices). The more devices have critical or notable findings, and the heavier those weigh, the lower the score. A high value (good) means a calm network, a middling one (moderate) some isolated anomalies, a low one (critical) a need to act. On request, the contributions list shows per device who contributes how much burden - the score is never merely asserted, it is derived.\n\nThe findings sit in four sections: hosts with notable ports, known vulnerabilities (CVE), network-wide anomalies (such as IP conflicts or DNS bypass) and - separately - already acknowledged findings. The latter explicitly do NOT count towards the score: what you have marked as settled stays visible but no longer weighs on the rating.\n\nOne principle carries the whole report: it describes and contextualises rather than judging. It states what is and how heavily it weighs - the decision on what to do stays with you. The rogue DHCP check appears only as a status note; it needs an active check with root privileges and is not started from within the report. The report is a pure reading view and changes nothing on the network; the print button puts it on paper."
     }
   },
+  "help.report.inventory": {
+    "status": "final",
+    "kategorie": "Berichte",
+    "de": {
+      "titel": "Bestandsbericht (Geraeteueberblick)",
+      "kurz": "Der Bestandsbericht zeigt Ihren Geraetebestand als Gesamtbild: wie viele Geraete bekannt oder unbekannt sind, wie sie sich auf Hersteller und Kategorien verteilen und welchen Vertrauensstatus sie haben. Er beschreibt und ordnet ein - er bewertet nicht.",
+      "lang": "Der Bestandsbericht fasst zusammen, was in Ihrem Netz an Geraeten lebt. Statt einer langen Liste bekommen Sie das Gesamtbild: Wie viele Geraete sind bekannt, wie viele noch unbekannt, und wie verteilen sie sich?\n\nZwei Ringdiagramme geben den schnellen Ueberblick - eines nach Bekannt/Unbekannt, eines nach Vertrauensstatus. Darunter laesst sich die Verteilung umschalten: nach Hersteller oder nach Kategorie (etwa Router, Drucker, Smartphone). So sehen Sie auf einen Blick, ob Ihr Netz eher aus einer Handvoll bekannter Geraete besteht oder ob sich viele unbekannte tummeln.\n\nDie Geraeteliste darunter laesst sich filtern und sortieren, damit Sie gezielt nachschauen koennen. Der Bericht beschreibt und ordnet ein - er urteilt nicht darueber, ob ein Geraet gut oder schlecht ist. Er ist eine reine Lesesicht und veraendert nichts; ueber den Drucken-Knopf bringen Sie ihn aufs Papier."
+    },
+    "en": {
+      "titel": "Inventory report (device overview)",
+      "kurz": "The inventory report shows your device inventory as a whole: how many devices are known or unknown, how they are distributed across manufacturers and categories, and what trust status they have. It describes and contextualises - it does not rate.",
+      "lang": "The inventory report sums up which devices live in your network. Instead of a long list you get the whole picture: how many devices are known, how many still unknown, and how they are distributed?\n\nTwo doughnut charts give the quick overview - one by known/unknown, one by trust status. Below, the distribution can be switched: by manufacturer or by category (such as router, printer, smartphone). This way you see at a glance whether your network consists of a handful of known devices or whether many unknown ones are milling about.\n\nThe device list below can be filtered and sorted so you can look things up in a targeted way. The report describes and contextualises - it does not judge whether a device is good or bad. It is a pure reading view and changes nothing; the print button puts it on paper."
+    }
+  },
+  "help.report.cve": {
+    "status": "final",
+    "kategorie": "Berichte",
+    "de": {
+      "titel": "CVE-Bericht (bekannte Schwachstellen)",
+      "kurz": "Der CVE-Bericht buendelt alle bekannten Schwachstellen Ihres Netzes in einem Dokument: nach Schweregrad geordnet, mit betroffenen Geraeten und Mustern nach Dienst. Er zeigt den Stand - die Entscheidung bleibt bei Ihnen.",
+      "lang": "Der CVE-Bericht sammelt die bekannten Schwachstellen (CVEs) Ihres Netzes an einem Ort. Eine CVE ist eine oeffentlich dokumentierte Sicherheitsluecke in einer Software oder einem Geraet - CERNIS PRO gleicht Ihre Geraete laufend gegen eine grosse oeffentliche Datenbank ab und traegt die Funde hier zusammen.\n\nOben stehen die Kennzahlen und ein Ringdiagramm nach Schweregrad (fuenf Stufen von kritisch bis unbekannt). Darunter laesst sich umschalten zwischen den betroffenen Geraeten und den Mustern nach Dienst - so sehen Sie, ob sich Luecken auf einzelne Geraete oder auf einen bestimmten Dienst haeufen. Die Befundliste ist nach Geraet gruppiert und laesst sich filtern und sortieren.\n\nJeder Befund traegt einen Status: aktiv, aktiv und neu, oder von Ihnen quittiert. Neue Funde der letzten 24 Stunden sind eigens markiert. Der Bericht zeigt den Stand ehrlich - auch wenn die Datenbank einmal nicht erreichbar ist, erfindet er nichts. Die Entscheidung, was zu tun ist, bleibt bei Ihnen. Reine Lesesicht, mit Drucken-Knopf."
+    },
+    "en": {
+      "titel": "CVE report (known vulnerabilities)",
+      "kurz": "The CVE report bundles all known vulnerabilities of your network into one document: ordered by severity, with affected devices and patterns by service. It shows the state - the decision stays with you.",
+      "lang": "The CVE report gathers the known vulnerabilities (CVEs) of your network in one place. A CVE is a publicly documented security hole in a piece of software or a device - CERNIS PRO continually compares your devices against a large public database and collates the findings here.\n\nAt the top are the key figures and a doughnut chart by severity (five levels from critical to unknown). Below, you can switch between the affected devices and the patterns by service - this way you see whether holes cluster on individual devices or on a particular service. The findings list is grouped by device and can be filtered and sorted.\n\nEvery finding carries a status: active, active and new, or acknowledged by you. New findings from the last 24 hours are specially marked. The report shows the state honestly - even if the database is unreachable at some point, it invents nothing. The decision on what to do stays with you. A pure reading view, with a print button."
+    }
+  },
+  "help.report.outbound": {
+    "status": "final",
+    "kategorie": "Berichte",
+    "de": {
+      "titel": "Aussenkontakte-Bericht (Verbindungen nach aussen)",
+      "kurz": "Der Aussenkontakte-Bericht zeigt, mit wem dieser Rechner nach aussen gesprochen hat: Laender, Betreiber und einzelne Gegenstellen - mit dezenter Einordnung als Tracker oder Bedrohung. Rein beschreibend, kein Urteil.",
+      "lang": "Der Aussenkontakte-Bericht verdichtet die Verbindungen dieses Rechners nach aussen zu einem Bild: Wohin telefoniert mein Rechner? Sie waehlen den Bezugsrahmen - alle Aufzeichnungen zusammengefasst oder eine einzelne - und bekommen dann Kennzahlen, Verteilungen und eine Kontaktliste.\n\nDie Verteilung laesst sich nach Land oder nach Betreiber umschalten (der Organisation hinter dem Ziel). So sehen Sie, ob Ihr Verkehr ueberwiegend zu erwarteten Zielen fliesst oder ob ungewoehnliche Gegenstellen auftauchen. Die Kontaktliste zeigt jede Gegenstelle einzeln; Treffer auf Ihren Blocklisten werden dezent als Tracker oder Bedrohung ausgewiesen - mit Quellenangabe, damit Sie es selbst einordnen koennen.\n\nEigene Verbindungen im Heimnetz (etwa zur FRITZ!Box) werden als lokal markiert und aus den Bedrohungszaehlern herausgehalten, lassen sich aber einblenden. Der Bericht beschreibt und ordnet ein, urteilt aber nicht - viel Verkehr kann voellig normal sein. Reine Lesesicht, mit Drucken-Knopf."
+    },
+    "en": {
+      "titel": "Outbound contacts report (connections to the outside)",
+      "kurz": "The outbound contacts report shows whom this computer has talked to outside: countries, operators, and individual counterparts - with a discreet classification as tracker or threat. Purely descriptive, no judgement.",
+      "lang": "The outbound contacts report condenses this computer's connections to the outside into a picture: where does my computer phone to? You choose the frame of reference - all recordings combined or a single one - and then get key figures, distributions, and a contacts list.\n\nThe distribution can be switched by country or by operator (the organisation behind the target). This way you see whether your traffic mostly flows to expected destinations or whether unusual counterparts show up. The contacts list shows each counterpart individually; matches on your block lists are discreetly flagged as tracker or threat - with a source reference, so you can make sense of it yourself.\n\nYour own connections within the home network (for example to the FRITZ!Box) are marked as local and kept out of the threat counters, but can be shown. The report describes and contextualises but does not judge - a lot of traffic can be completely normal. A pure reading view, with a print button."
+    }
+  },
   "help.geraete.verwaltung": {
     "status": "final",
     "kategorie": "Geräte",
@@ -621,6 +691,34 @@
       "titel": "Post-scan archive prompt",
       "kurz": "After a scan, CERNIS quietly asks about devices not seen in a while, whether they should be taken out of the list. Nothing happens automatically - you decide per device.",
       "lang": "Over time, devices vanish from a network: a device is retired, a guest leaves, an old smartphone is never switched on again. So that your inventory does not silently fill up with dead entries, CERNIS asks quietly after a scan.\n\nThe prompt only appears for devices that have not been seen for a longer while. The threshold is around one month and can be adjusted in the settings. Per device you have the choice: 'Remove from list' moves it to the archive (restorable at any time), 'Keep' leaves it in the active inventory.\n\nNothing happens automatically - no device is ever archived without your involvement. And the prompt does not push itself on you: if you choose 'Keep' for a device several times, CERNIS remembers that and stops asking about that device.\n\nDevices taken out of the list are not lost: they sit in the archive and can be restored at any time via device management."
+    }
+  },
+  "help.wartung": {
+    "status": "final",
+    "kategorie": "Verwaltung",
+    "de": {
+      "titel": "Daten loeschen",
+      "kurz": "Unter \"Daten loeschen\" raeumen Sie gezielt auf: einzelne Datenbereiche waehlen und loeschen oder den kompletten Werkszustand herstellen. Jede Loeschung laeuft ueber eine zweistufige Bestaetigung und wird vorher klar benannt.",
+      "lang": "\"Daten loeschen\" ist Ihr Aufraeum-Werkzeug. CERNIS PRO sammelt mit der Zeit viele Daten an - Scans, Verlaeufe, Protokolle, Aufzeichnungen. Hier bestimmen Sie selbst, was davon weg soll.\n\nDer Baukasten gruppiert die loeschbaren Bereiche. In der Gruppe \"Scan & Analyse\" bildet die Scan-Historie die Wurzel: Loeschen Sie diese, gehen die daraus abgeleiteten Daten zwangslaeufig mit - die CVE-Funde, der ARP-Waechter, die Analyse-Quittierungen und die bekannten Geraete. Das ist Absicht, denn ohne die zugrunde liegenden Scans waeren diese Daten ohnehin ohne Bezug. Eine zweite Gruppe umfasst die zeitbezogenen Daten: Erreichbarkeits-Messungen, SLA-Werte, Logging-Aufgaben und die Aussenkontakte-Aufzeichnungen. Sie haken an, was weg soll - vor dem Loeschen sehen Sie in einem zweiten Schritt noch einmal genau, was betroffen ist.\n\nDaneben steht der Werkszustand: Er setzt das Programm komplett zurueck, als waere es frisch installiert - alle Einstellungen inklusive der Sprache sind danach weg. Auf Wunsch werden dabei auch gespeicherte Zugangsdaten (etwa das FRITZ!Box-Passwort) mit entfernt.\n\nAnders als das Archivieren bei den Geraeten ist das Loeschen hier endgueltig: Was Sie hier entfernen, ist wirklich weg. Deshalb ist jeder Schritt bewusst als zweistufige Bestaetigung gebaut - so behalten Sie die volle Kontrolle, ohne versehentlich zu viel zu loeschen."
+    },
+    "en": {
+      "titel": "Delete data",
+      "kurz": "Under \"Delete data\" you tidy up in a targeted way: select and delete individual data areas or restore the complete factory state. Every deletion runs through a two-step confirmation and is clearly named beforehand.",
+      "lang": "\"Delete data\" is your tidy-up tool. Over time CERNIS PRO accumulates a lot of data - scans, histories, logs, recordings. Here you decide for yourself what should go.\n\nThe toolkit groups the deletable areas. In the \"Scan & Analysis\" group the scan history forms the root: if you delete it, the data derived from it inevitably goes with it - the CVE findings, the ARP guard, the analysis acknowledgements, and the known devices. That is intentional, because without the underlying scans this data would be without reference anyway. A second group covers the time-related data: reachability measurements, SLA values, logging tasks, and the outbound contacts recordings. You tick what should go - before deleting, a second step shows you once more exactly what is affected.\n\nAlongside this is the factory state: it resets the program completely, as if freshly installed - all settings including the language are gone afterwards. On request, stored credentials (such as the FRITZ!Box password) are removed as well.\n\nUnlike archiving with the devices, deletion here is final: what you remove here is really gone. That is why each step is deliberately built as a two-step confirmation - this way you keep full control without accidentally deleting too much."
+    }
+  },
+  "help.listen": {
+    "status": "final",
+    "kategorie": "Verwaltung",
+    "de": {
+      "titel": "Listen-Verwaltung",
+      "kurz": "In der Listen-Verwaltung pflegen Sie die Quellen, gegen die Aussenkontakte geprueft werden - Tracker, Werbung, Bedrohungen. Sie schalten mitgelieferte Listen an oder aus, fuegen eigene hinzu und stellen ein, wie streng Treffer angezeigt werden.",
+      "lang": "Die Listen-Verwaltung steuert, woran CERNIS PRO Ihre Aussenkontakte misst. Damit eine Gegenstelle als Tracker, Werbung oder Bedrohung erkannt werden kann, braucht es Vergleichslisten - und deren Verwaltung liegt bei Ihnen.\n\nCERNIS PRO liefert kuratierte Listen mit. Diese koennen Sie einzeln an- und abschalten; mitgelieferte Listen lassen sich nicht loeschen, eigene dagegen jederzeit. Eigene Quellen fuegen Sie per Adresse hinzu oder laden sie als Datei hoch. Manche Listen sind bewusst mitgeliefert, aber ausgeschaltet - etwa weil sie zu Reibung mit dem eigenen Heimnetz fuehren oder aus Lizenzgruenden nicht vorab aktiv sein sollen. Bei manchen Listen ist eine Namensnennung noetig; das zeigt CERNIS PRO offen an.\n\nWie viel angezeigt wird, bestimmen Sie ueber die Strenge: \"Nur kritisch\" zeigt ausschliesslich Bedrohungen (Schadsoftware, Phishing), \"Empfohlen\" zeigt Bedrohungen und Tracker und laesst reine Werbung still, \"Alles zeigen\" blendet jeden Treffer ein. Zusaetzlich lassen sich die Gruppen \"Tracker & Werbung\" und \"Bedrohungen\" getrennt ein- oder ausblenden.\n\nEine rote Linie zieht sich durch: Die Einordnung stammt aus der jeweils genannten Liste, nicht von CERNIS PRO - das Programm bildet sie nur ab und nennt die Quelle. Die Treffer erscheinen spaeter an den Aussenkontakten als dezente Hinweise. So behalten Sie die Kontrolle darueber, was als auffaellig gilt, statt eine feste Vorgabe hinnehmen zu muessen."
+    },
+    "en": {
+      "titel": "List management",
+      "kurz": "In list management you maintain the sources against which outbound contacts are checked - trackers, advertising, threats. You switch bundled lists on or off, add your own, and set how strictly matches are shown.",
+      "lang": "List management controls what CERNIS PRO measures your outbound contacts against. For a counterpart to be recognised as a tracker, advertising, or a threat, comparison lists are needed - and managing them is up to you.\n\nCERNIS PRO ships with curated lists. You can switch these on and off individually; bundled lists cannot be deleted, your own ones can be at any time. You add your own sources by address or upload them as a file. Some lists are deliberately bundled but switched off - for example because they cause friction with your own home network or, for licensing reasons, should not be active in advance. Some lists require attribution; CERNIS PRO shows this openly.\n\nHow much is shown you decide via the strictness: \"Critical only\" shows exclusively threats (malware, phishing), \"Recommended\" shows threats and trackers and leaves pure advertising silent, \"Show everything\" brings in every match. In addition, the groups \"Trackers & advertising\" and \"Threats\" can be shown or hidden separately.\n\nOne red line runs through it: the classification comes from the respective named list, not from CERNIS PRO - the program merely reflects it and names the source. The matches later appear at the outbound contacts as discreet hints. This way you keep control over what counts as notable, instead of having to accept a fixed default."
     }
   }
 }
