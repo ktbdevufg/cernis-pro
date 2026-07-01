@@ -611,6 +611,7 @@ export default function ObserveView({
   onRefreshIntervalChange,
   initialFunction = null,
   onFunktionGeoeffnet,
+  onOpenManual,
 }) {
   const { t } = useTranslation();
   // null -> Kachel-Übersicht; sonst die geöffnete Funktion. Eine von aussen
@@ -688,6 +689,8 @@ export default function ObserveView({
       <FunctionShell
         title={t("beobachten.cards.scan.title")}
         onBack={() => setOpenFunction(null)}
+        helpId="help.scan.start"
+        onOpenManual={onOpenManual}
       >
         <ScanInhalt />
       </FunctionShell>

@@ -65,6 +65,10 @@ export default function App() {
   // InvestigateView gereicht, danach von dort quittiert (onFunktionGeoeffnet ->
   // null), damit der Nutzer dort frei navigiert.
   const [investigateFunktion, setInvestigateFunktion] = useState(null);
+  // Sprungziel im Handbuch (help_id) oder null. Wird gesetzt, wenn der Nutzer im
+  // Popup "Mehr im Handbuch" wählt; ManualView springt beim Öffnen zum Anker.
+  // Beim normalen Menü-Weg (Kopfzeile) bleibt es null (kein Sprung).
+  const [handbuchSprung, setHandbuchSprung] = useState(null);
 
   // Von der Startseite (OverviewView): Reiter wechseln und optional zusätzlich
   // die gewünschte Funktion im Ziel-Bereich vormerken. Ohne funktion bleibt es
@@ -95,6 +99,15 @@ export default function App() {
     setHandbuchOffen(false);
     setActiveTab("observe");
     setObserveFunktion("outbound");
+  };
+
+  // Aus einem "?"-Hilfe-Popup: das Handbuch öffnen und beim Öffnen zum Anker der
+  // help_id springen. Einstellungen schließen (gegenseitiger Ausschluss), das
+  // Handbuch öffnen und das Sprungziel vormerken (ManualView springt dann dort).
+  const openManualAt = (helpId) => {
+    setSettingsOffen(false);
+    setHandbuchOffen(true);
+    setHandbuchSprung(helpId);
   };
 
   // Theme am <html> setzen und persistieren.
@@ -128,6 +141,8 @@ export default function App() {
         onOpenManual={() => {
           setSettingsOffen(false);
           setHandbuchOffen(true);
+          // Menü-Weg: kein Sprung, das Handbuch öffnet oben.
+          setHandbuchSprung(null);
         }}
         onGoToLogging={goToLogging}
         onGoToOutbound={goToOutbound}
@@ -152,7 +167,13 @@ export default function App() {
           fallback={<div className="app__lazy-fallback">{t("app.laedt")}</div>}
         >
           {handbuchOffen ? (
-            <ManualView onClose={() => setHandbuchOffen(false)} />
+            <ManualView
+              sprungZiel={handbuchSprung}
+              onClose={() => {
+                setHandbuchOffen(false);
+                setHandbuchSprung(null);
+              }}
+            />
           ) : settingsOffen ? (
             <SettingsView
               lang={lang}
@@ -170,6 +191,7 @@ export default function App() {
                   onRefreshIntervalChange={setRefreshInterval}
                   initialFunction={observeFunktion}
                   onFunktionGeoeffnet={() => setObserveFunktion(null)}
+                  onOpenManual={openManualAt}
                 />
               )}
               {activeTab === "investigate" && (

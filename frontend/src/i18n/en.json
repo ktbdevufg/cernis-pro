@@ -204,6 +204,11 @@
   "placeholder": {
     "inProgress": "in progress"
   },
+  "help": {
+    "ariaOeffnen": "Show help",
+    "ariaSchliessen": "Close",
+    "mehrImHandbuch": "More in the manual"
+  },
   "manual": {
     "title": "User Manual",
     "vorlaeufigHint": "This section describes the planned behaviour; the final interface is not yet fixed.",

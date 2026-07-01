@@ -9,6 +9,7 @@
 import { ArrowLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import HelpDot from "./HelpDot.jsx";
 import "./AreaShell.css";
 
 // Kachel-Gitter für die Bereichs-Übersicht.
@@ -23,7 +24,14 @@ export function CardGrid({ children }) {
 // mit eigenem Zurück (z. B. die Logging-Detailansicht), wäre der Shell-Zurück
 // darüber redundant + verwirrend. Default false -> alle bestehenden Aufrufer
 // (scan/traffic/monitor) unverändert.
-export function FunctionShell({ title, onBack, children, zurueckVerbergen = false }) {
+export function FunctionShell({
+  title,
+  onBack,
+  children,
+  zurueckVerbergen = false,
+  helpId,
+  onOpenManual,
+}) {
   const { t } = useTranslation();
 
   return (
@@ -40,6 +48,9 @@ export function FunctionShell({ title, onBack, children, zurueckVerbergen = fals
           </button>
         )}
         <h2 className="function-shell__title">{title}</h2>
+        {helpId ? (
+          <HelpDot helpId={helpId} onOpenManual={onOpenManual} />
+        ) : null}
       </div>
 
       <div className="function-shell__body">{children}</div>

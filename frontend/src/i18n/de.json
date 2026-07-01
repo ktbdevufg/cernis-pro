@@ -204,6 +204,11 @@
   "placeholder": {
     "inProgress": "in Arbeit"
   },
+  "help": {
+    "ariaOeffnen": "Hilfe anzeigen",
+    "ariaSchliessen": "Schliessen",
+    "mehrImHandbuch": "Mehr im Handbuch"
+  },
   "manual": {
     "title": "Benutzerhandbuch",
     "vorlaeufigHint": "Dieser Abschnitt beschreibt das geplante Verhalten; die endgültige Oberfläche wird noch festgelegt.",
