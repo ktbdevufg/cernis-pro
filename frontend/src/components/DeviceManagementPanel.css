@@ -69,6 +69,14 @@
   background: var(--color-accent-bg);
 }
 
+/* Eigener Host: derselbe dezente Akzent-Ton wie „manuell" (keine eigene
+   erfundene Farbe), damit der eigene Rechner erkennbar hervorsticht. */
+.dm-badge[data-herkunft="self"] {
+  color: var(--color-accent);
+  border-color: var(--color-accent-border);
+  background: var(--color-accent-bg);
+}
+
 /* --- Tabellen (aktiv + archiv) --- */
 .dm-table-wrap {
   overflow-x: auto;

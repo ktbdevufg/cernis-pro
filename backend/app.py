@@ -556,7 +556,7 @@ from domain.blocklist import (
     MatchStrictness,
     domain_suffix_candidates,
 )
-from domain.devices import Device, normalize_mac
+from domain.devices import Device, DeviceSource, normalize_mac
 from domain.dns_bypass import AggregatedBypass
 from domain.dns_watch import doh_providers_or_default, expected_servers_or_default
 from domain.export import (
@@ -682,6 +682,7 @@ from infrastructure.security import (
     SqliteArpGuardRepository,
     TlsInspectorAdapter,
 )
+from infrastructure.self_host import detect_self_host
 from infrastructure.settings_repository import CorruptSettingError, SqliteSettingsRepository
 from infrastructure.sni.errors import SniError, SniPermissionError
 from infrastructure.sni.sni_sniffer import ScapySniSniffer
@@ -1820,6 +1821,17 @@ def _dns_bypass_name_by_ip(devices: list[Device]) -> dict[str, str]:
     return {d.last_ip: (d.label or d.hostname or d.mac) for d in devices if d.last_ip}
 
 
+def _dns_bypass_self_ips(devices: list[Device]) -> set[str]:
+    """Die IPs der eigenen Hosts (``source=SELF``) mit gesetzter ``last_ip``.
+
+    Erlaubt dem DNS-Umgehungs-Bericht, einen Befund, dessen Quell-IP der eigene
+    Rechner ist, als "eigener Host" zu markieren. Best-effort ueber ``last_ip``
+    (dieselbe Naht wie ``_dns_bypass_name_by_ip``); ist kein eigener Host im
+    Bestand, ist die Menge leer (ehrlicher Leerfall).
+    """
+    return {d.last_ip for d in devices if d.last_ip and d.source == DeviceSource.SELF}
+
+
 class _DohSourceLister(Protocol):
     """Schmale Lese-Naht der Quellen-Definitionen fuer die DoH-Bewertung (nur ``list_all``).
 
@@ -1881,6 +1893,63 @@ def _dns_bypass_doh_lookup(
     return (False, None)
 
 
+def _register_self_host(repository: SqliteDeviceRepository, clock: SystemClock) -> None:
+    """Nimmt den eigenen Host beim Start EINMALIG in den Bestand auf (best-effort).
+
+    Ein aktiver Netz-Scan findet den eigenen Host nicht; damit die eigene IP im
+    Bestand steht (und der DNS-Umgehungs-Bericht die Quelle aufloest), wird der
+    Rechner, auf dem CERNIS laeuft, hier als ``Device`` mit
+    ``source=DeviceSource.SELF`` upgesertet -- ueber die bestehende
+    ``save``-Naht des Repositories, NICHT ueber den Scan.
+
+    Bewahrung wie beim Scan-Upsert: existiert der Eintrag schon (gleiche MAC),
+    werden NUR ``last_ip``/``hostname``/``source`` aktualisiert; die
+    user-gesteuerten Felder (``label``/``is_known``/``trust_state``/``tags``/
+    ``notes`` u. a.) bleiben unangetastet. Ein neuer Eintrag bekommt das Label
+    "Dieser Rechner" und ``is_known=True``.
+
+    best-effort: scheitert die Interface-Ermittlung -- oder wirft irgendetwas --,
+    wird geloggt und geschluckt (KEIN Startup-Crash). 127.0.0.1 / ``lo`` wird von
+    ``detect_self_host`` strikt ausgeschlossen.
+    """
+    try:
+        detected = detect_self_host()
+        if detected is None:
+            logger.info("self_host_not_detected")
+            return
+        mac = normalize_mac(detected.mac)
+        now = clock.now()
+        existing = repository.get(mac)
+        if existing is None:
+            device = Device(
+                mac=mac,
+                first_seen=now,
+                last_seen=now,
+                last_ip=detected.ip,
+                is_known=True,
+                label="Dieser Rechner",
+                hostname=detected.hostname,
+                source=DeviceSource.SELF,
+            )
+        else:
+            # NUR die Fakten des eigenen Hosts nachfuehren -- die user-gesteuerten
+            # Felder (label/is_known/trust_state/tags/notes/...) NICHT ueberschreiben
+            # (Muster der Scan-Bewahrung). last_seen wird mitgezogen, damit der
+            # eigene Host als aktiv gilt.
+            device = replace(
+                existing,
+                last_seen=now,
+                last_ip=detected.ip,
+                hostname=detected.hostname or existing.hostname,
+                source=DeviceSource.SELF,
+            )
+        repository.save(device)
+        logger.info("self_host_registered", mac=mac, ip=detected.ip)
+    except Exception as exc:
+        # best-effort: der eigene Host ist Komfort, kein Startup-Gate.
+        logger.warning("self_host_registration_failed", error=str(exc))
+
+
 def create_app(config: AppConfig | None = None) -> FastAPI:
     """Baut die FastAPI-App. ``config=None`` liest die Konfiguration aus der Umgebung."""
     cfg = config or AppConfig()
@@ -1896,6 +1965,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             _check_version_upgrade()
             init_db()
             init_devices_db()
+            # Eigenen Host EINMALIG in den Bestand aufnehmen (ADR self-host): ein
+            # aktiver Scan findet den eigenen Rechner nicht -> die eigene IP bliebe
+            # im DNS-Umgehungs-Bericht unaufgeloest. Upsert ueber die device-Naht
+            # (nicht ueber den Scan), best-effort (Fehler werden geschluckt).
+            _register_self_host(device_repository(), device_clock)
             # ── monitoring v2 (M.9): Altcode-Loop (configure_monitor + run_monitor)
             # und Altcode-Scheduler (start_scheduler) ERSETZT durch die v2-Use-Cases.
             # Der RunMonitor tickt bis stop(); der Task haengt an app.state (kein GC).
@@ -4127,7 +4201,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # (4) Anreicherung (Regel 5, faellt NUR hier): Geraete-Namens-Map einmal je Aufbau,
         # DoH-Bewertung je Datensatz ueber die eigene Lookup-Naht (Ziel-IP + best-effort
         # erstes sample_qname). Die Zuordnung liegt bewusst NICHT in domain/application.
-        name_by_ip = _dns_bypass_name_by_ip(GetDevices(device_repository())(known_only=False))
+        devices = GetDevices(device_repository())(known_only=False)
+        name_by_ip = _dns_bypass_name_by_ip(devices)
+        self_ips = _dns_bypass_self_ips(devices)
         sources = blocklist_source_repository()
         entries = blocklist_entry_repository()
 
@@ -4139,6 +4215,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 DnsBypassFindingOut(
                     src_ip=agg.src_ip,
                     device_name=name_by_ip.get(agg.src_ip),
+                    is_self=agg.src_ip in self_ips,
                     dst_ip=agg.dst_ip,
                     is_doh=is_doh,
                     doh_source_name=doh_source_name,

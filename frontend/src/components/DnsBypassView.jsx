@@ -91,6 +91,11 @@ function UmgeherZeile({ befund }) {
       <div className="dnsbypass-zeile__main">
         <div className="dnsbypass-zeile__kopf">
           <span className="dnsbypass-zeile__title dnsbypass-mono">{titel}</span>
+          {befund.isSelf && (
+            <span className="dnsbypass-badge dnsbypass-badge--self">
+              {t("beobachten.dnsbypass.selfBadge")}
+            </span>
+          )}
           {befund.isDoh && (
             <span className="dnsbypass-badge dnsbypass-badge--doh">
               {befund.dohSourceName

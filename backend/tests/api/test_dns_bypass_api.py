@@ -90,6 +90,7 @@ def test_get_dns_bypass_liefert_200_und_json_form(app: FastAPI) -> None:
             DnsBypassFindingOut(
                 src_ip="192.168.1.50",
                 device_name="Wohnzimmer-TV",
+                is_self=True,
                 dst_ip="1.1.1.1",
                 is_doh=True,
                 doh_source_name="Bekannte DoH-Anbieter (IP)",
@@ -126,6 +127,7 @@ def test_get_dns_bypass_liefert_200_und_json_form(app: FastAPI) -> None:
             {
                 "src_ip": "192.168.1.50",
                 "device_name": "Wohnzimmer-TV",
+                "is_self": True,
                 "dst_ip": "1.1.1.1",
                 "is_doh": True,
                 "doh_source_name": "Bekannte DoH-Anbieter (IP)",
@@ -135,6 +137,7 @@ def test_get_dns_bypass_liefert_200_und_json_form(app: FastAPI) -> None:
             {
                 "src_ip": "192.168.1.99",
                 "device_name": None,
+                "is_self": False,
                 "dst_ip": "9.9.9.9",
                 "is_doh": False,
                 "doh_source_name": None,

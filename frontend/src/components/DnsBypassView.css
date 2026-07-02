@@ -261,6 +261,14 @@
   border: 1px solid var(--color-border);
 }
 
+/* Eigener-Host-Badge: NEUTRAL wie das DoH-Badge (kein Warnton) -- kennzeichnet
+   nur, dass die Quell-IP der eigene Rechner ist. */
+.dnsbypass-badge--self {
+  color: var(--color-text-sec);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+}
+
 /* Ruhiger Standard-Leerzustand. */
 .dnsbypass__empty {
   margin: 0;

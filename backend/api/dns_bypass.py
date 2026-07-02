@@ -56,6 +56,9 @@ class DnsBypassFindingOut(BaseModel):
 
     src_ip: str
     device_name: str | None
+    # Ob die Quell-IP der eigene Host ist (Geraet mit source=self im Bestand).
+    # Erlaubt der UI, den eigenen Rechner als "eigener Host" zu markieren.
+    is_self: bool = False
     dst_ip: str
     is_doh: bool
     doh_source_name: str | None

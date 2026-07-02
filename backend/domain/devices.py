@@ -42,13 +42,17 @@ class DeviceSource(StrEnum):
     """Woher der Geraete-Datensatz urspruenglich stammt.
 
     Ein Scan-Fund ist ``SCAN`` -- so wird ein neu entdecktes Geraet angelegt.
-    Ein vom Nutzer von Hand angelegtes Geraet ist ``MANUAL``. Default ist
-    ``SCAN``, weil der weit ueberwiegende Weg ins Inventar der Scan ist; das
-    manuelle Anlegen ist die Ausnahme und wird vom Use-Case explizit gesetzt.
+    Ein vom Nutzer von Hand angelegtes Geraet ist ``MANUAL``. Der eigene Host --
+    der Rechner, auf dem CERNIS laeuft -- ist ``SELF``; er wird automatisch beim
+    Backend-Start in den Bestand aufgenommen, weil ein aktiver Netz-Scan den
+    eigenen Host nicht findet. Default ist ``SCAN``, weil der weit ueberwiegende
+    Weg ins Inventar der Scan ist; das manuelle Anlegen und der Selbst-Eintrag
+    sind die Ausnahmen und werden vom Use-Case bzw. Bootstrap explizit gesetzt.
     """
 
     SCAN = "scan"
     MANUAL = "manual"
+    SELF = "self"
 
 
 def normalize_mac(raw: str) -> str:

@@ -40,6 +40,9 @@ export function mappeBefund(f) {
   return {
     srcIp: f.src_ip,
     deviceName: f.device_name ?? null,
+    // Ob die Quell-IP der eigene Host ist (Geraet mit source=self) -- treibt das
+    // "eigener Host"-Badge in der Zeile. Fehlt das Feld -> false (ehrlich).
+    isSelf: Boolean(f.is_self),
     dstIp: f.dst_ip,
     isDoh: Boolean(f.is_doh),
     dohSourceName: f.doh_source_name ?? null,

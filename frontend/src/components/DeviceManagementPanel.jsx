@@ -43,16 +43,21 @@ function lokalesDatum(roh) {
   return Number.isNaN(d.getTime()) ? null : d.toLocaleString();
 }
 
-// Herkunfts-Badge: "manual" -> „manuell", sonst „Scan". Dezent über die
-// CSS-Tokens, keine erfundene Farbe.
+// Herkunfts-Badge: "self" -> „eigener Host", "manual" -> „manuell", sonst
+// „Scan". Dezent über die CSS-Tokens, keine erfundene Farbe.
 function HerkunftBadge({ source }) {
   const { t } = useTranslation();
+  const istSelbst = source === "self";
   const istManuell = source === "manual";
+  const herkunft = istSelbst ? "self" : istManuell ? "manual" : "scan";
+  const text = istSelbst
+    ? t("geraete.verwaltung.herkunftSelbst")
+    : istManuell
+      ? t("geraete.verwaltung.herkunftManuell")
+      : t("geraete.verwaltung.herkunftScan");
   return (
-    <span className="dm-badge" data-herkunft={istManuell ? "manual" : "scan"}>
-      {istManuell
-        ? t("geraete.verwaltung.herkunftManuell")
-        : t("geraete.verwaltung.herkunftScan")}
+    <span className="dm-badge" data-herkunft={herkunft}>
+      {text}
     </span>
   );
 }

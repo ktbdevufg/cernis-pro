@@ -156,6 +156,7 @@ def _device_to_dict(device: Any) -> dict[str, Any]:
         "category": device.category,
         "is_known": device.is_known,
         "trust_state": device.trust_state.value,
+        "source": device.source.value,
         "watch_dismissed": device.watch_dismissed,
         "hostname": device.hostname,
         "os_guess": device.os_guess,
