@@ -1921,6 +1921,8 @@ class ReportlabRenderer:
                     ("FONTSIZE", (0, 1), (-1, 1), 9),
                     ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                     ("TOPPADDING", (0, 0), (-1, 0), 8),
+                    ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
+                    ("TOPPADDING", (0, 1), (-1, 1), 4),
                     ("BOTTOMPADDING", (0, 1), (-1, 1), 8),
                 ]
             )
