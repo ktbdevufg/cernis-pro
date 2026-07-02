@@ -598,12 +598,15 @@ def test_get_dns_bypass_report_liefert_200_und_json_form(app: FastAPI) -> None:
         bypass_total=8,
         expected_total=12,
         bypass_devices=2,
-        resolver_distribution=[DnsBypassResolverOut(dst_ip="8.8.8.8", count=8)],
+        resolver_distribution=[
+            DnsBypassResolverOut(dst_ip="8.8.8.8", count=8, resolver_name="Google Public DNS")
+        ],
         bypass_rows=[
             DnsBypassReportRowOut(
                 src_ip="10.0.0.5",
                 device_name="Laptop",
                 dst_ip="8.8.8.8",
+                resolver_name="Google Public DNS",
                 is_doh=False,
                 doh_source_name="",
                 query_count=8,
@@ -627,12 +630,15 @@ def test_get_dns_bypass_report_liefert_200_und_json_form(app: FastAPI) -> None:
         "bypass_total": 8,
         "expected_total": 12,
         "bypass_devices": 2,
-        "resolver_distribution": [{"dst_ip": "8.8.8.8", "count": 8}],
+        "resolver_distribution": [
+            {"dst_ip": "8.8.8.8", "count": 8, "resolver_name": "Google Public DNS"}
+        ],
         "bypass_rows": [
             {
                 "src_ip": "10.0.0.5",
                 "device_name": "Laptop",
                 "dst_ip": "8.8.8.8",
+                "resolver_name": "Google Public DNS",
                 "is_doh": False,
                 "doh_source_name": "",
                 "query_count": 8,

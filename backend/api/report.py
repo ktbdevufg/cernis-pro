@@ -939,11 +939,13 @@ class DnsBypassResolverOut(BaseModel):
     """Ein Eintrag der Ziel-Resolver-Verteilung (Ziel-IP + Anzahl Umgehungen, Wire-Form).
 
     ``dst_ip`` der Ziel-Resolver, ``count`` die Summe der Umgehungs-Anfragen an dieses Ziel
-    (ueber alle fragenden Geraete). Reine Anzeige.
+    (ueber alle fragenden Geraete). ``resolver_name`` der best-effort Anzeigename dieses
+    Ziels ("" wenn nicht aufloesbar -- die rohe ``dst_ip`` bleibt sichtbar). Reine Anzeige.
     """
 
     dst_ip: str
     count: int
+    resolver_name: str = ""
 
 
 class DnsBypassReportRowOut(BaseModel):
@@ -960,6 +962,9 @@ class DnsBypassReportRowOut(BaseModel):
     src_ip: str
     device_name: str
     dst_ip: str
+    # Best-effort Anzeigename des Ziel-Resolvers ("" wenn nicht aufloesbar -- die rohe
+    # ``dst_ip`` bleibt sichtbar; der Name ergaenzt, ersetzt nicht).
+    resolver_name: str = ""
     is_doh: bool
     doh_source_name: str
     query_count: int

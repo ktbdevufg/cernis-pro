@@ -928,8 +928,14 @@ function ResolverVerteilung({ eintraege, t }) {
         <div className="dns-report__balken-liste">
           {eintraege.map((e, i) => (
             <div key={`res-${i}`} className="dns-report__balken-zeile">
-              <span className="dns-report__balken-label dns-report__mono" title={e.dstIp}>
+              <span
+                className="dns-report__balken-label dns-report__mono"
+                title={e.resolverName ? `${e.dstIp} (${e.resolverName})` : e.dstIp}
+              >
                 {e.dstIp}
+                {e.resolverName && (
+                  <span className="dns-report__resolver-name"> ({e.resolverName})</span>
+                )}
               </span>
               <div className="dns-report__balken-bahn">
                 <div
@@ -997,7 +1003,12 @@ function UmgeherListe({ zeilen, t }) {
                       ) : null}
                     </span>
                   </td>
-                  <td className="dns-report__mono">{r.dstIp}</td>
+                  <td className="dns-report__mono">
+                    {r.dstIp}
+                    {r.resolverName && (
+                      <span className="dns-report__resolver-name"> ({r.resolverName})</span>
+                    )}
+                  </td>
                   <td className="dns-report__num dns-report__mono">{r.queryCount}</td>
                   <td className="dns-report__qnames dns-report__mono">
                     {beispiele.length > 0 ? beispiele.join(", ") : "—"}

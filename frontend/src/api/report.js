@@ -530,9 +530,9 @@ export async function fetchDnsWatchReportPdf() {
 //     recording_label:str, recording_scope:str ("single"/"all"),
 //     expected_servers:[str],
 //     queries_total:int, bypass_total:int, expected_total:int, bypass_devices:int,
-//     resolver_distribution: [ { dst_ip:str, count:int } ],
-//     bypass_rows: [ { src_ip, device_name, dst_ip, is_doh:bool, doh_source_name,
-//       query_count:int, sample_qnames:[str] } ]
+//     resolver_distribution: [ { dst_ip:str, count:int, resolver_name:str } ],
+//     bypass_rows: [ { src_ip, device_name, dst_ip, resolver_name, is_doh:bool,
+//       doh_source_name, query_count:int, sample_qnames:[str] } ]
 //   }
 // ``recording_id`` ist OPTIONAL: leer/None = alle Aufzeichnungen zusammengefasst, ein
 // Wert = nur diese. KEIN 404-Fall: leerer Stand ist ein DATUM (alle Zaehler 0 + leere
@@ -543,6 +543,8 @@ function mappeBypassResolver(e) {
   return {
     dstIp: e.dst_ip,
     count: e.count,
+    // Best-effort Ziel-Name; leer/fehlt -> null (nur die rohe IP zeigen).
+    resolverName: e.resolver_name || null,
   };
 }
 
@@ -556,6 +558,8 @@ function mappeBypassZeile(r) {
     srcIp: r.src_ip,
     deviceName: r.device_name ?? null,
     dstIp: r.dst_ip,
+    // Best-effort Ziel-Name; leer/fehlt -> null (nur die rohe IP zeigen).
+    resolverName: r.resolver_name || null,
     isDoh: Boolean(r.is_doh),
     dohSourceName: r.doh_source_name ?? null,
     queryCount: r.query_count,

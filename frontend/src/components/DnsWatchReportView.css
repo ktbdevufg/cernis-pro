@@ -20,6 +20,12 @@
   text-align: right;
 }
 
+/* Best-effort Ziel-Resolver-Name neben der rohen IP: dezent/gedaempft, damit die IP
+   die fuehrende Information bleibt (der Name ergaenzt, ersetzt nicht). */
+.dns-report__resolver-name {
+  color: var(--color-text-tert);
+}
+
 /* ── Bezugsrahmen-Umschalter (Etappe 6, Optik der DnsWatchScreen-Reiter) ────────
    Zwei nackte, tab-artige Knoepfe: "Dieser Rechner" vs. "Umgehung im Netz". Aktiver
    Reiter dezent akzentuiert. Im Druck ausgeblendet (kein Sinn auf Papier). */

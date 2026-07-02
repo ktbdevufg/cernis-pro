@@ -581,6 +581,7 @@ from domain.monitoring import (
 )
 from domain.outbound_log import AggregatedContact, ContactDelta
 from domain.process import classify_kind
+from domain.resolver_names import known_resolver_name
 from domain.scanning import EnrichedHost
 from domain.scheduler.models import DailyWindow
 from infrastructure.agent import (
@@ -662,6 +663,7 @@ from infrastructure.resolver import (
     ResolverToolMissing,
     TlsCertReader,
 )
+from infrastructure.reverse_dns import reverse_dns_name
 from infrastructure.rogue_dhcp_repository import SqliteRogueDhcpRepository
 from infrastructure.scanning.arp_table import ArpTableAdapter
 from infrastructure.scanning.fritz_detail import FritzDetailAdapter
@@ -1830,6 +1832,41 @@ def _dns_bypass_self_ips(devices: list[Device]) -> set[str]:
     Bestand, ist die Menge leer (ehrlicher Leerfall).
     """
     return {d.last_ip for d in devices if d.last_ip and d.source == DeviceSource.SELF}
+
+
+async def _dns_bypass_resolver_names(
+    dst_ips: set[str], name_by_ip: dict[str, str]
+) -> dict[str, str]:
+    """Loest je Ziel-Resolver-IP einen best-effort Anzeigenamen -> ``{dst_ip: name}``.
+
+    Anreicherung im Composition Root (Regel 5), analog ``_dns_bypass_name_by_ip`` /
+    ``_dns_bypass_doh_lookup``. Prioritaet je Ziel-IP:
+
+      (a) Geraete-Bestand -- die Ziel-IP kann ein bekanntes Geraet sein (z. B. der
+          lokale Pi-hole), aufgeloest ueber DIESELBE ``last_ip``-Naht (``name_by_ip``);
+      (b) bekannte-oeffentliche-Resolver-Liste (``domain.resolver_names``);
+      (c) Reverse-DNS (PTR, ``infrastructure.reverse_dns``, best-effort mit Timeout);
+      (d) sonst KEIN Name -- der Eintrag fehlt in der Map (der Rand zeigt dann nur die
+          rohe IP; der Name ist Beigabe, nicht Ersatz).
+
+    Der Reverse-DNS-Lookup faellt NUR fuer IPs an, die (a)/(b) nicht schon aufloesen --
+    er ist best-effort mit hartem Timeout und blockiert den Aufbau nie. Nur nicht-leere
+    Namen kommen in die Map.
+    """
+    resolved: dict[str, str] = {}
+    for ip in dst_ips:
+        bestand = name_by_ip.get(ip)
+        if bestand:
+            resolved[ip] = bestand
+            continue
+        bekannt = known_resolver_name(ip)
+        if bekannt:
+            resolved[ip] = bekannt
+            continue
+        ptr = await reverse_dns_name(ip)
+        if ptr:
+            resolved[ip] = ptr
+    return resolved
 
 
 class _DohSourceLister(Protocol):
@@ -4204,6 +4241,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         devices = GetDevices(device_repository())(known_only=False)
         name_by_ip = _dns_bypass_name_by_ip(devices)
         self_ips = _dns_bypass_self_ips(devices)
+        # Ziel-Resolver-Namen einmal je Aufbau best-effort aufloesen (Bestand > bekannte
+        # Resolver > PTR), damit jede Finding-Zeile den Ziel-Namen neben der IP zeigt.
+        resolver_names = await _dns_bypass_resolver_names(
+            {agg.dst_ip for agg in report.aggregates}, name_by_ip
+        )
         sources = blocklist_source_repository()
         entries = blocklist_entry_repository()
 
@@ -4217,6 +4259,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                     device_name=name_by_ip.get(agg.src_ip),
                     is_self=agg.src_ip in self_ips,
                     dst_ip=agg.dst_ip,
+                    resolver_name=resolver_names.get(agg.dst_ip),
                     is_doh=is_doh,
                     doh_source_name=doh_source_name,
                     query_count=agg.query_count,
@@ -5632,6 +5675,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # je Aggregat ueber die eigene Lookup-Naht (Ziel-IP + best-effort erstes sample_qname) --
         # DIESELBEN Nahtstellen wie im Live-View _dns_bypass_view.
         name_by_ip = _dns_bypass_name_by_ip(GetDevices(device_repository())(known_only=False))
+        # Ziel-Resolver-Namen einmal best-effort aufloesen (Bestand > bekannte Resolver >
+        # PTR) -- DIESELBE Naht wie im Live-View _dns_bypass_view.
+        resolver_names = await _dns_bypass_resolver_names(
+            {agg.dst_ip for agg in aggregates}, name_by_ip
+        )
         sources = blocklist_source_repository()
         entries = blocklist_entry_repository()
 
@@ -5645,6 +5693,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                     # "" statt None (der Bericht traegt Leerstring, Muster outbound-Bericht).
                     device_name=name_by_ip.get(agg.src_ip, "") or "",
                     dst_ip=agg.dst_ip,
+                    resolver_name=resolver_names.get(agg.dst_ip, ""),
                     is_doh=is_doh,
                     doh_source_name=doh_source_name or "",
                     query_count=agg.query_count,
@@ -5671,7 +5720,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             expected_total=report.expected_total,
             bypass_devices=report.bypass_devices,
             resolver_distribution=[
-                DnsBypassResolverOut(dst_ip=r.dst_ip, count=r.count)
+                DnsBypassResolverOut(dst_ip=r.dst_ip, count=r.count, resolver_name=r.resolver_name)
                 for r in report.resolver_distribution
             ],
             bypass_rows=[
@@ -5679,6 +5728,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                     src_ip=r.src_ip,
                     device_name=r.device_name,
                     dst_ip=r.dst_ip,
+                    resolver_name=r.resolver_name,
                     is_doh=r.is_doh,
                     doh_source_name=r.doh_source_name,
                     query_count=r.query_count,

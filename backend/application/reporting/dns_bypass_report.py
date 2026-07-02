@@ -52,6 +52,9 @@ class DnsBypassReportRow:
     src_ip: str
     device_name: str
     dst_ip: str
+    # Best-effort Anzeigename des Ziel-Resolvers (Aufrufer setzt "" statt None, wenn
+    # nicht aufloesbar). Beigabe -- die rohe ``dst_ip`` bleibt immer sichtbar.
+    resolver_name: str
     is_doh: bool
     doh_source_name: str
     query_count: int
@@ -84,11 +87,14 @@ class ResolverCount:
     """Ein Eintrag der Ziel-Resolver-Verteilung (Ziel-IP + Anzahl Umgehungen), neutral.
 
     ``dst_ip`` der Ziel-Resolver, ``count`` die Summe der ``query_count`` aller Zeilen zu
-    diesem Ziel (ueber ALLE fragenden Geraete). Die anfragestaerksten Resolver zuerst.
+    diesem Ziel (ueber ALLE fragenden Geraete). ``resolver_name`` der best-effort
+    Anzeigename dieses Ziels ("" wenn nicht aufloesbar -- die rohe ``dst_ip`` bleibt
+    sichtbar). Die anfragestaerksten Resolver zuerst.
     """
 
     dst_ip: str
     count: int
+    resolver_name: str = ""
 
 
 @dataclass(frozen=True)
@@ -156,12 +162,18 @@ def build_dns_bypass_report(
     # Schritt 3: distinct fragende Geraete.
     bypass_devices = len({r.src_ip for r in rows})
 
-    # Schritt 4: Ziel-Resolver-Verteilung (Summe der query_count je dst_ip).
+    # Schritt 4: Ziel-Resolver-Verteilung (Summe der query_count je dst_ip). Der
+    # best-effort Ziel-Name je dst_ip wird aus den Zeilen uebernommen (er ist je Ziel
+    # konstant -- der Aufrufer setzt ihn pro dst_ip gleich; erster nicht-leerer gewinnt).
     resolver_zaehler: dict[str, int] = {}
+    resolver_name_je_ziel: dict[str, str] = {}
     for row in rows:
         resolver_zaehler[row.dst_ip] = resolver_zaehler.get(row.dst_ip, 0) + row.query_count
+        if row.resolver_name and not resolver_name_je_ziel.get(row.dst_ip):
+            resolver_name_je_ziel[row.dst_ip] = row.resolver_name
     resolver_distribution = [
-        ResolverCount(dst_ip=ziel, count=anzahl) for ziel, anzahl in resolver_zaehler.items()
+        ResolverCount(dst_ip=ziel, count=anzahl, resolver_name=resolver_name_je_ziel.get(ziel, ""))
+        for ziel, anzahl in resolver_zaehler.items()
     ]
     resolver_distribution.sort(key=lambda r: (-r.count, r.dst_ip))
 

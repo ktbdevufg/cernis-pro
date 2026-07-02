@@ -73,7 +73,12 @@ function UmgeherZeile({ befund }) {
   if (zeigeIpUnten) {
     subTeile.push(befund.srcIp);
   }
-  subTeile.push(t("beobachten.dnsbypass.toTarget", { ziel: befund.dstIp }));
+  // Ziel-Resolver: rohe IP IMMER sichtbar; der best-effort Name ergaenzt sie in
+  // Klammern, wenn aufloesbar (kein Platzhalter, wenn er fehlt).
+  const ziel = befund.resolverName
+    ? `${befund.dstIp} (${befund.resolverName})`
+    : befund.dstIp;
+  subTeile.push(t("beobachten.dnsbypass.toTarget", { ziel }));
   subTeile.push(
     t("beobachten.dnsbypass.queriesSuffix", { count: befund.queryCount }),
   );

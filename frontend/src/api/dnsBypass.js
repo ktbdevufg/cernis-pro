@@ -44,6 +44,9 @@ export function mappeBefund(f) {
     // "eigener Host"-Badge in der Zeile. Fehlt das Feld -> false (ehrlich).
     isSelf: Boolean(f.is_self),
     dstIp: f.dst_ip,
+    // Best-effort Ziel-Resolver-Name (Bestand > bekannte Resolver > PTR); fehlt er,
+    // bleibt es bei der rohen IP (?? null -- kein erfundener Name).
+    resolverName: f.resolver_name ?? null,
     isDoh: Boolean(f.is_doh),
     dohSourceName: f.doh_source_name ?? null,
     queryCount: f.query_count,

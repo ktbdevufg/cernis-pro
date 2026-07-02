@@ -27,6 +27,7 @@ def _row(
     *,
     query_count: int = 1,
     device_name: str = "",
+    resolver_name: str = "",
     is_doh: bool = False,
     doh_source_name: str = "",
     sample_qnames: tuple[str, ...] = (),
@@ -40,6 +41,7 @@ def _row(
         src_ip=src_ip,
         device_name=device_name,
         dst_ip=dst_ip,
+        resolver_name=resolver_name,
         is_doh=is_doh,
         doh_source_name=doh_source_name,
         query_count=query_count,
@@ -123,6 +125,27 @@ def test_resolver_verteilung_summe_je_dst_ip_und_sortierung() -> None:
         ("8.8.8.8", 5),
         ("9.9.9.9", 1),
     ]
+
+
+def test_resolver_verteilung_uebernimmt_resolver_name_je_ziel() -> None:
+    """Der best-effort Ziel-Name wird je dst_ip in die Verteilung uebernommen.
+
+    Der Name ist je Ziel konstant (der Aufrufer setzt ihn pro dst_ip gleich); der erste
+    nicht-leere gewinnt, ein Ziel ohne Namen bleibt "" (nur die rohe IP).
+    """
+    status = DnsBypassReportInput(
+        recording_label="X", recording_scope="single", expected_servers=()
+    )
+    rows = [
+        _row("10.0.0.1", "8.8.8.8", query_count=3, resolver_name="Google Public DNS"),
+        _row("10.0.0.2", "8.8.8.8", query_count=2, resolver_name="Google Public DNS"),
+        _row("10.0.0.3", "203.0.113.9", query_count=1),  # kein Name -> ""
+    ]
+
+    report = build_dns_bypass_report(status, rows, 100)
+
+    namen = {r.dst_ip: r.resolver_name for r in report.resolver_distribution}
+    assert namen == {"8.8.8.8": "Google Public DNS", "203.0.113.9": ""}
 
 
 def test_bypass_rows_sortierung_query_count_dann_src_ip_dann_dst_ip() -> None:

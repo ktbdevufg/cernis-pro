@@ -60,6 +60,9 @@ class DnsBypassFindingOut(BaseModel):
     # Erlaubt der UI, den eigenen Rechner als "eigener Host" zu markieren.
     is_self: bool = False
     dst_ip: str
+    # Best-effort Anzeigename des Ziel-Resolvers (Bestand > bekannte Resolver > PTR),
+    # ``None`` wenn nicht aufloesbar -- der Name ist Beigabe, die rohe ``dst_ip`` bleibt.
+    resolver_name: str | None = None
     is_doh: bool
     doh_source_name: str | None
     query_count: int
