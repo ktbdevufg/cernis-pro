@@ -531,8 +531,8 @@ export async function fetchDnsWatchReportPdf() {
 //     expected_servers:[str],
 //     queries_total:int, bypass_total:int, expected_total:int, bypass_devices:int,
 //     resolver_distribution: [ { dst_ip:str, count:int, resolver_name:str } ],
-//     bypass_rows: [ { src_ip, device_name, dst_ip, resolver_name, is_doh:bool,
-//       doh_source_name, query_count:int, sample_qnames:[str] } ]
+//     bypass_rows: [ { src_ip, device_name, is_self:bool, dst_ip, resolver_name,
+//       is_doh:bool, doh_source_name, query_count:int, sample_qnames:[str] } ]
 //   }
 // ``recording_id`` ist OPTIONAL: leer/None = alle Aufzeichnungen zusammengefasst, ein
 // Wert = nur diese. KEIN 404-Fall: leerer Stand ist ein DATUM (alle Zaehler 0 + leere
@@ -557,6 +557,9 @@ function mappeBypassZeile(r) {
   return {
     srcIp: r.src_ip,
     deviceName: r.device_name ?? null,
+    // Markiert die Zeile des eigenen Hosts (source=SELF); die View zeigt dann "Dieser
+    // Rechner" dezent unter dem Hostnamen. Fehlt/false -> normale Zeile.
+    isSelf: Boolean(r.is_self),
     dstIp: r.dst_ip,
     // Best-effort Ziel-Name; leer/fehlt -> null (nur die rohe IP zeigen).
     resolverName: r.resolver_name || null,

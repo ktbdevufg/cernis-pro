@@ -77,6 +77,18 @@ _SEV_COLORS = {
     "UNKNOWN": _SEV_UNKNOWN,
 }
 
+# Stabile Farb-Palette fuer die DNS-Umgehungs-Verteilungs-Grafik (Variante C, gestapelter
+# Balken + Legende). KEIN neues Farbset -- nur bestehende Renderer-Tokens, in der Ordnung
+# der In-App-Sicht (staerkstes Ziel = Akzent, dann auffaellig/hoch/kritisch/neutral); laenger
+# als die Palette wird zyklisch weitergefaerbt (deterministisch je Index).
+_DIST_PALETTE: tuple[colors.Color, ...] = (
+    _ACCENT,
+    _NOTABLE,
+    _SEV_HIGH,
+    _CRIT,
+    _CLEAN,
+)
+
 # Repo-Asset des CERNIS-Logos (Auftrag: per find ermittelt -> frontend/public/cernis-logo.png).
 # Relativ zu diesem Modul aufgeloest (backend/infrastructure/ -> Repo-Root -> frontend/public).
 # Existiert die Datei nicht (z. B. im frozen-Build), faellt die Kopfzeile sauber auf reinen
@@ -193,19 +205,19 @@ DNS_CONTACT_COLUMNS: tuple[str, ...] = (
     "Status",
 )
 
-# Spalten-Spiegel der zwei DNS-Umgehungs-Bericht-Tabellen. SPIEGEL der ``DNS_BYPASS_*_COLUMNS``
+# Spalten-Spiegel der DNS-Umgehungs-Detailtabelle. SPIEGEL von ``DNS_BYPASS_ROW_COLUMNS``
 # aus ``application.reporting.dns_bypass_pdf_model`` -- der Adapter darf ``application`` NICHT
-# importieren (import-linter), darum hier als lokale Anzeige-Konstanten gefuehrt (Muster
+# importieren (import-linter), darum hier als lokale Anzeige-Konstante gefuehrt (Muster
 # DNS_*_COLUMNS). Die Schreibweise (Umlaute) ist WOERTLICH aus dns_bypass_pdf_model.py
 # uebernommen, damit Modell, Renderer und die Spaltenbreiten-Heuristik denselben Vertrag teilen.
-DNS_BYPASS_RESOLVER_COLUMNS: tuple[str, ...] = ("Ziel-Resolver", "Umgehungen")
+# (Die fruehere Resolver-Verteilungs-Tabelle ist entfernt -- die Verteilung zeigt die Grafik.)
 DNS_BYPASS_ROW_COLUMNS: tuple[str, ...] = (
     "Gerät",
     "Quell-IP",
     "Ziel-Resolver",
     "DoH",
     "Anfragen",
-    "Beispiel-Namen",
+    "Abgefragte Namen",
 )
 
 
@@ -541,7 +553,7 @@ class DnsBypassPdfModelLike(Protocol):
     @property
     def bypass_devices(self) -> int: ...
     @property
-    def resolver_rows(self) -> tuple[tuple[str, ...], ...]: ...
+    def resolver_distribution(self) -> tuple[tuple[str, str, int], ...]: ...
     @property
     def bypass_rows(self) -> tuple[tuple[str, ...], ...]: ...
 
@@ -1802,10 +1814,11 @@ class ReportlabRenderer:
         onLaterPages ueber dieselbe Funktion ``_draw_manual_header_footer``), dann die Story --
         Titel + Erzeugungsdatum + Einleitung, die fertige Bezugsrahmen-Zeile (``scope_text``) und
         die fertige erwartete-Server-Zeile (``expected_text``), der Kennzahlen-Block (eine Reihe
-        Zahlen) und die zwei Sektions-Rubriken (Verteilung nach Ziel-Resolver / Umgehungen im
-        Detail, letztere auf eigener Seite, da potentiell lang).
+        Zahlen), die Verteilungs-Grafik nach Ziel (gestapelter Balken + Legende, ALLEINIGE
+        Verteilungs-Darstellung) und die Umgehungs-Detailliste auf eigener Seite (potentiell
+        lang; eigener Render-Pfad, da die Geraet-Zelle beim eigenen Host zweizeilig ist).
 
-        Robust: leere Tabellen ziehen ihren eigenen Leer-Fallback ueber ``_append_table_section``.
+        Robust: eine leere Detailliste zieht ihren eigenen Leer-Fallback.
         KEINE Uhr, KEINE Rechnung -- alle Texte/Zahlen kommen fertig aus dem Modell. Liefert
         valide PDF-Bytes (Magic-Header ``%PDF``).
         """
@@ -1841,24 +1854,29 @@ class ReportlabRenderer:
         story.append(self._dns_bypass_kennzahlen(model))
         story.append(Spacer(1, 6 * mm))
 
-        # ── Sektions-Rubriken ueber das BESTEHENDE _append_table_section ──
-        self._append_table_section(
-            story,
-            styles,
-            "Verteilung nach Ziel-Resolver",
-            DNS_BYPASS_RESOLVER_COLUMNS,
-            model.resolver_rows,
-        )
+        # ── Verteilungs-Grafik (Variante C): gestapelter Balken + Legende ──
+        # Nur bei vorhandenen Zielen; leere Verteilung -> keine Grafik (die Tabelle unten
+        # zieht ihren eigenen Leer-Fallback). Titel + Grafik zusammenhalten.
+        if model.resolver_distribution:
+            story.append(
+                KeepTogether(
+                    [
+                        Paragraph("Verteilung nach Ziel", styles["h_section"]),
+                        Spacer(1, 3 * mm),
+                        self._dns_bypass_verteilung_grafik(model),
+                    ]
+                )
+            )
+            story.append(Spacer(1, 6 * mm))
 
-        # Die Detail-Liste auf eigener Seite (potentiell lang) -- PageBreak davor.
+        # ── Umgehungs-Detailliste ──
+        # Die Verteilung nach Ziel wird ALLEIN ueber die Grafik oben gezeigt -- die frueher hier
+        # stehende Tabelle "Verteilung nach Ziel-Resolver" war redundant und ist entfernt.
+        # Die Detail-Liste auf eigener Seite (potentiell lang) -- PageBreak davor. Eigener
+        # Render-Pfad, weil die Geraet-Zelle beim eigenen Host zweizeilig ist (Hostname +
+        # dezente Kennzeichnung); _append_table_section kennt nur einzeilige Zellen.
         story.append(PageBreak())
-        self._append_table_section(
-            story,
-            styles,
-            "Umgehungen im Detail",
-            DNS_BYPASS_ROW_COLUMNS,
-            model.bypass_rows,
-        )
+        self._dns_bypass_detail_tabelle(story, styles, model.bypass_rows)
 
         # ── Achse-B-Fussnote (invariant, wie im DNS-Waechter-/Aussenkontakte-Bericht) ──
         story.append(Spacer(1, 8 * mm))
@@ -1885,6 +1903,53 @@ class ReportlabRenderer:
             onLaterPages=lambda canvas, doc: _draw_manual_header_footer(canvas, doc, header_model),
         )
         return buffer.getvalue()
+
+    def _dns_bypass_detail_tabelle(
+        self,
+        story: list[Flowable],
+        styles: dict[str, ParagraphStyle],
+        rows: tuple[tuple[str, ...], ...],
+    ) -> None:
+        """Haengt die Umgehungs-Detailliste an -- eigener Pfad wegen der zweizeiligen Geraet-Zelle.
+
+        Wie ``_append_table_section`` (nummerierter Titel + Accent-Unterstrich + Tabelle, leerer
+        Fallback, ``repeatRows=1``), ABER: die Geraet-Zelle (Spalte 0) kann beim eigenen Host ein
+        einzelnes ``\\n`` tragen (Hostname + Kennzeichnung). Die erste Zeile wird als Name gesetzt,
+        die zweite dezent (kleiner, gedaempfte Farbe) darunter -- als ``<br/>``-Paragraph. Zellen
+        OHNE ``\\n`` bleiben einzeilig (Nicht-Self, unveraendert). Alle Werte werden maskiert
+        (``_esc``), bevor das ``<br/>``/``<font>``-Markup gesetzt wird.
+        """
+        columns = DNS_BYPASS_ROW_COLUMNS
+        story.append(Paragraph("Umgehungen im Detail", styles["h_rubric"]))
+        story.append(HRFlowable(width="100%", thickness=1.2, color=_ACCENT, spaceAfter=4))
+
+        if not rows:
+            leer_text = _EMPTY_SECTION_TEXT.get(columns, _EMPTY_FALLBACK)
+            story.append(Paragraph(leer_text, styles["body"]))
+            return
+
+        # Dezenter Stil fuer die zweite Geraet-Zeile ("Dieser Rechner"): kleiner, gedaempft --
+        # als Inline-Markup im selben Paragraph, damit Name und Kennzeichnung eine Zelle bleiben.
+        # reportlab-Markup will "#RRGGBB"; hexval() liefert "0xRRGGBB" -> Praefix ersetzen.
+        subtil = "#" + _CLEAN.hexval()[2:]
+
+        render_data: list[list[object]] = [list(columns)]
+        for row in rows:
+            geraet_roh = row[0]
+            if "\n" in geraet_roh:
+                name, _, kennzeichnung = geraet_roh.partition("\n")
+                geraet_markup = (
+                    f'{_esc(name)}<br/><font size="7" color="{subtil}">{_esc(kennzeichnung)}</font>'
+                )
+            else:
+                geraet_markup = _esc(geraet_roh)
+            zellen: list[object] = [Paragraph(geraet_markup, styles["cell"])]
+            zellen.extend(Paragraph(_esc(value), styles["cell"]) for value in row[1:])
+            render_data.append(zellen)
+
+        table = Table(render_data, repeatRows=1, colWidths=_col_widths(columns))
+        table.setStyle(self._base_table_style(len(render_data)))
+        story.append(table)
 
     @staticmethod
     def _dns_bypass_kennzahlen(model: DnsBypassPdfModelLike) -> Table:
@@ -1928,6 +1993,69 @@ class ReportlabRenderer:
             )
         )
         return table
+
+    def _dns_bypass_verteilung_grafik(self, model: DnsBypassPdfModelLike) -> Table:
+        """Verteilung nach Ziel (Variante C): gestapelter horizontaler Balken + Legende.
+
+        Zeichnet aus ``model.resolver_distribution`` (Tripel ``(resolver_name, dst_ip,
+        count)``, anfragestaerkste zuerst) EINEN horizontalen Balken, dessen Segmente die
+        Ziele nach ``count`` ANTEILIG zeigen (Segment-Breite = Anteil an der Summe). Die
+        Farben stammen aus ``_DIST_PALETTE`` (bestehende Renderer-Tokens, staerkstes Ziel =
+        Akzent), zyklisch je Index. Darunter eine Legende: je Ziel ein Farb-Quadrat + Name
+        (falls vorhanden) + rohe IP + Anzahl. Reine Anzeige der schon ermittelten Werte --
+        nur die Balken-Geometrie, keine neuen Farbkonstanten.
+
+        Robust: leere Verteilung -> nur der ``h_section``-Titel ohne Grafik (der Aufrufer
+        haengt den Titel getrennt an); die Summe 0 wuerde zu einer Division fuehren, darum
+        wird sie hier abgefangen (leerer Balken).
+        """
+        styles = self._security_styles()
+        eintraege = model.resolver_distribution
+        summe = sum(count for _, _, count in eintraege) or 1
+
+        bar_breite = _CONTENT_WIDTH_MM * mm
+        bar_hoehe = 10.0 * mm
+        drawing = Drawing(bar_breite, bar_hoehe)
+        # Dezente Grundbahn hinter den Segmenten (falls Rundungsreste eine Luecke lassen).
+        drawing.add(Rect(0.0, 0.0, bar_breite, bar_hoehe, fillColor=_ZEBRA, strokeColor=None))
+        x = 0.0
+        for i, (_, _, count) in enumerate(eintraege):
+            seg_breite = bar_breite * (count / summe)
+            farbe = _DIST_PALETTE[i % len(_DIST_PALETTE)]
+            drawing.add(Rect(x, 0.0, seg_breite, bar_hoehe, fillColor=farbe, strokeColor=None))
+            x += seg_breite
+
+        # Legende: je Ziel ein Farb-Quadrat + Name (Beigabe) + rohe IP + Anzahl. Die rohe IP
+        # bleibt immer sichtbar; ist ein Name da, steht er davor.
+        legende_data: list[list[object]] = []
+        for i, (resolver_name, dst_ip, count) in enumerate(eintraege):
+            farbe = _DIST_PALETTE[i % len(_DIST_PALETTE)]
+            swatch = Drawing(10.0, 10.0)
+            swatch.add(Rect(0.0, 1.0, 8.0, 8.0, fillColor=farbe, strokeColor=None))
+            beschriftung = f"{resolver_name} ({dst_ip})" if resolver_name else dst_ip
+            legende_data.append([swatch, Paragraph(_esc(beschriftung), styles["cell"]), str(count)])
+
+        legende = Table(legende_data, colWidths=[14.0, None, 60.0])
+        legende.setStyle(
+            TableStyle(
+                [
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("ALIGN", (0, 0), (0, -1), "CENTER"),
+                    ("ALIGN", (2, 0), (2, -1), "RIGHT"),
+                    ("FONTNAME", (2, 0), (2, -1), "Helvetica"),
+                    ("FONTSIZE", (1, 0), (-1, -1), 9),
+                    ("TEXTCOLOR", (1, 0), (-1, -1), _TEXT),
+                    ("TOPPADDING", (0, 0), (-1, -1), 1),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 2),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+                ]
+            )
+        )
+
+        block = Table([[drawing], [Spacer(1, 3 * mm)], [legende]], colWidths=[bar_breite])
+        block.setStyle(TableStyle([("ALIGN", (0, 0), (-1, -1), "LEFT")]))
+        return block
 
     # ── Benutzerhandbuch: eigener Render-Pfad ───────────────────────────────
     #
@@ -2064,10 +2192,10 @@ _COL_WEIGHTS: dict[tuple[str, ...], tuple[float, ...]] = {
     DNS_CATEGORY_COLUMNS: (5.0, 1.8),
     DNS_APP_COLUMNS: (5.0, 1.8),
     # DNS-Umgehungs-Bericht: Geraet/Quell-IP/Ziel-Resolver/Beispiel-Namen breit, die schmalen
-    # Wert-Spalten (DoH/Anfragen) schlank. Eigene Keys; die bestehenden Aufrufer bleiben
-    # unberuehrt. Die Resolver-Verteilung traegt das Verteilungsmuster (Label breit, Anzahl schmal).
-    DNS_BYPASS_ROW_COLUMNS: (2.0, 2.0, 2.2, 0.8, 1.0, 2.6),
-    DNS_BYPASS_RESOLVER_COLUMNS: (5.0, 1.8),
+    # Wert-Spalten (DoH/Anfragen) schlank -- ABER die DoH-Spalte breit genug fuer das einzeilige
+    # "Bekannt" (sonst bricht es haesslich zu "Bekann/t"); "Abgefragte Namen" gibt dafuer etwas
+    # Breite ab. Eigener Key; die bestehenden Aufrufer bleiben unberuehrt.
+    DNS_BYPASS_ROW_COLUMNS: (2.0, 2.0, 2.2, 1.2, 1.0, 2.2),
 }
 
 # Rubrikspezifischer Leertext je Tabellen-Schema (statt generisch "Keine Eintraege.").
@@ -2089,7 +2217,6 @@ _EMPTY_SECTION_TEXT: dict[tuple[str, ...], str] = {
     DNS_CATEGORY_COLUMNS: "Keine Kategoriedaten.",
     DNS_APP_COLUMNS: "Keine Programmdaten.",
     DNS_BYPASS_ROW_COLUMNS: "Keine DNS-Umgehungen aufgezeichnet.",
-    DNS_BYPASS_RESOLVER_COLUMNS: "Keine Resolver-Daten.",
 }
 
 

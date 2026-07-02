@@ -953,14 +953,18 @@ class DnsBypassReportRowOut(BaseModel):
 
     Alle Anzeige-/Bewertungs-Felder sind schon vom Composition-Root-Runner fertig gesetzt:
     ``device_name`` der best-effort im Bestand aufgeloeste Anzeigename ("" statt None, wenn
-    keine IP passt), ``is_doh``/``doh_source_name`` die DoH-Bewertung des Ziels (Name der
-    treffenden aktiven DOH-Quelle, "" wenn keine). ``src_ip`` das fragende Geraet, ``dst_ip``
-    der nicht-erwartete Resolver, ``query_count`` die Anzahl Umgehungs-Anfragen dieser Gruppe,
-    ``sample_qnames`` bis zu fuenf distinct qnames als Beleg.
+    keine IP passt), ``is_self`` markiert die Zeile des eigenen Hosts (``source=SELF``),
+    ``is_doh``/``doh_source_name`` die DoH-Bewertung des Ziels (Name der treffenden aktiven
+    DOH-Quelle, "" wenn keine). ``src_ip`` das fragende Geraet, ``dst_ip`` der nicht-erwartete
+    Resolver, ``query_count`` die Anzahl Umgehungs-Anfragen dieser Gruppe, ``sample_qnames``
+    bis zu fuenf distinct qnames als Beleg.
     """
 
     src_ip: str
     device_name: str
+    # Markiert die Zeile des eigenen Hosts. Additiv (Default False), spiegelt die Live-View
+    # ``DnsBypassFindingOut.is_self``; das Frontend zeigt dann "Dieser Rechner" dezent.
+    is_self: bool = False
     dst_ip: str
     # Best-effort Anzeigename des Ziel-Resolvers ("" wenn nicht aufloesbar -- die rohe
     # ``dst_ip`` bleibt sichtbar; der Name ergaenzt, ersetzt nicht).

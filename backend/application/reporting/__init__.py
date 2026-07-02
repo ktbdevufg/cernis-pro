@@ -28,7 +28,6 @@ from application.reporting.cve_report import (
     build_cve_report,
 )
 from application.reporting.dns_bypass_pdf_model import (
-    DNS_BYPASS_RESOLVER_COLUMNS,
     DNS_BYPASS_ROW_COLUMNS,
     DnsBypassPdfModel,
 )
@@ -121,7 +120,6 @@ __all__ = [
     "CVE_COLUMNS",
     "DEVICE_COLUMNS",
     "DNS_APP_COLUMNS",
-    "DNS_BYPASS_RESOLVER_COLUMNS",
     "DNS_BYPASS_ROW_COLUMNS",
     "DNS_CATEGORY_COLUMNS",
     "DNS_CONTACT_COLUMNS",

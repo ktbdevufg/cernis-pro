@@ -1930,6 +1930,12 @@ def _dns_bypass_doh_lookup(
     return (False, None)
 
 
+# Das feste Default-Label, mit dem der eigene Host FRUEHER angelegt wurde. Traegt ein
+# bestehender Eintrag GENAU diesen Wert, gilt er als nicht vom User geaendert und wird
+# beim Start einmalig auf den Hostnamen umgesetzt (siehe _register_self_host).
+_SELF_HOST_ALT_DEFAULT_LABEL = "Dieser Rechner"
+
+
 def _register_self_host(repository: SqliteDeviceRepository, clock: SystemClock) -> None:
     """Nimmt den eigenen Host beim Start EINMALIG in den Bestand auf (best-effort).
 
@@ -1942,8 +1948,10 @@ def _register_self_host(repository: SqliteDeviceRepository, clock: SystemClock) 
     Bewahrung wie beim Scan-Upsert: existiert der Eintrag schon (gleiche MAC),
     werden NUR ``last_ip``/``hostname``/``source`` aktualisiert; die
     user-gesteuerten Felder (``label``/``is_known``/``trust_state``/``tags``/
-    ``notes`` u. a.) bleiben unangetastet. Ein neuer Eintrag bekommt das Label
-    "Dieser Rechner" und ``is_known=True``.
+    ``notes`` u. a.) bleiben unangetastet. Ein neuer Eintrag bekommt als Label
+    den ECHTEN Hostnamen (z. B. "ubultsvm"; die Kennzeichnung "eigener Host"
+    kommt bereits ueber ``source=SELF``) und ``is_known=True``. Faellt der
+    Hostname leer aus, dient die MAC als Fallback (nie ein leeres Label).
 
     best-effort: scheitert die Interface-Ermittlung -- oder wirft irgendetwas --,
     wird geloggt und geschluckt (KEIN Startup-Crash). 127.0.0.1 / ``lo`` wird von
@@ -1958,13 +1966,16 @@ def _register_self_host(repository: SqliteDeviceRepository, clock: SystemClock) 
         now = clock.now()
         existing = repository.get(mac)
         if existing is None:
+            # Label = echter Hostname (die "eigener Host"-Kennzeichnung traegt
+            # source=SELF im Frontend). Leerer Hostname -> MAC als Fallback,
+            # damit nie ein leeres Label entsteht.
             device = Device(
                 mac=mac,
                 first_seen=now,
                 last_seen=now,
                 last_ip=detected.ip,
                 is_known=True,
-                label="Dieser Rechner",
+                label=detected.hostname or mac,
                 hostname=detected.hostname,
                 source=DeviceSource.SELF,
             )
@@ -1973,11 +1984,22 @@ def _register_self_host(repository: SqliteDeviceRepository, clock: SystemClock) 
             # Felder (label/is_known/trust_state/tags/notes/...) NICHT ueberschreiben
             # (Muster der Scan-Bewahrung). last_seen wird mitgezogen, damit der
             # eigene Host als aktiv gilt.
+            #
+            # Alt-Zustand-Korrektur (EINMALIG): frueher wurde der eigene Host mit dem
+            # festen Default-Label "Dieser Rechner" angelegt. Traegt der bestehende
+            # Eintrag GENAU dieses alte Default-Label (also NICHT vom User bewusst
+            # geaendert), wird es jetzt auf den echten Hostnamen umgesetzt (Fallback
+            # MAC, nie leer) -- so zeigt der Bericht kuenftig "ubultsvm". Ein echtes,
+            # vom User selbst vergebenes Label bleibt unangetastet.
+            label = existing.label
+            if label == _SELF_HOST_ALT_DEFAULT_LABEL:
+                label = detected.hostname or mac
             device = replace(
                 existing,
                 last_seen=now,
                 last_ip=detected.ip,
                 hostname=detected.hostname or existing.hostname,
+                label=label,
                 source=DeviceSource.SELF,
             )
         repository.save(device)
@@ -5674,7 +5696,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # (2) Anreicherung (Regel 5, faellt NUR hier): Geraete-Namens-Map einmal, DoH-Bewertung
         # je Aggregat ueber die eigene Lookup-Naht (Ziel-IP + best-effort erstes sample_qname) --
         # DIESELBEN Nahtstellen wie im Live-View _dns_bypass_view.
-        name_by_ip = _dns_bypass_name_by_ip(GetDevices(device_repository())(known_only=False))
+        devices = GetDevices(device_repository())(known_only=False)
+        name_by_ip = _dns_bypass_name_by_ip(devices)
+        # IPs der eigenen Hosts (source=SELF) -- DIESELBE Naht wie im Live-View
+        # _dns_bypass_view, damit der Bericht die Zeile des eigenen Rechners markieren kann.
+        self_ips = _dns_bypass_self_ips(devices)
         # Ziel-Resolver-Namen einmal best-effort aufloesen (Bestand > bekannte Resolver >
         # PTR) -- DIESELBE Naht wie im Live-View _dns_bypass_view.
         resolver_names = await _dns_bypass_resolver_names(
@@ -5698,6 +5724,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                     doh_source_name=doh_source_name or "",
                     query_count=agg.query_count,
                     sample_qnames=tuple(agg.sample_qnames),
+                    is_self=agg.src_ip in self_ips,
                 )
             )
 
@@ -5727,6 +5754,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 DnsBypassReportRowOut(
                     src_ip=r.src_ip,
                     device_name=r.device_name,
+                    is_self=r.is_self,
                     dst_ip=r.dst_ip,
                     resolver_name=r.resolver_name,
                     is_doh=r.is_doh,
@@ -5757,14 +5785,37 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         else:
             expected_text = "Erwartete DNS-Server: (keine)"
 
-        resolver_rows = tuple((r.dst_ip, str(r.count)) for r in report.resolver_distribution)
-        # Spalten-Reihenfolge: Geraet, Quell-IP, Ziel-Resolver, DoH, Anfragen, Beispiel-Namen.
+        # Ziel-Resolver-Zelle: bekannter Name als Haupttext, rohe IP dezent dahinter
+        # (der Name ist Beigabe, die IP bleibt sichtbar). Fehlt der Name -> nur die IP.
+        def _resolver_zelle(resolver_name: str, dst_ip: str) -> str:
+            return f"{resolver_name} ({dst_ip})" if resolver_name else dst_ip
+
+        # Verteilungs-Grafik (Variante C): strukturiert (Name, IP, Anzahl), damit der
+        # Adapter Balken + Legende zeichnet -- die ALLEINIGE Verteilungs-Darstellung (die
+        # frueher zusaetzliche Tabelle "Verteilung nach Ziel-Resolver" war redundant, entfernt).
+        resolver_distribution = tuple(
+            (r.resolver_name, r.dst_ip, r.count) for r in report.resolver_distribution
+        )
+
+        # Geraet-Zelle (Regel 5, fertige Projektion): beim eigenen Host (is_self) ZWEIZEILIG --
+        # Hostname oben, die Kennzeichnung "Dieser Rechner" dezent darunter (durch ein einzelnes
+        # "\n" getrennt; der Adapter rendert die zweite Zeile gedaempft). Faellt der Name leer,
+        # dient die Quell-IP als Name-Zeile (nie der Leer-Marker fuer den eigenen Host). Bei
+        # Nicht-Self bleibt es einzeilig (Name, sonst Leer-Marker) -- unveraendert.
+        def _geraet_zelle(device_name: str, src_ip: str, is_self: bool) -> str:
+            if is_self:
+                return f"{device_name or src_ip}\nDieser Rechner"
+            return device_name or "—"
+
+        # Spalten-Reihenfolge: Geraet, Quell-IP, Ziel-Resolver, DoH, Anfragen, Abgefragte Namen.
+        # DoH-Spalte im PDF kurz: "Bekannt" bei Treffer, sonst der Leer-Marker. Ziel-Resolver wie
+        # in der Verteilung (Name + IP).
         bypass_rows = tuple(
             (
-                r.device_name or "—",
+                _geraet_zelle(r.device_name, r.src_ip, r.is_self),
                 r.src_ip,
-                r.dst_ip,
-                (r.doh_source_name or "ja") if r.is_doh else "—",
+                _resolver_zelle(r.resolver_name, r.dst_ip),
+                "Bekannt" if r.is_doh else "—",
                 str(r.query_count),
                 ", ".join(r.sample_qnames) if r.sample_qnames else "—",
             )
@@ -5786,7 +5837,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             bypass_total=report.bypass_total,
             expected_total=report.expected_total,
             bypass_devices=report.bypass_devices,
-            resolver_rows=resolver_rows,
+            resolver_distribution=resolver_distribution,
             bypass_rows=bypass_rows,
         )
 

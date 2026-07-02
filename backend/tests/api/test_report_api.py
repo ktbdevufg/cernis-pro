@@ -637,6 +637,8 @@ def test_get_dns_bypass_report_liefert_200_und_json_form(app: FastAPI) -> None:
             {
                 "src_ip": "10.0.0.5",
                 "device_name": "Laptop",
+                # additiv: is_self markiert die Zeile des eigenen Hosts (Default False).
+                "is_self": False,
                 "dst_ip": "8.8.8.8",
                 "resolver_name": "Google Public DNS",
                 "is_doh": False,

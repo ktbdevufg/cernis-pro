@@ -908,13 +908,29 @@ function Kontaktliste({ zeilen, filter, onFilter, sortierung, onSortierung, t })
   );
 }
 
+// Stabile Token-Palette der Verteilungs-Grafik (Variante C). KEINE festen Farben --
+// nur bestehende Token-Variablen, in fester Reihenfolge (staerkstes Ziel = Akzent,
+// dann die Border-Toene der Badges), zyklisch je Index. Deterministisch, damit Balken
+// und Legende dieselbe Farbe je Ziel tragen.
+const RESOLVER_PALETTE = [
+  "var(--color-accent)",
+  "var(--sev-med-bd)",
+  "var(--sev-high-bd)",
+  "var(--color-border)",
+];
+
+function resolverFarbe(index) {
+  return RESOLVER_PALETTE[index % RESOLVER_PALETTE.length];
+}
+
 // ── 3.3 (netzweit) Resolver-Verteilung (fremde Ziel-IPs) ───────────────────────
-// Schlichte Balken-Tabelle: je fremdem Resolver (dst_ip) ein Balken relativ zum
-// groessten count, plus die Zahl. Reihenfolge kommt sortiert (count desc) rein. Leere
-// Verteilung -> ruhiger Leertext (Muster OutboundReportView.Verteilung, aber ohne
-// Umschalter/Top-N: die Liste fremder Resolver ist kurz).
+// Variante C: EIN gestapelter horizontaler Balken, dessen Segmente die Ziele nach
+// query_count anteilig zeigen (Segment-Breite = Anteil an der Summe), darunter eine
+// Legende (Farbe + Name + rohe IP + Anzahl). Farben aus stabilen Token-Variablen
+// (RESOLVER_PALETTE), staerkstes Ziel = Akzent. Reihenfolge kommt sortiert (count desc)
+// rein. Leere Verteilung -> ruhiger Leertext. t NIEMALS in Deps.
 function ResolverVerteilung({ eintraege, t }) {
-  const maxCount = eintraege.reduce((acc, e) => Math.max(acc, e.count), 0) || 1;
+  const summe = eintraege.reduce((acc, e) => acc + Math.max(0, e.count), 0) || 1;
 
   return (
     <section className="dns-report__verteilung">
@@ -925,27 +941,47 @@ function ResolverVerteilung({ eintraege, t }) {
       </div>
 
       {eintraege.length > 0 ? (
-        <div className="dns-report__balken-liste">
-          {eintraege.map((e, i) => (
-            <div key={`res-${i}`} className="dns-report__balken-zeile">
-              <span
-                className="dns-report__balken-label dns-report__mono"
-                title={e.resolverName ? `${e.dstIp} (${e.resolverName})` : e.dstIp}
-              >
-                {e.dstIp}
-                {e.resolverName && (
-                  <span className="dns-report__resolver-name"> ({e.resolverName})</span>
-                )}
-              </span>
-              <div className="dns-report__balken-bahn">
-                <div
-                  className="dns-report__balken-fueller"
-                  style={{ width: `${((e.count / maxCount) * 100).toFixed(1)}%` }}
+        <div className="dns-report__resolver-grafik">
+          {/* Gestapelter horizontaler Balken: je Ziel ein Segment, Breite = Anteil. */}
+          <div
+            className="dns-report__stapelbalken"
+            role="img"
+            aria-label={t("report.dnsBypass.resolver.titel")}
+          >
+            {eintraege.map((e, i) => (
+              <div
+                key={`seg-${i}`}
+                className="dns-report__stapel-segment"
+                style={{
+                  width: `${((e.count / summe) * 100).toFixed(2)}%`,
+                  background: resolverFarbe(i),
+                }}
+                title={
+                  e.resolverName ? `${e.resolverName} (${e.dstIp}): ${e.count}` : `${e.dstIp}: ${e.count}`
+                }
+              />
+            ))}
+          </div>
+
+          {/* Legende: Farbe + Name (falls vorhanden) + rohe IP + Anzahl. */}
+          <ul className="dns-report__legende dns-report__resolver-legende">
+            {eintraege.map((e, i) => (
+              <li key={`leg-${i}`} className="dns-report__legende-zeile">
+                <span
+                  className="dns-report__legende-punkt"
+                  style={{ background: resolverFarbe(i) }}
+                  aria-hidden="true"
                 />
-              </div>
-              <span className="dns-report__balken-zahl dns-report__mono">{e.count}</span>
-            </div>
-          ))}
+                <span className="dns-report__legende-label dns-report__mono">
+                  {e.resolverName && (
+                    <span className="dns-report__resolver-name">{e.resolverName} </span>
+                  )}
+                  {e.dstIp}
+                </span>
+                <span className="dns-report__legende-zahl dns-report__mono">{e.count}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       ) : (
         <p className="dns-report__leer">{t("report.dnsBypass.resolver.leer")}</p>
@@ -972,6 +1008,7 @@ function UmgeherListe({ zeilen, t }) {
           <thead>
             <tr>
               <th>{t("report.dnsBypass.spalte.geraet")}</th>
+              <th>{t("report.dnsBypass.spalte.quelle")}</th>
               <th>{t("report.dnsBypass.spalte.ziel")}</th>
               <th className="dns-report__num">{t("report.dnsBypass.spalte.anfragen")}</th>
               <th>{t("report.dnsBypass.spalte.beispiele")}</th>
@@ -979,10 +1016,11 @@ function UmgeherListe({ zeilen, t }) {
           </thead>
           <tbody>
             {zeilen.map((r, i) => {
-              // Titel: Geraetename, sonst die Quell-IP. Ist der Name da, wandert die
-              // Quell-IP dezent darunter (S3-ehrlich: nur vorhandene Felder).
-              const titel = r.deviceName ?? r.srcIp;
-              const zeigeIpUnten = r.deviceName !== null;
+              // Titel: Geraetename, sonst ein neutraler Strich. Die Quell-IP hat jetzt
+              // eine EIGENE Spalte (analog PDF) -- steht also nie mehr doppelt unter dem
+              // Namen. Das Geraet-Feld traegt nur noch Name (oder Strich), DoH-Badge und
+              // beim eigenen Host (isSelf) die dezente Kennzeichnung "Dieser Rechner".
+              const titel = r.deviceName ?? "—";
               const beispiele = r.sampleQnames.slice(0, 3);
               return (
                 <tr key={`umgeher-${i}`} className="dns-report__zeile">
@@ -996,13 +1034,14 @@ function UmgeherListe({ zeilen, t }) {
                             : t("report.dnsBypass.dohBadge")}
                         </span>
                       ) : null}
-                      {zeigeIpUnten ? (
-                        <span className="dns-report__geraet-ip dns-report__mono">
-                          {r.srcIp}
+                      {r.isSelf ? (
+                        <span className="dns-report__geraet-selbst">
+                          {t("report.dnsBypass.selbst")}
                         </span>
                       ) : null}
                     </span>
                   </td>
+                  <td className="dns-report__mono">{r.srcIp}</td>
                   <td className="dns-report__mono">
                     {r.dstIp}
                     {r.resolverName && (

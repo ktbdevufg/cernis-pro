@@ -23,22 +23,22 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-# ── Spalten-Vertraege der zwei Sektions-Tabellen (Auftrag) ──────────────────
+# ── Spalten-Vertrag der Umgehungs-Detailtabelle (Auftrag) ───────────────────
 #
 # Die Spaltenueberschriften liegen HIER fest (nicht im Adapter), damit Modell und Renderer
 # sich ueber denselben Vertrag einig sind. Der Composition Root liefert die Zeilen exakt in
-# dieser Spalten-Reihenfolge; der Adapter setzt diese Tupel als Kopfzeile. Der
-# ``DNS_BYPASS_``-Praefix haelt sie von den ``DNS_*_COLUMNS`` des host-lokalen
-# DNS-Waechter-Berichts getrennt.
+# dieser Spalten-Reihenfolge; der Adapter setzt dieses Tupel als Kopfzeile. Der
+# ``DNS_BYPASS_``-Praefix haelt es von den ``DNS_*_COLUMNS`` des host-lokalen
+# DNS-Waechter-Berichts getrennt. (Die fruehere Resolver-Verteilungs-Tabelle ist entfernt --
+# die Verteilung zeigt allein die Grafik ueber ``resolver_distribution``.)
 
-DNS_BYPASS_RESOLVER_COLUMNS: tuple[str, ...] = ("Ziel-Resolver", "Umgehungen")
 DNS_BYPASS_ROW_COLUMNS: tuple[str, ...] = (
     "Gerät",
     "Quell-IP",
     "Ziel-Resolver",
     "DoH",
     "Anfragen",
-    "Beispiel-Namen",
+    "Abgefragte Namen",
 )
 
 
@@ -66,12 +66,25 @@ class DnsBypassPdfModel:
       Anfragen, ``expected_total`` die erwartungsgemaessen, ``bypass_devices`` die Anzahl
       distinct fragender Geraete mit Umgehung.
 
-    SEKTIONS-TABELLEN (fertige String-Zeilen in der jeweiligen ``DNS_BYPASS_*_COLUMNS``-
-    Reihenfolge):
-      ``resolver_rows`` (Ziel-Resolver-Verteilung, DNS_BYPASS_RESOLVER_COLUMNS),
-      ``bypass_rows`` (Umgehungs-Liste, DNS_BYPASS_ROW_COLUMNS). Ist eine Tabelle LEER,
-      laesst der spaetere Adapter die Rubrik weg (wie beim Aussenkontakte-/DNS-Waechter-
-      Bericht).
+    VERTEILUNGS-GRAFIK (Variante C):
+      ``resolver_distribution`` je Ziel-Resolver ein Tripel ``(resolver_name, dst_ip,
+      count)`` -- STRUKTURIERT (nicht als fertige String-Zeile), die ALLEINIGE Verteilungs-
+      Darstellung, damit der Adapter daraus den gestapelten horizontalen Balken
+      + die Legende (Farbe + Name + rohe IP + Anzahl) zeichnen kann. ``resolver_name`` ist
+      "" wenn nicht aufloesbar (die rohe ``dst_ip`` bleibt sichtbar). Anfragestaerkste
+      zuerst (Reihenfolge kommt schon sortiert vom Composition Root).
+
+    SEKTIONS-TABELLE (fertige String-Zeilen in der ``DNS_BYPASS_ROW_COLUMNS``-Reihenfolge):
+      ``bypass_rows`` (Umgehungs-Liste, DNS_BYPASS_ROW_COLUMNS). Ist die Tabelle LEER, laesst
+      der spaetere Adapter die Rubrik weg (wie beim Aussenkontakte-/DNS-Waechter-Bericht).
+      Die Verteilung nach Ziel wird ALLEIN ueber die Grafik (``resolver_distribution``)
+      gezeigt -- es gibt KEINE separate Verteilungs-Tabelle mehr (Redundanz entfernt).
+
+      GERAET-ZELLE (Spalte 0) ist beim eigenen Host ZWEIZEILIG: der Composition Root setzt
+      dann "Hostname\nKennzeichnung" (z. B. "ubultsvm\nDieser Rechner"), getrennt durch ein
+      einzelnes ``\n``. Der Adapter rendert die erste Zeile als Namen und die zweite dezent
+      darunter; ein Wert OHNE ``\n`` bleibt einzeilig (Nicht-Self, unveraendert). Die IP wird
+      NICHT zusaetzlich in der Geraet-Zelle wiederholt -- sie steht in der Quell-IP-Spalte.
     """
 
     title: str
@@ -87,5 +100,5 @@ class DnsBypassPdfModel:
     expected_total: int
     bypass_devices: int
 
-    resolver_rows: tuple[tuple[str, ...], ...] = ()
+    resolver_distribution: tuple[tuple[str, str, int], ...] = ()
     bypass_rows: tuple[tuple[str, ...], ...] = field(default_factory=tuple)

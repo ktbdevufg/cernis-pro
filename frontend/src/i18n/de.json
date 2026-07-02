@@ -1628,10 +1628,12 @@
       },
       "spalte": {
         "geraet": "Gerät",
+        "quelle": "Quell-IP",
         "ziel": "Ziel-IP",
         "anfragen": "Anfragen",
-        "beispiele": "Beispiel-Namen"
+        "beispiele": "Abgefragte Namen"
       },
+      "selbst": "Dieser Rechner",
       "dohBadge": "mögliche DoH",
       "dohBadgeNamed": "mögliche DoH ({{quelle}})",
       "tabelle": {

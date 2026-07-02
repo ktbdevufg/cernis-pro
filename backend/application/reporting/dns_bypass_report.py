@@ -42,11 +42,12 @@ class DnsBypassReportRow:
     Spiegelt die Felder der Live-View ``DnsBypassFindingOut`` (dieselbe Sicht, nur aus dem
     persistenten Stand): ``src_ip`` ist das fragende Geraet (roher Gruppier-Schluessel),
     ``device_name`` der best-effort im Bestand aufgeloeste Anzeigename ("" moeglich -- der
-    Aufrufer setzt "" statt ``None``, wenn keine IP passt), ``dst_ip`` der nicht-erwartete
-    Ziel-Resolver, ``is_doh`` die DoH-Bewertung des Ziels, ``doh_source_name`` der Name der
-    treffenden aktiven DOH-Quelle ("" moeglich). ``query_count`` die aufsummierte Anzahl
-    Umgehungs-Anfragen dieser (Geraet, Resolver)-Gruppe, ``sample_qnames`` bis zu fuenf
-    distinct qnames als Beleg (vom Aufrufer durchgereicht).
+    Aufrufer setzt "" statt ``None``, wenn keine IP passt), ``is_self`` markiert die Zeile des
+    eigenen Hosts (``source=SELF``, vom Aufrufer ueber die ``self_ips``-Naht gesetzt), ``dst_ip``
+    der nicht-erwartete Ziel-Resolver, ``is_doh`` die DoH-Bewertung des Ziels,
+    ``doh_source_name`` der Name der treffenden aktiven DOH-Quelle ("" moeglich).
+    ``query_count`` die aufsummierte Anzahl Umgehungs-Anfragen dieser (Geraet, Resolver)-Gruppe,
+    ``sample_qnames`` bis zu fuenf distinct qnames als Beleg (vom Aufrufer durchgereicht).
     """
 
     src_ip: str
@@ -59,6 +60,9 @@ class DnsBypassReportRow:
     doh_source_name: str
     query_count: int
     sample_qnames: tuple[str, ...]
+    # Markiert die Zeile des eigenen Hosts (source=SELF). Additiv (Default False), damit
+    # bestehende Aufrufer/Tests nicht brechen; der Rand setzt es ueber die self_ips-Naht.
+    is_self: bool = False
 
 
 @dataclass(frozen=True)
