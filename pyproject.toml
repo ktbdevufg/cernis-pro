@@ -242,6 +242,7 @@ modules = [
     "domain.cve",
     "domain.dns_watch",
     "domain.dns_bypass",
+    "domain.dns_trust",
     "domain.scheduler",
 ]
 
