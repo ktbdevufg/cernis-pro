@@ -144,7 +144,7 @@
       "choice": {
         "scan": {
           "title": "Reset scan data",
-          "deletes": "Pick what gets deleted: scan history, findings, monitoring, recordings.",
+          "deletes": "Pick what gets deleted: scan history, findings, monitoring, recordings, DNS.",
           "keeps": "Keeps: settings and anything you don't check."
         },
         "factory": {
@@ -157,6 +157,7 @@
         "groupScan": "Scan & analysis",
         "groupMonitoring": "Monitoring",
         "groupOutbound": "Outbound contact recordings",
+        "groupDns": "DNS",
         "item": {
           "scanHistory": "Scan history",
           "cve": "CVE findings and acknowledgements",
@@ -166,7 +167,9 @@
           "rtt": "Response-time history and events",
           "sla": "SLA measurements",
           "logging": "Capture tasks and their data",
-          "outboundRecordings": "Outbound contact recordings"
+          "outboundRecordings": "Outbound contact recordings",
+          "dnsBypassRecordings": "DNS bypass recordings: saved network captures with history and analysis",
+          "dnsTrustServers": "DNS server trust: your trust/reject decisions for detected DNS servers"
         },
         "rootHint": "Deleting the scan history necessarily removes the findings derived from it as well.",
         "deleteSelected": "Delete selected",

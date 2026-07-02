@@ -157,6 +157,10 @@ def _make_factory_reset(
         outbound_recordings=_Spy(calls, "outbound_recordings"),
         outbound_detail=_Spy(calls, "outbound_detail"),
         outbound_aggregate=_Spy(calls, "outbound_aggregate"),
+        dns_bypass_recordings=_Spy(calls, "dns_bypass_recordings"),
+        dns_bypass_detail=_Spy(calls, "dns_bypass_detail"),
+        dns_bypass_aggregate=_Spy(calls, "dns_bypass_aggregate"),
+        dns_trust=_Spy(calls, "dns_trust"),
         alert_rules=_Spy(calls, "alert_rules"),
         agents=_Spy(calls, "agents"),
         dns_watch_acknowledgements=_Spy(calls, "dns_watch_acknowledgements"),
@@ -235,6 +239,10 @@ def test_factory_reset_ruft_stufe1_und_stufe2() -> None:
         "outbound_recordings.clear_all",
         "outbound_detail.clear_all",
         "outbound_aggregate.clear_all",
+        "dns_bypass_recordings.clear_all",
+        "dns_bypass_detail.clear_all",
+        "dns_bypass_aggregate.clear_all",
+        "dns_trust.clear_all",
         "alert_rules.clear_all",
         "agents.clear_all",
         "dns_watch_acknowledgements.clear_all",
@@ -360,6 +368,10 @@ def _make_delete_selected(calls: list[str]) -> DeleteSelectedData:
         outbound_recordings=_Spy(calls, "outbound_recordings"),
         outbound_detail=_Spy(calls, "outbound_detail"),
         outbound_aggregate=_Spy(calls, "outbound_aggregate"),
+        dns_bypass_recordings=_Spy(calls, "dns_bypass_recordings"),
+        dns_bypass_detail=_Spy(calls, "dns_bypass_detail"),
+        dns_bypass_aggregate=_Spy(calls, "dns_bypass_aggregate"),
+        dns_trust=_Spy(calls, "dns_trust"),
     )
 
 
@@ -377,6 +389,22 @@ def test_delete_selected_outbound_ruft_genau_die_drei_outbound_clears() -> None:
         "outbound_detail.clear_all",
         "outbound_aggregate.clear_all",
     ]
+
+
+def test_delete_selected_dns_bypass_ruft_genau_die_drei_dns_bypass_clears() -> None:
+    calls: list[str] = []
+    _make_delete_selected(calls).run({ScanSelection.DNS_BYPASS_RECORDINGS})
+    assert calls == [
+        "dns_bypass_recordings.clear_all",
+        "dns_bypass_detail.clear_all",
+        "dns_bypass_aggregate.clear_all",
+    ]
+
+
+def test_delete_selected_dns_trust_ruft_nur_dns_trust() -> None:
+    calls: list[str] = []
+    _make_delete_selected(calls).run({ScanSelection.DNS_TRUST_SERVERS})
+    assert calls == ["dns_trust.clear_all"]
 
 
 def test_delete_selected_leere_menge_ruft_nichts() -> None:

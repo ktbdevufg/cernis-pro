@@ -12,9 +12,10 @@ from enum import StrEnum
 class ScanSelection(StrEnum):
     """Posten der granularen Wartungs-Loeschung (Stufe 1 Baukasten).
 
-    Drei Gruppen -- Scan&Analyse (``scan_history``, ``cve``, ``arp_guard``,
+    Vier Gruppen -- Scan&Analyse (``scan_history``, ``cve``, ``arp_guard``,
     ``analysis_acknowledgements``, ``known_hosts``), Monitoring (``rtt``, ``sla``,
-    ``logging``), Aussenkontakte (``outbound_recordings``). Die Wurzel-Mitnahme
+    ``logging``), Aussenkontakte (``outbound_recordings``), DNS
+    (``dns_bypass_recordings``, ``dns_trust_servers``). Die Wurzel-Mitnahme
     (Scan-Historie zieht die uebrigen Scan&Analyse-Posten mit) ist FRONTEND-Sperrlogik;
     das Backend loescht stur die uebergebene Menge.
     """
@@ -28,3 +29,5 @@ class ScanSelection(StrEnum):
     SLA = "sla"
     LOGGING = "logging"
     OUTBOUND_RECORDINGS = "outbound_recordings"
+    DNS_BYPASS_RECORDINGS = "dns_bypass_recordings"
+    DNS_TRUST_SERVERS = "dns_trust_servers"

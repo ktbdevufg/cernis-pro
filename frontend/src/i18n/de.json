@@ -144,7 +144,7 @@
       "choice": {
         "scan": {
           "title": "Scan-Daten zurücksetzen",
-          "deletes": "Auswählen, was gelöscht wird: Scan-Historie, Befunde, Monitoring, Aufzeichnungen.",
+          "deletes": "Auswählen, was gelöscht wird: Scan-Historie, Befunde, Monitoring, Aufzeichnungen, DNS.",
           "keeps": "Bleibt: Einstellungen und alles, was Sie nicht ankreuzen."
         },
         "factory": {
@@ -157,6 +157,7 @@
         "groupScan": "Scan & Analyse",
         "groupMonitoring": "Monitoring",
         "groupOutbound": "Außenkontakte-Aufzeichnungen",
+        "groupDns": "DNS",
         "item": {
           "scanHistory": "Scan-Historie",
           "cve": "CVE-Befunde und Quittierungen",
@@ -166,7 +167,9 @@
           "rtt": "Antwortzeit-Verlauf und Ereignisse",
           "sla": "SLA-Messwerte",
           "logging": "Mitschnitt-Aufgaben und deren Daten",
-          "outboundRecordings": "Außenkontakte-Aufzeichnungen"
+          "outboundRecordings": "Außenkontakte-Aufzeichnungen",
+          "dnsBypassRecordings": "DNS-Umgehungs-Aufzeichnungen: gespeicherte Netz-Mitschnitte samt Verlauf und Auswertung",
+          "dnsTrustServers": "DNS-Server-Vertrauen: deine Vertrauen-/Ablehnen-Entscheidungen zu erkannten DNS-Servern"
         },
         "rootHint": "Die Scan-Historie zu löschen entfernt zwingend auch die daraus abgeleiteten Befunde.",
         "deleteSelected": "Ausgewähltes löschen",

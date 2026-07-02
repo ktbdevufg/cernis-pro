@@ -70,6 +70,19 @@ const GRUPPEN = [
       },
     ],
   },
+  {
+    titleKey: "settings.wartung.builder.groupDns",
+    posten: [
+      {
+        wire: "dns_bypass_recordings",
+        labelKey: "settings.wartung.builder.item.dnsBypassRecordings",
+      },
+      {
+        wire: "dns_trust_servers",
+        labelKey: "settings.wartung.builder.item.dnsTrustServers",
+      },
+    ],
+  },
 ];
 
 // Flache Karte wire -> labelKey, für die Bestätigungs-Liste (Fenster 2).

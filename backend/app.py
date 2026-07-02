@@ -6612,6 +6612,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             outbound_recordings=outbound_recording_repository(),
             outbound_detail=outbound_detail_repository(),
             outbound_aggregate=outbound_aggregate_repository(),
+            dns_bypass_recordings=dns_bypass_recording_repository(),
+            dns_bypass_detail=dns_bypass_detail_repository(),
+            dns_bypass_aggregate=dns_bypass_aggregate_repository(),
+            dns_trust=dns_trust_repository(),
             alert_rules=alert_rule_repository(),
             agents=agent_repository(),
             dns_watch_acknowledgements=dns_watch_acknowledgement_repository(),
@@ -6640,6 +6644,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             outbound_recordings=outbound_recording_repository(),
             outbound_detail=outbound_detail_repository(),
             outbound_aggregate=outbound_aggregate_repository(),
+            dns_bypass_recordings=dns_bypass_recording_repository(),
+            dns_bypass_detail=dns_bypass_detail_repository(),
+            dns_bypass_aggregate=dns_bypass_aggregate_repository(),
+            dns_trust=dns_trust_repository(),
         )
 
     app.include_router(maintenance_router)

@@ -59,6 +59,10 @@ from ports.settings import SecretStore, SettingsRepository
 __all__ = [
     "AnalysisAckCleaner",
     "DeleteSelectedData",
+    "DnsBypassAggregateCleaner",
+    "DnsBypassDetailCleaner",
+    "DnsBypassRecordingsCleaner",
+    "DnsTrustCleaner",
     "DnsWatchAckCleaner",
     "FactoryReset",
     "KnownHostsCleaner",
@@ -147,6 +151,49 @@ class OutboundAggregateCleaner(Protocol):
         ...
 
 
+class DnsBypassRecordingsCleaner(Protocol):
+    """Schmaler Vertrag fuer die DNS-Umgehungs-DEFINITIONEN (``dns_bypass_recordings``).
+
+    Wie bei den drei outbound_log-Stores tragen die DNS-Bypass-Repos ihren vollen Vertrag
+    im Adapter; fuer die Wartungs-Loeschung braucht der Use-Case aber NUR ``clear_all`` --
+    darum hier je ein schmales lokales Protocol (Muster ``OutboundRecordingsCleaner``),
+    das die Composition Root mit den echten Repo-Instanzen erfuellt.
+    """
+
+    def clear_all(self) -> None:
+        """Leert alle DNS-Umgehungs-Definitionen (``dns_bypass_recordings``)."""
+        ...
+
+
+class DnsBypassDetailCleaner(Protocol):
+    """Schmaler Vertrag fuer den rohen DETAIL-Zeitverlauf (``dns_bypass_detail``)."""
+
+    def clear_all(self) -> None:
+        """Leert alle DETAIL-Messpunkte (``dns_bypass_detail``)."""
+        ...
+
+
+class DnsBypassAggregateCleaner(Protocol):
+    """Schmaler Vertrag fuer die verdichteten Datensaetze (``dns_bypass_aggregate``)."""
+
+    def clear_all(self) -> None:
+        """Leert alle Aggregate (``dns_bypass_aggregate``)."""
+        ...
+
+
+class DnsTrustCleaner(Protocol):
+    """Schmaler Vertrag fuer die kuratierte Vertrauens-Liste (``dns_trust_servers``).
+
+    Das ``DnsTrustRepository`` traegt seinen vollen Vertrag in ``ports/dns_trust``; fuer
+    die Wartungs-Loeschung braucht der Use-Case aber NUR ``clear_all`` -- darum hier ein
+    schmales lokales Protocol (Muster ``OutboundRecordingsCleaner``).
+    """
+
+    def clear_all(self) -> None:
+        """Leert die kuratierte DNS-Vertrauens-Liste (``dns_trust_servers``) vollstaendig."""
+        ...
+
+
 # ── Stufe 1: Scan-Daten zuruecksetzen ──────────────────────────────────────────
 
 
@@ -221,6 +268,10 @@ class FactoryReset:
         outbound_recordings: OutboundRecordingsCleaner,
         outbound_detail: OutboundDetailCleaner,
         outbound_aggregate: OutboundAggregateCleaner,
+        dns_bypass_recordings: DnsBypassRecordingsCleaner,
+        dns_bypass_detail: DnsBypassDetailCleaner,
+        dns_bypass_aggregate: DnsBypassAggregateCleaner,
+        dns_trust: DnsTrustCleaner,
         alert_rules: AlertRuleRepository,
         agents: AgentRepository,
         dns_watch_acknowledgements: DnsWatchAckCleaner,
@@ -242,6 +293,10 @@ class FactoryReset:
         self._outbound_recordings = outbound_recordings
         self._outbound_detail = outbound_detail
         self._outbound_aggregate = outbound_aggregate
+        self._dns_bypass_recordings = dns_bypass_recordings
+        self._dns_bypass_detail = dns_bypass_detail
+        self._dns_bypass_aggregate = dns_bypass_aggregate
+        self._dns_trust = dns_trust
         self._alert_rules = alert_rules
         self._agents = agents
         self._dns_watch_acknowledgements = dns_watch_acknowledgements
@@ -281,6 +336,14 @@ class FactoryReset:
         self._outbound_recordings.clear_all()
         self._outbound_detail.clear_all()
         self._outbound_aggregate.clear_all()
+
+        # DNS-Umgehungs-Aufzeichnungen: Definitionen + roher DETAIL-Verlauf + Aggregate
+        # (drei eigene Tabellen, analog Aussenkontakte) plus die kuratierte
+        # DNS-Vertrauens-Liste. Im Werkszustand gehoeren auch sie geleert.
+        self._dns_bypass_recordings.clear_all()
+        self._dns_bypass_detail.clear_all()
+        self._dns_bypass_aggregate.clear_all()
+        self._dns_trust.clear_all()
 
         # e/f: Alert-Regeln, Agenten.
         self._alert_rules.clear_all()
@@ -332,6 +395,10 @@ class DeleteSelectedData:
         outbound_recordings: OutboundRecordingsCleaner,
         outbound_detail: OutboundDetailCleaner,
         outbound_aggregate: OutboundAggregateCleaner,
+        dns_bypass_recordings: DnsBypassRecordingsCleaner,
+        dns_bypass_detail: DnsBypassDetailCleaner,
+        dns_bypass_aggregate: DnsBypassAggregateCleaner,
+        dns_trust: DnsTrustCleaner,
     ) -> None:
         self._scan_history = scan_history
         self._cve_findings = cve_findings
@@ -349,6 +416,10 @@ class DeleteSelectedData:
         self._outbound_recordings = outbound_recordings
         self._outbound_detail = outbound_detail
         self._outbound_aggregate = outbound_aggregate
+        self._dns_bypass_recordings = dns_bypass_recordings
+        self._dns_bypass_detail = dns_bypass_detail
+        self._dns_bypass_aggregate = dns_bypass_aggregate
+        self._dns_trust = dns_trust
 
     def run_from_wire(self, items: list[str]) -> None:
         """Hebt rohe Wire-Strings autoritativ in ``ScanSelection`` und loescht (Rand-Adapter).
@@ -364,9 +435,9 @@ class DeleteSelectedData:
     def run(self, items: set[ScanSelection]) -> None:
         """Loescht NUR die in ``items`` enthaltenen Posten, in fester Reihenfolge.
 
-        Scan&Analyse zuerst, dann Monitoring, dann Aussenkontakte; am Ende EIN Info-Log
-        mit den tatsaechlich angefassten Posten (sortiert nach Wire-Wert). Eine leere
-        Menge ruft KEINEN ``clear_all`` (und loggt nur die leere Liste).
+        Scan&Analyse zuerst, dann Monitoring, dann Aussenkontakte, dann DNS; am Ende EIN
+        Info-Log mit den tatsaechlich angefassten Posten (sortiert nach Wire-Wert). Eine
+        leere Menge ruft KEINEN ``clear_all`` (und loggt nur die leere Liste).
         """
         if ScanSelection.SCAN_HISTORY in items:
             self._scan_history.clear_all()
@@ -394,4 +465,10 @@ class DeleteSelectedData:
             self._outbound_recordings.clear_all()
             self._outbound_detail.clear_all()
             self._outbound_aggregate.clear_all()
+        if ScanSelection.DNS_BYPASS_RECORDINGS in items:
+            self._dns_bypass_recordings.clear_all()
+            self._dns_bypass_detail.clear_all()
+            self._dns_bypass_aggregate.clear_all()
+        if ScanSelection.DNS_TRUST_SERVERS in items:
+            self._dns_trust.clear_all()
         _logger.info("selected_data_deleted", items=sorted(i.value for i in items))
