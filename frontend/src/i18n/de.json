@@ -617,7 +617,7 @@
       "emptyProminentText": "Die Aufzeichnung hat keine Umgehung gefunden. Netzweit sichtbar wird nur, was CERNIS mitliest: Das setzt voraus, dass der Netzverkehr hier ankommt (Gateway/Mirror-Port oder ein einfaches Netz). Ohne Netz-Sicht bleibt die Liste leer, auch wenn tatsächlich umgangen wird.",
       "prereqHint": "Netzweit sichtbar wird nur, was CERNIS mitliest — das setzt Netz-Sicht voraus (Gateway/Mirror/einfaches Netz). Plain-DNS (Port 53) wird sicher erkannt, DoH nur heuristisch vermutet.",
       "footerExpected": "Erwartete DNS-Server: {{servers}}",
-      "settingsHint": "In den Einstellungen anpassbar.",
+      "settingsHint": "Erwartete Server pflegst du unter Verwaltung → DNS-Server & Vertrauen.",
       "consent": {
         "title": "Netzweit passiv mitlesen?",
         "intro": "Um netzweite DNS-Umgehungen zu sehen, liest CERNIS den DNS-Verkehr im Netz passiv mit. Bevor das zum ersten Mal startet:",

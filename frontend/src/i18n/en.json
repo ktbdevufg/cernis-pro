@@ -617,7 +617,7 @@
       "emptyProminentText": "The recording found no bypass. Only what CERNIS observes becomes visible network-wide: this requires the network traffic to arrive here (gateway/mirror port or a simple network). Without a network view the list stays empty, even if bypassing is actually happening.",
       "prereqHint": "Only what CERNIS observes becomes visible network-wide — this requires a network view (gateway/mirror/simple network). Plain DNS (port 53) is detected reliably, DoH is only inferred heuristically.",
       "footerExpected": "Expected DNS servers: {{servers}}",
-      "settingsHint": "Adjustable in the settings.",
+      "settingsHint": "Manage expected servers under Management → DNS servers & trust.",
       "consent": {
         "title": "Observe network-wide, passively?",
         "intro": "To see network-wide DNS bypasses, CERNIS passively observes the DNS traffic on the network. Before this starts for the first time:",
