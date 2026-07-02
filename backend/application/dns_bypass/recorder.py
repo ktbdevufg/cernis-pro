@@ -4,8 +4,11 @@ Der laufende Aufzeichnungs-Kern: startet die DNS-Quelle, leert je ``tick`` ihren
 Query-Puffer (``poll_queries``) und SCHREIBT die Anfragen in SQLite -- KEIN RAM-Puffer mehr
 (Muster ``RunOutboundRecorder``): jede gepollte Anfrage geht als DETAIL-Zeile in den Store
 (alle Anfragen, auch erwartete -- fuer den spaeteren erwartungsgemaess-vs-Umgeher-Vergleich),
-und NUR die Umgehungen (``domain.dns_bypass.is_bypass``) werden je (``src_ip``, ``dst_ip``)
-per Merge-Upsert ins Aggregat verdichtet. Am Tick-Ende laeuft IMMER die zeit-basierte
+und NUR die Umgehungen (Drei-Zustands-Urteil ``domain.dns_trust.bypass_verdict`` == ``BYPASS``)
+werden je (``src_ip``, ``dst_ip``) per Merge-Upsert ins Aggregat verdichtet. Ein oeffentlicher
+Resolver/Bedrohungslisten-Treffer ist definitionsgemaess eine Umgehung; der eigene, noch nicht
+bestaetigte Resolver ist "noch nicht eingeordnet" (kein Befund). Am Tick-Ende laeuft IMMER die
+zeit-basierte
 DETAIL-Retention (``delete_older_than``). Der Bericht liest kuenftig aus SQLite, nicht mehr
 aus einem Speicher-Puffer.
 
@@ -31,7 +34,8 @@ Fremd-Adapter im application-Ring, der infrastructure-Client wird NICHT importie
 
 import asyncio
 import time
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from typing import Any, Protocol
 
 import structlog
@@ -39,8 +43,13 @@ import structlog
 from domain.dns_bypass import (
     BypassDelta,
     RawDnsQuery,
-    is_bypass,
     merge_bypass,
+)
+from domain.dns_trust import (
+    BypassVerdict,
+    DnsServerCategory,
+    DnsTrustState,
+    bypass_verdict,
 )
 from ports.dns_bypass import (
     DnsBypassAggregateRepository,
@@ -51,7 +60,16 @@ from ports.dns_bypass import (
 __all__ = [
     "DnsBypassRecorder",
     "DnsQuerySource",
+    "DnsServerTrustLookup",
 ]
+
+# Synchron lesende Naht (ADR 0043, E4): liefert je Ziel-IP das Paar
+# ``(Kategorie, Trust-Zustand)`` aus dem Vertrauens-Bestand -- oder ``None``, wenn die IP
+# (noch) NICHT im Bestand steht. Der Recorder-Tick ist synchron und darf keinen Event-Loop
+# treiben; die echte Lese-Verdrahtung (Repo-Lookup) faellt im Composition Root (Regel 5).
+# Der application-Ring nennt KEINEN dns_trust-Adapter -- nur die Domaenen-Enums + die
+# reine ``bypass_verdict``-Funktion.
+DnsServerTrustLookup = Callable[[str], tuple[DnsServerCategory, DnsTrustState] | None]
 
 _logger = structlog.get_logger(__name__)
 
@@ -90,9 +108,15 @@ class DnsBypassRecorder:
     NICHT im Speicher. Der Recorder haelt nur die aktive ``recording_id`` (die Aufzeichnung,
     in die er gerade schreibt) und das ``aktiv``-Flag.
 
-    ``expected_servers_provider`` liefert die aktuell erwartete Resolver-Menge (roh) fuer
-    die Umgehungs-Klassifikation -- die "erwartet-oder-Gateway"-Ableitung faellt spaeter im
-    Composition Root; hier kommt die fertige Menge herein.
+    ``trust_lookup`` liefert je Ziel-IP das Paar ``(Kategorie, Trust-Zustand)`` aus dem
+    Vertrauens-Bestand (ADR 0043, E4) -- oder ``None`` fuer eine (noch) unbekannte IP. Die
+    Umgehungs-Klassifikation ist damit KEINE flache IP-Mengen-Pruefung mehr, sondern das
+    Drei-Zustands-Urteil ``domain.dns_trust.bypass_verdict(Kategorie, Trust-Zustand)``:
+    nur ``BYPASS`` wird aggregiert; ``EXPECTED`` (vertraut) und ``UNCLASSIFIED`` (noch nicht
+    eingeordnet -- z. B. der eigene Pi-hole vor der Bestaetigung) sind KEIN Befund. Eine
+    unbekannte IP (``None``) gilt als ``UNCLASSIFIED`` -- kein Fehlalarm; sie wird erst durch
+    die Vertrauens-Erfassung (``dns_trust_sync``, laeuft in DIESEM Tick VOR der
+    Klassifikation) eingeordnet und beim naechsten Vergleich korrekt bewertet.
 
     ``dns_trust_sync`` ist eine OPTIONALE, best-effort Naht (ADR 0043, E3): je in diesem Tick
     verarbeiteter Ziel-IP wird sie einmalig awaited, damit die Umgehungs-Ziele in den
@@ -112,7 +136,7 @@ class DnsBypassRecorder:
         recordings: DnsBypassRecordingRepository,
         detail: DnsBypassDetailRepository,
         aggregate: DnsBypassAggregateRepository,
-        expected_servers_provider: Callable[[], Sequence[str]],
+        trust_lookup: DnsServerTrustLookup,
         poll_interval_s: int = 2,
         retention_max_age_s: int = 86400,
         now_provider: Callable[[], float] = time.time,
@@ -122,7 +146,7 @@ class DnsBypassRecorder:
         self._recordings = recordings
         self._detail = detail
         self._aggregate = aggregate
-        self._expected_servers_provider = expected_servers_provider
+        self._trust_lookup = trust_lookup
         self._dns_trust_sync = dns_trust_sync
         self._poll_interval_s = poll_interval_s
         self._retention_max_age_s = retention_max_age_s
@@ -164,14 +188,16 @@ class DnsBypassRecorder:
 
         1. ``source.poll_queries()`` abrufen, jedes rohe dict auf ``RawDnsQuery`` mappen
            (``src_ip``/``dst_ip``/``l4`` Pflicht; ``qname`` optional -> ``""`` wenn fehlt).
-        2. ``now`` holen; die erwartete Menge normalisiert (strip + lower) als Set bilden.
+        2. ``now`` holen.
         3. Fuer JEDE Anfrage eine DETAIL-Zeile schreiben (auch erwartete -- fuer den
            spaeteren erwartungsgemaess-vs-Umgeher-Vergleich).
-        4. NUR fuer Umgehungen (``is_bypass``) einen ``BypassDelta`` bilden, den Vorzustand
-           lesen, ``merge_bypass`` rechnen und ins Aggregat upserten.
-        5. Je distinct verarbeiteter Ziel-IP (best-effort) ``dns_trust_sync`` awaiten, damit
-           die Umgehungs-Ziele in den Vertrauens-Bestand kommen (ADR 0043, E3). Nur wenn eine
-           Naht gesetzt ist; einmal je Ziel-IP (dedupliziert).
+        4. Je distinct Ziel-IP (best-effort) ``dns_trust_sync`` awaiten, damit die Ziele in
+           den Vertrauens-Bestand kommen (ADR 0043, E3). Laeuft VOR der Klassifikation, damit
+           eine frisch gesehene IP (z. B. ``8.8.8.8``) noch in DIESEM Tick eingeordnet ist.
+           Nur wenn eine Naht gesetzt ist; einmal je Ziel-IP (dedupliziert).
+        5. NUR fuer Umgehungen (``bypass_verdict(trust_lookup(dst_ip))`` == ``BYPASS``) einen
+           ``BypassDelta`` bilden, den Vorzustand lesen, ``merge_bypass`` rechnen und ins
+           Aggregat upserten. ``EXPECTED``/``UNCLASSIFIED`` sind KEIN Befund.
         6. Am ENDE IMMER die DETAIL-Retention (``delete_older_than(now - retention)``).
 
         Solange keine Aufzeichnung aktiv ist (``recording_id`` None), wird NICHT geschrieben
@@ -182,8 +208,8 @@ class DnsBypassRecorder:
             now = self._now()
             recording_id = self._recording_id
             if recording_id is not None:
-                expected_set = {ip.strip().lower() for ip in self._expected_servers_provider()}
-                # Distinct Ziel-IPs dieses Ticks -- fuer die einmalige Vertrauens-Erfassung (5).
+                # (1)+(3) ALLE Anfragen mappen + als DETAIL schreiben; distinct Ziele merken.
+                queries: list[RawDnsQuery] = []
                 seen_dst_ips: set[str] = set()
                 for raw in self._source.poll_queries():
                     query = RawDnsQuery(
@@ -192,6 +218,7 @@ class DnsBypassRecorder:
                         l4=raw["l4"],
                         qname=raw.get("qname", ""),
                     )
+                    queries.append(query)
                     seen_dst_ips.add(query.dst_ip)
                     # DETAIL speichert ALLE Anfragen (auch erwartete).
                     self._detail.save(
@@ -202,22 +229,27 @@ class DnsBypassRecorder:
                         query.l4,
                         query.qname,
                     )
-                    # AGGREGAT nur fuer Umgehungen: Merge-Upsert je (src_ip, dst_ip).
-                    if is_bypass(query, expected_set):
-                        delta = BypassDelta(
-                            src_ip=query.src_ip,
-                            dst_ip=query.dst_ip,
-                            qname=query.qname,
-                            count=1,
-                        )
-                        existing = self._aggregate.get(recording_id, query.src_ip, query.dst_ip)
-                        merged = merge_bypass(existing, delta, now)
-                        self._aggregate.upsert(recording_id, merged)
-                # (5) Umgehungs-Ziele in den Vertrauens-Bestand aufnehmen (best-effort, je Ziel
-                # einmal). Liegt INNERHALB des try -- ein Fehler wird unten geschluckt.
+                # (4) Ziele in den Vertrauens-Bestand aufnehmen (best-effort, je Ziel einmal)
+                # -- VOR der Klassifikation, damit ``trust_lookup`` sie unten schon kennt.
+                # JEDER Aufruf ist einzeln gekapselt (``suppress``): eine werfende Erfassung
+                # darf die nachfolgende Klassifikation/Aggregation NICHT verhindern.
                 if self._dns_trust_sync is not None:
                     for dst_ip in seen_dst_ips:
-                        await self._dns_trust_sync(dst_ip)
+                        with suppress(Exception):
+                            await self._dns_trust_sync(dst_ip)
+                # (5) AGGREGAT nur fuer Umgehungen: Drei-Zustands-Urteil je Ziel (E4).
+                for query in queries:
+                    if self._verdict(query.dst_ip) is not BypassVerdict.BYPASS:
+                        continue
+                    delta = BypassDelta(
+                        src_ip=query.src_ip,
+                        dst_ip=query.dst_ip,
+                        qname=query.qname,
+                        count=1,
+                    )
+                    existing = self._aggregate.get(recording_id, query.src_ip, query.dst_ip)
+                    merged = merge_bypass(existing, delta, now)
+                    self._aggregate.upsert(recording_id, merged)
             # IMMER zum Schluss (egal ob aktiv oder nicht): DETAIL-Retention. So verfaellt
             # roher Detail-Verlauf zuverlaessig nach ``retention_max_age_s``, auch ueber
             # mehrere Aufzeichnungen / Neustarts hinweg (Muster outbound-Recorder).
@@ -226,6 +258,20 @@ class DnsBypassRecorder:
         except Exception as exc:
             # Best-effort: ein Tick-Fehler darf den Loop nie killen.
             _logger.warning("dns_bypass_recorder_tick_failed", error=str(exc))
+
+    def _verdict(self, dst_ip: str) -> BypassVerdict:
+        """Drei-Zustands-Urteil je Ziel-IP (ADR 0043, E4) ueber die injizierte Trust-Naht.
+
+        Liest ``(Kategorie, Trust-Zustand)`` synchron aus dem Bestand und faellt sie ueber
+        die reine ``bypass_verdict`` zusammen. Eine (noch) unbekannte IP (``trust_lookup``
+        liefert ``None``) gilt als ``UNCLASSIFIED`` -- KEIN Fehlalarm, sie wird durch die
+        vorgelagerte Vertrauens-Erfassung erst eingeordnet.
+        """
+        record = self._trust_lookup(dst_ip)
+        if record is None:
+            return BypassVerdict.UNCLASSIFIED
+        category, trust_state = record
+        return bypass_verdict(category, trust_state)
 
     def stop(self) -> None:
         """Beendet die Aufzeichnung: ``aktiv=False``, aktive Aufzeichnung loesen, Quelle stoppen."""

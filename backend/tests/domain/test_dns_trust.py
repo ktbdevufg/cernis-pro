@@ -1,9 +1,10 @@
 """Tests der reinen DNS-Vertrauens-Domaene (``domain/dns_trust``).
 
-Deckt die drei reinen Funktionen (``categorize_dns_server`` in ALLEN Prioritaets-
+Deckt die reinen Funktionen (``categorize_dns_server`` in ALLEN Prioritaets-
 Kombinationen, ``is_private_ip`` fuer RFC1918 v4+v6 / oeffentlich / ungueltig,
-``default_trust_for``) und die drei Uebergangs-Funktionen (``trust``/``reject``/
-``reset``) voll ab. Reine Funktionen -- kein I/O, keine Fakes noetig.
+``default_trust_for``, ``bypass_verdict`` in ALLEN (Kategorie, Trust)-Kombinationen)
+und die drei Uebergangs-Funktionen (``trust``/``reject``/``reset``) voll ab. Reine
+Funktionen -- kein I/O, keine Fakes noetig.
 """
 
 from dataclasses import FrozenInstanceError
@@ -11,9 +12,11 @@ from dataclasses import FrozenInstanceError
 import pytest
 
 from domain.dns_trust import (
+    BypassVerdict,
     DnsServerCategory,
     DnsTrustState,
     TrustedDnsServer,
+    bypass_verdict,
     categorize_dns_server,
     default_trust_for,
     is_private_ip,
@@ -88,14 +91,36 @@ def test_is_private_ip_ignoriert_whitespace() -> None:
 
 
 def test_categorize_threat_hat_hoechste_prioritaet() -> None:
-    """THREAT_LISTED schlaegt ALLE anderen Flags (hoechste Prioritaet)."""
+    """THREAT_LISTED schlaegt bei OEFFENTLICHER IP alle anderen Flags (hoechste Prioritaet)."""
     cat = categorize_dns_server(
-        "192.168.0.1",
+        "93.184.216.34",  # oeffentlich -- Threat greift nur hier
         is_gateway=True,
         is_public_resolver=True,
         is_threat_listed=True,
     )
     assert cat is DnsServerCategory.THREAT_LISTED
+
+
+def test_categorize_threat_bei_privater_ip_ignoriert_gateway() -> None:
+    """Threat-Treffer auf private IP ist Bogon-FP -> verworfen; Gateway greift weiter."""
+    cat = categorize_dns_server(
+        "172.18.0.1",  # privates Gateway, faelschlich threat-gelistet (FireHOL Bogon)
+        is_gateway=True,
+        is_public_resolver=False,
+        is_threat_listed=True,
+    )
+    assert cat is DnsServerCategory.GATEWAY
+
+
+def test_categorize_threat_bei_privater_ip_faellt_auf_local_private() -> None:
+    """Private IP + threat, ohne Gateway/public -> LOCAL_PRIVATE (Bogon-FP verworfen)."""
+    cat = categorize_dns_server(
+        "172.18.0.156",  # privater Pi-hole, faelschlich threat-gelistet
+        is_gateway=False,
+        is_public_resolver=False,
+        is_threat_listed=True,
+    )
+    assert cat is DnsServerCategory.LOCAL_PRIVATE
 
 
 def test_categorize_gateway_schlaegt_public_und_private() -> None:
@@ -184,6 +209,47 @@ def test_default_trust_gateway_ist_trusted() -> None:
 def test_default_trust_nicht_gateway_ist_neutral(category: DnsServerCategory) -> None:
     """Alle Nicht-Gateway-Kategorien starten NEUTRAL (Nutzer-Entscheidung noetig)."""
     assert default_trust_for(category) is DnsTrustState.NEUTRAL
+
+
+# ── bypass_verdict (Drei-Zustands-Urteil, ADR 0043 E4) ────────────────────────
+
+
+@pytest.mark.parametrize("category", list(DnsServerCategory))
+def test_bypass_verdict_trusted_immer_expected(category: DnsServerCategory) -> None:
+    """TRUSTED -> EXPECTED, unabhaengig von der Kategorie (bewusste Nutzer-/Auto-Wertung)."""
+    assert bypass_verdict(category, DnsTrustState.TRUSTED) is BypassVerdict.EXPECTED
+
+
+@pytest.mark.parametrize("category", list(DnsServerCategory))
+def test_bypass_verdict_rejected_immer_bypass(category: DnsServerCategory) -> None:
+    """REJECTED -> BYPASS, unabhaengig von der Kategorie (abgelehnt ist Umgehung)."""
+    assert bypass_verdict(category, DnsTrustState.REJECTED) is BypassVerdict.BYPASS
+
+
+@pytest.mark.parametrize(
+    "category",
+    [DnsServerCategory.PUBLIC_RESOLVER, DnsServerCategory.THREAT_LISTED],
+)
+def test_bypass_verdict_neutral_public_oder_threat_ist_bypass(
+    category: DnsServerCategory,
+) -> None:
+    """NEUTRAL + public_resolver/threat_listed -> BYPASS (definitionsgemaess, ohne Aktion)."""
+    assert bypass_verdict(category, DnsTrustState.NEUTRAL) is BypassVerdict.BYPASS
+
+
+@pytest.mark.parametrize(
+    "category",
+    [
+        DnsServerCategory.GATEWAY,
+        DnsServerCategory.LOCAL_PRIVATE,
+        DnsServerCategory.UNKNOWN,
+    ],
+)
+def test_bypass_verdict_neutral_lokal_gateway_unknown_ist_unclassified(
+    category: DnsServerCategory,
+) -> None:
+    """NEUTRAL + gateway/local_private/unknown -> UNCLASSIFIED (kein Fehlalarm)."""
+    assert bypass_verdict(category, DnsTrustState.NEUTRAL) is BypassVerdict.UNCLASSIFIED
 
 
 # ── Uebergangs-Funktionen (trust / reject / reset) ────────────────────────────

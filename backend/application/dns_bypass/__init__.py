@@ -16,6 +16,7 @@ spaeter im Composition Root (Regel 5).
 from application.dns_bypass.recorder import (
     DnsBypassRecorder,
     DnsQuerySource,
+    DnsServerTrustLookup,
 )
 from application.dns_bypass.use_cases import (
     BuildDnsBypass,
@@ -42,6 +43,7 @@ __all__ = [
     "DnsBypassReport",
     "DnsQueryProvider",
     "DnsQuerySource",
+    "DnsServerTrustLookup",
     "ExpectedServersProvider",
     "GetDnsBypassReport",
     "RawDnsQuery",

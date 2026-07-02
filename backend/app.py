@@ -565,6 +565,7 @@ from domain.blocklist import (
 )
 from domain.devices import Device, DeviceSource, normalize_mac
 from domain.dns_bypass import AggregatedBypass
+from domain.dns_trust import DnsServerCategory, DnsTrustState
 from domain.dns_watch import doh_providers_or_default, expected_servers_or_default
 from domain.export import (
     ExportableAnalysis,
@@ -4209,15 +4210,32 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         return SqliteDnsBypassAggregateRepository(get_db_path())
 
     def _dns_bypass_expected_servers() -> list[str]:
-        # SYNCHRONE erwartete-Menge fuer den Recorder-Tick (Klassifikation beim Schreiben):
-        # nur die editierbare Liste (DIESELBE Settings-Naht wie _dns_watch, EINE Quelle der
-        # Wahrheit). BEWUSSTE Wahl (dokumentiert): der Gateway-Default (_topology_gateway)
-        # bleibt HIER aussen vor -- er kommt heute nur aus einem AWAIT, der Recorder-Tick ist
-        # aber synchron und darf keinen Event-Loop treiben. Die "oder-Gateway"-Anreicherung
-        # der Anzeige faellt weiter im (async) View-Runner. Folge: eine reine Gateway-Anfrage
-        # (ohne editierte Liste) wird beim Schreiben als Umgehung gewertet -- die volle
-        # gateway-bewusste Menge zieht die Berichts-Etappe (5) nach.
-        return _dns_watch_read_list(DNS_EXPECTED_SERVERS_KEY)
+        # SYNCHRONE erwartete-Menge fuer den Recorder-Tick (Klassifikation beim Schreiben) --
+        # DAS VERTRAUENSMODELL (ADR 0043, E4): die Menge der als TRUSTED kuratierten DNS-Server
+        # (TrustedDnsServerIps). Damit ist das Gateway automatisch erwartet (beim Bootstrap
+        # TRUSTED) und ein lokaler Resolver (Pi-hole) nach Nutzer-Bestaetigung ebenfalls --
+        # alles andere bleibt Umgehung. Der frueher dokumentierte "Gateway fehlt im sync-
+        # Recorder"-Kompromiss ENTFAELLT, weil das Gateway beim Bootstrap TRUSTED wird und damit
+        # synchron in der Menge steht. Die Menge wird bei JEDEM Tick FRISCH gelesen (das
+        # Callable fragt jedes Mal repo.list_all() ab, kein eingefrorenes Set): eine
+        # nachtraegliche Vertrauens-Aenderung (Nutzer bestaetigt einen Resolver) greift beim
+        # naechsten Tick/View ohne Neustart. TrustedDnsServerIps wird HIER lazy erzeugt (die
+        # lru_cache-Factory dns_trust_repository ist zur Laufzeit gebunden, auch wenn sie im
+        # Quelltext weiter unten steht).
+        return list(TrustedDnsServerIps(dns_trust_repository())())
+
+    def _dns_bypass_trust_lookup(ip: str) -> tuple[DnsServerCategory, DnsTrustState] | None:
+        # SYNCHRONE (Kategorie, Trust-Zustand)-Naht fuer die Recorder-Tick-Klassifikation
+        # (ADR 0043, E4): liest je Ziel-IP den Vertrauens-Record frisch aus dem Bestand.
+        # Unbekannte IP -> None (der Recorder wertet das als UNCLASSIFIED = kein Fehlalarm;
+        # die vorgelagerte dns_trust_sync-Erfassung ordnet sie erst ein). Bei JEDEM Tick
+        # frisch gelesen -> eine nachtraegliche Trust-Aenderung wirkt ohne Neustart. Das
+        # dns_trust_repository() steht im Quelltext weiter unten, ist zur Laufzeit aber
+        # gebunden (Closure).
+        record = dns_trust_repository().get(ip)
+        if record is None:
+            return None
+        return (record.category, record.trust_state)
 
     @lru_cache(maxsize=1)
     def dns_bypass_recorder() -> DnsBypassRecorder:
@@ -4233,7 +4251,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             recordings=dns_bypass_recording_repository(),
             detail=dns_bypass_detail_repository(),
             aggregate=dns_bypass_aggregate_repository(),
-            expected_servers_provider=_dns_bypass_expected_servers,
+            # ADR 0043, E4: die Umgehungs-Klassifikation ist KEINE flache IP-Menge mehr,
+            # sondern das Drei-Zustands-Urteil bypass_verdict(Kategorie, Trust-Zustand) je
+            # Ziel-IP -- ueber diese synchron lesende Naht in den Vertrauens-Bestand.
+            trust_lookup=_dns_bypass_trust_lookup,
             # DNS-Vertrauensmodell (ADR 0043, E3): je Umgehungs-Ziel best-effort in den
             # Vertrauens-Bestand aufnehmen -- ein Schreibpfad, der nur bei aktiver Aufzeichnung
             # laeuft (passt; kein Schreiben bei reinen Lesezugriffen). Die Naht ist lazy (das
@@ -4255,15 +4276,13 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             dns_bypass_aggregate_repository(),
         )(until=time.time())
 
-        # (2) Erwartete-Resolver-Menge NUR fuer die Anzeige ueber DIESELBE Naht wie
-        # _dns_watch (EINE Quelle der Wahrheit): die editierbare Liste PLUS der
-        # Gateway-Default des primaeren Interface (hier async erlaubt, anders als im
-        # Recorder-Tick). Ist eine Aufzeichnung vorhanden, gilt aber ihr eingefrorener
-        # expected_servers-Beleg als Wahrheit (gegen den beim Schreiben klassifiziert wurde).
-        gateway = await _topology_gateway()
-        display_expected = expected_servers_or_default(
-            _dns_watch_read_list(DNS_EXPECTED_SERVERS_KEY), gateway
-        )
+        # (2) Erwartete-Resolver-Menge NUR fuer die Anzeige ueber DIESELBE Quelle wie der
+        # Recorder (ADR 0043, E4 -- EINE Wahrheit): die Menge der als TRUSTED kuratierten
+        # DNS-Server (TrustedDnsServerIps, FRISCH gelesen). Der angezeigte "Erwartete
+        # DNS-Server"-Beleg zeigt dann die TRUSTED-IPs. Ist eine Aufzeichnung vorhanden, gilt
+        # aber ihr eingefrorener expected_servers-Beleg als Wahrheit (gegen den beim Schreiben
+        # klassifiziert wurde) -- ehrliche Historie, nicht nachtraeglich umgedeutet.
+        display_expected = _dns_bypass_expected_servers()
         expected_servers = (
             list(report.recording.expected_servers)
             if report.recording is not None
@@ -5757,7 +5776,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     # _dns_bypass_doh_lookup) faellt HIER -- DIESELBEN Nahtstellen wie im Live-View
     # _dns_bypass_view. expected_servers als Beleg: bei "single" die eingefrorene Menge der
     # Aufzeichnung (gegen die beim Schreiben klassifiziert wurde), bei "all" die AKTUELL
-    # erwartete Menge (editierte Liste + Gateway-Default, wie im Live-View) -- dokumentierte,
+    # erwartete Menge = TRUSTED-Menge (ADR 0043, E4, wie im Live-View) -- dokumentierte,
     # ehrliche Wahl.
 
     # Recordings-Runner fuers Dropdown: die Aufzeichnungs-Definitionen auf die schlanke
@@ -5769,8 +5788,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         ]
 
     async def _build_dns_bypass_report_data(recording_id: str | None) -> DnsBypassReport:
-        # ASYNC, weil bei "all" die aktuell erwartete Menge ueber _topology_gateway (async)
-        # angereichert wird -- DIESELBE Naht wie im Live-View _dns_bypass_view.
+        # ASYNC, weil die Anreicherung (Resolver-Namen ueber PTR, is_doh) unten await braucht
+        # -- DIESELBE Naht wie im Live-View _dns_bypass_view. Die aktuell erwartete Menge bei
+        # "all" kommt jetzt SYNCHRON aus der TRUSTED-Menge (ADR 0043, E4).
         import time
 
         recordings_repo = dns_bypass_recording_repository()
@@ -5793,8 +5813,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             # Anzeige -> recording_label hier bewusst leer, recording_scope = "all". Je
             # (src_ip, dst_ip) ueber alle Laeufe mergen: query_count summieren, first_seen min,
             # last_seen max, sample_qnames distinct bis Deckel. queries_total = Summe der
-            # DETAIL-Zeilen aller Laeufe. expected_servers = AKTUELL erwartete Menge (editierte
-            # Liste + Gateway-Default, wie der Live-View sie fuer die Anzeige bildet).
+            # DETAIL-Zeilen aller Laeufe. expected_servers = AKTUELL erwartete Menge =
+            # TRUSTED-Menge (ADR 0043, E4, wie der Live-View sie fuer die Anzeige bildet).
             recording_label = ""
             recording_scope = "all"
             gemergt: dict[tuple[str, str], AggregatedBypass] = {}
@@ -5821,10 +5841,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                         sample_qnames=tuple(zusammen),
                     )
             aggregates = list(gemergt.values())
-            gateway = await _topology_gateway()
-            expected_servers = tuple(
-                expected_servers_or_default(_dns_watch_read_list(DNS_EXPECTED_SERVERS_KEY), gateway)
-            )
+            # expected_servers = AKTUELL erwartete Menge = TRUSTED-Menge (ADR 0043, E4 --
+            # DIESELBE Quelle wie Recorder/Live-View, FRISCH gelesen), NICHT mehr die alte
+            # expected_servers_or_default-Bildung.
+            expected_servers = tuple(_dns_bypass_expected_servers())
 
         # (2) Anreicherung (Regel 5, faellt NUR hier): Geraete-Namens-Map einmal, DoH-Bewertung
         # je Aggregat ueber die eigene Lookup-Naht (Ziel-IP + best-effort erstes sample_qname) --

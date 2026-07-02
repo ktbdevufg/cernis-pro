@@ -18,6 +18,10 @@ direkt. Belegt:
 * T7 ``stop()`` -> nicht mehr aktiv, recording_id geloest, ``source.stop()`` gerufen.
 * T8 die optionale ``dns_trust_sync``-Naht (ADR 0043, E3): je distinct Ziel-IP EINMAL
   awaited (nur bei aktiver Aufzeichnung); eine werfende Naht killt den Tick nicht.
+* T9 die Drei-Zustands-Klassifikation (ADR 0043, E4) ueber die ``trust_lookup``-Naht:
+  TRUSTED -> erwartet (kein Aggregat), REJECTED sowie NEUTRAL+public/threat -> Umgehung
+  (Aggregat), NEUTRAL+local/unknown sowie eine unbekannte IP -> "noch nicht eingeordnet"
+  (KEIN Aggregat, kein Fehlalarm).
 """
 
 import asyncio
@@ -26,6 +30,7 @@ from typing import Any
 
 from application.dns_bypass import DnsBypassRecorder
 from domain.dns_bypass import AggregatedBypass
+from domain.dns_trust import DnsServerCategory, DnsTrustState
 
 
 class _FakeDnsQuerySource:
@@ -168,15 +173,28 @@ class _FakeRecordingRepo:
         self.store = {}
 
 
+# Kurz-Aliase fuer die Trust-Records im Test (ADR 0043, E4). Ein ``trust_map`` bildet je
+# Ziel-IP das Paar ``(Kategorie, Trust-Zustand)`` ab, das die injizierte ``trust_lookup``-
+# Naht liefert; eine NICHT gelistete IP -> ``None`` (Recorder wertet das als UNCLASSIFIED).
+_TRUSTED_GATEWAY = (DnsServerCategory.GATEWAY, DnsTrustState.TRUSTED)
+_PUBLIC_NEUTRAL = (DnsServerCategory.PUBLIC_RESOLVER, DnsTrustState.NEUTRAL)
+_LOCAL_NEUTRAL = (DnsServerCategory.LOCAL_PRIVATE, DnsTrustState.NEUTRAL)
+
+
 def _make_recorder(
     source: _FakeDnsQuerySource,
     *,
-    expected: list[str] | None = None,
+    trust_map: dict[str, tuple[DnsServerCategory, DnsTrustState]] | None = None,
     now: float = 1000.0,
     retention_max_age_s: int = 86400,
     dns_trust_sync: Callable[[str], Awaitable[None]] | None = None,
 ) -> tuple[DnsBypassRecorder, _FakeDetailRepo, _FakeAggregateRepo]:
-    """Verdrahtet den Recorder mit den drei Fakes; fixe Uhr fuer deterministische ts."""
+    """Verdrahtet den Recorder mit den drei Fakes; fixe Uhr fuer deterministische ts.
+
+    ``trust_map`` speist die synchrone ``trust_lookup``-Naht (E4): je Ziel-IP das Paar
+    ``(Kategorie, Trust-Zustand)``; eine unbekannte IP -> ``None`` (UNCLASSIFIED).
+    """
+    records = dict(trust_map or {})
     detail = _FakeDetailRepo()
     aggregate = _FakeAggregateRepo()
     recordings = _FakeRecordingRepo()
@@ -185,7 +203,7 @@ def _make_recorder(
         recordings=recordings,
         detail=detail,
         aggregate=aggregate,
-        expected_servers_provider=lambda: list(expected or []),
+        trust_lookup=lambda ip: records.get(ip),
         retention_max_age_s=retention_max_age_s,
         now_provider=lambda: now,
         dns_trust_sync=dns_trust_sync,
@@ -211,14 +229,19 @@ def test_start_ok_tick_schreibt_detail_alle_und_aggregat_nur_umgehungen() -> Non
     source = _FakeDnsQuerySource(
         batches=[
             [
-                # erwartet (Ziel in erwarteter Menge) -> Detail ja, Aggregat nein
+                # erwartet (Gateway TRUSTED -> EXPECTED) -> Detail ja, Aggregat nein
                 {"src_ip": "10.0.0.5", "dst_ip": "192.168.0.1", "l4": "udp", "qname": "ok.example"},
-                # Umgehung -> Detail ja, Aggregat ja; fehlendes qname -> ""
+                # Umgehung (public resolver NEUTRAL -> BYPASS) -> Detail ja, Aggregat ja;
+                # fehlendes qname -> ""
                 {"src_ip": "10.0.0.6", "dst_ip": "8.8.8.8", "l4": "tcp"},
             ]
         ]
     )
-    recorder, detail, aggregate = _make_recorder(source, expected=["192.168.0.1"], now=1000.0)
+    recorder, detail, aggregate = _make_recorder(
+        source,
+        trust_map={"192.168.0.1": _TRUSTED_GATEWAY, "8.8.8.8": _PUBLIC_NEUTRAL},
+        now=1000.0,
+    )
 
     assert recorder.start("eth0", "rec-1") is None
     assert recorder.is_active() is True
@@ -252,7 +275,9 @@ def test_mehrere_ticks_verdichten_umgehung_per_merge_upsert() -> None:
             [{"src_ip": "10.0.0.6", "dst_ip": "8.8.8.8", "l4": "udp", "qname": "b.example"}],
         ]
     )
-    recorder, _detail, aggregate = _make_recorder(source, expected=[], now=2000.0)
+    recorder, _detail, aggregate = _make_recorder(
+        source, trust_map={"8.8.8.8": _PUBLIC_NEUTRAL}, now=2000.0
+    )
     recorder.start(None, "rec-1")
 
     asyncio.run(recorder.tick())
@@ -271,7 +296,7 @@ def test_tick_ohne_aktive_aufzeichnung_schreibt_nichts_aber_retention_laeuft() -
     source = _FakeDnsQuerySource(
         batches=[[{"src_ip": "10.0.0.6", "dst_ip": "8.8.8.8", "l4": "udp", "qname": "x"}]]
     )
-    recorder, detail, aggregate = _make_recorder(source, expected=[])
+    recorder, detail, aggregate = _make_recorder(source)
 
     asyncio.run(recorder.tick())
 
@@ -336,7 +361,9 @@ def test_tick_erfasst_ziel_ips_ueber_dns_trust_sync_einmal_je_ziel() -> None:
     async def _sync(ip: str) -> None:
         synced.append(ip)
 
-    recorder, _detail, _agg = _make_recorder(source, expected=["192.168.0.1"], dns_trust_sync=_sync)
+    recorder, _detail, _agg = _make_recorder(
+        source, trust_map={"192.168.0.1": _TRUSTED_GATEWAY}, dns_trust_sync=_sync
+    )
     recorder.start(None, "rec-1")
 
     asyncio.run(recorder.tick())
@@ -365,7 +392,7 @@ def test_tick_ohne_aktive_aufzeichnung_ruft_dns_trust_sync_nicht() -> None:
 
 def test_tick_werfendes_dns_trust_sync_killt_tick_nicht() -> None:
     # T8c: eine werfende dns_trust_sync-Naht -> kein Wurf; Detail/Aggregat sind trotzdem
-    # geschrieben (die Erfassung liegt am Ende der Schleifen-Arbeit, im best-effort-try).
+    # geschrieben (die Erfassung ist je Ziel einzeln gekapselt, VOR der Aggregation).
     source = _FakeDnsQuerySource(
         batches=[[{"src_ip": "10.0.0.6", "dst_ip": "8.8.8.8", "l4": "udp", "qname": "a"}]]
     )
@@ -373,11 +400,107 @@ def test_tick_werfendes_dns_trust_sync_killt_tick_nicht() -> None:
     async def _sync(ip: str) -> None:
         raise RuntimeError("Vertrauens-Erfassung kaputt")
 
-    recorder, detail, aggregate = _make_recorder(source, expected=[], dns_trust_sync=_sync)
+    recorder, detail, aggregate = _make_recorder(
+        source, trust_map={"8.8.8.8": _PUBLIC_NEUTRAL}, dns_trust_sync=_sync
+    )
     recorder.start(None, "rec-1")
 
     asyncio.run(recorder.tick())  # darf NICHT werfen
 
-    # Detail + Aggregat wurden vor der (werfenden) Erfassung geschrieben.
+    # Detail wurde geschrieben; die (werfende) Erfassung laeuft VOR der Aggregation, ist aber
+    # je Ziel einzeln gekapselt (suppress) -- danach wird die Umgehung trotzdem aggregiert.
     assert len(detail.saved) == 1
     assert len(aggregate.list_for("rec-1")) == 1
+
+
+def test_tick_drei_zustands_klassifikation_ueber_trust_lookup() -> None:
+    # T9a: die E4-Klassifikation je Ziel ueber die trust_lookup-Naht. In EINEM Tick fuenf
+    # Ziele mit verschiedenen (Kategorie, Trust)-Records -- NUR die echten Umgehungen
+    # (REJECTED, NEUTRAL+public) landen im Aggregat; TRUSTED/NEUTRAL-lokal/unbekannt nicht.
+    source = _FakeDnsQuerySource(
+        batches=[
+            [
+                {"src_ip": "10.0.0.1", "dst_ip": "192.168.0.1", "l4": "udp", "qname": "gw"},
+                {"src_ip": "10.0.0.2", "dst_ip": "8.8.8.8", "l4": "udp", "qname": "pub"},
+                {"src_ip": "10.0.0.3", "dst_ip": "192.168.0.53", "l4": "udp", "qname": "pi"},
+                {"src_ip": "10.0.0.4", "dst_ip": "1.2.3.4", "l4": "udp", "qname": "rej"},
+                {"src_ip": "10.0.0.5", "dst_ip": "9.9.9.9", "l4": "udp", "qname": "unk"},
+            ]
+        ]
+    )
+    recorder, detail, aggregate = _make_recorder(
+        source,
+        trust_map={
+            "192.168.0.1": _TRUSTED_GATEWAY,  # TRUSTED -> EXPECTED (kein Aggregat)
+            "8.8.8.8": _PUBLIC_NEUTRAL,  # NEUTRAL+public -> BYPASS
+            "192.168.0.53": _LOCAL_NEUTRAL,  # NEUTRAL+lokal -> UNCLASSIFIED (kein Aggregat)
+            "1.2.3.4": (DnsServerCategory.UNKNOWN, DnsTrustState.REJECTED),  # REJECTED -> BYPASS
+            # 9.9.9.9 fehlt im Bestand -> None -> UNCLASSIFIED (kein Aggregat, kein Fehlalarm)
+        },
+        now=1000.0,
+    )
+    recorder.start(None, "rec-1")
+
+    asyncio.run(recorder.tick())
+
+    # DETAIL: ALLE fuenf Anfragen (unabhaengig vom Urteil).
+    assert len(detail.saved) == 5
+    # AGGREGAT: NUR die zwei echten Umgehungen (public NEUTRAL + REJECTED).
+    aggs = aggregate.list_for("rec-1")
+    assert {agg.dst_ip for agg in aggs} == {"8.8.8.8", "1.2.3.4"}
+
+
+def test_tick_threat_neutral_zaehlt_als_umgehung() -> None:
+    # T9b: ein Bedrohungslisten-Treffer ist auch im Zustand NEUTRAL definitionsgemaess eine
+    # Umgehung (ohne Nutzer-Ablehnung).
+    source = _FakeDnsQuerySource(
+        batches=[[{"src_ip": "10.0.0.9", "dst_ip": "6.6.6.6", "l4": "udp", "qname": "bad"}]]
+    )
+    recorder, _detail, aggregate = _make_recorder(
+        source,
+        trust_map={"6.6.6.6": (DnsServerCategory.THREAT_LISTED, DnsTrustState.NEUTRAL)},
+        now=1000.0,
+    )
+    recorder.start(None, "rec-1")
+
+    asyncio.run(recorder.tick())
+
+    aggs = aggregate.list_for("rec-1")
+    assert len(aggs) == 1
+    assert aggs[0].dst_ip == "6.6.6.6"
+
+
+def test_tick_nachtraegliche_trust_aenderung_wirkt_ohne_neustart() -> None:
+    # T9c: dieselbe IP, zwei ticks -- erst NEUTRAL+lokal (UNCLASSIFIED, kein Aggregat), dann
+    # nach REJECT (im Bestand geaendert) eine Umgehung. Die trust_lookup-Naht wird bei JEDEM
+    # Tick frisch gelesen -> die Aenderung wirkt ohne Neustart.
+    source = _FakeDnsQuerySource(
+        batches=[
+            [{"src_ip": "10.0.0.3", "dst_ip": "192.168.0.53", "l4": "udp", "qname": "a"}],
+            [{"src_ip": "10.0.0.3", "dst_ip": "192.168.0.53", "l4": "udp", "qname": "b"}],
+        ]
+    )
+    # Veraenderbarer Record-Store, den die trust_lookup-Naht bei jedem Tick frisch liest.
+    records: dict[str, tuple[DnsServerCategory, DnsTrustState]] = {"192.168.0.53": _LOCAL_NEUTRAL}
+    detail = _FakeDetailRepo()
+    aggregate = _FakeAggregateRepo()
+    recorder = DnsBypassRecorder(
+        source=source,
+        recordings=_FakeRecordingRepo(),
+        detail=detail,
+        aggregate=aggregate,
+        trust_lookup=lambda ip: records.get(ip),
+        now_provider=lambda: 1000.0,
+    )
+    recorder.start(None, "rec-1")
+
+    asyncio.run(recorder.tick())  # noch NEUTRAL+lokal -> UNCLASSIFIED
+    assert aggregate.list_for("rec-1") == []
+
+    # Nutzer lehnt den Server nachtraeglich ab -> beim naechsten Tick eine Umgehung.
+    records["192.168.0.53"] = (DnsServerCategory.LOCAL_PRIVATE, DnsTrustState.REJECTED)
+
+    asyncio.run(recorder.tick())  # jetzt REJECTED -> BYPASS
+    aggs = aggregate.list_for("rec-1")
+    assert len(aggs) == 1
+    assert aggs[0].dst_ip == "192.168.0.53"

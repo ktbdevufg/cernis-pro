@@ -13,10 +13,13 @@ so nutzen. Reine Domaene -- nur stdlib.
 """
 
 import ipaddress
+from enum import StrEnum
 
 from domain.dns_trust.models import DnsServerCategory, DnsTrustState
 
 __all__ = [
+    "BypassVerdict",
+    "bypass_verdict",
     "categorize_dns_server",
     "default_trust_for",
     "is_private_ip",
@@ -51,8 +54,13 @@ def categorize_dns_server(
     ECHTEN Lookups (Topologie, DoH-Liste, THREAT-Blocklist) faellt spaeter der
     Composition Root, NICHT hier (Regel 5). Nur ``is_private`` wird hier direkt
     geprueft (reine Fachlogik ohne I/O).
+
+    THREAT_LISTED gilt nur fuer oeffentliche IPs; ein Threat-Treffer auf eine
+    private (RFC1918) Adresse ist ein Bogon-False-Positive und wird verworfen --
+    dann greift die normale Prioritaet weiter (Gateway > public > local_private
+    > unknown).
     """
-    if is_threat_listed:
+    if is_threat_listed and not is_private_ip(ip):
         return DnsServerCategory.THREAT_LISTED
     if is_gateway:
         return DnsServerCategory.GATEWAY
@@ -74,3 +82,57 @@ def default_trust_for(category: DnsServerCategory) -> DnsTrustState:
     if category is DnsServerCategory.GATEWAY:
         return DnsTrustState.TRUSTED
     return DnsTrustState.NEUTRAL
+
+
+class BypassVerdict(StrEnum):
+    """Drei-Zustands-Urteil des netzweiten Umgehungs-Waechters je Ziel-Server (ADR 0043, E4).
+
+    Der netzweite Waechter kennt kuenftig DREI Zustaende, nicht zwei -- das trennt
+    "noch nicht eingeordnet" sauber von "Umgehung":
+
+    * ``EXPECTED``: erwartet, KEIN Befund (der Server ist vertraut).
+    * ``BYPASS``: Umgehungs-Befund (abgelehnt ODER per Kategorie definitionsgemaess
+      eine Umgehung).
+    * ``UNCLASSIFIED``: noch nicht eingeordnet -- KEIN Befund, aber auch nicht erwartet
+      (z. B. der eigene Pi-hole/VPN-Resolver vor der Nutzer-Bestaetigung). Wird NICHT
+      als Umgehung gezaehlt (kein Fehlalarm), sondern als "bitte bestaetigen" gefuehrt.
+    """
+
+    EXPECTED = "expected"
+    BYPASS = "bypass"
+    UNCLASSIFIED = "unclassified"
+
+
+# Kategorien, die im Zustand NEUTRAL bereits DEFINITIONSGEMAESS eine Umgehung sind
+# (kein Umkehren der Richtung, Schutz bleibt opt-in): ein oeffentlicher Resolver und ein
+# Bedrohungslisten-Treffer sind per se eine Umgehung -- sie muessen nicht erst abgelehnt
+# werden. Alle uebrigen Kategorien (gateway/local_private/unknown) sind im Zustand NEUTRAL
+# lediglich "noch nicht eingeordnet".
+_BYPASS_WHEN_NEUTRAL = frozenset(
+    {DnsServerCategory.PUBLIC_RESOLVER, DnsServerCategory.THREAT_LISTED}
+)
+
+
+def bypass_verdict(category: DnsServerCategory, trust_state: DnsTrustState) -> BypassVerdict:
+    """Kombiniert Kategorie UND Trust-Zustand zum Drei-Zustands-Urteil (reine Funktion, E4).
+
+    Regeln (ADR 0043, E4):
+
+    1. ``TRUSTED`` -> ``EXPECTED`` (Gateway automatisch, plus bestaetigte Resolver).
+    2. ``REJECTED`` -> ``BYPASS``.
+    3. ``NEUTRAL`` UND Kategorie in {public_resolver, threat_listed} -> ``BYPASS``
+       (definitionsgemaess Umgehung, ohne Nutzer-Aktion -- z. B. ``8.8.8.8`` sofort).
+    4. ``NEUTRAL`` sonst (gateway/local_private/unknown) -> ``UNCLASSIFIED``
+       (der eigene Pi-hole/VPN-Resolver vor der Bestaetigung: kein Fehlalarm).
+
+    Rein, kein I/O, kein Zeit-Bezug -- die (Kategorie, Trust-Zustand)-Ermittlung je IP
+    faellt beim Aufrufer (Composition Root / injizierte Naht).
+    """
+    if trust_state is DnsTrustState.TRUSTED:
+        return BypassVerdict.EXPECTED
+    if trust_state is DnsTrustState.REJECTED:
+        return BypassVerdict.BYPASS
+    # ab hier NEUTRAL: nur public_resolver/threat_listed sind schon Umgehung.
+    if category in _BYPASS_WHEN_NEUTRAL:
+        return BypassVerdict.BYPASS
+    return BypassVerdict.UNCLASSIFIED

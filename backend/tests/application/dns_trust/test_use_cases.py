@@ -9,7 +9,9 @@ bestehenden application-Tests: kein echtes SQLite/Netz). Kern der Behauptungen:
     gepflegt, ``trust_state`` und ``first_seen`` bleiben (User-Wertung NIE ueberschreiben).
 (3) Die Kategorie-Ableitung folgt den Flags (gateway/public/threat) in fester Prioritaet.
 (4) ``SetDnsServerTrust`` bildet alle drei decisions korrekt ab; ein Unbekannter wirft.
-(5) ``TrustedDnsServerIps`` liefert genau die TRUSTED-IPs.
+(5) ``TrustedDnsServerIps`` liefert genau die TRUSTED-IPs (die als "erwartet" angezeigte
+    Beleg-Menge des netzweiten Waechters; die eigentliche Drei-Zustands-Klassifikation
+    testet ``domain.dns_trust.bypass_verdict`` bzw. der Recorder-Tick, ADR 0043, E4).
 (6) ``ListDnsTrustServers`` stellt je Server die Plausibilitaet bei (bzw. ``None``).
 
 Der einzige async Use-Case (``SyncDnsTrustServer``, wegen ``GatewayProvider``) wird ueber
@@ -146,9 +148,15 @@ def test_sync_neuanlage_stellt_display_name_aus_bestand_bei() -> None:
 
 def test_sync_kategorie_folgt_flags_prioritaet() -> None:
     repo = FakeRepo()
-    # threat schlaegt alles (auch gateway): categorize priorisiert THREAT_LISTED.
-    threat_server = asyncio.run(_sync(repo, gateway="10.0.0.1", threat=True)("10.0.0.1", now=1.0))
+    # threat schlaegt bei OEFFENTLICHER IP alles: categorize priorisiert THREAT_LISTED.
+    threat_server = asyncio.run(
+        _sync(repo, gateway="93.184.216.34", threat=True)("93.184.216.34", now=1.0)
+    )
     assert threat_server.category is DnsServerCategory.THREAT_LISTED
+
+    # threat auf PRIVATER IP ist Bogon-FP -> verworfen; hier greift GATEWAY weiter.
+    private_threat = asyncio.run(_sync(repo, gateway="10.0.0.1", threat=True)("10.0.0.1", now=1.0))
+    assert private_threat.category is DnsServerCategory.GATEWAY
 
     # private, nicht public/gateway/threat -> LOCAL_PRIVATE.
     local_server = asyncio.run(_sync(repo)("192.168.1.77", now=1.0))

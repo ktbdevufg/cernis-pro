@@ -12,6 +12,8 @@ nur stdlib (``ipaddress``/``dataclasses``/``enum``).
 """
 
 from domain.dns_trust.logic import (
+    BypassVerdict,
+    bypass_verdict,
     categorize_dns_server,
     default_trust_for,
     is_private_ip,
@@ -26,9 +28,11 @@ from domain.dns_trust.models import (
 )
 
 __all__ = [
+    "BypassVerdict",
     "DnsServerCategory",
     "DnsTrustState",
     "TrustedDnsServer",
+    "bypass_verdict",
     "categorize_dns_server",
     "default_trust_for",
     "is_private_ip",
