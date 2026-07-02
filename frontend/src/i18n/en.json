@@ -11,6 +11,9 @@
     "liveZurAnsicht": "Open logging view",
     "outboundRecOne": "Outbound recording running",
     "outboundRecZurAnsicht": "Go to outbound contacts",
+    "dnsRecOne": "DNS recording running",
+    "dnsRecZurAnsicht": "Go to DNS guard",
+    "dnsRecCount": "{{count}} queries",
     "outboundRecRest": {
       "tage": "{{value}} d",
       "stunden": "{{value}} h",

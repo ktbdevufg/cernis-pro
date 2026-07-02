@@ -101,6 +101,16 @@ export default function App() {
     setObserveFunktion("outbound");
   };
 
+  // Vom Kopfzeilen-DNS-Pill: zur netzweiten DNS-Waechter-Sicht springen. Wie
+  // goToOutbound Reiter auf "observe" und die dnswatch-Funktion vormerken
+  // (ObserveView oeffnet dann den DnsWatchScreen); offene Modi werden verlassen.
+  const goToDnsWatch = () => {
+    setSettingsOffen(false);
+    setHandbuchOffen(false);
+    setActiveTab("observe");
+    setObserveFunktion("dnswatch");
+  };
+
   // Aus einem "?"-Hilfe-Popup: das Handbuch öffnen und beim Öffnen zum Anker der
   // help_id springen. Einstellungen schließen (gegenseitiger Ausschluss), das
   // Handbuch öffnen und das Sprungziel vormerken (ManualView springt dann dort).
@@ -146,6 +156,7 @@ export default function App() {
         }}
         onGoToLogging={goToLogging}
         onGoToOutbound={goToOutbound}
+        onGoToDnsWatch={goToDnsWatch}
         onGoHome={() => {
           setSettingsOffen(false);
           setHandbuchOffen(false);

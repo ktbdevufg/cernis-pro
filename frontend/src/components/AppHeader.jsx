@@ -6,12 +6,13 @@
 import { BookOpen, Settings } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import DnsBypassRecordingPill from "./DnsBypassRecordingPill.jsx";
 import LivePill from "./LivePill.jsx";
 import OutboundRecordingPill from "./OutboundRecordingPill.jsx";
 import ThemeToggle from "./ThemeToggle.jsx";
 import "./AppHeader.css";
 
-export default function AppHeader({ theme, onThemeChange, onOpenSettings, onOpenManual, onGoToLogging, onGoToOutbound, onGoHome }) {
+export default function AppHeader({ theme, onThemeChange, onOpenSettings, onOpenManual, onGoToLogging, onGoToOutbound, onGoToDnsWatch, onGoHome }) {
   const { t } = useTranslation();
 
   return (
@@ -43,6 +44,7 @@ export default function AppHeader({ theme, onThemeChange, onOpenSettings, onOpen
       <div className="app-header__pills">
         <LivePill onOeffnen={onGoToLogging} />
         <OutboundRecordingPill onOeffnen={onGoToOutbound} />
+        <DnsBypassRecordingPill onOeffnen={onGoToDnsWatch} />
       </div>
 
       <div className="app-header__controls">

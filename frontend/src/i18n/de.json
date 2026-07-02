@@ -11,6 +11,9 @@
     "liveZurAnsicht": "Zur Logging-Ansicht",
     "outboundRecOne": "Außenkontakte-Aufzeichnung läuft",
     "outboundRecZurAnsicht": "Zur Außenkontakte-Ansicht",
+    "dnsRecOne": "DNS-Aufzeichnung läuft",
+    "dnsRecZurAnsicht": "Zur DNS-Wächter-Ansicht",
+    "dnsRecCount": "{{count}} Anfragen",
     "outboundRecRest": {
       "tage": "{{value}} Tg",
       "stunden": "{{value}} Std",
