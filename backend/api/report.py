@@ -1120,3 +1120,213 @@ async def get_dns_bypass_report_pdf(
             "Content-Disposition": f'attachment; filename="{result.filename}"'  # type: ignore[attr-defined]
         },
     )
+
+
+# ══ Verhaltensprofil-Bericht (Block 4, Etappe 2) ══════════════════════════════
+# Eigene schmale pydantic-``*Out``-Modelle, die die application-Sicht ``BehaviorReport``
+# (samt ``BehaviorReportEntry``/``BehaviorProfile``) spiegeln, OHNE diese Typen zu importieren
+# (Regel 4: api kennt application nicht). Der Composition-Root-Runner in ``app.py`` projiziert
+# die application-Sicht auf genau diese Form. Der Router-prefix ``/api/report`` ergibt
+# ``/api/report/behavior`` -- keine Kollision mit dem Live-Router ``/api/monitor/logging``.
+
+
+class BehaviorReportEntryOut(BaseModel):
+    """Verdichtete Kennzahlen EINER Aufgabe/eines Geraets fuers "alle Geraete"-Bild (Wire-Form).
+
+    ``label`` der Anzeigename, ``recorded_days`` die gezaehlten Aufzeichnungstage,
+    ``has_enough_data`` ob genug Daten vorliegen, ``deviation_count`` die Zahl der Abweichungen
+    in der Wochen-Heatmap. ``busiest_slot_start`` der ``slot_start`` des aktivsten Tagesband-Slots
+    (None wenn leer/alle 0), ``busiest_weekday`` der ``weekday`` der aktivsten Wochen-Heatmap-Zelle
+    (None wenn leer/alle 0). Reine Anzeige, alle Felder ROH durchgereicht.
+    """
+
+    label: str
+    recorded_days: int
+    has_enough_data: bool
+    deviation_count: int
+    busiest_slot_start: int | None = None
+    busiest_weekday: int | None = None
+
+
+class BehaviorDayBandSlotOut(BaseModel):
+    """Ein Slot des gemittelten Tagesbandes (Wire-Form, spiegelt ``_behavior_profile_to_dict``).
+
+    ``slot_start`` die untere Bucket-Grenze des Tageszeit-Slots, ``activity_count`` die Zahl der
+    aktiven Messpunkte in diesem Slot ueber alle Wochentage, ``is_deviation`` ob der Slot fuer das
+    Tagesband untypisch aktiv ist. Reine Anzeige.
+    """
+
+    slot_start: int
+    activity_count: int
+    is_deviation: bool
+
+
+class BehaviorWeekSlotOut(BaseModel):
+    """Eine Zelle der Wochen-Heatmap (Wire-Form, spiegelt ``_behavior_profile_to_dict``).
+
+    ``weekday`` (0..6, Mo=0), ``slot_start`` die untere Bucket-Grenze des Tageszeit-Slots,
+    ``activity_count`` die Zahl der aktiven Messpunkte in dieser Zelle, ``is_deviation`` ob die
+    Zelle fuer ihren Wochentag untypisch aktiv ist. Reine Anzeige.
+    """
+
+    weekday: int
+    slot_start: int
+    activity_count: int
+    is_deviation: bool
+
+
+class BehaviorSingleProfileOut(BaseModel):
+    """Die Diagramm-Daten EINER Aufgabe (scope=single), Wire-Form des ``BehaviorProfile``.
+
+    Spiegelt GENAU die Struktur von ``_behavior_profile_to_dict`` (Quelle der Wahrheit fuers
+    Frontend-Mapping): ``recorded_days``/``has_enough_data``/``deviation_count`` die Kennzahlen,
+    ``day_band`` das gemittelte Tagesband, ``week_heatmap`` die Wochen-Heatmap. ``day_band``/
+    ``week_heatmap`` sind auch bei ``has_enough_data`` False befuellt -- ueber die Anzeige
+    entscheidet das Frontend.
+    """
+
+    recorded_days: int
+    has_enough_data: bool
+    deviation_count: int
+    day_band: list[BehaviorDayBandSlotOut]
+    week_heatmap: list[BehaviorWeekSlotOut]
+
+
+class BehaviorReportOut(BaseModel):
+    """Die Gesamtsicht des Verhaltensprofil-Berichts: Bezugsrahmen, Uebersicht ODER Einzel-Profil.
+
+    ``scope`` der rohe Bezugsrahmen-Schluessel ("single"/"all"), ``report_label`` der fertige
+    Anzeigename des Berichts (bei "single" der Aufgaben-Name, bei "all" die "Alle Geraete"-
+    Bezeichnung -- vom Composition-Root-Runner gesetzt). Bei scope="all" ist ``entries`` gefuellt
+    (ein Eintrag je Aufgabe mit Daten), ``single_profile``/``single_label`` sind None. Bei
+    scope="single" traegt ``single_profile`` die Diagramm-Daten und ``single_label`` den
+    Aufgaben-Namen, ``entries`` ist leer. KEIN 404-Fall: leerer Stand ist ein DATUM, kein
+    HTTP-Fehler.
+    """
+
+    scope: str
+    report_label: str
+    entries: list[BehaviorReportEntryOut]
+    single_profile: BehaviorSingleProfileOut | None = None
+    single_label: str | None = None
+
+
+class BehaviorReportTaskOut(BaseModel):
+    """Eine waehlbare Logging-Aufgabe fuers Berichts-Dropdown (schlanke Wire-Form).
+
+    ``id`` der technische Schluessel der Aufgabe (Query-Wert fuer ``task_id``), ``label`` der
+    Anzeigename (vom Root auf die id zurueckgefallen, falls leer). Bewusst ein EIGENER,
+    report-spezifischer schlanker Pfad (Muster ``DnsBypassReportRecordingOut``) -- das Frontend
+    fuellt damit das Dropdown, OHNE den vollen ``monitor/logging``-Router zu nutzen.
+    """
+
+    id: str
+    label: str
+
+
+# ── Verhaltensprofil-Bericht: injizierte Composition-Root-Runner ───────────────
+# Provider-Marker (Muster ``DnsBypassReportRunner``): in app.py per dependency_overrides mit den
+# echten Root-Runnern verdrahtet. Ohne Verdrahtung bewusst ein lauter Fehler (kein stiller
+# Fallback, S3).
+#
+# Der Bericht laeuft ueber EINE Aufgabe ODER alle: ``task_id`` ist ein optionaler Query-Parameter
+# (None bzw. leer = "alle Geraete zusammengefasst"; ein konkreter Wert = nur diese Aufgabe). Der
+# dritte Runner liefert die waehlbaren Aufgaben fuers Dropdown.
+
+
+class BehaviorReportRunner(Protocol):
+    """Schmaler Vertrag des injizierten Lese-Runners (liefert die fertige Verhaltens-Sicht)."""
+
+    async def __call__(self, task_id: str | None) -> BehaviorReportOut:
+        """Baut den Verhaltensprofil-Bericht (eine Aufgabe oder alle) Wire-fertig."""
+        ...
+
+
+def provide_behavior_report() -> BehaviorReportRunner:
+    raise NotImplementedError("BehaviorReportRunner wird in app.py verdrahtet")
+
+
+class BehaviorReportPdfRunner(Protocol):
+    """Schmaler Vertrag des injizierten PDF-Runners (liefert das fertige Download-Ergebnis)."""
+
+    async def __call__(self, task_id: str | None) -> object:
+        """Baut den Verhaltensprofil-Bericht als PDF und liefert content/media_type/filename."""
+        ...
+
+
+def provide_behavior_report_pdf() -> BehaviorReportPdfRunner:
+    raise NotImplementedError("BehaviorReportPdfRunner wird in app.py verdrahtet")
+
+
+class BehaviorReportTasksRunner(Protocol):
+    """Schmaler Vertrag des injizierten Tasks-Runners (liefert das Dropdown-Datum)."""
+
+    async def __call__(self) -> list[BehaviorReportTaskOut]:
+        """Liefert die waehlbaren Aufgaben als schlanke Wire-Form (leere Liste = Datum)."""
+        ...
+
+
+def provide_behavior_report_tasks() -> BehaviorReportTasksRunner:
+    raise NotImplementedError("BehaviorReportTasksRunner wird in app.py verdrahtet")
+
+
+# ── Verhaltensprofil-Bericht: Routen ───────────────────────────────────────────
+# Reihenfolge (Muster DNS-Umgehung): recordings/Aufgaben, dann behavior, dann pdf. Alle drei haben
+# feste, eindeutige Suffixe (kein Pfad-Parameter-Konflikt), die Reihenfolge ist daher unkritisch.
+
+
+@router.get("/behavior/recordings")
+async def get_behavior_report_recordings(
+    runner: Annotated[BehaviorReportTasksRunner, Depends(provide_behavior_report_tasks)],
+) -> list[BehaviorReportTaskOut]:
+    """Liefert die waehlbaren Logging-Aufgaben fuers Berichts-Dropdown (schlanke Wire-Form).
+
+    Der Pfad-Suffix ``recordings`` ist bewusst zum Muster (DNS-Umgehung/Aussenkontakte) gespiegelt;
+    der Wert ist die Aufgabenliste. KEIN 404-Fall: eine leere Liste ist ein DATUM (noch keine
+    Aufgaben), kein HTTP-Fehler. Die Projektion macht der injizierte Composition-Root-Runner
+    (Regel 4: api kennt application nicht).
+    """
+    return await runner()
+
+
+@router.get("/behavior")
+async def get_behavior_report(
+    runner: Annotated[BehaviorReportRunner, Depends(provide_behavior_report)],
+    task_id: str | None = None,
+) -> BehaviorReportOut:
+    """Liefert den aggregierten Verhaltensprofil-Bericht (EINE Aufgabe oder alle Geraete).
+
+    ``task_id`` ist optional: None bzw. leer = alle Geraete zusammengefasst (scope="all"), ein
+    konkreter Wert = nur diese Aufgabe (scope="single"). KEIN 404-Fall: leerer Stand ist ein DATUM
+    (leere Uebersicht bzw. leeres Profil), kein HTTP-Fehler. Die ganze Projektion macht der
+    injizierte Composition-Root-Runner (Regel 4: der api-Ring kennt application nicht).
+    """
+    return await runner(task_id)
+
+
+@router.get("/behavior/pdf")
+async def get_behavior_report_pdf(
+    runner: Annotated[BehaviorReportPdfRunner, Depends(provide_behavior_report_pdf)],
+    task_id: str | None = None,
+) -> Response:
+    """Liefert den Verhaltensprofil-Bericht als PDF-Download (Bytes, ``attachment``).
+
+    ``task_id`` ist optional (None/leer = alle Geraete, ein Wert = nur diese Aufgabe). Der
+    injizierte Composition-Root-Runner baut den Bericht, projiziert ihn auf das render-fertige
+    PDF-Modell und rendert das PDF; er liefert ein Objekt mit ``content`` (PDF-Bytes),
+    ``media_type`` (``application/pdf``) und ``filename``. Der Router verpackt es in eine
+    ``Response`` mit ``Content-Disposition: attachment; filename="..."``.
+
+    KEIN 404-Fall: leerer Stand ist ein gueltiges PDF, kein HTTP-Fehler -- analog
+    ``GET /api/report/behavior``.
+    """
+    result = await runner(task_id)
+    # result kommt aus dem Composition Root; per Attribut-Zugriff gelesen (kein Typ-Import im
+    # Router -- der api-Ring kennt nur die drei Attribute, Muster ``get_dns_bypass_report_pdf``).
+    return Response(
+        content=result.content,  # type: ignore[attr-defined]
+        media_type=result.media_type,  # type: ignore[attr-defined]
+        headers={
+            "Content-Disposition": f'attachment; filename="{result.filename}"'  # type: ignore[attr-defined]
+        },
+    )

@@ -227,6 +227,12 @@ from api.outbound_log import router as outbound_log_router
 from api.process import provide_check_process_permission, provide_list_processes
 from api.process import router as process_router
 from api.report import (
+    BehaviorDayBandSlotOut,
+    BehaviorReportEntryOut,
+    BehaviorReportOut,
+    BehaviorReportTaskOut,
+    BehaviorSingleProfileOut,
+    BehaviorWeekSlotOut,
     CveDeviceRowOut,
     CveFindingOut,
     CveFindingRowOut,
@@ -254,6 +260,8 @@ from api.report import (
     ScoreContributionOut,
     ScoreOut,
     SecurityReportOut,
+    provide_behavior_report,
+    provide_behavior_report_tasks,
     provide_cve_report,
     provide_cve_report_pdf,
     provide_dns_bypass_report,
@@ -458,6 +466,7 @@ from application.monitoring import (
     GetSchedules,
     GetSlaStats,
     ListLoggingTasks,
+    LoggingTaskNotFound,
     ManageSchedules,
     PauseLoggingTask,
     ResumeActiveLoggingTasks,
@@ -468,6 +477,7 @@ from application.monitoring import (
     StopLoggingTask,
     UpdateSchedule,
 )
+from application.monitoring.behavior_profile import ProfileSample
 from application.monitoring.scheduler_handler import MonitoringWindowHandler
 from application.outbound import BuildOutboundContacts, RawConnection
 from application.outbound_log import (
@@ -525,6 +535,12 @@ from application.reporting import (
 )
 from application.reporting import (
     PortFinding as ReportPortFinding,
+)
+from application.reporting.behavior_report import (
+    BehaviorReport,
+    BehaviorTaskInput,
+    build_all_behavior_report,
+    build_single_behavior_report,
 )
 from application.resolver import ResolveEndpoint, ResolvePtrBatch
 from application.scanning import (
@@ -6063,6 +6079,118 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             filename="CERNISPRO_Netzwerk-DNS-Umgehungs-Bericht.pdf",
         )
 
+    # ── Verhaltensprofil-Bericht (Block 4, Etappe 3): Daten- und Tasks-Runner ──────
+    # Muster _dns_bypass_report (Bezugsrahmen-Wahl EINE Aufgabe ODER alle), aber gegen die
+    # Logging-Repos. Der PDF-Runner kommt erst in Etappe 4 -- hier NUR report + tasks.
+    #
+    # Regel 5 / api-Ring: die Naht Unix-ts -> ProfileSample faellt HIER (Server-Zeitzone) --
+    # WORTGLEICH zu _enrich_behavior_local am Router-Rand (die zeitfreie Aggregation rechnet
+    # keine Wanduhr, ADR 0002). Der api-Rand _enrich_behavior_local wird NICHT importiert
+    # (api-Ring); die Logik ist hier gespiegelt.
+    def _enrich_behavior_samples_root(rtt: list[Any]) -> list[ProfileSample]:
+        enriched: list[ProfileSample] = []
+        for sample in rtt:
+            local = datetime.fromtimestamp(sample.ts)
+            enriched.append(
+                ProfileSample(
+                    weekday=local.date().weekday(),
+                    minute_of_day=local.hour * 60 + local.minute,
+                    day_key=local.date().isoformat(),
+                    alive=sample.alive,
+                )
+            )
+        return enriched
+
+    # Use-Case-Instanzen einmal bauen (Reuse der bestehenden Logging-Repos, wie die anderen
+    # logging-overrides).
+    list_tasks = ListLoggingTasks(logging_task_repository())
+    get_rtt = GetLoggingTaskRtt(logging_task_repository(), logging_rtt_repository())
+    get_detail = GetLoggingTaskDetail(logging_task_repository())
+
+    def _project_behavior_report(report: BehaviorReport) -> BehaviorReportOut:
+        # Projektion application-Sicht -> Wire-Form (Regel 4: der api-Ring kennt application
+        # nicht, DIESE Naht faellt im Composition Root). Muster _dns_bypass_report.
+        return BehaviorReportOut(
+            scope=report.scope,
+            report_label=(report.single_label if report.scope == "single" else "") or "",
+            entries=[
+                BehaviorReportEntryOut(
+                    label=e.label,
+                    recorded_days=e.recorded_days,
+                    has_enough_data=e.has_enough_data,
+                    deviation_count=e.deviation_count,
+                    busiest_slot_start=e.busiest_slot_start,
+                    busiest_weekday=e.busiest_weekday,
+                )
+                for e in report.entries
+            ],
+            single_profile=(
+                None
+                if report.single_profile is None
+                else BehaviorSingleProfileOut(
+                    recorded_days=report.single_profile.recorded_days,
+                    has_enough_data=report.single_profile.has_enough_data,
+                    deviation_count=report.single_profile.deviation_count,
+                    day_band=[
+                        BehaviorDayBandSlotOut(
+                            slot_start=s.slot_start,
+                            activity_count=s.activity_count,
+                            is_deviation=s.is_deviation,
+                        )
+                        for s in report.single_profile.day_band
+                    ],
+                    week_heatmap=[
+                        BehaviorWeekSlotOut(
+                            weekday=s.weekday,
+                            slot_start=s.slot_start,
+                            activity_count=s.activity_count,
+                            is_deviation=s.is_deviation,
+                        )
+                        for s in report.single_profile.week_heatmap
+                    ],
+                )
+            ),
+            single_label=report.single_label,
+        )
+
+    async def _behavior_report_tasks() -> list[BehaviorReportTaskOut]:
+        # Waehlbare Aufgaben fuers Dropdown: NUR RECURRING (das Verhaltensprofil ergibt nur
+        # fuer wiederkehrende Serien Sinn). Leer -> [] (ein ehrliches Datum, kein Fehler).
+        return [
+            BehaviorReportTaskOut(id=task.id, label=task.label or task.id)
+            for task in list_tasks()
+            if task.operation_mode is OperationMode.RECURRING
+        ]
+
+    async def _behavior_report(task_id: str | None = None) -> BehaviorReportOut:
+        # Bezugsrahmen ueber task_id: gesetzt = EINE Aufgabe (scope="single"), None/leer =
+        # ALLE RECURRING-Aufgaben zusammengefasst (scope="all"). KEIN 404: leerer Stand ist
+        # ein DATUM (Muster _dns_bypass_report).
+        if task_id:
+            # EINE Aufgabe. Unbekannte id -> leerer "single"-Bericht (single_label=""), kein
+            # 404: build_single_behavior_report ueber leere Samples liefert ein leeres Profil.
+            try:
+                task = get_detail(task_id)
+            except LoggingTaskNotFound:
+                empty = build_single_behavior_report(
+                    BehaviorTaskInput(task_id=task_id, label="", samples=[])
+                )
+                return _project_behavior_report(empty)
+            samples = _enrich_behavior_samples_root(get_rtt(task_id, since=None, until=None))
+            ti = BehaviorTaskInput(task_id=task_id, label=task.label or task_id, samples=samples)
+            return _project_behavior_report(build_single_behavior_report(ti))
+
+        # ALLE RECURRING-Aufgaben: je Aufgabe rtt laden, Samples anreichern, sammeln.
+        inputs: list[BehaviorTaskInput] = []
+        for task in list_tasks():
+            if task.operation_mode is not OperationMode.RECURRING:
+                continue
+            samples = _enrich_behavior_samples_root(get_rtt(task.id, since=None, until=None))
+            inputs.append(
+                BehaviorTaskInput(task_id=task.id, label=task.label or task.id, samples=samples)
+            )
+        return _project_behavior_report(build_all_behavior_report(inputs))
+
     app.include_router(report_router)
     app.dependency_overrides[provide_security_report] = lambda: _security_report
     app.dependency_overrides[provide_security_report_pdf] = lambda: _security_report_pdf
@@ -6083,6 +6211,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.dependency_overrides[provide_dns_bypass_report_recordings] = lambda: (
         _dns_bypass_report_recordings
     )
+    app.dependency_overrides[provide_behavior_report] = lambda: _behavior_report
+    app.dependency_overrides[provide_behavior_report_tasks] = lambda: _behavior_report_tasks
 
     # ── Route zum Ziel (ADR 0036): traceroute-Hops + Geo/ASN, zwei getrennte Naehte ──
     # Regel 5: die Quer-Domaenen-Naht (diagnostics-Hops + resolver-Geo/RDAP) faellt
