@@ -153,6 +153,13 @@ from api.dns_bypass import (
     provide_dns_bypass_view,
 )
 from api.dns_bypass import router as dns_bypass_router
+from api.dns_trust import (
+    DnsServerPlausibilityOut,
+    TrustedDnsServerOut,
+    provide_dns_trust_decision,
+    provide_dns_trust_list,
+)
+from api.dns_trust import router as dns_trust_router
 from api.dns_watch import (
     DNS_DOH_PROVIDERS_KEY,
     DNS_EXPECTED_SERVERS_KEY,
@@ -4490,14 +4497,55 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             if gateway_ip:
                 await _dns_trust_sync_detected(gateway_ip)
 
-    # Lese-/Aktions-Use-Cases (intern bereitgestellt; Verdrahtung an api kommt E5). Bewusst
-    # instanziiert + auf app.state geparkt, damit die Naht real steht (mypy/import-linter
-    # pruefen sie mit) und E5 sie ohne erneute Verdrahtung abgreifen kann -- KEIN toter Code.
-    app.state.list_dns_trust_servers = ListDnsTrustServers(
-        dns_trust_repository(), _dns_trust_plausibility
-    )
-    app.state.set_dns_server_trust = SetDnsServerTrust(dns_trust_repository())
+    # Lese-/Aktions-Use-Cases (intern bereitgestellt; an die api verdrahtet in E5, s. u.).
+    # Bewusst instanziiert + auf app.state geparkt, damit die Naht real steht (mypy/import-
+    # linter pruefen sie mit) und die api-Runner sie ohne Doppel-Instanziierung abgreifen.
+    _list_dns_trust_servers = ListDnsTrustServers(dns_trust_repository(), _dns_trust_plausibility)
+    _set_dns_server_trust = SetDnsServerTrust(dns_trust_repository())
+    app.state.list_dns_trust_servers = _list_dns_trust_servers
+    app.state.set_dns_server_trust = _set_dns_server_trust
     app.state.trusted_dns_server_ips = TrustedDnsServerIps(dns_trust_repository())
+
+    # ── dns_trust-api verdrahten (ADR 0043, E5; Regel 4/5: Projektion + Naht nur hier) ──
+    # Der api-Ring (api/dns_trust.py) kennt WEDER application NOCH domain -- die Projektion
+    # application (TrustedDnsServer + DnsServerPlausibility) -> api-Out faellt HIER im Root.
+    def _dns_trust_list() -> list[TrustedDnsServerOut]:
+        # Lese-Runner: ListDnsTrustServers liefert je Server (TrustedDnsServer, Plausibilitaet|
+        # None) in first_seen-Reihenfolge; hier auf die Wire-Form projizieren (Regel 4).
+        return [
+            TrustedDnsServerOut(
+                ip=server.ip,
+                category=server.category,
+                trust_state=server.trust_state,
+                first_seen=server.first_seen,
+                last_seen=server.last_seen,
+                display_name=server.display_name,
+                notes=server.notes,
+                plausibility=(
+                    None
+                    if indizien is None
+                    else DnsServerPlausibilityOut(
+                        in_inventory=indizien.in_inventory,
+                        first_seen_days=indizien.first_seen_days,
+                        vendor=indizien.vendor,
+                        open_ports=list(indizien.open_ports),
+                        display_name=indizien.display_name,
+                    )
+                ),
+            )
+            for server, indizien in _list_dns_trust_servers()
+        ]
+
+    def _dns_trust_decision(ip: str, decision: str) -> None:
+        # Schreib-Runner: vertrauen/ablehnen/zuruecksetzen. now am Rand (time.time), der
+        # Use-Case bleibt uhrfrei; unbekannte ip ist ein definierter No-Op (kein 500).
+        import time
+
+        _set_dns_server_trust(ip, decision, time.time())
+
+    app.include_router(dns_trust_router)
+    app.dependency_overrides[provide_dns_trust_list] = lambda: _dns_trust_list
+    app.dependency_overrides[provide_dns_trust_decision] = lambda: _dns_trust_decision
 
     # ── Sicherheitsbericht: Fuenf-Quellen-Projektion (Etappe 2b, Regel 5/Composition Root) ──
     # DIESE Naht KENNT alle fuenf Quell-Domaenen (analysis/cve/security/dns_watch/diagnostics)
