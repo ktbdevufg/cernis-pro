@@ -415,6 +415,13 @@ from application.dns_bypass import (
     StartDnsBypassRecording,
     StopDnsBypassRecording,
 )
+from application.dns_trust import (
+    DnsServerPlausibility,
+    ListDnsTrustServers,
+    SetDnsServerTrust,
+    SyncDnsTrustServer,
+    TrustedDnsServerIps,
+)
 from application.dns_watch import BuildDnsWatch, RawDnsConnection
 from application.export import (
     ExportAnalysis,
@@ -628,6 +635,7 @@ from infrastructure.diagnostics_linux import (
 from infrastructure.dns_bypass_aggregate import SqliteDnsBypassAggregateRepository
 from infrastructure.dns_bypass_detail import SqliteDnsBypassDetailRepository
 from infrastructure.dns_bypass_recordings import SqliteDnsBypassRecordingRepository
+from infrastructure.dns_trust_repository import SqliteDnsTrustRepository
 from infrastructure.dns_watch_acknowledgements_db import (
     SqliteDnsWatchAcknowledgementRepository,
 )
@@ -688,6 +696,7 @@ from infrastructure.self_host import detect_self_host
 from infrastructure.settings_repository import CorruptSettingError, SqliteSettingsRepository
 from infrastructure.sni.errors import SniError, SniPermissionError
 from infrastructure.sni.sni_sniffer import ScapySniSniffer
+from infrastructure.system_resolvers import detect_system_resolvers
 from infrastructure.traffic_linux import PsutilTrafficAdapter
 from infrastructure.traffic_permission import TrafficPermissionAdapter
 
@@ -2029,6 +2038,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             # im DNS-Umgehungs-Bericht unaufgeloest. Upsert ueber die device-Naht
             # (nicht ueber den Scan), best-effort (Fehler werden geschluckt).
             _register_self_host(device_repository(), device_clock)
+            # DNS-Vertrauensmodell (ADR 0043, E3): einmalig die vertrauenswuerdigen
+            # Kandidaten erfassen -- System-Resolver (detect_system_resolvers) + Gateway
+            # (_topology_gateway) je IP ueber SyncDnsTrustServer. best-effort/Fehler
+            # geschluckt im Bootstrap selbst (kein Startup-Crash), Muster _register_self_host.
+            await _dns_trust_bootstrap()
             # ── monitoring v2 (M.9): Altcode-Loop (configure_monitor + run_monitor)
             # und Altcode-Scheduler (start_scheduler) ERSETZT durch die v2-Use-Cases.
             # Der RunMonitor tickt bis stop(); der Task haengt an app.state (kein GC).
@@ -4220,6 +4234,12 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             detail=dns_bypass_detail_repository(),
             aggregate=dns_bypass_aggregate_repository(),
             expected_servers_provider=_dns_bypass_expected_servers,
+            # DNS-Vertrauensmodell (ADR 0043, E3): je Umgehungs-Ziel best-effort in den
+            # Vertrauens-Bestand aufnehmen -- ein Schreibpfad, der nur bei aktiver Aufzeichnung
+            # laeuft (passt; kein Schreiben bei reinen Lesezugriffen). Die Naht ist lazy (das
+            # Factory-Ergebnis wird erst zur Laufzeit erzeugt), also ist _dns_trust_sync_detected
+            # hier bereits gebunden.
+            dns_trust_sync=_dns_trust_sync_detected,
         )
 
     async def _dns_bypass_view() -> DnsBypassOverviewOut:
@@ -4268,6 +4288,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         resolver_names = await _dns_bypass_resolver_names(
             {agg.dst_ip for agg in report.aggregates}, name_by_ip
         )
+        # HINWEIS (ADR 0043, E3): die Vertrauens-Erfassung der Umgehungs-Ziele passiert
+        # BEWUSST NICHT hier -- ein reiner GET-Lese-View darf nicht in die DB schreiben. Die
+        # dst_ips werden stattdessen im Recorder-Tick (Schreibpfad, nur bei aktiver
+        # Aufzeichnung) erfasst; Resolver/Gateway kommen im lifespan-Bootstrap herein.
         sources = blocklist_source_repository()
         entries = blocklist_entry_repository()
 
@@ -4346,6 +4370,115 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.dependency_overrides[provide_dns_bypass_start] = lambda: _dns_bypass_start
     app.dependency_overrides[provide_dns_bypass_stop] = lambda: _dns_bypass_stop
     app.dependency_overrides[provide_dns_bypass_status] = lambda: _dns_bypass_status
+
+    # ── DNS-Server-Vertrauensmodell verdrahten (ADR 0043, Etappe 3) ──
+    # Der Composition Root fuellt die echten Lookups der quellen-agnostischen Use-Cases
+    # (Regel 5, faellt NUR hier). NOCH KEINE api, KEIN Frontend, KEIN Umbau der bestehenden
+    # Umgehungs-Klassifikation (expected_servers) -- das ist E4/E5/E6. Die Use-Cases werden
+    # hier instanziiert + intern bereitgestellt; die Verdrahtung an api/Waechter kommt spaeter.
+    #
+    # Repo als lru_cache-Singleton je eigener Tabelle (Muster der dns_bypass-Repos oben:
+    # db_path-Factory).
+    @lru_cache(maxsize=1)
+    def dns_trust_repository() -> SqliteDnsTrustRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteDnsTrustRepository(get_db_path())
+
+    def _dns_trust_is_public_resolver(ip: str) -> bool:
+        # PublicResolverCheck: der schon vorhandene, saubere Weg ist die bekannte-
+        # oeffentliche-Resolver-Liste (domain.resolver_names.known_resolver_name != None) --
+        # DIESELBE Naht, die _dns_bypass_resolver_names schon nutzt. (Die DoH-Gruppe waere die
+        # Alternative, ist aber qname-/eintrags-gebunden; die Resolver-Liste ist der schlanke,
+        # rein IP-basierte Test, den dieser Check braucht.)
+        return known_resolver_name(ip) is not None
+
+    def _dns_trust_is_threat_listed(ip: str) -> bool:
+        # ThreatCheck: Treffer der IP in einer AKTIVEN THREAT-Quelle (Muster der bestehenden
+        # Blocklist-Lookup-Naht _dns_bypass_doh_lookup, hier fuer die Gruppe THREAT). Roh-
+        # Lookup lookup_ips, gefiltert auf enabled + group == THREAT.
+        sources = blocklist_source_repository()
+        threat_ids = {
+            s.id for s in sources.list_all() if s.group == BlocklistGroup.THREAT and s.enabled
+        }
+        if not threat_ids:
+            return False
+        entries = blocklist_entry_repository()
+        return any(source_id in threat_ids for source_id, _matched in entries.lookup_ips(ip))
+
+    def _dns_trust_plausibility_map(
+        devices: list[Device], now: float
+    ) -> dict[str, DnsServerPlausibility]:
+        # PlausibilityProvider-Grundlage: aus dem Geraete-Bestand ueber die last_ip-Naht
+        # (Muster _dns_bypass_name_by_ip) je bekannter IP schlanke, REIN DESKRIPTIVE Indizien.
+        # first_seen_days = ganze Tage seit Device.first_seen bis now (>= 0; None ist hier nie
+        # noetig, da der Bestand ein first_seen traegt). display_name-Prioritaet label>hostname>mac.
+        result: dict[str, DnsServerPlausibility] = {}
+        for device in devices:
+            if not device.last_ip:
+                continue
+            first_seen_days = max(int((now - device.first_seen.timestamp()) // 86400), 0)
+            result[device.last_ip] = DnsServerPlausibility(
+                in_inventory=True,
+                first_seen_days=first_seen_days,
+                vendor=device.vendor,
+                open_ports=device.open_ports,
+                display_name=(device.label or device.hostname or device.mac),
+            )
+        return result
+
+    def _dns_trust_plausibility(ip: str) -> DnsServerPlausibility | None:
+        # Best-effort Einzel-Lookup ueber den aktuellen Bestand (kein Treffer -> None). Uhr am
+        # Rand (time.time), der Use-Case bleibt uhrfrei.
+        import time
+
+        devices = GetDevices(device_repository())(known_only=False)
+        return _dns_trust_plausibility_map(devices, time.time()).get(ip)
+
+    def _make_sync_dns_trust_server() -> SyncDnsTrustServer:
+        # GatewayProvider: der schon vorhandene _topology_gateway (liefert "" statt None ->
+        # der Use-Case behandelt beides als "kein Gateway").
+        return SyncDnsTrustServer(
+            repo=dns_trust_repository(),
+            gateway=_topology_gateway,
+            is_public_resolver=_dns_trust_is_public_resolver,
+            is_threat_listed=_dns_trust_is_threat_listed,
+            plausibility=_dns_trust_plausibility,
+        )
+
+    async def _dns_trust_sync_detected(ip: str) -> None:
+        # Je erkannter Ziel-/Resolver-IP SyncDnsTrustServer aufrufen, damit Server ueberhaupt
+        # in den Bestand kommen. best-effort, nicht-blockierend, Fehler schlucken (die Erfassung
+        # ist Beigabe, kein Muss -- sie darf weder Recorder-Tick noch Bootstrap reissen). Diese
+        # Naht wird an ZWEI getrennte Trigger gehaengt: den lifespan-Bootstrap (Resolver +
+        # Gateway) und den Recorder-Tick (Umgehungs-Ziele) -- NIE an einen GET-Lese-View.
+        import time
+
+        with suppress(Exception):
+            await _make_sync_dns_trust_server()(ip, time.time())
+
+    async def _dns_trust_bootstrap() -> None:
+        # BOOTSTRAP-Erfassung (ADR 0043, E3): einmalig beim Backend-Start die
+        # vertrauenswuerdigen Kandidaten in den Bestand nehmen -- die real genutzten
+        # System-Resolver (detect_system_resolvers, hart getimt) UND das Gateway
+        # (_topology_gateway). So kommen Pi-hole/Gateway/VPN-Resolver in den Vertrauens-
+        # Bestand, unabhaengig von einer Aufzeichnung. best-effort, Fehler schlucken (kein
+        # Startup-Crash) -- Muster _register_self_host.
+        with suppress(Exception):
+            for resolver_ip in await detect_system_resolvers():
+                await _dns_trust_sync_detected(resolver_ip)
+            gateway_ip = await _topology_gateway()
+            if gateway_ip:
+                await _dns_trust_sync_detected(gateway_ip)
+
+    # Lese-/Aktions-Use-Cases (intern bereitgestellt; Verdrahtung an api kommt E5). Bewusst
+    # instanziiert + auf app.state geparkt, damit die Naht real steht (mypy/import-linter
+    # pruefen sie mit) und E5 sie ohne erneute Verdrahtung abgreifen kann -- KEIN toter Code.
+    app.state.list_dns_trust_servers = ListDnsTrustServers(
+        dns_trust_repository(), _dns_trust_plausibility
+    )
+    app.state.set_dns_server_trust = SetDnsServerTrust(dns_trust_repository())
+    app.state.trusted_dns_server_ips = TrustedDnsServerIps(dns_trust_repository())
 
     # ── Sicherheitsbericht: Fuenf-Quellen-Projektion (Etappe 2b, Regel 5/Composition Root) ──
     # DIESE Naht KENNT alle fuenf Quell-Domaenen (analysis/cve/security/dns_watch/diagnostics)

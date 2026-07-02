@@ -31,7 +31,7 @@ Fremd-Adapter im application-Ring, der infrastructure-Client wird NICHT importie
 
 import asyncio
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any, Protocol
 
 import structlog
@@ -94,6 +94,13 @@ class DnsBypassRecorder:
     die Umgehungs-Klassifikation -- die "erwartet-oder-Gateway"-Ableitung faellt spaeter im
     Composition Root; hier kommt die fertige Menge herein.
 
+    ``dns_trust_sync`` ist eine OPTIONALE, best-effort Naht (ADR 0043, E3): je in diesem Tick
+    verarbeiteter Ziel-IP wird sie einmalig awaited, damit die Umgehungs-Ziele in den
+    Vertrauens-Bestand kommen. Der Composition Root fuellt sie mit ``SyncDnsTrustServer``
+    (Regel 5) -- der application-Ring nennt KEINEN dns_trust-Adapter/-Use-Case; ``None``
+    (Default) laesst die Erfassung schlicht aus. Sie liegt INNERHALB des ``tick``-``try`` und
+    ist damit best-effort: ein Fehler killt den Loop nie.
+
     ``run()`` ist nur der Rahmen ``while self._active: tick(); sleep`` -- die Arbeit sitzt in
     ``tick``, best-effort: ein werfendes ``poll_queries``/Repo wird geloggt und geschluckt,
     der Loop laeuft weiter.
@@ -109,12 +116,14 @@ class DnsBypassRecorder:
         poll_interval_s: int = 2,
         retention_max_age_s: int = 86400,
         now_provider: Callable[[], float] = time.time,
+        dns_trust_sync: Callable[[str], Awaitable[None]] | None = None,
     ) -> None:
         self._source = source
         self._recordings = recordings
         self._detail = detail
         self._aggregate = aggregate
         self._expected_servers_provider = expected_servers_provider
+        self._dns_trust_sync = dns_trust_sync
         self._poll_interval_s = poll_interval_s
         self._retention_max_age_s = retention_max_age_s
         self._now = now_provider
@@ -160,7 +169,10 @@ class DnsBypassRecorder:
            spaeteren erwartungsgemaess-vs-Umgeher-Vergleich).
         4. NUR fuer Umgehungen (``is_bypass``) einen ``BypassDelta`` bilden, den Vorzustand
            lesen, ``merge_bypass`` rechnen und ins Aggregat upserten.
-        5. Am ENDE IMMER die DETAIL-Retention (``delete_older_than(now - retention)``).
+        5. Je distinct verarbeiteter Ziel-IP (best-effort) ``dns_trust_sync`` awaiten, damit
+           die Umgehungs-Ziele in den Vertrauens-Bestand kommen (ADR 0043, E3). Nur wenn eine
+           Naht gesetzt ist; einmal je Ziel-IP (dedupliziert).
+        6. Am ENDE IMMER die DETAIL-Retention (``delete_older_than(now - retention)``).
 
         Solange keine Aufzeichnung aktiv ist (``recording_id`` None), wird NICHT geschrieben
         -- die Retention laeuft aber trotzdem (Muster outbound-Recorder). Ein Fehler (z. B.
@@ -171,6 +183,8 @@ class DnsBypassRecorder:
             recording_id = self._recording_id
             if recording_id is not None:
                 expected_set = {ip.strip().lower() for ip in self._expected_servers_provider()}
+                # Distinct Ziel-IPs dieses Ticks -- fuer die einmalige Vertrauens-Erfassung (5).
+                seen_dst_ips: set[str] = set()
                 for raw in self._source.poll_queries():
                     query = RawDnsQuery(
                         src_ip=raw["src_ip"],
@@ -178,6 +192,7 @@ class DnsBypassRecorder:
                         l4=raw["l4"],
                         qname=raw.get("qname", ""),
                     )
+                    seen_dst_ips.add(query.dst_ip)
                     # DETAIL speichert ALLE Anfragen (auch erwartete).
                     self._detail.save(
                         recording_id,
@@ -198,6 +213,11 @@ class DnsBypassRecorder:
                         existing = self._aggregate.get(recording_id, query.src_ip, query.dst_ip)
                         merged = merge_bypass(existing, delta, now)
                         self._aggregate.upsert(recording_id, merged)
+                # (5) Umgehungs-Ziele in den Vertrauens-Bestand aufnehmen (best-effort, je Ziel
+                # einmal). Liegt INNERHALB des try -- ein Fehler wird unten geschluckt.
+                if self._dns_trust_sync is not None:
+                    for dst_ip in seen_dst_ips:
+                        await self._dns_trust_sync(dst_ip)
             # IMMER zum Schluss (egal ob aktiv oder nicht): DETAIL-Retention. So verfaellt
             # roher Detail-Verlauf zuverlaessig nach ``retention_max_age_s``, auch ueber
             # mehrere Aufzeichnungen / Neustarts hinweg (Muster outbound-Recorder).

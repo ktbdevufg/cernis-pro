@@ -16,9 +16,12 @@ direkt. Belegt:
 * T5 ``tick`` ist best-effort: ein werfendes ``poll_queries`` -> kein Wurf, kein Schreiben.
 * T6 am Tick-Ende laeuft IMMER die DETAIL-Retention (``delete_older_than(now - max_age)``).
 * T7 ``stop()`` -> nicht mehr aktiv, recording_id geloest, ``source.stop()`` gerufen.
+* T8 die optionale ``dns_trust_sync``-Naht (ADR 0043, E3): je distinct Ziel-IP EINMAL
+  awaited (nur bei aktiver Aufzeichnung); eine werfende Naht killt den Tick nicht.
 """
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from application.dns_bypass import DnsBypassRecorder
@@ -171,6 +174,7 @@ def _make_recorder(
     expected: list[str] | None = None,
     now: float = 1000.0,
     retention_max_age_s: int = 86400,
+    dns_trust_sync: Callable[[str], Awaitable[None]] | None = None,
 ) -> tuple[DnsBypassRecorder, _FakeDetailRepo, _FakeAggregateRepo]:
     """Verdrahtet den Recorder mit den drei Fakes; fixe Uhr fuer deterministische ts."""
     detail = _FakeDetailRepo()
@@ -184,6 +188,7 @@ def _make_recorder(
         expected_servers_provider=lambda: list(expected or []),
         retention_max_age_s=retention_max_age_s,
         now_provider=lambda: now,
+        dns_trust_sync=dns_trust_sync,
     )
     return recorder, detail, aggregate
 
@@ -311,3 +316,68 @@ def test_stop_deaktiviert_loest_recording_und_ruft_source_stop() -> None:
     assert recorder.is_active() is False
     assert recorder.active_recording_id() is None
     assert source.stop_calls == 1
+
+
+def test_tick_erfasst_ziel_ips_ueber_dns_trust_sync_einmal_je_ziel() -> None:
+    # T8a: je DISTINCT Ziel-IP dieses Ticks wird dns_trust_sync GENAU einmal awaited --
+    # unabhaengig davon, ob das Ziel erwartet oder eine Umgehung ist (reine Erfassung).
+    source = _FakeDnsQuerySource(
+        batches=[
+            [
+                {"src_ip": "10.0.0.5", "dst_ip": "192.168.0.1", "l4": "udp", "qname": "a"},
+                {"src_ip": "10.0.0.6", "dst_ip": "8.8.8.8", "l4": "udp", "qname": "b"},
+                # zweite Anfrage an dasselbe Ziel -> keine zweite Erfassung
+                {"src_ip": "10.0.0.7", "dst_ip": "8.8.8.8", "l4": "udp", "qname": "c"},
+            ]
+        ]
+    )
+    synced: list[str] = []
+
+    async def _sync(ip: str) -> None:
+        synced.append(ip)
+
+    recorder, _detail, _agg = _make_recorder(source, expected=["192.168.0.1"], dns_trust_sync=_sync)
+    recorder.start(None, "rec-1")
+
+    asyncio.run(recorder.tick())
+
+    # beide distinct Ziele genau einmal (Reihenfolge egal -> Set-Vergleich).
+    assert set(synced) == {"192.168.0.1", "8.8.8.8"}
+    assert len(synced) == 2
+
+
+def test_tick_ohne_aktive_aufzeichnung_ruft_dns_trust_sync_nicht() -> None:
+    # T8b: kein start -> keine recording_id -> die Erfassung laeuft NICHT (kein Schreibpfad).
+    source = _FakeDnsQuerySource(
+        batches=[[{"src_ip": "10.0.0.6", "dst_ip": "8.8.8.8", "l4": "udp", "qname": "x"}]]
+    )
+    synced: list[str] = []
+
+    async def _sync(ip: str) -> None:  # pragma: no cover - darf nie laufen
+        synced.append(ip)
+
+    recorder, _detail, _agg = _make_recorder(source, dns_trust_sync=_sync)
+
+    asyncio.run(recorder.tick())  # kein start()
+
+    assert synced == []
+
+
+def test_tick_werfendes_dns_trust_sync_killt_tick_nicht() -> None:
+    # T8c: eine werfende dns_trust_sync-Naht -> kein Wurf; Detail/Aggregat sind trotzdem
+    # geschrieben (die Erfassung liegt am Ende der Schleifen-Arbeit, im best-effort-try).
+    source = _FakeDnsQuerySource(
+        batches=[[{"src_ip": "10.0.0.6", "dst_ip": "8.8.8.8", "l4": "udp", "qname": "a"}]]
+    )
+
+    async def _sync(ip: str) -> None:
+        raise RuntimeError("Vertrauens-Erfassung kaputt")
+
+    recorder, detail, aggregate = _make_recorder(source, expected=[], dns_trust_sync=_sync)
+    recorder.start(None, "rec-1")
+
+    asyncio.run(recorder.tick())  # darf NICHT werfen
+
+    # Detail + Aggregat wurden vor der (werfenden) Erfassung geschrieben.
+    assert len(detail.saved) == 1
+    assert len(aggregate.list_for("rec-1")) == 1
