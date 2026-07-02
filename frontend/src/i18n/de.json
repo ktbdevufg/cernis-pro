@@ -1663,6 +1663,69 @@
       "listen": {
         "title": "Listen-Verwaltung",
         "subtitle": "Erkennen, welche Außenkontakte als Tracker, Werbung oder Bedrohung gelten — Quellen pflegen und Anzeige einstellen."
+      },
+      "dnsvertrauen": {
+        "title": "DNS-Server & Vertrauen",
+        "subtitle": "Erkannte DNS-Server sehen und je Server entscheiden, ob Sie ihm vertrauen — mit Indizien als Entscheidungshilfe."
+      }
+    },
+    "dnsTrust": {
+      "intro": "Diese Funktion listet die DNS-Server auf, die CERNIS in Ihrem Netz beobachtet hat, gruppiert nach ihrer Art. Zu jedem Server sehen Sie ein paar Anhaltspunkte und können festlegen, ob Sie ihm vertrauen, ihn ablehnen oder Ihre Entscheidung zurücknehmen.",
+      "redLine": "CERNIS zeigt und ordnet ein, urteilt aber nicht. Ob ein DNS-Server vertrauenswürdig ist, entscheiden Sie — die Anhaltspunkte helfen nur dabei.",
+      "loading": "DNS-Server werden geladen …",
+      "empty": "Noch keine DNS-Server erkannt — sie erscheinen nach dem nächsten Start oder einer Aufzeichnung.",
+      "ladeFehler": "Die DNS-Server konnten nicht geladen werden. Bitte prüfen Sie, ob das Backend läuft.",
+      "aktionFehler": "Die Entscheidung konnte nicht gespeichert werden.",
+      "groups": {
+        "trusted": {
+          "title": "Vertrauenswürdig",
+          "lead": "Ihr Router (automatisch vertraut) und alle Server, denen Sie bewusst vertraut haben."
+        },
+        "localPrivate": {
+          "title": "Bitte bestätigen — lokal",
+          "lead": "Server aus Ihrem eigenen Netz. Prüfen Sie kurz, ob Sie diese erwarten."
+        },
+        "publicResolver": {
+          "title": "Unklar — öffentlicher Resolver",
+          "lead": "Bekannte öffentliche DNS-Dienste. Legitim, aber Sie sollten wissen, wer angefragt wird."
+        },
+        "unknown": {
+          "title": "Unklar — unbekannt",
+          "lead": "Server, die sich keiner bekannten Art zuordnen lassen. Sehen Sie sich die Anhaltspunkte an."
+        },
+        "threat": {
+          "title": "Warnung — auf Bedrohungsliste",
+          "lead": "Diese Server stehen auf einer Bedrohungsliste. Vertrauen Sie ihnen nur, wenn Sie sich ganz sicher sind."
+        },
+        "rejected": {
+          "title": "Abgelehnt",
+          "lead": "Server, die Sie abgelehnt haben. Sie können die Entscheidung jederzeit zurücknehmen."
+        }
+      },
+      "category": {
+        "gateway": "Router",
+        "local_private": "Lokal",
+        "public_resolver": "Öffentlicher Resolver",
+        "unknown": "Unbekannt",
+        "threat_listed": "Auf Bedrohungsliste"
+      },
+      "state": {
+        "trusted": "Vertraut",
+        "neutral": "Noch offen",
+        "rejected": "Abgelehnt"
+      },
+      "plausibility": {
+        "inInventorySince": "Im Bestand seit {{days}} Tagen",
+        "inInventoryPlain": "Im Bestand",
+        "notInInventory": "Nicht im Bestand",
+        "vendor": "Hersteller: {{vendor}}",
+        "openPorts": "Offene Ports: {{ports}}"
+      },
+      "actions": {
+        "trust": "Vertrauen",
+        "reject": "Ablehnen",
+        "reset": "Zurücksetzen",
+        "trustDespiteThreat": "Trotz Bedrohungslisten-Eintrag vertrauen"
       }
     },
     "blocklist": {

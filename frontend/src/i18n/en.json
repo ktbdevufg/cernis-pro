@@ -1663,6 +1663,69 @@
       "listen": {
         "title": "List management",
         "subtitle": "See which outbound contacts are listed as trackers, advertising, or threats — manage sources and set what's shown."
+      },
+      "dnsvertrauen": {
+        "title": "DNS servers & trust",
+        "subtitle": "See the DNS servers that were detected and decide, per server, whether you trust it — with clues to help you decide."
+      }
+    },
+    "dnsTrust": {
+      "intro": "This function lists the DNS servers CERNIS has observed on your network, grouped by their kind. For each server you see a few clues and can decide whether to trust it, reject it, or take back your decision.",
+      "redLine": "CERNIS shows and classifies, but does not judge. Whether a DNS server is trustworthy is your call — the clues only help.",
+      "loading": "Loading DNS servers …",
+      "empty": "No DNS servers detected yet — they appear after the next start or a recording.",
+      "ladeFehler": "The DNS servers could not be loaded. Please check whether the backend is running.",
+      "aktionFehler": "The decision could not be saved.",
+      "groups": {
+        "trusted": {
+          "title": "Trustworthy",
+          "lead": "Your router (trusted automatically) and every server you have deliberately trusted."
+        },
+        "localPrivate": {
+          "title": "Please confirm — local",
+          "lead": "Servers from your own network. Take a moment to check whether you expect them."
+        },
+        "publicResolver": {
+          "title": "Unclear — public resolver",
+          "lead": "Known public DNS services. Legitimate, but you should know who is being queried."
+        },
+        "unknown": {
+          "title": "Unclear — unknown",
+          "lead": "Servers that don't match any known kind. Have a look at the clues."
+        },
+        "threat": {
+          "title": "Warning — on a threat list",
+          "lead": "These servers appear on a threat list. Trust them only if you are absolutely sure."
+        },
+        "rejected": {
+          "title": "Rejected",
+          "lead": "Servers you have rejected. You can take back the decision at any time."
+        }
+      },
+      "category": {
+        "gateway": "Router",
+        "local_private": "Local",
+        "public_resolver": "Public resolver",
+        "unknown": "Unknown",
+        "threat_listed": "On a threat list"
+      },
+      "state": {
+        "trusted": "Trusted",
+        "neutral": "Still open",
+        "rejected": "Rejected"
+      },
+      "plausibility": {
+        "inInventorySince": "In inventory for {{days}} days",
+        "inInventoryPlain": "In inventory",
+        "notInInventory": "Not in inventory",
+        "vendor": "Vendor: {{vendor}}",
+        "openPorts": "Open ports: {{ports}}"
+      },
+      "actions": {
+        "trust": "Trust",
+        "reject": "Reject",
+        "reset": "Reset",
+        "trustDespiteThreat": "Trust despite the threat-list entry"
       }
     },
     "blocklist": {

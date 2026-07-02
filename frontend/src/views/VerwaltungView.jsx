@@ -7,14 +7,16 @@
 //   "geraeteverwaltung" Geräteverwaltung (aktiv) -> DeviceManagementPanel.
 //   "wartung"           Daten löschen (aktiv) -> WartungPanel.
 //   "listen"            Listen-Verwaltung (aktiv) -> BlocklistPanel.
+//   "dnsvertrauen"      DNS-Server & Vertrauen (aktiv) -> DnsTrustPanel.
 
-import { ListChecks, ShieldAlert, Trash2 } from "lucide-react";
+import { ListChecks, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { CardGrid, FunctionShell } from "../components/AreaShell.jsx";
 import BlocklistPanel from "../components/BlocklistPanel.jsx";
 import DeviceManagementPanel from "../components/DeviceManagementPanel.jsx";
+import DnsTrustPanel from "../components/DnsTrustPanel.jsx";
 import FunctionCard from "../components/FunctionCard.jsx";
 import WartungPanel from "../components/WartungPanel.jsx";
 
@@ -23,6 +25,7 @@ const FUNKTIONEN = [
   { id: "geraeteverwaltung", icon: ListChecks, locked: false, helpId: "help.geraete.verwaltung" },
   { id: "wartung", icon: Trash2, locked: false, helpId: "help.wartung" },
   { id: "listen", icon: ShieldAlert, locked: false, helpId: "help.listen" },
+  { id: "dnsvertrauen", icon: ShieldCheck, locked: false, helpId: "help.dnsvertrauen" },
 ];
 
 export default function VerwaltungView({ onOpenManual }) {
@@ -65,6 +68,19 @@ export default function VerwaltungView({ onOpenManual }) {
         onOpenManual={onOpenManual}
       >
         <BlocklistPanel />
+      </FunctionShell>
+    );
+  }
+
+  if (openFunction === "dnsvertrauen") {
+    return (
+      <FunctionShell
+        title={t("verwaltung.cards.dnsvertrauen.title")}
+        onBack={() => setOpenFunction(null)}
+        helpId="help.dnsvertrauen"
+        onOpenManual={onOpenManual}
+      >
+        <DnsTrustPanel />
       </FunctionShell>
     );
   }
