@@ -34,6 +34,8 @@ from typing import Any
 
 from fastapi import WebSocket
 
+from infrastructure.http_guard import is_origin_allowed
+
 # Keep-Alive-Takt des offenen Handlers (altcode-treu, ``main.ws_monitor``): der
 # Handler empfaengt passiv, die ``monitor_update``-Frames pusht der Loop ueber den
 # Broadcaster. Der Sleep haelt die Coroutine nur am Leben.
@@ -52,6 +54,7 @@ StatusProvider = Callable[[], dict[str, dict[str, Any]]]
 def make_ws_monitor(
     broadcaster: Broadcaster,
     status_provider: StatusProvider,
+    allowed_origins: list[str],
 ) -> Callable[[WebSocket], Awaitable[None]]:
     """Baut den ``/ws/monitor``-Handler mit injiziertem Broadcaster + Status-Provider.
 
@@ -59,9 +62,18 @@ def make_ws_monitor(
     ``RunMonitor``-Loop bespielt -- so sieht eine frisch verbundene Connection die
     naechste Loop-Runde. ``status_provider()`` liefert die label-angereicherte
     Status-Map fuer den Connect-Frame (frisch je Connect aufgeloest).
+
+    ``allowed_origins`` ist die CORS-Allowlist (``cfg.cors_allow_origins``, injiziert
+    in app.py -- EINE Quelle der Wahrheit): der Origin-Guard (F-01) prueft die
+    ``Origin`` des Handshakes VOR ``accept()`` und schliesst boese Browser-Tabs aus.
     """
 
     async def ws_monitor(websocket: WebSocket) -> None:
+        # Origin-Guard (F-01) VOR accept(): fremde Browser-Herkunft -> 1008 + Ende,
+        # ohne Handshake. Same-origin/Nicht-Browser (kein Origin-Header) laufen durch.
+        if not is_origin_allowed(websocket.headers.get("origin"), allowed_origins):
+            await websocket.close(code=1008)
+            return
         await websocket.accept()
 
         # Connect-Frame VOR dem subscribe (Altcode-Reihenfolge): aktueller Stand mit

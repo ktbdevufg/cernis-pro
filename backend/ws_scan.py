@@ -67,6 +67,7 @@ from domain.scanning import (
     ScanEvent,
     ScanStarted,
 )
+from infrastructure.http_guard import is_origin_allowed
 from infrastructure.scanning.fritz_hosts import FritzAuthError
 from infrastructure.scanning.port_scanner import NmapScanError
 
@@ -321,6 +322,7 @@ def make_ws_scan(
     get_device_factory: GetDeviceFactory,
     is_known_factory: IsKnownFactory,
     axis_b_factory: AxisBFactory,
+    allowed_origins: list[str],
 ) -> Callable[[WebSocket], Awaitable[None]]:
     """Baut den ``/ws/scan``-Handler mit injizierter ``RunNetworkScan``-Factory.
 
@@ -359,9 +361,18 @@ def make_ws_scan(
     nicht an der Differenz, und braucht KEINE Kuratierung (auch ein brandneuer Host kann
     auffaellige Ports haben). Best-effort wie die uebrigen Anreicherungen (Fehler -> Defaults +
     Log, der Scan laeuft weiter).
+
+    ``allowed_origins`` ist die CORS-Allowlist (``cfg.cors_allow_origins``, injiziert in
+    app.py -- EINE Quelle der Wahrheit): der Origin-Guard (F-01) prueft die ``Origin`` des
+    Handshakes VOR ``accept()`` und schliesst boese Browser-Tabs aus.
     """
 
     async def ws_scan(websocket: WebSocket) -> None:
+        # Origin-Guard (F-01) VOR accept(): fremde Browser-Herkunft -> 1008 + Ende,
+        # ohne Handshake. Same-origin/Nicht-Browser (kein Origin-Header) laufen durch.
+        if not is_origin_allowed(websocket.headers.get("origin"), allowed_origins):
+            await websocket.close(code=1008)
+            return
         await websocket.accept()
 
         # 1. Config aus dem WS-JSON. Kaputtes JSON ODER ungueltiges CIDR

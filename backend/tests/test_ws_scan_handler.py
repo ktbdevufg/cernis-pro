@@ -227,6 +227,10 @@ def _client(
             lambda: device_reader,
             lambda: known_reader,
             lambda: severity_reader,
+            # Origin-Guard-Allowlist (F-01): der TestClient sendet keinen Origin-Header
+            # (-> is_origin_allowed None == True), diese Tests connecten also ohne Origin
+            # und laufen unveraendert durch. Leere Allowlist genuegt.
+            [],
         ),
     )
     return TestClient(app)

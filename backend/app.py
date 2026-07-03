@@ -28,6 +28,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import Response
 from starlette.types import Scope
 
@@ -666,6 +667,7 @@ from infrastructure.dns_watch_acknowledgements_db import (
     SqliteDnsWatchAcknowledgementRepository,
 )
 from infrastructure.export_pdf import ReportlabRenderer
+from infrastructure.http_guard import is_origin_allowed
 from infrastructure.interfaces_linux import InterfaceDiscoveryAdapter
 from infrastructure.logging import configure_logging
 from infrastructure.metrics import SqliteMetricsReader
@@ -2243,6 +2245,42 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         allow_headers=["*"],
     )
 
+    # Origin-Guard fuer zustandsaendernde HTTP-Methoden (Finding F-01, Etappe 1).
+    # Schliesst die Angriffsflaeche "fremde Webseite im lokalen Browser triggert die
+    # localhost-API": ein boeser Tab kann zwar einen POST/PUT/DELETE/PATCH an
+    # ``http://localhost:...`` absetzen, aber der Browser setzt dabei zwingend den
+    # ``Origin``-Header auf die Tab-Herkunft -- und die steht nicht in der Allowlist.
+    #
+    # Reihenfolge (add_middleware fuegt VORNE ein -> zuletzt hinzugefuegt laeuft
+    # AUSSEN): der Guard wird NACH der CORSMiddleware hinzugefuegt, sitzt also INNEN
+    # von CORS. Ein abgewiesener Request wird VOR der Route (403) gestoppt, aber die
+    # Antwort laeuft auf dem Rueckweg weiter durch die aeussere CORSMiddleware -- die
+    # CORS-Header bleiben also unberuehrt gesetzt (fuer erlaubte Origins). Nur
+    # zustandsaendernde Methoden werden geprueft; GET/HEAD/OPTIONS (Lesezugriffe +
+    # CORS-Preflight) laufen immer durch. Die Allowlist wird injiziert (dieselbe
+    # ``cfg.cors_allow_origins`` wie CORS -- EINE Quelle der Wahrheit), der Guard liest
+    # NICHT selbst aus der Umgebung.
+    _origin_allowlist = cfg.cors_allow_origins
+    _guarded_methods = frozenset({"POST", "PUT", "DELETE", "PATCH"})
+
+    class _OriginGuardMiddleware(BaseHTTPMiddleware):
+        """Weist zustandsaendernde Requests mit fremder ``Origin`` mit 403 ab."""
+
+        async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+            if request.method in _guarded_methods:
+                origin = request.headers.get("origin")
+                if not is_origin_allowed(origin, _origin_allowlist):
+                    logger.warning(
+                        "origin_rejected",
+                        origin=origin,
+                        method=request.method,
+                        path=request.url.path,
+                    )
+                    return JSONResponse({"detail": "Origin nicht erlaubt."}, status_code=403)
+            return await call_next(request)
+
+    app.add_middleware(_OriginGuardMiddleware)
+
     @app.get("/health", tags=["ops"])
     async def health() -> dict[str, str]:
         """Liveness-Check fuer Betrieb und Smoke-Tests."""
@@ -2474,6 +2512,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             _build_get_device,
             _build_is_known,
             _build_axis_b,
+            # Origin-Guard (F-01): dieselbe Allowlist wie HTTP/CORS -- der WS-Handshake
+            # prueft die Origin VOR accept() und schliesst boese Browser-Tabs aus.
+            cfg.cors_allow_origins,
         ),
     )
 
@@ -2744,7 +2785,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     )
 
     app.add_api_websocket_route(
-        "/ws/monitor", make_ws_monitor(monitor_broadcaster(), _monitor_status)
+        "/ws/monitor",
+        make_ws_monitor(monitor_broadcaster(), _monitor_status, cfg.cors_allow_origins),
     )
 
     # ── alerting-Domaene v2 verdrahten (A.6, Regel 5: ports<->infra nur hier) ──
@@ -3508,7 +3550,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     app.dependency_overrides[provide_build_topology] = lambda: _build_topology_for
 
-    app.add_api_websocket_route("/ws/pcap", make_ws_pcap(capture_broadcaster()))
+    app.add_api_websocket_route(
+        "/ws/pcap", make_ws_pcap(capture_broadcaster(), cfg.cors_allow_origins)
+    )
 
     # ── agent-Domaene v2 verdrahten (A.4+5, Regel 5: ports<->infra nur hier) ──
     # REST-only (Client-Seite): GET/POST/DELETE /api/agents + ping/scan. KEIN WS --

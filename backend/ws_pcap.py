@@ -32,6 +32,8 @@ from typing import Any
 
 from fastapi import WebSocket
 
+from infrastructure.http_guard import is_origin_allowed
+
 # Keep-Alive-Takt des offenen Handlers (ws_monitor-treu): der Handler empfaengt
 # passiv, die capture_packet-Frames pusht der RunCapture-Loop ueber den Broadcaster.
 _KEEPALIVE_SECONDS = 30
@@ -42,15 +44,26 @@ _KEEPALIVE_SECONDS = 30
 Broadcaster = Any
 
 
-def make_ws_pcap(broadcaster: Broadcaster) -> Callable[[WebSocket], Awaitable[None]]:
+def make_ws_pcap(
+    broadcaster: Broadcaster, allowed_origins: list[str]
+) -> Callable[[WebSocket], Awaitable[None]]:
     """Baut den ``/ws/pcap``-Handler mit injiziertem Broadcaster-Singleton.
 
     ``broadcaster`` ist die EINE langlebige Instanz, die auch der ``RunCapture``-Loop
     bespielt -- so sieht eine frisch verbundene Connection die naechsten Pakete des
     laufenden Captures (oder nichts, wenn keiner laeuft).
+
+    ``allowed_origins`` ist die CORS-Allowlist (``cfg.cors_allow_origins``, injiziert
+    in app.py -- EINE Quelle der Wahrheit): der Origin-Guard (F-01) prueft die
+    ``Origin`` des Handshakes VOR ``accept()`` und schliesst boese Browser-Tabs aus.
     """
 
     async def ws_pcap(websocket: WebSocket) -> None:
+        # Origin-Guard (F-01) VOR accept(): fremde Browser-Herkunft -> 1008 + Ende,
+        # ohne Handshake. Same-origin/Nicht-Browser (kein Origin-Header) laufen durch.
+        if not is_origin_allowed(websocket.headers.get("origin"), allowed_origins):
+            await websocket.close(code=1008)
+            return
         await websocket.accept()
         # KEIN Connect-Frame (anders als /ws/monitor): Capture hat keinen Stand-Frame.
         await broadcaster.subscribe(websocket)

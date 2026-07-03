@@ -64,7 +64,9 @@ def test_handler_subscribes_on_connect_and_unsubscribes_on_disconnect(
 
     bc = _FakeBroadcaster()
     app = FastAPI()
-    app.add_api_websocket_route("/ws/pcap", make_ws_pcap(bc))
+    # Origin-Guard-Allowlist (F-01): der TestClient sendet keinen Origin-Header
+    # (-> is_origin_allowed None == True) -> connectet ohne Origin, laeuft unveraendert.
+    app.add_api_websocket_route("/ws/pcap", make_ws_pcap(bc, []))
     client = TestClient(app)
 
     assert bc.subscribe_calls == 0
@@ -89,7 +91,7 @@ def test_no_connect_frame_sent(monkeypatch: pytest.MonkeyPatch) -> None:
 
     bc = _FakeBroadcaster()
     app = FastAPI()
-    app.add_api_websocket_route("/ws/pcap", make_ws_pcap(bc))
+    app.add_api_websocket_route("/ws/pcap", make_ws_pcap(bc, []))
     with TestClient(app).websocket_connect("/ws/pcap") as ws:
         # Kein Frame verfuegbar: ein receive mit kurzem Timeout liefe leer. Statt zu
         # blockieren, pruefen wir strukturell, dass subscribe lief (kein Connect-Frame
