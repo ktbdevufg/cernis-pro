@@ -679,6 +679,20 @@
       "lang": "The DNS watch report condenses this computer's DNS-relevant connections: which name servers does my computer talk to? Every contact falls into exactly one of three categories - as expected (a resolver from your expected list, e.g. the gateway), open (a resolver outside that list), or possible DoH (encrypted DNS over port 443 to a known provider).\n\nYou see key figures, a distribution by category or by program, and a contacts list that can be filtered (all / notable only / acknowledged) and sorted. As a basis, the lists used (expected DNS servers, known DoH providers) are shown openly, so you can retrace the classification yourself.\n\nImportant: the view is host-local - only THIS computer's outbound contacts, not network-wide. The report describes and contextualises but does not judge: 'open' only means that a resolver lies outside the expected list - that can be harmless. A pure reading view, with a print button."
     }
   },
+  "help.report.behavior": {
+    "status": "final",
+    "kategorie": "Berichte",
+    "de": {
+      "titel": "Verhaltensprofil-Bericht (wiederkehrende Aktivitaetsmuster)",
+      "kurz": "Der Verhaltensprofil-Bericht zeigt wiederkehrende Aktivitaetsmuster - je Aufgabe (Tagesverlauf + Wochenmuster) oder als Uebersicht ueber alle Geraete. Rein beschreibend, kein Urteil.",
+      "lang": "Der Verhaltensprofil-Bericht verdichtet, wann wiederkehrend ueberwachte Geraete aktiv sind. Er kennt zwei Bezugsrahmen, die Sie oben umschalten: 'Diese Aufgabe' zeigt das Profil einer einzelnen wiederkehrenden Logging-Aufgabe - einen Tagesverlauf (ueber alle Wochentage gemittelt) und ein Wochenmuster (Wochentag x Tageszeit). 'Alle Geraete' zeigt eine Uebersichtstabelle je Aufgabe: Aufzeichnungstage, ob genug Daten fuer ein belastbares Profil vorliegen, die Zahl der Abweichungen sowie die aktivste Zeit und der aktivste Tag.\n\nEine Abweichung ist ein Zeitfenster, in dem ein Geraet ungewoehnlich aktiv war - gemessen am eigenen typischen Muster, nicht an einer festen Vorgabe. Solange zu wenige Tage aufgezeichnet sind, sagt der Bericht das offen ('Noch keine ausreichenden Daten') statt ein duennes Profil als gesichert auszugeben.\n\nDer Bericht ist eine reine Lesesicht und veraendert nichts. Er beschreibt und ordnet ein, urteilt aber nicht: Ein auffaelliges Fenster kann harmlos sein. Ueber den Knopf laesst sich der Bericht als PDF sichern."
+    },
+    "en": {
+      "titel": "Behaviour profile report (recurring activity patterns)",
+      "kurz": "The behaviour profile report shows recurring activity patterns - per task (daily rhythm + weekly pattern) or as an overview across all devices. Purely descriptive, no judgement.",
+      "lang": "The behaviour profile report condenses when recurringly monitored devices are active. It has two frames of reference that you switch at the top: 'This task' shows the profile of a single recurring logging task - a daily rhythm (averaged over all weekdays) and a weekly pattern (weekday x time of day). 'All devices' shows an overview table per task: recorded days, whether there is enough data for a reliable profile, the number of deviations, and the busiest time and busiest day.\n\nA deviation is a time window in which a device was unusually active - measured against its own typical pattern, not against a fixed target. As long as too few days have been recorded, the report says so openly ('Not enough data yet') instead of presenting a thin profile as certain.\n\nThe report is a pure reading view and changes nothing. It describes and contextualises but does not judge: a notable window can be harmless. The button saves the report as a PDF."
+    }
+  },
   "help.geraete.verwaltung": {
     "status": "final",
     "kategorie": "Geräte",
