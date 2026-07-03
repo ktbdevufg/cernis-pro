@@ -558,6 +558,43 @@ class DnsBypassPdfModelLike(Protocol):
     def bypass_rows(self) -> tuple[tuple[str, ...], ...]: ...
 
 
+class BehaviorPdfModelLike(Protocol):
+    """Struktureller Vertrag des Verhaltensprofil-Modells (duck-typing, KEIN application-Import).
+
+    Wie ``DnsBypassPdfModelLike``: ``infrastructure`` darf ``application`` NICHT importieren
+    (import-linter), das reiche ``BehaviorPdfModel`` lebt aber in ``application/reporting``.
+    Darum nimmt der Adapter es STRUKTURELL ueber dieses ``Protocol`` entgegen -- genau die
+    Felder, die er rendert. Read-only Properties decken die frozen-Felder ab (siehe Begruendung
+    bei ``SecurityPdfModelLike``). Das echte ``BehaviorPdfModel`` erfuellt das Protokoll
+    automatisch (gleiche Feldnamen/Typen).
+    """
+
+    @property
+    def title(self) -> str: ...
+    @property
+    def generated_at_text(self) -> str: ...
+    @property
+    def footer_left(self) -> str: ...
+    @property
+    def einleitung(self) -> str: ...
+    @property
+    def scope(self) -> str: ...
+    @property
+    def scope_text(self) -> str: ...
+    @property
+    def single_kennzahlen(self) -> tuple[tuple[str, str], ...]: ...
+    @property
+    def day_band(self) -> tuple[tuple[int, int, bool], ...]: ...
+    @property
+    def week_heatmap(self) -> tuple[tuple[int, int, int, bool], ...]: ...
+    @property
+    def slot_minutes(self) -> int: ...
+    @property
+    def weekday_labels(self) -> tuple[str, ...]: ...
+    @property
+    def entry_rows(self) -> tuple[tuple[str, ...], ...]: ...
+
+
 class ReportlabRenderer:
     """Rendert ein ``PdfReportModel`` zu PDF-Bytes (``ReportRenderer``) -- schlicht, robust.
 
@@ -2056,6 +2093,318 @@ class ReportlabRenderer:
         block = Table([[drawing], [Spacer(1, 3 * mm)], [legende]], colWidths=[bar_breite])
         block.setStyle(TableStyle([("ALIGN", (0, 0), (-1, -1), "LEFT")]))
         return block
+
+    # ── Verhaltensprofil-Bericht: eigener Render-Pfad ───────────────────────────
+    #
+    # NEUE Methoden neben render_dns_bypass_report_pdf -- alle bestehenden Pfade bleiben
+    # UNANGETASTET. Rendert das render-fertige BehaviorPdfModel (Kennzahlen + Tagesband +
+    # Wochen-Heatmap bei scope="single", Geraete-Uebersichtstabelle bei scope="all"). Kein
+    # Import des application-Modells (import-linter); struktureller Vertrag ueber
+    # BehaviorPdfModelLike. KEINE Uhr, KEINE Rechnung ausser reiner Balken-/Raster-Geometrie.
+
+    # Spaltenkoepfe der "alle Geraete"-Tabelle -- WOERTLICHE Spiegelung von
+    # BEHAVIOR_ENTRY_COLUMNS (application.reporting.behavior_pdf_model). Der Adapter darf die
+    # Modell-Datei nicht importieren, also liegen die Strings hier lokal (Muster: der Adapter
+    # haelt die DNS_*_COLUMNS-Spiegelung ebenfalls lokal). Reihenfolge/Schreibweise identisch.
+    _BEHAVIOR_ENTRY_COLUMNS_LOCAL: tuple[str, ...] = (
+        "Gerät",
+        "Aufzeichnungstage",
+        "Genug Daten",
+        "Abweichungen",
+        "Aktivste Zeit",
+        "Aktivster Tag",
+    )
+
+    def render_behavior_report_pdf(self, model: BehaviorPdfModelLike) -> bytes:
+        """Rendert das ``BehaviorPdfModel`` zum Verhaltensprofil-Bericht-PDF (A4 hoch).
+
+        Layout (Muster ``render_dns_bypass_report_pdf``): durchgaengige Kopf-/Fusszeile je Seite
+        (onFirstPage UND onLaterPages ueber ``_draw_manual_header_footer``), dann die Story --
+        Titel + Erzeugungsdatum + Einleitung, die fertige Bezugsrahmen-Zeile (``scope_text``) und
+        eine Verzweigung nach ``scope``:
+
+          * ``"single"`` -- Kennzahlen-Tabelle (Label/Wert) + Tagesverlauf-Grafik (Tagesband) +
+            Wochenmuster-Grafik (Heatmap). Sind beide Grafik-Datensaetze leer, steht statt der
+            Grafiken ein dezenter Hinweis-Absatz.
+          * ``"all"`` -- eine Geraete-Uebersichtstabelle (leere Tabelle -> Leer-Fallback-Absatz).
+
+        Robust: KEINE Uhr, KEINE Rechnung -- alle Texte/Zahlen kommen fertig aus dem Modell
+        (die Grafiken tragen nur strukturierte Zahlen und rechnen reine Balken-Geometrie).
+        Liefert valide PDF-Bytes (Magic-Header ``%PDF``).
+        """
+        buffer = io.BytesIO()
+        document = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,  # Hochformat (Muster DNS-Umgehung)
+            leftMargin=18 * mm,
+            rightMargin=18 * mm,
+            topMargin=32 * mm,  # Platz fuer die durchgaengige Kopfzeile
+            bottomMargin=20 * mm,  # Platz fuer die Fusszeile
+            title=model.title,
+        )
+
+        story: list[Flowable] = []
+        styles = self._security_styles()
+
+        # ── Titel + Erzeugungsdatum + Einleitung (fertige Texte aus dem Modell) ──
+        story.append(Paragraph(model.title, styles["h_title"]))
+        story.append(Paragraph(model.generated_at_text, styles["sub"]))
+        story.append(Spacer(1, 4 * mm))
+        if model.einleitung:
+            story.append(Paragraph(model.einleitung, styles["body"]))
+            story.append(Spacer(1, 6 * mm))
+
+        # ── Bezugsrahmen-Zeile (fertig lokalisiert vom Composition Root) ──
+        story.append(Paragraph(model.scope_text, styles["sub"]))
+        story.append(Spacer(1, 4 * mm))
+
+        if model.scope == "single":
+            # ── Kennzahlen (Label/Wert) ──
+            story.append(Paragraph("Kennzahlen", styles["h_section"]))
+            story.append(self._behavior_kennzahlen(model))
+            story.append(Spacer(1, 6 * mm))
+
+            if not model.day_band and not model.week_heatmap:
+                # Zu wenig Daten fuer ein Profil -> dezenter Hinweis statt der Grafiken.
+                story.append(
+                    Paragraph(
+                        "Noch keine ausreichenden Daten für ein Verhaltensprofil.",
+                        styles["body"],
+                    )
+                )
+            else:
+                # ── Tagesverlauf (Tagesband) ──
+                story.append(
+                    KeepTogether(
+                        [
+                            Paragraph("Tagesverlauf", styles["h_section"]),
+                            Spacer(1, 3 * mm),
+                            self._behavior_tagesband(model),
+                        ]
+                    )
+                )
+                story.append(Spacer(1, 6 * mm))
+                # ── Wochenmuster (Heatmap) ──
+                story.append(
+                    KeepTogether(
+                        [
+                            Paragraph("Wochenmuster", styles["h_section"]),
+                            Spacer(1, 3 * mm),
+                            self._behavior_heatmap(model),
+                        ]
+                    )
+                )
+        else:
+            # ── scope == "all": Geraete-Uebersicht ──
+            story.append(Paragraph("Geräte-Übersicht", styles["h_section"]))
+            if not model.entry_rows:
+                story.append(
+                    Paragraph(
+                        "Keine wiederkehrenden Aufgaben mit Verhaltensdaten.",
+                        styles["body"],
+                    )
+                )
+            else:
+                columns = self._BEHAVIOR_ENTRY_COLUMNS_LOCAL
+                render_data: list[list[object]] = [list(columns)]
+                for row in model.entry_rows:
+                    render_data.append([Paragraph(_esc(value), styles["cell"]) for value in row])
+                table = Table(render_data, repeatRows=1, colWidths=_col_widths(columns))
+                table.setStyle(self._base_table_style(len(render_data)))
+                story.append(table)
+
+        # ── Achse-B-Fussnote (invariant, wie im DNS-Umgehungs-Bericht) ──
+        story.append(Spacer(1, 8 * mm))
+        story.append(
+            KeepTogether(
+                [
+                    HRFlowable(width="100%", thickness=0.6, color=_LINE),
+                    Spacer(1, 2 * mm),
+                    Paragraph(
+                        "Dieser Bericht beschreibt und ordnet ein — er fällt kein Urteil.",
+                        styles["footnote"],
+                    ),
+                ]
+            )
+        )
+
+        # _draw_manual_header_footer ist auf ManualPdfModelLike typisiert, liest zur Laufzeit aber
+        # NUR model.title + model.footer_left -- beide hat BehaviorPdfModelLike ebenfalls (Muster
+        # render_dns_bypass_report_pdf): cast statt Aenderung der Kopf-/Fuss-Funktion.
+        header_model = cast(ManualPdfModelLike, model)
+        document.build(
+            story,
+            onFirstPage=lambda canvas, doc: _draw_manual_header_footer(canvas, doc, header_model),
+            onLaterPages=lambda canvas, doc: _draw_manual_header_footer(canvas, doc, header_model),
+        )
+        return buffer.getvalue()
+
+    @staticmethod
+    def _behavior_kennzahlen(model: BehaviorPdfModelLike) -> Table:
+        """Die Einzelprofil-Kennzahlen als schlichte zweispaltige Label/Wert-Tabelle (dezent).
+
+        ``model.single_kennzahlen`` ist eine Liste fertiger ``(Label, Wert)``-Paare. Eine
+        schlichte 2-spaltige ``Table`` in ruhigem Stil (Label in ``_TEXT``, Wert in ``_ACCENT``,
+        Zebra-Zeilen) -- keine Rechnung, keine neuen Farben. Leere Liste -> leere Tabelle mit
+        einer Platzhalter-Zeile, damit reportlab keine 0-Zeilen-Tabelle rendern muss.
+        """
+        paare = model.single_kennzahlen or (("—", "—"),)
+        data: list[list[object]] = [[label, wert] for label, wert in paare]
+        table = Table(data, colWidths=[60 * mm, 40 * mm])
+        table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, -1), _ZEBRA),
+                    ("TEXTCOLOR", (0, 0), (0, -1), _TEXT),
+                    ("TEXTCOLOR", (1, 0), (1, -1), _ACCENT),
+                    ("FONTNAME", (0, 0), (0, -1), "Helvetica"),
+                    ("FONTNAME", (1, 0), (1, -1), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 10),
+                    ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("LINEBELOW", (0, 0), (-1, -1), 0.4, _LINE),
+                    ("TOPPADDING", (0, 0), (-1, -1), 5),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                ]
+            )
+        )
+        return table
+
+    def _behavior_tagesband(self, model: BehaviorPdfModelLike) -> Flowable:
+        """Tagesverlauf: EINE Reihe vertikaler Balken je Tages-Slot (Hoehe = relative Aktivitaet).
+
+        Zeichnet aus ``model.day_band`` (Tripel ``(slot_start, activity_count, is_deviation)``,
+        nach ``slot_start`` aufsteigend) je Slot einen vertikalen Balken; die Hoehe ist
+        proportional zu ``activity_count / max(activity_count)`` (max 0 -> alle leer, kein
+        Div-by-0). Abweichungs-Slots (``is_deviation``) in der Akzentfarbe ``_ACCENT``, normale
+        dezent in ``_CLEAN`` -- bestehende Renderer-Tokens, KEINE neuen Farben. Unter den Balken
+        sparsam Uhrzeit-Achsenmarken aus ``slot_start`` (Minuten seit Mitternacht), nur an jeder
+        vollen Stunde, damit die Achse lesbar bleibt. Leeres Band -> dezente Grundbahn.
+        """
+        slots = sorted(model.day_band, key=lambda s: s[0])
+        breite = _CONTENT_WIDTH_MM * mm
+        plot_hoehe = 22.0 * mm
+        achse_hoehe = 5.0 * mm
+        gesamt_hoehe = plot_hoehe + achse_hoehe
+        drawing = Drawing(breite, gesamt_hoehe)
+        # Dezente Grundbahn (Basislinie) hinter den Balken.
+        drawing.add(Rect(0.0, achse_hoehe, breite, plot_hoehe, fillColor=_ZEBRA, strokeColor=None))
+        if not slots:
+            return drawing
+
+        max_count = max((count for _, count, _ in slots), default=0) or 1
+        n = len(slots)
+        slot_breite = breite / n
+        # Schmaler Balken mittig im Slot, etwas Luft an den Seiten.
+        bar_breite = slot_breite * 0.7
+        bar_offset = (slot_breite - bar_breite) / 2.0
+        for i, (slot_start, count, is_deviation) in enumerate(slots):
+            hoehe = plot_hoehe * (count / max_count)
+            x = i * slot_breite + bar_offset
+            farbe = _ACCENT if is_deviation else _CLEAN
+            if hoehe > 0:
+                drawing.add(
+                    Rect(x, achse_hoehe, bar_breite, hoehe, fillColor=farbe, strokeColor=None)
+                )
+            # Achsenmarke nur an voller Stunde (slot_start Minuten seit Mitternacht).
+            if slot_start % 60 == 0:
+                drawing.add(
+                    String(
+                        i * slot_breite + slot_breite / 2.0,
+                        0.0,
+                        f"{slot_start // 60:02d}:{slot_start % 60:02d}",
+                        fontName="Helvetica",
+                        fontSize=6,
+                        fillColor=_TEXT,
+                        textAnchor="middle",
+                    )
+                )
+        return drawing
+
+    def _behavior_heatmap(self, model: BehaviorPdfModelLike) -> Flowable:
+        """Wochenmuster: Raster 7 Zeilen (Mo oben) x N Spalten (Slots), Intensitaet = Aktivitaet.
+
+        Zeichnet aus ``model.week_heatmap`` (Zellen ``(weekday, slot_start, activity_count,
+        is_deviation)``) ein Raster: 7 Zeilen (``weekday`` 0..6, Mo oben) x den distinct
+        ``slot_start`` aufsteigend. Die Zell-Fuellung ist ``_ACCENT`` mit einer Deckkraft
+        proportional zu ``activity_count / global max`` (max 0 -> leeres Raster, kein Div-by-0)
+        -- bestehendes Token, nur die Alpha-Intensitaet variiert. Abweichungs-Zellen tragen
+        zusaetzlich eine dezente ``_ACCENT``-Umrandung. Links beschriften ``model.weekday_labels``
+        die Zeilen (leer -> Index als Fallback), unten sparsam Uhrzeit-Marken aus ``slot_start``
+        (nur an voller Stunde). Reine Raster-Geometrie, KEINE neuen Farben.
+        """
+        zellen = model.week_heatmap
+        slot_starts = sorted({slot_start for _, slot_start, _, _ in zellen})
+        labels = model.weekday_labels
+        label_w = 10.0 * mm
+        achse_hoehe = 5.0 * mm
+        zeilen_hoehe = 6.0 * mm
+        raster_hoehe = zeilen_hoehe * 7
+        breite = _CONTENT_WIDTH_MM * mm
+        raster_breite = breite - label_w
+        gesamt_hoehe = raster_hoehe + achse_hoehe
+        drawing = Drawing(breite, gesamt_hoehe)
+
+        # Leeres Raster (keine Spalten) -> nur die Zeilen-Beschriftung, kein Div-by-0.
+        n_spalten = len(slot_starts)
+        zell_breite = raster_breite / n_spalten if n_spalten else raster_breite
+        max_count = max((count for _, _, count, _ in zellen), default=0) or 1
+        # Aktivitaet je (weekday, slot_start) fuer schnellen Lookup.
+        werte: dict[tuple[int, int], tuple[int, bool]] = {
+            (weekday, slot_start): (count, is_deviation)
+            for weekday, slot_start, count, is_deviation in zellen
+        }
+
+        for zeile in range(7):
+            # weekday 0 (Mo) oben: y faellt mit steigender Zeile.
+            y = achse_hoehe + raster_hoehe - (zeile + 1) * zeilen_hoehe
+            beschriftung = labels[zeile] if zeile < len(labels) else str(zeile)
+            drawing.add(
+                String(
+                    0.0,
+                    y + zeilen_hoehe / 2.0 - 3.0,
+                    beschriftung,
+                    fontName="Helvetica",
+                    fontSize=7,
+                    fillColor=_TEXT,
+                )
+            )
+            for spalte, slot_start in enumerate(slot_starts):
+                x = label_w + spalte * zell_breite
+                count, is_deviation = werte.get((zeile, slot_start), (0, False))
+                # Intensitaet als Deckkraft des Akzents (bestehendes Token, nur Alpha variiert).
+                anteil = count / max_count
+                zell_farbe = colors.Color(_ACCENT.red, _ACCENT.green, _ACCENT.blue, alpha=anteil)
+                rand = _ACCENT if is_deviation else _LINE
+                drawing.add(
+                    Rect(
+                        x,
+                        y,
+                        zell_breite,
+                        zeilen_hoehe,
+                        fillColor=zell_farbe,
+                        strokeColor=rand,
+                        strokeWidth=1.0 if is_deviation else 0.3,
+                    )
+                )
+
+        # Uhrzeit-Marken unten, nur an voller Stunde.
+        for spalte, slot_start in enumerate(slot_starts):
+            if slot_start % 60 == 0:
+                drawing.add(
+                    String(
+                        label_w + spalte * zell_breite + zell_breite / 2.0,
+                        0.0,
+                        f"{slot_start // 60:02d}:{slot_start % 60:02d}",
+                        fontName="Helvetica",
+                        fontSize=6,
+                        fillColor=_TEXT,
+                        textAnchor="middle",
+                    )
+                )
+        return drawing
 
     # ── Benutzerhandbuch: eigener Render-Pfad ───────────────────────────────
     #

@@ -1,0 +1,246 @@
+/* Verhaltensprofil-Bericht — In-App-Ansicht (Etappe 5b). Eigene BEM-Klassen mit
+   Praefix behavior-report__, gleiche Designsprache/Tokens wie DnsWatchReportView:
+   Card-Flaechen, --color-border, radius, accent fuer Kopf/Aktionen. Nur bestehende
+   Token-Variablen, nie feste Farben. Der Bezugsrahmen-Umschalter spiegelt die Optik
+   von .dns-report__bezug-reiter. */
+
+.behavior-report {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.behavior-report__mono {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+.behavior-report__num {
+  text-align: right;
+}
+
+/* ── Bezugsrahmen-Umschalter (Optik der DnsWatchScreen-Reiter) ─────────────────────
+   Zwei nackte, tab-artige Knoepfe. Aktiver Reiter dezent akzentuiert. Im Druck weg. */
+.behavior-report__bezug-reiter {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.behavior-report__bezug-knopf {
+  padding: 7px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-sec);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+
+.behavior-report__bezug-knopf:hover {
+  border-color: var(--color-accent-border);
+}
+
+.behavior-report__bezug-knopf:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.behavior-report__bezug-knopf--aktiv {
+  color: var(--color-accent-strong);
+  background: var(--color-accent-bg);
+  border-color: var(--color-accent-border);
+}
+
+/* ── Toolbar (Aufgaben-Dropdown) ──────────────────────────────────────────────────
+   Muster dns-report__bezug: dezent, im Druck ausgeblendet. */
+.behavior-report__toolbar {
+  display: flex;
+}
+
+.behavior-report__aufgabe-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+.behavior-report__aufgabe-select {
+  padding: 5px 10px;
+  font-size: 12px;
+  color: var(--color-text);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+/* Dezenter Fehlerhinweis (Ladefehler kippt die Ansicht nicht). */
+.behavior-report__fehler {
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--sev-med-text);
+  background: var(--sev-med-bg);
+  border: 1px solid var(--sev-med-bd);
+  border-radius: var(--radius-md);
+}
+
+/* Dezenter Hinweis (Einzel-Bezug ohne Auswahl). */
+.behavior-report__hinweis {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-tert);
+}
+
+/* Ruhige Leer-Meldung (statt leerem Kasten). */
+.behavior-report__leer {
+  margin: 0;
+  padding: 16px 12px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--color-text-sec);
+}
+
+/* ── Kennzahlen (Einzelprofil) ────────────────────────────────────────────────────
+   Muster dns-report__kennzahlen. */
+.behavior-report__kennzahlen {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.behavior-report__kennzahl {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-left-width: 4px;
+  border-left-color: var(--color-accent);
+  border-radius: var(--radius-md);
+}
+
+.behavior-report__kennzahl-wert {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.behavior-report__kennzahl-label {
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+/* ── Grafiken (Tagesverlauf-Balken + Wochen-Heatmap) ──────────────────────────────
+   Ruhiger Card-Rahmen; das SVG selbst traegt nur Token-Farben. currentColor faellt auf
+   den gedaempften Sekundaertext, damit die Achsen-/Stundenmarken dezent bleiben. */
+.behavior-report__grafik {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 18px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-tert);
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.behavior-report__grafik-titel {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.behavior-report__svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* Achsen-/Stundenmarken (currentColor = gedaempfter Ton des .grafik-Containers). */
+.behavior-report__svg-mark {
+  fill: currentColor;
+}
+
+/* ── Uebersichtstabelle (scope all) — Muster dns-report__tabelle ─────────────────── */
+.behavior-report__tabelle {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.behavior-report__tabelle th {
+  text-align: left;
+  padding: 8px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--color-text-tert);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.behavior-report__tabelle td {
+  padding: 8px 10px;
+  color: var(--color-text);
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: top;
+}
+
+.behavior-report__tabelle .behavior-report__num {
+  text-align: right;
+}
+
+/* ── Aktionsleiste (PDF) — Muster dns-report__aktionen ───────────────────────────── */
+.behavior-report__aktionen {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.behavior-report__pdf {
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-bg);
+  background: var(--color-accent);
+  border: 1px solid var(--color-accent-strong);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.behavior-report__pdf:hover {
+  background: var(--color-accent-strong);
+}
+
+.behavior-report__pdf:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.behavior-report__pdf-fehler {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--sev-med-text);
+}
+
+/* ── Druck: Bedien-Controls weg ───────────────────────────────────────────────────
+   Bezugsrahmen-Umschalter, Aufgaben-Dropdown und PDF-Knopf haben auf Papier keinen
+   Sinn. */
+@media print {
+  .behavior-report__bezug-reiter,
+  .behavior-report__toolbar,
+  .behavior-report__aktionen {
+    display: none;
+  }
+}

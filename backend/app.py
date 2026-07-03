@@ -261,6 +261,7 @@ from api.report import (
     ScoreOut,
     SecurityReportOut,
     provide_behavior_report,
+    provide_behavior_report_pdf,
     provide_behavior_report_tasks,
     provide_cve_report,
     provide_cve_report_pdf,
@@ -536,6 +537,7 @@ from application.reporting import (
 from application.reporting import (
     PortFinding as ReportPortFinding,
 )
+from application.reporting.behavior_pdf_model import BehaviorPdfModel
 from application.reporting.behavior_report import (
     BehaviorReport,
     BehaviorTaskInput,
@@ -6162,23 +6164,24 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             if task.operation_mode is OperationMode.RECURRING
         ]
 
-    async def _behavior_report(task_id: str | None = None) -> BehaviorReportOut:
-        # Bezugsrahmen ueber task_id: gesetzt = EINE Aufgabe (scope="single"), None/leer =
-        # ALLE RECURRING-Aufgaben zusammengefasst (scope="all"). KEIN 404: leerer Stand ist
-        # ein DATUM (Muster _dns_bypass_report).
+    async def _build_behavior_report_data(task_id: str | None = None) -> BehaviorReport:
+        # Gemeinsame Bericht-Bildung fuer BEIDE Runner (Wire-Ansicht _behavior_report UND
+        # PDF-Runner _behavior_report_pdf): liefert das application-``BehaviorReport`` (nicht
+        # die Wire-Form). Bezugsrahmen ueber task_id: gesetzt = EINE Aufgabe (scope="single"),
+        # None/leer = ALLE RECURRING-Aufgaben zusammengefasst (scope="all"). KEIN 404: leerer
+        # Stand ist ein DATUM (Muster _dns_bypass_report). Reine Datenlogik, KEINE Projektion.
         if task_id:
             # EINE Aufgabe. Unbekannte id -> leerer "single"-Bericht (single_label=""), kein
             # 404: build_single_behavior_report ueber leere Samples liefert ein leeres Profil.
             try:
                 task = get_detail(task_id)
             except LoggingTaskNotFound:
-                empty = build_single_behavior_report(
+                return build_single_behavior_report(
                     BehaviorTaskInput(task_id=task_id, label="", samples=[])
                 )
-                return _project_behavior_report(empty)
             samples = _enrich_behavior_samples_root(get_rtt(task_id, since=None, until=None))
             ti = BehaviorTaskInput(task_id=task_id, label=task.label or task_id, samples=samples)
-            return _project_behavior_report(build_single_behavior_report(ti))
+            return build_single_behavior_report(ti)
 
         # ALLE RECURRING-Aufgaben: je Aufgabe rtt laden, Samples anreichern, sammeln.
         inputs: list[BehaviorTaskInput] = []
@@ -6189,7 +6192,109 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             inputs.append(
                 BehaviorTaskInput(task_id=task.id, label=task.label or task.id, samples=samples)
             )
-        return _project_behavior_report(build_all_behavior_report(inputs))
+        return build_all_behavior_report(inputs)
+
+    async def _behavior_report(task_id: str | None = None) -> BehaviorReportOut:
+        # Baut den Bericht ueber die gemeinsame Datenlogik und projiziert ihn auf die Wire-Form
+        # (Regel 4: der api-Ring kennt application nicht, DIESE Naht faellt im Composition Root).
+        report = await _build_behavior_report_data(task_id)
+        return _project_behavior_report(report)
+
+    # ── Verhaltensprofil-Bericht (Etappe 4b): PDF-Projektion + Runner ──────────────
+    # Reine Projektion application-``BehaviorReport`` -> render-fertiges ``BehaviorPdfModel``
+    # (Muster _project_dns_bypass_pdf_model): ALLE lokalisierten Texte fallen HIER. Das Modell
+    # traegt nur fertige Strings/Tupel; der reportlab-Adapter rechnet nichts.
+    def _project_behavior_pdf_model(
+        report: BehaviorReport, generated_at_text: str
+    ) -> BehaviorPdfModel:
+        # Lokalisierte Wochentagskuerzel (Mo..So, Index = weekday 0..6) -- der Adapter
+        # beschriftet damit die Heatmap-Zeilen; auch als Klartext fuer den "aktivsten Tag".
+        wochentage = ("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So")
+
+        # Tagesminute -> "HH:MM" (rein, deterministisch; keine Wanduhr).
+        def _hhmm(minute: int) -> str:
+            return f"{minute // 60:02d}:{minute % 60:02d}"
+
+        scope = report.scope
+        if scope == "single":
+            scope_text = (
+                f"Bezug: Aufgabe „{report.single_label}“"
+                if report.single_label
+                else "Bezug: Aufgabe (unbekannt)"
+            )
+        else:
+            scope_text = "Bezug: Alle Geräte"
+
+        single_kennzahlen: tuple[tuple[str, str], ...] = ()
+        day_band: tuple[tuple[int, int, bool], ...] = ()
+        week_heatmap: tuple[tuple[int, int, int, bool], ...] = ()
+        entry_rows: tuple[tuple[str, ...], ...] = ()
+
+        if scope == "single" and report.single_profile is not None:
+            p = report.single_profile
+            single_kennzahlen = (
+                ("Aufzeichnungstage", str(p.recorded_days)),
+                ("Genug Daten", "ja" if p.has_enough_data else "nein"),
+                ("Abweichungen", str(p.deviation_count)),
+            )
+            day_band = tuple((s.slot_start, s.activity_count, s.is_deviation) for s in p.day_band)
+            week_heatmap = tuple(
+                (s.weekday, s.slot_start, s.activity_count, s.is_deviation) for s in p.week_heatmap
+            )
+        elif scope == "all":
+            # Je Eintrag eine Zeile in BEHAVIOR_ENTRY_COLUMNS-Reihenfolge (Gerät,
+            # Aufzeichnungstage, Genug Daten, Abweichungen, Aktivste Zeit, Aktivster Tag).
+            entry_rows = tuple(
+                (
+                    e.label,
+                    str(e.recorded_days),
+                    "ja" if e.has_enough_data else "nein",
+                    str(e.deviation_count),
+                    _hhmm(e.busiest_slot_start) if e.busiest_slot_start is not None else "—",
+                    wochentage[e.busiest_weekday] if e.busiest_weekday is not None else "—",
+                )
+                for e in report.entries
+            )
+
+        return BehaviorPdfModel(
+            title="Verhaltensprofil-Bericht",
+            generated_at_text=generated_at_text,
+            footer_left="CERNIS PRO 2.0 — Verhaltensprofil-Bericht",
+            einleitung=(
+                "Dieser Bericht zeigt die wiederkehrenden Aktivitätsmuster je Aufgabe bzw. Gerät "
+                "— Tagesverlauf, Wochenmuster und die als untypisch markierten Abweichungen. Er "
+                "beschreibt und ordnet ein, er fällt kein Urteil."
+            ),
+            scope=scope,
+            scope_text=scope_text,
+            single_kennzahlen=single_kennzahlen,
+            day_band=day_band,
+            week_heatmap=week_heatmap,
+            slot_minutes=60,
+            weekday_labels=wochentage,
+            entry_rows=entry_rows,
+        )
+
+    @dataclass(frozen=True)
+    class _BehaviorPdfResult:
+        content: bytes
+        media_type: str
+        filename: str
+
+    async def _behavior_report_pdf(task_id: str | None = None) -> _BehaviorPdfResult:
+        report = await _build_behavior_report_data(task_id)
+        # Wanduhr GENAU HIER lesen (einziger Ort) -- Projektion und Modell bleiben rein.
+        import time
+
+        now = time.time()
+        generated_at_text = "Erstellt am " + datetime.fromtimestamp(now).strftime("%d.%m.%Y %H:%M")
+        model = _project_behavior_pdf_model(report, generated_at_text)
+        pdf_bytes = ReportlabRenderer().render_behavior_report_pdf(model)
+        return _BehaviorPdfResult(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            filename="CERNISPRO_Verhaltensprofil-Bericht.pdf",
+        )
 
     app.include_router(report_router)
     app.dependency_overrides[provide_security_report] = lambda: _security_report
@@ -6212,6 +6317,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         _dns_bypass_report_recordings
     )
     app.dependency_overrides[provide_behavior_report] = lambda: _behavior_report
+    app.dependency_overrides[provide_behavior_report_pdf] = lambda: _behavior_report_pdf
     app.dependency_overrides[provide_behavior_report_tasks] = lambda: _behavior_report_tasks
 
     # ── Route zum Ziel (ADR 0036): traceroute-Hops + Geo/ASN, zwei getrennte Naehte ──

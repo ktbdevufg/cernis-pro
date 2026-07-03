@@ -614,6 +614,92 @@ export async function fetchDnsBypassReportPdf(recordingId) {
   return apiDownload(pfad, null, "CERNISPRO_DNS-Umgehungs-Bericht.pdf");
 }
 
+// ── Verhaltensprofil-Bericht (Etappe 5) ────────────────────────────────────────
+//
+// Wire-Form (aus backend/api/report.py, verifiziert, NICHT aendern):
+//   GET /api/report/behavior/recordings -> [ { id:str, label:str } ]
+//     (waehlbare RECURRING-Aufgaben furs Bezugsrahmen-Dropdown)
+//   GET /api/report/behavior?task_id=... -> {
+//     scope:str ("single"/"all"), report_label:str,
+//     entries: [ { label, recorded_days:int, has_enough_data:bool,
+//       deviation_count:int, busiest_slot_start:int|null,
+//       busiest_weekday:int|null } ],
+//     single_profile: null | { recorded_days:int, has_enough_data:bool,
+//       deviation_count:int,
+//       day_band: [ { slot_start:int, activity_count:int, is_deviation:bool } ],
+//       week_heatmap: [ { weekday:int, slot_start:int, activity_count:int,
+//         is_deviation:bool } ] },
+//     single_label: str|null }
+//   GET /api/report/behavior/pdf?task_id=... -> PDF-Download (Blob)
+// ``task_id`` ist OPTIONAL: leer/None = alle Geraete zusammengefasst, ein Wert =
+// nur diese Aufgabe. KEIN 404-Fall: leerer Stand ist ein DATUM (leere Listen),
+// kein Fehler.
+
+// GET /api/report/behavior/recordings -> die waehlbaren wiederkehrenden Aufgaben
+// fuers Bezugsrahmen-Dropdown (schlanke Wire-Form: id + label). Leere Liste = DATUM
+// (keine Aufgaben mit Verhaltensdaten), kein Fehler. Bei !ok/Netzfehler -> ApiError
+// (die View faengt das still ab). Muster fetchDnsBypassReportRecordings.
+export async function fetchBehaviorReportTasks() {
+  const backend = await apiGet("/api/report/behavior/recordings");
+  return (backend ?? []).map((t) => ({ id: t.id, label: t.label }));
+}
+
+// GET /api/report/behavior?task_id=... -> der aggregierte Verhaltensprofil-Bericht
+// (EINE Aufgabe mit Tagesband/Wochen-Heatmap oder alle Geraete als Uebersicht).
+// taskId leer/null -> ohne Query (alle). Fehlt ein Block wider Erwarten, fallen
+// Zaehler auf 0 und Listen auf [] (gefahrloses Mappen, Muster fetchDnsBypassReport);
+// singleProfile bleibt ehrlich null im all-Bezug. Bei !ok/Netzfehler -> ApiError
+// (die View faengt das und zeigt den Fehlerhinweis).
+export async function fetchBehaviorReport(taskId) {
+  const pfad = taskId
+    ? `/api/report/behavior?task_id=${encodeURIComponent(taskId)}`
+    : "/api/report/behavior";
+  const backend = await apiGet(pfad);
+  return {
+    scope: backend?.scope ?? "all",
+    reportLabel: backend?.report_label ?? "",
+    entries: (backend?.entries ?? []).map((e) => ({
+      label: e.label,
+      recordedDays: e.recorded_days ?? 0,
+      hasEnoughData: e.has_enough_data ?? false,
+      deviationCount: e.deviation_count ?? 0,
+      busiestSlotStart: e.busiest_slot_start ?? null,
+      busiestWeekday: e.busiest_weekday ?? null,
+    })),
+    singleProfile: backend?.single_profile
+      ? {
+          recordedDays: backend.single_profile.recorded_days ?? 0,
+          hasEnoughData: backend.single_profile.has_enough_data ?? false,
+          deviationCount: backend.single_profile.deviation_count ?? 0,
+          dayBand: (backend.single_profile.day_band ?? []).map((s) => ({
+            slotStart: s.slot_start,
+            activityCount: s.activity_count,
+            isDeviation: s.is_deviation,
+          })),
+          weekHeatmap: (backend.single_profile.week_heatmap ?? []).map((s) => ({
+            weekday: s.weekday,
+            slotStart: s.slot_start,
+            activityCount: s.activity_count,
+            isDeviation: s.is_deviation,
+          })),
+        }
+      : null,
+    singleLabel: backend?.single_label ?? null,
+  };
+}
+
+// GET /api/report/behavior/pdf?task_id=... -> loest den Browser-Download des
+// Verhaltensprofil-Berichts als PDF aus (Blob via apiDownload). taskId leer/null ->
+// ohne Query (alle). Der echte Dateiname kommt vom Backend ueber Content-Disposition;
+// der defaultName hier ist nur Fallback. Bei !ok/Netzfehler -> ApiError (die View
+// faengt das und zeigt einen dezenten PDF-Fehlerhinweis).
+export async function fetchBehaviorReportPdf(taskId) {
+  const pfad = taskId
+    ? `/api/report/behavior/pdf?task_id=${encodeURIComponent(taskId)}`
+    : "/api/report/behavior/pdf";
+  return apiDownload(pfad, null, "CERNISPRO_Verhaltensprofil-Bericht.pdf");
+}
+
 export default {
   fetchSecurityReport,
   fetchSecurityReportPdf,
@@ -630,4 +716,7 @@ export default {
   fetchDnsBypassReportRecordings,
   fetchDnsBypassReport,
   fetchDnsBypassReportPdf,
+  fetchBehaviorReportTasks,
+  fetchBehaviorReport,
+  fetchBehaviorReportPdf,
 };

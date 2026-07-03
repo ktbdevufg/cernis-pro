@@ -1202,6 +1202,11 @@
         "title": "DNS-Wächter-Bericht",
         "subtitle": "DNS-relevante Außenkontakte dieses Rechners – erwartungsgemäß, offen oder möglicher DoH, mit Programm-Zuordnung.",
         "locked": ""
+      },
+      "behavior": {
+        "title": "Verhaltensprofil-Bericht",
+        "subtitle": "Wiederkehrende Aktivitätsmuster je Aufgabe oder über alle Geräte – Tagesverlauf, Wochenmuster und markierte Abweichungen.",
+        "locked": ""
       }
     }
   },
@@ -1652,6 +1657,23 @@
       },
       "fussnote": "Der Bericht beschreibt netzweit, welche Geräte den erwarteten DNS umgehen, und ordnet ein – er urteilt nicht. Plain-DNS (Port 53) wird sicher erkannt, DoH nur heuristisch vermutet.",
       "fusszeile": "CERNIS PRO 2.0 – DNS-Umgehungs-Bericht · {{datum}}",
+      "pdf": "Als PDF herunterladen",
+      "pdfFehler": "Das PDF konnte nicht erstellt werden."
+    },
+    "behavior": {
+      "titel": "Verhaltensprofil-Bericht",
+      "einleitung": "Dieser Bericht zeigt die wiederkehrenden Aktivitätsmuster je Aufgabe bzw. Gerät – Tagesverlauf, Wochenmuster und die als untypisch markierten Abweichungen. Er beschreibt und ordnet ein – er fällt kein Urteil.",
+      "ladeFehler": "Der Verhaltensprofil-Bericht konnte nicht geladen werden.",
+      "bezug": { "single": "Diese Aufgabe", "all": "Alle Geräte" },
+      "aufgabeWahl": "Aufgabe",
+      "aufgabeHinweis": "Bitte eine Aufgabe wählen.",
+      "keineAufgaben": "Keine wiederkehrenden Aufgaben mit Verhaltensdaten vorhanden.",
+      "kennzahl": { "aufzeichnungstage": "Aufzeichnungstage", "genugDaten": "Genug Daten", "abweichungen": "Abweichungen", "ja": "ja", "nein": "nein" },
+      "tagesverlauf": "Tagesverlauf",
+      "wochenmuster": "Wochenmuster",
+      "keineDaten": "Noch keine ausreichenden Daten für ein Verhaltensprofil.",
+      "spalte": { "geraet": "Gerät", "aufzeichnungstage": "Aufzeichnungstage", "genugDaten": "Genug Daten", "abweichungen": "Abweichungen", "aktivsteZeit": "Aktivste Zeit", "aktivsterTag": "Aktivster Tag" },
+      "wochentage": ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"],
       "pdf": "Als PDF herunterladen",
       "pdfFehler": "Das PDF konnte nicht erstellt werden."
     }

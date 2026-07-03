@@ -7,7 +7,7 @@
 //   weitere Berichte folgen als eigene Kacheln (zusätzlicher FUNKTIONEN-Eintrag
 //   mit eigener id + Eintrag in KOMPONENTEN_JE_ID).
 
-import { Boxes, Globe, Radar, ShieldAlert, ShieldCheck } from "lucide-react";
+import { Activity, Boxes, Globe, Radar, ShieldAlert, ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -16,6 +16,7 @@ import {
   FunctionShell,
 } from "../components/AreaShell.jsx";
 import FunctionCard from "../components/FunctionCard.jsx";
+import BehaviorReportView from "../components/BehaviorReportView.jsx";
 import CveReportView from "../components/CveReportView.jsx";
 import DnsWatchReportView from "../components/DnsWatchReportView.jsx";
 import InventoryReportView from "../components/InventoryReportView.jsx";
@@ -29,6 +30,7 @@ const FUNKTIONEN = [
   { id: "cve", icon: ShieldAlert, locked: false, helpId: "help.report.cve" },
   { id: "outbound", icon: Radar, locked: false, helpId: "help.report.outbound" },
   { id: "dnswatch", icon: Globe, locked: false, helpId: "help.report.dns_watch" },
+  { id: "behavior", icon: Activity, locked: false, helpId: "help.report.behavior" },
 ];
 
 // Mapping id -> geöffnete Berichts-Komponente. Ein weiterer Bericht braucht nur
@@ -39,6 +41,7 @@ const KOMPONENTEN_JE_ID = {
   cve: CveReportView,
   outbound: OutboundReportView,
   dnswatch: DnsWatchReportView,
+  behavior: BehaviorReportView,
 };
 
 export default function ReportingView({ onOpenManual }) {
