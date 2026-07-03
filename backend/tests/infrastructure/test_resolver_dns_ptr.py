@@ -103,6 +103,26 @@ def test_resolve_ptr_tool_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "dig" in exc_info.value.message
 
 
+def test_resolve_ptr_places_terminator_after_x_before_ip(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``resolve_ptr`` setzt ``--`` NACH ``-x`` und VOR der nutzergesteuerten ip (F-07).
+
+    ``-x`` muss VOR ``--`` bleiben (sonst kein Reverse-Lookup); die ip muss NACH ``--``
+    stehen (sonst wuerde ein mit ``-`` beginnender Wert als Option interpretiert).
+    """
+    captured: list[tuple[str, ...]] = []
+
+    def _capture_dig(*args: str) -> str:
+        captured.append(args)
+        return ""
+
+    monkeypatch.setattr(shutil, "which", lambda _name: "/usr/bin/dig")
+    monkeypatch.setattr("infrastructure.resolver.dns_ptr._run_dig", _capture_dig)
+    asyncio.run(DigDnsPtrResolver().resolve_ptr("-leading-dash"))
+    args = captured[0]
+    assert "-x" in args and "--" in args
+    assert args.index("-x") < args.index("--") < args.index("-leading-dash")
+
+
 # ── resolve_forward (Adapter-Kern, gemocktes _run_dig/which) ──────────────────
 
 
@@ -135,3 +155,26 @@ def test_resolve_forward_tool_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(ResolverToolMissing) as exc_info:
         asyncio.run(DigDnsPtrResolver().resolve_forward("example.com"))
     assert exc_info.value.tool == "dig"
+
+
+def test_resolve_forward_places_terminator_before_hostname(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``resolve_forward`` setzt ``--`` VOR den nutzergesteuerten hostname (F-07).
+
+    Der record_type (``A``/``AAAA``) ist fix und darf nach dem hostname bleiben; ein mit
+    ``-`` beginnender hostname darf nicht als Option interpretiert werden.
+    """
+    captured: list[tuple[str, ...]] = []
+
+    def _capture_dig(*args: str) -> str:
+        captured.append(args)
+        return ""
+
+    monkeypatch.setattr(shutil, "which", lambda _name: "/usr/bin/dig")
+    monkeypatch.setattr("infrastructure.resolver.dns_ptr._run_dig", _capture_dig)
+    asyncio.run(DigDnsPtrResolver().resolve_forward("-leading-dash"))
+    # Beide Aufrufe (A + AAAA) setzen "--" vor den hostname.
+    for args in captured:
+        assert "--" in args
+        assert args.index("--") < args.index("-leading-dash")

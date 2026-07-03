@@ -109,7 +109,9 @@ class DigDnsPtrResolver:
         """
         if shutil.which("dig") is None:
             raise ResolverToolMissing("dig")
-        return _first_ptr_name(_run_dig("+short", "-x", ip))
+        # "--" nach -x, vor dem nutzergesteuerten ip: -x bleibt als Reverse-Flag wirksam,
+        # ein mit "-" beginnender ip-Wert wird nicht mehr als Option interpretiert.
+        return _first_ptr_name(_run_dig("+short", "-x", "--", ip))
 
     async def resolve_forward(self, hostname: str) -> tuple[str, ...]:
         """Loest die Vorwaerts-IPs zum ``hostname`` (A + AAAA) -> IP-Tuple oder ``()``.
@@ -131,5 +133,9 @@ class DigDnsPtrResolver:
         """
         if shutil.which("dig") is None:
             raise ResolverToolMissing("dig")
-        combined = _run_dig("+short", hostname, "A") + _run_dig("+short", hostname, "AAAA")
+        # "--" vor dem nutzergesteuerten hostname (record_type ist fix und darf danach
+        # stehen): ein mit "-" beginnender hostname wird nicht als Option interpretiert.
+        combined = _run_dig("+short", "--", hostname, "A") + _run_dig(
+            "+short", "--", hostname, "AAAA"
+        )
         return _valid_ips(combined)

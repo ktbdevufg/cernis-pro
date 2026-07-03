@@ -32,6 +32,8 @@ from infrastructure.diagnostics_linux import (
     _parse_dig_answer,
     _parse_nmap_dhcp,
     _parse_traceroute,
+    _run_dig,
+    _run_traceroute,
 )
 
 # ── dig-Parser (realistische Ausgaben) ────────────────────────────────────────
@@ -163,6 +165,49 @@ def test_run_traceroute_reflects_privileged_flag(monkeypatch: pytest.MonkeyPatch
     assert result.target == "example.com"
     assert result.privileged is True
     assert [h.hop for h in result.hops] == [1, 2, 3, 4]
+
+
+# ── "--"-Terminator vor nutzergesteuerten Werten (F-07) ───────────────────────
+
+
+class _FakeCompleted:
+    """Minimaler ``subprocess.run``-Rueckgabe-Stub (nur ``stdout``)."""
+
+    def __init__(self) -> None:
+        self.stdout = ""
+
+
+def test_run_dig_places_terminator_before_query(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``_run_dig`` setzt ``--`` vor den nutzergesteuerten query (kein "-"-Wert als Option)."""
+    captured: list[list[str]] = []
+
+    def _fake_run(argv: list[str], **_kwargs: object) -> _FakeCompleted:
+        captured.append(argv)
+        return _FakeCompleted()
+
+    monkeypatch.setattr("infrastructure.diagnostics_linux.subprocess.run", _fake_run)
+    _run_dig("-leading-dash.example", "A")
+
+    argv = captured[0]
+    assert "--" in argv
+    # Der query steht NACH dem Terminator (wird nicht als Option interpretiert).
+    assert argv.index("--") < argv.index("-leading-dash.example")
+
+
+def test_run_traceroute_places_terminator_before_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``_run_traceroute`` setzt ``--`` vor das nutzergesteuerte target."""
+    captured: list[list[str]] = []
+
+    def _fake_run(argv: list[str], **_kwargs: object) -> _FakeCompleted:
+        captured.append(argv)
+        return _FakeCompleted()
+
+    monkeypatch.setattr("infrastructure.diagnostics_linux.subprocess.run", _fake_run)
+    _run_traceroute("-leading-dash.example", False)
+
+    argv = captured[0]
+    assert "--" in argv
+    assert argv.index("--") < argv.index("-leading-dash.example")
 
 
 # ── LinuxTraceroutePermission ─────────────────────────────────────────────────

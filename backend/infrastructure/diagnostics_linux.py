@@ -503,7 +503,10 @@ def _run_dig(query: str, record_type: DnsRecordType) -> str:
     """
     try:
         completed = subprocess.run(
-            ["dig", "+noall", "+answer", query, record_type],
+            # "--" vor dem nutzergesteuerten query (record_type ist fix/kontrolliert und
+            # darf nach "--" stehen): ein mit "-" beginnender query wird nicht als Option
+            # interpretiert.
+            ["dig", "+noall", "+answer", "--", query, record_type],
             capture_output=True,
             text=True,
             timeout=_DIG_TIMEOUT_SECS,
@@ -532,6 +535,9 @@ def _run_traceroute(target: str, privileged: bool) -> str:
     # kuenftig ueber cernis-sniffd, nicht ueber geteuid.
     if privileged:
         args.append("-I")  # ICMP-Echo -- genauere Root-Methode
+    # "--" vor dem nutzergesteuerten target: ein mit "-" beginnender target wird nicht
+    # als Option interpretiert.
+    args.append("--")
     args.append(target)
     try:
         completed = subprocess.run(

@@ -12,6 +12,8 @@ from typing import Any
 import pytest
 
 from infrastructure.sniffd.protocol import (
+    _LEN_PREFIX,
+    _LEN_PREFIX_MAX,
     MessageType,
     ProtocolError,
     recv_message,
@@ -117,6 +119,24 @@ def test_recv_message_raises_on_truncated_body() -> None:
         with pytest.raises(ProtocolError):
             recv_message(b)
     finally:
+        b.close()
+
+
+def test_recv_message_raises_on_oversized_length_prefix() -> None:
+    """Ein Laengenpraefix > _LEN_PREFIX_MAX wirft ProtocolError VOR dem Body-Read.
+
+    DoS-Deckel: Der Header behauptet mehr Body-Bytes als erlaubt; der Frame wird
+    abgewiesen, BEVOR ``_recv_exactly`` auch nur ein Body-Byte allokiert -- darum
+    genuegt es, allein den Header (ohne echten grossen Body) zu senden.
+    """
+    a, b = socket.socketpair()
+    try:
+        # Nur der Header -- kein Body. Der Deckel greift vor dem Body-Read.
+        a.sendall(_LEN_PREFIX.pack(_LEN_PREFIX_MAX + 1))
+        with pytest.raises(ProtocolError):
+            recv_message(b)
+    finally:
+        a.close()
         b.close()
 
 

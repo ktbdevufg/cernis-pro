@@ -31,6 +31,7 @@ import subprocess
 import structlog
 
 from domain.alerting import EmailResult, SmtpConfig
+from infrastructure.osascript_escape import escape_applescript_literal
 from modules.alerting import notify_email_with_log
 
 _logger = structlog.get_logger(__name__)
@@ -58,9 +59,16 @@ class AlertNotifierAdapter:
 
     @staticmethod
     def _run_osascript(title: str, message: str, subtitle: str) -> None:
-        # Wortlaut wie Altcode modules.alerting.notify_macos.
-        sub = f'subtitle "{subtitle}" ' if subtitle else ""
-        script = f'display notification "{message}" with title "{title}" {sub}sound name "Basso"'
+        # Wortlaut wie Altcode modules.alerting.notify_macos. Die eingebetteten Werte
+        # werden fuer das AppleScript-Literal escaped (kein Ausbruch per "), die
+        # Programmstruktur bleibt identisch.
+        title_e = escape_applescript_literal(title)
+        message_e = escape_applescript_literal(message)
+        subtitle_e = escape_applescript_literal(subtitle)
+        sub = f'subtitle "{subtitle_e}" ' if subtitle else ""
+        script = (
+            f'display notification "{message_e}" with title "{title_e}" {sub}sound name "Basso"'
+        )
         # Arg-Liste ohne shell=True -> keine Shell-Injection (Altcode-treu).
         subprocess.run(
             ["osascript", "-e", script],

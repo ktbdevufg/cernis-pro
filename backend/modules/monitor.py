@@ -15,6 +15,7 @@ from datetime import datetime
 from pathlib import Path
 
 from modules.db_path import DB_PATH  # noqa
+from infrastructure.osascript_escape import escape_applescript_literal
 
 # ── Data structures ───────────────────────────────────────────
 
@@ -135,11 +136,11 @@ async def _ping_once(host: str, interface: str = "", timeout: float = 2.0) -> tu
         cmd = ["ping", "-c", "1", "-W", str(int(timeout * 1000)), "-t", "2"]
         if interface:
             cmd += ["-b", interface]
-        cmd.append(host)
+        cmd += ["--", host]
     elif system == "Windows":
-        cmd = ["ping", "-n", "1", "-w", str(int(timeout * 1000)), host]
+        cmd = ["ping", "-n", "1", "-w", str(int(timeout * 1000)), "--", host]
     else:
-        cmd = ["ping", "-c", "1", "-W", str(int(timeout)), host]
+        cmd = ["ping", "-c", "1", "-W", str(int(timeout)), "--", host]
 
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -184,7 +185,7 @@ async def _ping_burst(host: str, interface: str = "", count: int = 3) -> PingRes
 
 def _notify_macos(title: str, message: str):
     try:
-        script = f'display notification "{message}" with title "{title}" sound name "Basso"'
+        script = f'display notification "{escape_applescript_literal(message)}" with title "{escape_applescript_literal(title)}" sound name "Basso"'
         subprocess.run(["osascript", "-e", script], timeout=3, capture_output=True)
     except Exception:
         pass

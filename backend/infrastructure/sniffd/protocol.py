@@ -28,6 +28,11 @@ from typing import Any
 # jeder realen Nachricht -- ein einzelner SNI-Hit ist wenige hundert Byte).
 _LEN_PREFIX = struct.Struct(">I")
 _LEN_PREFIX_SIZE = _LEN_PREFIX.size  # == 4
+# Obergrenze fuer die angekuendigte Body-Laenge (DoS-Deckel): Ein boeser/kaputter Peer
+# darf ueber das 4-Byte-Praefix (bis ~4 GiB) keine unbegrenzte Body-Allokation ausloesen.
+# 16 MiB ist grosszuegig fuer JSON-Kontrollframes (ein SNI-Hit ist wenige hundert Byte),
+# aber weit unter DoS-relevanten Groessen.
+_LEN_PREFIX_MAX = 16 * 1024 * 1024
 
 
 class ProtocolError(Exception):
@@ -108,6 +113,9 @@ def recv_message(sock: socket.socket) -> dict[str, Any] | None:
         # EOF GENAU am Frame-Anfang -> sauberes Verbindungsende.
         return None
     (length,) = _LEN_PREFIX.unpack(header)
+    if length > _LEN_PREFIX_MAX:
+        # DoS-Deckel: greift VOR dem Body-Read, damit keine unbegrenzte Allokation erfolgt.
+        raise ProtocolError(f"Frame zu gross: {length} > {_LEN_PREFIX_MAX}")
     body = _recv_exactly(sock, length)
     if body is None:
         # EOF mitten im Body -> abgeschnittener (kaputter) Frame.
