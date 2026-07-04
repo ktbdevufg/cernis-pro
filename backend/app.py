@@ -301,14 +301,26 @@ from api.scheduler import (
 )
 from api.scheduler import router as scheduler_router
 from api.security import (
+    EintragBody,
+    PruefenBody,
+    provide_add_default_creds,
     provide_check_default_creds,
     provide_clear_arp_baseline,
+    provide_delete_default_creds,
+    provide_ermittle_pruefplan,
     provide_get_arp_alerts,
     provide_get_arp_baseline,
+    provide_get_pruef_historie,
+    provide_get_pruef_historie_detail,
     provide_inspect_tls,
+    provide_list_default_creds,
     provide_lookup_cves,
+    provide_pruefen_kandidaten,
+    provide_reset_default_creds,
     provide_run_arp_scan,
+    provide_set_default_creds_aktiv,
     provide_target_scope_guard,
+    provide_update_default_creds,
 )
 from api.security import router as security_router
 from api.settings import (
@@ -563,13 +575,24 @@ from application.scheduler import (
     RunScheduler,
 )
 from application.security import (
+    AddDefaultCredsEintrag,
     CheckDefaultCreds,
     ClearArpBaseline,
+    DeleteDefaultCredsEintrag,
+    ErmittlePruefplan,
     GetArpAlerts,
     GetArpBaseline,
+    GetDefaultCredsListe,
+    GetPruefHistorie,
+    GetPruefHistorieDetail,
     InspectTls,
     LookupCves,
+    PruefeGewaehlteKandidaten,
+    ResetDefaultCredsListe,
     RunArpScan,
+    SetDefaultCredsAktiv,
+    SpeicherePruefung,
+    UpdateDefaultCredsEintrag,
 )
 from application.settings import GetSettings, UpdateSecret, UpdateSetting
 from application.sni import GetObservedSni, RunSniCapture, StartSniCapture
@@ -619,6 +642,7 @@ from domain.process import classify_kind
 from domain.resolver_names import known_resolver_name
 from domain.scanning import EnrichedHost
 from domain.scheduler.models import DailyWindow
+from domain.security import CredentialKandidat, DefaultCredsEintrag
 from infrastructure.agent import (
     SqliteAgentRepository,
     UrllibAgentPinger,
@@ -719,6 +743,8 @@ from infrastructure.security import (
     CveLookupAdapter,
     DefaultCredsCheckerAdapter,
     SqliteArpGuardRepository,
+    SqliteDefaultCredsHistoryRepository,
+    SqliteDefaultCredsListRepository,
     TlsInspectorAdapter,
     is_private_target,
 )
@@ -2852,6 +2878,27 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     tls_inspector_adapter = TlsInspectorAdapter()
     default_creds_adapter = DefaultCredsCheckerAdapter()
 
+    # Standardzugangs-Redesign Etappe C: die verwaltbare Liste + die Pruef-Historie (eigene
+    # SQLite-Tabellen, teilen die DB via get_db_path -- Muster arp_guard_repository). Beide
+    # als @lru_cache-Factory (eine Instanz je Prozess). Der DefaultCredsCheckerAdapter
+    # (default_creds_adapter, oben) wird fuer die gezielte Kandidaten-Pruefung
+    # WIEDERVERWENDET -- kein zweiter Adapter.
+    @lru_cache(maxsize=1)
+    def default_creds_list_repository() -> SqliteDefaultCredsListRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteDefaultCredsListRepository(get_db_path())
+
+    @lru_cache(maxsize=1)
+    def default_creds_history_repository() -> SqliteDefaultCredsHistoryRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteDefaultCredsHistoryRepository(get_db_path())
+
+    # Erst-Seeding beim Start (einmalig, idempotent): fuellt die mitgelieferte Liste ein,
+    # wenn noch keine mitgelieferte Zeile da ist (ensure_seeded ueberschreibt nichts).
+    default_creds_list_repository().ensure_seeded()
+
     # default-creds ist eine scharfe Opt-in-Sonderfunktion: sitzungsweites Arm-Flag am
     # app.state (Startwert False, NICHT persistent -- Muster capture/traffic). Der
     # Endpunkt bleibt bis zum Arm-Aufruf 403.
@@ -2878,6 +2925,99 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     # Ziel-Bereichs-Guard: infra-reine is_private_target hier verdrahtet (Regel 5, damit
     # der api-Ring infrastructure nicht direkt importiert).
     app.dependency_overrides[provide_target_scope_guard] = lambda: is_private_target
+
+    # ── Standardzugangs-Redesign Etappe C: Composition-Root-Runner + Verdrahtung ──
+    # Der api-Ring bleibt domain-frei -- das Bauen der domain.DefaultCredsEintrag aus dem
+    # Body-DTO passiert HIER (Muster _add_user_rules). Die List-CRUD-Runner nutzen das
+    # default_creds_list_repository (Reader+Store in einer Instanz), die Pruef-/Historie-
+    # Runner das history_repository + den wiederverwendeten default_creds_adapter.
+    def _eintrag_from_body(body: EintragBody) -> DefaultCredsEintrag:
+        # DTO -> domain.DefaultCredsEintrag. Die konfidenz-/zustand-/herkunft-Literale
+        # kommen als Strings herein; die strukturelle Validierung macht der Store (reine
+        # Domaenen-Validierung -> ValueError). type: ignore an den Literal-Grenzen (Muster
+        # _add_user_rules: severity/kind als str ins Literal-Feld).
+        return DefaultCredsEintrag(
+            eintrag_id=body.eintrag_id,
+            hersteller=body.hersteller,
+            modell=body.modell,
+            zustand=body.zustand,  # type: ignore[arg-type]
+            kandidaten=tuple(
+                CredentialKandidat(
+                    username=kandidat.username,
+                    password=kandidat.password,
+                    konfidenz=kandidat.konfidenz,  # type: ignore[arg-type]
+                )
+                for kandidat in body.kandidaten
+            ),
+            quelle_url=body.quelle_url,
+            aktiv=body.aktiv,
+            herkunft=body.herkunft,  # type: ignore[arg-type]
+        )
+
+    def _list_default_creds() -> list[Any]:
+        return list(GetDefaultCredsListe(default_creds_list_repository())())
+
+    def _add_default_creds(body: EintragBody) -> None:
+        # AddDefaultCredsEintrag validiert im Store -> ValueError bei Issue/Duplikat-id.
+        AddDefaultCredsEintrag(default_creds_list_repository())(_eintrag_from_body(body))
+
+    def _update_default_creds(eintrag_id: str, body: EintragBody) -> bool:
+        # Der Store macht bei unbekannter id einen stillen No-op -- darum HIER pruefen, ob
+        # die id existiert, und das dem api-Rand zurueckmelden (False -> 404). Die
+        # eintrag_id aus dem Pfad ist massgeblich (nicht die aus dem Body).
+        repo = default_creds_list_repository()
+        vorhanden = any(e.eintrag_id == eintrag_id for e in repo.get_eintraege())
+        if not vorhanden:
+            return False
+        eintrag = _eintrag_from_body(body)
+        # eintrag_id des Pfads erzwingen (der Body koennte eine abweichende tragen).
+        if eintrag.eintrag_id != eintrag_id:
+            eintrag = replace(eintrag, eintrag_id=eintrag_id)
+        UpdateDefaultCredsEintrag(repo)(eintrag)
+        return True
+
+    def _delete_default_creds(eintrag_id: str) -> None:
+        DeleteDefaultCredsEintrag(default_creds_list_repository())(eintrag_id)
+
+    def _set_default_creds_aktiv(eintrag_id: str, aktiv: bool) -> None:
+        SetDefaultCredsAktiv(default_creds_list_repository())(eintrag_id, aktiv)
+
+    def _reset_default_creds() -> None:
+        ResetDefaultCredsListe(default_creds_list_repository())()
+
+    def _ermittle_pruefplan(hersteller: str, modell: str) -> Any:
+        return ErmittlePruefplan(default_creds_list_repository())(hersteller, modell)
+
+    async def _pruefen_kandidaten(body: PruefenBody) -> list[Any]:
+        # Gezielte Pruefung (aktive Logins im wiederverwendeten default_creds_adapter):
+        # genau die gewaehlten Kandidaten gegen die offenen Ports. Danach das Ergebnis in
+        # die Historie schreiben (fall="kandidaten" -- diese Pruefung laeuft immer mit vom
+        # Aufrufer gewaehlten Kandidaten). Die Guards (Arm/Privatnetz) sitzen am api-Rand.
+        kandidaten = [(k.username, k.password) for k in body.kandidaten]
+        findings = await PruefeGewaehlteKandidaten(default_creds_adapter)(
+            body.host, body.ports, kandidaten
+        )
+        SpeicherePruefung(default_creds_history_repository())(
+            body.host, body.hersteller, body.modell, "kandidaten", findings
+        )
+        return list(findings)
+
+    def _get_pruef_historie() -> list[Any]:
+        return list(GetPruefHistorie(default_creds_history_repository())())
+
+    def _get_pruef_historie_detail(eintrag_id: int) -> Any | None:
+        return GetPruefHistorieDetail(default_creds_history_repository())(eintrag_id)
+
+    app.dependency_overrides[provide_list_default_creds] = lambda: _list_default_creds
+    app.dependency_overrides[provide_add_default_creds] = lambda: _add_default_creds
+    app.dependency_overrides[provide_update_default_creds] = lambda: _update_default_creds
+    app.dependency_overrides[provide_delete_default_creds] = lambda: _delete_default_creds
+    app.dependency_overrides[provide_set_default_creds_aktiv] = lambda: _set_default_creds_aktiv
+    app.dependency_overrides[provide_reset_default_creds] = lambda: _reset_default_creds
+    app.dependency_overrides[provide_ermittle_pruefplan] = lambda: _ermittle_pruefplan
+    app.dependency_overrides[provide_pruefen_kandidaten] = lambda: _pruefen_kandidaten
+    app.dependency_overrides[provide_get_pruef_historie] = lambda: _get_pruef_historie
+    app.dependency_overrides[provide_get_pruef_historie_detail] = lambda: _get_pruef_historie_detail
 
     @app.exception_handler(SecretStoreUnavailableError)
     async def _on_secret_store_unavailable(
