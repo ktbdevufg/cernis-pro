@@ -25,6 +25,7 @@ import {
 } from "../api/settings.js";
 import { FunctionShell } from "../components/AreaShell.jsx";
 import DefaultCredsConsentDialog from "../components/DefaultCredsConsentDialog.jsx";
+import DefaultCredsListeSektion from "../components/DefaultCredsListeSektion.jsx";
 import "./SettingsView.css";
 
 // Default-Portmengen der Auffälligkeits-Engine. SPIEGELT bewusst die Backend-
@@ -1728,6 +1729,7 @@ export default function SettingsView({ lang, onLangChange, onClose, onOpenManual
     { id: "auffaelligkeit", label: t("settings.nav.auffaelligkeit") },
     { id: "dnswatch", label: t("settings.nav.dnswatch") },
     { id: "defaultcreds", label: t("settings.nav.defaultcreds") },
+    { id: "defaultcredsList", label: t("settings.nav.defaultcredsList") },
   ];
 
   return (
@@ -1808,6 +1810,10 @@ export default function SettingsView({ lang, onLangChange, onClose, onOpenManual
 
           {rubrik === "defaultcreds" ? (
             <DefaultCredsSektion onGespeichert={zeigeGespeichert} />
+          ) : null}
+
+          {rubrik === "defaultcredsList" ? (
+            <DefaultCredsListeSektion onGespeichert={zeigeGespeichert} />
           ) : null}
         </div>
       </div>

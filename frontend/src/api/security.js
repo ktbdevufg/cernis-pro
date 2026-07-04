@@ -83,8 +83,140 @@ export async function checkDefaultCreds(host, ports, vendor) {
   return response.json();
 }
 
+// -------------------------------------------------------------------------
+// Etappe C: Standardzugangs-LISTE (die Credential-Datenbank).
+//
+// Getrennt von der scharfen Session-Sonderfunktion oben (arm/check): hier geht
+// es um die Verwaltung der Kandidaten-Liste, die die aktive Prüfung speist —
+// einsehen, hinzufügen, ändern, löschen, aktiv-schalten, auf Standard zurück.
+//
+// Wire-Form (Etappe C-Backend, bereits implementiert, NICHT ändern):
+//   GET    "/api/security/default-creds-list"                 -> [eintrag, ...]
+//   POST   "/api/security/default-creds-list"        Body eintrag -> 201 | 422 { ok:false, error }
+//   PUT    "/api/security/default-creds-list/{id}"   Body eintrag -> 200 | 404 | 422
+//   DELETE "/api/security/default-creds-list/{id}"                -> { ok:true }
+//   POST   "/api/security/default-creds-list/{id}/aktiv" Body { aktiv } -> { ok:true }
+//   POST   "/api/security/default-creds-list/reset"              -> { ok:true }
+//
+// Ein Eintrag: { eintrag_id, hersteller, modell, zustand,
+//   kandidaten:[{ username, password, konfidenz }], quelle_url, aktiv, herkunft }.
+//
+// Für POST/PUT/DELETE gibt es in client.js KEIN apiDelete, und apiPost/apiPut
+// tragen die Body-error-Meldung bei !ok NICHT mit (sie werfen nur den Status).
+// Der Validierungsfall 422 ist aber ein FACHLICHER Zustand, dessen Meldung die
+// View zeigen soll — darum bauen diese drei Funktionen den fetch bewusst selbst
+// (gleiche Fehler-Form wie checkDefaultCreds: ApiError mit status, Body-error
+// bei !ok übernommen). NIE einen Host hartkodieren (relativer Pfad, Vite-Proxy).
+
+// Basis-Pfad der Listen-Verwaltung (relativ; Vite-Proxy leitet ans Backend).
+const LISTE_BASIS = "/api/security/default-creds-list";
+
+// Gemeinsamer !ok-Pfad für die eigenen fetches: die Body-error-message (falls
+// vorhanden) in die ApiError übernehmen, sonst auf den Status-Text zurückfallen.
+// Ein nicht-JSON-Body darf hier NICHT crashen. Muster wie checkDefaultCreds.
+async function apiErrorAusAntwort(response) {
+  let nachricht = `Unerwarteter HTTP-Status ${response.status}`;
+  try {
+    const body = await response.json();
+    if (body && typeof body.error === "string" && body.error !== "") {
+      nachricht = body.error;
+    }
+  } catch {
+    // Body nicht lesbar/kein JSON -> beim Status-Text bleiben (kein Crash).
+  }
+  return new ApiError(nachricht, response.status);
+}
+
+// GET Liste -> Array von Einträgen. Fehler als ApiError (kein stiller Fallback).
+export async function fetchDefaultCredsList() {
+  return apiGet(LISTE_BASIS);
+}
+
+// POST neuer Eintrag -> 201 (der angelegte Eintrag) | 422 { ok:false, error }.
+// Eigener fetch, damit die 422-Body-Meldung in die ApiError wandert.
+export async function addDefaultCredsEintrag(eintrag) {
+  let response;
+  try {
+    response = await fetch(LISTE_BASIS, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(eintrag),
+    });
+  } catch (ursache) {
+    throw new ApiError(ursache?.message ?? "Netzwerkfehler", null);
+  }
+  if (!response.ok) {
+    throw await apiErrorAusAntwort(response);
+  }
+  return response.json();
+}
+
+// PUT Eintrag ändern -> 200 | 404 | 422. Eigener fetch, damit die 422-Body-
+// Meldung (Validierung) in die ApiError wandert.
+export async function updateDefaultCredsEintrag(eintragId, eintrag) {
+  let response;
+  try {
+    response = await fetch(`${LISTE_BASIS}/${encodeURIComponent(eintragId)}`, {
+      method: "PUT",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(eintrag),
+    });
+  } catch (ursache) {
+    throw new ApiError(ursache?.message ?? "Netzwerkfehler", null);
+  }
+  if (!response.ok) {
+    throw await apiErrorAusAntwort(response);
+  }
+  return response.json();
+}
+
+// DELETE Eintrag -> { ok:true }. client.js hat kein apiDelete, darum eigener
+// fetch (gleiche Fehler-Form). Ein 404 kommt als ApiError(status=404) an.
+export async function deleteDefaultCredsEintrag(eintragId) {
+  let response;
+  try {
+    response = await fetch(`${LISTE_BASIS}/${encodeURIComponent(eintragId)}`, {
+      method: "DELETE",
+      headers: { Accept: "application/json" },
+    });
+  } catch (ursache) {
+    throw new ApiError(ursache?.message ?? "Netzwerkfehler", null);
+  }
+  if (!response.ok) {
+    throw await apiErrorAusAntwort(response);
+  }
+  return response.json();
+}
+
+// POST aktiv -> { ok:true }. Nur ein Bool-Flag; apiPost genügt (keine fachliche
+// Body-Meldung erwartet). Fehler als ApiError.
+export async function setDefaultCredsEintragAktiv(eintragId, aktiv) {
+  return apiPost(
+    `${LISTE_BASIS}/${encodeURIComponent(eintragId)}/aktiv`,
+    { aktiv },
+  );
+}
+
+// POST reset -> { ok:true }. Setzt nur die mitgelieferten Einträge zurück;
+// Benutzer-Einträge bleiben erhalten (Backend-Semantik). Fehler als ApiError.
+export async function resetDefaultCredsList() {
+  return apiPost(`${LISTE_BASIS}/reset`, {});
+}
+
 export default {
   fetchDefaultCredsState,
   armDefaultCreds,
   checkDefaultCreds,
+  fetchDefaultCredsList,
+  addDefaultCredsEintrag,
+  updateDefaultCredsEintrag,
+  deleteDefaultCredsEintrag,
+  setDefaultCredsEintragAktiv,
+  resetDefaultCredsList,
 };
