@@ -183,9 +183,17 @@ def _check_http_basic(
     return results
 
 
-def _check_ftp(host: str, port: int = 21, timeout: float = 3.0) -> list[CredFinding]:
+def _check_ftp(
+    host: str,
+    port: int = 21,
+    creds: list[tuple[str, str]] | None = None,
+    timeout: float = 3.0,
+) -> list[CredFinding]:
+    # Bestand: ohne ``creds`` die generischen FTP-Defaults (Altcode). Der Etappe-B-
+    # Kandidaten-Pfad reicht die AUSGEWAEHLTEN Paare durch (dann genau diese, kein Raten).
+    ftp_creds = DEFAULT_CREDS["ftp"] if creds is None else creds
     results: list[CredFinding] = []
-    for idx, (user, pwd) in enumerate(DEFAULT_CREDS["ftp"][:4]):
+    for idx, (user, pwd) in enumerate(ftp_creds[:4]):
         if idx > 0:
             time.sleep(_RATE_LIMIT_SECONDS)  # Rate-Limit ZWISCHEN Versuchen, nicht davor.
         try:
@@ -218,6 +226,36 @@ def _check_ftp(host: str, port: int = 21, timeout: float = 3.0) -> list[CredFind
     return results
 
 
+def _route_ports(
+    host: str, ports: list[PortQuery], creds: list[tuple[str, str]]
+) -> list[CredFinding]:
+    """Routet die Ports auf ``_check_http_basic``/``_check_ftp`` mit der Credential-Liste.
+
+    Gemeinsamer Kern von ``check_host`` (vendor-geratene Liste) und
+    ``check_host_mit_kandidaten`` (gewaehlte Kandidaten): das Port->Methoden-Routing ist
+    identisch (exakt Altcode ``check_host``), NUR die Credential-Quelle unterscheidet sich.
+    Die TLS-Haertung und das Rate-Limit stecken in ``_check_*`` und gelten fuer BEIDE Pfade.
+    ``creds`` leer -> kein Versuch (jedes ``_check_*`` iteriert ueber die leere Liste -> []).
+    """
+    results: list[CredFinding] = []
+    for p in ports:
+        port = p.port
+        service = p.service.lower()
+        # Loop-Schutz (Muster i): per-Item-try IN der Schleife -- ein Port-Fehler
+        # (in _check_* geloggt + leer, ODER ein unerwarteter Fehler ausserhalb dessen
+        # Faenge) killt die ANDEREN Ports NICHT (Routing exakt Altcode check_host).
+        try:
+            if port in (80, 8080, 8081, 8000, 3000, 9000) or "http" in service:
+                results.extend(_check_http_basic(host, port, creds, https=False))
+            elif port in (443, 8443, 4443) or "https" in service:
+                results.extend(_check_http_basic(host, port, creds, https=True))
+            elif port == 21 or "ftp" in service:
+                results.extend(_check_ftp(host, port, creds))
+        except Exception as exc:
+            _logger.warning("cred_port_check_failed", host=host, port=port, error=str(exc))
+    return results
+
+
 class DefaultCredsCheckerAdapter:
     """Erfuellt das ``DefaultCredsChecker``-Protocol (aktive Logins, stdlib)."""
 
@@ -228,20 +266,22 @@ class DefaultCredsCheckerAdapter:
 
     def _check_host_sync(self, host: str, ports: list[PortQuery], vendor: str) -> list[CredFinding]:
         creds = get_creds_for_vendor(vendor) if vendor else DEFAULT_CREDS["web"][:6]
-        results: list[CredFinding] = []
-        for p in ports:
-            port = p.port
-            service = p.service.lower()
-            # Loop-Schutz (Muster i): per-Item-try IN der Schleife -- ein Port-Fehler
-            # (in _check_* geloggt + leer, ODER ein unerwarteter Fehler ausserhalb dessen
-            # Faenge) killt die ANDEREN Ports NICHT (Routing exakt Altcode check_host).
-            try:
-                if port in (80, 8080, 8081, 8000, 3000, 9000) or "http" in service:
-                    results.extend(_check_http_basic(host, port, creds, https=False))
-                elif port in (443, 8443, 4443) or "https" in service:
-                    results.extend(_check_http_basic(host, port, creds, https=True))
-                elif port == 21 or "ftp" in service:
-                    results.extend(_check_ftp(host, port))
-            except Exception as exc:
-                _logger.warning("cred_port_check_failed", host=host, port=port, error=str(exc))
-        return results
+        return _route_ports(host, ports, creds)
+
+    async def check_host_mit_kandidaten(
+        self,
+        host: str,
+        ports: Sequence[PortQuery],
+        kandidaten: Sequence[tuple[str, str]],
+    ) -> list[CredFinding]:
+        return await asyncio.to_thread(
+            self._check_mit_kandidaten_sync, host, list(ports), list(kandidaten)
+        )
+
+    def _check_mit_kandidaten_sync(
+        self, host: str, ports: list[PortQuery], kandidaten: list[tuple[str, str]]
+    ) -> list[CredFinding]:
+        # Etappe-B-Pfad: GENAU die gewaehlten Kandidaten gegen GENAU die uebergebenen
+        # Ports -- kein Vendor-Raten, keine generische Liste. Selbes Routing +
+        # dieselbe TLS-Haertung + dasselbe Rate-Limit wie check_host (via _route_ports).
+        return _route_ports(host, ports, kandidaten)

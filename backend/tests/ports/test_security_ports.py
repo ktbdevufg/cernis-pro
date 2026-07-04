@@ -134,6 +134,27 @@ class FakeDefaultCredsChecker:
             for p in ports
         ]
 
+    async def check_host_mit_kandidaten(
+        self,
+        host: str,
+        ports: Sequence[PortQuery],
+        kandidaten: Sequence[tuple[str, str]],
+    ) -> list[CredFinding]:
+        return [
+            CredFinding(
+                host=host,
+                port=p.port,
+                service=p.service,
+                username=user,
+                password=pwd,
+                success=True,
+                method="http_basic",
+                note="HTTP 200",
+            )
+            for p in ports
+            for user, pwd in kandidaten
+        ]
+
 
 # ── statische Konformitaet (mypy traegt die Pruefung) ───────────────────────
 

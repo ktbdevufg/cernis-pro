@@ -21,7 +21,15 @@ Rand. RunArpScan reicht nur ``ArpEntry``/``ArpAlert`` durch, braucht keine ``now
 from collections.abc import Sequence
 from typing import Any
 
-from domain.security import ArpAlert, ArpEntry, detect_arp_anomalies
+from domain.security import (
+    ArpAlert,
+    ArpEntry,
+    DefaultCredsEintrag,
+    PruefFall,
+    PruefPlan,
+    bestimme_pruefplan,
+    detect_arp_anomalies,
+)
 from ports.scanning import ArpTablePort, VendorLookupPort
 from ports.security import (
     ArpAlertRecord,
@@ -31,7 +39,12 @@ from ports.security import (
     CveFinding,
     CveLookup,
     DefaultCredsChecker,
+    DefaultCredsHistoryRepository,
+    DefaultCredsListReader,
+    DefaultCredsListStore,
     PortQuery,
+    PruefHistorieDetail,
+    PruefHistorieSummary,
     TlsFinding,
     TlsInspector,
 )
@@ -199,3 +212,171 @@ class CheckDefaultCreds:
         self, host: str, ports: Sequence[dict[str, Any]], vendor: str = ""
     ) -> list[CredFinding]:
         return await self._creds_checker.check_host(host, _to_port_queries(ports), vendor)
+
+
+# ── Standardzugangs-Liste: CRUD-Use-Cases (duenne Huellen, Etappe A) ─────────
+#
+# Reine Delegation an den Reader- bzw. Store-Port (Muster ``CheckDefaultCreds`` /
+# ``GetArpAlerts``): keine Logik ausser dem Weiterreichen. Die Matching-Regel lebt im
+# Adapter (finde_fuer_hersteller_modell), die Validierung in der Domaene -- der Use-Case
+# haelt nur den Verdrahtungs-Punkt fuer den Composition Root. Diese Etappe verdrahtet
+# NICHT (kein api-Ring) -- die Use-Cases existieren als Fundament.
+
+
+class GetDefaultCredsListe:
+    """Alle Standardzugangs-Eintraege (Lese-Pfad ueber den Reader-Port)."""
+
+    def __init__(self, reader: DefaultCredsListReader) -> None:
+        self._reader = reader
+
+    def __call__(self) -> list[DefaultCredsEintrag]:
+        return self._reader.get_eintraege()
+
+
+class FindeDefaultCredsFuerGeraet:
+    """Die zu Hersteller/Modell passenden, aktiven Eintraege (Lese-Pfad, Matching im Adapter)."""
+
+    def __init__(self, reader: DefaultCredsListReader) -> None:
+        self._reader = reader
+
+    def __call__(self, hersteller: str, modell: str) -> list[DefaultCredsEintrag]:
+        return self._reader.finde_fuer_hersteller_modell(hersteller, modell)
+
+
+class AddDefaultCredsEintrag:
+    """Fuegt einen neuen Eintrag hinzu (validierender Schreibpfad ueber den Store-Port)."""
+
+    def __init__(self, store: DefaultCredsListStore) -> None:
+        self._store = store
+
+    def __call__(self, eintrag: DefaultCredsEintrag) -> None:
+        self._store.add_eintrag(eintrag)
+
+
+class UpdateDefaultCredsEintrag:
+    """Aktualisiert einen bestehenden Eintrag (validierender Schreibpfad ueber den Store)."""
+
+    def __init__(self, store: DefaultCredsListStore) -> None:
+        self._store = store
+
+    def __call__(self, eintrag: DefaultCredsEintrag) -> None:
+        self._store.update_eintrag(eintrag)
+
+
+class DeleteDefaultCredsEintrag:
+    """Loescht einen Eintrag ueber seine eintrag_id (Store-Port)."""
+
+    def __init__(self, store: DefaultCredsListStore) -> None:
+        self._store = store
+
+    def __call__(self, eintrag_id: str) -> None:
+        self._store.delete_eintrag(eintrag_id)
+
+
+class SetDefaultCredsAktiv:
+    """Schaltet einen Eintrag aktiv/inaktiv (Store-Port)."""
+
+    def __init__(self, store: DefaultCredsListStore) -> None:
+        self._store = store
+
+    def __call__(self, eintrag_id: str, aktiv: bool) -> None:
+        self._store.set_aktiv(eintrag_id, aktiv)
+
+
+class ResetDefaultCredsListe:
+    """Stellt die mitgelieferten Eintraege wieder her (behaelt benutzer-eigene, Store-Port)."""
+
+    def __init__(self, store: DefaultCredsListStore) -> None:
+        self._store = store
+
+    def __call__(self) -> None:
+        self._store.reset_auf_standard()
+
+
+# ── Etappe B: intelligenter Scan-Workflow (Pruefplan + gezielte Pruefung + Historie) ─
+#
+# Duenne Huellen (Muster ``CheckDefaultCreds``/``GetArpAlerts``): reine Delegation an die
+# reine Domaenenfunktion bzw. den jeweiligen Port. Keine Logik ausser dem Weiterreichen.
+# Diese Etappe verdrahtet NICHT (kein api-Ring) -- die Use-Cases sind das Fundament fuer
+# das Etappe-C/D-Wiring.
+
+
+class ErmittlePruefplan:
+    """Ermittelt den ``PruefPlan`` fuer Hersteller/Modell (Aufgabe 1).
+
+    Reader-Treffer holen -> reine Domaenenfunktion ``bestimme_pruefplan`` -> ``PruefPlan``
+    mit einem der drei Faelle ("entwarnung"/"kandidaten"/"keine_infos"). Duenne Huelle: die
+    Fall-Logik lebt in der Domaene, das Matching im Adapter.
+    """
+
+    def __init__(self, reader: DefaultCredsListReader) -> None:
+        self._reader = reader
+
+    def __call__(self, hersteller: str, modell: str) -> PruefPlan:
+        treffer = self._reader.finde_fuer_hersteller_modell(hersteller, modell)
+        return bestimme_pruefplan(tuple(treffer))
+
+
+class PruefeGewaehlteKandidaten:
+    """Prueft die vom Aufrufer GEWAEHLTEN Kandidaten gegen die offenen Ports (Aufgabe 2).
+
+    KEIN blindes Port-Raten, KEINE generische Liste: genau die uebergebenen ``kandidaten``
+    (``(username, password)``-Paare) gegen genau die uebergebenen ``ports``. Nimmt die
+    rohen Port-dicts (der api-Rand importiert ``PortQuery`` nicht), wandelt intern und
+    reicht an den Checker-Port. Die TLS-Haertung + das Rate-Limit gelten im Adapter.
+    """
+
+    def __init__(self, creds_checker: DefaultCredsChecker) -> None:
+        self._creds_checker = creds_checker
+
+    async def __call__(
+        self,
+        host: str,
+        ports: Sequence[dict[str, Any]],
+        kandidaten: Sequence[tuple[str, str]],
+    ) -> list[CredFinding]:
+        return await self._creds_checker.check_host_mit_kandidaten(
+            host, _to_port_queries(ports), list(kandidaten)
+        )
+
+
+class SpeicherePruefung:
+    """Protokolliert eine durchgefuehrte Pruefung in der Historie (Aufgabe 3).
+
+    Duenne Huelle ueber ``DefaultCredsHistoryRepository.add_eintrag`` -- der Adapter setzt
+    ``geprueft_at`` und serialisiert die Findings verlustfrei. ``treffer_count`` ergibt sich
+    im Adapter aus ``len(findings)``.
+    """
+
+    def __init__(self, history: DefaultCredsHistoryRepository) -> None:
+        self._history = history
+
+    def __call__(
+        self,
+        host: str,
+        hersteller: str,
+        modell: str,
+        fall: PruefFall,
+        findings: Sequence[CredFinding],
+    ) -> None:
+        self._history.add_eintrag(host, hersteller, modell, fall, findings)
+
+
+class GetPruefHistorie:
+    """Die neuesten Historien-Datensaetze als Zusammenfassungen (ohne Findings-Blob)."""
+
+    def __init__(self, history: DefaultCredsHistoryRepository) -> None:
+        self._history = history
+
+    def __call__(self, limit: int = 50) -> list[PruefHistorieSummary]:
+        return self._history.list_eintraege(limit)
+
+
+class GetPruefHistorieDetail:
+    """Ein Historien-Datensatz MIT Findings (unbekannte id -> ``None``)."""
+
+    def __init__(self, history: DefaultCredsHistoryRepository) -> None:
+        self._history = history
+
+    def __call__(self, eintrag_id: int) -> PruefHistorieDetail | None:
+        return self._history.get_eintrag(eintrag_id)

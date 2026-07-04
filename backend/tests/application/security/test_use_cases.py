@@ -237,9 +237,17 @@ class _FakeTls:
 class _FakeCreds:
     def __init__(self) -> None:
         self.received: object = None
+        self.received_kandidaten: object = None
 
     async def check_host(self, host: str, ports: object, vendor: str = "") -> list[CredFinding]:
         self.received = ports
+        return [CredFinding(host, 80, "http", "admin", "admin", True, "http_basic")]
+
+    async def check_host_mit_kandidaten(
+        self, host: str, ports: object, kandidaten: object
+    ) -> list[CredFinding]:
+        self.received = ports
+        self.received_kandidaten = kandidaten
         return [CredFinding(host, 80, "http", "admin", "admin", True, "http_basic")]
 
 

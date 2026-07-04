@@ -46,7 +46,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from domain.security import ArpAlert, ArpEntry
+from domain.security import ArpAlert, ArpEntry, DefaultCredsEintrag, PruefFall
 
 # ── ARP-Lese-Records (Wire-nahe Rand-Typen MIT Zeit, NICHT domain) ──────────
 #
@@ -299,7 +299,196 @@ class DefaultCredsChecker(Protocol):
     async def check_host(
         self, host: str, ports: Sequence[PortQuery], vendor: str = ""
     ) -> list[CredFinding]:
-        """Gefundene funktionierende Default-Credentials (leer wenn keine)."""
+        """Gefundene funktionierende Default-Credentials (leer wenn keine).
+
+        BESTAND (Rueckwaertskompatibilitaet): raet die Credential-Liste ueber ``vendor``
+        (generische Web-Defaults ohne vendor). Bleibt am Vertrag, auch wenn der intelligente
+        Etappe-B-Workflow stattdessen ``check_host_mit_kandidaten`` nutzt.
+        """
+        ...
+
+    async def check_host_mit_kandidaten(
+        self,
+        host: str,
+        ports: Sequence[PortQuery],
+        kandidaten: Sequence[tuple[str, str]],
+    ) -> list[CredFinding]:
+        """Prueft GENAU die uebergebenen Kandidaten gegen GENAU die uebergebenen Ports.
+
+        Der intelligente Etappe-B-Pfad: KEIN blindes Port-Raten und KEINE generische
+        Credential-Liste -- die vom Aufrufer AUSGEWAEHLTEN ``(username, password)``-Paare
+        werden gegen die uebergebenen offenen ``ports`` getestet. ``kandidaten`` leer oder
+        ``ports`` leer -> ``[]`` (nichts zu pruefen). Die TLS-Haertung (strikt +
+        self-signed-Fallback mit note) und das Rate-Limit (1 s zwischen Versuchen) des
+        Adapters gelten fuer diesen Pfad EBENSO. Keine Treffer -> ``[]``.
+        """
+        ...
+
+
+# ── Standardzugangs-Liste: Lese-Port vs. Verwaltungs-/Schreib-Port ──────────
+#
+# ZWEI Protocols, BEWUSST getrennt nach Belang (Muster ``ports.analysis``
+# RuleProvider vs. UserRuleStore): der Lese-Pfad (``DefaultCredsListReader``) ist die
+# reine Abfrage-Quelle -- was der spaetere Scan-/Anzeige-Pfad braucht; der Verwaltungs-
+# Pfad (``DefaultCredsListStore``) ist der validierende Schreib-/Pflege-Vertrag, den die
+# CRUD-Use-Cases nutzen. Ein Adapter kann beide erfuellen (``get_eintraege`` deckt beide
+# ab), aber die VERTRAEGE sind getrennt, damit der Lese-Konsument nichts vom Schreiben
+# weiss. Die MATCHING-Logik (finde_fuer_hersteller_modell) lebt im ADAPTER, nicht im Port
+# -- hier nur die Signatur.
+#
+# Synchron (kein Netz-/Loop-I/O -- lokaler SQLite-Zugriff, Muster ArpGuardRepository).
+# KEIN ``@runtime_checkable`` (Modul-Konvention: statische Pruefung ueber mypy +
+# Verdrahtung im Composition Root).
+
+
+class DefaultCredsListReader(Protocol):
+    """Lese-Port der Standardzugangs-Liste -- reine Abfrage-Quelle.
+
+    ``get_eintraege`` liefert ALLE Eintraege (Verwaltungs-/Anzeige-Sicht);
+    ``finde_fuer_hersteller_modell`` ist die geraetebezogene Abfrage (nur die passenden,
+    aktiven Eintraege). Die Matching-Regel steckt im Adapter, nicht im Vertrag.
+    """
+
+    def get_eintraege(self) -> list[DefaultCredsEintrag]:
+        """Alle gespeicherten Eintraege. Leere Liste (``[]``) ist ein gueltiger Zustand."""
+        ...
+
+    def finde_fuer_hersteller_modell(
+        self, hersteller: str, modell: str
+    ) -> list[DefaultCredsEintrag]:
+        """Die zu Hersteller/Modell passenden, AKTIVEN Eintraege (Matching im Adapter).
+
+        Kein Treffer -> ``[]`` (der implizite Zustand "unbekannt" -- kein Eintrag
+        vorhanden, KEIN Fehler).
+        """
+        ...
+
+
+class DefaultCredsListStore(Protocol):
+    """Verwaltungs-/Schreib-Port der Standardzugangs-Liste -- CRUD + reset.
+
+    BEWUSST getrennt vom ``DefaultCredsListReader``: jener ist die reine Lese-Quelle,
+    dieser der validierende Pflege-Vertrag, den die CRUD-Use-Cases nutzen. ``get_eintraege``
+    ist deckungsgleich mit dem Reader (ein Store IST eine Quelle). Der Adapter validiert
+    beim Schreiben ueber ``domain.security.validate_eintraege`` und wirft bei Issues.
+    """
+
+    def get_eintraege(self) -> list[DefaultCredsEintrag]:
+        """Alle gespeicherten Eintraege (deckungsgleich mit dem Reader)."""
+        ...
+
+    def add_eintrag(self, eintrag: DefaultCredsEintrag) -> None:
+        """Fuegt einen neuen Eintrag hinzu (validierend; wirft bei Issues/Duplikat-id)."""
+        ...
+
+    def update_eintrag(self, eintrag: DefaultCredsEintrag) -> None:
+        """Aktualisiert einen bestehenden Eintrag (validierend; ueber die eintrag_id)."""
+        ...
+
+    def delete_eintrag(self, eintrag_id: str) -> None:
+        """Loescht einen Eintrag ueber seine eintrag_id."""
+        ...
+
+    def set_aktiv(self, eintrag_id: str, aktiv: bool) -> None:
+        """Schaltet einen Eintrag aktiv/inaktiv, ohne ihn zu loeschen."""
+        ...
+
+    def reset_auf_standard(self) -> None:
+        """Stellt die mitgelieferten Eintraege wieder her (herkunft='mitgeliefert').
+
+        Loescht alle Zeilen mit ``herkunft='mitgeliefert'`` und schreibt den Seed frisch;
+        benutzer-eigene Eintraege (``herkunft='benutzer'``) bleiben unangetastet.
+        """
+        ...
+
+
+# ── Standardzugangs-Pruef-Historie: Lese-Views + Persistenz-Port ────────────
+#
+# Etappe B protokolliert JEDE durchgefuehrte Pruefung (drei-Faelle-Ergebnis + gefundene
+# Findings) in einer eigenen Tabelle -- ANALOG ``ScanHistoryRepository``: ``list`` liefert
+# Zusammenfassungen OHNE den Findings-Blob, ``get`` das Detail MIT Findings. Zwei schmale
+# Read-Views (Rand-Typen MIT Zeit, wie ``ArpAlertRecord``/``ScanSummary``): die Uhr
+# (``geprueft_at``) lebt im Adapter, NICHT in der Domaene. Sync (lokaler SQLite-Zugriff).
+
+
+@dataclass(frozen=True)
+class PruefHistorieSummary:
+    """Lese-View eines Historien-Datensatzes OHNE Findings-Blob (Muster ``ScanSummary``).
+
+    Was ``list_eintraege`` liefert: die id + Metadaten (``geprueft_at`` ISO-UTC-Text,
+    host/hersteller/modell, der ``fall`` als ``PruefFall``, ``treffer_count``). Der
+    Findings-Blob kommt erst per ``get_eintrag(eintrag_id)`` (Charakterisierung
+    ``ScanHistoryRepository.list`` ohne ``result_json``).
+    """
+
+    eintrag_id: int
+    geprueft_at: str
+    host: str
+    hersteller: str
+    modell: str
+    fall: PruefFall
+    treffer_count: int
+
+
+@dataclass(frozen=True)
+class PruefHistorieDetail:
+    """Lese-View eines Historien-Datensatzes MIT Findings (Muster ``ScanRecord``).
+
+    Was ``get_eintrag`` liefert: wie ``PruefHistorieSummary``, plus die verlustfreie
+    ``findings``-Tuple (die gespeicherten ``CredFinding``). Unbekannte id -> ``None``
+    (nicht dieser Typ) -- s. ``DefaultCredsHistoryRepository.get_eintrag``.
+    """
+
+    eintrag_id: int
+    geprueft_at: str
+    host: str
+    hersteller: str
+    modell: str
+    fall: PruefFall
+    treffer_count: int
+    findings: tuple[CredFinding, ...]
+
+
+class DefaultCredsHistoryRepository(Protocol):
+    """Persistenz der Standardzugangs-Pruef-Historie (Tabelle ``default_creds_history``).
+
+    Muster ``ScanHistoryRepository``: ``add_eintrag`` schreibt einen Datensatz (Findings
+    verlustfrei als JSON-Blob), ``list_eintraege`` liefert die neuesten Zusammenfassungen
+    OHNE Blob, ``get_eintrag`` das Detail MIT Findings (unbekannte id -> ``None``). Die
+    Zeit (``geprueft_at``) setzt der Adapter (``datetime.now(UTC)``), sie ist NICHT Teil
+    eines Domaenentyps. Sync (lokaler SQLite-Zugriff, Muster ``ArpGuardRepository``).
+    """
+
+    def add_eintrag(
+        self,
+        host: str,
+        hersteller: str,
+        modell: str,
+        fall: PruefFall,
+        findings: Sequence[CredFinding],
+    ) -> None:
+        """Speichert einen Historien-Datensatz (``treffer_count = len(findings)``).
+
+        Der Adapter setzt ``geprueft_at`` (ISO-UTC) und serialisiert ``findings``
+        verlustfrei. Leere ``findings`` (z. B. Fall "entwarnung"/"keine_infos") sind ein
+        gueltiger Zustand -> ``treffer_count = 0``.
+        """
+        ...
+
+    def list_eintraege(self, limit: int = 50) -> list[PruefHistorieSummary]:
+        """Die neuesten Datensaetze als ``PruefHistorieSummary``, neueste zuerst.
+
+        OHNE Findings-Blob (Muster ``ScanHistoryRepository.list``). ``ORDER BY id DESC
+        LIMIT``. Leere Historie -> ``[]``.
+        """
+        ...
+
+    def get_eintrag(self, eintrag_id: int) -> PruefHistorieDetail | None:
+        """Ein Datensatz MIT Findings (``PruefHistorieDetail``). Unbekannte id -> ``None``.
+
+        KEIN stiller Fallback bei kaputtem ``ergebnis_json`` -- der Adapter wirft dann einen
+        Fehler MIT id-Bezug (Muster ``CorruptScanError``).
+        """
         ...
 
 
@@ -311,7 +500,12 @@ __all__ = [
     "CveFinding",
     "CveLookup",
     "DefaultCredsChecker",
+    "DefaultCredsHistoryRepository",
+    "DefaultCredsListReader",
+    "DefaultCredsListStore",
     "PortQuery",
+    "PruefHistorieDetail",
+    "PruefHistorieSummary",
     "TlsCertInfo",
     "TlsFinding",
     "TlsInspector",
