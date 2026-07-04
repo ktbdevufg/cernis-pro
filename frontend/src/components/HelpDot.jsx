@@ -9,7 +9,7 @@
 // dort für die lang-Texte). Fehlt der Eintrag, rendert die Komponente nichts
 // (null) — kein Absturz, kein leerer Knopf.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import helpContent from "../lib/help_content.json";
@@ -21,7 +21,11 @@ export default function HelpDot({ helpId, onOpenManual }) {
   const { t, i18n } = useTranslation();
 
   const [offen, setOffen] = useState(false);
+  // Öffnungsrichtung des Popups: Default "rechts" (left:0). Bei einer randnahen
+  // Kachel ragt die 340px-Box über die rechte Viewport-Kante — dann "links".
+  const [richtung, setRichtung] = useState("rechts");
   const wrapRef = useRef(null);
+  const popRef = useRef(null);
 
   // Schließen bei Klick außerhalb des Wrappers und bei Escape. Nur aktiv,
   // solange das Popup offen ist — sonst hängen keine Listener am document.
@@ -46,6 +50,31 @@ export default function HelpDot({ helpId, onOpenManual }) {
     return () => {
       document.removeEventListener("mousedown", beiMausunten);
       document.removeEventListener("keydown", beiTaste);
+    };
+  }, [offen]);
+
+  // Kanten-Erkennung: misst die Popup-Box vor dem Paint (useLayoutEffect, kein
+  // Flackern) und wählt die Öffnungsrichtung. Ragt die rechte Kante über den
+  // Viewport (Sicherheitsabstand 8px), öffnet das Popup nach links, sonst rechts.
+  // Nur aktiv, solange offen; misst auch bei window-resize neu. Hängt allein an
+  // `offen` — t/i18n bewusst NICHT als Dependency (bestehende Regel im File).
+  useLayoutEffect(() => {
+    if (!offen) {
+      return undefined;
+    }
+    const RAND = 8;
+    const messen = () => {
+      const el = popRef.current;
+      if (!el) {
+        return;
+      }
+      const rect = el.getBoundingClientRect();
+      setRichtung(rect.right > window.innerWidth - RAND ? "links" : "rechts");
+    };
+    messen();
+    window.addEventListener("resize", messen);
+    return () => {
+      window.removeEventListener("resize", messen);
     };
   }, [offen]);
 
@@ -77,7 +106,14 @@ export default function HelpDot({ helpId, onOpenManual }) {
       </button>
 
       {offen ? (
-        <div className="help-pop" role="dialog">
+        <div
+          className={
+            "help-pop " +
+            (richtung === "links" ? "help-pop--links" : "help-pop--rechts")
+          }
+          role="dialog"
+          ref={popRef}
+        >
           <div className="help-pop__head">
             <span className="help-pop__title">
               <span className="help-pop__dot" aria-hidden="true" />

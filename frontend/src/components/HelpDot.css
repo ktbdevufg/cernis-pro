@@ -37,11 +37,11 @@
   outline-offset: 2px;
 }
 
-/* Popup: hängt unter dem Knopf, linksbündig, mit kleinem Abstand. */
+/* Popup: hängt unter dem Knopf, mit kleinem Abstand. Die horizontale Ausrichtung
+   (left/right) kommt aus den Richtungs-Modifiern — je nach Kanten-Erkennung. */
 .help-pop {
   position: absolute;
   top: calc(100% + 6px);
-  left: 0;
   z-index: 60;
   width: 340px;
   max-width: min(340px, 86vw);
@@ -50,6 +50,18 @@
   border-radius: var(--radius-lg);
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.14);
   text-align: left;
+}
+
+/* Öffnungsrichtung (Kanten-Erkennung in HelpDot.jsx): rechts = Default (left:0),
+   links = bei randnaher Kachel, damit die Box nicht über den Viewport ragt. */
+.help-pop--rechts {
+  left: 0;
+  right: auto;
+}
+
+.help-pop--links {
+  right: 0;
+  left: auto;
 }
 
 .help-pop__head {
