@@ -24,6 +24,7 @@ import asyncio
 import base64
 import ftplib
 import ssl
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Sequence
@@ -33,6 +34,11 @@ import structlog
 from ports.security import CredFinding, PortQuery
 
 _logger = structlog.get_logger(__name__)
+
+# Rate-Limit: mind. 1 s Pause ZWISCHEN aktiven Login-Versuchen pro Ziel (ein Versuch pro
+# Sekunde), damit keine Geraet-Lockouts/Log-Fluten entstehen. Keine Pause vor dem ersten
+# Versuch. Laeuft im synchronen _check_*-Pfad (ohnehin in asyncio.to_thread).
+_RATE_LIMIT_SECONDS = 1.0
 
 # Daten-Tabellen aus modules/default_creds.py als v2-Konstanten (reine Daten).
 DEFAULT_CREDS: dict[str, list[tuple[str, str]]] = {
@@ -97,34 +103,68 @@ def get_creds_for_vendor(vendor: str) -> list[tuple[str, str]]:
     return DEFAULT_CREDS["web"][:6]
 
 
+def _unverified_context() -> ssl.SSLContext:
+    """Ungepruefter TLS-Kontext -- NUR fuer den self-signed-Fallback (check_hostname=False,
+    verify_mode=CERT_NONE)."""
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
+
 def _check_http_basic(
     host: str, port: int, creds: list[tuple[str, str]], https: bool, timeout: float = 3.0
 ) -> list[CredFinding]:
     scheme = "https" if https else "http"
     url = f"{scheme}://{host}:{port}/"
 
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_OPTIONAL
-    opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
+    # Opener-Erzeugung parametrisiert: die Credential-Schleife wird NICHT dupliziert,
+    # nur die TLS-Kontext-Wahl. http -> einfacher Opener (unveraendert). https -> erst
+    # strikter TLS (create_default_context: check_hostname=True, CERT_REQUIRED); bei
+    # Zertifikatsfehler EIN ungepruefter Fallback (self-signed-Hinweis).
+    strict_opener = (
+        urllib.request.build_opener(
+            urllib.request.HTTPSHandler(context=ssl.create_default_context())
+        )
+        if https
+        else urllib.request.build_opener()
+    )
+
+    def _run(req: urllib.request.Request) -> tuple[int, bool]:
+        """Fuehrt EINEN Request aus -> ``(code, self_signed)``. ``self_signed`` True, wenn
+        der Aufbau nur ueber den ungepruefthen TLS-Fallback gelang."""
+        try:
+            return strict_opener.open(req, timeout=timeout).code, False
+        except urllib.error.HTTPError as exc:
+            # E.4b TRAGENDE LOGIK: 401/403 = Cred falsch -> kein Treffer, KEIN Log.
+            return exc.code, False
+        except (ssl.SSLCertVerificationError, ssl.SSLError):
+            # Zertifikatsfehler (typisch self-signed) -> EIN ungepruefter Fallback.
+            fallback = urllib.request.build_opener(
+                urllib.request.HTTPSHandler(context=_unverified_context())
+            )
+            try:
+                return fallback.open(req, timeout=timeout).code, True
+            except urllib.error.HTTPError as exc:
+                return exc.code, True
+            except Exception as exc:
+                _logger.warning("cred_http_check_error", host=host, port=port, error=str(exc))
+                return 0, True
+        except Exception as exc:
+            # E.4b-Heilung (Muster i): echter Netzfehler -> geloggt (vorher still 0).
+            _logger.warning("cred_http_check_error", host=host, port=port, error=str(exc))
+            return 0, False
 
     results: list[CredFinding] = []
-    for user, pwd in creds[:8]:  # max 8 Versuche (Altcode)
+    for idx, (user, pwd) in enumerate(creds[:8]):  # max 8 Versuche (Altcode)
+        if idx > 0:
+            time.sleep(_RATE_LIMIT_SECONDS)  # Rate-Limit ZWISCHEN Versuchen, nicht davor.
         cred = base64.b64encode(f"{user}:{pwd}".encode()).decode()
         req = urllib.request.Request(
             url,
             headers={"Authorization": f"Basic {cred}", "User-Agent": "CERNIS PRO/1.0"},
         )
-        try:
-            resp = opener.open(req, timeout=timeout)
-            code = resp.code
-        except urllib.error.HTTPError as exc:
-            # E.4b TRAGENDE LOGIK: 401/403 = Cred falsch -> kein Treffer, KEIN Log.
-            code = exc.code
-        except Exception as exc:
-            # E.4b-Heilung (Muster i): echter Netzfehler -> geloggt (vorher still 0).
-            _logger.warning("cred_http_check_error", host=host, port=port, error=str(exc))
-            code = 0
+        code, self_signed = _run(req)
 
         if code in _HTTP_HIT_CODES:
             results.append(
@@ -136,7 +176,7 @@ def _check_http_basic(
                     password=pwd,
                     success=True,
                     method="http_basic",
-                    note=f"HTTP {code}",
+                    note="selbstsigniertes Zertifikat" if self_signed else f"HTTP {code}",
                 )
             )
             break  # erster Treffer -> Stop (Altcode)
@@ -145,7 +185,9 @@ def _check_http_basic(
 
 def _check_ftp(host: str, port: int = 21, timeout: float = 3.0) -> list[CredFinding]:
     results: list[CredFinding] = []
-    for user, pwd in DEFAULT_CREDS["ftp"][:4]:
+    for idx, (user, pwd) in enumerate(DEFAULT_CREDS["ftp"][:4]):
+        if idx > 0:
+            time.sleep(_RATE_LIMIT_SECONDS)  # Rate-Limit ZWISCHEN Versuchen, nicht davor.
         try:
             ftp = ftplib.FTP()
             ftp.connect(host, port, timeout=timeout)

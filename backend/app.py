@@ -308,6 +308,7 @@ from api.security import (
     provide_inspect_tls,
     provide_lookup_cves,
     provide_run_arp_scan,
+    provide_target_scope_guard,
 )
 from api.security import router as security_router
 from api.settings import (
@@ -719,6 +720,7 @@ from infrastructure.security import (
     DefaultCredsCheckerAdapter,
     SqliteArpGuardRepository,
     TlsInspectorAdapter,
+    is_private_target,
 )
 from infrastructure.self_host import detect_self_host
 from infrastructure.settings_repository import CorruptSettingError, SqliteSettingsRepository
@@ -2850,6 +2852,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     tls_inspector_adapter = TlsInspectorAdapter()
     default_creds_adapter = DefaultCredsCheckerAdapter()
 
+    # default-creds ist eine scharfe Opt-in-Sonderfunktion: sitzungsweites Arm-Flag am
+    # app.state (Startwert False, NICHT persistent -- Muster capture/traffic). Der
+    # Endpunkt bleibt bis zum Arm-Aufruf 403.
+    app.state.default_creds_armed = False
+
     app.include_router(security_router)
     # RunArpScan: arp_table + vendor_lookup sind DIESELBEN Instanzen wie im scanning-Block
     # (Wiederverwendung, kein zweiter ArpTable/Vendor-Adapter).
@@ -2868,6 +2875,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.dependency_overrides[provide_check_default_creds] = lambda: CheckDefaultCreds(
         default_creds_adapter
     )
+    # Ziel-Bereichs-Guard: infra-reine is_private_target hier verdrahtet (Regel 5, damit
+    # der api-Ring infrastructure nicht direkt importiert).
+    app.dependency_overrides[provide_target_scope_guard] = lambda: is_private_target
 
     @app.exception_handler(SecretStoreUnavailableError)
     async def _on_secret_store_unavailable(

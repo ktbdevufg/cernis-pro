@@ -23,11 +23,13 @@ from api.security import (
     provide_inspect_tls,
     provide_lookup_cves,
     provide_run_arp_scan,
+    provide_target_scope_guard,
 )
 from api.security import (
     router as security_router,
 )
 from domain.security import ArpAlert
+from infrastructure.security import is_private_target
 from ports.security import (
     ArpAlertRecord,
     ArpBaselineRecord,
@@ -127,6 +129,11 @@ def client() -> TestClient:
     app.dependency_overrides[provide_lookup_cves] = lambda: _FakeLookupCves()
     app.dependency_overrides[provide_inspect_tls] = lambda: _FakeInspectTls()
     app.dependency_overrides[provide_check_default_creds] = lambda: _FakeCheckDefaultCreds()
+    # default-creds ist eine Opt-in-Sonderfunktion: sitzungsweites Arm-Flag + Ziel-
+    # Bereichs-Guard (privates Netz). Im bare-FastAPI-Test beides verdrahten wie der
+    # Composition Root, damit der 200-Pfad (privates Ziel, freigeschaltet) laeuft.
+    app.state.default_creds_armed = True
+    app.dependency_overrides[provide_target_scope_guard] = lambda: is_private_target
     return TestClient(app)
 
 
@@ -241,7 +248,7 @@ def test_tls_inspect_host_san_warnings_are_json_lists(client: TestClient) -> Non
 def test_default_creds_returns_findings(client: TestClient) -> None:
     r = client.post(
         "/api/security/default-creds",
-        json={"host": "h", "ports": [{"port": 80, "service": "http"}], "vendor": "ubnt"},
+        json={"host": "192.168.1.10", "ports": [{"port": 80, "service": "http"}], "vendor": "ubnt"},
     )
     assert r.status_code == 200
     c = r.json()[0]

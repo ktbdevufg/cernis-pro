@@ -34,9 +34,11 @@ KEINE alerting-Naht: ARP-Alerts feuern KEINE alerting-Regeln (DF1, latente Naht 
 Notiz dokumentiert -- arp_guard ``new_device`` / alerting ``RULE_TYPE_NEW_DEVICE``).
 """
 
+from collections.abc import Callable
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from application.security import (
@@ -83,6 +85,14 @@ def provide_check_default_creds() -> CheckDefaultCreds:
     raise NotImplementedError("provide_check_default_creds nicht verdrahtet (app.py)")
 
 
+# Ziel-Bereichs-Pruefung (default-creds): Callable[[str], bool] -- ``True`` = privates
+# Netz. Liegt im infrastructure-Ring (net_scope.is_private_target); der api-Ring darf
+# infrastructure NICHT importieren, darum als dependency-Marker injiziert (Verdrahtung
+# im Composition Root app.py, Regel 5). Muster: reines Pruef-Callable am api-Rand.
+def provide_target_scope_guard() -> Callable[[str], bool]:
+    raise NotImplementedError("provide_target_scope_guard nicht verdrahtet (app.py)")
+
+
 # ── Body-Modelle (kein rohes Body(dict) -- B008; Hausmuster api/alerting) ──────
 
 
@@ -105,6 +115,12 @@ class DefaultCredsBody(BaseModel):
     host: str = ""
     ports: list[dict[str, Any]] = []
     vendor: str = ""
+
+
+class ArmBody(BaseModel):
+    """POST /api/security/default-creds/arm -- schaltet die Sonderfunktion sitzungsweit."""
+
+    armed: bool = False
 
 
 # ── Rand-Serializer (dataclass -> dict via Attribut-Zugriff, Typ Any) ──────────
@@ -285,8 +301,48 @@ async def api_tls_inspect_host(
 
 @router.post("/api/security/default-creds")
 async def api_default_creds(
+    request: Request,
     body: DefaultCredsBody,
     check_default_creds: Annotated[CheckDefaultCreds, Depends(provide_check_default_creds)],
-) -> list[dict[str, Any]]:
+    is_private_target: Annotated[Callable[[str], bool], Depends(provide_target_scope_guard)],
+) -> Any:
+    # Arm-Guard: die intrusive Sonderfunktion laeuft NUR, wenn sie fuer diese Sitzung
+    # freigeschaltet ist (Laufzeit-Flag am app.state, Muster capture/traffic; kein
+    # Use-Case). Nicht freigeschaltet -> 403 (Muster capture.py JSONResponse 403).
+    if getattr(request.app.state, "default_creds_armed", False) is not True:
+        return JSONResponse(
+            status_code=403,
+            content={
+                "ok": False,
+                "error": "Standardpasswort-Pruefung ist fuer diese Sitzung nicht freigeschaltet.",
+            },
+        )
+    # Private-Netz-Guard: nur Ziele im eigenen, privaten Netz. Die Pruefung liegt im
+    # infrastructure-Ring (net_scope) und kommt per dependency herein -- der api-Ring
+    # importiert infrastructure NICHT direkt (Verdrahtung app.py, Regel 5).
+    if is_private_target(body.host) is False:
+        return JSONResponse(
+            status_code=403,
+            content={
+                "ok": False,
+                "error": "Nur Ziele im eigenen, privaten Netz sind zulaessig.",
+            },
+        )
     findings = await check_default_creds(body.host, body.ports, body.vendor)
     return [_cred_to_dict(c) for c in findings]
+
+
+# ── default-creds Arm/State (Laufzeit-Flag am api-Rand, KEINE Domaenenlogik) ──
+# Reines sitzungsweites Opt-in-Flag am ``app.state`` (Muster capture/traffic). Nicht
+# persistent (Startwert False im Composition Root), kein Use-Case, kein Port.
+
+
+@router.get("/api/security/default-creds/state")
+def api_default_creds_state(request: Request) -> dict[str, bool]:
+    return {"armed": bool(getattr(request.app.state, "default_creds_armed", False))}
+
+
+@router.post("/api/security/default-creds/arm")
+def api_default_creds_arm(request: Request, body: ArmBody) -> dict[str, bool]:
+    request.app.state.default_creds_armed = body.armed
+    return {"armed": body.armed}
