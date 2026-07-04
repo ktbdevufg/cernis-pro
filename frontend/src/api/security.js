@@ -209,6 +209,80 @@ export async function resetDefaultCredsList() {
   return apiPost(`${LISTE_BASIS}/reset`, {});
 }
 
+// -------------------------------------------------------------------------
+// Etappe D: geräte-/modellbasierter Prüf-Workflow (die NEUE Prüf-Ansicht).
+//
+// Statt blind admin/admin gegen feste Ports zu schießen, geht die Prüfung jetzt
+// vom Gerät aus: Hersteller/Modell -> Prüfplan ermitteln (drei Fälle) -> der
+// Nutzer hakt Kandidaten an -> gezielte Prüfung -> Historie. Wire-Form (Etappe
+// B/C-Backend, bereits implementiert, NICHT ändern):
+//   POST "/api/security/default-creds/ermitteln"  Body { hersteller, modell }
+//        -> { fall, eintraege:[{ eintrag_id, hersteller, modell, zustand,
+//             kandidaten:[{ username, password, konfidenz }], quelle_url,
+//             aktiv, herkunft }], quelle_urls:[...] }.
+//        fall = "entwarnung" | "kandidaten" | "keine_infos".
+//   POST "/api/security/default-creds/pruefen"     Body { host,
+//        ports:[{ port, service }], kandidaten:[{ username, password }],
+//        hersteller, modell } -> list[cred-dict { port, service, username,
+//        password, note }] (200) | 403 { ok:false, error } (nicht armed ODER
+//        Host nicht privat).
+//   GET  "/api/security/default-creds/historie"       -> [ { id, geprueft_at,
+//        host, hersteller, modell, fall, treffer_count } ] (neueste zuerst).
+//   GET  "/api/security/default-creds/historie/{id}"  -> { ..., findings:[
+//        { port, service, username, password, note } ] }.
+//
+// „ermitteln" und die Historie-GETs sind reine Lesefälle (apiGet/apiPost genügen).
+// „pruefen" trägt wie checkDefaultCreds den 403 als FACHLICHEN Zustand, dessen
+// Body-error die View zeigen soll — darum eigener fetch mit apiErrorAusAntwort.
+
+// POST ermitteln -> { fall, eintraege, quelle_urls }. Kein Login-Versuch, nur
+// der Prüfplan (Hersteller/Modell -> bekannte Kandidaten). apiPost genügt:
+// hier gibt es keinen fachlichen Fehler-Body, den die View zeigen müsste.
+export async function ermittlePruefplan(hersteller, modell) {
+  return apiPost(`${BASIS}/ermitteln`, { hersteller, modell });
+}
+
+// POST pruefen -> list[cred-dict] (200) | 403 { ok:false, error }. Eigener fetch
+// (wie checkDefaultCreds), damit die 403-Body-message (nicht armed / Host nicht
+// privat) in die ApiError wandert und die View sie ruhig zeigen kann.
+export async function pruefeKandidaten({
+  host,
+  ports,
+  kandidaten,
+  hersteller,
+  modell,
+}) {
+  let response;
+  try {
+    response = await fetch(`${BASIS}/pruefen`, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ host, ports, kandidaten, hersteller, modell }),
+    });
+  } catch (ursache) {
+    throw new ApiError(ursache?.message ?? "Netzwerkfehler", null);
+  }
+  if (!response.ok) {
+    throw await apiErrorAusAntwort(response);
+  }
+  return response.json();
+}
+
+// GET historie -> Array von Prüf-Zusammenfassungen (neueste zuerst). Fehler als
+// ApiError (kein stiller Fallback auf leere Historie).
+export async function fetchDefaultCredsHistorie() {
+  return apiGet(`${BASIS}/historie`);
+}
+
+// GET historie/{id} -> eine Prüfung samt findings. Fehler (u. a. 404) als
+// ApiError; der Aufrufer behandelt das ruhig.
+export async function fetchDefaultCredsHistorieDetail(id) {
+  return apiGet(`${BASIS}/historie/${encodeURIComponent(id)}`);
+}
+
 export default {
   fetchDefaultCredsState,
   armDefaultCreds,
@@ -219,4 +293,8 @@ export default {
   deleteDefaultCredsEintrag,
   setDefaultCredsEintragAktiv,
   resetDefaultCredsList,
+  ermittlePruefplan,
+  pruefeKandidaten,
+  fetchDefaultCredsHistorie,
+  fetchDefaultCredsHistorieDetail,
 };
