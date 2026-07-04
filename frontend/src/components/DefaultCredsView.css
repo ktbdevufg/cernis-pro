@@ -1,0 +1,142 @@
+/* Standardzugangs-Prüfansicht (CERNIS PRO 2.0, Etappe 2) — folgt der Design-
+   sprache der übrigen Diagnose-/Detail-Panels (gleiche Farb-/Radius-Variablen,
+   Muster RouteView.css). Nur Projekt-Tokens, keine hartkodierten Farben. */
+
+.defcreds {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 4px;
+}
+
+/* Ruhiger Warnhinweis oben: aktive Prüfung, nur eigene Geräte. */
+.defcreds__notice {
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  color: var(--color-text-sec);
+  background: var(--color-bar);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.defcreds__form {
+  display: flex;
+  gap: 8px;
+}
+
+.defcreds__input {
+  flex: 1;
+  padding: 8px 12px;
+  font-size: 0.95rem;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.defcreds__input:focus {
+  outline: 2px solid var(--color-accent);
+  border-color: var(--color-accent-border);
+}
+
+.defcreds__start {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  font-size: 0.9rem;
+  color: var(--color-accent-strong);
+  background: transparent;
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.defcreds__start:hover:not(:disabled) {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.defcreds__start:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Fehler-/403-Zeile: ruhig, ohne Alarm-Rot (neutrale Einordnung). */
+.defcreds__error {
+  padding: 10px 12px;
+  font-size: 0.9rem;
+  color: var(--color-text);
+  background: var(--color-bar);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* Ehrlicher Leerbefund: kein „alles gut", nur „nichts gefunden". */
+.defcreds__none {
+  padding: 12px;
+  font-size: 0.9rem;
+  color: var(--color-text-sec);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* Fund-Liste: je Fund eine abgesetzte Karte. */
+.defcreds__funde {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.defcreds__fund {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.defcreds__fund-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text);
+}
+
+.defcreds__fund-title {
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.defcreds__fund-meta {
+  font-size: 0.82rem;
+  color: var(--color-text-sec);
+}
+
+.defcreds__fund-cred {
+  font-size: 0.88rem;
+  color: var(--color-text);
+  font-family: var(--font-mono, monospace);
+}
+
+.defcreds__fund-note {
+  font-size: 0.82rem;
+  color: var(--color-text-sec);
+  font-style: italic;
+}
+
+.defcreds__hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 32px;
+  color: var(--color-text-sec);
+  text-align: center;
+}

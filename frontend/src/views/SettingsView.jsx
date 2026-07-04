@@ -14,12 +14,17 @@ import { useTranslation } from "react-i18next";
 
 import { fetchAllRules, lookupService, parsePortliste } from "../api/analysis.js";
 import {
+  fetchDefaultCredsState,
+  armDefaultCreds,
+} from "../api/security.js";
+import {
   fetchSettings,
   updateSetting,
   updateSecret,
   secretGesetzt,
 } from "../api/settings.js";
 import { FunctionShell } from "../components/AreaShell.jsx";
+import DefaultCredsConsentDialog from "../components/DefaultCredsConsentDialog.jsx";
 import "./SettingsView.css";
 
 // Default-Portmengen der Auffälligkeits-Engine. SPIEGELT bewusst die Backend-
@@ -1536,6 +1541,157 @@ function DnsWatchSektion({ onGespeichert }) {
   );
 }
 
+// Standardzugangs-Sektion (Etappe 2): scharfer Session-Schalter für die Opt-in-
+// Sonderfunktion „Standardzugänge prüfen". Anders als die übrigen Sektionen
+// schreibt sie NICHT gegen die Settings-API, sondern liest/setzt den sitzungs-
+// weiten Freischalt-Zustand über den Security-Endpunkt. Der Zustand ist NICHT
+// persistent (kein localStorage) — beim Mount wird er gelesen und der Schalter
+// danach gesetzt.
+//
+// Einschalten (aus -> an) verlangt ZUERST einen Bestätigungs-Dialog (aktiver
+// Login-Versuch, nur Sitzung). Erst nach Bestätigung armDefaultCreds(true) und
+// Schalter an. Abbrechen -> nichts passiert. Ausschalten (an -> aus) braucht
+// KEINE Bestätigung: direkt armDefaultCreds(false). Fehler (Backend nicht
+// erreichbar) werden ruhig behandelt: der Schalter bleibt im letzten sicheren
+// Zustand, eine kurze Meldung erscheint, kein Absturz.
+function DefaultCredsSektion({ onGespeichert }) {
+  const { t } = useTranslation();
+
+  const [armed, setArmed] = useState(false);
+  const [ladeStatus, setLadeStatus] = useState("laedt"); // laedt | bereit | fehler
+  const [dialogOffen, setDialogOffen] = useState(false);
+  const [fehler, setFehler] = useState(false); // Schreibfehler beim arm
+
+  // Einmal beim Mount den sitzungsweiten Zustand lesen. Fehler nicht verschlucken
+  // (console.error) und in den Lade-Fehlerzustand gehen — KEIN stiller Fallback
+  // auf „armed".
+  useEffect(() => {
+    let aktiv = true;
+    (async () => {
+      try {
+        const zustand = await fetchDefaultCredsState();
+        if (!aktiv) {
+          return;
+        }
+        setArmed(Boolean(zustand?.armed));
+        setLadeStatus("bereit");
+      } catch (ursache) {
+        if (!aktiv) {
+          return;
+        }
+        console.error("Standardzugangs-Zustand laden fehlgeschlagen:", ursache);
+        setLadeStatus("fehler");
+      }
+    })();
+    return () => {
+      aktiv = false;
+    };
+  }, []);
+
+  // Schalter-Änderung: Einschalten öffnet erst den Dialog; Ausschalten läuft
+  // direkt. Der Schalter selbst wird NICHT sofort umgelegt — er folgt dem
+  // tatsächlichen Backend-Zustand (nach Bestätigung bzw. nach dem arm-Aufruf).
+  const handleToggle = (an) => {
+    if (an) {
+      setDialogOffen(true);
+    } else {
+      setzeArmed(false);
+    }
+  };
+
+  // armDefaultCreds aufrufen und den Schalter dem Ergebnis folgen lassen. Bei
+  // Fehler bleibt der Schalter im letzten sicheren Zustand und eine Meldung
+  // erscheint (kein stiller Fallback).
+  const setzeArmed = async (an) => {
+    setFehler(false);
+    try {
+      const zustand = await armDefaultCreds(an);
+      setArmed(Boolean(zustand?.armed));
+      onGespeichert();
+    } catch (ursache) {
+      console.error("Standardzugangs-Zustand setzen fehlgeschlagen:", ursache);
+      setFehler(true);
+    }
+  };
+
+  // Dialog bestätigt: schließen, dann freischalten.
+  const handleBestaetigen = () => {
+    setDialogOffen(false);
+    setzeArmed(true);
+  };
+
+  // Dialog abgebrochen: nur schließen, nichts passiert (Schalter bleibt aus).
+  const handleAbbrechen = () => {
+    setDialogOffen(false);
+  };
+
+  if (ladeStatus === "laedt") {
+    return (
+      <SettingsSektion title={t("settings.defaultCreds.title")}>
+        <div className="settings__row">
+          <span className="settings__hint">
+            {t("settings.defaultCreds.loading")}
+          </span>
+        </div>
+      </SettingsSektion>
+    );
+  }
+
+  if (ladeStatus === "fehler") {
+    return (
+      <SettingsSektion title={t("settings.defaultCreds.title")}>
+        <div className="settings__row">
+          <span className="settings__hint settings__hint--error">
+            {t("settings.defaultCreds.loadError")}
+          </span>
+        </div>
+      </SettingsSektion>
+    );
+  }
+
+  return (
+    <SettingsSektion title={t("settings.defaultCreds.title")}>
+      {/* Ruhiger Warn-/Erklärungsabsatz. */}
+      <p className="settings__hint">{t("settings.defaultCreds.warn")}</p>
+
+      {/* Session-Schalter im auffaelligkeit__switch-Stil (bestehendes Toggle-
+          Muster der View), eingerückt im auffaelligkeit__block. */}
+      <div className="auffaelligkeit__block">
+        <ul className="auffaelligkeit__rules">
+          <li className="auffaelligkeit__rule">
+            <span className="auffaelligkeit__rule-label">
+              <span className="auffaelligkeit__rule-title">
+                {t("settings.defaultCreds.toggleLabel")}
+              </span>
+            </span>
+            <span className="auffaelligkeit__rule-switchbox">
+              <input
+                type="checkbox"
+                className="auffaelligkeit__switch"
+                checked={armed}
+                onChange={(e) => handleToggle(e.target.checked)}
+              />
+            </span>
+          </li>
+        </ul>
+      </div>
+
+      {fehler ? (
+        <span className="settings__hint settings__hint--error">
+          {t("settings.defaultCreds.saveError")}
+        </span>
+      ) : null}
+
+      {dialogOffen ? (
+        <DefaultCredsConsentDialog
+          onConfirm={handleBestaetigen}
+          onCancel={handleAbbrechen}
+        />
+      ) : null}
+    </SettingsSektion>
+  );
+}
+
 export default function SettingsView({ lang, onLangChange, onClose, onOpenManual }) {
   const { t } = useTranslation();
 
@@ -1571,6 +1727,7 @@ export default function SettingsView({ lang, onLangChange, onClose, onOpenManual
     { id: "fritzbox", label: t("settings.nav.fritzbox") },
     { id: "auffaelligkeit", label: t("settings.nav.auffaelligkeit") },
     { id: "dnswatch", label: t("settings.nav.dnswatch") },
+    { id: "defaultcreds", label: t("settings.nav.defaultcreds") },
   ];
 
   return (
@@ -1647,6 +1804,10 @@ export default function SettingsView({ lang, onLangChange, onClose, onOpenManual
 
           {rubrik === "dnswatch" ? (
             <DnsWatchSektion onGespeichert={zeigeGespeichert} />
+          ) : null}
+
+          {rubrik === "defaultcreds" ? (
+            <DefaultCredsSektion onGespeichert={zeigeGespeichert} />
           ) : null}
         </div>
       </div>

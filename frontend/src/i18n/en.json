@@ -113,6 +113,7 @@
       "fritzbox": "FRITZ!Box",
       "auffaelligkeit": "What is suspicious?",
       "dnswatch": "DNS watchdog",
+      "defaultcreds": "Default credentials",
       "wartung": "Maintenance"
     },
     "startseite": {
@@ -197,6 +198,24 @@
           "item4": "Settings"
         }
       }
+    },
+    "defaultCreds": {
+      "title": "Check default credentials",
+      "warn": "A sharp special feature: CERNIS actively tries to log in to a device using its factory-default credentials. That is a real login attempt — use it only for devices on your own network that belong to you. For safety it is locked by default and must be unlocked here for each session.",
+      "toggleLabel": "Unlock for this session",
+      "loading": "Loading …",
+      "loadError": "The unlock state could not be loaded.",
+      "saveError": "The unlock state could not be changed.",
+      "dialogTitle": "Unlock default credential check?",
+      "dialogBody": "Before you unlock this special feature, please read what it does. It deliberately differs from the passive observation features of CERNIS.",
+      "dialogActiveTitle": "Active login attempt.",
+      "dialogActiveText": "CERNIS really logs in using default credentials. This can produce device logs or briefly lock accounts. Use it only on your own devices.",
+      "dialogOwnNetTitle": "Own network only.",
+      "dialogOwnNetText": "Targets outside the private network are rejected by the system.",
+      "dialogSessionTitle": "This session only.",
+      "dialogSessionText": "The unlock applies solely to the current CERNIS session. After a restart the feature is locked again.",
+      "confirm": "Unlock",
+      "cancel": "Cancel"
     }
   },
   "nav": {
@@ -1117,7 +1136,25 @@
         "title": "CVE matching",
         "subtitle": "Match detected services against known CVE entries.",
         "locked": ""
+      },
+      "defaultcreds": {
+        "title": "Default credentials",
+        "subtitle": "Active check: flags devices still using factory-default credentials.",
+        "locked": "Unlock it for this session in the settings first."
       }
+    },
+    "defaultCreds": {
+      "notice": "Active check: CERNIS attempts a real login using default credentials. For devices on your own network only.",
+      "hostLabel": "Target host or IP",
+      "hostPlaceholder": "Enter a host or IP on your own network (e.g. 192.168.1.1)",
+      "checkButton": "Check",
+      "checking": "Checking …",
+      "idle": "Enter a device on your own network to check it for default credentials.",
+      "resultHit": "Device uses default credentials (user/password)",
+      "resultNone": "No default credentials found.",
+      "portLabel": "Port {{port}} ({{service}})",
+      "selfSigned": "Note: {{note}}",
+      "error": "The check could not be performed."
     },
     "route": {
       "targetLabel": "Target",

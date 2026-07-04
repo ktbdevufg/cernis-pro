@@ -113,6 +113,7 @@
       "fritzbox": "FRITZ!Box",
       "auffaelligkeit": "Was ist auffällig?",
       "dnswatch": "DNS-Wächter",
+      "defaultcreds": "Standardzugänge",
       "wartung": "Wartung"
     },
     "startseite": {
@@ -197,6 +198,24 @@
           "item4": "Einstellungen"
         }
       }
+    },
+    "defaultCreds": {
+      "title": "Standardzugänge prüfen",
+      "warn": "Eine scharfe Sonderfunktion: CERNIS versucht aktiv, sich bei einem Gerät mit werksseitig voreingestellten Zugangsdaten anzumelden. Das ist ein echter Login-Versuch — nutze sie ausschließlich für Geräte im eigenen Netz, die dir gehören. Aus Sicherheitsgründen ist sie standardmäßig gesperrt und muss hier für jede Sitzung neu freigeschaltet werden.",
+      "toggleLabel": "Für diese Sitzung freischalten",
+      "loading": "Lädt …",
+      "loadError": "Der Freischalt-Zustand konnte nicht geladen werden.",
+      "saveError": "Die Freischaltung konnte nicht geändert werden.",
+      "dialogTitle": "Standardzugänge prüfen freischalten?",
+      "dialogBody": "Bevor du diese Sonderfunktion freischaltest, lies bitte, was sie tut. Sie unterscheidet sich bewusst von den passiven Beobachtungs-Funktionen von CERNIS.",
+      "dialogActiveTitle": "Aktiver Login-Versuch.",
+      "dialogActiveText": "CERNIS meldet sich tatsächlich mit Standard-Zugangsdaten an. Das kann Geräte-Logs erzeugen oder Konten kurzzeitig sperren. Nur auf eigenen Geräten anwenden.",
+      "dialogOwnNetTitle": "Nur im eigenen Netz.",
+      "dialogOwnNetText": "Ziele außerhalb des privaten Netzes werden vom System abgelehnt.",
+      "dialogSessionTitle": "Nur für diese Sitzung.",
+      "dialogSessionText": "Die Freischaltung gilt ausschließlich für die aktuelle CERNIS-Sitzung. Nach einem Neustart ist die Funktion wieder gesperrt.",
+      "confirm": "Freischalten",
+      "cancel": "Abbrechen"
     }
   },
   "nav": {
@@ -1117,7 +1136,25 @@
         "title": "CVE-Abgleich",
         "subtitle": "Erkannte Dienste gegen bekannte CVE-Einträge abgleichen.",
         "locked": ""
+      },
+      "defaultcreds": {
+        "title": "Standardzugänge",
+        "subtitle": "Aktive Prüfung: meldet Geräte, die noch werksseitige Standard-Zugangsdaten nutzen.",
+        "locked": "Erst in den Einstellungen für diese Sitzung freischalten."
       }
+    },
+    "defaultCreds": {
+      "notice": "Aktive Prüfung: CERNIS versucht einen echten Login mit Standard-Zugangsdaten. Nur für Geräte im eigenen Netz.",
+      "hostLabel": "Ziel-Host oder IP",
+      "hostPlaceholder": "Host oder IP im eigenen Netz eingeben (z. B. 192.168.1.1)",
+      "checkButton": "Prüfen",
+      "checking": "Prüfe …",
+      "idle": "Gib ein Gerät im eigenen Netz ein, um es auf Standard-Zugangsdaten zu prüfen.",
+      "resultHit": "Gerät nutzt Standardzugang (Benutzer/Passwort)",
+      "resultNone": "Kein Standardzugang gefunden.",
+      "portLabel": "Port {{port}} ({{service}})",
+      "selfSigned": "Zusatz: {{note}}",
+      "error": "Die Prüfung konnte nicht durchgeführt werden."
     },
     "route": {
       "targetLabel": "Ziel",
