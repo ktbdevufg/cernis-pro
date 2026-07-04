@@ -61,7 +61,52 @@ und die B4-Matrix). Diese werden bewusst nicht als Befunde geführt.
 
 ---
 
-## 3. Befunde (Critical → Low)
+## 3. Remediierungs-Status (Stand 2026-07-03)
+
+Dieser Abschnitt hält den Behebungs-Stand der neun Befunde fest. Behobene Findings sind
+mit dem jeweiligen Commit belegt; bewusst zurückgestellte Findings sind mit Begründung
+und Reaktivierungs-Bedingung dokumentiert.
+
+| Finding | Schweregrad | Status | Beleg / Begründung |
+|---------|-------------|--------|--------------------|
+| F-01 | Critical | **Teilweise behoben** | Etappe 1 (Origin-Guard HTTP+WS) behoben in Commit `fb9c113`; Etappe 2 (Token) bewusst zurückgestellt — siehe unten. |
+| F-02 | High | **Behoben** | SSRF-Schema-/Ziel-Guard in Commit `ed652a3`. |
+| F-03 | High | **Als Feature-Entscheidung übernommen** | Wird nicht entfernt, sondern zur scharfen Opt-in-Sonderfunktion umgebaut — siehe unten (ADR 0044). |
+| F-04 | Medium | **Behoben** | sniffd-Frame-Längendeckel in Commit `c49440d`. |
+| F-05 | Medium | **Behoben** | osascript-Escaping in Commit `c49440d`. |
+| F-06 | Medium | **Behoben** | Dependency-Bumps (starlette/cryptography/pydantic-settings) in Commit `b66704f`. |
+| F-07 | Low | **Behoben** | `--`-Terminatoren vor nutzergesteuerten CLI-Argumenten in Commit `c49440d`. |
+| F-08 | Low | **Zurückgestellt** | Nur Dev-Abhängigkeit, kein Produkt-Impact — siehe unten. |
+| F-09 | Low | **In Feature-Block verlagert** | Wird im Zuge des F-03-Umbaus (ADR 0044) adressiert — siehe unten. |
+
+### Bewusst zurückgestellte und verlagerte Findings
+
+**F-01 Etappe 2 (lokaler Shared-Token):** Zurückgestellt. Etappe 1 (Origin-Guard) schließt
+den realistischen Angriff (fremde Webseite im lokalen Browser triggert die localhost-API,
+inkl. der WebSocket-Lücke). Etappe 2 würde zusätzlich einen lokalen Fremdprozess unter
+demselben Nutzer abwehren — ein Angreifer, der bereits Code als dieser Nutzer ausführt und
+damit das Token-File (0600) ohnehin lesen sowie DB und Keyring-Secrets abgreifen könnte.
+Der Grenznutzen ist klein, der Grenzaufwand hoch (Tauri-nativer Token-Kanal, Selbst-
+Aussperr-Risiko, Dev-Modus-Bypass). Reaktivierung, wenn sich das Threat-Model ändert:
+Bindung an mehr als Loopback, Multi-User-Host oder Server-Deployment.
+
+**F-03 / F-09 (Standardpasswort-Prüfung):** Als Produktentscheidung übernommen statt entfernt.
+Die aktiven Default-Credential-Logins bleiben erhalten, werden aber zu einer bewusst
+scharfen Sonderfunktion umgebaut: bei jedem Programmstart deaktiviert (Session-scoped),
+manuelles Aktivieren nur nach bestätigter Warnung, technisch auf das eigene/lokale Netz
+begrenzt (keine Internet-Ziele). Damit entfällt die Missbrauchs-Fläche als
+Credential-Stuffing-Proxy. F-09 (deaktivierte TLS-Verifikation im creds-Check) wird im
+Zuge dieses Umbaus adressiert, nicht separat. Verortet als eigener Feature-Block, ADR 0044.
+
+**F-08 (esbuild/vite Dev-Server-CVE):** Zurückgestellt. Die Lücke steckt ausschließlich in
+Dev-Abhängigkeiten (Vite-Dev-Server); npm audit --omit=dev meldet null Verwundbarkeiten,
+das ausgelieferte Frontend ist nicht betroffen. Der Fix erzwingt ein Major-Upgrade auf
+vite 8 mit Breaking-Change-Risiko. Wird mit dem geplanten bewussten vite-8-Upgrade
+gebündelt, nicht als isolierter Sicherheits-Fix vorgezogen.
+
+---
+
+## 4. Befunde (Critical → Low)
 
 ### F-01 — Gesamte localhost-API und alle WebSockets ohne Authentifizierung/Origin-Prüfung  **[Critical]**
 
@@ -317,7 +362,7 @@ potenziell untergeschobenen Endpunkt gehen. Isoliert Low; im Verbund mit F-03 zu
 
 ---
 
-## 4. Teil-B-Matrix (Punkt für Punkt)
+## 5. Teil-B-Matrix (Punkt für Punkt)
 
 | Punkt | Gegenstand | Ergebnis | Ort / Beleg |
 |-------|-----------|----------|-------------|
@@ -341,9 +386,9 @@ potenziell untergeschobenen Endpunkt gehen. Isoliert Low; im Verbund mit F-03 zu
 
 ---
 
-## 5. Anhang — vollständige Roh-Ausgabe der Scanner (wörtlich)
+## 6. Anhang — vollständige Roh-Ausgabe der Scanner (wörtlich)
 
-### 5.1 bandit — Neucode (`uv run bandit -r backend -x backend/tests,backend/build,backend/dist,backend/modules`)
+### 6.1 bandit — Neucode (`uv run bandit -r backend -x backend/tests,backend/build,backend/dist,backend/modules`)
 
 Exit-Code: 1 (bandit: Fund vorhanden; kein Scanner-Fehler).
 
@@ -921,7 +966,7 @@ Run metrics:
 Files skipped (0):
 ```
 
-### 5.2 bandit — Altcode `backend/modules` (`uv run bandit -r backend/modules`, ADR-0007-eingezäunt)
+### 6.2 bandit — Altcode `backend/modules` (`uv run bandit -r backend/modules`, ADR-0007-eingezäunt)
 
 Exit-Code: 1 (Fund vorhanden). Getrennt ausgewiesen, damit Alt- von Neucode-Funden unterscheidbar ist.
 
@@ -1499,7 +1544,7 @@ Run metrics:
 Files skipped (0):
 ```
 
-### 5.3 pip-audit (`uv run pip-audit`)
+### 6.3 pip-audit (`uv run pip-audit`)
 
 Exit-Code: 1 (bekannte CVEs gefunden; kein Scanner-Fehler).
 
@@ -1513,7 +1558,7 @@ starlette         1.1.0   PYSEC-2026-249      1.3.1
 starlette         1.1.0   PYSEC-2026-248      1.3.0
 ```
 
-### 5.4 npm audit — Produktion (`npm audit --omit=dev`, in `frontend/`)
+### 6.4 npm audit — Produktion (`npm audit --omit=dev`, in `frontend/`)
 
 Exit-Code: 0.
 
@@ -1521,7 +1566,7 @@ Exit-Code: 0.
 found 0 vulnerabilities
 ```
 
-### 5.5 npm audit — alle (`npm audit`, in `frontend/`)
+### 6.5 npm audit — alle (`npm audit`, in `frontend/`)
 
 Exit-Code: 1 (Dev-Dependency-Funde).
 
