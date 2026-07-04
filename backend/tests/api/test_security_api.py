@@ -280,13 +280,13 @@ def real_client(tmp_path: Any) -> TestClient:
     app.dependency_overrides[provide_get_arp_baseline] = lambda: GetArpBaseline(repo)
     # repo am Client merken, damit der Test direkt schreiben kann.
     client = TestClient(app)
-    client.repo = repo  # type: ignore[attr-defined]
+    client.repo = repo
     return client
 
 
 def test_arp_alerts_end_to_end_datetime_from_db(real_client: TestClient) -> None:
     # Echte Zeile in die echte DB schreiben (der Adapter setzt ts + datetime selbst).
-    real_client.repo.save_alert(  # type: ignore[attr-defined]
+    real_client.repo.save_alert(
         ArpAlert("mac_changed", "192.168.1.10", "AA", "BB", "Acme", "Beta", "high", "msg")
     )
     r = real_client.get("/api/security/arp-alerts")
@@ -303,9 +303,7 @@ def test_arp_alerts_end_to_end_datetime_from_db(real_client: TestClient) -> None
 def test_arp_baseline_end_to_end_first_last_seen_from_db(real_client: TestClient) -> None:
     from domain.security import ArpEntry
 
-    real_client.repo.save_baseline_entry(  # type: ignore[attr-defined]
-        ArpEntry("192.168.1.10", "AA:AA:AA:11:11:11", "AcmeCorp")
-    )
+    real_client.repo.save_baseline_entry(ArpEntry("192.168.1.10", "AA:AA:AA:11:11:11", "AcmeCorp"))
     r = real_client.get("/api/security/arp-baseline")
     assert r.status_code == 200
     b = r.json()[0]
