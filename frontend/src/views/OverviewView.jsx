@@ -19,9 +19,15 @@
 
 import {
   Activity,
+  FileClock,
+  Globe,
+  KeyRound,
+  Network,
   Plus,
   Radar,
+  Repeat,
   ShieldAlert,
+  ShieldQuestion,
   Smartphone,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -32,9 +38,146 @@ import { fetchMonitorStatus } from "../api/monitoring.js";
 import { fetchScanDetail, fetchScanHistory } from "../api/scan.js";
 import { fetchSettings } from "../api/settings.js";
 import { fetchTraffic } from "../api/traffic.js";
+import { fetchTopFeatures } from "../api/usage.js";
 import { CardGrid } from "../components/AreaShell.jsx";
 import FunctionCard from "../components/FunctionCard.jsx";
 import "./OverviewView.css";
+
+// Zentrale Zuordnung feature_id -> anzeigbare Kachel. Deckt ALLE regulär (nicht
+// gesperrten) per onNavigate(tab, funktion) erreichbaren Funktionen ab; die feature_id
+// ist der stabile Backend-Schlüssel `${tab}:${funktion}` (identisch zu App.jsx). Titel/
+// Subtitle nutzen die BESTEHENDEN Kachel-i18n-Keys der jeweiligen Views (Wiederverwendung
+// — keine neuen Keys). icon/tab/funktion steuern Darstellung und den Klick-Sprung
+// (springe(tab, funktion)). Eine feature_id ohne Eintrag hier (z. B. der reine "observe"-
+// Sprung des Neuer-Scan-Knopfs) ist bewusst nicht als Kachel darstellbar und wird beim
+// Auflösen übersprungen.
+const FEATURE_KATALOG = {
+  "observe:scan": {
+    icon: Radar,
+    tab: "observe",
+    funktion: "scan",
+    titleKey: "beobachten.cards.scan.title",
+    subtitleKey: "beobachten.cards.scan.subtitle",
+    helpId: "help.scan.start",
+  },
+  "observe:watch": {
+    icon: ShieldQuestion,
+    tab: "observe",
+    funktion: "watch",
+    titleKey: "beobachten.cards.watch.title",
+    subtitleKey: "beobachten.cards.watch.subtitle",
+    helpId: "help.watch.uebersicht",
+  },
+  "observe:traffic": {
+    icon: Repeat,
+    tab: "observe",
+    funktion: "traffic",
+    titleKey: "beobachten.cards.traffic.title",
+    subtitleKey: "beobachten.cards.traffic.subtitle",
+    helpId: "help.traffic.uebersicht",
+  },
+  "observe:outbound": {
+    icon: Globe,
+    tab: "observe",
+    funktion: "outbound",
+    titleKey: "beobachten.cards.outbound.title",
+    subtitleKey: "beobachten.cards.outbound.subtitle",
+    helpId: "help.outbound.uebersicht",
+  },
+  "observe:dnswatch": {
+    icon: ShieldAlert,
+    tab: "observe",
+    funktion: "dnswatch",
+    titleKey: "beobachten.cards.dnswatch.title",
+    subtitleKey: "beobachten.cards.dnswatch.subtitle",
+    helpId: "help.dns_watch.uebersicht",
+  },
+  "observe:monitor": {
+    icon: Activity,
+    tab: "observe",
+    funktion: "monitor",
+    titleKey: "beobachten.cards.monitor.title",
+    subtitleKey: "beobachten.cards.monitor.subtitle",
+    helpId: "help.monitor.live",
+  },
+  "observe:logging": {
+    icon: FileClock,
+    tab: "observe",
+    funktion: "logging",
+    titleKey: "beobachten.cards.logging.title",
+    subtitleKey: "beobachten.cards.logging.subtitle",
+    helpId: "help.monitor.logging",
+  },
+  "observe:topology": {
+    icon: Network,
+    tab: "observe",
+    funktion: "topology",
+    titleKey: "beobachten.cards.topology.title",
+    subtitleKey: "beobachten.cards.topology.subtitle",
+    helpId: "help.topology.uebersicht",
+  },
+  "investigate:diagnose": {
+    icon: Activity,
+    tab: "investigate",
+    funktion: "diagnose",
+    titleKey: "untersuchen.cards.diagnose.title",
+    subtitleKey: "untersuchen.cards.diagnose.subtitle",
+    helpId: "help.diagnostics.route_geo",
+  },
+  "investigate:cve": {
+    icon: ShieldAlert,
+    tab: "investigate",
+    funktion: "cve",
+    titleKey: "untersuchen.cards.cve.title",
+    subtitleKey: "untersuchen.cards.cve.subtitle",
+    helpId: "help.cve.uebersicht",
+  },
+  "investigate:defaultcreds": {
+    icon: KeyRound,
+    tab: "investigate",
+    funktion: "defaultcreds",
+    titleKey: "untersuchen.cards.defaultcreds.title",
+    subtitleKey: "untersuchen.cards.defaultcreds.subtitle",
+    helpId: "help.security.default_creds",
+  },
+};
+
+// Startbelegung/Fallback des Schnellzugriffs: solange weniger als 5 Funktionen echte
+// Zähldaten haben, wird die Liste in DIESER Reihenfolge mit den bisherigen festen
+// Defaults aufgefüllt (die drei ursprünglich fest verdrahteten Kacheln). Eine Funktion,
+// die schon durch echte Zählung oben steht, wird NICHT noch einmal als Default ergänzt.
+const DEFAULT_FEATURE_IDS = ["observe:scan", "observe:monitor", "investigate:cve"];
+
+// Wie viele Kacheln der Schnellzugriff maximal zeigt.
+const SCHNELLZUGRIFF_LIMIT = 5;
+
+// Baut die anzuzeigende Kachel-Reihenfolge: zuerst die echten Top-Funktionen (nach count
+// absteigend, so wie das Backend sie liefert), dann mit den Defaults aufgefüllt — jeweils
+// nur bekannte (im Katalog auflösbare) feature_ids und ohne Duplikate, gedeckelt auf das
+// Limit. Eine einmalige alte Nutzung blockiert keinen Platz dauerhaft: das ergibt sich aus
+// der count-Sortierung des Backends.
+function baueSchnellzugriff(topFeatureIds) {
+  const reihenfolge = [];
+  const gesehen = new Set();
+  const hinzufuegen = (featureId) => {
+    if (
+      reihenfolge.length >= SCHNELLZUGRIFF_LIMIT ||
+      gesehen.has(featureId) ||
+      !FEATURE_KATALOG[featureId]
+    ) {
+      return;
+    }
+    gesehen.add(featureId);
+    reihenfolge.push({ featureId, ...FEATURE_KATALOG[featureId] });
+  };
+  for (const featureId of topFeatureIds) {
+    hinzufuegen(featureId);
+  }
+  for (const featureId of DEFAULT_FEATURE_IDS) {
+    hinzufuegen(featureId);
+  }
+  return reihenfolge;
+}
 
 // Settings-Key für die Bereichs-Schalter. Wert ist ein JSON-Objekt mit Booleans;
 // fehlt der Key -> alle Defaults true. In dieser Etappe NUR gelesen.
@@ -135,6 +278,11 @@ export default function OverviewView({ onNavigate, onOpenManual }) {
   // Kennzahlen-Fußzeile.
   const [kennzahlen, setKennzahlen] = useState(null); // { appsWithTraffic, activeConnections } | null
 
+  // Dynamischer Schnellzugriff: die aufgelösten Kacheln (Top-Funktionen nach Nutzung,
+  // mit Defaults aufgefüllt). Startwert ist die reine Default-Belegung, damit der
+  // Schnellzugriff schon vor dem Laden nie leer ist.
+  const [schnellzugriff, setSchnellzugriff] = useState(() => baueSchnellzugriff([]));
+
   // Dezenter Ladezustand (kein Vollbild-Spinner): nur, bis der erste Lauf durch ist.
   const [laedt, setLaedt] = useState(true);
 
@@ -153,12 +301,14 @@ export default function OverviewView({ onNavigate, onOpenManual }) {
         monitorErg,
         cveErg,
         trafficErg,
+        topErg,
       ] = await Promise.allSettled([
         fetchSettings(),
         fetchScanHistory(1),
         fetchMonitorStatus(),
         fetchCveFindings(),
         fetchTraffic(),
+        fetchTopFeatures(SCHNELLZUGRIFF_LIMIT),
       ]);
 
       if (abgebrochen) {
@@ -171,6 +321,15 @@ export default function OverviewView({ onNavigate, onOpenManual }) {
           ? leseSektionen(settingsErg.value)
           : { ...SECTION_DEFAULTS },
       );
+
+      // Schnellzugriff: die Top-Funktionen (nach Nutzung) in Kacheln auflösen und mit
+      // den Defaults auffüllen. Fehler -> reine Default-Belegung (nie leer). Das Backend
+      // liefert [{feature_id, count, last_used}] absteigend nach count.
+      const topFeatureIds =
+        topErg.status === "fulfilled"
+          ? (topErg.value ?? []).map((eintrag) => eintrag.feature_id)
+          : [];
+      setSchnellzugriff(baueSchnellzugriff(topFeatureIds));
 
       // Letzter Scan: neuester History-Eintrag liefert scannedAt + hostCount.
       // Sein id speist den Detail-Abruf für die Achse-B-Hosts.
@@ -303,35 +462,26 @@ export default function OverviewView({ onNavigate, onOpenManual }) {
         </section>
       )}
 
-      {/* Schnellzugriff: bestehende FunctionCard im CardGrid */}
-      {sektionen.schnellzugriff && (
+      {/* Schnellzugriff: DYNAMISCH — die meistgeöffneten Funktionen (nach Nutzung
+          absteigend), mit den bisherigen Defaults aufgefüllt. Klick nutzt weiterhin
+          springe(tab, funktion); der Sprung wird in App.jsx (handleNavigate) gezählt. */}
+      {sektionen.schnellzugriff && schnellzugriff.length > 0 && (
         <section className="overview-section">
           <h2 className="overview-section__heading">{t("overview.quickAccessHeading")}</h2>
           <CardGrid>
-            <FunctionCard
-              icon={Radar}
-              title={t("beobachten.cards.scan.title")}
-              subtitle={t("beobachten.cards.scan.subtitle")}
-              onOpen={() => springe("observe", "scan")}
-              helpId="help.scan.start"
-              onOpenManual={onOpenManual}
-            />
-            <FunctionCard
-              icon={Activity}
-              title={t("beobachten.cards.monitor.title")}
-              subtitle={t("beobachten.cards.monitor.subtitle")}
-              onOpen={() => springe("observe", "monitor")}
-              helpId="help.monitor.live"
-              onOpenManual={onOpenManual}
-            />
-            <FunctionCard
-              icon={ShieldAlert}
-              title={t("untersuchen.cards.cve.title")}
-              subtitle={t("untersuchen.cards.cve.subtitle")}
-              onOpen={() => springe("investigate", "cve")}
-              helpId="help.cve.uebersicht"
-              onOpenManual={onOpenManual}
-            />
+            {schnellzugriff.map(
+              ({ featureId, icon, tab, funktion, titleKey, subtitleKey, helpId }) => (
+                <FunctionCard
+                  key={featureId}
+                  icon={icon}
+                  title={t(titleKey)}
+                  subtitle={t(subtitleKey)}
+                  onOpen={() => springe(tab, funktion)}
+                  helpId={helpId}
+                  onOpenManual={onOpenManual}
+                />
+              ),
+            )}
           </CardGrid>
         </section>
       )}

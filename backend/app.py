@@ -350,6 +350,8 @@ from api.traffic import (
     provide_stop_poll,
 )
 from api.traffic import router as traffic_router
+from api.usage import provide_record_usage, provide_top_features
+from api.usage import router as usage_router
 from application.agent import (
     DeleteAgent,
     ListAgents,
@@ -597,6 +599,7 @@ from application.security import (
 from application.settings import GetSettings, UpdateSecret, UpdateSetting
 from application.sni import GetObservedSni, RunSniCapture, StartSniCapture
 from application.traffic import CheckTrafficPermission, ListAppTraffic, PollThroughput
+from application.usage import GetTopFeatures, RecordFeatureUsage
 from domain.analysis import (
     ObservedConnection,
     ObservedHost,
@@ -755,6 +758,7 @@ from infrastructure.sni.sni_sniffer import ScapySniSniffer
 from infrastructure.system_resolvers import detect_system_resolvers
 from infrastructure.traffic_linux import PsutilTrafficAdapter
 from infrastructure.traffic_permission import TrafficPermissionAdapter
+from infrastructure.usage_stats_db import SqliteUsageStatsRepository
 
 # ── ÜBERGANGS-KRÜCKE P2.1b: Bootstrap-Init aus dem Altcode (modules/) ──────────
 # app.py ist Bootstrap-Owner und ruft die Init-/Teardown-Funktionen der noch
@@ -6995,6 +6999,28 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.dependency_overrides[provide_list_all_rules] = lambda: _list_all_rules
     app.dependency_overrides[provide_delete_user_rule] = lambda: _delete_user_rule
     app.dependency_overrides[provide_acknowledge] = lambda: _acknowledge
+
+    # ── usage-Zaehlung verdrahten (Nutzungs-Ranking des Startseiten-Schnellzugriffs) ──
+    # Lazy-memoisiertes Zaehl-Repo (lru_cache, Muster analysis_rule_repository): teilt die
+    # cernis.db mit dem uebrigen Bestand (eigene Tabelle usage_stats). Persistent ueber
+    # Neustarts. Der db_path kommt aus derselben Aufloesung wie alle Repos (get_db_path).
+    @lru_cache(maxsize=1)
+    def usage_stats_repository() -> SqliteUsageStatsRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteUsageStatsRepository(get_db_path())
+
+    # Die zwei duennen Use-Cases als Runner herausreichen (Muster _delete_user_rule /
+    # _list_user_rules): der api-Ring bleibt repo-/use-case-frei; die Kopplung lebt hier.
+    def _record_feature_usage(feature_id: str) -> None:
+        RecordFeatureUsage(usage_stats_repository())(feature_id)
+
+    def _top_features(limit: int) -> list[Any]:
+        return list(GetTopFeatures(usage_stats_repository())(limit))
+
+    app.include_router(usage_router)
+    app.dependency_overrides[provide_record_usage] = lambda: _record_feature_usage
+    app.dependency_overrides[provide_top_features] = lambda: _top_features
 
     # ── maintenance-Domaene v2 verdrahten (Etappe 3, Regel 5: ports<->infra nur hier) ──
     # Die Wartungs-Funktion (Daten loeschen) komponiert die zwei Stufen aus den BEREITS

@@ -5,6 +5,7 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { recordFeatureUsage } from "./api/usage.js";
 import AppHeader from "./components/AppHeader.jsx";
 import TabNav, { REITER } from "./components/TabNav.jsx";
 // Die grossen Views werden erst bei Bedarf geladen (Code-Splitting), damit der
@@ -73,8 +74,22 @@ export default function App() {
   // Von der Startseite (OverviewView): Reiter wechseln und optional zusätzlich
   // die gewünschte Funktion im Ziel-Bereich vormerken. Ohne funktion bleibt es
   // beim reinen Reiter-Wechsel (wie bisher).
+  //
+  // ZENTRALER ZÄHLPUNKT (Nutzungs-Ranking): jede echte, NUTZER-ausgelöste
+  // Funktionsöffnung wird hier EINMAL gezählt (feature_id = `${tab}:${funktion}`
+  // wenn funktion gesetzt, sonst `${tab}`). handleNavigate wird ausschließlich per
+  // Klick (springe → onNavigate) aufgerufen — die initialFunction-Effekte der Views
+  // laufen NICHT hierdurch, es gibt also keine programmatische Doppelzählung. Die
+  // Zählung ist Nebensache: ein Fehler darf den Navigationsfluss NIE stören, darum
+  // fire-and-forget mit still geschlucktem Fehler (try/catch + .catch am Promise).
   const handleNavigate = (tab, funktion) => {
     setActiveTab(tab);
+    try {
+      const featureId = funktion ? `${tab}:${funktion}` : tab;
+      recordFeatureUsage(featureId).catch(() => {});
+    } catch {
+      // Zählung ist Nebensache — niemals die Navigation stören.
+    }
     if (!funktion) {
       return;
     }
