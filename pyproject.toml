@@ -8,6 +8,12 @@ name = "cernis-pro"
 version = "2.0.0"
 description = "CERNIS PRO — lokaler Netzwerk- und System-Scanner (Backend-Rewrite v2)"
 requires-python = ">=3.12"
+# Gesamtwerk ist GPL-2.0-only: scapy (GPL-2.0-only) im Sniffer zwingt v2,
+# GPLv3 ausgeschlossen. Siehe docs/LICENSE_AUDIT_2026-07.md.
+license = "GPL-2.0-only"
+classifiers = [
+    "License :: OSI Approved :: GNU General Public License v2 (GPLv2)",
+]
 
 # Laufzeit-Abhaengigkeiten. Pins gespiegelt aus backend/requirements.txt
 # (Altbestand laeuft weiter) plus die drei neuen Bausteine der v2-Architektur:
@@ -27,7 +33,6 @@ dependencies = [
     "pysnmp>=6.1.0",
     "dnspython>=2.4.0",
     "apscheduler>=3.10.0",
-    "websocket-client>=1.7.0",
     "websockets>=12.0",
     "scapy>=2.5.0",
     "keyring>=25.7.0",
