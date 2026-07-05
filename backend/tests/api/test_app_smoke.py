@@ -13,7 +13,7 @@ def test_health_ok(client: TestClient) -> None:
     body = response.json()
     assert body["status"] == "ok"
     assert body["service"] == "cernis-pro"
-    assert body["version"] == "2.0.0.dev0"
+    assert body["version"] == "2.0.0"
 
 
 def test_scanning_routes_registered() -> None:

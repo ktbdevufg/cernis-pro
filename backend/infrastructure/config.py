@@ -8,7 +8,7 @@ Aussenwelt (Environment). Wird im Composition Root (``app.py``) instanziiert.
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 APP_NAME = "cernis-pro"
-APP_VERSION = "2.0.0.dev0"
+APP_VERSION = "2.0.0"
 
 
 class AppConfig(BaseSettings):
@@ -30,6 +30,15 @@ class AppConfig(BaseSettings):
         "http://tauri.localhost",
         "http://localhost:1420",
         "http://localhost:5173",
+        # Die deb-GUI laedt das Frontend vom Backend-Port (tauri.conf.json
+        # url = http://127.0.0.1:8765), daher ist diese Adresse ein legitimer
+        # Same-Origin. Diese Allowlist speist REST-CORS UND die WS-Origin-Guards
+        # (/ws/scan, /ws/monitor, /ws/pcap); ohne die Ergaenzung blockt der
+        # Origin-Guard den WebSocket-Handshake der installierten App
+        # ("Scan-Verbindung unterbrochen"). Fremde Webseiten haben nie diesen
+        # Origin -> F-01-Schutz gegen Fremd-Origins bleibt wirksam.
+        "http://127.0.0.1:8765",
+        "http://localhost:8765",
     ]
 
     log_level: str = "INFO"
