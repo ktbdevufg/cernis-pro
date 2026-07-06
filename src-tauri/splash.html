@@ -112,10 +112,15 @@
       fehlertext.classList.remove('hidden');
     }
 
+    // Erfolgsfall: Der Wechsel zur App kommt jetzt von der Rust-Seite
+    // (webview.navigate() auf die Backend-URL). Der Splash navigiert NICHT mehr
+    // selbst -- WebKit blockiert window.location.href von file:// auf
+    // http://127.0.0.1:8765. Diese Funktion markiert nur noch die erkannte
+    // Bereitschaft (fertig-Flag), damit der Fehlerfall danach nicht mehr greift.
     function geheZurApp() {
       if (fertig) return;
       fertig = true;
-      window.location.href = BACKEND_URL;
+      // Keine Navigation hier -- Rust lenkt die ganze Webview weg.
     }
 
     // 1) Primaerer Signalweg: Tauri-Event aus main.rs (backend-ready / backend-error).
@@ -131,9 +136,9 @@
       }
     } catch (e) {}
 
-    // 2) Fallback: selbst /api/status pollen. Bei HTTP 200 zur App navigieren.
-    //    Dient als zusaetzliche Absicherung fuer den Erfolgsfall, falls das Event
-    //    nicht ankommt.
+    // 2) Reine Bereitschaftserkennung: selbst /api/status pollen. Bei HTTP 200
+    //    gilt das Backend als bereit (fertig-Flag). Die eigentliche Navigation
+    //    zur App macht Rust (webview.navigate); hier wird NICHT mehr navigiert.
     var attempts = 0;
     var check = setInterval(function () {
       if (fertig) { clearInterval(check); return; }

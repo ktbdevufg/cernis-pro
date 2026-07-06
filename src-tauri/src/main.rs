@@ -571,6 +571,42 @@ fn main() {
                 if status.is_ready() {
                     log("Backend bereit -> Event 'backend-ready'");
                     let _ = app_handle.emit("backend-ready", ());
+
+                    // Eigentliche Navigation macht jetzt Rust, nicht die HTML-Seite:
+                    // Der Splash laeuft als file://-Seite, WebKit blockiert dort
+                    // window.location.href auf http://127.0.0.1:8765. Deshalb lenken
+                    // wir die "main"-Webview direkt per navigate() auf die Backend-URL
+                    // (analog zur splash_url-Navigation im CloseRequested-Handler).
+                    // navigate() muss auf dem Main-/UI-Thread laufen -> run_on_main_thread.
+                    match BACKEND_URL.parse() {
+                        Ok(url) => {
+                            let nav_handle = app_handle.clone();
+                            let webview_handle = nav_handle.clone();
+                            let run = nav_handle.run_on_main_thread(move || {
+                                if let Some(webview) = webview_handle.get_webview_window("main") {
+                                    match webview.navigate(url) {
+                                        Ok(_) => log("Webview auf Backend-URL navigiert"),
+                                        Err(e) => log(&format!(
+                                            "WARN: Navigation zur Backend-URL fehlgeschlagen: {}",
+                                            e
+                                        )),
+                                    }
+                                } else {
+                                    log("WARN: 'main'-Webview fuer Navigation nicht gefunden");
+                                }
+                            });
+                            if let Err(e) = run {
+                                log(&format!(
+                                    "WARN: run_on_main_thread fuer Navigation fehlgeschlagen: {}",
+                                    e
+                                ));
+                            }
+                        }
+                        Err(e) => log(&format!(
+                            "WARN: BACKEND_URL nicht parsebar ({}): {}",
+                            BACKEND_URL, e
+                        )),
+                    }
                 } else {
                     log(&format!("Backend-Fehler {} -> Event 'backend-error'", status.code()));
                     let _ = app_handle.emit("backend-error", status.code());
