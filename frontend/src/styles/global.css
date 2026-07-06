@@ -50,6 +50,30 @@ button {
   cursor: pointer;
 }
 
+/*
+ * Zentrale Basis für native <select>-Dropdowns: NUR Farben.
+ * Ohne sie nehmen ungestylte selects die hellen Browser-Defaultfarben —
+ * im Dunkelmodus ergibt das ein weißes Feld auf dunklem UI (unlesbar).
+ * Bewusst KEINE Layout-Eigenschaften (border, border-radius, width, appearance,
+ * padding, font) global setzen: Das würde die intrinsische Breite/Darstellung
+ * bestehender selects (z. B. .observe__iface-select in der Scan-Toolbar) stören.
+ * Komponenten-eigene .*-select-Klassen ergänzen Rahmen/Breite/Padding selbst.
+ */
+select {
+  color: var(--color-text);
+  background: var(--color-card);
+}
+
+/*
+ * Die aufgeklappte Optionsliste rendert bei manchen Browsern (v. a. Linux/GTK)
+ * mit Systemfarben statt denen des Feldes — hier explizit die Theme-Farben setzen,
+ * damit auch das Popup im Dunkelmodus lesbar bleibt.
+ */
+select option {
+  color: var(--color-text);
+  background: var(--color-bg);
+}
+
 a {
   color: var(--color-link);
   text-decoration: none;
