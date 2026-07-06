@@ -299,6 +299,24 @@ export default function InventoryReportView() {
             {t("report.inventory.kopf.erstellt", { datum: erstelltDatum })}
           </p>
         </div>
+        {/* PDF-Aktion rechtsbuendig im Kopf: spart den Weg ans Berichtsende. */}
+        {bericht ? (
+          <div className="inventory-report__kopf-aktionen">
+            <button
+              type="button"
+              className="inventory-report__pdf"
+              onClick={handlePdf}
+              disabled={pdfLaedt}
+            >
+              {t("report.inventory.pdf")}
+            </button>
+            {pdfFehler ? (
+              <p className="inventory-report__pdf-fehler" role="alert">
+                {t("report.inventory.pdfFehler")}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
       </header>
 
       {fehler && (
@@ -388,24 +406,6 @@ export default function InventoryReportView() {
         </>
       ) : null}
 
-      {/* ── Aktionsleiste: Bericht als PDF herunterladen ───────────────────────── */}
-      {bericht ? (
-        <div className="inventory-report__aktionen">
-          <button
-            type="button"
-            className="inventory-report__pdf"
-            onClick={handlePdf}
-            disabled={pdfLaedt}
-          >
-            {t("report.inventory.pdf")}
-          </button>
-          {pdfFehler ? (
-            <p className="inventory-report__pdf-fehler" role="alert">
-              {t("report.inventory.pdfFehler")}
-            </p>
-          ) : null}
-        </div>
-      ) : null}
 
       {laedt && <div className="inventory-report__laedt" aria-hidden="true" />}
     </div>

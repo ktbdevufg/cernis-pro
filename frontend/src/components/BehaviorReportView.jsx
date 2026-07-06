@@ -38,7 +38,15 @@ function hhmm(minuten) {
 }
 
 export default function BehaviorReportView() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+
+  // Erstelldatum des Berichts: heute, lokal formatiert. Reine Anzeige im Titelkopf
+  // (Muster CveReportView.erstelltDatum).
+  const sprache = i18n.language === "en" ? "en" : "de";
+  const erstelltDatum = new Date().toLocaleDateString(
+    sprache === "en" ? "en-US" : "de-DE",
+    { year: "numeric", month: "long", day: "numeric" },
+  );
 
   // Aktiver Bezugsrahmen. Default "all" (Uebersicht ohne Vorauswahl).
   const [bezug, setBezug] = useState("all");
@@ -135,6 +143,37 @@ export default function BehaviorReportView() {
 
   return (
     <div className="behavior-report">
+      {/* ── 1. Bericht-Titelkopf: Logo + grosse Ueberschrift + Erstelldatum ──────
+          Eigener Dokument-Kopf (NICHT die App-Navi). Der Hilfe-Anker bleibt am Titel. */}
+      <header className="behavior-report__kopf">
+        <img className="behavior-report__logo" src="/cernis-logo.png" alt="CERNIS PRO" />
+        <div className="behavior-report__kopf-text">
+          <h3 className="behavior-report__titel" id="help.report.behavior">
+            {t("report.behavior.titel")}
+          </h3>
+          <p className="behavior-report__kopf-datum">
+            {t("report.behavior.kopf.erstellt", { datum: erstelltDatum })}
+          </p>
+        </div>
+        {/* PDF-Aktion rechtsbuendig im Kopf: spart den Weg ans Berichtsende. */}
+        {berichtSichtbar ? (
+          <div className="behavior-report__kopf-aktionen">
+            <button
+              type="button"
+              className="behavior-report__pdf"
+              onClick={handlePdf}
+            >
+              {t("report.behavior.pdf")}
+            </button>
+            {pdfFehler ? (
+              <p className="behavior-report__pdf-fehler" role="alert">
+                {t("report.behavior.pdfFehler")}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+      </header>
+
       {/* Bezugsrahmen-Umschalter (Optik der DnsWatchScreen-Reiter). Im Druck weg. */}
       <div className="behavior-report__bezug-reiter" role="tablist">
         <button
@@ -210,23 +249,6 @@ export default function BehaviorReportView() {
         <EinzelProfil profil={bericht.singleProfile} wochentage={wochentage} t={t} />
       ) : null}
 
-      {/* ── Aktionsleiste: Bericht als PDF herunterladen ──────────────────────── */}
-      {berichtSichtbar ? (
-        <div className="behavior-report__aktionen">
-          <button
-            type="button"
-            className="behavior-report__pdf"
-            onClick={handlePdf}
-          >
-            {t("report.behavior.pdf")}
-          </button>
-          {pdfFehler ? (
-            <p className="behavior-report__pdf-fehler" role="alert">
-              {t("report.behavior.pdfFehler")}
-            </p>
-          ) : null}
-        </div>
-      ) : null}
     </div>
   );
 }

@@ -248,6 +248,24 @@ export default function OutboundReportView() {
             {t("report.outbound.kopf.erstellt", { datum: erstelltDatum })}
           </p>
         </div>
+        {/* PDF-Aktion rechtsbuendig im Kopf: spart den Weg ans Berichtsende. */}
+        {bericht ? (
+          <div className="outbound-report__kopf-aktionen">
+            <button
+              type="button"
+              className="outbound-report__pdf"
+              onClick={handlePdf}
+              disabled={pdfLaedt}
+            >
+              {t("report.outbound.pdf")}
+            </button>
+            {pdfFehler ? (
+              <p className="outbound-report__pdf-fehler" role="alert">
+                {t("report.outbound.pdfFehler")}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
       </header>
 
       {/* Bezugsrahmen-Dropdown: nur wenn es waehlbare Aufzeichnungen gibt. value="" =
@@ -361,24 +379,6 @@ export default function OutboundReportView() {
         </>
       ) : null}
 
-      {/* ── Aktionsleiste: Bericht als PDF herunterladen ───────────────────────── */}
-      {bericht ? (
-        <div className="outbound-report__aktionen">
-          <button
-            type="button"
-            className="outbound-report__pdf"
-            onClick={handlePdf}
-            disabled={pdfLaedt}
-          >
-            {t("report.outbound.pdf")}
-          </button>
-          {pdfFehler ? (
-            <p className="outbound-report__pdf-fehler" role="alert">
-              {t("report.outbound.pdfFehler")}
-            </p>
-          ) : null}
-        </div>
-      ) : null}
 
       {laedt && <div className="outbound-report__laedt" aria-hidden="true" />}
     </div>

@@ -20,6 +20,53 @@
   text-align: right;
 }
 
+/* ── 1. Bericht-Titelkopf: Logo + grosse Ueberschrift + Erstelldatum ───────────────
+   Muster der anderen Berichtsansichten (cve-/dns-report__kopf): Logo + Titel links,
+   PDF-Aktion rechtsbuendig. */
+.behavior-report__kopf {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding-bottom: 14px;
+  border-bottom: 2px solid var(--color-accent);
+}
+
+.behavior-report__logo {
+  height: 44px;
+  width: auto;
+  display: block;
+}
+
+.behavior-report__kopf-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.behavior-report__titel {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--color-text);
+}
+
+.behavior-report__kopf-datum {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-tert);
+}
+
+/* PDF-Aktion rechtsbuendig im Kopf: margin-left:auto schiebt den Block ganz nach
+   rechts, neben Logo + Titel. */
+.behavior-report__kopf-aktionen {
+  margin-left: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
 /* ── Bezugsrahmen-Umschalter (Optik der DnsWatchScreen-Reiter) ─────────────────────
    Zwei nackte, tab-artige Knoepfe. Aktiver Reiter dezent akzentuiert. Im Druck weg. */
 .behavior-report__bezug-reiter {
@@ -202,12 +249,7 @@
   text-align: right;
 }
 
-/* ── Aktionsleiste (PDF) — Muster dns-report__aktionen ───────────────────────────── */
-.behavior-report__aktionen {
-  display: flex;
-  justify-content: flex-end;
-}
-
+/* ── PDF-Aktion (rechtsbuendig im Kopf) — Muster dns-report__pdf ──────────────────── */
 .behavior-report__pdf {
   padding: 8px 18px;
   font-size: 13px;
@@ -229,7 +271,7 @@
 }
 
 .behavior-report__pdf-fehler {
-  margin: 8px 0 0;
+  margin: 0;
   font-size: 12px;
   color: var(--sev-med-text);
 }
@@ -240,7 +282,7 @@
 @media print {
   .behavior-report__bezug-reiter,
   .behavior-report__toolbar,
-  .behavior-report__aktionen {
+  .behavior-report__kopf-aktionen {
     display: none;
   }
 }

@@ -502,10 +502,15 @@
   page-break-inside: avoid;
 }
 
-/* ── Aktionsleiste ─────────────────────────────────────────────────────────────── */
-.inventory-report__aktionen {
+/* ── PDF-Aktion (rechtsbuendig im Kopf) ────────────────────────────────────────── */
+/* Sitzt jetzt im header.inventory-report__kopf; margin-left:auto schiebt den Block
+   ganz nach rechts, neben Logo + Titel. */
+.inventory-report__kopf-aktionen {
+  margin-left: auto;
   display: flex;
-  justify-content: flex-end;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
 }
 
 .inventory-report__pdf {
@@ -529,7 +534,7 @@
 }
 
 .inventory-report__pdf-fehler {
-  margin: 8px 0 0;
+  margin: 0;
   font-size: 12px;
   color: var(--sev-med-text);
 }
@@ -559,7 +564,7 @@
   /* Bedien-Controls (kein Sinn auf Papier): Toggle, Filter, Sortierung, PDF-Knopf. */
   .inventory-report__toggle,
   .inventory-report__steuerung,
-  .inventory-report__aktionen,
+  .inventory-report__kopf-aktionen,
   .inventory-report__laedt {
     display: none;
   }

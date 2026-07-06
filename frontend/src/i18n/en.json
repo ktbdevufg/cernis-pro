@@ -1816,6 +1816,9 @@
     },
     "behavior": {
       "titel": "Behaviour profile report",
+      "kopf": {
+        "erstellt": "Created on {{datum}}"
+      },
       "einleitung": "This report shows the recurring activity patterns per task or device – daily rhythm, weekly pattern and the deviations flagged as atypical. It describes and contextualises – it passes no judgement.",
       "ladeFehler": "The behaviour profile report could not be loaded.",
       "bezug": { "single": "This task", "all": "All devices" },

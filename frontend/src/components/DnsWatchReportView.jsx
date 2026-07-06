@@ -359,6 +359,24 @@ function HostBericht({ t }) {
             {t("report.dnsWatch.kopf.erstellt", { datum: erstelltDatum })}
           </p>
         </div>
+        {/* PDF-Aktion rechtsbuendig im Kopf: spart den Weg ans Berichtsende. */}
+        {bericht ? (
+          <div className="dns-report__kopf-aktionen">
+            <button
+              type="button"
+              className="dns-report__pdf"
+              onClick={handlePdf}
+              disabled={pdfLaedt}
+            >
+              {t("report.dnsWatch.pdf")}
+            </button>
+            {pdfFehler ? (
+              <p className="dns-report__pdf-fehler" role="alert">
+                {t("report.dnsWatch.pdfFehler")}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
       </header>
 
       {fehler && (
@@ -454,25 +472,6 @@ function HostBericht({ t }) {
             {t("report.dnsWatch.fusszeile", { datum: erstelltDatum })}
           </footer>
         </>
-      ) : null}
-
-      {/* ── Aktionsleiste: Bericht als PDF herunterladen ───────────────────────── */}
-      {bericht ? (
-        <div className="dns-report__aktionen">
-          <button
-            type="button"
-            className="dns-report__pdf"
-            onClick={handlePdf}
-            disabled={pdfLaedt}
-          >
-            {t("report.dnsWatch.pdf")}
-          </button>
-          {pdfFehler ? (
-            <p className="dns-report__pdf-fehler" role="alert">
-              {t("report.dnsWatch.pdfFehler")}
-            </p>
-          ) : null}
-        </div>
       ) : null}
 
       {laedt && <div className="dns-report__laedt" aria-hidden="true" />}
@@ -606,6 +605,24 @@ function NetzBericht({ t }) {
             {t("report.dnsWatch.kopf.erstellt", { datum: erstelltDatum })}
           </p>
         </div>
+        {/* PDF-Aktion rechtsbuendig im Kopf: spart den Weg ans Berichtsende. */}
+        {bericht ? (
+          <div className="dns-report__kopf-aktionen">
+            <button
+              type="button"
+              className="dns-report__pdf"
+              onClick={handlePdf}
+              disabled={pdfLaedt}
+            >
+              {t("report.dnsBypass.pdf")}
+            </button>
+            {pdfFehler ? (
+              <p className="dns-report__pdf-fehler" role="alert">
+                {t("report.dnsBypass.pdfFehler")}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
       </header>
 
       {/* Bezugsrahmen-Dropdown: nur wenn es waehlbare Aufzeichnungen gibt. value="" =
@@ -703,25 +720,6 @@ function NetzBericht({ t }) {
             {t("report.dnsBypass.fusszeile", { datum: erstelltDatum })}
           </footer>
         </>
-      ) : null}
-
-      {/* ── Aktionsleiste: Bericht als PDF herunterladen ───────────────────────── */}
-      {bericht ? (
-        <div className="dns-report__aktionen">
-          <button
-            type="button"
-            className="dns-report__pdf"
-            onClick={handlePdf}
-            disabled={pdfLaedt}
-          >
-            {t("report.dnsBypass.pdf")}
-          </button>
-          {pdfFehler ? (
-            <p className="dns-report__pdf-fehler" role="alert">
-              {t("report.dnsBypass.pdfFehler")}
-            </p>
-          ) : null}
-        </div>
       ) : null}
 
       {laedt && <div className="dns-report__laedt" aria-hidden="true" />}

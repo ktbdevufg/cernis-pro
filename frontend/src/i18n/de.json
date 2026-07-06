@@ -1816,6 +1816,9 @@
     },
     "behavior": {
       "titel": "Verhaltensprofil-Bericht",
+      "kopf": {
+        "erstellt": "Erstellt am {{datum}}"
+      },
       "einleitung": "Dieser Bericht zeigt die wiederkehrenden Aktivitätsmuster je Aufgabe bzw. Gerät – Tagesverlauf, Wochenmuster und die als untypisch markierten Abweichungen. Er beschreibt und ordnet ein – er fällt kein Urteil.",
       "ladeFehler": "Der Verhaltensprofil-Bericht konnte nicht geladen werden.",
       "bezug": { "single": "Diese Aufgabe", "all": "Alle Geräte" },

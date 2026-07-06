@@ -28,6 +28,13 @@
   border-bottom: 2px solid var(--color-accent);
 }
 
+/* Bildschirm: PDF-Knopf rechts im Kopf. Im Druck (Papier/PDF) unnoetig -> weg. */
+@media print {
+  .security-report__kopf-aktionen {
+    display: none;
+  }
+}
+
 .security-report__logo {
   height: 44px;
   width: auto;
@@ -551,10 +558,21 @@
   border-radius: var(--radius-md);
 }
 
-/* ── 6. Aktionsleiste ──────────────────────────────────────────────────────────── */
-.security-report__aktionen {
+/* ── 6. PDF-Aktion (rechtsbuendig im Kopf) ─────────────────────────────────────── */
+/* Sitzt jetzt im header.security-report__kopf; margin-left:auto schiebt den Block
+   ganz nach rechts, neben Logo + Titel. Button oben buendig zur Ueberschrift. */
+.security-report__kopf-aktionen {
+  margin-left: auto;
   display: flex;
-  justify-content: flex-end;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.security-report__pdf-fehler {
+  margin: 0;
+  font-size: 12px;
+  color: var(--sev-med-text);
 }
 
 .security-report__pdf {

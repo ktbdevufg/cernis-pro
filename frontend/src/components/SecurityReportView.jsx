@@ -264,6 +264,24 @@ export default function SecurityReportView() {
             {t("report.security.kopf.erstellt", { datum: erstelltDatum })}
           </p>
         </div>
+        {/* PDF-Aktion rechtsbuendig im Kopf: spart den Weg ans Berichtsende. */}
+        {bericht ? (
+          <div className="security-report__kopf-aktionen">
+            <button
+              type="button"
+              className="security-report__pdf"
+              onClick={handlePdf}
+              disabled={pdfLaedt}
+            >
+              {t("report.security.pdf")}
+            </button>
+            {pdfFehler ? (
+              <p className="security-report__pdf-fehler" role="alert">
+                {t("report.security.pdfFehler")}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
       </header>
 
       {fehler && (
@@ -359,25 +377,6 @@ export default function SecurityReportView() {
             ? t("report.security.rogue.ungeprueft")
             : t("report.security.rogue.geprueft", { datum: rogueZeitpunkt })}
         </p>
-      ) : null}
-
-      {/* ── Aktionsleiste: Bericht als PDF herunterladen ───────────────────────── */}
-      {bericht ? (
-        <div className="security-report__aktionen">
-          <button
-            type="button"
-            className="security-report__pdf"
-            onClick={handlePdf}
-            disabled={pdfLaedt}
-          >
-            {t("report.security.pdf")}
-          </button>
-          {pdfFehler ? (
-            <p className="security-report__pdf-fehler" role="alert">
-              {t("report.security.pdfFehler")}
-            </p>
-          ) : null}
-        </div>
       ) : null}
 
       {laedt && <div className="security-report__laedt" aria-hidden="true" />}

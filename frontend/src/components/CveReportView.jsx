@@ -383,6 +383,24 @@ export default function CveReportView() {
             {t("report.cve.kopf.erstellt", { datum: erstelltDatum })}
           </p>
         </div>
+        {/* PDF-Aktion rechtsbuendig im Kopf: spart den Weg ans Berichtsende. */}
+        {bericht ? (
+          <div className="cve-report__kopf-aktionen">
+            <button
+              type="button"
+              className="cve-report__pdf"
+              onClick={handlePdf}
+              disabled={pdfLaedt}
+            >
+              {t("report.cve.pdf")}
+            </button>
+            {pdfFehler ? (
+              <p className="cve-report__pdf-fehler" role="alert">
+                {t("report.cve.pdfFehler")}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
       </header>
 
       {fehler && (
@@ -473,24 +491,6 @@ export default function CveReportView() {
         </>
       ) : null}
 
-      {/* ── Aktionsleiste: Bericht als PDF herunterladen ───────────────────────── */}
-      {bericht ? (
-        <div className="cve-report__aktionen">
-          <button
-            type="button"
-            className="cve-report__pdf"
-            onClick={handlePdf}
-            disabled={pdfLaedt}
-          >
-            {t("report.cve.pdf")}
-          </button>
-          {pdfFehler ? (
-            <p className="cve-report__pdf-fehler" role="alert">
-              {t("report.cve.pdfFehler")}
-            </p>
-          ) : null}
-        </div>
-      ) : null}
 
       {laedt && <div className="cve-report__laedt" aria-hidden="true" />}
     </div>
