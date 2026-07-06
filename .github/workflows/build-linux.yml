@@ -9,8 +9,12 @@ name: Build Linux
 on:
   # Manueller Knopf (Actions-Tab) ...
   workflow_dispatch:
-  # ... und automatisch bei Release-Tags v*.
   push:
+    # ... push auf den Entwicklungs-Branch loest den Build waehrend der
+    # Entwicklung direkt aus (workflow_dispatch greift nur auf main) ...
+    branches:
+      - "rewrite/v2"
+    # ... und automatisch bei Release-Tags v*.
     tags:
       - "v*"
 
