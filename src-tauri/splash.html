@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="de">
 <head>
   <meta charset="UTF-8">
   <title>CERNIS PRO</title>
@@ -15,6 +15,8 @@
       font-family: -apple-system, 'Segoe UI', sans-serif;
       color: #00e5ff;
       overflow: hidden;
+      text-align: center;
+      padding: 24px;
     }
     .logo {
       font-size: 48px;
@@ -43,35 +45,113 @@
       color: #4a5568;
       letter-spacing: 1px;
     }
+    /* Fehlerzustand: grosser Code + menschenlesbarer Text. */
+    .fehlercode {
+      font-size: 40px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      color: #ff6b6b;
+      margin-bottom: 16px;
+    }
+    .fehlertext {
+      font-size: 14px;
+      line-height: 1.6;
+      color: #c9d1d9;
+      max-width: 460px;
+    }
+    .hidden { display: none !important; }
     @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
   <div class="logo">CERNIS PRO</div>
   <div class="subtitle">LAN Scanner &amp; Monitor</div>
-  <div class="spinner"></div>
+  <div class="spinner" id="spinner"></div>
   <div class="status" id="status">Starte Backend...</div>
+  <div class="fehlercode hidden" id="fehlercode"></div>
+  <div class="fehlertext hidden" id="fehlertext"></div>
   <script>
-    // Versuche alle 500ms ob Backend bereit ist
-    let attempts = 0;
-    const check = setInterval(async () => {
-      attempts++;
-      try {
-        const r = await fetch('http://127.0.0.1:8765/api/status');
-        if (r.ok) {
-          clearInterval(check);
-          window.location.href = 'http://127.0.0.1:8765';
-        }
-      } catch(e) {}
-      if (attempts > 60) {
-        clearInterval(check);
-        document.getElementById('status').style.color = '#ff6b6b';
-        document.getElementById('status').textContent =
-          'Backend konnte nicht gestartet werden. Bitte als Administrator ausführen.';
+    var BACKEND_URL = 'http://127.0.0.1:8765';
+
+    // Menschenlesbare Texte je Fehlercode (E-1xx). Unbekannte/fehlende Codes
+    // fallen auf einen neutralen Text zurueck.
+    var FEHLERTEXTE = {
+      'E-101': 'Backend nicht erreichbar - Port 8765 ist belegt (E-101). Laeuft CERNIS PRO bereits?',
+      'E-102': 'Das Backend ist beim Start abgestuerzt (E-102). Details im Log: /tmp/cernis-backend.log',
+      'E-103': 'Zeitueberschreitung beim Backend-Start (E-103). Bitte erneut starten.',
+      'E-104': 'Programmkomponente nicht gefunden (E-104). Bitte CERNIS PRO neu installieren.'
+    };
+
+    var fertig = false;
+
+    function zeigeFehler(code) {
+      if (fertig) return;
+      fertig = true;
+      var spinner = document.getElementById('spinner');
+      var status = document.getElementById('status');
+      var fehlercode = document.getElementById('fehlercode');
+      var fehlertext = document.getElementById('fehlertext');
+
+      spinner.classList.add('hidden');
+      status.classList.add('hidden');
+
+      var text = FEHLERTEXTE[code];
+      if (text) {
+        fehlercode.textContent = code;
+        fehlertext.textContent = text;
+      } else if (code) {
+        // Unbekannter Code: generischer Text, Code trotzdem anzeigen.
+        fehlercode.textContent = code;
+        fehlertext.textContent = 'Das Backend konnte nicht gestartet werden (' + code + '). Bitte erneut starten.';
+      } else {
+        // Kein Code vorhanden: neutraler Fallback.
+        fehlercode.textContent = 'Fehler';
+        fehlertext.textContent = 'Das Backend konnte nicht gestartet werden. Bitte erneut starten.';
       }
-      const dots = '.'.repeat((attempts % 3) + 1);
-      if (attempts <= 60)
-        document.getElementById('status').textContent = 'Starte Backend' + dots;
+      fehlercode.classList.remove('hidden');
+      fehlertext.classList.remove('hidden');
+    }
+
+    function geheZurApp() {
+      if (fertig) return;
+      fertig = true;
+      window.location.href = BACKEND_URL;
+    }
+
+    // 1) Primaerer Signalweg: Tauri-Event aus main.rs (backend-ready / backend-error).
+    //    withGlobalTauri stellt window.__TAURI__ bereit.
+    try {
+      if (window.__TAURI__ && window.__TAURI__.event) {
+        window.__TAURI__.event.listen('backend-ready', function () {
+          geheZurApp();
+        });
+        window.__TAURI__.event.listen('backend-error', function (evt) {
+          zeigeFehler(evt && evt.payload ? evt.payload : '');
+        });
+      }
+    } catch (e) {}
+
+    // 2) Fallback: selbst /api/status pollen. Bei HTTP 200 zur App navigieren.
+    //    Dient als zusaetzliche Absicherung fuer den Erfolgsfall, falls das Event
+    //    nicht ankommt.
+    var attempts = 0;
+    var check = setInterval(function () {
+      if (fertig) { clearInterval(check); return; }
+      attempts++;
+      fetch(BACKEND_URL + '/api/status')
+        .then(function (r) {
+          if (r.ok) {
+            clearInterval(check);
+            geheZurApp();
+          }
+        })
+        .catch(function () {});
+
+      var status = document.getElementById('status');
+      if (!fertig && status) {
+        var dots = new Array((attempts % 3) + 2).join('.');
+        status.textContent = 'Starte Backend' + dots;
+      }
     }, 500);
   </script>
 </body>

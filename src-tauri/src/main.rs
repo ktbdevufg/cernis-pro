@@ -7,11 +7,69 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
-use tauri::{Manager, WindowEvent};
+use tauri::path::BaseDirectory;
+use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
 const BACKEND_PORT: u16 = 8765;
 const BACKEND_URL: &str = "http://127.0.0.1:8765";
 const STARTUP_TIMEOUT_SECS: u64 = 45;
+
+/// Ergebnis des Backend-Starts: entweder bereit oder ein kategorisierter
+/// Fehlercode (E-1xx), den der Ladebildschirm menschenlesbar anzeigt.
+enum BackendStatus {
+    Ready,
+    /// Port 8765 belegt, aber kein sauberer 200 (Fremdprozess).
+    Error101,
+    /// Backend-Prozess vorzeitig beendet.
+    Error102,
+    /// Timeout ohne Prozess-Exit.
+    Error103,
+    /// Backend-Binary nicht gefunden.
+    Error104,
+}
+
+impl BackendStatus {
+    /// Fehlercode-String fuers Splash-Fenster (leer, wenn bereit).
+    fn code(&self) -> &'static str {
+        match self {
+            BackendStatus::Ready => "",
+            BackendStatus::Error101 => "E-101",
+            BackendStatus::Error102 => "E-102",
+            BackendStatus::Error103 => "E-103",
+            BackendStatus::Error104 => "E-104",
+        }
+    }
+
+    fn is_ready(&self) -> bool {
+        matches!(self, BackendStatus::Ready)
+    }
+}
+
+/// Pfad der Startup-Status-Datei im temp_dir. Der Splash pollt diese Datei
+/// (plugin-frei, ohne withGlobalTauri), main.rs schreibt sie nach dem Warten.
+fn startup_status_path() -> &'static str {
+    static STATUS_PATH: OnceLock<String> = OnceLock::new();
+    STATUS_PATH.get_or_init(|| {
+        std::env::temp_dir()
+            .join("cernis-startup.json")
+            .to_string_lossy()
+            .into_owned()
+    })
+}
+
+/// Schreibt {"ready":bool,"code":string} in die Startup-Status-Datei.
+/// Der Ladebildschirm pollt sie als primaeren Signalweg.
+fn write_startup_status(status: &BackendStatus) {
+    let json = format!(
+        "{{\"ready\":{},\"code\":\"{}\"}}",
+        status.is_ready(),
+        status.code()
+    );
+    match std::fs::write(startup_status_path(), &json) {
+        Ok(_) => log(&format!("Startup-Status geschrieben: {}", json)),
+        Err(e) => log(&format!("WARN: Startup-Status nicht schreibbar: {}", e)),
+    }
+}
 
 fn log_path() -> &'static str {
     static LOG_PATH: OnceLock<String> = OnceLock::new();
@@ -128,14 +186,15 @@ fn kill_stale_backend() {
     }
 }
 
-fn start_backend() -> Option<Child> {
+fn start_backend() -> Result<Child, BackendStatus> {
     kill_stale_backend();
 
     let backend = match find_backend_exe() {
         Some(p) => p,
         None => {
             log("ERROR: Cannot start backend — binary not found");
-            return None;
+            // Backend-Binary nicht gefunden -> E-104.
+            return Err(BackendStatus::Error104);
         }
     };
 
@@ -186,16 +245,49 @@ fn start_backend() -> Option<Child> {
     match cmd.spawn() {
         Ok(child) => {
             log(&format!("Backend process started (PID {})", child.id()));
-            Some(child)
+            Ok(child)
         }
         Err(e) => {
             log(&format!("ERROR: Failed to spawn backend: {}", e));
-            None
+            // Binary vorhanden, laesst sich aber nicht starten -> wie vorzeitiger
+            // Prozess-Abbruch behandeln (E-102).
+            Err(BackendStatus::Error102)
         }
     }
 }
 
-fn wait_for_backend(child: &mut Option<Child>) -> bool {
+/// Prueft, ob auf dem Backend-Port ueberhaupt etwas lauscht (TCP-Connect).
+/// Dient beim Timeout der Unterscheidung E-101 (Fremdprozess belegt Port)
+/// vs. E-103 (niemand da / unser Prozess haengt).
+fn port_belegt() -> bool {
+    matches!(
+        std::net::TcpStream::connect_timeout(
+            &format!("127.0.0.1:{}", BACKEND_PORT).parse().unwrap(),
+            Duration::from_millis(500),
+        ),
+        Ok(_)
+    )
+}
+
+/// Kurz-lockender Exit-Check auf dem geteilten Child. Gibt Some(true) zurueck,
+/// wenn der Prozess beendet ist, Some(false) wenn er laeuft, None wenn kein
+/// Child (mehr) vorhanden ist. Der Lock wird nur fuer die Dauer des try_wait
+/// gehalten — nie ueber Netzwerk-Wartezeiten —, damit ein paralleles
+/// kill_backend_tree beim Fenster-Schliessen nicht blockiert (kein Deadlock).
+fn child_exited(process: &Arc<Mutex<Option<Child>>>) -> Option<bool> {
+    let mut guard = process.lock().ok()?;
+    let child = guard.as_mut()?;
+    match child.try_wait() {
+        Ok(Some(_)) => Some(true),
+        Ok(None) => Some(false),
+        Err(e) => {
+            log(&format!("WARN: Could not check process status: {}", e));
+            Some(false)
+        }
+    }
+}
+
+fn wait_for_backend(process: &Arc<Mutex<Option<Child>>>) -> BackendStatus {
     let start = Instant::now();
     let url = format!("{}/api/status", BACKEND_URL);
     let mut attempts = 0;
@@ -208,22 +300,12 @@ fn wait_for_backend(child: &mut Option<Child>) -> bool {
     while start.elapsed().as_secs() < STARTUP_TIMEOUT_SECS {
         attempts += 1;
 
-        // Check if process is still alive
-        if let Some(ref mut c) = child {
-            match c.try_wait() {
-                Ok(Some(status)) => {
-                    log(&format!(
-                        "ERROR: Backend process exited prematurely with status: {}",
-                        status
-                    ));
-                    log(&format!("Check {} for details", log_path()));
-                    return false;
-                }
-                Ok(None) => {} // still running, good
-                Err(e) => {
-                    log(&format!("WARN: Could not check process status: {}", e));
-                }
-            }
+        // Check if process is still alive (kurzer Lock)
+        if child_exited(process) == Some(true) {
+            log("ERROR: Backend process exited prematurely");
+            log(&format!("Check {} for details", log_path()));
+            // Backend-Prozess vorzeitig beendet -> E-102.
+            return BackendStatus::Error102;
         }
 
         // Try to reach the backend
@@ -231,24 +313,18 @@ fn wait_for_backend(child: &mut Option<Child>) -> bool {
             Ok(r) if r.status() == 200 => {
                 // Verify our process survived (not a stale leftover answering)
                 thread::sleep(Duration::from_millis(500));
-                if let Some(ref mut c) = child {
-                    match c.try_wait() {
-                        Ok(Some(status)) => {
-                            log(&format!(
-                                "ERROR: Backend died right after responding (port conflict?): {}",
-                                status
-                            ));
-                            return false;
-                        }
-                        _ => {}
-                    }
+                if child_exited(process) == Some(true) {
+                    log("ERROR: Backend died right after responding (port conflict?)");
+                    // Sauberer 200 kam von einem Fremdprozess, unser Backend
+                    // ist danach gestorben -> Port belegt -> E-101.
+                    return BackendStatus::Error101;
                 }
                 let elapsed = start.elapsed().as_millis();
                 log(&format!(
                     "Backend ready after {}ms ({} attempts)",
                     elapsed, attempts
                 ));
-                return true;
+                return BackendStatus::Ready;
             }
             Ok(r) => {
                 log(&format!(
@@ -275,7 +351,19 @@ fn wait_for_backend(child: &mut Option<Child>) -> bool {
         STARTUP_TIMEOUT_SECS, attempts
     ));
     log(&format!("Check {} for backend errors", log_path()));
-    false
+
+    // Timeout-Klassifikation: Lebt unser eigener Prozess noch, haengt also unser
+    // Backend beim Start -> E-103. Ist unser Prozess weg/nie gestartet, aber der
+    // Port ist dennoch belegt, haelt ihn ein Fremdprozess -> E-101.
+    let eigener_prozess_lebt = child_exited(process) == Some(false);
+
+    if !eigener_prozess_lebt && port_belegt() {
+        log("Timeout: Port belegt, aber unser Prozess laeuft nicht -> E-101 (Fremdprozess)");
+        BackendStatus::Error101
+    } else {
+        log("Timeout: kein sauberer 200, Prozess ohne Exit -> E-103 (Zeitueberschreitung)");
+        BackendStatus::Error103
+    }
 }
 
 fn detect_vm() -> Option<&'static str> {
@@ -387,6 +475,14 @@ fn configure_rendering() {
     }
 }
 
+/// Lokale file://-URL des gebuendelten Splash-HTML. Wird im setup gesetzt und
+/// beim Fenster-Schliessen wiederverwendet, um die Webview von der (dann toten)
+/// Backend-URL wegzulenken -> kein rohes "Connection refused" beim Beenden.
+fn splash_url() -> &'static OnceLock<String> {
+    static SPLASH_URL: OnceLock<String> = OnceLock::new();
+    &SPLASH_URL
+}
+
 fn main() {
     // Clear previous log
     let _ = std::fs::write(log_path(), "");
@@ -394,23 +490,94 @@ fn main() {
 
     configure_rendering();
 
-    let mut child = start_backend();
-    let backend_ok = wait_for_backend(&mut child);
+    // Startup-Status zuruecksetzen: bis der Hintergrund-Thread fertig ist, gilt
+    // "noch nicht bereit". Der Splash pollt diese Datei.
+    let _ = std::fs::remove_file(startup_status_path());
 
-    if !backend_ok {
-        log("WARNING: Opening window despite backend failure — user will see error page");
-    }
-
-    let backend_process = Arc::new(Mutex::new(child));
+    // Der Backend-Prozess wird erst im Hintergrund-Thread gestartet und dort in
+    // dieses Arc gelegt, damit kill_backend_tree ihn beim Beenden findet.
+    let backend_process: Arc<Mutex<Option<Child>>> = Arc::new(Mutex::new(None));
+    let backend_worker = Arc::clone(&backend_process);
     let backend_cleanup = Arc::clone(&backend_process);
-    let backend_exit = Arc::clone(&backend_cleanup);
+    let backend_exit = Arc::clone(&backend_process);
 
     tauri::Builder::default()
-        .manage(BackendProcess(backend_process))
-        .on_window_event(move |_window, event| {
-            if let WindowEvent::Destroyed = event {
+        .manage(BackendProcess(Arc::clone(&backend_process)))
+        .on_window_event(move |window, event| match event {
+            // Beim Schliessen zuerst die Webview auf die lokale Splash lenken,
+            // damit WebKit nicht mehr auf die gleich sterbende Backend-URL
+            // zugreift (sonst rohes Connection-refused-Bild), DANN Backend killen.
+            WindowEvent::CloseRequested { .. } => {
+                // navigate() gibt es nur auf der WebviewWindow, nicht auf Window —
+                // ueber den AppHandle beziehen.
+                if let Some(url) = splash_url().get() {
+                    if let (Some(webview), Ok(parsed)) = (
+                        window.app_handle().get_webview_window("main"),
+                        url.parse(),
+                    ) {
+                        let _ = webview.navigate(parsed);
+                    }
+                }
                 kill_backend_tree(&backend_cleanup);
             }
+            WindowEvent::Destroyed => {
+                kill_backend_tree(&backend_cleanup);
+            }
+            _ => {}
+        })
+        .setup(move |app| {
+            // Splash-HTML als gebuendelte Resource aufloesen -> lokale file://-URL.
+            // So erscheint IMMER zuerst der Ladebildschirm, nie die rohe Backend-URL.
+            let splash_path = app
+                .path()
+                .resolve("splash.html", BaseDirectory::Resource)?;
+            let splash_file_url = format!("file://{}", splash_path.to_string_lossy());
+            let _ = splash_url().set(splash_file_url.clone());
+            log(&format!("Splash-Resource: {}", splash_file_url));
+
+            let splash = splash_file_url
+                .parse()
+                .map(WebviewUrl::External)
+                .unwrap_or_else(|_| WebviewUrl::App("splash.html".into()));
+
+            WebviewWindowBuilder::new(app, "main", splash)
+                .title("CERNIS PRO")
+                .inner_size(1600.0, 900.0)
+                .min_inner_size(1200.0, 700.0)
+                .resizable(true)
+                .center()
+                .build()?;
+
+            // Backend erst NACH dem Fenster starten und im Hintergrund abwarten,
+            // damit der Splash sofort sichtbar ist. Ergebnis -> Status-Datei
+            // (primaerer Signalweg, plugin-frei) + Tauri-Event an das Fenster.
+            let app_handle = app.handle().clone();
+            thread::spawn(move || {
+                let status = match start_backend() {
+                    Ok(child) => {
+                        // Child ins geteilte Arc legen, damit er beim Beenden
+                        // sauber gekillt werden kann. wait_for_backend lockt das
+                        // Arc nur kurz pro Exit-Check (kein Deadlock beim Kill).
+                        if let Ok(mut guard) = backend_worker.lock() {
+                            *guard = Some(child);
+                        }
+                        wait_for_backend(&backend_worker)
+                    }
+                    Err(status) => status,
+                };
+
+                write_startup_status(&status);
+
+                if status.is_ready() {
+                    log("Backend bereit -> Event 'backend-ready'");
+                    let _ = app_handle.emit("backend-ready", ());
+                } else {
+                    log(&format!("Backend-Fehler {} -> Event 'backend-error'", status.code()));
+                    let _ = app_handle.emit("backend-error", status.code());
+                }
+            });
+
+            Ok(())
         })
         .run(tauri::generate_context!())
         .expect("error running app");

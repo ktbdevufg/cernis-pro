@@ -6,19 +6,8 @@
     "frontendDist": "../frontend/dist"
   },
   "app": {
-    "windows": [
-      {
-        "title": "CERNIS PRO",
-        "width": 1600,
-        "height": 900,
-        "minWidth": 1200,
-        "minHeight": 700,
-        "resizable": true,
-        "fullscreen": false,
-        "center": true,
-        "url": "http://127.0.0.1:8765"
-      }
-    ],
+    "withGlobalTauri": true,
+    "windows": [],
     "security": {
       "csp": null
     }
@@ -78,7 +67,8 @@
       "cernis-sniffd"
     ],
     "resources": [
-      "../scripts/install-bpf-permissions.sh"
+      "../scripts/install-bpf-permissions.sh",
+      "splash.html"
     ]
   }
 }
