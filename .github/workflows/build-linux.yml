@@ -64,6 +64,21 @@ jobs:
       - name: Python-Abhaengigkeiten installieren (inkl. Dev-Gruppe)
         run: uv sync --locked --group dev
 
+      # Build-Version zur BUILD-ZEIT als Python-Datei erzeugen. config.py liest
+      # os.environ NICHT -- es importiert diese Datei. PyInstaller friert sie
+      # mit ein, damit die installierte App die volle Version kennt (kein
+      # Laufzeit-Env noetig). Plattform-Suffix dieses Workflows: x64deb.
+      - name: Build-Version erzeugen (_build_version.py)
+        run: |
+          SHORT_SHA=$(git rev-parse --short=7 HEAD)
+          BUILD_VERSION="2.0.0+x64deb.${SHORT_SHA}"
+          echo "Build-Version: ${BUILD_VERSION}"
+          cat > backend/infrastructure/_build_version.py <<EOF
+          """Im CI erzeugte Build-Version. Nicht committet (siehe .gitignore)."""
+
+          BUILD_VERSION = "${BUILD_VERSION}"
+          EOF
+
       - name: Linux-Build (Frontend + Binaries + Tauri-Bundle)
         run: bash build-linux.sh
 

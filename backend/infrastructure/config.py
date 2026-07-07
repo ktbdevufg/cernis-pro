@@ -8,7 +8,44 @@ Aussenwelt (Environment). Wird im Composition Root (``app.py``) instanziiert.
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 APP_NAME = "cernis-pro"
-APP_VERSION = "2.0.0"
+
+
+def _lese_build_version() -> str:
+    """Volle interne Version inkl. Build-Metadaten (SemVer-Build-Metadata).
+
+    Im CI wird VOR dem Build ``infrastructure/_build_version.py`` mit einer
+    Konstante ``BUILD_VERSION`` erzeugt (z. B. ``"2.0.0+x64deb.a1b2c3d"``) und
+    von PyInstaller mit eingefroren -- damit ist die Build-Version in der
+    installierten App verfuegbar, ohne dass zur Laufzeit eine Env gesetzt sein
+    muss. Fehlt die Datei (Dev-Betrieb, nie committet), gilt der Fallback
+    ``"2.0.0"``. Die Datei liegt in ``infrastructure/`` -- config.py ist
+    ebenfalls ``infrastructure/`` -> hexagonal erlaubt.
+    """
+    try:
+        # Die Datei existiert nur im CI-Build (nie committet) -> mypy kennt sie
+        # nicht; der ImportError-Zweig ist der Dev-Normalfall.
+        from infrastructure._build_version import (  # type: ignore[import-not-found]
+            BUILD_VERSION,
+        )
+    except ImportError:
+        return "2.0.0"
+    return str(BUILD_VERSION)
+
+
+# Volle interne Version. Enthaelt im CI-Build die SemVer-Build-Metadaten
+# ("2.0.0+x64deb.<sha>"), im Dev schlicht "2.0.0".
+APP_VERSION = _lese_build_version()
+
+
+def display_version(version: str = APP_VERSION) -> str:
+    """Anzeige-Form aus der internen Version: ``"2.0.0+x64deb.a1b2c3d"`` ->
+    ``"2.0.0 (x64deb.a1b2c3d)"``. Ohne Build-Metadaten (kein ``"+"``) bleibt sie
+    unveraendert (``"2.0.0"`` -> ``"2.0.0"``). Nach aussen/GUI = Anzeige-Form.
+    """
+    kern, trenner, metadaten = version.partition("+")
+    if not trenner:
+        return version
+    return f"{kern} ({metadaten})"
 
 
 class AppConfig(BaseSettings):

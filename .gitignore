@@ -52,6 +52,9 @@ src-tauri/cernis-backend-*
 # Claude Code
 .claude/
 
+# CI-generierte Build-Version (nur im Workflow erzeugt, nie committet)
+backend/infrastructure/_build_version.py
+
 # Sensitive file types
 *.p12
 *.pfx

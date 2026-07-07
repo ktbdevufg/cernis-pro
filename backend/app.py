@@ -669,7 +669,7 @@ from infrastructure.capture import (
     WebSocketCaptureBroadcaster,
 )
 from infrastructure.clock import SystemClock
-from infrastructure.config import APP_NAME, APP_VERSION, AppConfig
+from infrastructure.config import APP_NAME, APP_VERSION, AppConfig, display_version
 from infrastructure.cve_acknowledgements_db import SqliteCveAcknowledgementRepository
 from infrastructure.cve_checkstate_db import SqliteCveCheckStateRepository
 from infrastructure.cve_findings_db import SqliteCveFindingRepository
@@ -3759,7 +3759,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         import shutil
 
         return {
-            "version": APP_VERSION,
+            # Nach aussen/GUI -> Anzeige-Form ("2.0.0 (x64deb.a1b2c3d)").
+            "version": display_version(),
             "nmap": shutil.which("nmap") is not None,
             "scapy": importlib.util.find_spec("scapy") is not None,
         }
@@ -3773,7 +3774,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         webbrowser.open(url)
 
     app.include_router(system_router)
-    app.dependency_overrides[provide_version] = lambda: lambda: APP_VERSION
+    # /api/version bzw. /api/status -> nach aussen/GUI -> Anzeige-Form.
+    app.dependency_overrides[provide_version] = lambda: display_version
     app.dependency_overrides[provide_system_info] = lambda: _system_info
     app.dependency_overrides[provide_url_opener] = lambda: _open_url
 
