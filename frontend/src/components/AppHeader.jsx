@@ -4,8 +4,10 @@
 // onOpenSettings. Die Sprach-Auswahl wohnt jetzt im Einstellungs-Bereich.
 
 import { BookOpen, Settings } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { fetchSystemInfo } from "../api/system.js";
 import DnsBypassRecordingPill from "./DnsBypassRecordingPill.jsx";
 import LivePill from "./LivePill.jsx";
 import OutboundRecordingPill from "./OutboundRecordingPill.jsx";
@@ -14,6 +16,28 @@ import "./AppHeader.css";
 
 export default function AppHeader({ theme, onThemeChange, onOpenSettings, onOpenManual, onGoToLogging, onGoToOutbound, onGoToDnsWatch, onGoHome }) {
   const { t } = useTranslation();
+
+  // Echte Build-Version vom Backend (bereits Anzeige-Form, z. B. "2.0.0 (x64deb.<sha>)").
+  // Einmalig beim Mount geladen. Solange nichts geladen ist ODER der Aufruf
+  // fehlschlaegt, bleibt version null und die Anzeige faellt unten auf den
+  // i18n-Text t("app.version") zurueck (kein leerer/springender Zustand).
+  const [version, setVersion] = useState(null);
+
+  useEffect(() => {
+    let aktiv = true;
+    fetchSystemInfo()
+      .then((info) => {
+        if (aktiv && info?.version) {
+          setVersion(info.version);
+        }
+      })
+      .catch(() => {
+        // Backend nicht erreichbar o. Ae.: still schlucken, Fallback greift.
+      });
+    return () => {
+      aktiv = false;
+    };
+  }, []);
 
   return (
     <header className="app-header">
@@ -32,7 +56,7 @@ export default function AppHeader({ theme, onThemeChange, onOpenSettings, onOpen
         <span className="app-header__wordmark">
           {/* Wortmarke ist fester Markenname, wird nicht übersetzt. */}
           CERNIS PRO
-          <span className="app-header__version">{t("app.version")}</span>
+          <span className="app-header__version">{version ?? t("app.version")}</span>
         </span>
       </button>
 

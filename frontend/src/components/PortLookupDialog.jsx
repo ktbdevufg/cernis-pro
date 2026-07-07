@@ -7,8 +7,15 @@
 //
 // Passiv: KEIN automatischer Web-Verkehr. Die interne Beschreibung kommt aus der
 // lokalen Tabelle (lib/portInfo -> i18n); die Wikipedia-Suche wird ausschließlich
-// bei bewusstem Klick auf den Link geöffnet. In Tauri v2 öffnet ein normaler
-// <a href target="_blank"> im Standardbrowser — kein Plugin, keine Dependency.
+// bei bewusstem Klick auf den Link geöffnet.
+//
+// Link-Öffnen: Ein normales <a target="_blank"> öffnet in der Tauri-WebView
+// KEINEN Systembrowser — und ein opener/shell-Plugin ist nicht gebaut. Darum
+// geht der Klick über den bereits existierenden Backend-Opener
+// (POST /api/open-url, öffnet via webbrowser.open im Systembrowser); das ist
+// same-origin und in der installierten App zuverlässig. Im Browser-Dev (kein
+// laufendes Backend) fällt es auf window.open zurück. href bleibt als
+// semantischer Fallback gesetzt. Kein neues npm-Paket, keine neue Dependency.
 //
 // Props:
 //   port    — { num, proto, service } des gewählten Ports.
@@ -18,6 +25,7 @@ import { ExternalLink, X } from "lucide-react";
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 
+import { openUrl } from "../api/system.js";
 import { portBeschreibung } from "../lib/portInfo.js";
 import "./PortLookupDialog.css";
 
@@ -71,6 +79,19 @@ export default function PortLookupDialog({ port, onClose }) {
     : `Port ${port.num}`;
   const wikiUrl = `${WIKI_BASIS[sprache]}${encodeURIComponent(suchbegriff)}`;
 
+  // Öffnet die Wikipedia-URL beim Klick. Primärweg: der Backend-Opener
+  // (POST /api/open-url) -> Systembrowser, zuverlässig in der Tauri-App. Schlägt
+  // der Aufruf fehl (ApiError, z. B. Browser-Dev ohne laufendes Backend), fällt
+  // es auf window.open zurück. e.preventDefault() unterdrückt das native
+  // target="_blank" (das in der WebView ohnehin nicht in den Systembrowser
+  // führt); der href bleibt am <a> als semantischer Fallback erhalten.
+  const handleWikiClick = (e) => {
+    e.preventDefault();
+    openUrl(wikiUrl).catch(() => {
+      window.open(wikiUrl, "_blank", "noopener,noreferrer");
+    });
+  };
+
   return (
     // Backdrop: Klick daneben schließt. Der Klick im Dialog selbst wird gestoppt,
     // damit er nicht durchschlägt.
@@ -108,12 +129,15 @@ export default function PortLookupDialog({ port, onClose }) {
           <p className="port-lookup-dialog__desc">{beschreibung}</p>
 
           {/* Klar als extern erkennbarer Link. Öffnet erst bei bewusstem Klick;
-              in Tauri v2 im Standardbrowser (kein Plugin nötig). */}
+              der onClick-Handler leitet die URL über den Backend-Opener in den
+              Systembrowser (WebView öffnet target="_blank" nicht selbst) und
+              fällt im Browser-Dev auf window.open zurück. */}
           <a
             className="port-lookup-dialog__wiki"
             href={wikiUrl}
             target="_blank"
             rel="noopener noreferrer"
+            onClick={handleWikiClick}
           >
             <ExternalLink size={15} aria-hidden="true" />
             {t("beobachten.scan.detail.ports.lookupDialog.wikipedia")}
