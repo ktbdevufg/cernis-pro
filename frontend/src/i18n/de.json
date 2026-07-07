@@ -500,7 +500,36 @@
           "unacknowledge": "Wieder scharf stellen",
           "ackDone": "Quittiert — wird beim nächsten Scan wirksam",
           "unackDone": "Wieder scharf gestellt — wird beim nächsten Scan wirksam",
-          "ackError": "Aktion fehlgeschlagen."
+          "ackError": "Aktion fehlgeschlagen.",
+          "lookupDialog": {
+            "title": "Port {{num}}/{{proto}}",
+            "service": "Dienst",
+            "generic": "Zu diesem Port liegt keine interne Beschreibung vor. Über den Link unten kannst du ihn bei Bedarf extern nachschlagen.",
+            "wikipedia": "Auf Wikipedia nachschlagen",
+            "close": "Schließen",
+            "info": {
+              "ftp": "FTP überträgt Dateien zwischen Rechnern. Die klassische Variante arbeitet unverschlüsselt; für sensible Daten ist heute FTPS oder SFTP üblich.",
+              "ssh": "SSH bietet verschlüsselten Fernzugriff auf ein System (Konsole, Dateiübertragung, Tunnel). Ein gängiger, verschlüsselter Verwaltungszugang.",
+              "telnet": "Telnet ist ein früher Fernzugriffsdienst und arbeitet unverschlüsselt. Heute meist durch SSH ersetzt.",
+              "smtp": "SMTP versendet E-Mails zwischen Mailservern. Der Transport kann per STARTTLS abgesichert werden.",
+              "dns": "DNS löst Namen (z. B. example.com) in IP-Adressen auf. Ein grundlegender Dienst der Netzinfrastruktur.",
+              "http": "HTTP liefert Webseiten und Web-APIs aus. Die Verbindung ist unverschlüsselt; die abgesicherte Variante ist HTTPS.",
+              "pop3": "POP3 ruft E-Mails von einem Server ab. Die klassische Variante ist unverschlüsselt; abgesichert läuft sie über POP3S.",
+              "netbios": "NetBIOS dient der Namens- und Sitzungsverwaltung in älteren Windows-Netzen und ist meist auf das lokale Netz beschränkt.",
+              "imap": "IMAP verwaltet E-Mails direkt auf dem Server (mehrere Geräte, synchron). Abgesichert läuft es über IMAPS.",
+              "https": "HTTPS liefert Webseiten und APIs verschlüsselt aus (HTTP über TLS). Der heute übliche, abgesicherte Web-Zugang.",
+              "smb": "SMB stellt Datei- und Druckerfreigaben bereit (vor allem in Windows-Netzen). Üblicherweise nur im lokalen Netz.",
+              "ipp": "IPP steuert das Drucken über das Netzwerk und übermittelt Druckaufträge sowie Statusinformationen.",
+              "imaps": "IMAPS ist IMAP über eine verschlüsselte TLS-Verbindung — der abgesicherte Zugriff auf E-Mails am Server.",
+              "pop3s": "POP3S ist POP3 über eine verschlüsselte TLS-Verbindung — der abgesicherte Abruf von E-Mails.",
+              "mqtt": "MQTT ist ein leichtgewichtiges Nachrichtenprotokoll, verbreitet im Umfeld von IoT- und Sensor-Geräten.",
+              "mysql": "MySQL ist ein Datenbankdienst. Der Zugang sollte üblicherweise nicht offen im Netz erreichbar sein.",
+              "rdp": "RDP ermöglicht die grafische Fernsteuerung eines Windows-Rechners. Ein aus dem Internet erreichbarer RDP-Zugang gilt als besonders exponiert.",
+              "postgresql": "PostgreSQL ist ein Datenbankdienst. Der Zugang sollte üblicherweise nicht offen im Netz erreichbar sein.",
+              "vnc": "VNC ermöglicht die grafische Fernsteuerung eines Rechners. Je nach Konfiguration ist die Verbindung nicht verschlüsselt.",
+              "http-alt": "Ein alternativer HTTP-Port, häufig für Web-Anwendungen, Proxys oder Verwaltungsoberflächen genutzt."
+            }
+          }
         },
         "notes": {
           "heading": "Gerätenotizen",

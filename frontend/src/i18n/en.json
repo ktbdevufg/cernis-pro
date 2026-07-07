@@ -500,7 +500,36 @@
           "unacknowledge": "Re-arm",
           "ackDone": "Acknowledged — takes effect on next scan",
           "unackDone": "Re-armed — takes effect on next scan",
-          "ackError": "Action failed."
+          "ackError": "Action failed.",
+          "lookupDialog": {
+            "title": "Port {{num}}/{{proto}}",
+            "service": "Service",
+            "generic": "There is no internal description for this port. You can look it up externally via the link below if needed.",
+            "wikipedia": "Look up on Wikipedia",
+            "close": "Close",
+            "info": {
+              "ftp": "FTP transfers files between computers. The classic variant is unencrypted; for sensitive data, FTPS or SFTP is common today.",
+              "ssh": "SSH provides encrypted remote access to a system (console, file transfer, tunnels). A common, encrypted way to manage a host.",
+              "telnet": "Telnet is an early remote-access service and works unencrypted. Nowadays it is mostly replaced by SSH.",
+              "smtp": "SMTP sends email between mail servers. The transport can be secured via STARTTLS.",
+              "dns": "DNS resolves names (e.g. example.com) into IP addresses. A fundamental service of network infrastructure.",
+              "http": "HTTP serves web pages and web APIs. The connection is unencrypted; the secured variant is HTTPS.",
+              "pop3": "POP3 retrieves email from a server. The classic variant is unencrypted; secured it runs over POP3S.",
+              "netbios": "NetBIOS handles name and session management in older Windows networks and is usually confined to the local network.",
+              "imap": "IMAP manages email directly on the server (multiple devices, in sync). Secured it runs over IMAPS.",
+              "https": "HTTPS serves web pages and APIs encrypted (HTTP over TLS). The common, secured way to access the web today.",
+              "smb": "SMB provides file and printer sharing (mainly in Windows networks). Usually only within the local network.",
+              "ipp": "IPP controls printing over the network and carries print jobs and status information.",
+              "imaps": "IMAPS is IMAP over an encrypted TLS connection — secured access to email on the server.",
+              "pop3s": "POP3S is POP3 over an encrypted TLS connection — secured retrieval of email.",
+              "mqtt": "MQTT is a lightweight messaging protocol, common in the context of IoT and sensor devices.",
+              "mysql": "MySQL is a database service. Its access should usually not be openly reachable on the network.",
+              "rdp": "RDP allows graphical remote control of a Windows machine. An RDP endpoint reachable from the internet is considered especially exposed.",
+              "postgresql": "PostgreSQL is a database service. Its access should usually not be openly reachable on the network.",
+              "vnc": "VNC allows graphical remote control of a machine. Depending on the configuration, the connection may be unencrypted.",
+              "http-alt": "An alternative HTTP port, often used for web applications, proxies or management interfaces."
+            }
+          }
         },
         "notes": {
           "heading": "Device notes",

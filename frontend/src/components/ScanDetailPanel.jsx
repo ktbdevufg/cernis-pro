@@ -6,8 +6,8 @@
 // Die Komponente kennt ihre Props (geraet, onClose, onGespeichert). Die drei
 // Notizfelder (label/tags/notes) sind controlled und werden per
 // PUT /api/devices/{mac} gespeichert; bei Erfolg meldet onGespeichert das
-// aktualisierte View-Gerät nach oben. Identität, Ports und Port-Nachschlagen
-// bleiben unverändert (Nachschlagen weiter Platzhalter).
+// aktualisierte View-Gerät nach oben. Das Port-Nachschlagen öffnet ein kleines
+// Info-Fenster (PortLookupDialog) mit interner Beschreibung + Wikipedia-Link.
 
 import { Fingerprint, Network, StickyNote, X } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -19,6 +19,7 @@ import {
   tagsAusText,
   updateDeviceMeta,
 } from "../api/devices.js";
+import PortLookupDialog from "./PortLookupDialog.jsx";
 import "./ScanDetailPanel.css";
 
 // Eine Feld-Zeile: Label links, Wert rechts. mono tönt den Wert monospace.
@@ -65,6 +66,9 @@ export default function ScanDetailPanel({ geraet, onClose, onGespeichert }) {
   // Scan über das Frame. Dieser State trägt nur den dezenten Hinweis am Port.
   const [ackStatus, setAckStatus] = useState({});
 
+  // Der Port, dessen Nachschlage-Dialog offen ist (null = geschlossen).
+  const [lookupPort, setLookupPort] = useState(null);
+
   // Gerätewechsel: alle drei Felder neu aus dem Gerät setzen (sonst bleiben
   // alte Eingaben stehen). Status zurück auf idle.
   useEffect(() => {
@@ -78,6 +82,8 @@ export default function ScanDetailPanel({ geraet, onClose, onGespeichert }) {
     // Quittier-Hinweise pro Port mit zurücksetzen — wie die Notizfelder gehören
     // sie zum gewählten Gerät und dürfen nicht auf das nächste übergreifen.
     setAckStatus({});
+    // Offenen Nachschlage-Dialog schließen — er gehört zum vorigen Gerät.
+    setLookupPort(null);
     // Abhängig allein von der MAC: ein anderes Gerät heißt neue Initialwerte.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [geraet.mac]);
@@ -90,10 +96,9 @@ export default function ScanDetailPanel({ geraet, onClose, onGespeichert }) {
     ? t("beobachten.scan.detail.identity.statusNew")
     : t("beobachten.scan.detail.identity.statusKnown");
 
-  // Platzhalter — späteres echtes Nachschlagen hängt sich hier an.
+  // Port-Nachschlagen: öffnet den Info-Dialog für den gewählten Port.
   const handleNachschlagen = (port) => {
-    // Bewusst ohne Funktion (Nachschlagen kommt mit der Datenanbindung).
-    void port;
+    setLookupPort(port);
   };
 
   // Quittiert einen bewerteten Port bzw. nimmt die Quittierung zurück (Schnitt 8b).
@@ -496,6 +501,15 @@ export default function ScanDetailPanel({ geraet, onClose, onGespeichert }) {
           </div>
         </section>
       </div>
+
+      {/* Port-Nachschlage-Dialog: nur offen, wenn ein Port gewählt wurde.
+          position:fixed -> die DOM-Position im Panel ist fürs Layout egal. */}
+      {lookupPort && (
+        <PortLookupDialog
+          port={lookupPort}
+          onClose={() => setLookupPort(null)}
+        />
+      )}
     </aside>
   );
 }

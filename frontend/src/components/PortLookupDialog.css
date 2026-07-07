@@ -1,0 +1,134 @@
+/* Port-Nachschlage-Dialog: zentrierter Overlay-Dialog (CERNIS PRO 2.0).
+   Nur CSS-Tokens; keine hartkodierten Farben (Ausnahme: der halbtransparente
+   Backdrop-Schwarzton, wie im Projekt üblich für Überdeckung/Schatten). Struktur
+   analog MaintenanceDialog. */
+
+/* Backdrop: deckt die ganze App, zentriert den Dialog. */
+.port-lookup-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+/* Der Dialog selbst: Karten-Optik, dezenter Akzentstreifen links wie die
+   Settings-Sektionen, angenehme Breite. */
+.port-lookup-dialog {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 440px;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-accent);
+  border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.28);
+}
+
+.port-lookup-dialog__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.port-lookup-dialog__title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+/* Schließen-X: dezenter Icon-Button (wie die übrigen Icon-Knöpfe). */
+.port-lookup-dialog__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  color: var(--color-text-tert);
+  background: none;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.port-lookup-dialog__close:hover {
+  color: var(--color-text);
+  background: var(--color-card);
+}
+
+.port-lookup-dialog__close:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.port-lookup-dialog__body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+}
+
+/* Dienst-Zeile: Label + Name. */
+.port-lookup-dialog__service-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.port-lookup-dialog__service-label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-tert);
+}
+
+.port-lookup-dialog__service {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+/* Die interne, neutrale Beschreibung. */
+.port-lookup-dialog__desc {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--color-text-sec);
+}
+
+/* Wikipedia-Link: klar als extern erkennbar (Icon + Akzentfarbe), ganzflächig
+   klickbar, im Settings-Akzent-Stil. */
+.port-lookup-dialog__wiki {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  padding: 8px 14px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-accent);
+  text-decoration: none;
+  background: var(--color-accent-bg);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+}
+
+.port-lookup-dialog__wiki:hover {
+  color: var(--color-text);
+  background: var(--color-accent);
+}
+
+.port-lookup-dialog__wiki:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
