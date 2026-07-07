@@ -104,20 +104,75 @@ function dateinameAusHeader(header, defaultName) {
   return treffer ? decodeURIComponent(treffer[1]) : defaultName;
 }
 
+// Laufen wir in der Tauri-WebView? window.__TAURI__ wird von Tauri injiziert
+// (withGlobalTauri=true). Im Browser-Dev (npm run dev) ist es nicht vorhanden.
+function inTauri() {
+  return typeof window !== "undefined" && Boolean(window.__TAURI__);
+}
+
+// Tauri-Zweig: nativer "Speichern unter"-Dialog + Datei schreiben. Der Nutzer
+// wählt Ort und Namen selbst (maximale Nutzerwahl). Die Plugin-Funktionen werden
+// per dynamischem import() ERST hier geladen — so muss der Browser-Dev-Pfad die
+// Tauri-Pakete nie auflösen und bricht ohne Tauri nicht.
+//
+// save() liefert den gewählten Pfad oder null (Nutzer bricht ab). Bei null: sauber
+// zurückkehren (KEIN Fehler). Sonst die Bytes an den gewählten Pfad schreiben und
+// den Basisnamen zurückgeben. Der per Dialog gewählte Pfad erhält vom Dialog-Plugin
+// automatisch Schreibzugriff — deshalb genügt fs:allow-write-file ohne breiten Scope.
+async function speichernUeberTauriDialog(bytes, name) {
+  const { save } = await import("@tauri-apps/plugin-dialog");
+  const { writeFile } = await import("@tauri-apps/plugin-fs");
+
+  const pfad = await save({ defaultPath: name });
+  if (!pfad) {
+    // Nutzer hat den Dialog abgebrochen: nichts schreiben, kein Fehler.
+    return null;
+  }
+
+  await writeFile(pfad, bytes);
+
+  // Nur den Dateinamen zurückgeben (nicht den vollen Pfad) — passt zum Rückgabewert
+  // des Browser-Zweigs (Feedback-Text). Trenner \\ und / abdecken.
+  const teile = pfad.split(/[\\/]/);
+  return teile[teile.length - 1] || name;
+}
+
+// Browser-Dev-Fallback: klassisches Object-URL -> temporäres <a download> ->
+// programmatischer Klick. In der Tauri-WebView löst genau das KEINEN Download aus
+// (deshalb der Tauri-Zweig oben); im Browser funktioniert es weiterhin, damit
+// npm run dev nutzbar bleibt.
+//
+// Warum Blob + Object-URL statt window.open(url)? Ein Object-URL trägt den vom
+// Server gelieferten Dateinamen sauber ins <a download>; ein direktes Navigieren
+// würde den Tab verlassen oder den Namen verlieren. Der Object-URL belegt Speicher,
+// bis er freigegeben wird — darum revokeObjectURL nach dem Klick.
+function speichernUeberBrowserDownload(blob, name) {
+  const objektUrl = URL.createObjectURL(blob);
+  const anker = document.createElement("a");
+  anker.href = objektUrl;
+  anker.download = name;
+  document.body.appendChild(anker);
+  anker.click();
+  anker.remove();
+  // Den Object-URL freigeben, sonst bleibt der Blob bis zum Tab-Schließen im Speicher.
+  URL.revokeObjectURL(objektUrl);
+  return name;
+}
+
 // Datei-Download über einen relativen API-Pfad. params werden wie bei apiGet als
 // Query angehängt (URLSearchParams; null/undefined übersprungen). Anders als apiGet
-// erwartet das hier KEIN JSON — wir holen die Antwort als Blob und lösen einen
-// Browser-Download aus.
+// erwartet das hier KEIN JSON — wir holen die Antwort als Bytes und speichern sie.
 //
-// Warum Blob + Object-URL statt direkt window.open(url)? Ein Object-URL trägt den
-// vom Server gelieferten Dateinamen (Content-Disposition) sauber ins <a download>;
-// ein direktes Navigieren würde den Tab verlassen oder den Namen verlieren. Der
-// Object-URL belegt Speicher, bis er freigegeben wird — darum revokeObjectURL nach
-// dem Klick (sonst leakt der Blob über die Sitzung).
+// Zentraler Fix für die Tauri-App: In der Tauri-v2-WebView löst das Browser-Pattern
+// (Object-URL + <a download>-Klick) KEINEN Download aus — die Datei "passiert nie".
+// Darum wird in Tauri der native "Speichern unter"-Dialog genutzt (dialog + fs).
+// Alle apiDownload-Nutzer (PDF-Berichte, Handbuch-PDF, CSV-Exporte) profitieren
+// automatisch, weil der Fix zentral hier sitzt. Im Browser-Dev bleibt der Fallback.
 //
 // Bei !ok ODER Netzfehler -> ApiError (gleiche Form wie apiGet). Bei ok -> der
-// tatsächlich verwendete Dateiname (für evtl. Feedback). KEIN Host hartkodiert
-// (relativer Pfad, Vite-Proxy).
+// tatsächlich verwendete Dateiname (für evtl. Feedback), oder null, wenn der Nutzer
+// den nativen Speichern-Dialog abbricht. KEIN Host hartkodiert (relativer Pfad,
+// Vite-Proxy).
 export async function apiDownload(path, params, defaultName = "download") {
   let url = path;
   if (params) {
@@ -149,25 +204,21 @@ export async function apiDownload(path, params, defaultName = "download") {
     );
   }
 
-  const blob = await response.blob();
+  // Dateiname wie bisher aus Content-Disposition als Vorschlag (Fallback: defaultName).
   const name = dateinameAusHeader(
     response.headers.get("Content-Disposition"),
     defaultName,
   );
 
-  // Standard-Browser-Download-Pattern: Object-URL -> temporäres <a download> ->
-  // programmatischer Klick -> wieder aus dem DOM entfernen -> Object-URL freigeben.
-  const objektUrl = URL.createObjectURL(blob);
-  const anker = document.createElement("a");
-  anker.href = objektUrl;
-  anker.download = name;
-  document.body.appendChild(anker);
-  anker.click();
-  anker.remove();
-  // Den Object-URL freigeben, sonst bleibt der Blob bis zum Tab-Schließen im Speicher.
-  URL.revokeObjectURL(objektUrl);
+  if (inTauri()) {
+    // Bytes als Uint8Array aus arrayBuffer() für writeFile().
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    return speichernUeberTauriDialog(bytes, name);
+  }
 
-  return name;
+  // Browser-Dev: Blob + Object-URL-Fallback.
+  const blob = await response.blob();
+  return speichernUeberBrowserDownload(blob, name);
 }
 
 export async function apiPut(path, body) {

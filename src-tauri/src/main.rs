@@ -503,6 +503,8 @@ fn main() {
     let backend_exit = Arc::clone(&backend_process);
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .manage(BackendProcess(Arc::clone(&backend_process)))
         .on_window_event(move |window, event| match event {
             // Beim Schliessen zuerst die Webview auf die lokale Splash lenken,
