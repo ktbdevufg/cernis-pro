@@ -19,6 +19,7 @@ import {
   tagsAusText,
   updateDeviceMeta,
 } from "../api/devices.js";
+import { CODES, mitCode } from "../lib/fehlercodes.js";
 import PortLookupDialog from "./PortLookupDialog.jsx";
 import "./ScanDetailPanel.css";
 
@@ -281,7 +282,10 @@ export default function ScanDetailPanel({ geraet, onClose, onGespeichert }) {
             </div>
             {trustFehler && (
               <p className="scan-detail__trust-error">
-                {t("beobachten.scan.detail.identity.trust.saveError")}
+                {mitCode(
+                  t("beobachten.scan.detail.identity.trust.saveError"),
+                  CODES.E_501,
+                )}
               </p>
             )}
           </div>
@@ -400,7 +404,10 @@ export default function ScanDetailPanel({ geraet, onClose, onGespeichert }) {
                           </button>
                           {lokal === "error" && (
                             <p className="scan-detail__ack-error">
-                              {t("beobachten.scan.detail.ports.ackError")}
+                              {mitCode(
+                                t("beobachten.scan.detail.ports.ackError"),
+                                CODES.E_503,
+                              )}
                             </p>
                           )}
                         </div>
@@ -422,7 +429,10 @@ export default function ScanDetailPanel({ geraet, onClose, onGespeichert }) {
                           </button>
                           {lokal === "error" && (
                             <p className="scan-detail__ack-error">
-                              {t("beobachten.scan.detail.ports.ackError")}
+                              {mitCode(
+                                t("beobachten.scan.detail.ports.ackError"),
+                                CODES.E_503,
+                              )}
                             </p>
                           )}
                         </div>
@@ -495,7 +505,10 @@ export default function ScanDetailPanel({ geraet, onClose, onGespeichert }) {
               {status === "ok"
                 ? t("beobachten.scan.detail.notes.saveOk")
                 : status === "fehler"
-                  ? t("beobachten.scan.detail.notes.saveError")
+                  ? mitCode(
+                      t("beobachten.scan.detail.notes.saveError"),
+                      CODES.E_501,
+                    )
                   : t("beobachten.scan.detail.notes.saveHint")}
             </p>
           </div>

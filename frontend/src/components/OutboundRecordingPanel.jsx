@@ -45,6 +45,7 @@ import {
   stopRecording,
   updateRecording,
 } from "../api/outboundLog.js";
+import { CODES, mitCode } from "../lib/fehlercodes.js";
 import "./OutboundRecordingPanel.css";
 
 // Waehlbare Mess-Intervall-Stufen (nur bei mode==detail): i18n-Schluessel ->
@@ -1010,7 +1011,10 @@ export default function OutboundRecordingPanel({ onAktivCount = () => {} }) {
         setKonflikt(true);
       } else {
         setFehler(
-          aktionFehler?.message ?? t("beobachten.outboundlog.aktionFehler"),
+          mitCode(
+            aktionFehler?.message ?? t("beobachten.outboundlog.aktionFehler"),
+            CODES.E_503,
+          ),
         );
       }
     }

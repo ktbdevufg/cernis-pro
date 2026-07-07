@@ -2331,5 +2331,27 @@
   "lang": {
     "de": "DE",
     "en": "EN"
+  },
+  "fehlercodes": {
+    "E-101": "Der benötigte Netzwerk-Port ist bereits belegt.",
+    "E-102": "Der Hintergrunddienst ist abgestürzt.",
+    "E-103": "Der Start hat zu lange gedauert (Zeitüberschreitung).",
+    "E-104": "Eine benötigte Komponente fehlt.",
+    "E-201": "Die Scan-Verbindung wurde unterbrochen.",
+    "E-202": "Die Verbindung zum Monitoring/Logging ist getrennt.",
+    "E-203": "Der Verkehr (Traffic) ist nicht erreichbar.",
+    "E-204": "Die Namensauflösung ist nicht erreichbar.",
+    "E-205": "Das Ziel ist nicht erreichbar.",
+    "E-301": "Die Paketaufzeichnung braucht das Recht CAP_NET_RAW.",
+    "E-401": "Die Anmeldung an der FRITZ!Box ist gescheitert.",
+    "E-402": "Die FRITZ!Box ist nicht erreichbar.",
+    "E-403": "Der Dienst cpnetcheck ist nicht erreichbar.",
+    "E-404": "nmap fehlt oder ist fehlgeschlagen.",
+    "E-501": "Das Speichern ist fehlgeschlagen.",
+    "E-502": "Das Löschen ist fehlgeschlagen.",
+    "E-503": "Die Aktion ist fehlgeschlagen.",
+    "E-504": "Der Export ist fehlgeschlagen.",
+    "E-505": "Das Gerät wurde nicht gefunden.",
+    "E-506": "Die Eingabe ist ungültig."
   }
 }

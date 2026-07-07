@@ -32,6 +32,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { fetchLookup } from "../api/resolver.js";
+import { CODES, mitCode } from "../lib/fehlercodes.js";
 import "./LookupPanel.css";
 
 // Eine Feld-Zeile: Label links, Wert rechts mit dezentem Quellen-Badge,
@@ -302,7 +303,9 @@ export default function LookupPanel({ ip, port, onClose }) {
 
       {status === "fehler" && (
         <div className="lookup__body">
-          <p className="lookup__notice">{t("beobachten.lookup.error")}</p>
+          <p className="lookup__notice">
+            {mitCode(t("beobachten.lookup.error"), CODES.E_204)}
+          </p>
         </div>
       )}
 

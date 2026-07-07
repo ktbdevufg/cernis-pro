@@ -26,6 +26,7 @@ import { X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { CODES, mitCode } from "../lib/fehlercodes.js";
 import "./MaintenanceDialog.css";
 
 // Die Fenster/Stufen als Konstanten — vermeidet Tippfehler-Strings im JSX.
@@ -422,7 +423,7 @@ export default function MaintenanceDialog({ onSchliessen, onBestaetigt }) {
 
             {fehler ? (
               <span className="maint-dialog__error">
-                {t("settings.wartung.confirm.error")}
+                {mitCode(t("settings.wartung.confirm.error"), CODES.E_502)}
               </span>
             ) : null}
 

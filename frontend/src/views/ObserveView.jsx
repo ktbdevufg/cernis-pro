@@ -39,6 +39,7 @@ import {
 } from "../api/scan.js";
 import { starteScanStream } from "../api/scanStream.js";
 import { fetchSettings, updateSetting } from "../api/settings.js";
+import { CODES, mitCode } from "../lib/fehlercodes.js";
 import { CardGrid, FunctionShell } from "../components/AreaShell.jsx";
 import ArchivePromptDialog from "../components/ArchivePromptDialog.jsx";
 import ColumnManager from "../components/ColumnManager.jsx";
@@ -373,7 +374,9 @@ function ScanInhalt() {
         pruefeNachfrage();
       },
       onError: (msg) => {
-        setScanError(msg ?? t("beobachten.scan.scanError"));
+        // Scan-Kontext: der Fehler kommt aus dem Scan-Stream (Verbindung/Backend),
+        // daher E-201 (Scan-Verbindung) statt eines generischen Aktionscodes.
+        setScanError(mitCode(msg ?? t("beobachten.scan.scanError"), CODES.E_201));
         setScanLaeuft(false);
         setFortschritt(null);
         setPhase(null);

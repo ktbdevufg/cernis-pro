@@ -645,24 +645,24 @@ def _validate_logging_modes(body: CreateLoggingTaskBody) -> None:
     if body.capture_mode not in _CAPTURE_MODES:
         raise HTTPException(
             422,
-            detail=f"Unbekannter capture_mode {body.capture_mode!r}",
+            detail=f"Unbekannter capture_mode {body.capture_mode!r} (E-506)",
         )
     if body.operation_mode not in _OPERATION_MODES:
         raise HTTPException(
             422,
-            detail=f"Unbekannter operation_mode {body.operation_mode!r}",
+            detail=f"Unbekannter operation_mode {body.operation_mode!r} (E-506)",
         )
     if body.operation_mode == "scheduled" and (
         body.planned_start is None or body.planned_end is None
     ):
         raise HTTPException(
             422,
-            detail="operation_mode 'scheduled' braucht planned_start und planned_end",
+            detail="operation_mode 'scheduled' braucht planned_start und planned_end (E-506)",
         )
     if body.operation_mode == "immediate" and body.max_duration_s is None:
         raise HTTPException(
             422,
-            detail="operation_mode 'immediate' braucht max_duration_s",
+            detail="operation_mode 'immediate' braucht max_duration_s (E-506)",
         )
     # RECURRING (3b): braucht ein Tagesfenster (beide Minuten-Grenzen) -- kein stiller
     # Fallback (Finding S3). Zusaetzlich: end > start (halb-offenes Fenster) und beide
@@ -671,17 +671,23 @@ def _validate_logging_modes(body: CreateLoggingTaskBody) -> None:
         if body.recur_start_minute is None or body.recur_end_minute is None:
             raise HTTPException(
                 422,
-                detail="operation_mode 'recurring' braucht recur_start_minute und recur_end_minute",
+                detail=(
+                    "operation_mode 'recurring' braucht recur_start_minute "
+                    "und recur_end_minute (E-506)"
+                ),
             )
         if body.recur_end_minute <= body.recur_start_minute:
             raise HTTPException(
                 422,
-                detail="recur_end_minute muss groesser als recur_start_minute sein",
+                detail="recur_end_minute muss groesser als recur_start_minute sein (E-506)",
             )
         if not (0 <= body.recur_start_minute <= 1440) or not (0 <= body.recur_end_minute <= 1440):
             raise HTTPException(
                 422,
-                detail="recur_start_minute und recur_end_minute muessen im Bereich 0..1440 liegen",
+                detail=(
+                    "recur_start_minute und recur_end_minute muessen im "
+                    "Bereich 0..1440 liegen (E-506)"
+                ),
             )
     # Mess-Intervall (C-2): wenn gesetzt, muss es eine der erlaubten Stufen sein --
     # sonst 422 (kein stiller Fallback, Finding S3). ``None`` ist erlaubt (= nicht
@@ -690,7 +696,7 @@ def _validate_logging_modes(body: CreateLoggingTaskBody) -> None:
         raise HTTPException(
             422,
             detail=f"interval_s {body.interval_s!r} ist keine erlaubte Stufe "
-            f"{sorted(_INTERVAL_STUFEN)}",
+            f"{sorted(_INTERVAL_STUFEN)} (E-506)",
         )
     # Schwellwert (Schnitt 4): nur pruefen, wenn der Client einen gesendet hat.
     if body.threshold is not None:
@@ -711,17 +717,17 @@ def _validate_threshold(threshold: ThresholdBody) -> None:
         raise HTTPException(
             422,
             detail=f"Unbekannte threshold.condition {threshold.condition!r} "
-            f"(erlaubt: {sorted(_THRESHOLD_CONDITIONS)})",
+            f"(erlaubt: {sorted(_THRESHOLD_CONDITIONS)}) (E-506)",
         )
     if threshold.consecutive_n < 1:
         raise HTTPException(
             422,
-            detail="threshold.consecutive_n muss >= 1 sein",
+            detail="threshold.consecutive_n muss >= 1 sein (E-506)",
         )
     if threshold.limit_ms < 0:
         raise HTTPException(
             422,
-            detail="threshold.limit_ms muss >= 0 sein",
+            detail="threshold.limit_ms muss >= 0 sein (E-506)",
         )
 
 

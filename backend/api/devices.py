@@ -213,12 +213,13 @@ def create_device(
         )
     except DeviceAlreadyExistsError as exc:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="Geraet existiert bereits."
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Geraet existiert bereits. (E-506)",
         ) from exc
     except ValueError as exc:
         # Ungueltige MAC aus normalize_mac im Use-Case. Bare 422 wie der
         # InvalidTrustState-Pfad (vermeidet den deprecateten status-Alias).
-        raise HTTPException(status_code=422, detail="Ungueltige MAC.") from exc
+        raise HTTPException(status_code=422, detail="Ungueltige MAC. (E-506)") from exc
     return _device_to_dict(created)
 
 
@@ -269,7 +270,8 @@ def get_device(
         result = get_device(mac)
     except DeviceNotFoundError as exc:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Geraet nicht gefunden."
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Geraet nicht gefunden. (E-505)",
         ) from exc
     return {
         **_device_to_dict(result.device),
@@ -297,14 +299,15 @@ def put_device(
         )
     except DeviceNotFoundError as exc:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Geraet nicht gefunden."
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Geraet nicht gefunden. (E-505)",
         ) from exc
     except InvalidTrustStateError as exc:
         # Bare 422 wie der uebrige Router (monitoring/analysis): vermeidet die
         # Deprecation des status.HTTP_422_*-Alias der installierten Starlette.
         raise HTTPException(
             status_code=422,
-            detail=f"Ungueltiger trust_state: {exc.value!r}.",
+            detail=f"Ungueltiger trust_state: {exc.value!r}. (E-506)",
         ) from exc
     return _device_to_dict(updated)
 
@@ -333,7 +336,8 @@ def dismiss_device(
         updated = dismiss_from_watch(mac, body.dismissed)
     except DeviceNotFoundError as exc:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Geraet nicht gefunden."
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Geraet nicht gefunden. (E-505)",
         ) from exc
     return _device_to_dict(updated)
 
@@ -348,7 +352,8 @@ def archive_device(
         updated = archive_device(mac)
     except DeviceNotFoundError as exc:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Geraet nicht gefunden."
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Geraet nicht gefunden. (E-505)",
         ) from exc
     return _device_to_dict(updated)
 
@@ -363,7 +368,8 @@ def restore_device(
         updated = restore_device(mac)
     except DeviceNotFoundError as exc:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Geraet nicht gefunden."
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Geraet nicht gefunden. (E-505)",
         ) from exc
     return _device_to_dict(updated)
 
@@ -380,6 +386,7 @@ def answer_archive_prompt(
         updated = answer_archive_prompt(mac, body.archive)
     except DeviceNotFoundError as exc:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Geraet nicht gefunden."
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Geraet nicht gefunden. (E-505)",
         ) from exc
     return _device_to_dict(updated)

@@ -22,6 +22,7 @@ import {
   setTrustState,
   updateDeviceMeta,
 } from "../api/devices.js";
+import { CODES, mitCode } from "../lib/fehlercodes.js";
 import "./WatchView.css";
 
 // Reiner Helfer: "vor X" aus einem ISO-Zeitstempel (firstSeen). Liefert den
@@ -87,7 +88,7 @@ function WacheZeile({ geraet, jetzt, onEingeordnet, onAusgeblendet, onFehler }) 
       await setTrustState(geraet.mac, "trusted");
       onEingeordnet(geraet.mac);
     } catch {
-      onFehler(t("beobachten.watch.actionError"));
+      onFehler(mitCode(t("beobachten.watch.actionError"), CODES.E_503));
       setBusy(false);
     }
   };
@@ -103,7 +104,7 @@ function WacheZeile({ geraet, jetzt, onEingeordnet, onAusgeblendet, onFehler }) 
       await dismissDevice(geraet.mac, true);
       onAusgeblendet(geraet.mac);
     } catch {
-      onFehler(t("beobachten.watch.actionError"));
+      onFehler(mitCode(t("beobachten.watch.actionError"), CODES.E_503));
       setBusy(false);
     }
   };
@@ -119,7 +120,7 @@ function WacheZeile({ geraet, jetzt, onEingeordnet, onAusgeblendet, onFehler }) 
       await updateDeviceMeta(geraet.mac, { notes: notizEntwurf });
       setNotizOffen(false);
     } catch {
-      onFehler(t("beobachten.watch.actionError"));
+      onFehler(mitCode(t("beobachten.watch.actionError"), CODES.E_503));
     } finally {
       setBusy(false);
     }

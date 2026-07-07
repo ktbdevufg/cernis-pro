@@ -30,6 +30,7 @@ import {
   uploadSource,
   writeSettings,
 } from "../api/blocklist.js";
+import { CODES, mitCode } from "../lib/fehlercodes.js";
 import { AddSourceDialog, HealthDialog, UploadSourceDialog } from "./BlocklistDialogs.jsx";
 import "./BlocklistPanel.css";
 
@@ -318,7 +319,11 @@ export default function BlocklistPanel() {
       {/* Globaler, dezenter Fehlerhinweis (Lade-/Aktions-Fehler). */}
       {fehler ? (
         <p className="bl-error" role="alert">
-          {t(`verwaltung.blocklist.${fehler}`)}
+          {/* Nur der Aktions-Fehler traegt einen Schema-Code (E-503); Lade-/
+              Settings-Fehler bleiben ohne Code. */}
+          {fehler === "aktionFehler"
+            ? mitCode(t(`verwaltung.blocklist.${fehler}`), CODES.E_503)
+            : t(`verwaltung.blocklist.${fehler}`)}
         </p>
       ) : null}
 

@@ -34,6 +34,7 @@ import {
   startLoggingTask,
   stopLoggingTask,
 } from "../api/monitoring.js";
+import { CODES, mitCode } from "../lib/fehlercodes.js";
 import {
   fortschrittAnteil,
   formatiereRestzeit,
@@ -686,7 +687,12 @@ export default function LoggingPanel({ onDetailChange }) {
         } catch (startFehler) {
           // Anlegen ging, Start kollidiert (z. B. Ziel belegt): den detail-Text
           // zeigen, die Aufgabe bleibt aber angelegt (CREATED).
-          setFehler(startFehler?.message ?? t("beobachten.logging.aktionFehler"));
+          setFehler(
+            mitCode(
+              startFehler?.message ?? t("beobachten.logging.aktionFehler"),
+              CODES.E_503,
+            ),
+          );
         }
       }
       setEingabe(LEERE_EINGABE);
@@ -722,7 +728,12 @@ export default function LoggingPanel({ onDetailChange }) {
       setFehler(null);
       await ladeAufgaben();
     } catch (aktionFehler) {
-      setFehler(aktionFehler?.message ?? t("beobachten.logging.aktionFehler"));
+      setFehler(
+        mitCode(
+          aktionFehler?.message ?? t("beobachten.logging.aktionFehler"),
+          CODES.E_503,
+        ),
+      );
     }
   };
 

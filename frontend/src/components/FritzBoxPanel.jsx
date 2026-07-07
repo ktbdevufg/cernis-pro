@@ -31,6 +31,7 @@ import {
   updateSecret,
   updateSetting,
 } from "../api/settings.js";
+import { CODES, mitCode } from "../lib/fehlercodes.js";
 import "./FritzBoxPanel.css";
 
 // Interne Reiter der Detailansicht. Reihenfolge ist verbindlich.
@@ -135,7 +136,7 @@ function VerbindenMaske({ authFehler, onVerbunden }) {
 
         {authFehler ? (
           <p className="fritz-connect__auth-hint">
-            {t("geraete.fritzbox.authHint")}
+            {mitCode(t("geraete.fritzbox.authHint"), CODES.E_401)}
           </p>
         ) : (
           <p className="fritz-connect__neutral-hint">

@@ -15,6 +15,7 @@ import { useTranslation } from "react-i18next";
 import { FunctionShell } from "../components/AreaShell.jsx";
 import { fetchSettings, updateSetting } from "../api/settings.js";
 import { fetchManualPdf } from "../api/report.js";
+import { CODES, mitCode } from "../lib/fehlercodes.js";
 import helpContent from "../lib/help_content.json";
 import "./ManualView.css";
 
@@ -661,7 +662,9 @@ export default function ManualView({ onClose, sprungZiel }) {
           </div>
 
           {speicherFehler ? (
-            <p className="manual__save-error">{t("manual.schrift.saveError")}</p>
+            <p className="manual__save-error">
+              {mitCode(t("manual.schrift.saveError"), CODES.E_501)}
+            </p>
           ) : null}
 
           {pdfFehler ? (

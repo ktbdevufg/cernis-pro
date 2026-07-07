@@ -2331,5 +2331,27 @@
   "lang": {
     "de": "DE",
     "en": "EN"
+  },
+  "fehlercodes": {
+    "E-101": "The required network port is already in use.",
+    "E-102": "The background service has crashed.",
+    "E-103": "Startup took too long (timeout).",
+    "E-104": "A required component is missing.",
+    "E-201": "The scan connection was interrupted.",
+    "E-202": "The connection to monitoring/logging was lost.",
+    "E-203": "Traffic is not reachable.",
+    "E-204": "Name resolution is not reachable.",
+    "E-205": "The target is not reachable.",
+    "E-301": "Packet capture requires the CAP_NET_RAW capability.",
+    "E-401": "Sign-in to the FRITZ!Box failed.",
+    "E-402": "The FRITZ!Box is not reachable.",
+    "E-403": "The cpnetcheck service is not reachable.",
+    "E-404": "nmap is missing or failed.",
+    "E-501": "Saving failed.",
+    "E-502": "Deleting failed.",
+    "E-503": "The action failed.",
+    "E-504": "The export failed.",
+    "E-505": "The device was not found.",
+    "E-506": "The input is invalid."
   }
 }

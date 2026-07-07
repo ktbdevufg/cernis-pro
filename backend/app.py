@@ -3889,7 +3889,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # (api/sni.js) faengt gezielt 403 fuer den Rechte-Hinweis. Muss VOR dem
         # generischen SniError-Handler stehen.
         logger.warning("sni_permission_error", error=str(exc))
-        return JSONResponse(status_code=403, content={"detail": str(exc)})
+        # Paketaufzeichnung ohne CAP_NET_RAW -> E-301 (Praesentations-Code am
+        # HTTP-Rand; die application-Exception bleibt unveraendert).
+        return JSONResponse(status_code=403, content={"detail": f"{exc} (E-301)"})
 
     @app.exception_handler(SniError)
     async def _on_sni_error(_request: Request, exc: SniError) -> JSONResponse:
@@ -3969,7 +3971,12 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # (ADR 0001). Vorbild SecretStoreUnavailableError: infra-Exception -> 503. Die
         # neutrale Meldung benennt das fehlende Programm; der Install-Hinweis folgt in 1b.
         logger.error("diagnostics_tool_missing", tool=exc.tool)
-        return JSONResponse(status_code=503, content={"detail": exc.message})
+        # nmap fehlt/fehlgeschlagen -> E-404 (nur fuer nmap; dig/traceroute haben
+        # keinen eigenen Schema-Code und bleiben ohne Anhang).
+        detail = exc.message
+        if exc.tool == "nmap":
+            detail = f"{detail} (E-404)"
+        return JSONResponse(status_code=503, content={"detail": detail})
 
     # ── diagnostics 2b: externer IP/Port-Check via cpnetcheck verdrahten ───────────
     # Modell D: der Use-Case liest URL (settings-``repository()``) + Token (``secret_store()``,
@@ -3995,7 +4002,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # bereits jeden Token/internen Detail entfernt; hier wird NICHTS Zusaetzliches
         # geloggt, was den Token enthalten koennte.
         logger.error("external_check_failed")
-        return JSONResponse(status_code=502, content={"detail": exc.message})
+        # Externer cpnetcheck-Dienst nicht erreichbar/gescheitert -> E-403.
+        return JSONResponse(status_code=502, content={"detail": f"{exc.message} (E-403)"})
 
     # ── diagnostics 3: Rogue-DHCP-Erkennung verdrahten ────────────────────────────
     # Zustandslose Adapter direkt instanziiert (Muster process/interfaces). Der Use-Case

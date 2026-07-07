@@ -136,7 +136,10 @@ def get_history_detail(
     """Ein Scan mit seinen vollen Hosts; unbekannte ID -> 404."""
     record = get_scan_detail(scan_id)
     if record is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scan nicht gefunden.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Scan nicht gefunden. (E-505)",
+        )
     return {
         "id": record.scan_id,
         "scanned_at": record.scanned_at,

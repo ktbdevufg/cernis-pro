@@ -26,6 +26,7 @@ import {
   fetchLoggingSla,
   fetchLoggingTask,
 } from "../api/monitoring.js";
+import { CODES, mitCode } from "../lib/fehlercodes.js";
 import LoggingProfileView from "./LoggingProfileView.jsx";
 import LoggingSeriesView from "./LoggingSeriesView.jsx";
 import SlaChart from "./SlaChart.jsx";
@@ -493,7 +494,7 @@ export default function LoggingTaskDetail({ taskId, onZurueck }) {
         </div>
         {exportFehler && (
           <span className="logging-detail__export-fehler" role="note">
-            {t("beobachten.logging.exportFehler")}
+            {mitCode(t("beobachten.logging.exportFehler"), CODES.E_504)}
           </span>
         )}
       </div>

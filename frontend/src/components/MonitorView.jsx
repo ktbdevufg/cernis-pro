@@ -24,6 +24,7 @@ import {
 } from "../api/monitoring.js";
 import { fetchSettings, updateSetting } from "../api/settings.js";
 import { starteMonitorStream } from "../api/monitorStream.js";
+import { CODES, mitCode } from "../lib/fehlercodes.js";
 import { spieleSignalton } from "../lib/sound.js";
 import RttGraph from "./RttGraph.jsx";
 import RttSparkline from "./RttSparkline.jsx";
@@ -432,7 +433,8 @@ export default function MonitorView() {
       setNeuHost("");
       setFehler(null);
     } catch {
-      setFehler(t("beobachten.monitor.ladeFehler"));
+      // Ziel anlegen fehlgeschlagen: generische Aktion -> E-503.
+      setFehler(mitCode(t("beobachten.monitor.ladeFehler"), CODES.E_503));
     }
   };
 
@@ -449,7 +451,8 @@ export default function MonitorView() {
       await deleteMonitorTarget(targetId);
       setFehler(null);
     } catch {
-      setFehler(t("beobachten.monitor.ladeFehler"));
+      // Loeschen fehlgeschlagen -> E-502.
+      setFehler(mitCode(t("beobachten.monitor.ladeFehler"), CODES.E_502));
     }
   };
 
@@ -487,7 +490,7 @@ export default function MonitorView() {
       {/* Dezenter Hinweisstreifen, wenn der Strom getrennt ist (Reconnect läuft). */}
       {getrennt && (
         <div className="monitor__getrennt" role="status">
-          {t("beobachten.monitor.getrennt")}
+          {mitCode(t("beobachten.monitor.getrennt"), CODES.E_202)}
         </div>
       )}
 

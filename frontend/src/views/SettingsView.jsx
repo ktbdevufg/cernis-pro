@@ -23,6 +23,7 @@ import {
   updateSecret,
   secretGesetzt,
 } from "../api/settings.js";
+import { CODES, mitCode } from "../lib/fehlercodes.js";
 import { FunctionShell } from "../components/AreaShell.jsx";
 import DefaultCredsConsentDialog from "../components/DefaultCredsConsentDialog.jsx";
 import DefaultCredsListeSektion from "../components/DefaultCredsListeSektion.jsx";
@@ -286,7 +287,7 @@ function OverviewSektion({ onGespeichert }) {
 
       {speicherFehler ? (
         <span className="settings__hint settings__hint--error">
-          {t("settings.startseite.saveError")}
+          {mitCode(t("settings.startseite.saveError"), CODES.E_501)}
         </span>
       ) : null}
     </SettingsSektion>
@@ -446,7 +447,7 @@ function FritzBoxSektion({ onGespeichert }) {
       <div className="settings__row settings__row--actions">
         {speicherStatus === "fehler" ? (
           <span className="settings__hint settings__hint--error">
-            {t("settings.fritzbox.saveError")}
+            {mitCode(t("settings.fritzbox.saveError"), CODES.E_501)}
           </span>
         ) : (
           <span />
@@ -1321,7 +1322,7 @@ function AuffaelligkeitSektion({ onGespeichert }) {
 
       {speicherFehler ? (
         <span className="settings__hint settings__hint--error">
-          {t("settings.auffaelligkeit.saveError")}
+          {mitCode(t("settings.auffaelligkeit.saveError"), CODES.E_501)}
         </span>
       ) : null}
     </SettingsSektion>
@@ -1535,7 +1536,7 @@ function DnsWatchSektion({ onGespeichert }) {
 
       {speicherFehler ? (
         <span className="settings__hint settings__hint--error">
-          {t("settings.dnswatch.saveError")}
+          {mitCode(t("settings.dnswatch.saveError"), CODES.E_501)}
         </span>
       ) : null}
     </SettingsSektion>
@@ -1679,7 +1680,7 @@ function DefaultCredsSektion({ onGespeichert }) {
 
       {fehler ? (
         <span className="settings__hint settings__hint--error">
-          {t("settings.defaultCreds.saveError")}
+          {mitCode(t("settings.defaultCreds.saveError"), CODES.E_501)}
         </span>
       ) : null}
 

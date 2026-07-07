@@ -32,6 +32,7 @@ import {
   fetchTraffic,
   fetchTrafficPermission,
 } from "../api/traffic.js";
+import { CODES, mitCode } from "../lib/fehlercodes.js";
 import LookupPanel from "./LookupPanel.jsx";
 import "./TrafficView.css";
 
@@ -824,7 +825,7 @@ export default function TrafficView({
 
       {status === "fehler" && (
         <p className="traffic-state-notice traffic-state-notice--error">
-          {t("beobachten.traffic.error")}
+          {mitCode(t("beobachten.traffic.error"), CODES.E_203)}
         </p>
       )}
 

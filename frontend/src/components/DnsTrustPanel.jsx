@@ -19,6 +19,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { fetchDnsTrustServers, setDnsTrustDecision } from "../api/dnsTrust.js";
+import { CODES, mitCode } from "../lib/fehlercodes.js";
 import "./DnsTrustPanel.css";
 
 // Die Gruppen in ihrer verbindlichen Anzeige-Reihenfolge. Jeder Server landet in
@@ -299,7 +300,11 @@ export default function DnsTrustPanel() {
       {/* Dezenter Lade-/Aktions-Fehlerhinweis. */}
       {fehler ? (
         <p className="dt-error" role="alert">
-          {t(`verwaltung.dnsTrust.${fehler}`)}
+          {/* Nur der Aktions-Fehler traegt einen Schema-Code (E-503); der
+              Lade-Fehler bleibt ohne Code. */}
+          {fehler === "aktionFehler"
+            ? mitCode(t(`verwaltung.dnsTrust.${fehler}`), CODES.E_503)
+            : t(`verwaltung.dnsTrust.${fehler}`)}
         </p>
       ) : null}
 

@@ -139,6 +139,6 @@ async def get_fritz_detail(
     except FritzDetailAuthError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="FRITZ!Box-Authentifizierung gescheitert (Credentials pruefen).",
+            detail="FRITZ!Box-Authentifizierung gescheitert (Credentials pruefen). (E-401)",
         ) from exc
     return _detail_to_dict(detail)
