@@ -333,6 +333,17 @@ def start_raw_sniff(
     if not (thread and thread.is_alive()):
         with contextlib.suppress(Exception):
             sniffer.stop(join=True)
+        # scapy legt eine im Sniffer-Thread aufgetretene Ausnahme in
+        # ``sniffer.exception`` ab (fehlt/None, wenn keine hinterlegt ist).
+        # Den stabilen Substring "CAP_NET_RAW" IMMER erhalten (daran haengt
+        # die Rechte-Klassifikation der sni-Domaene), aber die echte Ursache
+        # sichtbar machen statt sie pauschal zu verschlucken.
+        thread_exc = getattr(sniffer, "exception", None)
+        if thread_exc is not None:
+            raise RuntimeError(
+                "raw socket not accessible -- requires CAP_NET_RAW "
+                f"(Sniffer-Thread-Fehler: {thread_exc})"
+            ) from thread_exc
         raise RuntimeError("raw socket not accessible -- requires CAP_NET_RAW")
 
     return sniffer
@@ -446,6 +457,17 @@ def start_dns_sniff(
     if not (thread and thread.is_alive()):
         with contextlib.suppress(Exception):
             sniffer.stop(join=True)
+        # scapy legt eine im Sniffer-Thread aufgetretene Ausnahme in
+        # ``sniffer.exception`` ab (fehlt/None, wenn keine hinterlegt ist).
+        # Den stabilen Substring "CAP_NET_RAW" IMMER erhalten (daran haengt
+        # die Rechte-Klassifikation der sni-Domaene), aber die echte Ursache
+        # sichtbar machen statt sie pauschal zu verschlucken.
+        thread_exc = getattr(sniffer, "exception", None)
+        if thread_exc is not None:
+            raise RuntimeError(
+                "raw socket not accessible -- requires CAP_NET_RAW "
+                f"(Sniffer-Thread-Fehler: {thread_exc})"
+            ) from thread_exc
         raise RuntimeError("raw socket not accessible -- requires CAP_NET_RAW")
 
     return sniffer
@@ -601,6 +623,17 @@ def start_pcap_sniff(
     if not (thread and thread.is_alive()):
         with contextlib.suppress(Exception):
             sniffer.stop(join=True)
+        # scapy legt eine im Sniffer-Thread aufgetretene Ausnahme in
+        # ``sniffer.exception`` ab (fehlt/None, wenn keine hinterlegt ist).
+        # Den stabilen Substring "CAP_NET_RAW" IMMER erhalten (daran haengt
+        # die Rechte-Klassifikation der sni-Domaene), aber die echte Ursache
+        # sichtbar machen statt sie pauschal zu verschlucken.
+        thread_exc = getattr(sniffer, "exception", None)
+        if thread_exc is not None:
+            raise RuntimeError(
+                "raw socket not accessible -- requires CAP_NET_RAW "
+                f"(Sniffer-Thread-Fehler: {thread_exc})"
+            ) from thread_exc
         raise RuntimeError("raw socket not accessible -- requires CAP_NET_RAW")
 
     return sniffer
