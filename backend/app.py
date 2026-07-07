@@ -663,6 +663,7 @@ from infrastructure.analysis_rules_db import SqliteUserRuleRepository
 from infrastructure.blocklist_entries_db import SqliteBlocklistEntryRepository
 from infrastructure.blocklist_fetcher import UrllibBlocklistFetcher
 from infrastructure.blocklist_sources_db import SqliteBlocklistSourceRepository
+from infrastructure.bundle_paths import resolve_bundle_path
 from infrastructure.capture import (
     ScapyLldpSniffer,
     ScapyPacketSniffer,
@@ -1788,12 +1789,18 @@ def _project_security_pdf_model(
 # vom bereits geladenen help_content-dict auf das render-fertige ManualPdfModel. Der Runner
 # _manual_pdf liest die Uhr GENAU EINMAL und uebergibt fertige Kopf-/Fusstexte.
 
-# Pfad zur Hilfe-Quelle, relativ zu DIESEM Modul aufgeloest (app.py liegt in backend/, NICHT in
-# backend/src): von backend/ ein Verzeichnis hoch zum Repo-Root, dann frontend/src/lib/.
-# Wie _LOGO_PATH ueber os.path.normpath verifiziert. Existiert die Datei nicht (frozen-Build),
-# liefert der Lade-Helfer ein leeres dict -> das PDF hat dann nur Kopf/Titel (ehrlicher Leerfall).
-_HELP_CONTENT_PATH = os.path.normpath(
-    os.path.join(os.path.dirname(__file__), "..", "frontend", "src", "lib", "help_content.json")
+# Pfad zur Hilfe-Quelle. Frozen-Build (PyInstaller): die Datei liegt NICHT in frontend/dist,
+# darum gibt die Spec sie eigens als Datenfile unter _MEIPASS/help/help_content.json mit (siehe
+# cernis_*.spec). Dev: relativ zu DIESEM Modul (app.py liegt in backend/, NICHT in backend/src):
+# von backend/ ein Verzeichnis hoch zum Repo-Root, dann frontend/src/lib/. Die Fallunterscheidung
+# kapselt der gemeinsame Helfer resolve_bundle_path (wie _LOGO_PATH). Existiert die Datei nicht,
+# liefert der Lade-Helfer ein leeres dict -> das PDF hat dann nur Kopf/Titel (ehrlicher Leerfall);
+# im Normalfall MUSS der Inhalt jetzt aber geladen werden.
+_HELP_CONTENT_PATH = resolve_bundle_path(
+    frozen_relative=os.path.join("help", "help_content.json"),
+    dev_absolute=os.path.normpath(
+        os.path.join(os.path.dirname(__file__), "..", "frontend", "src", "lib", "help_content.json")
+    ),
 )
 
 
@@ -5887,12 +5894,13 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
         now = time.time()
         generated_at_text = "Erstellt am " + datetime.fromtimestamp(now).strftime("%d.%m.%Y %H:%M")
+        datumsteil = datetime.fromtimestamp(now).strftime("%Y-%m-%d")
         model = _project_outbound_pdf_model(report, generated_at_text)
         pdf_bytes = ReportlabRenderer().render_outbound_report_pdf(model)
         return _OutboundPdfResult(
             content=pdf_bytes,
             media_type="application/pdf",
-            filename="CERNISPRO_Netzwerk-Aussenkontakte-Bericht.pdf",
+            filename=f"CERNISPRO_Netzwerk-Aussenkontakte-Bericht_{datumsteil}.pdf",
         )
 
     # ── DNS-Waechter-Bericht: Datenseite (Muster _build_outbound_report_data, Regel 4/5) ──
@@ -6034,12 +6042,13 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
         now = time.time()
         generated_at_text = "Erstellt am " + datetime.fromtimestamp(now).strftime("%d.%m.%Y %H:%M")
+        datumsteil = datetime.fromtimestamp(now).strftime("%Y-%m-%d")
         model = _project_dns_watch_pdf_model(report, generated_at_text)
         pdf_bytes = ReportlabRenderer().render_dns_watch_report_pdf(model)
         return _DnsWatchPdfResult(
             content=pdf_bytes,
             media_type="application/pdf",
-            filename="CERNISPRO_DNS-Waechter-Bericht.pdf",
+            filename=f"CERNISPRO_DNS-Waechter-Bericht_{datumsteil}.pdf",
         )
 
     # ── DNS-Umgehungs-Bericht (Etappe 5): die Naht zu den PERSISTENTEN Umgehungs-Laeufen ──
@@ -6281,12 +6290,13 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
         now = time.time()
         generated_at_text = "Erstellt am " + datetime.fromtimestamp(now).strftime("%d.%m.%Y %H:%M")
+        datumsteil = datetime.fromtimestamp(now).strftime("%Y-%m-%d")
         model = _project_dns_bypass_pdf_model(report, generated_at_text)
         pdf_bytes = ReportlabRenderer().render_dns_bypass_report_pdf(model)
         return _DnsBypassPdfResult(
             content=pdf_bytes,
             media_type="application/pdf",
-            filename="CERNISPRO_Netzwerk-DNS-Umgehungs-Bericht.pdf",
+            filename=f"CERNISPRO_Netzwerk-DNS-Umgehungs-Bericht_{datumsteil}.pdf",
         )
 
     # ── Verhaltensprofil-Bericht (Block 4, Etappe 3): Daten- und Tasks-Runner ──────
@@ -6496,12 +6506,13 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
         now = time.time()
         generated_at_text = "Erstellt am " + datetime.fromtimestamp(now).strftime("%d.%m.%Y %H:%M")
+        datumsteil = datetime.fromtimestamp(now).strftime("%Y-%m-%d")
         model = _project_behavior_pdf_model(report, generated_at_text)
         pdf_bytes = ReportlabRenderer().render_behavior_report_pdf(model)
         return _BehaviorPdfResult(
             content=pdf_bytes,
             media_type="application/pdf",
-            filename="CERNISPRO_Verhaltensprofil-Bericht.pdf",
+            filename=f"CERNISPRO_Verhaltensprofil-Bericht_{datumsteil}.pdf",
         )
 
     app.include_router(report_router)

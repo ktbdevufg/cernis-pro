@@ -68,6 +68,15 @@ if os.path.exists(frontend_dist):
 else:
     print(f"WARNING: frontend dist not found at {os.path.abspath(frontend_dist)}")
 
+# ── Handbuch-Inhalte: help_content.json liegt nur in frontend/src/lib (NICHT in
+# frontend/dist), darum eigens als Datenfile unter _MEIPASS/help/ mitgeben. app.py loest
+# den Pfad im Frozen-Build auf _MEIPASS/help/help_content.json auf (resolve_bundle_path).
+help_content = os.path.join('..', 'frontend', 'src', 'lib', 'help_content.json')
+if os.path.exists(help_content):
+    datas += [(help_content, 'help')]
+else:
+    print(f"WARNING: help_content.json not found at {os.path.abspath(help_content)}")
+
 # ── Hidden imports ────────────────────────────────────────────
 hiddenimports += [
     'uvicorn.logging', 'uvicorn.loops', 'uvicorn.loops.auto',

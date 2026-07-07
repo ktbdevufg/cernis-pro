@@ -45,6 +45,7 @@ from reportlab.platypus import (
 )
 
 from domain.export import PdfReportModel
+from infrastructure.bundle_paths import resolve_bundle_path
 
 # ── CERNIS-Farbpalette (Auftrag) ────────────────────────────────────────────
 # Die Marken-/Severity-Farben des Sicherheitsberichts als reportlab-Farben. Zentral hier,
@@ -90,11 +91,19 @@ _DIST_PALETTE: tuple[colors.Color, ...] = (
 )
 
 # Repo-Asset des CERNIS-Logos (Auftrag: per find ermittelt -> frontend/public/cernis-logo.png).
-# Relativ zu diesem Modul aufgeloest (backend/infrastructure/ -> Repo-Root -> frontend/public).
-# Existiert die Datei nicht (z. B. im frozen-Build), faellt die Kopfzeile sauber auf reinen
-# Titel-Text zurueck -- KEIN gezeichnetes Ersatz-Logo (Auftrag).
-_LOGO_PATH = os.path.normpath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "public", "cernis-logo-pdf.png")
+# Frozen-Build (PyInstaller): das Asset liegt ueber frontend/public -> frontend/dist gebundelt
+# als _MEIPASS/frontend-dist/cernis-logo-pdf.png (Spec: frontend/dist -> "frontend-dist"). Dev:
+# relativ zu diesem Modul (backend/infrastructure/ -> Repo-Root -> frontend/public). Die
+# Fallunterscheidung kapselt der gemeinsame Helfer resolve_bundle_path. Existiert die Datei nicht,
+# faellt die Kopfzeile sauber auf reinen Titel-Text zurueck -- KEIN gezeichnetes Ersatz-Logo
+# (Auftrag); im Normalfall MUSS das Logo jetzt aber gefunden werden.
+_LOGO_PATH = resolve_bundle_path(
+    frozen_relative=os.path.join("frontend-dist", "cernis-logo-pdf.png"),
+    dev_absolute=os.path.normpath(
+        os.path.join(
+            os.path.dirname(__file__), "..", "..", "frontend", "public", "cernis-logo-pdf.png"
+        )
+    ),
 )
 
 
@@ -2650,8 +2659,8 @@ def _draw_header_footer(canvas: object, doc: object, model: SecurityPdfModelLike
             mask="auto",
         )
         text_x = margin + logo_size + 4 * mm
-    # else: KEIN Ersatz-Logo -- nur der Titel-Text (TODO-Logo: Repo-Asset im frozen-Build
-    # nicht vorhanden; dann traegt die Kopfzeile bewusst nur den Titel).
+    # else: KEIN Ersatz-Logo -- nur der Titel-Text (fehlt das Asset ausnahmsweise, traegt die
+    # Kopfzeile bewusst nur den Titel; _LOGO_PATH loest frozen wie dev auf).
     c.setFillColor(_TEXT)  # type: ignore[attr-defined]
     c.setFont("Helvetica-Bold", 13)  # type: ignore[attr-defined]
     c.drawString(text_x, header_baseline, "Netzwerk-Sicherheitsbericht")  # type: ignore[attr-defined]
@@ -2703,7 +2712,8 @@ def _draw_manual_header_footer(canvas: object, doc: object, model: ManualPdfMode
             mask="auto",
         )
         text_x = margin + logo_size + 4 * mm
-    # else: KEIN Ersatz-Logo -- nur der Titel-Text (Repo-Asset im frozen-Build evtl. nicht da).
+    # else: KEIN Ersatz-Logo -- nur der Titel-Text (fehlt das Asset ausnahmsweise; _LOGO_PATH
+    # loest frozen wie dev auf).
     c.setFillColor(_TEXT)  # type: ignore[attr-defined]
     c.setFont("Helvetica-Bold", 13)  # type: ignore[attr-defined]
     c.drawString(text_x, header_baseline, model.title)  # type: ignore[attr-defined]
