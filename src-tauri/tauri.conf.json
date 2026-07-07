@@ -67,8 +67,7 @@
       "cernis-sniffd"
     ],
     "resources": [
-      "../scripts/install-bpf-permissions.sh",
-      "splash.html"
+      "../scripts/install-bpf-permissions.sh"
     ]
   }
 }

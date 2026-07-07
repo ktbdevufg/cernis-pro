@@ -7,7 +7,6 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
-use tauri::path::BaseDirectory;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
 const BACKEND_PORT: u16 = 8765;
@@ -475,8 +474,9 @@ fn configure_rendering() {
     }
 }
 
-/// Lokale file://-URL des gebuendelten Splash-HTML. Wird im setup gesetzt und
-/// beim Fenster-Schliessen wiederverwendet, um die Webview von der (dann toten)
+/// App-Protocol-URL des ueber frontendDist ausgelieferten Splash-HTML
+/// (tauri://localhost/splash.html auf Linux). Wird im setup gesetzt und beim
+/// Fenster-Schliessen wiederverwendet, um die Webview von der (dann toten)
 /// Backend-URL wegzulenken -> kein rohes "Connection refused" beim Beenden.
 fn splash_url() -> &'static OnceLock<String> {
     static SPLASH_URL: OnceLock<String> = OnceLock::new();
@@ -526,19 +526,15 @@ fn main() {
             _ => {}
         })
         .setup(move |app| {
-            // Splash-HTML als gebuendelte Resource aufloesen -> lokale file://-URL.
-            // So erscheint IMMER zuerst der Ladebildschirm, nie die rohe Backend-URL.
-            let splash_path = app
-                .path()
-                .resolve("splash.html", BaseDirectory::Resource)?;
-            let splash_file_url = format!("file://{}", splash_path.to_string_lossy());
-            let _ = splash_url().set(splash_file_url.clone());
-            log(&format!("Splash-Resource: {}", splash_file_url));
+            // Splash-HTML ueber das Tauri-App-Protocol laden (kommt via frontendDist
+            // aus public/). So erscheint IMMER zuerst der Ladebildschirm, nie die rohe
+            // Backend-URL -- und die Navigation window.location.href auf die Backend-URL
+            // ist vom App-Protocol-Origin aus erlaubt (anders als von file://).
+            // Fuer den CloseRequested-Handler die zugehoerige tauri://-URL merken.
+            let _ = splash_url().set("tauri://localhost/splash.html".to_string());
+            log("Splash via App-Protocol: splash.html");
 
-            let splash = splash_file_url
-                .parse()
-                .map(WebviewUrl::External)
-                .unwrap_or_else(|_| WebviewUrl::App("splash.html".into()));
+            let splash = WebviewUrl::App("splash.html".into());
 
             WebviewWindowBuilder::new(app, "main", splash)
                 .title("CERNIS PRO")
@@ -569,44 +565,12 @@ fn main() {
                 write_startup_status(&status);
 
                 if status.is_ready() {
+                    // Der Splash laeuft ueber das App-Protocol und navigiert nun SELBST
+                    // per window.location.href auf die Backend-URL (im backend-ready-
+                    // Listener bzw. beim /api/status-Poll). Rust meldet nur die
+                    // Bereitschaft via Event.
                     log("Backend bereit -> Event 'backend-ready'");
                     let _ = app_handle.emit("backend-ready", ());
-
-                    // Eigentliche Navigation macht jetzt Rust, nicht die HTML-Seite:
-                    // Der Splash laeuft als file://-Seite, WebKit blockiert dort
-                    // window.location.href auf http://127.0.0.1:8765. Deshalb lenken
-                    // wir die "main"-Webview direkt per navigate() auf die Backend-URL
-                    // (analog zur splash_url-Navigation im CloseRequested-Handler).
-                    // navigate() muss auf dem Main-/UI-Thread laufen -> run_on_main_thread.
-                    match BACKEND_URL.parse() {
-                        Ok(url) => {
-                            let nav_handle = app_handle.clone();
-                            let webview_handle = nav_handle.clone();
-                            let run = nav_handle.run_on_main_thread(move || {
-                                if let Some(webview) = webview_handle.get_webview_window("main") {
-                                    match webview.navigate(url) {
-                                        Ok(_) => log("Webview auf Backend-URL navigiert"),
-                                        Err(e) => log(&format!(
-                                            "WARN: Navigation zur Backend-URL fehlgeschlagen: {}",
-                                            e
-                                        )),
-                                    }
-                                } else {
-                                    log("WARN: 'main'-Webview fuer Navigation nicht gefunden");
-                                }
-                            });
-                            if let Err(e) = run {
-                                log(&format!(
-                                    "WARN: run_on_main_thread fuer Navigation fehlgeschlagen: {}",
-                                    e
-                                ));
-                            }
-                        }
-                        Err(e) => log(&format!(
-                            "WARN: BACKEND_URL nicht parsebar ({}): {}",
-                            BACKEND_URL, e
-                        )),
-                    }
                 } else {
                     log(&format!("Backend-Fehler {} -> Event 'backend-error'", status.code()));
                     let _ = app_handle.emit("backend-error", status.code());
