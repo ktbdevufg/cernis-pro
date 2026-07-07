@@ -118,10 +118,12 @@
    hierher). Schlanker als das settings__select: kleinere Schrift, weniger
    Padding, dezenter Rahmen — fügt sich neben Live-Punkt und Refresh-Button ein. */
 .traffic-list__interval {
-  padding: 2px 6px;
+  /* background-color (nicht background-Shorthand), damit der globale
+     Custom-Chevron erhalten bleibt; padding-right stellt den Pfeilplatz. */
+  padding: 2px 24px 2px 6px;
   font-size: 12px;
   color: var(--color-text-sec);
-  background: var(--color-bg);
+  background-color: var(--color-bg);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   cursor: pointer;

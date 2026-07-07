@@ -158,17 +158,20 @@
 
 /* Dropdown im Stil der übrigen Bedienelemente. */
 .settings__select {
-  padding: 6px 12px;
+  /* background-color (nicht das background-Shorthand), damit der globale
+     Custom-Chevron (background-image aus global.css) nicht zurückgesetzt wird.
+     padding-right auf 28px für den Pfeilplatz. */
+  padding: 6px 28px 6px 12px;
   font-size: 14px;
   color: var(--color-text);
-  background: var(--color-bg);
+  background-color: var(--color-bg);
   border: 1px solid var(--color-accent-border);
   border-radius: var(--radius-md);
   cursor: pointer;
 }
 
 .settings__select:hover {
-  background: var(--color-accent-bg);
+  background-color: var(--color-accent-bg);
 }
 
 .settings__select:focus-visible {

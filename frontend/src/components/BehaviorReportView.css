@@ -120,10 +120,12 @@
 }
 
 .behavior-report__aufgabe-select {
-  padding: 5px 10px;
+  padding: 5px 28px 5px 10px;
   font-size: 12px;
   color: var(--color-text);
-  background: var(--color-card);
+  /* background-color (nicht background-Shorthand), damit der globale
+     Custom-Chevron erhalten bleibt; padding-right stellt den Pfeilplatz. */
+  background-color: var(--color-card);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   cursor: pointer;

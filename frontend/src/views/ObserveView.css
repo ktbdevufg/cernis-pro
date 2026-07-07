@@ -152,21 +152,14 @@
 /* Interface-Dropdown: ruhige Card-Fläche im bestehenden Toolbar-Stil.
    appearance:none schaltet das native GTK-Widget ab, damit WebKit (installierte
    Linux/GTK-App) das Theme-Styling statt des hellen System-Hintergrunds nutzt;
-   sonst wird das Feld im Dunkelmodus weiss und unlesbar. Farben werden zusätzlich
-   explizit erzwungen. Da appearance:none den nativen Pfeil entfernt, kommt ein
-   eigener Chevron als Hintergrund-SVG (neutrales Grau, in Hell wie Dunkel lesbar);
-   padding-right schafft Platz, damit der Text nicht unter den Pfeil läuft. */
+   Nur noch observe-spezifische Eigenschaften: Breite, Rahmen, Padding, Schrift.
+   appearance:none, Farben, der Custom-Chevron und der disabled-Zustand kommen
+   jetzt aus der globalen select-Regel (styles/global.css) — hier bewusst NICHT
+   noch einmal gesetzt, damit kein zweiter Pfeil entsteht. Das rechte Padding
+   bleibt bei 28px, damit der Text nicht unter den (globalen) Pfeil läuft. */
 .observe__iface-select {
-  -webkit-appearance: none;
-  -moz-appearance: none;
-  appearance: none;
   padding: 6px 28px 6px 10px;
   font-size: 13px;
-  color: var(--color-text);
-  background-color: var(--color-card);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke='%23a0a0a0' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 4.5L6 8l3.5-3.5'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 10px center;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   max-width: 280px;
@@ -177,13 +170,8 @@
   outline-offset: 1px;
 }
 
-/* disabled explizit theme-konform halten: WebKit darf auch hier NICHT auf helles
-   Native-Styling zurückfallen. background-color/color gesetzt; opacity dimmt
-   gleichmässig auf dunklem Grund, statt weiss zu werden. */
+/* disabled: nur der observe-eigene Cursor; Farben/opacity kommen global. */
 .observe__iface-select:disabled {
-  background-color: var(--color-card);
-  color: var(--color-text);
-  opacity: 0.6;
   cursor: default;
 }
 

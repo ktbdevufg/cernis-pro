@@ -39,13 +39,15 @@ APP_VERSION = _lese_build_version()
 
 def display_version(version: str = APP_VERSION) -> str:
     """Anzeige-Form aus der internen Version: ``"2.0.0+x64deb.a1b2c3d"`` ->
-    ``"2.0.0 (x64deb.a1b2c3d)"``. Ohne Build-Metadaten (kein ``"+"``) bleibt sie
-    unveraendert (``"2.0.0"`` -> ``"2.0.0"``). Nach aussen/GUI = Anzeige-Form.
+    ``"2.0.0-x64deb.a1b2c3d"``. Das ``"+"`` der internen Form wird zum
+    Bindestrich -- KEINE Klammern, KEIN Leerzeichen. Ohne Build-Metadaten (kein
+    ``"+"``) bleibt sie unveraendert (``"2.0.0"`` -> ``"2.0.0"``). Nach
+    aussen/GUI = Anzeige-Form.
     """
     kern, trenner, metadaten = version.partition("+")
     if not trenner:
         return version
-    return f"{kern} ({metadaten})"
+    return f"{kern}-{metadaten}"
 
 
 class AppConfig(BaseSettings):

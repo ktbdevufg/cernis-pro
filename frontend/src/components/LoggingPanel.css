@@ -105,9 +105,16 @@
   padding: 7px 10px;
   font-size: 13px;
   color: var(--color-text);
-  background: var(--color-bg);
+  /* background-color statt background-Shorthand, sonst würde der globale
+     Custom-Chevron (background-image) beim select zurückgesetzt. */
+  background-color: var(--color-bg);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
+}
+
+/* Nur das select braucht rechts Platz für den globalen Chevron; das Input nicht. */
+.logging-feld__select {
+  padding-right: 28px;
 }
 
 .logging-feld__input:focus-visible,

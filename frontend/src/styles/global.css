@@ -51,17 +51,42 @@ button {
 }
 
 /*
- * Zentrale Basis für native <select>-Dropdowns: NUR Farben.
+ * Zentrale Basis für native <select>-Dropdowns: Farben + WebKit-Dunkelmodus-Fix.
  * Ohne sie nehmen ungestylte selects die hellen Browser-Defaultfarben —
- * im Dunkelmodus ergibt das ein weißes Feld auf dunklem UI (unlesbar).
- * Bewusst KEINE Layout-Eigenschaften (border, border-radius, width, appearance,
- * padding, font) global setzen: Das würde die intrinsische Breite/Darstellung
- * bestehender selects (z. B. .observe__iface-select in der Scan-Toolbar) stören.
- * Komponenten-eigene .*-select-Klassen ergänzen Rahmen/Breite/Padding selbst.
+ * im Dunkelmodus ergibt das ein weißes Feld auf dunklem UI (unlesbar), vor allem
+ * bei disabled. appearance:none schaltet das native GTK/WebKit-Styling ab; ein
+ * eigener Chevron (neutrales Grau, in Hell wie Dunkel lesbar) ersetzt den
+ * entfernten nativen Pfeil, padding-right schafft den Platz dafür.
+ *
+ * WICHTIG — bewusst KEINE feste width/max-width, KEIN border/border-radius global:
+ * das würde die intrinsische Breite/Darstellung bestehender selects sprengen
+ * (der Grund, warum global bisher NUR Farben standen). Nur appearance/Farben/
+ * Pfeil/padding-right sind global; Breite, Rahmen und übriges Padding bleiben
+ * bei den komponenten-eigenen .*-select-Klassen. Der Pfeil ist global über
+ * background-position robust rechts gesetzt, damit ein größeres komponenten-
+ * eigenes padding-right ihn nicht überdeckt.
  */
 select {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
   color: var(--color-text);
-  background: var(--color-card);
+  background-color: var(--color-card);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke='%23a0a0a0' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 4.5L6 8l3.5-3.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 28px;
+}
+
+/*
+ * disabled global theme-konform halten: WebKit darf auch hier NICHT auf helles
+ * Native-Styling zurückfallen. Farben explizit; opacity dimmt gleichmäßig auf
+ * dunklem Grund, statt weiß zu werden.
+ */
+select:disabled {
+  color: var(--color-text);
+  background-color: var(--color-card);
+  opacity: 0.6;
 }
 
 /*
