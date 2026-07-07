@@ -474,10 +474,11 @@ fn configure_rendering() {
     }
 }
 
-/// App-Protocol-URL des ueber frontendDist ausgelieferten Splash-HTML
-/// (tauri://localhost/splash.html auf Linux). Wird im setup gesetzt und beim
-/// Fenster-Schliessen wiederverwendet, um die Webview von der (dann toten)
-/// Backend-URL wegzulenken -> kein rohes "Connection refused" beim Beenden.
+/// App-Protocol-URL des lokal ueber frontendDist ausgelieferten Splash-HTML
+/// (tauri://localhost/splash.html auf Linux). Braucht kein Backend. Wird im
+/// setup gesetzt und beim Fenster-Schliessen wiederverwendet, um die Webview von
+/// der (dann sterbenden) Backend-http-URL auf diesen lokalen Splash zu lenken ->
+/// kein rohes "Connection refused" beim Beenden.
 fn splash_url() -> &'static OnceLock<String> {
     static SPLASH_URL: OnceLock<String> = OnceLock::new();
     &SPLASH_URL
@@ -526,17 +527,17 @@ fn main() {
             _ => {}
         })
         .setup(move |app| {
-            // Splash-HTML ueber das Tauri-App-Protocol laden (kommt via frontendDist
-            // aus public/). So erscheint IMMER zuerst der Ladebildschirm, nie die rohe
-            // Backend-URL -- und die Navigation window.location.href auf die Backend-URL
-            // ist vom App-Protocol-Origin aus erlaubt (anders als von file://).
-            // Fuer den CloseRequested-Handler die zugehoerige tauri://-URL merken.
+            // Fenster SOFORT auf dem Main-Thread erzeugen (setup laeuft auf dem
+            // Main-Thread) und zunaechst auf den lokalen App-Protocol-Splash zeigen.
+            // Dieser braucht KEIN Backend -> nie ein rohes Connection-refused-Bild.
+            // Fuer den CloseRequested-Handler die zugehoerige tauri://-URL merken;
+            // sie ist auch beim Beenden der sichere Zielort (Backend stirbt dann).
             let _ = splash_url().set("tauri://localhost/splash.html".to_string());
-            log("Splash via App-Protocol: splash.html");
+            log("Lokaler App-Protocol-Splash: splash.html");
 
             let splash = WebviewUrl::App("splash.html".into());
 
-            WebviewWindowBuilder::new(app, "main", splash)
+            let fenster = WebviewWindowBuilder::new(app, "main", splash)
                 .title("CERNIS PRO")
                 .inner_size(1600.0, 900.0)
                 .min_inner_size(1200.0, 700.0)
@@ -546,7 +547,7 @@ fn main() {
 
             // Backend erst NACH dem Fenster starten und im Hintergrund abwarten,
             // damit der Splash sofort sichtbar ist. Ergebnis -> Status-Datei
-            // (primaerer Signalweg, plugin-frei) + Tauri-Event an das Fenster.
+            // (plugin-freier Zweitweg) + native Navigation / Tauri-Event.
             let app_handle = app.handle().clone();
             thread::spawn(move || {
                 let status = match start_backend() {
@@ -565,13 +566,28 @@ fn main() {
                 write_startup_status(&status);
 
                 if status.is_ready() {
-                    // Der Splash laeuft ueber das App-Protocol und navigiert nun SELBST
-                    // per window.location.href auf die Backend-URL (im backend-ready-
-                    // Listener bzw. beim /api/status-Poll). Rust meldet nur die
-                    // Bereitschaft via Event.
-                    log("Backend bereit -> Event 'backend-ready'");
-                    let _ = app_handle.emit("backend-ready", ());
+                    // Erfolg: Die Webview NATIV (Rust-seitig, nicht per JS) auf den
+                    // vom Backend selbst ausgelieferten Splash lenken. navigate() geht
+                    // ueber den threadsicheren Dispatcher und darf aus diesem
+                    // Hintergrund-Thread aufgerufen werden (marshallt intern auf den
+                    // Main-Thread) -- anders als WebviewWindowBuilder::build(). Eine
+                    // native Navigation unterliegt NICHT der Cross-Origin-Sperre, die
+                    // WebKit einer JS-Navigation (window.location) von tauri:// auf
+                    // http:// auferlegt. Ab dann teilen Splash und App denselben
+                    // http-Origin, sodass der Splash same-origin auf "/" navigieren darf.
+                    let ziel = format!("{}/splash.html", BACKEND_URL);
+                    log(&format!("Backend bereit -> native Navigation auf {}", ziel));
+                    match ziel.parse() {
+                        Ok(url) => {
+                            if let Err(e) = fenster.navigate(url) {
+                                log(&format!("WARN: navigate auf http-Splash fehlgeschlagen: {}", e));
+                            }
+                        }
+                        Err(e) => log(&format!("WARN: http-Splash-URL nicht parsebar: {}", e)),
+                    }
                 } else {
+                    // Fehler: Es gibt kein Backend -> der lokale App-Splash MUSS
+                    // sichtbar bleiben. Fehlercode per Event an ihn schicken.
                     log(&format!("Backend-Fehler {} -> Event 'backend-error'", status.code()));
                     let _ = app_handle.emit("backend-error", status.code());
                 }

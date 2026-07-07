@@ -112,33 +112,31 @@
       fehlertext.classList.remove('hidden');
     }
 
-    // Erfolgsfall: Der Wechsel zur App kommt jetzt von der Rust-Seite
-    // (webview.navigate() auf die Backend-URL). Der Splash navigiert NICHT mehr
-    // selbst -- WebKit blockiert window.location.href von file:// auf
-    // http://127.0.0.1:8765. Diese Funktion markiert nur noch die erkannte
-    // Bereitschaft (fertig-Flag), damit der Fehlerfall danach nicht mehr greift.
+    // Erfolgsfall: Diese Seite wird im Ready-Fall vom Backend selbst ueber
+    // http://127.0.0.1:8765/splash.html ausgeliefert (Rust navigiert die Webview
+    // nativ dorthin). Splash und App teilen dann denselben http-Origin, daher ist
+    // die same-origin-Navigation auf "/" erlaubt (anders als tauri:// -> http://).
     function geheZurApp() {
       if (fertig) return;
       fertig = true;
-      // Keine Navigation hier -- Rust lenkt die ganze Webview weg.
+      window.location.href = '/';
     }
 
-    // 1) Primaerer Signalweg: Tauri-Event aus main.rs (backend-ready / backend-error).
-    //    withGlobalTauri stellt window.__TAURI__ bereit.
+    // 1) Fehler-Signalweg: Tauri-Event aus main.rs (backend-error). Greift auf dem
+    //    lokalen App-Protocol-Splash, der im Fehlerfall sichtbar bleibt.
+    //    withGlobalTauri stellt window.__TAURI__ bereit. KEIN backend-ready-Listener:
+    //    Der Erfolgsfall wird Rust-seitig per nativer navigate() zum http-Splash
+    //    gefahren; die same-origin-Navigation auf "/" macht dann der Poll unten.
     try {
       if (window.__TAURI__ && window.__TAURI__.event) {
-        window.__TAURI__.event.listen('backend-ready', function () {
-          geheZurApp();
-        });
         window.__TAURI__.event.listen('backend-error', function (evt) {
           zeigeFehler(evt && evt.payload ? evt.payload : '');
         });
       }
     } catch (e) {}
 
-    // 2) Reine Bereitschaftserkennung: selbst /api/status pollen. Bei HTTP 200
-    //    gilt das Backend als bereit (fertig-Flag). Die eigentliche Navigation
-    //    zur App macht Rust (webview.navigate); hier wird NICHT mehr navigiert.
+    // 2) Erfolgs-Signalweg auf dem http-Splash: /api/status pollen. Bei HTTP 200
+    //    gilt das Backend als bereit -> geheZurApp() navigiert same-origin auf "/".
     var attempts = 0;
     var check = setInterval(function () {
       if (fertig) { clearInterval(check); return; }
