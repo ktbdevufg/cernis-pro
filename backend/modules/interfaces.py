@@ -2,10 +2,16 @@
 import socket
 import subprocess
 import platform
+import os
 import re
 from dataclasses import dataclass, field, asdict
 from typing import Optional
 import ipaddress
+
+# Externe Kommandos (ip, netstat, ifconfig, route, ipconfig) werden mit erzwungener
+# C-Locale gestartet, weil lokalisierte Ausgaben (z.B. Zeit= statt time=) das Parsing
+# sonst still scheitern lassen.
+_C_LOCALE_ENV = {**os.environ, "LC_ALL": "C", "LANG": "C"}
 
 
 @dataclass
@@ -45,7 +51,8 @@ def _run(cmd: list[str]) -> str:
     try:
         result = subprocess.run(
             cmd, capture_output=True, timeout=5,
-            encoding="utf-8", errors="replace"
+            encoding="utf-8", errors="replace",
+            env=_C_LOCALE_ENV,
         )
         return result.stdout or ""
     except Exception:

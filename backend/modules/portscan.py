@@ -8,6 +8,10 @@ import platform
 import os
 from dataclasses import dataclass, field
 
+# nmap wird mit erzwungener C-Locale gestartet, weil lokalisierte Ausgaben (z.B.
+# Zeit= statt time=) das Parsing sonst still scheitern lassen.
+_C_LOCALE_ENV = {**os.environ, "LC_ALL": "C", "LANG": "C"}
+
 
 def _find_nmap() -> str:
     """Return path to nmap binary, searching common Windows install dirs."""
@@ -122,7 +126,7 @@ def scan_with_nmap(ip: str, port_spec: str = "T:1-1024,5353,5900,32400") -> Host
             "--host-timeout", "30s",
             ip
         ]
-        out = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace", timeout=45)
+        out = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace", timeout=45, env=_C_LOCALE_ENV)
         output = out.stdout
 
         # Parse open ports

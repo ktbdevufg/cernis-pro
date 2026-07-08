@@ -8,10 +8,16 @@ CERNIS PRO IPv6 Full Support
 import asyncio
 import socket
 import subprocess
+import os
 import re
 import platform
 from dataclasses import dataclass, field, asdict
 from typing import Optional
+
+# Externe Kommandos (ping6, ndp, netsh, ip -6 neigh) werden mit erzwungener C-Locale
+# gestartet, weil lokalisierte Ausgaben (z.B. Zeit= statt time=) das Parsing sonst
+# still scheitern lassen.
+_C_LOCALE_ENV = {**os.environ, "LC_ALL": "C", "LANG": "C"}
 
 
 @dataclass
@@ -82,6 +88,7 @@ async def ping6(addr: str, interface: str = "", timeout: float = 1.0) -> tuple[b
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
+            env=_C_LOCALE_ENV,
         )
         stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout + 1)
         output = stdout.decode("utf-8", errors="replace")
@@ -102,7 +109,7 @@ def get_ndp_table() -> dict[str, str]:
 
     try:
         if sys == "Darwin":
-            out = subprocess.run(["ndp", "-a"], capture_output=True, encoding="utf-8", errors="replace", timeout=3).stdout or ""
+            out = subprocess.run(["ndp", "-a"], capture_output=True, encoding="utf-8", errors="replace", timeout=3, env=_C_LOCALE_ENV).stdout or ""
             for line in out.splitlines():
                 m = re.match(r"^([\da-f:]+(?:%\w+)?)\s+([0-9a-f:]{17})", line, re.IGNORECASE)
                 if m:
@@ -110,13 +117,13 @@ def get_ndp_table() -> dict[str, str]:
                     mac = m.group(2).lower()
                     ndp[ip] = mac
         elif sys == "Windows":
-            out = subprocess.run(["netsh", "interface", "ipv6", "show", "neighbors"], capture_output=True, encoding="utf-8", errors="replace", timeout=5).stdout or ""
+            out = subprocess.run(["netsh", "interface", "ipv6", "show", "neighbors"], capture_output=True, encoding="utf-8", errors="replace", timeout=5, env=_C_LOCALE_ENV).stdout or ""
             for line in out.splitlines():
                 m = re.match(r"([\da-f:]+(?:%\d+)?)\s+([0-9a-f]{2}-[0-9a-f]{2}-[0-9a-f]{2}-[0-9a-f]{2}-[0-9a-f]{2}-[0-9a-f]{2})", line, re.IGNORECASE)
                 if m:
                     ndp[m.group(1).split("%")[0]] = m.group(2).replace("-",":").lower()
         else:
-            out = subprocess.run(["ip", "-6", "neigh"], capture_output=True, encoding="utf-8", errors="replace", timeout=3).stdout or ""
+            out = subprocess.run(["ip", "-6", "neigh"], capture_output=True, encoding="utf-8", errors="replace", timeout=3, env=_C_LOCALE_ENV).stdout or ""
             for line in out.splitlines():
                 parts = line.split()
                 if len(parts) >= 5:

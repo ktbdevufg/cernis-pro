@@ -51,6 +51,10 @@ from infrastructure.sniffd import _scapy
 
 _logger = structlog.get_logger(__name__)
 
+# ip wird mit erzwungener C-Locale gestartet, weil lokalisierte Ausgaben (z.B.
+# Zeit= statt time=) das Parsing sonst still scheitern lassen.
+_C_LOCALE_ENV = {**os.environ, "LC_ALL": "C", "LANG": "C"}
+
 # Alive-Probe-Fenster (Muster ScapyPacketSniffer): dem Sniffer-Thread kurz Zeit
 # lassen, sofort zu sterben -- Permission-Fehler schlagen instantan zu.
 _ALIVE_PROBE_SECS = 0.8
@@ -199,6 +203,7 @@ def _pick_iface() -> str:
             text=True,
             timeout=3,
             check=False,
+            env=_C_LOCALE_ENV,
         ).stdout
         match = re.search(r"\bdev\s+(\S+)", out)
         if match:

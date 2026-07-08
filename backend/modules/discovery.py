@@ -2,9 +2,15 @@
 import asyncio
 import subprocess
 import platform
+import os
 import re
 import ipaddress
 from dataclasses import dataclass
+
+# Externe Kommandos (ping, arp, ip neigh) werden mit erzwungener C-Locale gestartet,
+# weil lokalisierte Ausgaben (z.B. Zeit= statt time=) das Parsing sonst still
+# scheitern lassen.
+_C_LOCALE_ENV = {**os.environ, "LC_ALL": "C", "LANG": "C"}
 
 
 @dataclass
@@ -32,6 +38,7 @@ async def ping_host(ip: str, timeout: float = 1.0) -> DiscoveredHost:
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
+            env=_C_LOCALE_ENV,
         )
         stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout + 0.5)
         output = stdout.decode("utf-8", errors="replace")
@@ -60,20 +67,20 @@ def get_arp_table() -> dict[str, str]:
     arp_map = {}
 
     if system == "Darwin":
-        out = subprocess.run(["arp", "-a"], capture_output=True, encoding="utf-8", errors="replace").stdout or ""
+        out = subprocess.run(["arp", "-a"], capture_output=True, encoding="utf-8", errors="replace", env=_C_LOCALE_ENV).stdout or ""
         for line in out.splitlines():
             m = re.search(r"\((\d+\.\d+\.\d+\.\d+)\) at ([0-9a-f:]{17})", line)
             if m:
                 arp_map[m.group(1)] = m.group(2)
     elif system == "Windows":
-        out = subprocess.run(["arp", "-a"], capture_output=True, encoding="utf-8", errors="replace").stdout or ""
+        out = subprocess.run(["arp", "-a"], capture_output=True, encoding="utf-8", errors="replace", env=_C_LOCALE_ENV).stdout or ""
         for line in out.splitlines():
             m = re.search(r"(\d+\.\d+\.\d+\.\d+)\s+([0-9a-f]{2}-[0-9a-f]{2}-[0-9a-f]{2}-[0-9a-f]{2}-[0-9a-f]{2}-[0-9a-f]{2})", line, re.IGNORECASE)
             if m:
                 arp_map[m.group(1)] = m.group(2).replace("-", ":").lower()
     elif system == "Linux":
         try:
-            out = subprocess.run(["ip", "neigh"], capture_output=True, encoding="utf-8", errors="replace").stdout or ""
+            out = subprocess.run(["ip", "neigh"], capture_output=True, encoding="utf-8", errors="replace", env=_C_LOCALE_ENV).stdout or ""
             for line in out.splitlines():
                 parts = line.split()
                 if len(parts) >= 5 and re.match(r"\d+\.\d+\.\d+\.\d+", parts[0]):

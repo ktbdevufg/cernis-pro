@@ -21,10 +21,15 @@ sondern ein gueltiger Leer-Zustand (``""`` bzw. ``()``) -- Muster
 
 import asyncio
 import ipaddress
+import os
 import shutil
 import subprocess
 
 from infrastructure.resolver.errors import ResolverToolMissing
+
+# dig wird mit erzwungener C-Locale gestartet, weil lokalisierte Ausgaben (z.B.
+# Zeit= statt time=) das Parsing sonst still scheitern lassen.
+_C_LOCALE_ENV = {**os.environ, "LC_ALL": "C", "LANG": "C"}
 
 # Kurzer Standard-Timeout fuer die ``dig``-Aufrufe -- ein haengender dig darf den Request
 # nicht unbegrenzt blockieren. Eigene lokale Konstante (bewusst NICHT die diagnostics-
@@ -46,6 +51,7 @@ def _run_dig(*args: str) -> str:
             text=True,
             timeout=_DIG_TIMEOUT_SECS,
             check=False,
+            env=_C_LOCALE_ENV,
         )
     except subprocess.TimeoutExpired:
         return ""

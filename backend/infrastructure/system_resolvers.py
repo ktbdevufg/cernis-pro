@@ -24,8 +24,13 @@ application/api"). Die reinen Parse-Kerne sind herausgezogen und ohne Subprocess
 import asyncio
 import contextlib
 import ipaddress
+import os
 import shutil
 from pathlib import Path
+
+# resolvectl wird mit erzwungener C-Locale gestartet, weil lokalisierte Ausgaben (z.B.
+# Zeit= statt time=) das Parsing sonst still scheitern lassen.
+_C_LOCALE_ENV = {**os.environ, "LC_ALL": "C", "LANG": "C"}
 
 # Kurzer, harter Standard-Timeout (Sekunden) fuer den resolvectl-Subprocess: die Ermittlung
 # ist Beigabe, kein Muss -- sie darf den Aufrufer nie fesseln (< 1.5s, Auftrag).
@@ -154,6 +159,7 @@ async def _run_resolvectl(timeout: float) -> list[str]:
             "status",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
+            env=_C_LOCALE_ENV,
         )
         stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
     except (TimeoutError, OSError):

@@ -126,6 +126,11 @@ class ExternalCheckFailed(Exception):
         super().__init__(self.message)
 
 
+# Externe Kommandos (dig, traceroute, nmap) werden mit erzwungener C-Locale
+# gestartet, weil lokalisierte Ausgaben (z.B. Zeit= statt time=) das Parsing
+# sonst still scheitern lassen.
+_C_LOCALE_ENV = {**os.environ, "LC_ALL": "C", "LANG": "C"}
+
 # Kurzer Standard-Timeout fuer die Subprocess-Aufrufe -- ein haengender dig/traceroute
 # darf den Request nicht unbegrenzt blockieren. ``traceroute`` ist von Natur aus langsam
 # (mehrere Hops a mehrere Probes), darum grosszuegiger als dig.
@@ -511,6 +516,7 @@ def _run_dig(query: str, record_type: DnsRecordType) -> str:
             text=True,
             timeout=_DIG_TIMEOUT_SECS,
             check=False,
+            env=_C_LOCALE_ENV,
         )
     except subprocess.TimeoutExpired:
         return ""
@@ -546,6 +552,7 @@ def _run_traceroute(target: str, privileged: bool) -> str:
             text=True,
             timeout=_TRACEROUTE_TIMEOUT_SECS,
             check=False,
+            env=_C_LOCALE_ENV,
         )
     except subprocess.TimeoutExpired as exc:
         # Bis zum Timeout gesammelte Hops noch verwerten (ehrliche Teil-Sicht).
@@ -772,6 +779,7 @@ def _run_nmap_dhcp() -> str:
             text=True,
             timeout=_NMAP_DHCP_TIMEOUT_SECS,
             check=False,
+            env=_C_LOCALE_ENV,
         )
     except subprocess.TimeoutExpired as exc:
         partial = exc.stdout

@@ -6,6 +6,7 @@ Tracks WLAN / LAN / Internet independently using interface-bound pings.
 import asyncio
 import subprocess
 import platform
+import os
 import re
 import time
 import sqlite3
@@ -143,10 +144,16 @@ async def _ping_once(host: str, interface: str = "", timeout: float = 2.0) -> tu
         cmd = ["ping", "-c", "1", "-W", str(int(timeout)), "--", host]
 
     try:
+        # ping wird mit erzwungener C-Locale gestartet, weil lokalisierte
+        # ping-Ausgaben (z.B. Zeit= statt time= auf Fedora mit deutscher
+        # Locale) das RTT-Parsing sonst scheitern lassen und den Sentinel
+        # -1.0 liefern, obwohl der Host erreichbar ist.
+        ping_env = {**os.environ, "LC_ALL": "C", "LANG": "C"}
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
+            env=ping_env,
         )
         stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout + 1)
         output = stdout.decode("utf-8", errors="replace")

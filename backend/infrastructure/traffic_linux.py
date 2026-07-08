@@ -36,6 +36,7 @@ Self-contained stdlib + psutil -- kein ``modules``-Import (import-linter-Contrac
 """
 
 import asyncio
+import os
 import re
 import socket
 import subprocess
@@ -51,6 +52,10 @@ from domain.traffic import (
     make_socket_key,
     normalize_status,
 )
+
+# ss wird mit erzwungener C-Locale gestartet, weil lokalisierte Ausgaben (z.B.
+# Zeit= statt time=) das Parsing sonst still scheitern lassen.
+_C_LOCALE_ENV = {**os.environ, "LC_ALL": "C", "LANG": "C"}
 
 # psutil-``SocketKind`` -> Domaenen-L4. NUR TCP/UDP werden aufgenommen; andere
 # Socket-Typen (RAW/SEQPACKET o. Ae.) sind fuer die Per-App-Sicht uninteressant und
@@ -103,6 +108,7 @@ def _run(cmd: list[str]) -> str:
             timeout=5,
             encoding="utf-8",
             errors="replace",
+            env=_C_LOCALE_ENV,
         )
         return result.stdout or ""
     except Exception:

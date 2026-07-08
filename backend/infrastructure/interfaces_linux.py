@@ -29,10 +29,16 @@ importieren NICHT modules" bleibt unberuehrt.
 
 import asyncio
 import ipaddress
+import os
 import re
 import subprocess
 
 from domain.interfaces import NetworkInterface
+
+# Externe Kommandos (ip route/addr/link) werden mit erzwungener C-Locale gestartet,
+# weil lokalisierte Ausgaben (z.B. Zeit= statt time=) das Parsing sonst still
+# scheitern lassen.
+_C_LOCALE_ENV = {**os.environ, "LC_ALL": "C", "LANG": "C"}
 
 
 def _run(cmd: list[str]) -> str:
@@ -49,6 +55,7 @@ def _run(cmd: list[str]) -> str:
             timeout=5,
             encoding="utf-8",
             errors="replace",
+            env=_C_LOCALE_ENV,
         )
         return result.stdout or ""
     except Exception:
