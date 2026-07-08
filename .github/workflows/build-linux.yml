@@ -130,6 +130,21 @@ jobs:
               echo "OK: KEIN libibverbs in NEEDED"
             '
 
+      # Der Container laeuft als root, die im Container erzeugten Bundles
+      # gehoeren daher root. Der Artefakt-Upload laeuft als Runner-User und
+      # braucht Lesezugriff -- also die Besitzrechte der erzeugten Dateien im
+      # Container auf die vom Host uebergebene UID/GID des Runner-Users
+      # zuruecksetzen. Betroffen ist mindestens src-tauri/target/, dazu die
+      # Python-Build-Artefakte und node_modules.
+      - name: Besitzrechte der Bundle-Dateien auf Runner-User zuruecksetzen
+        run: |
+          docker run --rm \
+            -v "$PWD":/build \
+            -w /build \
+            cernis-build:debian13 \
+            bash -c "chown -R $(id -u):$(id -g) \
+              src-tauri/target backend/dist backend/build node_modules 2>/dev/null || true"
+
       - name: Bundle als Artefakt hochladen (deb + rpm + AppImage)
         uses: actions/upload-artifact@v4
         with:
