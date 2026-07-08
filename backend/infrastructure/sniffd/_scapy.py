@@ -48,20 +48,6 @@ try:
     )
 
     HAS_SCAPY = True
-
-    # use_pcap=False -> scapy nutzt auf Linux den nativen AF_PACKET-Socket
-    # (Kernel-BPF) statt libpcap fuer die Filter-Kompilierung. Noetig, weil im
-    # frozen Bundle keine libpcap-Anbindung vorhanden ist und die
-    # BPF-Filter-Kompilierung ueber libpcap sonst scheitert (Cannot compile
-    # filter). Defensiv gekapselt: fehlt das Attribut in einer scapy-Version,
-    # darf das weder crashen noch HAS_SCAPY zuruecksetzen.
-    try:
-        from scapy.config import conf as _scapy_conf
-
-        if hasattr(_scapy_conf, "use_pcap"):
-            _scapy_conf.use_pcap = False
-    except Exception:
-        pass
 except Exception:
     HAS_SCAPY = False
     DNS = ICMP = IP = TCP = UDP = AsyncSniffer = Ether = IPv6 = sniff = wrpcap = None
