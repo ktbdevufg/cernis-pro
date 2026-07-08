@@ -1,10 +1,20 @@
 name: Build Linux
 
-# Baut das verteilbare Linux-Paket (deb + AppImage) BEWUSST auf gesunder
-# GitHub-Hardware. Grund: die lokale VM produziert nicht-deterministische
-# PyInstaller-Crashes; auf ubuntu-latest laeuft die bestehende CI gruen.
-# Das Ergebnis (Bundle-Ordner) wird als herunterladbares Artefakt abgelegt.
-# build-linux.sh selbst bleibt unveraendert -- dieser Workflow ruft es nur auf.
+# Baut das verteilbare Linux-Paket (deb + rpm + AppImage) auf der Debian-13-
+# Werkbank. Grund: Ubuntus libpcap.so.0.8 ist gegen libibverbs.so.1 (RDMA)
+# gelinkt; Debian-Ziele haben libibverbs nicht. cernis-sniffd traegt cap_net_raw
+# via setcap und laeuft als AT_SECURE-Prozess -- glibc ignoriert dann
+# LD_LIBRARY_PATH, die mitgebundelte libibverbs ist unerreichbar, dlopen(libpcap)
+# scheitert ("libpcap is not available"). Ein Debian-13-Build bundelt eine
+# libpcap OHNE libibverbs-NEEDED und loest den SNI-Blocker.
+#
+# Container-Strategie: Das Image wird im Workflow aus der im Repo liegenden
+# Dockerfile.build.debian13 gebaut (docker build) und die Build-Schritte laufen
+# DARIN. Bewusst NICHT das container:-Feld von Actions mit einer im YAML
+# wiederholten Paketliste: das Dockerfile bleibt so die EINZIGE Quelle der
+# Wahrheit fuer Toolchain und System-Pakete (Node/Rust/uv/Python 3.12, libpcap,
+# file, desktop-file-utils, zsync). Kein Drift zwischen Dockerfile und Workflow.
+# build-linux.sh selbst bleibt unveraendert -- der Container ruft es nur auf.
 
 on:
   # Manueller Knopf (Actions-Tab) ...
@@ -25,51 +35,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      # System-Deps fuer build-linux.sh + Tauri. Auf dem GitHub-Runner mit sudo
-      # (anders als lokal, wo die Deps bereits installiert sind) -- hier korrekt.
-      # libpython3.12 liefert die Shared Library, die PyInstaller zum Bundeln braucht.
-      - name: System-Abhaengigkeiten installieren
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            nmap \
-            libcap2-bin \
-            libwebkit2gtk-4.1-dev \
-            libgtk-3-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libpcap0.8 \
-            libpcap0.8-dev \
-            patchelf \
-            libssl-dev \
-            pkg-config \
-            libpython3.12
-
-      - name: Node einrichten (LTS 20, npm-Cache)
-        uses: actions/setup-node@v5
-        with:
-          node-version: "20"
-          cache: "npm"
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: uv installieren (+ Download-Cache, gekeyt auf uv.lock)
-        uses: astral-sh/setup-uv@v8.1.0
-        with:
-          enable-cache: true
-          cache-dependency-glob: "uv.lock"
-
-      - name: Rust-Toolchain (fuer Tauri, stable)
-        uses: dtolnay/rust-toolchain@stable
-
-      # Dev-Gruppe zieht PyInstaller; --locked erzwingt, dass uv.lock zu
-      # pyproject passt (analog CI-Frische-Test).
-      - name: Python-Abhaengigkeiten installieren (inkl. Dev-Gruppe)
-        run: uv sync --locked --group dev
+      # Das Build-Image aus der repo-eigenen Dockerfile.build.debian13 bauen.
+      # Alle Toolchains (Node 20, Rust stable, uv, Python 3.12) und System-Deps
+      # (libpcap0.8-dev, file, desktop-file-utils, zsync, Tauri-GTK-Deps) sind
+      # bereits im Image -- deshalb entfallen setup-node / rust-toolchain /
+      # setup-uv und der separate System-Abhaengigkeiten-apt-Schritt.
+      - name: Build-Image bauen (Debian 13, Quelle der Wahrheit)
+        run: docker build -f Dockerfile.build.debian13 -t cernis-build:debian13 .
 
       # Build-Version zur BUILD-ZEIT als Python-Datei erzeugen. config.py liest
       # os.environ NICHT -- es importiert diese Datei. PyInstaller friert sie
       # mit ein, damit die installierte App die volle Version kennt (kein
       # Laufzeit-Env noetig). Plattform-Suffix dieses Workflows: x64deb.
+      # git laeuft auf dem Host (Runner), die Datei landet im ausgecheckten Repo
+      # und ist beim spaeteren Bind-Mount im Container sichtbar.
       - name: Build-Version erzeugen (_build_version.py)
         run: |
           SHORT_SHA=$(git rev-parse --short=7 HEAD)
@@ -81,10 +60,77 @@ jobs:
           BUILD_VERSION = "${BUILD_VERSION}"
           EOF
 
-      - name: Linux-Build (Frontend + Binaries + Tauri-Bundle)
-        run: bash build-linux.sh
+      # Den unveraenderten build-linux.sh IM Container ausfuehren. Das Repo wird
+      # nach /build gemountet, die erzeugten Bundles landen so wieder auf dem
+      # Host (fuer den Artefakt-Upload sichtbar). '-v /build/.venv' legt ein
+      # anonymes Volume ueber .venv -> der Container synchronisiert dort frisch
+      # (uv sync), ohne eine evtl. vorhandene Host-.venv zu beruehren.
+      - name: Linux-Build im Container (Frontend + Binaries + Tauri-Bundle)
+        run: |
+          docker run --rm \
+            -v "$PWD":/build \
+            -v /build/.venv \
+            -w /build \
+            cernis-build:debian13 \
+            bash -c '
+              set -e
+              echo "--- uv sync (Deps + .venv, inkl. Dev-Gruppe fuer PyInstaller) ---"
+              uv sync --locked --group dev
+              echo "--- build-linux.sh (unveraendert) ---"
+              bash build-linux.sh
+            '
 
-      - name: Bundle als Artefakt hochladen (deb + AppImage)
+      # Kernbeweis: verhindert, dass je wieder ein Bundle mit RDMA-gelinkter
+      # libpcap ausgeliefert wird. Das erzeugte deb wird entpackt, der enthaltene
+      # cernis-sniffd kurz gestartet (er entpackt sich als PyInstaller-onefile
+      # nach /tmp/_MEI...), dort libpcap.so.0.8 gesucht und per readelf -d
+      # geprueft, dass KEIN libibverbs in den NEEDED-Eintraegen steht. Schlaegt
+      # die Pruefung fehl, bricht der Workflow ab. Laeuft im selben Debian-Image
+      # (readelf/dpkg-deb vorhanden), Repo erneut nach /build gemountet.
+      - name: Verifikation -- gebundelte libpcap ohne libibverbs
+        run: |
+          docker run --rm \
+            -v "$PWD":/build \
+            -w /build \
+            cernis-build:debian13 \
+            bash -c '
+              set -e
+              TRIPLE="x86_64-unknown-linux-gnu"
+              BUNDLE="/build/src-tauri/target/$TRIPLE/release/bundle"
+              DEB=$(find "$BUNDLE/deb" -name "*.deb" -print -quit)
+              [ -n "$DEB" ] || { echo "FEHLER: kein deb gefunden"; exit 1; }
+              echo "deb: $DEB"
+
+              WORK=$(mktemp -d)
+              dpkg-deb -x "$DEB" "$WORK"
+              SNIFFD=$(find "$WORK" -name "cernis-sniffd" -type f -print -quit)
+              [ -n "$SNIFFD" ] || { echo "FEHLER: cernis-sniffd nicht im deb"; exit 1; }
+              chmod +x "$SNIFFD"
+
+              # onefile-sniffd starten; er entpackt sich nach TMPDIR/_MEI...
+              MEIROOT=$(mktemp -d)
+              TMPDIR="$MEIROOT" "$SNIFFD" >/tmp/sniffd.log 2>&1 &
+              PID=$!
+              LIB=""
+              for _ in $(seq 1 60); do
+                LIB=$(find "$MEIROOT" -name "libpcap.so.0.8" -print -quit 2>/dev/null || true)
+                [ -n "$LIB" ] && break
+                sleep 0.25
+              done
+              kill $PID 2>/dev/null || true
+              [ -n "$LIB" ] || { echo "FEHLER: libpcap.so.0.8 nicht im _MEI entpackt"; cat /tmp/sniffd.log; exit 1; }
+              echo "geprueft: $LIB"
+
+              echo "--- readelf -d NEEDED ---"
+              readelf -d "$LIB" | grep NEEDED || true
+              if readelf -d "$LIB" | grep -qi ibverbs; then
+                echo "FEHLER: libibverbs in NEEDED der gebundelten libpcap -- RDMA-gelinkt, SNI-Blocker!"
+                exit 1
+              fi
+              echo "OK: KEIN libibverbs in NEEDED"
+            '
+
+      - name: Bundle als Artefakt hochladen (deb + rpm + AppImage)
         uses: actions/upload-artifact@v4
         with:
           name: cernis-pro-linux-deb
