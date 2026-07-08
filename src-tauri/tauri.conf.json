@@ -58,7 +58,8 @@
           "net-tools",
           "traceroute",
           "psmisc",
-          "libpcap"
+          "libpcap",
+          "libcap"
         ],
         "preInstallScript": "rpm-preinst.sh",
         "postInstallScript": "rpm-postinst.sh"

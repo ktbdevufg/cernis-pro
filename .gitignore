@@ -48,6 +48,7 @@ desktop.ini
 npm-debug.log*
 src-tauri/gen/
 src-tauri/cernis-backend-*
+src-tauri/cernis-sniffd-*
 
 # Claude Code
 .claude/
