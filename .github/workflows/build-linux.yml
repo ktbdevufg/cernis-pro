@@ -46,13 +46,17 @@ jobs:
       # Build-Version zur BUILD-ZEIT als Python-Datei erzeugen. config.py liest
       # os.environ NICHT -- es importiert diese Datei. PyInstaller friert sie
       # mit ein, damit die installierte App die volle Version kennt (kein
-      # Laufzeit-Env noetig). Plattform-Suffix dieses Workflows: x64deb.
+      # Laufzeit-Env noetig). Der Suffix nennt nur die Architektur (x64), NICHT
+      # das Paketformat: ein Build erzeugt aus denselben Binaries deb, rpm und
+      # AppImage -- ein Format-Suffix waere bei zwei von drei Bundles falsch. Das
+      # Format sieht der Nutzer an der Dateiendung. Die Architektur bleibt drin,
+      # weil spaeter ARM-Builds dazukommen.
       # git laeuft auf dem Host (Runner), die Datei landet im ausgecheckten Repo
       # und ist beim spaeteren Bind-Mount im Container sichtbar.
       - name: Build-Version erzeugen (_build_version.py)
         run: |
           SHORT_SHA=$(git rev-parse --short=7 HEAD)
-          BUILD_VERSION="2.0.0+x64deb.${SHORT_SHA}"
+          BUILD_VERSION="2.0.0+x64.${SHORT_SHA}"
           echo "Build-Version: ${BUILD_VERSION}"
           cat > backend/infrastructure/_build_version.py <<EOF
           """Im CI erzeugte Build-Version. Nicht committet (siehe .gitignore)."""
@@ -148,6 +152,6 @@ jobs:
       - name: Bundle als Artefakt hochladen (deb + rpm + AppImage)
         uses: actions/upload-artifact@v4
         with:
-          name: cernis-pro-linux-deb
+          name: cernis-pro-linux-x64
           path: src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/
           if-no-files-found: error

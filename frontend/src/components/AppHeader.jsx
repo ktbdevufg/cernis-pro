@@ -17,7 +17,7 @@ import "./AppHeader.css";
 export default function AppHeader({ theme, onThemeChange, onOpenSettings, onOpenManual, onGoToLogging, onGoToOutbound, onGoToDnsWatch, onGoHome }) {
   const { t } = useTranslation();
 
-  // Echte Build-Version vom Backend (bereits Anzeige-Form, z. B. "2.0.0 (x64deb.<sha>)").
+  // Echte Build-Version vom Backend (bereits Anzeige-Form, z. B. "2.0.0-x64.<sha>").
   // Einmalig beim Mount geladen. Solange nichts geladen ist ODER der Aufruf
   // fehlschlaegt, bleibt version null und die Anzeige faellt unten auf den
   // i18n-Text t("app.version") zurueck (kein leerer/springender Zustand).

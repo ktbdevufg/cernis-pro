@@ -3766,7 +3766,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         import shutil
 
         return {
-            # Nach aussen/GUI -> Anzeige-Form ("2.0.0 (x64deb.a1b2c3d)").
+            # Nach aussen/GUI -> Anzeige-Form ("2.0.0-x64.a1b2c3d"). Der Suffix
+            # nennt nur die Architektur, kein Paketformat.
             "version": display_version(),
             "nmap": shutil.which("nmap") is not None,
             "scapy": importlib.util.find_spec("scapy") is not None,

@@ -9,7 +9,7 @@
 // auf seinen i18n-Fallback zurueckfallen.
 //
 // Wire-Form:
-//   GET  "/api/system/info" -> { version: "2.0.0 (x64deb.<sha>)", nmap, scapy }
+//   GET  "/api/system/info" -> { version: "2.0.0-x64.<sha>", nmap, scapy }
 //   POST "/api/open-url" Body { url } -> { ok: true } | { ok: false, error }
 
 import { apiGet, apiPost } from "./client.js";

@@ -14,7 +14,7 @@ def _lese_build_version() -> str:
     """Volle interne Version inkl. Build-Metadaten (SemVer-Build-Metadata).
 
     Im CI wird VOR dem Build ``infrastructure/_build_version.py`` mit einer
-    Konstante ``BUILD_VERSION`` erzeugt (z. B. ``"2.0.0+x64deb.a1b2c3d"``) und
+    Konstante ``BUILD_VERSION`` erzeugt (z. B. ``"2.0.0+x64.a1b2c3d"``) und
     von PyInstaller mit eingefroren -- damit ist die Build-Version in der
     installierten App verfuegbar, ohne dass zur Laufzeit eine Env gesetzt sein
     muss. Fehlt die Datei (Dev-Betrieb, nie committet), gilt der Fallback
@@ -32,14 +32,16 @@ def _lese_build_version() -> str:
     return str(BUILD_VERSION)
 
 
-# Volle interne Version. Enthaelt im CI-Build die SemVer-Build-Metadaten
-# ("2.0.0+x64deb.<sha>"), im Dev schlicht "2.0.0".
+# Volle interne Version. Enthaelt im CI-Build die SemVer-Build-Metadaten. Der
+# Suffix nennt nur die Architektur (x64), NICHT das Paketformat -- ein Build
+# erzeugt deb, rpm und AppImage aus denselben Binaries ("2.0.0+x64.<sha>"). Im
+# Dev schlicht "2.0.0".
 APP_VERSION = _lese_build_version()
 
 
 def display_version(version: str = APP_VERSION) -> str:
-    """Anzeige-Form aus der internen Version: ``"2.0.0+x64deb.a1b2c3d"`` ->
-    ``"2.0.0-x64deb.a1b2c3d"``. Das ``"+"`` der internen Form wird zum
+    """Anzeige-Form aus der internen Version: ``"2.0.0+x64.a1b2c3d"`` ->
+    ``"2.0.0-x64.a1b2c3d"``. Das ``"+"`` der internen Form wird zum
     Bindestrich -- KEINE Klammern, KEIN Leerzeichen. Ohne Build-Metadaten (kein
     ``"+"``) bleibt sie unveraendert (``"2.0.0"`` -> ``"2.0.0"``). Nach
     aussen/GUI = Anzeige-Form.
