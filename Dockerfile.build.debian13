@@ -90,6 +90,54 @@ RUN curl -LsSf https://astral.sh/uv/install.sh \
 # ------------------------------------------------------------
 RUN uv python install 3.12 && uv python find 3.12
 
+# ------------------------------------------------------------
+# AppImage-Bundler-Tools vorab in den Cache legen (429-Vermeidung)
+#
+# WARUM: Beim AppImage-Bundling laedt der tauri-bundler vier
+#   externe Hilfswerkzeuge (AppRun, linuxdeploy und die beiden
+#   linuxdeploy-Plugins gtk/gstreamer). Diese Downloads treffen
+#   GitHub-Release- und raw.githubusercontent-Endpunkte, die im
+#   CI sporadisch mit HTTP 429 (Rate-Limit) antworten und den
+#   Build dann hart abbrechen.
+#
+# WIE: Der Bundler prueft vor jedem Download, ob die Datei im
+#   tools_path bereits existiert (if !x.exists()) und ueberspringt
+#   den Download, wenn sie da ist. tools_path ist
+#   dirs::cache_dir()/tauri, und dirs::cache_dir() folgt XDG:
+#   $XDG_CACHE_HOME, sonst $HOME/.cache. Wir setzen XDG_CACHE_HOME
+#   fest auf /opt/cache -- damit ist der Bundler-Cache
+#   deterministisch /opt/cache/tauri, unabhaengig von HOME oder
+#   dem ausfuehrenden User. Legen wir die vier Tools hier ins
+#   Image, findet der eigentliche CI-Build sie vor und laedt
+#   nichts mehr extern. curl mit robustem Retry faengt einen
+#   sporadischen 429 bereits beim Image-Build ab.
+#
+# HINWEIS (ARM): Fuer kuenftige aarch64-Builds werden dieselben
+#   Tools mit aarch64-Namen benoetigt (AppRun-aarch64,
+#   linuxdeploy-aarch64.AppImage; die beiden Plugin-Skripte sind
+#   architekturunabhaengig). Das ist hier bewusst NICHT
+#   implementiert, nur als Hinweis vermerkt.
+# ------------------------------------------------------------
+ENV XDG_CACHE_HOME=/opt/cache
+RUN mkdir -p /opt/cache/tauri \
+    && curl -fSL --retry 5 --retry-delay 5 --retry-all-errors \
+        -o /opt/cache/tauri/AppRun-x86_64 \
+        https://github.com/tauri-apps/binary-releases/releases/download/apprun-old/AppRun-x86_64 \
+    && curl -fSL --retry 5 --retry-delay 5 --retry-all-errors \
+        -o /opt/cache/tauri/linuxdeploy-x86_64.AppImage \
+        https://github.com/tauri-apps/binary-releases/releases/download/linuxdeploy/linuxdeploy-x86_64.AppImage \
+    && curl -fSL --retry 5 --retry-delay 5 --retry-all-errors \
+        -o /opt/cache/tauri/linuxdeploy-plugin-gtk.sh \
+        https://raw.githubusercontent.com/tauri-apps/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh \
+    && curl -fSL --retry 5 --retry-delay 5 --retry-all-errors \
+        -o /opt/cache/tauri/linuxdeploy-plugin-gstreamer.sh \
+        https://raw.githubusercontent.com/tauri-apps/linuxdeploy-plugin-gstreamer/master/linuxdeploy-plugin-gstreamer.sh \
+    && chmod +x /opt/cache/tauri/AppRun-x86_64 \
+        /opt/cache/tauri/linuxdeploy-x86_64.AppImage \
+        /opt/cache/tauri/linuxdeploy-plugin-gtk.sh \
+        /opt/cache/tauri/linuxdeploy-plugin-gstreamer.sh \
+    && ls -l /opt/cache/tauri
+
 # Arbeitsverzeichnis: hierhin wird das Repo zur Laufzeit gemountet.
 WORKDIR /build
 
