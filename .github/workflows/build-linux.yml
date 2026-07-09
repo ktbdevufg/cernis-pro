@@ -31,6 +31,12 @@ on:
 jobs:
   build-linux:
     runs-on: ubuntu-latest
+    # Schreibrecht auf contents ist noetig, damit der Workflow bei v-Tags ein
+    # GitHub-Release anlegen und Assets hochladen darf. Bewusst auf Job-Ebene
+    # (nicht Workflow-Ebene) und nur dieses eine Recht -- minimale Rechte: die
+    # Branch-/Dispatch-Builds brauchen es nicht, schaden aber nicht.
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -149,9 +155,50 @@ jobs:
             bash -c "chown -R $(id -u):$(id -g) \
               src-tauri/target backend/dist backend/build node_modules 2>/dev/null || true"
 
+      # Ab hier Fallunterscheidung nach Trigger. Beide Faelle laufen ERST nach
+      # Verifikation und chown -- diese beiden Schritte oben sind unveraendert
+      # und gelten fuer beide Pfade gleichermassen.
+      #
+      # Fall a) v-Tag: NICHT als Actions-Artefakt hochladen (zaehlt gegen das
+      # 500-MB-Gratislimit und verfaellt), sondern als GitHub-Release-Asset
+      # veroeffentlichen. Release-Assets zaehlen nicht gegen das Limit und
+      # verfallen nicht.
+      #
+      # Werkzeugwahl: softprops/action-gh-release statt handgeschriebener
+      # gh-CLI-Aufrufe. Gruende: die Action legt ein fehlendes Release fuer den
+      # Tag idempotent selbst an (kein "gh release view || gh release create"
+      # noetig), haengt mehrere Dateien per Glob an und bietet mit
+      # fail_on_unmatched_files genau die geforderte Abbruch-bei-leerem-Glob-
+      # Semantik out of the box. Mit gh-CLI muesste all das von Hand in Shell
+      # nachgebaut werden (Existenzpruefung, Glob-Expansion, Fehlerabbruch) --
+      # mehr Code, mehr Wartung, mehr Fehlerquellen. Der GITHUB_TOKEN wird von
+      # der Action automatisch aus dem Job-Kontext genutzt (contents: write
+      # oben). Kein draft/prerelease, damit die Assets sofort verfuegbar sind.
+      - name: Release erstellen und Bundles als Assets anhaengen (nur v-Tags)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: CERNIS PRO ${{ github.ref_name }}
+          body: "Release ${{ github.ref_name }} -- Release-Notes werden separat gepflegt."
+          draft: false
+          prerelease: false
+          # fail_on_unmatched_files bricht ab, wenn ein Glob KEINE Datei findet.
+          # Damit erfuellt: das Release bleibt nicht still leer, wenn z.B. die
+          # AppImage fehlt -- der Schritt schlaegt fehl.
+          fail_on_unmatched_files: true
+          files: |
+            src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb
+            src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/rpm/*.rpm
+            src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
+
+      # Fall b) kein v-Tag (push auf rewrite/v2 oder workflow_dispatch): weiter
+      # als Actions-Artefakt wie bisher, aber retention-days auf 1 -- Test-
+      # Builds sollen sich nicht ansammeln und das 500-MB-Limit sprengen.
       - name: Bundle als Artefakt hochladen (deb + rpm + AppImage)
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         uses: actions/upload-artifact@v4
         with:
           name: cernis-pro-linux-x64
           path: src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/
           if-no-files-found: error
+          retention-days: 1
