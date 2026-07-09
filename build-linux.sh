@@ -12,7 +12,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$SCRIPT_DIR/backend"
 FRONTEND_DIR="$SCRIPT_DIR/frontend"
 TAURI_SRC="$SCRIPT_DIR/src-tauri"
-TRIPLE="x86_64-unknown-linux-gnu"
+TRIPLE="${CERNIS_BUILD_TRIPLE:-x86_64-unknown-linux-gnu}"
 
 # PyInstaller/altgraph zeigt bei der scapy-Modulanalyse einen nicht-
 # deterministischen Fehler ("Graph object does not support item assignment");
