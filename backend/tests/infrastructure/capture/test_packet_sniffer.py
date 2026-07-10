@@ -21,6 +21,7 @@ KEIN echter scapy/Raw-Socket/Subprozess in diesem Modul.
 
 import asyncio
 import queue
+import socket
 import threading
 from typing import Any
 
@@ -247,5 +248,9 @@ def test_check_permission_is_optimistic_none() -> None:
 
 
 def test_is_available_reflects_helper_entry_in_dev() -> None:
-    # dev-Umgebung: backend/sniffd.py existiert -> is_available() True.
-    assert ScapyPacketSniffer().is_available() is True
+    # dev-Umgebung mit tragender Plattform (Linux/macOS, AF_UNIX vorhanden):
+    # backend/sniffd.py existiert -> is_available() True. Auf Windows (kein AF_UNIX)
+    # meldet die Verfuegbarkeitspruefung ehrlich False, obwohl die Helfer-Binary
+    # existiert (W1: Npcap/AF_UNIX-Naht noch nicht tragbar) -- deshalb plattform-abhaengig.
+    expected = hasattr(socket, "AF_UNIX")
+    assert ScapyPacketSniffer().is_available() is expected

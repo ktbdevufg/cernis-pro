@@ -31,6 +31,7 @@ EHRLICHEN Fehlertext (kein Crash, keine stille Leer-Erfassung). Alle scapy-/Rech
 Fehler kommen als ERROR-Text vom Helfer und werden 1:1 durchgereicht.
 """
 
+import os
 import shutil
 import socket
 import subprocess
@@ -87,13 +88,81 @@ def _spawn_command(socket_path: str) -> list[str]:
     return [sys.executable, str(entry), socket_path]
 
 
+def sniffd_platform_supported() -> tuple[bool, str]:
+    """``(ok, marker)`` -- traegt die Sniff-Naht auf DIESER Plattform grundsaetzlich?
+
+    ``ok=True, marker=""`` wenn tragbar (Linux/macOS: AF_UNIX vorhanden). Sonst
+    ``ok=False`` mit stabilem Marker-String fuer den API-Layer.
+
+    Windows-Zweig (``hasattr(socket, "AF_UNIX")`` False): Die Sniff-Familie
+    (SNI/pcap/LLDP) braucht Npcap FUER die Rohpaket-Erfassung UND die AF_UNIX-IPC-
+    Naht zum Helfer. Beides ist auf Windows in W1 noch nicht tragbar:
+    * Npcap fehlt -> ``"NPCAP_MISSING"`` (ohne Treiber kein Sniffing).
+    * Npcap da, aber kein AF_UNIX -> ``"WINDOWS_IPC_UNSUPPORTED"``. Auch mit Npcap
+      bleibt die Naht in W1 unnutzbar, weil die AF_UNIX-Helfer-IPC noch NICHT auf
+      Windows Named Pipes portiert ist (das ist Aufgabe W2). Darum sind BEIDE
+      Windows-Faelle ``ok=False``.
+    """
+    if not hasattr(socket, "AF_UNIX"):
+        # Windows: Npcap ueber drei Stufen pruefen (erste positive genuegt).
+        # winreg/ctypes.util lokal importieren, damit Linux/macOS sie nie laden.
+        import ctypes.util
+
+        npcap = False
+        try:
+            import winreg
+
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Npcap"):
+                npcap = True
+        except OSError:
+            pass  # Registry-Schluessel fehlt -- naechste Stufe pruefen.
+
+        if not npcap:
+            driver = os.path.join(
+                os.environ.get("WINDIR", "C:\\Windows"),
+                "System32",
+                "Npcap",
+                "npcap.sys",
+            )
+            if os.path.exists(driver):
+                npcap = True
+
+        if not npcap and ctypes.util.find_library("wpcap") is not None:
+            npcap = True
+
+        if not npcap:
+            return (False, "NPCAP_MISSING")
+        return (False, "WINDOWS_IPC_UNSUPPORTED")
+
+    # Linux/macOS: AF_UNIX vorhanden -> Naht grundsaetzlich tragbar.
+    return (True, "")
+
+
+def sniffd_unavailable_reason() -> str:
+    """Marker aus ``sniffd_platform_supported()`` bei nicht getragener Plattform, sonst ``""``.
+
+    Der API-Layer haengt diesen Marker spaeter an ``permission_error`` an (in diesem
+    Auftrag NICHT verdrahtet). Auf Linux/macOS immer ``""``.
+    """
+    ok, marker = sniffd_platform_supported()
+    return "" if ok else marker
+
+
 def helper_entry_exists() -> bool:
     """``True``, wenn der Helfer-Einstieg (frozen-Binary bzw. dev-``sniffd.py``) existiert.
 
     Reiner Pfad-Check fuer den optimistischen Verfuegbarkeits-Check der Adapter
     (``is_available``). Sagt NICHTS ueber Rechte/scapy aus -- das prueft erst der
     echte Start ueber die ERROR-Naht des Helfers.
+
+    ZUERST ``sniffd_platform_supported()``: traegt die Plattform grundsaetzlich nicht
+    (Windows in W1), ist der Helfer trotz existierender Binary NICHT nutzbar -> ``False``
+    (ehrlich statt faelschlich "verfuegbar"). Der Datei-Existenz-Check laeuft nur, wenn
+    die Plattform traegt (Linux/macOS: Verhalten unveraendert, ``ok=True``).
     """
+    ok, _ = sniffd_platform_supported()
+    if not ok:
+        return False
     cmd = _spawn_command("")
     if _is_frozen():
         return Path(cmd[0]).exists()

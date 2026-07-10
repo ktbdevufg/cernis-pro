@@ -15,6 +15,7 @@ KEIN echter scapy/Raw-Socket, KEIN echter Subprozess in diesem Modul.
 """
 
 import os
+import socket
 import time
 
 import pytest
@@ -230,7 +231,10 @@ def test_check_permission_is_optimistic_none() -> None:
 
 
 def test_is_available_reflects_helper_entry_in_dev() -> None:
-    """In der dev-Umgebung existiert ``backend/sniffd.py`` -> ``is_available()`` True.
-    Reiner Pfad-Verfuegbarkeits-Check (scapy lebt jetzt im Helfer, ohne Spawn nicht
-    pruefbar)."""
-    assert ScapySniSniffer(channel_factory=_FakeChannel).is_available() is True
+    """In der dev-Umgebung auf tragender Plattform (Linux/macOS, AF_UNIX vorhanden)
+    existiert ``backend/sniffd.py`` -> ``is_available()`` True. Reiner Pfad-
+    Verfuegbarkeits-Check (scapy lebt jetzt im Helfer, ohne Spawn nicht pruefbar).
+    Auf Windows (kein AF_UNIX) meldet die Pruefung ehrlich False, obwohl die Helfer-
+    Binary existiert (W1: Npcap/AF_UNIX-Naht noch nicht tragbar) -- plattform-abhaengig."""
+    expected = hasattr(socket, "AF_UNIX")
+    assert ScapySniSniffer(channel_factory=_FakeChannel).is_available() is expected
