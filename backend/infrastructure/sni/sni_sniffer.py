@@ -45,6 +45,7 @@ from domain.sni import ObservedSni, match_snapshot
 from infrastructure.sni.channel import SniffHelperChannel
 from infrastructure.sni.errors import SniError, SniPermissionError
 from infrastructure.sniffd_client import SniHelperClient, helper_entry_exists
+from infrastructure.sniffd_client.base import sniffd_unavailable_reason
 
 _logger = structlog.get_logger(__name__)
 
@@ -305,20 +306,30 @@ class ScapySniSniffer:
         return result
 
     def check_permission(self) -> str | None:
-        """Optimistischer Verfuegbarkeits-Check -- gibt ``None`` zurueck (best practice B).
+        """Plattform-Marker (Vorrang) sonst optimistischer Check -> ``None`` (best practice B).
+
+        W1 (Windows-Ausgrauung): Traegt die Plattform die Sniff-Naht grundsaetzlich NICHT
+        (Windows ohne Npcap bzw. ohne AF_UNIX-IPC), liefert ``sniffd_unavailable_reason()``
+        einen stabilen Marker-String (``NPCAP_MISSING`` / ``WINDOWS_IPC_UNSUPPORTED``).
+        Dieser Marker hat VORRANG und wird als ``permission_error`` durchgereicht -- der
+        api-Rand/Use-Case bleiben unveraendert, das Frontend graut die Funktion ehrlich
+        aus. Auf Linux/macOS ist der Marker ``""`` -> unveraendertes Verhalten.
 
         ETAPPE 2 / Privilege-Separation: Das Backend traegt kuenftig KEIN ``CAP_NET_RAW``
         mehr (das traegt allein der Helfer ``cernis-sniffd``). Eine Backend-seitige
         ``AF_PACKET``-Raw-Socket-Probe wuerde darum faelschlich "keine Rechte" melden,
         obwohl der Helfer sehr wohl sniffen darf. Daher KEINE Backend-Probe mehr:
 
-        Dieser Check ist optimistisch und gibt ``None`` zurueck (= "Sniff moeglich"). Die
-        ECHTE Rechtepruefung passiert beim ``start()`` ueber die ERROR-Naht des Helfers
-        (``check_raw_permission`` LAEUFT IM HELFER, der das Recht wirklich hat) -- ein
-        echter Rechte-Fehler kommt dann als ``SniError`` aus ``start()`` heraus. Damit
-        bleibt die 403-/503-Naht ehrlich: sie feuert genau dann, wenn der Helfer den
+        Ohne Marker ist der Check optimistisch und gibt ``None`` zurueck (= "Sniff
+        moeglich"). Die ECHTE Rechtepruefung passiert beim ``start()`` ueber die ERROR-Naht
+        des Helfers (``check_raw_permission`` LAEUFT IM HELFER, der das Recht wirklich hat)
+        -- ein echter Rechte-Fehler kommt dann als ``SniError`` aus ``start()`` heraus.
+        Damit bleibt die 403-/503-Naht ehrlich: sie feuert genau dann, wenn der Helfer den
         Sniff ablehnt, nicht spekulativ aus dem rechtelosen Backend.
         """
+        marker = sniffd_unavailable_reason()
+        if marker:
+            return marker
         return None
 
     def is_available(self) -> bool:

@@ -16,12 +16,22 @@ import { useTranslation } from "react-i18next";
 
 import { fetchOutboundContacts } from "../api/outbound.js";
 import { matchContacts } from "../api/blocklist.js";
-import { fetchSniMap } from "../api/sni.js";
+import { fetchSniMap, fetchSniStatus } from "../api/sni.js";
 import { fetchSettings, updateSetting } from "../api/settings.js";
 import { useSni } from "../hooks/useSni.js";
+import NpcapDialog from "./NpcapDialog.jsx";
 import OutboundRecordingPanel from "./OutboundRecordingPanel.jsx";
 import OutboundConsentDialog from "./OutboundConsentDialog.jsx";
 import "./OutboundView.css";
+
+// Windows-Marker der Sniff-Verfügbarkeit (aus permission_error, siehe Backend
+// sniffd_platform_supported). Trägt permissionError einen davon, ist die Sniff-
+// Familie auf dieser Plattform grundsätzlich nicht nutzbar -> Ausgrau-Hinweis.
+const NPCAP_MARKER = new Set(["NPCAP_MISSING", "WINDOWS_IPC_UNSUPPORTED"]);
+
+function istNpcapMarker(marker) {
+  return typeof marker === "string" && NPCAP_MARKER.has(marker);
+}
 
 // Reihenfolge/Erlaubte Gruppen der Blocklist-Badges. tracker_ads zuerst (häufiger,
 // harmloser), threat zuletzt (zurückhaltend hervorgehoben). Unbekannte Gruppen-
@@ -256,6 +266,12 @@ export default function OutboundView() {
   // Ob der Threat-Filter aktiv ist (nur Gegenstellen auf Threat-Listen zeigen).
   const [threatGefiltert, setThreatGefiltert] = useState(false);
 
+  // Windows-Marker aus dem SNI-Status (permissionError). Ist er einer der beiden
+  // Npcap-Marker, ersetzt der Ausgrau-Block die Startphasen-/Startfehler-Hinweise.
+  const [sniPermMarker, setSniPermMarker] = useState(null);
+  // Offener NpcapDialog (Marker-String) oder null. Mount/Unmount wie bei Dialogen.
+  const [npcapDialogMarker, setNpcapDialogMarker] = useState(null);
+
   // Geteilter SNI-Lifecycle-Hook: real gestartet beim ERSTEN acquire, real
   // gestoppt erst beim LETZTEN release (Reference-Count). running/starting/error
   // spiegeln den globalen Sniffer-Zustand.
@@ -334,6 +350,16 @@ export default function OutboundView() {
       release();
     };
   }, [consent, acquire, release]);
+
+  // permissionError-Marker beim Mount holen: trägt er einen Windows-Marker, ist
+  // der Sniff auf dieser Plattform grundsätzlich nicht nutzbar -> der Ausgrau-
+  // Block ersetzt die Startphasen-/Startfehler-Hinweise. fetchSniStatus wirft
+  // (kein still-Fallback); tolerant fangen, damit ein Patzer die View nicht kippt.
+  useEffect(() => {
+    fetchSniStatus()
+      .then((s) => setSniPermMarker(s.permissionError ?? null))
+      .catch(() => {});
+  }, []);
 
   // SNI-Map-Anreicherung: läuft der Sniffer, einmal die Map remote_ip -> hostname
   // holen (fetchSniMap wirft nie). Läuft er nicht, die Map leeren. Bewusst KEIN
@@ -501,6 +527,15 @@ export default function OutboundView() {
         <OutboundConsentDialog onGrant={handleGrant} onDeny={handleDeny} />
       )}
 
+      {/* NpcapDialog: marker-abhängiger Erklär-/Download-Dialog. Mount/Unmount
+          über den State (npcapDialogMarker); onClose setzt ihn zurück. */}
+      {npcapDialogMarker && (
+        <NpcapDialog
+          marker={npcapDialogMarker}
+          onClose={() => setNpcapDialogMarker(null)}
+        />
+      )}
+
       {/* Ehrlicher host_scope-Banner: nur bei "local_host". Bei anderem/leerem
           Wert weglassen (S3-ehrlich). Erweitert um zwei ehrliche dynamische Teile:
           (a) Anzahl der aktuell SICHTBAREN Aussenkontakte (nach Lokale-Filter),
@@ -553,8 +588,36 @@ export default function OutboundView() {
         </div>
       )}
 
-      {/* SNI-Startphase: kurzer, ruhiger Lade-Hinweis, bis der Helfer läuft. */}
-      {consent === "granted" && sniStartet && (
+      {/* Npcap-Ausgrau-Block: trägt der SNI-Status einen Windows-Marker (Npcap
+          fehlt / IPC noch nicht portiert), ist der Sniff auf dieser Plattform
+          grundsätzlich nicht nutzbar. Dann STATT der Startphasen-/Startfehler-
+          Hinweise ein ehrlicher Ausgrau-Hinweis. Marker-abhängig wie der Dialog:
+          NPCAP_MISSING -> Hinweistext + Button (öffnet NpcapDialog zum Download);
+          WINDOWS_IPC_UNSUPPORTED -> IPC-Text OHNE Button (Npcap ist da, der Dialog-
+          Aufruf ergäbe keinen Sinn). Nur bei erteilter Einwilligung (konsistent
+          mit den SNI-Blöcken). */}
+      {consent === "granted" && istNpcapMarker(sniPermMarker) && (
+        <div className="outbound__hinweis" role="note">
+          <span className="outbound__hinweis-text">
+            {sniPermMarker === "WINDOWS_IPC_UNSUPPORTED"
+              ? t("npcap.inlineHintIpc")
+              : t("npcap.inlineHint")}
+          </span>
+          {sniPermMarker !== "WINDOWS_IPC_UNSUPPORTED" && (
+            <button
+              type="button"
+              className="outbound__hinweis-button"
+              onClick={() => setNpcapDialogMarker(sniPermMarker)}
+            >
+              {t("npcap.installBtn")}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* SNI-Startphase: kurzer, ruhiger Lade-Hinweis, bis der Helfer läuft.
+          Entfällt bei aktivem Npcap-Marker (dann greift der Ausgrau-Block). */}
+      {consent === "granted" && !istNpcapMarker(sniPermMarker) && sniStartet && (
         <div className="outbound__hinweis" role="note">
           <span className="outbound__hinweis-text">
             {t("beobachten.outbound.sni.starting")}
@@ -563,8 +626,9 @@ export default function OutboundView() {
       )}
 
       {/* Start-Fehler der SNI-Beobachtung: ruhiger Hinweis (Stil Ladefehler),
-          nur bei erteilter Einwilligung und tatsächlichem Fehler. */}
-      {consent === "granted" && sniError && (
+          nur bei erteilter Einwilligung und tatsächlichem Fehler. Entfällt bei
+          aktivem Npcap-Marker (der Ausgrau-Block erklärt die Ursache ehrlicher). */}
+      {consent === "granted" && !istNpcapMarker(sniPermMarker) && sniError && (
         <div className="outbound__hinweis" role="note">
           <span className="outbound__hinweis-title">
             {t("beobachten.traffic.permissionTitle")}
