@@ -94,7 +94,7 @@ def sniffd_platform_supported() -> tuple[bool, str]:
     ``ok=True, marker=""`` wenn tragbar (Linux/macOS: AF_UNIX vorhanden). Sonst
     ``ok=False`` mit stabilem Marker-String fuer den API-Layer.
 
-    Windows-Zweig (``hasattr(socket, "AF_UNIX")`` False): Die Sniff-Familie
+    Windows-Zweig (``sys.platform == "win32"``): Die Sniff-Familie
     (SNI/pcap/LLDP) braucht Npcap FUER die Rohpaket-Erfassung UND die AF_UNIX-IPC-
     Naht zum Helfer. Beides ist auf Windows in W1 noch nicht tragbar:
     * Npcap fehlt -> ``"NPCAP_MISSING"`` (ohne Treiber kein Sniffing).
@@ -103,15 +103,20 @@ def sniffd_platform_supported() -> tuple[bool, str]:
       Windows Named Pipes portiert ist (das ist Aufgabe W2). Darum sind BEIDE
       Windows-Faelle ``ok=False``.
     """
-    if not hasattr(socket, "AF_UNIX"):
+    # Plattform-Weiche ueber ``sys.platform == "win32"``: DIESEN Guard wertet mypy
+    # STATISCH aus (anders als ``hasattr(socket, "AF_UNIX")``). Nur so aktiviert mypy
+    # die Windows-``winreg``-Stubs im Windows-Zweig und behandelt ihn auf Linux/macOS
+    # als unerreichbar -- die frueheren ``winreg``-``attr-defined``-Fehler auf dem
+    # Linux-Runner entfallen dadurch. Laufzeit-Semantik bleibt identisch: ``win32``
+    # deckt sich mit dem alten ``not hasattr(socket, "AF_UNIX")``-Zweig.
+    if sys.platform == "win32":
         # Windows: Npcap ueber drei Stufen pruefen (erste positive genuegt).
         # winreg/ctypes.util lokal importieren, damit Linux/macOS sie nie laden.
         import ctypes.util
+        import winreg
 
         npcap = False
         try:
-            import winreg
-
             with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Npcap"):
                 npcap = True
         except OSError:

@@ -224,10 +224,18 @@ def test_stop_idempotent_without_sniff() -> None:
 def test_check_permission_is_optimistic_none() -> None:
     """ETAPPE-2-(B)-Semantik: ``check_permission`` macht KEINE Backend-Raw-Socket-Probe
     mehr (das Backend hat kuenftig kein CAP_NET_RAW -- eine Probe wuerde faelschlich
-    "keine Rechte" melden). Sie ist optimistisch ``None``; der echte Rechte-Fehler kommt
-    beim ``start()`` ueber die ERROR-Naht des Helfers. Ersetzt den alten Test der
-    AF_PACKET-Probe-Semantik."""
-    assert ScapySniSniffer(channel_factory=_FakeChannel).check_permission() is None
+    "keine Rechte" melden). Auf tragender Plattform (Linux/macOS, AF_UNIX vorhanden) ist
+    sie optimistisch ``None``; der echte Rechte-Fehler kommt beim ``start()`` ueber die
+    ERROR-Naht des Helfers. Ersetzt den alten Test der AF_PACKET-Probe-Semantik.
+    Auf Windows (kein AF_UNIX) hat der Plattform-Marker Vorrang (``sniffd_unavailable_reason``
+    -> ``WINDOWS_IPC_UNSUPPORTED`` bzw. ``NPCAP_MISSING``) -> nicht ``None``, damit das
+    Frontend die Funktion ehrlich ausgraut (W1) -- plattform-abhaengig, analog zum
+    ``is_available``-Test."""
+    result = ScapySniSniffer(channel_factory=_FakeChannel).check_permission()
+    if hasattr(socket, "AF_UNIX"):
+        assert result is None
+    else:
+        assert result is not None
 
 
 def test_is_available_reflects_helper_entry_in_dev() -> None:
