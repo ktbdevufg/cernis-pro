@@ -45,7 +45,10 @@ class ListInterfaces:
         enriched = [
             replace(
                 iface,
-                type=classify_type(iface.name),
+                # Einen vom Adapter bereits klassifizierten Typ (!= unknown, z. B.
+                # Windows via IfType) ERHALTEN; nur einen noch unbestimmten Typ
+                # (unknown) ueber die namensbasierte classify_type nachbestimmen.
+                type=iface.type if iface.type != "unknown" else classify_type(iface.name),
                 status=classify_status(iface.is_up, iface.ipv4 is not None),
             )
             for iface in raw

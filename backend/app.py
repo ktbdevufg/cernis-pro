@@ -697,7 +697,19 @@ from infrastructure.dns_watch_acknowledgements_db import (
 )
 from infrastructure.export_pdf import ReportlabRenderer
 from infrastructure.http_guard import is_origin_allowed
-from infrastructure.interfaces_linux import InterfaceDiscoveryAdapter
+
+# Plattform-Weiche fuer den Interface-Discovery-Adapter. sys.platform (nicht hasattr),
+# weil mypy --strict den Zweig statisch auswertet und so den plattformspezifischen
+# ctypes-Code des Windows-Adapters nur unter win32 typprueft -- ein hasattr-Guard
+# bliebe fuer mypy beidseitig sichtbar und wuerde die Linux-CI brechen.
+if sys.platform == "win32":
+    from infrastructure.interfaces_windows import (
+        InterfaceDiscoveryAdapter as InterfaceDiscoveryAdapter,
+    )
+else:
+    from infrastructure.interfaces_linux import (
+        InterfaceDiscoveryAdapter as InterfaceDiscoveryAdapter,
+    )
 from infrastructure.logging import configure_logging
 from infrastructure.metrics import SqliteMetricsReader
 from infrastructure.monitoring import (

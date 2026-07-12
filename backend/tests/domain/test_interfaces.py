@@ -12,6 +12,7 @@ from domain.interfaces import (
     NetworkInterface,
     classify_status,
     classify_type,
+    classify_type_from_if_type,
     mark_primary,
     select_primary,
 )
@@ -78,6 +79,38 @@ def test_classify_type_no_false_match_lo_vs_ethernet() -> None:
     assert classify_type("lo") == "loopback"
     # "lo"-Praefix matcht NUR Namen, die mit "lo" beginnen.
     assert classify_type("eth_lo") == "ethernet"
+
+
+# ── classify_type_from_if_type: numerischer IANA-ifType (Windows-Quelle) ──────
+
+
+def test_classify_type_from_if_type_ethernet() -> None:
+    assert classify_type_from_if_type(6) == "ethernet"
+
+
+def test_classify_type_from_if_type_wifi() -> None:
+    assert classify_type_from_if_type(71) == "wifi"
+
+
+def test_classify_type_from_if_type_loopback() -> None:
+    assert classify_type_from_if_type(24) == "loopback"
+
+
+def test_classify_type_from_if_type_vpn() -> None:
+    assert classify_type_from_if_type(131) == "vpn"
+
+
+def test_classify_type_from_if_type_bridge() -> None:
+    assert classify_type_from_if_type(209) == "bridge"
+
+
+def test_classify_type_from_if_type_virtual() -> None:
+    assert classify_type_from_if_type(53) == "virtual"
+
+
+def test_classify_type_from_if_type_unknown() -> None:
+    # Nicht abgebildeter ifType (z. B. 1 = other) -> unknown.
+    assert classify_type_from_if_type(1) == "unknown"
 
 
 # ── classify_status: alle drei Pfade ─────────────────────────────────────────

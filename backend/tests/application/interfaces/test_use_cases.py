@@ -56,6 +56,29 @@ def test_list_interfaces_enriches_type_and_status_and_marks_primary() -> None:
     assert by_name["wlp3s0"].is_primary is False
 
 
+# ── (a2) Vom Adapter gesetzter type bleibt erhalten ──────────────────────────
+
+
+def test_list_interfaces_preserves_adapter_set_type() -> None:
+    # Ein Adapter (z. B. Windows via IfType) liefert bereits einen type != unknown.
+    # Der Use-Case darf ihn NICHT ueber die namensbasierte classify_type ueber-
+    # schreiben -- der Windows-Anzeigename "Ethernet0" trifft keinen Linux-Praefix.
+    fake = FakeDiscovery(
+        [
+            NetworkInterface(
+                name="Ethernet0", ipv4="10.0.0.5", gateway="10.0.0.1", type="ethernet"
+            ),
+            # unknown -> weiterhin ueber classify_type(name) nachbestimmt (eth0 -> ethernet).
+            NetworkInterface(name="eth0", ipv4="10.0.1.5"),
+        ]
+    )
+    result = asyncio.run(ListInterfaces(fake)())
+
+    by_name = {iface.name: iface for iface in result}
+    assert by_name["Ethernet0"].type == "ethernet"  # erhalten (nicht auf unknown ueberschrieben)
+    assert by_name["eth0"].type == "ethernet"  # unknown -> namensbasiert nachbestimmt
+
+
 # ── (b) Reihenfolge bewahrt ──────────────────────────────────────────────────
 
 

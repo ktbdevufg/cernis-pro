@@ -122,6 +122,36 @@ def classify_type(name: str) -> InterfaceType:
     return "unknown"
 
 
+# IANA-ifType-Nummern (RFC 1213 / ifType-MIB) -> fachlicher Typ. Nur die vom
+# Windows-Adapter relevanten Werte sind abgebildet; alles andere -> unknown.
+_IF_TYPE_MAP: dict[int, InterfaceType] = {
+    6: "ethernet",  # ethernetCsmacd
+    71: "wifi",  # ieee80211
+    24: "loopback",  # softwareLoopback
+    131: "vpn",  # tunnel
+    209: "bridge",  # bridge
+    53: "virtual",  # propVirtual
+}
+
+
+def classify_type_from_if_type(if_type: int) -> InterfaceType:
+    """Klassifiziert ein Interface anhand des numerischen IANA-ifType -- rein.
+
+    Bildet den ifType (RFC 1213 / ifType-MIB) auf den fachlichen Typ ab: 6 ->
+    ethernet, 71 -> wifi, 24 -> loopback, 131 -> vpn (Tunnel), 209 -> bridge,
+    53 -> virtual (propVirtual); alles andere -> unknown.
+
+    Die richtige Quelle auf Plattformen, die den ifType liefern (Windows via
+    GetAdaptersAddresses): Ein Namens-Raten auf Windows-Anzeigenamen (lokalisiert,
+    frei umbenennbar) waere strukturell falsch, darum ``classify_type`` (namens-
+    basiert, Linux) hier NICHT nutzbar. Diese Funktion ergaenzt sie, ersetzt sie
+    nicht.
+
+    Rein: kein I/O, kein State, gleiches ``if_type`` -> gleiches Ergebnis.
+    """
+    return _IF_TYPE_MAP.get(if_type, "unknown")
+
+
 def classify_status(is_up: bool, has_ipv4: bool) -> InterfaceStatus:
     """Leitet den Betriebszustand aus zwei Flags ab -- rein, deterministisch.
 
