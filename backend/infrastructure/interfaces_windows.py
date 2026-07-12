@@ -406,6 +406,12 @@ class InterfaceDiscoveryAdapter:
         Leer-Zustand). Auf Windows: API rufen, dann Filter (Loopback raus; ohne IPv4
         UND ohne IPv6-Link-Local raus), Reihenfolge der API bewahrt.
         """
-        if sys.platform != "win32":
-            return []
-        return _filter_and_map(_collect_raw_interfaces())
+        # Der AUFRUF von _collect_raw_interfaces muss selbst im positiven
+        # sys.platform-Guard stehen, nicht nur dessen Definition: mypy wertet
+        # sys.platform statisch aus und behandelt den win32-Block auf Linux als
+        # unerreichbar -- dort existiert der Name _collect_raw_interfaces NICHT.
+        # Ein negatives "if != win32: return []" schuetzt den Namen nicht, weil die
+        # folgende Zeile fuer mypy auf Linux erreichbar bleibt (name-defined-Fehler).
+        if sys.platform == "win32":
+            return _filter_and_map(_collect_raw_interfaces())
+        return []
