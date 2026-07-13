@@ -1,0 +1,139 @@
+name: Build Windows
+
+# Baut das verteilbare Windows-Paket (NSIS-Installer) auf windows-latest und
+# fuehrt dazu den unveraenderten build.ps1 aus.
+#
+# ENTSCHEIDENDER UNTERSCHIED ZUM LINUX-WORKFLOW: Auf Windows gibt es KEINEN
+# Container. Der Linux-Job baut sein Debian-13-Image aus einem Dockerfile und
+# fuehrt den Build DARIN aus -- das geht auf windows-latest nicht. Statt eines
+# Images kommt die Toolchain hier ueber Setup-Actions: Node 20 (setup-node),
+# uv (setup-uv), Rust stable (rust-toolchain). Es gibt daher keinen "Image
+# bauen"-Schritt und kein chown/Besitzrechte-Zuruecksetzen (kein root im
+# Container, der Runner-User besitzt die Dateien ohnehin).
+#
+# WARUM KEIN actions/setup-python: Das Projekt laesst uv den Interpreter
+# verwalten. Das Linux-Dockerfile haelt fest, dass PyInstaller mit Python 3.13
+# inkompatibel ist, und ruft darum 'uv python install 3.12'. Wir machen es
+# genauso -- ein eigener Schritt 'uv python install 3.12' vor 'uv sync'. Mit
+# setup-python koennte der Runner 3.13 ziehen und PyInstaller scheitert.
+#
+# WARUM keine libpcap-Verifikation wie unter Linux: Der libibverbs/RDMA-Blocker
+# ist rein linux-spezifisch (glibc, ELF, readelf). Unter Windows existiert er
+# nicht -- der Kernbeweis dieses Workflows ist stattdessen, dass der auf der
+# lokalen VM reproduzierbar mit nativem Rust-Compiler-Absturz scheiternde
+# Tauri-Schritt (STATUS_ACCESS_VIOLATION / STATUS_ILLEGAL_INSTRUCTION) in der
+# CI vollstaendig durchlaeuft: beide PyInstaller-Binaries, Tauri-Bundle,
+# NSIS-Installer.
+
+on:
+  # Manueller Knopf (Actions-Tab) ...
+  workflow_dispatch:
+  push:
+    # ... push auf den Entwicklungs-Branch loest den Build waehrend der
+    # Entwicklung direkt aus ...
+    branches:
+      - "rewrite/v2"
+    # ... und automatisch bei Release-Tags v*.
+    tags:
+      - "v*"
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    # Schreibrecht auf contents ist noetig, damit der Workflow bei v-Tags ein
+    # GitHub-Release anlegen und Assets hochladen darf. Bewusst auf Job-Ebene
+    # (nicht Workflow-Ebene) und nur dieses eine Recht -- minimale Rechte: die
+    # Branch-/Dispatch-Builds brauchen es nicht, schaden aber nicht.
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      # Toolchain via Setup-Actions statt via Container-Image. Versionen exakt
+      # wie in ci.yml und im Linux-Dockerfile (Node 20, uv, Rust stable),
+      # damit kein Drift zwischen den Werkbaenken entsteht.
+      - name: Node einrichten (LTS 20)
+        uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+
+      - name: uv installieren
+        uses: astral-sh/setup-uv@v8.1.0
+
+      - name: Rust-Toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      # Wie im Linux-Dockerfile: PyInstaller ist mit Python 3.13 inkompatibel,
+      # darum uv explizit auf 3.12 festnageln, BEVOR 'uv sync' (in build.ps1)
+      # laeuft. Bewusst KEIN setup-python -- der wuerde evtl. 3.13 bringen.
+      - name: Python 3.12 via uv installieren (PyInstaller-kompatibel)
+        run: uv python install 3.12
+
+      # Build-Version zur BUILD-ZEIT als Python-Datei erzeugen. config.py liest
+      # os.environ NICHT -- es importiert diese Datei. PyInstaller friert sie
+      # mit ein, damit die installierte App die volle Version kennt (kein
+      # Laufzeit-Env noetig). Der Suffix nennt nur die Architektur (x64), NICHT
+      # das Paketformat -- gleiche Begruendung wie im Linux-Workflow. Format wie
+      # dort: 2.0.0+x64.<7-stelliger-sha>, SHA via 'git rev-parse --short=7'.
+      #
+      # Auf windows-latest laeuft standardmaessig PowerShell. Die Datei wird
+      # darum per .NET WriteAllText mit UTF8Encoding($false) OHNE BOM
+      # geschrieben -- exakt das Muster, das build.ps1 fuer dieselbe Datei nutzt.
+      # Eine BOM am Dateianfang wuerde den Python-Import stoeren.
+      - name: Build-Version erzeugen (_build_version.py)
+        shell: pwsh
+        run: |
+          $shortSha = (git rev-parse --short=7 HEAD).Trim()
+          $buildVersion = "2.0.0+x64.$shortSha"
+          Write-Host "Build-Version: $buildVersion"
+          $content = @"
+          """Im CI erzeugte Build-Version. Nicht committet (siehe .gitignore)."""
+
+          BUILD_VERSION = "$buildVersion"
+          "@
+          $target = Join-Path $PWD "backend\infrastructure\_build_version.py"
+          [System.IO.File]::WriteAllText($target, $content, (New-Object System.Text.UTF8Encoding($false)))
+
+      # Den unveraenderten build.ps1 ausfuehren. Er erledigt selbst: uv sync
+      # (--locked --group dev), Frontend-Build, beide PyInstaller-Binaries,
+      # Binaries fuer Tauri bereitstellen, Tauri-Build (NSIS-Installer) und das
+      # Einsammeln. Der Tauri-Schritt ist der Kernbeweis -- er scheitert auf der
+      # lokalen VM und muss hier durchlaufen.
+      - name: Windows-Build (build.ps1 -- Frontend + Binaries + Tauri/NSIS)
+        shell: pwsh
+        run: .\build.ps1
+
+      # Ab hier Fallunterscheidung nach Trigger -- identische Logik wie im
+      # Linux-Workflow, nur mit den Windows-Bundle-Pfaden (NSIS statt deb/rpm/
+      # AppImage). Das Triple ist der build.ps1-Default x86_64-pc-windows-msvc.
+      #
+      # Fall a) v-Tag: als GitHub-Release-Asset veroeffentlichen (zaehlt nicht
+      # gegen das 500-MB-Artefaktlimit und verfaellt nicht). softprops/action-
+      # gh-release legt ein fehlendes Release idempotent an und bietet mit
+      # fail_on_unmatched_files die geforderte Abbruch-bei-leerem-Glob-Semantik.
+      # Der NSIS-Installer ist der von build.ps1 garantierte Output.
+      - name: Release erstellen und Installer als Asset anhaengen (nur v-Tags)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: CERNIS PRO ${{ github.ref_name }}
+          body: "Release ${{ github.ref_name }} -- Release-Notes werden separat gepflegt."
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: true
+          files: |
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+
+      # Fall b) kein v-Tag (push auf rewrite/v2 oder workflow_dispatch): weiter
+      # als Actions-Artefakt, retention-days auf 1 -- Test-Builds sollen sich
+      # nicht ansammeln. Das gesamte bundle/-Verzeichnis wird hochgeladen (wie
+      # im Linux-Workflow), if-no-files-found error bricht ab, falls leer.
+      - name: Bundle als Artefakt hochladen (NSIS-Installer)
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: cernis-pro-windows-x64
+          path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/
+          if-no-files-found: error
+          retention-days: 1

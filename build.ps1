@@ -83,9 +83,36 @@ Write-Host "============================================"
 Write-Host ""
 Write-Host "[0/6] VS Build Tools Umgebung initialisieren ($VCVARS_ARCH)..."
 
-$vcvarsall = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat"
-if (-not (Test-Path $vcvarsall)) {
-    Write-Host "FEHLER: vcvarsall.bat nicht gefunden: $vcvarsall" -ForegroundColor Red
+# vcvarsall.bat finden, OHNE den Pfad hart zu verdrahten: die lokale VM hat
+# die Edition "BuildTools", der GitHub-Runner eine andere Edition an einem
+# anderen Ort -- ein hartkodierter Pfad bricht auf der jeweils anderen Maschine
+# (und ein zweiter hartkodierter Pfad waere derselbe Fehler nur ein zweites
+# Mal). Darum vswhere befragen: dieses von Microsoft mitgelieferte Werkzeug
+# liegt an einem festen, garantierten Ort und findet JEDE VS-Installation
+# edition- und ortsunabhaengig. Aus dem gemeldeten Installationsstamm leiten
+# wir vcvarsall.bat ab. Faellt vswhere aus oder findet nichts, versuchen wir
+# als Rueckfall den bisher bekannten lokalen BuildTools-Pfad -- und erst wenn
+# auch der fehlt, brechen wir mit klarer Meldung ab.
+$vcvarsall = $null
+$vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+if (Test-Path $vswhere) {
+    # -latest neueste Installation, -products * auch die Edition BuildTools,
+    # -property installationPath liefert den Installationsstamm (ohne trailing
+    # Zeilenumbruch dank .Trim()). Schlaegt vswhere fehl, bleibt $vsInstall leer
+    # und wir fallen unten auf den bekannten Pfad zurueck.
+    $vsInstall = (& $vswhere -latest -products * -property installationPath 2>$null | Select-Object -First 1)
+    if ($vsInstall) {
+        $candidate = Join-Path $vsInstall.Trim() "VC\Auxiliary\Build\vcvarsall.bat"
+        if (Test-Path $candidate) { $vcvarsall = $candidate }
+    }
+}
+if (-not $vcvarsall) {
+    # Rueckfall: der bisher bekannte lokale BuildTools-Pfad.
+    $fallback = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat"
+    if (Test-Path $fallback) { $vcvarsall = $fallback }
+}
+if (-not $vcvarsall) {
+    Write-Host "FEHLER: vcvarsall.bat nicht gefunden (weder via vswhere noch am bekannten BuildTools-Pfad)." -ForegroundColor Red
     Write-Host "Bitte Visual Studio Build Tools 2022 installieren." -ForegroundColor Red
     exit 1
 }
@@ -94,14 +121,55 @@ if (-not (Test-Path $vcvarsall)) {
 # Darum in cmd aufrufen, danach 'set' abgreifen und die Variablen in den
 # aktuellen PowerShell-Prozess uebernehmen -- sonst sieht PyInstaller/Tauri
 # die MSVC-Toolchain nicht.
+#
+# Den urspruenglichen PATH VOR dem cmd-Aufruf sichern: vcvarsall liefert per
+# 'set' einen PATH, der nur die MSVC-/SDK-Werkzeuge enthaelt, NICHT aber die
+# uebrigen Eintraege der Nutzerumgebung. Wuerden wir diesen PATH stur
+# uebernehmen (wie alle anderen Variablen), verschwaenden node, git, uv und npm
+# aus dem PATH des laufenden Prozesses -- der Frontend-Schritt (npm/node) wuerde
+# dann mit "node nicht gefunden" scheitern, obwohl node installiert ist. Darum
+# wird der PATH weiter unten gesondert GEMERGT statt ersetzt. Bitte nicht auf
+# stures Ueberschreiben zurueckdrehen.
+$originalPath = $env:PATH
+
 $vsEnv = cmd /c "`"$vcvarsall`" $VCVARS_ARCH >nul 2>&1 && set" | Where-Object { $_ -match '=' }
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "FEHLER: vcvarsall.bat ($VCVARS_ARCH) fehlgeschlagen" -ForegroundColor Red
-    exit 1
-}
+
+# LASTEXITCODE ist hier NICHT belastbar: zwischen dem cmd-Aufruf und dieser
+# Zeile liegt die Pipeline mit Where-Object, deren Exit-Code $LASTEXITCODE
+# ueberschreibt -- der Rueckgabewert von cmd/vcvarsall geht verloren. Statt-
+# dessen inhaltlich pruefen: es muessen Variablen zurueckgekommen sein UND eine
+# fuer MSVC charakteristische Variable muss gesetzt sein. Als Marker dient
+# VSINSTALLDIR -- diese Variable setzt ausschliesslich vcvarsall (Wurzel der
+# VS-Installation), sie existiert in einer frischen Shell nicht und wird
+# unabhaengig von der Ziel-Architektur (x64/arm64) gesetzt. Fehlt sie, ist
+# vcvarsall nicht korrekt durchgelaufen.
+$vsEnvMap = @{}
 foreach ($line in $vsEnv) {
     $parts = $line -split '=', 2
-    [System.Environment]::SetEnvironmentVariable($parts[0], $parts[1], "Process")
+    if ($parts.Count -eq 2) { $vsEnvMap[$parts[0]] = $parts[1] }
+}
+if (($vsEnvMap.Count -eq 0) -or (-not $vsEnvMap.ContainsKey("VSINSTALLDIR"))) {
+    Write-Host "FEHLER: vcvarsall.bat ($VCVARS_ARCH) lieferte keine gueltige MSVC-Umgebung (VSINSTALLDIR fehlt)" -ForegroundColor Red
+    exit 1
+}
+
+foreach ($name in $vsEnvMap.Keys) {
+    if ($name -ieq "PATH") {
+        # PATH mergen statt ersetzen: die von vcvarsall gelieferten Eintraege
+        # zuerst (damit der MSVC-Linker seine Werkzeuge vorrangig findet),
+        # danach der urspruengliche PATH (damit node/git/uv/npm erreichbar
+        # bleiben). Dubletten (case-insensitiv, Windows-Pfade) werden dabei
+        # ausgelassen, um einen aufgeblaehten PATH zu vermeiden.
+        $seen = New-Object System.Collections.Generic.HashSet[string] ([System.StringComparer]::OrdinalIgnoreCase)
+        $merged = New-Object System.Collections.Generic.List[string]
+        foreach ($entry in (($vsEnvMap[$name] + ';' + $originalPath) -split ';')) {
+            if (($entry -ne '') -and $seen.Add($entry)) { $merged.Add($entry) }
+        }
+        [System.Environment]::SetEnvironmentVariable("PATH", ($merged -join ';'), "Process")
+    }
+    else {
+        [System.Environment]::SetEnvironmentVariable($name, $vsEnvMap[$name], "Process")
+    }
 }
 Write-Host "      VS Build Tools ${VCVARS_ARCH}: OK"
 
