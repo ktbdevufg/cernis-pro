@@ -67,6 +67,13 @@ class TrustedDnsServer:
     Adaptern, hier kommt ``now`` herein). ``display_name`` ist ein best-effort
     Resolver-/Geraetename (``""`` moeglich, wenn keiner ermittelt wurde),
     ``notes`` eine optionale Nutzer-Notiz (``""`` Default).
+
+    ``is_platform_placeholder`` kennzeichnet, dass dieser Eintrag ein funktionsloser
+    Plattform-Platzhalter ist (Windows meldet ueber die Adapter-API drei fest eingebaute
+    IPv6-Adressen ``fec0:0:0:ffff::1..3`` als DNS-Server, die keine Anfragen beantworten).
+    Das ist eine ANDERE Achse als ``category`` (Herkunft) -- hier geht es um die
+    Funktionsfaehigkeit, nicht die Rolle. Default ``False`` (regulaerer, funktionierender
+    Eintrag). Die Erkennung leistet die reine ``logic.is_platform_placeholder``.
     """
 
     ip: str
@@ -76,6 +83,7 @@ class TrustedDnsServer:
     trust_state: DnsTrustState = DnsTrustState.NEUTRAL
     display_name: str = ""
     notes: str = ""
+    is_platform_placeholder: bool = False
 
 
 def trust(server: TrustedDnsServer, now: float) -> TrustedDnsServer:

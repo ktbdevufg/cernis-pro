@@ -16,6 +16,7 @@ from domain.dns_trust.logic import (
     bypass_verdict,
     categorize_dns_server,
     default_trust_for,
+    is_platform_placeholder,
     is_private_ip,
 )
 from domain.dns_trust.models import (
@@ -35,6 +36,7 @@ __all__ = [
     "bypass_verdict",
     "categorize_dns_server",
     "default_trust_for",
+    "is_platform_placeholder",
     "is_private_ip",
     "reject",
     "reset",

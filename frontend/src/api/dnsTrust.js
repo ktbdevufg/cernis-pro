@@ -8,9 +8,9 @@
 //
 // Wire-Form (verifiziert, E5, Prefix /api/dns-trust, NICHT aendern):
 //   GET  ""          -> [ { ip, category, trust_state, first_seen, last_seen,
-//                          display_name, notes, plausibility: { in_inventory,
-//                          first_seen_days, vendor, open_ports[], display_name }
-//                          | null } ]
+//                          display_name, notes, is_platform_placeholder,
+//                          plausibility: { in_inventory, first_seen_days, vendor,
+//                          open_ports[], display_name } | null } ]
 //     category    in {gateway, local_private, public_resolver, unknown, threat_listed}
 //     trust_state in {trusted, neutral, rejected}
 //   POST "/decision" Body { ip, decision: "trust"|"reject"|"reset" } -> {ok:true}
@@ -50,6 +50,7 @@ export function mappeServer(s) {
     lastSeen: s.last_seen ?? null,
     displayName: s.display_name ?? null,
     notes: s.notes ?? null,
+    isPlatformPlaceholder: Boolean(s.is_platform_placeholder),
     plausibility: mappePlausibilitaet(s.plausibility),
   };
 }

@@ -66,6 +66,8 @@ class TrustedDnsServerOut(BaseModel):
     Spiegelt ``domain.dns_trust.TrustedDnsServer``: ``category`` (faktische Einordnung)
     und ``trust_state`` (Nutzer-Wertung) sind ihre ``str``-Werte. ``plausibility`` ist die
     beigestellte Bestands-Sicht -- ``None``, wenn die IP kein bekanntes Geraet ist.
+    ``is_platform_placeholder`` kennzeichnet einen funktionslosen Windows-Platzhalter-DNS-
+    Server (fec0:0:0:ffff::1..3) -- eine andere Achse als ``category``.
     """
 
     ip: str
@@ -75,6 +77,7 @@ class TrustedDnsServerOut(BaseModel):
     last_seen: float
     display_name: str
     notes: str
+    is_platform_placeholder: bool
     plausibility: DnsServerPlausibilityOut | None
 
 

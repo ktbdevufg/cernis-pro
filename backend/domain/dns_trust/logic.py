@@ -22,8 +22,20 @@ __all__ = [
     "bypass_verdict",
     "categorize_dns_server",
     "default_trust_for",
+    "is_platform_placeholder",
     "is_private_ip",
 ]
+
+
+# Die drei fest eingebauten, funktionslosen Windows-Platzhalter-DNS-Server (dokumentierte
+# Microsoft-Konvention): Windows meldet ueber die Adapter-API immer diese IPv6-Adressen als
+# DNS-Server, sie beantworten aber KEINE Anfragen. Als IPv6-Adressobjekte gehalten, damit der
+# Vergleich normalisiert laeuft (abweichende Schreibweisen -- z. B. voll ausgeschrieben oder
+# mit Grossbuchstaben -- werden ebenso erkannt).
+_PLATFORM_PLACEHOLDER_IPS = frozenset(
+    ipaddress.IPv6Address(addr)
+    for addr in ("fec0:0:0:ffff::1", "fec0:0:0:ffff::2", "fec0:0:0:ffff::3")
+)
 
 
 def is_private_ip(ip: str) -> bool:
@@ -36,6 +48,26 @@ def is_private_ip(ip: str) -> bool:
     try:
         return ipaddress.ip_address(ip.strip()).is_private
     except ValueError:
+        return False
+
+
+def is_platform_placeholder(ip: str) -> bool:
+    """``True``, wenn ``ip`` einer der drei funktionslosen Windows-Platzhalter ist (reine Funktion).
+
+    Windows meldet ueber die Adapter-API immer die fest eingebauten IPv6-Adressen
+    ``fec0:0:0:ffff::1``, ``fec0:0:0:ffff::2`` und ``fec0:0:0:ffff::3`` als DNS-Server; diese
+    beantworten jedoch keine Anfragen (dokumentierte Microsoft-Konvention). Der Vergleich laeuft
+    normalisiert ueber ``ipaddress.IPv6Address``-Objekte -- abweichende, aber gleichwertige
+    Schreibweisen (voll ausgeschrieben, Grossschreibung, andere Nullkomprimierung) werden damit
+    ebenfalls erkannt.
+
+    Kein IPv6-Literal (IPv4, Hostname, Muell, leer) -> ``False`` -- KEIN Werfen, KEIN stiller
+    Erfolg (Muster ``is_private_ip``). Rein, kein Netz. Diese Achse (Funktionsfaehigkeit) ist
+    von ``category`` (Herkunft) unabhaengig.
+    """
+    try:
+        return ipaddress.IPv6Address(ip.strip()) in _PLATFORM_PLACEHOLDER_IPS
+    except ipaddress.AddressValueError:
         return False
 
 

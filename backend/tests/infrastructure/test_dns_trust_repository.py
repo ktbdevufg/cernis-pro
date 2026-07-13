@@ -95,6 +95,78 @@ def test_get_unknown_returns_none(repo: SqliteDnsTrustRepository) -> None:
     assert repo.get("9.9.9.9") is None
 
 
+def test_platform_placeholder_flag_roundtrips(repo: SqliteDnsTrustRepository) -> None:
+    # Das Platzhalter-Flag ueberlebt den Round-trip (INTEGER 0/1 <-> bool).
+    server = TrustedDnsServer(
+        ip="fec0:0:0:ffff::1",
+        category=DnsServerCategory.UNKNOWN,
+        first_seen=1.0,
+        last_seen=1.0,
+        is_platform_placeholder=True,
+    )
+    repo.upsert(server)
+    loaded = repo.get("fec0:0:0:ffff::1")
+    assert loaded is not None
+    assert loaded.is_platform_placeholder is True
+    # Default bleibt False, wenn nicht gesetzt.
+    repo.upsert(_server("1.1.1.1"))
+    plain = repo.get("1.1.1.1")
+    assert plain is not None
+    assert plain.is_platform_placeholder is False
+
+
+# ── Additive Schema-Migration (bestehende DB ohne die neue Spalte) ─────────
+
+
+def test_ensure_schema_adds_placeholder_column_to_legacy_table(tmp_path: Path) -> None:
+    # Eine VOR der Platzhalter-Etappe angelegte Tabelle besitzt is_platform_placeholder
+    # noch nicht -- CREATE TABLE IF NOT EXISTS legt sie dann NIE nach. Der Schema-Guard
+    # (PRAGMA table_info + bedingtes ALTER) muss die Spalte beim Oeffnen nachruesten,
+    # sonst scheitert jeder SELECT auf sie.
+    db_path = tmp_path / "cernis.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        # ALTE Tabellenform: exakt wie das CREATE, aber OHNE is_platform_placeholder.
+        conn.execute(
+            """
+            CREATE TABLE dns_trust_servers (
+                ip           TEXT PRIMARY KEY,
+                category     TEXT,
+                trust_state  TEXT,
+                first_seen   REAL,
+                last_seen    REAL,
+                display_name TEXT,
+                notes        TEXT
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO dns_trust_servers "
+            "(ip, category, trust_state, first_seen, last_seen, display_name, notes) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("1.1.1.1", "public_resolver", "neutral", 1.0, 1.0, "alt", ""),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Oeffnen des Repositories fuehrt _ensure_schema aus und ruestet die Spalte nach.
+    repo = SqliteDnsTrustRepository(db_path)
+
+    # Die Spalte existiert nun.
+    conn = sqlite3.connect(db_path)
+    try:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(dns_trust_servers)")}
+    finally:
+        conn.close()
+    assert "is_platform_placeholder" in cols
+
+    # Und der bestehende Eintrag ist lesbar; die nachgeruestete Spalte traegt den Default.
+    loaded = repo.get("1.1.1.1")
+    assert loaded is not None
+    assert loaded.is_platform_placeholder is False
+
+
 # ── Upsert ──────────────────────────────────────────────────────────────────
 
 

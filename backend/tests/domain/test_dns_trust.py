@@ -19,6 +19,7 @@ from domain.dns_trust import (
     bypass_verdict,
     categorize_dns_server,
     default_trust_for,
+    is_platform_placeholder,
     is_private_ip,
     reject,
     reset,
@@ -85,6 +86,63 @@ def test_is_private_ip_ungueltig_false(ip: str) -> None:
 def test_is_private_ip_ignoriert_whitespace() -> None:
     """Fuehrender/nachlaufender Whitespace wird abgeschnitten."""
     assert is_private_ip("  10.0.0.1  ") is True
+
+
+# ── is_platform_placeholder (funktionslose Windows-Vorgabe-DNS-Server) ─────────
+
+
+@pytest.mark.parametrize(
+    "ip",
+    [
+        "fec0:0:0:ffff::1",  # kanonisch, Vorgabe 1
+        "fec0:0:0:ffff::2",  # kanonisch, Vorgabe 2
+        "fec0:0:0:ffff::3",  # kanonisch, Vorgabe 3
+    ],
+)
+def test_is_platform_placeholder_kanonisch(ip: str) -> None:
+    """Die drei kanonisch geschriebenen Windows-Vorgabe-Adressen sind Platzhalter."""
+    assert is_platform_placeholder(ip) is True
+
+
+@pytest.mark.parametrize(
+    "ip",
+    [
+        "FEC0:0:0:FFFF::1",  # Grossschreibung
+        "fec0:0000:0000:ffff:0000:0000:0000:0001",  # voll ausgeschrieben (Nullen)
+        "fec0:0:0:ffff:0:0:0:2",  # teils ausgeschrieben, andere Kompression
+        "  fec0:0:0:ffff::3  ",  # umgebender Whitespace
+        "fec0::ffff:0:0:0:1",  # abweichende Nullkomprimierung derselben Adresse
+    ],
+)
+def test_is_platform_placeholder_abweichende_schreibweise(ip: str) -> None:
+    """Gleichwertige, aber abweichend geschriebene Adressen werden ebenfalls erkannt."""
+    assert is_platform_placeholder(ip) is True
+
+
+@pytest.mark.parametrize(
+    "ip",
+    [
+        "fec0:0:0:ffff::4",  # eine vierte fec0-Adresse ist KEIN Platzhalter
+        "fec0:0:0:fffe::1",  # anderes Subnetz
+        "fe80::1",  # link-local, aber nicht die Vorgabe
+        "8.8.8.8",  # oeffentlicher v4-Resolver
+        "192.168.0.1",  # privat v4
+        "::1",  # IPv6-Loopback
+        "2001:4860:4860::8888",  # oeffentlicher v6-Resolver
+    ],
+)
+def test_is_platform_placeholder_negativ(ip: str) -> None:
+    """Andere (auch aehnliche) Adressen sind KEINE Platzhalter."""
+    assert is_platform_placeholder(ip) is False
+
+
+@pytest.mark.parametrize(
+    "ip",
+    ["", "   ", "kein.host.name", "muell", "fec0:0:0:ffff::1/64", "999.999.999.999"],
+)
+def test_is_platform_placeholder_ungueltig_false(ip: str) -> None:
+    """Ungueltige/keine IPv6-Eingaben -> False (KEIN Werfen, KEIN stiller Erfolg)."""
+    assert is_platform_placeholder(ip) is False
 
 
 # ── categorize_dns_server (Prioritaet, alle Kombinationen) ────────────────────
@@ -298,7 +356,7 @@ def test_record_ist_frozen() -> None:
 
 
 def test_record_defaults() -> None:
-    """Default trust_state=NEUTRAL, display_name='' , notes=''."""
+    """Default trust_state=NEUTRAL, display_name='' , notes='', is_platform_placeholder=False."""
     server = TrustedDnsServer(
         ip="192.168.0.1",
         category=DnsServerCategory.LOCAL_PRIVATE,
@@ -308,3 +366,4 @@ def test_record_defaults() -> None:
     assert server.trust_state is DnsTrustState.NEUTRAL
     assert server.display_name == ""
     assert server.notes == ""
+    assert server.is_platform_placeholder is False

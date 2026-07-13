@@ -159,6 +159,13 @@ function ServerZeile({ server, busy, onEntscheidung }) {
         {nameIstIp ? null : <span className="dt-row__ip">{server.ip}</span>}
         <span className="dt-row__meta">
           <span className="dt-badge">{t(kategorieSchluessel(server.category))}</span>
+          {/* Zusaetzliche, informative Marke NEBEN der Kategorie (nicht statt ihr):
+              funktionsloser Windows-Vorgabe-Platzhalter. Kategorie bleibt unveraendert. */}
+          {server.isPlatformPlaceholder ? (
+            <span className="dt-badge dt-badge--placeholder">
+              {t("verwaltung.dnsTrust.placeholder.badge")}
+            </span>
+          ) : null}
           <span className="dt-badge dt-badge--state" data-state={server.trustState}>
             {t(zustandSchluessel(server.trustState))}
           </span>
@@ -281,6 +288,13 @@ export default function DnsTrustPanel() {
     return koerbe;
   }, [servers]);
 
+  // Gibt es mindestens einen funktionslosen Plattform-Platzhalter? Nur dann erscheint
+  // der einmalige Erklaertext unterhalb der Liste (nicht pro Zeile wiederholt).
+  const hatPlatzhalter = useMemo(
+    () => servers.some((server) => server.isPlatformPlaceholder),
+    [servers],
+  );
+
   if (laden && servers.length === 0) {
     return (
       <div className="dt-panel">
@@ -312,33 +326,43 @@ export default function DnsTrustPanel() {
       {servers.length === 0 ? (
         <p className="dt-empty">{t("verwaltung.dnsTrust.empty")}</p>
       ) : (
-        GRUPPEN.map((gruppe) => {
-          const zeilen = gruppiert.get(gruppe.id);
-          // Leere Gruppen ausblenden.
-          if (!zeilen || zeilen.length === 0) {
-            return null;
-          }
-          return (
-            <section key={gruppe.id} className="dt-group" data-ton={gruppe.ton}>
-              <h3 className="dt-group__title">
-                {t(`verwaltung.dnsTrust.groups.${gruppe.id}.title`)}
-              </h3>
-              <p className="dt-group__lead">
-                {t(`verwaltung.dnsTrust.groups.${gruppe.id}.lead`)}
-              </p>
-              <div className="dt-group__rows">
-                {zeilen.map((server) => (
-                  <ServerZeile
-                    key={server.ip}
-                    server={server}
-                    busy={busy.has(server.ip)}
-                    onEntscheidung={handleEntscheidung}
-                  />
-                ))}
-              </div>
-            </section>
-          );
-        })
+        <>
+          {GRUPPEN.map((gruppe) => {
+            const zeilen = gruppiert.get(gruppe.id);
+            // Leere Gruppen ausblenden.
+            if (!zeilen || zeilen.length === 0) {
+              return null;
+            }
+            return (
+              <section key={gruppe.id} className="dt-group" data-ton={gruppe.ton}>
+                <h3 className="dt-group__title">
+                  {t(`verwaltung.dnsTrust.groups.${gruppe.id}.title`)}
+                </h3>
+                <p className="dt-group__lead">
+                  {t(`verwaltung.dnsTrust.groups.${gruppe.id}.lead`)}
+                </p>
+                <div className="dt-group__rows">
+                  {zeilen.map((server) => (
+                    <ServerZeile
+                      key={server.ip}
+                      server={server}
+                      busy={busy.has(server.ip)}
+                      onEntscheidung={handleEntscheidung}
+                    />
+                  ))}
+                </div>
+              </section>
+            );
+          })}
+
+          {/* EINMALIGER Erklaertext unterhalb der Liste -- nur wenn mindestens ein
+              funktionsloser Plattform-Platzhalter vorhanden ist (nicht pro Zeile). */}
+          {hatPlatzhalter ? (
+            <p className="dt-placeholder-note">
+              {t("verwaltung.dnsTrust.placeholder.note")}
+            </p>
+          ) : null}
+        </>
       )}
     </div>
   );

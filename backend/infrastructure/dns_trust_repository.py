@@ -11,6 +11,9 @@ UPSERT (kein reines Append): Schluessel ist die ``ip`` (PRIMARY KEY). ``upsert``
 ``INSERT OR REPLACE`` -- ein zweiter Aufruf derselben ``ip`` ersetzt die Zeile. ``upsert``
 schreibt KEINE Uhr: ``first_seen``/``last_seen`` kommen fertig aus dem ``server``.
 
+``is_platform_placeholder`` (funktionsloser Windows-Platzhalter-DNS-Server) liegt als
+``INTEGER`` (0/1) mit Default 0 und wird beim Lesen ueber ``bool(...)`` zurueckgehoben.
+
 ENUM-ROUND-TRIP: ``category`` und ``trust_state`` werden als ihr ``str``-Wert gespeichert
 (``StrEnum`` -> roher String) und beim Lesen via ``DnsServerCategory(...)`` /
 ``DnsTrustState(...)`` zurueck in die Domaenen-Enums gehoben -- Muster
@@ -59,16 +62,29 @@ class SqliteDnsTrustRepository:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS dns_trust_servers (
-                    ip           TEXT PRIMARY KEY,
-                    category     TEXT,
-                    trust_state  TEXT,
-                    first_seen   REAL,
-                    last_seen    REAL,
-                    display_name TEXT,
-                    notes        TEXT
+                    ip                     TEXT PRIMARY KEY,
+                    category               TEXT,
+                    trust_state            TEXT,
+                    first_seen             REAL,
+                    last_seen              REAL,
+                    display_name           TEXT,
+                    notes                  TEXT,
+                    is_platform_placeholder INTEGER NOT NULL DEFAULT 0
                 )
                 """
             )
+            # SCHEMA-GUARD (additive Migration, Hausmuster wie device_repository/monitoring):
+            # eine vor der Platzhalter-Etappe angelegte dns_trust_servers-Tabelle besitzt die
+            # Spalte is_platform_placeholder noch nicht (CREATE TABLE IF NOT EXISTS legt sie
+            # dann NIE nach) -- per PRAGMA table_info pruefen und bei Bedarf per ALTER
+            # nachruesten. NOT NULL DEFAULT 0 -> bestehende Zeilen erhalten verlustfrei den
+            # Default (regulaerer, funktionierender Eintrag).
+            cols = {row["name"] for row in conn.execute("PRAGMA table_info(dns_trust_servers)")}
+            if "is_platform_placeholder" not in cols:
+                conn.execute(
+                    "ALTER TABLE dns_trust_servers ADD COLUMN"
+                    " is_platform_placeholder INTEGER NOT NULL DEFAULT 0"
+                )
 
     def upsert(self, server: TrustedDnsServer) -> None:
         # INSERT OR REPLACE -> Upsert ueber PRIMARY KEY ip. category/trust_state als ihr
@@ -79,8 +95,8 @@ class SqliteDnsTrustRepository:
                 """
                 INSERT OR REPLACE INTO dns_trust_servers (
                     ip, category, trust_state, first_seen,
-                    last_seen, display_name, notes
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    last_seen, display_name, notes, is_platform_placeholder
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     server.ip,
@@ -90,6 +106,7 @@ class SqliteDnsTrustRepository:
                     server.last_seen,
                     server.display_name,
                     server.notes,
+                    int(server.is_platform_placeholder),
                 ),
             )
 
@@ -97,7 +114,7 @@ class SqliteDnsTrustRepository:
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT ip, category, trust_state, first_seen, "
-                "last_seen, display_name, notes "
+                "last_seen, display_name, notes, is_platform_placeholder "
                 "FROM dns_trust_servers WHERE ip = ?",
                 (ip,),
             ).fetchone()
@@ -110,7 +127,7 @@ class SqliteDnsTrustRepository:
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT ip, category, trust_state, first_seen, "
-                "last_seen, display_name, notes "
+                "last_seen, display_name, notes, is_platform_placeholder "
                 "FROM dns_trust_servers ORDER BY first_seen ASC"
             ).fetchall()
         return [self._row_to_server(row) for row in rows]
@@ -147,4 +164,5 @@ class SqliteDnsTrustRepository:
             trust_state=DnsTrustState(row["trust_state"]),
             display_name=row["display_name"],
             notes=row["notes"],
+            is_platform_placeholder=bool(row["is_platform_placeholder"]),
         )

@@ -66,6 +66,7 @@ def test_get_dns_trust_liefert_200_und_json_form(app: FastAPI) -> None:
             last_seen=200.0,
             display_name="FritzBox",
             notes="",
+            is_platform_placeholder=False,
             plausibility=DnsServerPlausibilityOut(
                 in_inventory=True,
                 first_seen_days=12,
@@ -75,13 +76,14 @@ def test_get_dns_trust_liefert_200_und_json_form(app: FastAPI) -> None:
             ),
         ),
         TrustedDnsServerOut(
-            ip="8.8.8.8",
-            category="public_resolver",
+            ip="fec0:0:0:ffff::1",
+            category="unknown",
             trust_state="neutral",
             first_seen=300.0,
             last_seen=300.0,
             display_name="",
             notes="",
+            is_platform_placeholder=True,
             plausibility=None,
         ),
     ]
@@ -102,6 +104,7 @@ def test_get_dns_trust_liefert_200_und_json_form(app: FastAPI) -> None:
             "last_seen": 200.0,
             "display_name": "FritzBox",
             "notes": "",
+            "is_platform_placeholder": False,
             "plausibility": {
                 "in_inventory": True,
                 "first_seen_days": 12,
@@ -111,13 +114,14 @@ def test_get_dns_trust_liefert_200_und_json_form(app: FastAPI) -> None:
             },
         },
         {
-            "ip": "8.8.8.8",
-            "category": "public_resolver",
+            "ip": "fec0:0:0:ffff::1",
+            "category": "unknown",
             "trust_state": "neutral",
             "first_seen": 300.0,
             "last_seen": 300.0,
             "display_name": "",
             "notes": "",
+            "is_platform_placeholder": True,
             "plausibility": None,
         },
     ]

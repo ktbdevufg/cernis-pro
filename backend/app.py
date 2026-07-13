@@ -734,12 +734,26 @@ from infrastructure.process_linux import PsutilProcessAdapter
 from infrastructure.process_permission import ProcessPermissionAdapter
 from infrastructure.resolver import (
     CsvGeoAsnDb,
-    DigDnsPtrResolver,
     RdapClient,
     ResolverDataMissing,
     ResolverToolMissing,
     TlsCertReader,
 )
+
+# Plattform-Weiche fuer den PTR-/Vorwaerts-DNS-Adapter -- exakt dasselbe Muster wie beim
+# Interface-Discovery-Adapter oben. sys.platform (nicht hasattr), weil mypy --strict den
+# Zweig statisch auswertet: auf Windows fehlt das System-``dig``-Binary, dort traegt der
+# dnspython-Adapter die Aufloesung; sonst der bestehende DigDnsPtrResolver. Beide Zweige
+# binden dieselbe Name ``DigDnsPtrResolver``, damit die Verwendungsstelle unveraendert
+# bleibt (der gewaehlte Adapter erfuellt denselben PtrResolverPort-Vertrag).
+if sys.platform == "win32":
+    from infrastructure.resolver.dns_ptr_windows import (
+        DnspythonPtrResolver as DigDnsPtrResolver,
+    )
+else:
+    from infrastructure.resolver.dns_ptr import (
+        DigDnsPtrResolver as DigDnsPtrResolver,
+    )
 from infrastructure.reverse_dns import reverse_dns_name
 from infrastructure.rogue_dhcp_repository import SqliteRogueDhcpRepository
 from infrastructure.scanning.arp_table import ArpTableAdapter
@@ -4724,6 +4738,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # ist Beigabe, kein Muss -- sie darf weder Recorder-Tick noch Bootstrap reissen). Diese
         # Naht wird an ZWEI getrennte Trigger gehaengt: den lifespan-Bootstrap (Resolver +
         # Gateway) und den Recorder-Tick (Umgehungs-Ziele) -- NIE an einen GET-Lese-View.
+        #
+        # Funktionslose Windows-Platzhalter (fec0:0:0:ffff::1..3, dokumentierte Microsoft-
+        # Konvention) werden NICHT herausgefiltert, sondern gekennzeichnet: das Setzen des
+        # Flags leistet der Use-Case selbst (ein einziger Schreibvorgang), hier ist keine
+        # Nachkorrektur mehr noetig.
         import time
 
         with suppress(Exception):
@@ -4767,6 +4786,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 last_seen=server.last_seen,
                 display_name=server.display_name,
                 notes=server.notes,
+                is_platform_placeholder=server.is_platform_placeholder,
                 plausibility=(
                     None
                     if indizien is None

@@ -24,6 +24,7 @@ from domain.dns_trust import (
     TrustedDnsServer,
     categorize_dns_server,
     default_trust_for,
+    is_platform_placeholder,
 )
 from ports.dns_trust import DnsTrustRepository
 
@@ -101,6 +102,12 @@ class SyncDnsTrustServer:
     ``display_name`` wird best-effort ueber den ``PlausibilityProvider`` beigestellt (die
     IP kann ein bekanntes Geraet sein); kein Treffer -> ``""`` beim Neuanlegen bzw. der
     bestehende Name beim Update bleibt erhalten, falls kein neuer ermittelt wurde.
+
+    ``is_platform_placeholder`` wird in BEIDEN Faellen (Neuanlage wie Update) ueber die reine
+    ``domain.is_platform_placeholder`` je IP gesetzt -- die drei funktionslosen Windows-
+    Platzhalter (``fec0:0:0:ffff::1..3``) werden so gekennzeichnet, statt herausgefiltert.
+    Da die Pruefung rein von der IP abhaengt, bleibt ein bereits gespeicherter Eintrag beim
+    erneuten Sync korrekt (derselbe IP -> derselbe Flag-Wert).
     """
 
     def __init__(
@@ -130,6 +137,10 @@ class SyncDnsTrustServer:
         indizien = self._plausibility(ip)
         detected_name = indizien.display_name if indizien is not None else ""
 
+        # Funktionsloser Windows-Platzhalter? Rein aus der IP abgeleitet (reine Domaene) --
+        # ein einziger Schreibvorgang, kein nachtraegliches Korrigieren im Composition Root.
+        placeholder = is_platform_placeholder(ip)
+
         existing = self._repo.get(ip)
         if existing is not None:
             # Update: Kategorie/last_seen/display_name pflegen, trust_state + first_seen
@@ -143,6 +154,7 @@ class SyncDnsTrustServer:
                 trust_state=existing.trust_state,
                 display_name=detected_name or existing.display_name,
                 notes=existing.notes,
+                is_platform_placeholder=placeholder,
             )
             self._repo.upsert(updated)
             return updated
@@ -155,6 +167,7 @@ class SyncDnsTrustServer:
             last_seen=now,
             trust_state=default_trust_for(category),
             display_name=detected_name,
+            is_platform_placeholder=placeholder,
         )
         self._repo.upsert(created)
         return created
