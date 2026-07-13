@@ -505,7 +505,6 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .manage(BackendProcess(Arc::clone(&backend_process)))
         .on_window_event(move |window, event| match event {
             // Beim Schliessen zuerst die Webview auf die lokale Splash lenken,
             // damit WebKit nicht mehr auf die gleich sterbende Backend-URL
@@ -645,5 +644,3 @@ fn kill_backend_tree(process: &Arc<Mutex<Option<Child>>>) {
         *guard = None;
     }
 }
-
-struct BackendProcess(Arc<Mutex<Option<Child>>>);
