@@ -133,13 +133,20 @@ def get_rtt_history(target_id: str, limit: int = 120) -> list[dict]:
 async def _ping_once(host: str, interface: str = "", timeout: float = 2.0) -> tuple[bool, float]:
     """Returns (alive, rtt_ms). Uses interface binding on macOS."""
     system = platform.system()
+    if system == "Windows":
+        # Windows: nativer ICMP-Echo statt ping.exe. Lokalisierte ping.exe-Ausgabe
+        # (deutsch Zeit<, englisch time=) laesst jeden Regex still scheitern; die
+        # native iphlpapi liefert Status/RoundTripTime als Zahl. Der Import steht
+        # im Windows-Zweig (auf Nicht-Windows nie erreicht).
+        from infrastructure.icmp_windows import icmp_echo
+
+        return await icmp_echo(host, timeout)
+
     if system == "Darwin":
         cmd = ["ping", "-c", "1", "-W", str(int(timeout * 1000)), "-t", "2"]
         if interface:
             cmd += ["-b", interface]
         cmd += ["--", host]
-    elif system == "Windows":
-        cmd = ["ping", "-n", "1", "-w", str(int(timeout * 1000)), "--", host]
     else:
         cmd = ["ping", "-c", "1", "-W", str(int(timeout)), "--", host]
 

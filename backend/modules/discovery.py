@@ -26,10 +26,18 @@ class DiscoveredHost:
 async def ping_host(ip: str, timeout: float = 1.0) -> DiscoveredHost:
     """Ping a single host, return result."""
     system = platform.system()
+    if system == "Windows":
+        # Windows: nativer ICMP-Echo statt ping.exe. Lokalisierte ping.exe-Ausgabe
+        # (deutsch Zeit<, englisch time=) laesst jeden Regex still scheitern; die
+        # native iphlpapi liefert Status/RoundTripTime als Zahl. Der Import steht
+        # im Windows-Zweig (auf Nicht-Windows nie erreicht).
+        from infrastructure.icmp_windows import icmp_echo
+
+        alive, rtt = await icmp_echo(ip, timeout)
+        return DiscoveredHost(ip=ip, rtt_ms=rtt, is_alive=alive, source="ping")
+
     if system == "Darwin":
         cmd = ["ping", "-c", "1", "-W", str(int(timeout * 1000)), "-t", "1", ip]
-    elif system == "Windows":
-        cmd = ["ping", "-n", "1", "-w", str(int(timeout * 1000)), ip]
     else:
         cmd = ["ping", "-c", "1", "-W", str(int(timeout)), ip]
 
