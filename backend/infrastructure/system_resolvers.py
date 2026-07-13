@@ -26,6 +26,7 @@ import contextlib
 import ipaddress
 import os
 import shutil
+import sys
 from pathlib import Path
 
 # resolvectl wird mit erzwungener C-Locale gestartet, weil lokalisierte Ausgaben (z.B.
@@ -194,12 +195,26 @@ async def detect_system_resolvers(
 ) -> list[str]:
     """Ermittelt die real genutzten System-DNS-Server best-effort -> kanonische IP-Liste.
 
+    Auf Windows existieren weder ``resolvectl`` noch ``/etc/resolv.conf`` -- dort greift der
+    native Windows-Zweig (``GetAdaptersAddresses`` via ctypes, Feld ``FirstDnsServerAddress``),
+    der dieselbe kanonische, loopback-freie, stabil deduplizierte IP-Liste liefert. Auf Linux
+    bleibt die bestehende Logik voellig unveraendert.
+
     Erst ``resolvectl status`` (mit hartem Timeout im Executor/Subprocess); liefert der Weg
     IPs, gewinnt er. Ist er leer (kein systemd-resolved, Fehler, Timeout), greift der
     ``/etc/resolv.conf``-Fallback. Beide Wege verwerfen Loopback-Stubs (insb. ``127.0.0.53``)
     und liefern kanonische, stabil deduplizierte IPs. Eine LEERE Liste ist ein gueltiges
     Ergebnis (der Nutzer bekommt dann eben nichts vorgelegt -- kein Fehler).
     """
+    # Windows-Zweig: Import UND Aufruf stehen im positiven sys.platform-Guard, weil mypy
+    # sys.platform statisch auswertet -- auf dem Linux-Runner existiert der im win32-Block
+    # importierte Name sonst nicht (name-defined-Fehler, hat die CI bereits gebrochen). Der
+    # native Aufruf ist nicht blockierend (kein Subprocess/IO-Wait) -> ohne Executor/Timeout.
+    if sys.platform == "win32":
+        from infrastructure.system_resolvers_windows import detect_windows_resolvers
+
+        return detect_windows_resolvers()
+
     via_resolvectl = await _run_resolvectl(timeout)
     if via_resolvectl:
         return via_resolvectl

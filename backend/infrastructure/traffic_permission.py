@@ -87,7 +87,7 @@ class TrafficPermissionAdapter:
         ``/proc/self/status`` nicht lesbar (``_read_cap_eff`` -> ``None``), zaehlt nur
         ``geteuid`` (konservativer Rueckfall, kein verschwiegener Fehler -- S3).
         """
-        if os.geteuid() == 0:
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
             return None
         cap_eff = _read_cap_eff()
         if cap_eff is not None and _has_cap_net_admin(cap_eff):

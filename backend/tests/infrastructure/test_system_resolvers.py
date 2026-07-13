@@ -15,6 +15,7 @@ sitzt in den herausgezogenen reinen Parse-Kernen.
 """
 
 import asyncio
+import sys
 from pathlib import Path
 
 import pytest
@@ -118,6 +119,22 @@ def test_resolvectl_strips_zone_from_link_local() -> None:
 # ``test_diagnostics_linux``/``test_resolver_dns_ptr``), damit die Wahl zwischen resolvectl
 # und dem resolv.conf-Fallback deterministisch ist. Der Coroutine-Aufruf laeuft ueber
 # ``asyncio.run`` (kein async-pytest-Plugin in diesem Repo).
+#
+# Diese drei Tests pruefen die LINUX-Selektionslogik (resolvectl vs. resolv.conf). Sie
+# laufen auf JEDEM Host deterministisch, indem ``sys.platform`` zur Laufzeit auf ``"linux"``
+# gepinnt wird -- auf einem echten Windows-Host wuerde ``detect_system_resolvers`` sonst in
+# den nativen Windows-Zweig abbiegen und die echten Systemresolver liefern. Der
+# Windows-Zweig selbst ist in ``test_system_resolvers_windows`` getestet.
+
+
+def _force_linux(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pinnt den Plattform-Guard von ``detect_system_resolvers`` zur Laufzeit auf Linux.
+
+    ``sysres`` liest ``sys.platform`` zur Laufzeit; ``sys`` ist dasselbe Modulobjekt, das
+    hier importiert ist -- ein Patch auf ``sys.platform`` wirkt daher auch dort. So laeuft
+    die Linux-Selektionslogik auf jedem Host (auch echtem Windows) deterministisch.
+    """
+    monkeypatch.setattr(sys, "platform", "linux")
 
 
 def _stub_resolvectl(monkeypatch: pytest.MonkeyPatch, result: list[str]) -> None:
@@ -133,6 +150,7 @@ def test_detect_prefers_resolvectl_over_fallback(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     # Liefert resolvectl IPs, gewinnt es -- der resolv.conf-Fallback wird NICHT gelesen.
+    _force_linux(monkeypatch)
     _stub_resolvectl(monkeypatch, ["1.1.1.1"])
     resolv = tmp_path / "resolv.conf"
     resolv.write_text("nameserver 8.8.8.8\n", encoding="utf-8")
@@ -143,6 +161,7 @@ def test_detect_prefers_resolvectl_over_fallback(
 def test_detect_falls_back_to_resolv_conf(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # resolvectl leer -> der Fallback greift und liest die Test-Datei (Stub 127.0.0.53
     # verworfen, echter Server bleibt).
+    _force_linux(monkeypatch)
     _stub_resolvectl(monkeypatch, [])
     resolv = tmp_path / "resolv.conf"
     resolv.write_text("nameserver 127.0.0.53\nnameserver 192.168.178.1\n", encoding="utf-8")
@@ -154,6 +173,7 @@ def test_detect_missing_resolv_conf_is_empty(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     # resolvectl leer UND Datei fehlt -> best-effort [] (leere Liste ist gueltig).
+    _force_linux(monkeypatch)
     _stub_resolvectl(monkeypatch, [])
     missing = tmp_path / "nicht_da.conf"
     result = asyncio.run(detect_system_resolvers(resolv_conf_path=missing))

@@ -51,6 +51,6 @@ class ProcessPermissionAdapter:
         ein handlungsorientierter Hinweis (eigene Prozesse bleiben sichtbar). KEIN
         CAP_NET_ADMIN-Pfad wie bei traffic -- die ``/proc``-Sicht haengt an euid 0.
         """
-        if os.geteuid() == 0:
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
             return None
         return _NEEDS_ROOT_MESSAGE
