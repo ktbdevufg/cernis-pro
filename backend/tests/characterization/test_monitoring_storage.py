@@ -11,6 +11,7 @@ Lese-Helfer es zurueckliefern:
     monitor:   _save_event/_save_rtt  ->  get_monitor_events/get_rtt_history
 """
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -119,3 +120,43 @@ def test_get_rtt_history_filters_by_target(monitor_storage: Any) -> None:
     )
     assert len(monitor.get_rtt_history("wlan")) == 1
     assert monitor.get_rtt_history("wlan")[0]["rtt_ms"] == 1.0
+
+
+# ── monitor: _ping_burst-Aggregation (RTT 0.0 vs. Sentinel -1.0) ──
+
+
+def test_ping_burst_treats_zero_rtt_as_valid(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Windows-DWORD RoundTripTime rundet sub-ms-LAN-Latenz auf 0.0. Diese 0.0 ist
+    # eine GUELTIGE Messung, kein Sentinel. Liefert _ping_once ausschliesslich
+    # (True, 0.0), muss das aggregierte PingResult alive True, loss_pct 0.0 und
+    # rtt_ms 0.0 melden -- NICHT den Sentinel -1.0.
+    from modules import monitor
+
+    async def fake_once(host: str, interface: str = "") -> tuple[bool, float]:
+        return True, 0.0
+
+    monkeypatch.setattr(monitor, "_ping_once", fake_once)
+
+    result = asyncio.run(monitor._ping_burst("192.168.1.1", count=3))
+    assert result.alive is True
+    assert result.loss_pct == 0.0
+    assert result.rtt_ms == 0.0
+
+
+def test_ping_burst_sentinel_still_applies_when_unreachable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Gegenprobe: der Sentinel greift weiterhin. Liefert _ping_once ausschliesslich
+    # (False, -1.0), ist das aggregierte PingResult alive False, loss_pct 100.0 und
+    # rtt_ms -1.0 (kein gueltiger RTT-Wert vorhanden -> Rueckfall auf Sentinel).
+    from modules import monitor
+
+    async def fake_once(host: str, interface: str = "") -> tuple[bool, float]:
+        return False, -1.0
+
+    monkeypatch.setattr(monitor, "_ping_once", fake_once)
+
+    result = asyncio.run(monitor._ping_burst("192.168.1.1", count=3))
+    assert result.alive is False
+    assert result.loss_pct == 100.0
+    assert result.rtt_ms == -1.0

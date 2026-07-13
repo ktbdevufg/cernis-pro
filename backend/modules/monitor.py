@@ -183,7 +183,10 @@ async def _ping_burst(host: str, interface: str = "", count: int = 3) -> PingRes
         await asyncio.sleep(0.2)
 
     alive_count = sum(1 for a, _ in results if a)
-    rtts = [r for _, r in results if r > 0]
+    # 0.0 ist eine gueltige RTT (Windows-DWORD RoundTripTime rundet sub-ms auf 0);
+    # nur -1.0 ist der Sentinel. Daher r >= 0 statt r > 0, sonst wird eine echte
+    # 0.0-Messung faelschlich verworfen und die Aggregation faellt auf -1.0 zurueck.
+    rtts = [r for _, r in results if r >= 0]
     loss_pct = (1 - alive_count / count) * 100
     avg_rtt = sum(rtts) / len(rtts) if rtts else -1.0
     return PingResult(
