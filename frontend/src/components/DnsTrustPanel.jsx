@@ -141,6 +141,11 @@ function ServerZeile({ server, busy, onEntscheidung }) {
   const nameIstIp = !server.displayName;
   const istThreat = server.category === "threat_listed";
   const istGateway = server.category === "gateway";
+  // Funktionsloser Windows-Vorgabe-Platzhalter: eine Adresse, die keine DNS-Anfragen
+  // beantwortet. Vertrauen/Ablehnen/Zuruecksetzen und die Zustands-Marke „Noch offen"
+  // sind hier sinnlos -- statt der Knoepfe steht ein dezenter, nicht anklickbarer
+  // Hinweis, die Zustands-Marke entfaellt. Kategorie- und Platzhalter-Marke bleiben.
+  const istPlatzhalter = server.isPlatformPlaceholder;
 
   // Welche Aktionen die Zeile anbietet (aus dem Zustand abgeleitet):
   //   „Vertrauen"     bei neutral/rejected (noch nicht vertraut).
@@ -166,60 +171,77 @@ function ServerZeile({ server, busy, onEntscheidung }) {
               {t("verwaltung.dnsTrust.placeholder.badge")}
             </span>
           ) : null}
-          <span className="dt-badge dt-badge--state" data-state={server.trustState}>
-            {t(zustandSchluessel(server.trustState))}
-          </span>
+          {/* Zustands-Marke („Noch offen"/„Vertraut"/„Abgelehnt") -- bei einem
+              funktionslosen Platzhalter entfaellt sie, denn es steht keine
+              Entscheidung aus und ein Vertrauenszustand ist bedeutungslos. */}
+          {istPlatzhalter ? null : (
+            <span className="dt-badge dt-badge--state" data-state={server.trustState}>
+              {t(zustandSchluessel(server.trustState))}
+            </span>
+          )}
         </span>
         <PlausibilitaetsIndizien plausibility={server.plausibility} />
       </div>
 
       <div className="dt-row__actions">
-        {/* threat_listed: „Vertrauen" nur als klar warnende Aktion. */}
-        {kannVertrauen ? (
-          istThreat ? (
-            <button
-              type="button"
-              className="dt-action dt-action--warn"
-              onClick={() => onEntscheidung(server.ip, "trust")}
-              disabled={busy}
-            >
-              {t("verwaltung.dnsTrust.actions.trustDespiteThreat")}
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="dt-action dt-action--trust"
-              onClick={() => onEntscheidung(server.ip, "trust")}
-              disabled={busy}
-            >
-              {t("verwaltung.dnsTrust.actions.trust")}
-            </button>
-          )
-        ) : null}
+        {/* Funktionsloser Platzhalter: keine Entscheidungs-Knoepfe (Vertrauen/
+            Ablehnen/Zuruecksetzen), sondern ein dezenter, nicht anklickbarer,
+            nicht fokussierbarer Hinweistext an ihrer Stelle. Gleiche Zeile,
+            damit die Liste ruhig bleibt und keine Luecke entsteht. */}
+        {istPlatzhalter ? (
+          <span className="dt-actions-note">
+            {t("verwaltung.dnsTrust.placeholder.noDecisionNeeded")}
+          </span>
+        ) : (
+          <>
+            {/* threat_listed: „Vertrauen" nur als klar warnende Aktion. */}
+            {kannVertrauen ? (
+              istThreat ? (
+                <button
+                  type="button"
+                  className="dt-action dt-action--warn"
+                  onClick={() => onEntscheidung(server.ip, "trust")}
+                  disabled={busy}
+                >
+                  {t("verwaltung.dnsTrust.actions.trustDespiteThreat")}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="dt-action dt-action--trust"
+                  onClick={() => onEntscheidung(server.ip, "trust")}
+                  disabled={busy}
+                >
+                  {t("verwaltung.dnsTrust.actions.trust")}
+                </button>
+              )
+            ) : null}
 
-        {kannAblehnen ? (
-          <button
-            type="button"
-            // Gateway (Auto-Vertrauen): Ablehnen bleibt technisch moeglich, aber
-            // dezent (kein Zwang) -- daher der leisere „subtle"-Stil.
-            className={`dt-action dt-action--reject${istGateway ? " dt-action--subtle" : ""}`}
-            onClick={() => onEntscheidung(server.ip, "reject")}
-            disabled={busy}
-          >
-            {t("verwaltung.dnsTrust.actions.reject")}
-          </button>
-        ) : null}
+            {kannAblehnen ? (
+              <button
+                type="button"
+                // Gateway (Auto-Vertrauen): Ablehnen bleibt technisch moeglich, aber
+                // dezent (kein Zwang) -- daher der leisere „subtle"-Stil.
+                className={`dt-action dt-action--reject${istGateway ? " dt-action--subtle" : ""}`}
+                onClick={() => onEntscheidung(server.ip, "reject")}
+                disabled={busy}
+              >
+                {t("verwaltung.dnsTrust.actions.reject")}
+              </button>
+            ) : null}
 
-        {kannZuruecksetzen ? (
-          <button
-            type="button"
-            className="dt-action dt-action--reset"
-            onClick={() => onEntscheidung(server.ip, "reset")}
-            disabled={busy}
-          >
-            {t("verwaltung.dnsTrust.actions.reset")}
-          </button>
-        ) : null}
+            {kannZuruecksetzen ? (
+              <button
+                type="button"
+                className="dt-action dt-action--reset"
+                onClick={() => onEntscheidung(server.ip, "reset")}
+                disabled={busy}
+              >
+                {t("verwaltung.dnsTrust.actions.reset")}
+              </button>
+            ) : null}
+          </>
+        )}
       </div>
     </div>
   );

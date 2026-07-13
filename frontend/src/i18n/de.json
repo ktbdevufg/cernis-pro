@@ -1952,6 +1952,7 @@
       },
       "placeholder": {
         "badge": "ohne Funktion (Windows-Vorgabe)",
+        "noDecisionNeeded": "keine Entscheidung nötig",
         "note": "Windows meldet drei fest eingebaute IPv6-Adressen als DNS-Server. Sie werden nicht zur Namensauflösung genutzt. CERNIS zeigt sie, weil Windows sie meldet, bewertet sie aber nicht als fremde Resolver."
       }
     },

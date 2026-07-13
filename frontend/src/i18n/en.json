@@ -1952,6 +1952,7 @@
       },
       "placeholder": {
         "badge": "non-functional (Windows default)",
+        "noDecisionNeeded": "no decision needed",
         "note": "Windows reports three built-in IPv6 addresses as DNS servers. They are not used for name resolution. CERNIS shows them because Windows reports them, but does not treat them as foreign resolvers."
       }
     },
