@@ -6,38 +6,31 @@ gehoert monitoring). Beide Methoden ``async``; das blockierende osascript-Subpro
 bzw. der SMTP-Versand laufen ueber ``run_in_executor``, damit kein Event-Loop
 blockiert.
 
-modules-Bezug (durch ADR-0007 ``infrastructure.alerting.** -> modules`` gedeckt):
-* ``email`` ist ein duenner Wrapper um ``modules.alerting.notify_email_with_log``
-  (gibt IMMER ``{"success": bool, "log": [str]}`` zurueck, wirft nie) -- 1:1
-  uebernommen, nur zu ``EmailResult`` gemappt. Die ``SmtpConfig`` wird wieder zum
-  smtp_config-dict auseinandergenommen (die Keys, die der Altcode liest:
-  host/port/user/password/to/from).
-* ``macos`` baut das osascript EIGENSTAENDIG (NICHT der monitor._notify_macos): die
-  Altcode-``modules.alerting.notify_macos`` traegt ``subtitle`` + ``except: pass``
-  (E.4). Hier reproduzieren wir den osascript-Aufruf, ABER mit der EINEN bewussten
-  Abweichung von E.4: ein unerwarteter Fehler wird per ``structlog.warning``
-  protokolliert statt still verschluckt (robust UND sichtbar -- kein S3-Fang ohne
-  Log). Das Mail-/Notify-VERHALTEN bleibt identisch (Linux: osascript fehlt ->
-  no-op), nur der Fehlschlag ist sichtbar.
+v2-NEUBAU (A.8): Der frueher hier verankerte ``modules``-Bezug ist WEG. Der Adapter
+delegiert jetzt an den migrierten v2-Kern:
+* ``email`` -> ``infrastructure.alerting.email_sender.notify_email_with_log`` (SMTP
+  mit PFLICHT-TLS, kein Klartext-Rueckfall, ``finally``-Verbindungsabbau -- die zwei
+  belegten Sicherheitsfehler des Altcode sind dort geheilt). Gibt IMMER
+  ``{"success": bool, "log": list[str]}`` zurueck, wird zu ``EmailResult`` gemappt.
+* ``macos`` -> ``infrastructure.alerting.desktop_notifier.notify_macos`` (osascript
+  mit ``escape_applescript_literal`` gegen AppleScript-Injection). Der unerwartete
+  Fehler wird hier per ``structlog.warning`` protokolliert statt still verschluckt
+  (bewusste Abweichung vom Altcode-``except: pass``, E.4 -- robust UND sichtbar).
 
 PLATTFORM (port-treu): osascript ist macOS-only. Auf Linux wirft
-``subprocess.run(["osascript", ...])`` ``FileNotFoundError`` -- hier gefangen +
-geloggt, der vom Port vorgesehene "kein Notification-Backend"-no-op-Zustand.
+``desktop_notifier.notify_macos`` ``FileNotFoundError`` -- hier gefangen + geloggt,
+der vom Port vorgesehene "kein Notification-Backend"-no-op-Zustand.
 """
 
 import asyncio
-import subprocess
 
 import structlog
 
 from domain.alerting import EmailResult, SmtpConfig
-from infrastructure.osascript_escape import escape_applescript_literal
-from modules.alerting import notify_email_with_log
+from infrastructure.alerting.desktop_notifier import notify_macos
+from infrastructure.alerting.email_sender import notify_email_with_log
 
 _logger = structlog.get_logger(__name__)
-
-# osascript-Timeout wie Altcode modules.alerting.notify_macos (3 s).
-_OSASCRIPT_TIMEOUT = 3
 
 
 class AlertNotifierAdapter:
@@ -52,36 +45,18 @@ class AlertNotifierAdapter:
         """
         loop = asyncio.get_running_loop()
         try:
-            await loop.run_in_executor(None, self._run_osascript, title, message, subtitle)
+            await loop.run_in_executor(None, notify_macos, title, message, subtitle)
         except Exception:
             # Best-effort: nie ein Aufrufer-Fehler. MIT Log (kein stiller S3-Fang, E.4).
             _logger.warning("alert_macos_notify_failed", title=title)
 
-    @staticmethod
-    def _run_osascript(title: str, message: str, subtitle: str) -> None:
-        # Wortlaut wie Altcode modules.alerting.notify_macos. Die eingebetteten Werte
-        # werden fuer das AppleScript-Literal escaped (kein Ausbruch per "), die
-        # Programmstruktur bleibt identisch.
-        title_e = escape_applescript_literal(title)
-        message_e = escape_applescript_literal(message)
-        subtitle_e = escape_applescript_literal(subtitle)
-        sub = f'subtitle "{subtitle_e}" ' if subtitle else ""
-        script = (
-            f'display notification "{message_e}" with title "{title_e}" {sub}sound name "Basso"'
-        )
-        # Arg-Liste ohne shell=True -> keine Shell-Injection (Altcode-treu).
-        subprocess.run(
-            ["osascript", "-e", script],
-            timeout=_OSASCRIPT_TIMEOUT,
-            capture_output=True,
-        )
-
     async def email(self, subject: str, body: str, config: SmtpConfig) -> EmailResult:
-        """Sendet eine E-Mail ueber ``modules.alerting.notify_email_with_log``.
+        """Sendet eine E-Mail ueber ``email_sender.notify_email_with_log``.
 
-        Gibt IMMER ein ``EmailResult`` zurueck (der Altcode-Wrapper faengt jeden
-        SMTP-Fehler intern und protokolliert ihn in ``log``). ``EmailResult.success``
-        ist exakt der Altcode-``success``-Wert. Blockierender SMTP-Versand ->
+        Gibt IMMER ein ``EmailResult`` zurueck (der Sender faengt jeden SMTP-Fehler
+        intern und protokolliert ihn in ``log``). ``EmailResult.success`` ist exakt
+        der Sender-``success``-Wert -- ``True`` nur bei tatsaechlichem Versand ueber
+        eine verschluesselte Verbindung. Blockierender SMTP-Versand ->
         ``run_in_executor``.
         """
         smtp_config = self._to_smtp_dict(config)

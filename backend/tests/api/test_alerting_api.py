@@ -56,12 +56,10 @@ _NOT_CONFIGURED = "ERROR: SMTP not configured — set host and recipient address
 
 @pytest.fixture(autouse=True)
 def _isolated_keyring(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # crypto-Key auf tmp_path: kein Schreiben ins echte Home, frischer Key pro Test
-    # (Muster test_smtp_config_roundtrip). Der SMTP-PUT/-GET nutzt echtes encrypt/decrypt.
-    from modules import crypto
-
-    monkeypatch.setattr(crypto, "KEY_DIR", tmp_path / ".cernis-pro")
-    monkeypatch.setattr(crypto, "KEY_FILE", tmp_path / ".cernis-pro" / "keyring")
+    # crypto-Key auf tmp_path: kein Schreiben ins echte Datenverzeichnis, frischer Key
+    # pro Test (Muster test_smtp_config_roundtrip). Der SMTP-PUT/-GET nutzt echtes
+    # encrypt/decrypt; ``secret_cipher._data_dir()`` liest ``CERNIS_DATA_DIR`` zuerst.
+    monkeypatch.setenv("CERNIS_DATA_DIR", str(tmp_path / "data"))
 
 
 class _FakeSettingsRepository:

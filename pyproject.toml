@@ -258,18 +258,32 @@ modules = [
 # die Uebergangs-Kruecke des Bootstrap-Inits (P2.1b). So kann der Altcode nicht in
 # die sauberen Ringe lecken; jeder Versuch bricht CI.
 #
-# DREI eng eingezaeunte Ausnahmen (ADR 0007, in M.4 um monitoring, in A.4 um alerting
-# erweitert): die scanning-, monitoring- UND alerting-Infrastructure-Adapter DUERFEN
-# modules/ importieren -- eine Reimplementierung der systemnahen Schicht (scanning:
-# Ping/Portscan/mDNS/SSDP/IPv6/Fritz; monitoring: Ping-Burst + osascript-Notification;
-# alerting: crypto.decrypt + osascript + SMTP-Versand) waere Wegwerf-Arbeit vor dem in
-# Vision 5.2 vorgesehenen moeglichen Sprachwechsel. Die Ausnahme ist SUBTRAKTIV ueber
+# ZWEI eng eingezaeunte Ausnahmen (ADR 0007, in M.4 um monitoring erweitert): die
+# scanning- UND monitoring-Infrastructure-Adapter DUERFEN modules/ importieren -- eine
+# Reimplementierung der systemnahen Schicht (scanning: Ping/Portscan/mDNS/SSDP/IPv6/
+# Fritz; monitoring: Ping-Burst + osascript-Notification) waere Wegwerf-Arbeit vor dem
+# in Vision 5.2 vorgesehenen moeglichen Sprachwechsel. Die Ausnahme ist SUBTRAKTIV ueber
 # ignore_imports umgesetzt, NICHT als zweiter (additiver) Contract: ein
 # forbidden-Contract kann nur verbieten, nie erlauben -- die Lockerung MUSS daher am
 # bestehenden Contract haengen. source_modules/forbidden_modules bleiben unveraendert;
 # ignore_imports schneidet ausschliesslich Importe AUS den Paketen
-# `infrastructure.scanning`, `infrastructure.monitoring` und `infrastructure.alerting`
-# (beliebige Tiefe via `**`) in den Altcode heraus.
+# `infrastructure.scanning` und `infrastructure.monitoring` (beliebige Tiefe via `**`)
+# in den Altcode heraus.
+#
+# ALERTING-AUSNAHME ENTFERNT (A.8): Der alerting-Versand (osascript-Desktop + SMTP) ist
+# jetzt im v2-Kern neu gebaut (`infrastructure.alerting.desktop_notifier` /
+# `email_sender`), der Notifier-Adapter delegiert an diese statt an
+# `modules.alerting.notify_email_with_log`; der SmtpConfig-Adapter nutzt bereits
+# `infrastructure.crypto` statt `modules.crypto`. Damit importiert KEIN Modul unter
+# `infrastructure.alerting` mehr aus `modules` -- die Ausnahme
+# `infrastructure.alerting.** -> modules` matchte nichts mehr (import-linter bricht bei
+# einem toten ignore hart ab) und ist ERSATZLOS gestrichen. Das ist eine
+# VERSCHAERFUNG, keine Lockerung: `infrastructure.alerting` ist ab jetzt CI-hart gegen
+# `modules` geblockt wie jeder andere saubere Ring. Genau der von ADR 0007 vorgesehene
+# Endzustand ("faellt ganz weg, sobald die systemnahe Schicht ersetzt ist"). Der
+# umgekehrte Legacy-Bezug `modules.alerting -> infrastructure.alerting` (Teil B
+# `fire_alert` ruft den migrierten Versand) ist NICHT analysiert: `modules` ist kein
+# root_package, import-linter betrachtet nur Kanten AUS den Ringen heraus.
 #
 # SCOPED innerhalb monitoring (ADR 0007): nur Pinger/Notifier nutzen modules
 # (_ping_burst/_notify_macos); die sqlite-Repos und der TargetSource-Adapter kommen
@@ -278,13 +292,6 @@ modules = [
 # `**`-Scope deckt das Paket maschinell ab; der minimal gehaltene reale
 # modules-Footprint ist eine bewusste Disziplin, im ADR festgehalten.
 #
-# SCOPED innerhalb alerting (ADR 0007, A.4): nur der Notifier- (osascript +
-# notify_email_with_log) und der SmtpConfig-Adapter (crypto.decrypt) nutzen modules;
-# das sqlite-Repo (alert_rules/alert_history) kommt BEWUSST ohne modules aus (eigenes
-# Schema, deckungsgleich mit dem Altcode-init -> CREATE IF NOT EXISTS ist No-Op gegen
-# die bestehende Tabelle). Der SmtpConfig-Adapter zieht das smtp_config-Setting ueber
-# den migrierten ports/settings-Port; nur crypto.decrypt bleibt modules-Bezug.
-#
 # WICHTIG zur Pattern-Form (in S.4a empirisch korrigiert): Die Zielseite ist
 # `modules` OHNE Suffix -- der forbidden-Contract loest die Kanten gegen das
 # verbotene PAKET `modules` auf (nicht gegen `modules.resolver` o.ae.), also matcht
@@ -292,13 +299,9 @@ modules = [
 # NICHTS (verifiziert: "No matches for ignored import"). Das `**` auf der QUELLseite
 # deckt jeden kuenftigen scanning-Adapter (discovery/portscan/mdns/ssdp/ipv6/fritz,
 # S.4b) automatisch mit ab. JEDER andere Ring (domain, ports, application, api) und
-# JEDER andere infrastructure-Adapter bleibt vom selben Contract weiter CI-hart
-# gegen modules/ geblockt (Probe: Import ausserhalb scanning -> BROKEN).
-#
-# KEIN unmatched_ignore_imports_alerting mehr: der scanning-Adapter existiert seit
-# S.4a, die Expression matcht real -- ein "none"-Schalter wuerde nur kuenftige
-# Pattern-Fehler maskieren (genau das hatte er in S.3 getan). Faellt mit ADR 0007
-# ganz weg, sobald die systemnahe Schicht ersetzt ist.
+# JEDER andere infrastructure-Adapter -- inkl. `infrastructure.alerting` (A.8) --
+# bleibt vom selben Contract weiter CI-hart gegen modules/ geblockt (Probe: Import
+# ausserhalb scanning/monitoring -> BROKEN).
 [[tool.importlinter.contracts]]
 name = "neue Ringe importieren NICHT den Altcode (modules/)"
 type = "forbidden"
@@ -307,5 +310,4 @@ forbidden_modules = ["modules"]
 ignore_imports = [
     "infrastructure.scanning.** -> modules",
     "infrastructure.monitoring.** -> modules",
-    "infrastructure.alerting.** -> modules",
 ]

@@ -4,25 +4,28 @@ Spiegelt die Altcode-Lese-/Decrypt-Sequenz (main.py ``/test``): ``smtp_config`` 
 ein dict im SettingsRepository (KEIN Secret-Store-Eintrag), nur das ``password``-Feld
 INNERHALB ist crypto-verschluesselt. Der Adapter liest das dict ueber den MIGRIERTEN
 ``ports/settings.SettingsRepository``-Port, casted ``port`` zu int und entschluesselt
-``password`` via ``modules.crypto.decrypt``. Der A.5-Use-Case sieht weder settings
-noch crypto -- er ruft nur ``load()``.
+``password`` via ``infrastructure.crypto.secret_cipher``. Der A.5-Use-Case sieht weder
+settings noch crypto -- er ruft nur ``load()``.
 
-modules-Bezug: NUR ``crypto.decrypt`` (durch ADR-0007 ``infrastructure.alerting.** ->
-modules`` gedeckt). Das smtp_config-Setting laeuft ueber den migrierten settings-Port,
-NICHT ueber modules.storage.
+crypto-Bezug: NUR ``secret_cipher.decrypt``/``encrypt`` -- ein Infrastruktur-interner
+Import (``infrastructure.alerting`` -> ``infrastructure.crypto``), kein ``modules``-Bezug
+mehr. Das smtp_config-Setting laeuft ueber den migrierten settings-Port.
 
 ``from_addr``-Default (in B verifiziert): der Altcode nutzt ``smtp_config.get("from",
 user)`` -- fehlt ``from``, faellt es auf ``user`` zurueck. Diesen Default setzt das
 Mapping hier.
 
-AUFLAGE 1 (v2-Sichtbarmachung eines Altcode-S3-Strangs, KEIN Verhaltens-Fix):
-``crypto.decrypt`` gibt bei kaputtem/ungueltigem Cipher ``""`` zurueck (Altcode-S3-
-Fallback, modules/crypto.py:76 ``except (InvalidToken, Exception): return ""``). Der
-Adapter macht daraus NICHTS anderes -- ``SmtpConfig.password`` wird dann ``""``,
-exakt Altcode-treu, das Mail-Verhalten bleibt identisch. ABER: wenn ein
-nicht-leerer ``password``-Cipher vorlag und decrypt ``""`` lieferte, wird ein
-``structlog.warning("smtp_password_decrypt_empty")`` geloggt -- der stille Fehlschlag
-wird SICHTBAR gemacht (robust UND sichtbar), ohne das Verhalten zu aendern.
+KEIN STILLER FALLBACK BEI DECRYPT (ADR 0001; v2-Neubau von crypto): Der frueher hier
+verankerte Altcode-S3-Strang -- ``decrypt`` lieferte bei kaputtem Cipher ``""``, der
+Adapter loggte eine Warnung und machte mit leerem Passwort weiter -- ist AUFGEHOBEN.
+``secret_cipher.decrypt`` wirft jetzt ``DecryptionError`` statt still ``""`` zu liefern.
+Der Adapter faengt diese Ausnahme, loggt sie MIT dem echten Fehler und reicht sie NICHT
+als leeres Passwort weiter: eine nicht entschluesselbare ``smtp_config`` ist eine KAPUTTE
+Konfiguration, KEIN Zustand ohne Passwort. Er re-raist die Ausnahme, damit der ehrliche
+Fehlzustand am Port-Vertrag sichtbar wird (der Aufrufer wuerde sonst mit leerem Passwort
+mailen -- genau der stille Fehlschlag, den v2 beseitigt). ``None`` bleibt reserviert fuer
+"nicht konfiguriert"; leeres Passwort fuer "kein Passwort gesetzt"; ein kaputter Cipher
+ist keines von beidem.
 """
 
 from typing import Any
@@ -31,7 +34,7 @@ import structlog
 
 from domain.alerting import SmtpConfig
 from domain.settings import Setting
-from modules.crypto import decrypt, encrypt
+from infrastructure.crypto.secret_cipher import DecryptionError, decrypt, encrypt
 from ports.settings import SettingsRepository
 
 _logger = structlog.get_logger(__name__)
@@ -106,7 +109,7 @@ class SettingsSmtpConfigAdapter:
             payload["password"] = existing.get("password", "")
         elif new_password:
             # Echtes neues Klartext-PW -> genau 1x verschluesseln.
-            payload["password"] = str(encrypt(str(new_password)))
+            payload["password"] = encrypt(str(new_password))
         else:
             payload["password"] = ""
 
@@ -125,11 +128,12 @@ class SettingsSmtpConfigAdapter:
         cipher_str = str(cipher) if cipher else ""
         if not cipher_str:
             return ""
-        # decrypt ist untypisiertes modules -> expliziter Vertrags-Cast zu str.
-        plaintext = str(decrypt(cipher_str))
-        if not plaintext:
-            # AUFLAGE 1: decrypt lieferte "" trotz vorhandenem Cipher (Altcode-S3-
-            # Fallback bei kaputtem/ungueltigem Cipher). Verhalten Altcode-treu ("")
-            # -- aber sichtbar geloggt statt still.
-            _logger.warning("smtp_password_decrypt_empty")
-        return plaintext
+        try:
+            return decrypt(cipher_str)
+        except DecryptionError:
+            # KEIN stiller Fallback: der Cipher ist vorhanden, laesst sich aber nicht
+            # entschluesseln (kaputt, fremder Schluessel, kein enc:-Praefix). Das ist
+            # eine KAPUTTE Konfiguration, kein leeres Passwort -- mit dem echten Fehler
+            # loggen und weiterreichen, statt still mit "" zu mailen.
+            _logger.error("smtp_password_decrypt_failed")
+            raise

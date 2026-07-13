@@ -1,16 +1,16 @@
 """Round-Trip-Vertrag des SMTP-Sentinel-Pfads mit ECHTEM crypto (A.4b, Heilung S7).
 
 KEIN encrypt/decrypt-Mock hier (anders als test_smtp_config.py): save -> load laeuft
-ueber das echte ``modules.crypto``. Das beweist die Heilung des Altcode-Doppel-encrypt-
-Bugs (S7) end-to-end: nach einem Sentinel-Save gibt ``load()`` das URSPRUENGLICHE
-Klartext-PW zurueck -- NICHT den doppelt verschluesselten Murks.
+ueber das echte ``infrastructure.crypto.secret_cipher``. Das beweist die Heilung des
+Altcode-Doppel-encrypt-Bugs (S7) end-to-end: nach einem Sentinel-Save gibt ``load()``
+das URSPRUENGLICHE Klartext-PW zurueck -- NICHT den doppelt verschluesselten Murks.
 
-ISOLATION (CI-deterministisch, KEIN Home-Zugriff): ``crypto._get_or_create_key`` legt
-den Fernet-Key sonst unter ``~/.cernis-pro/keyring`` an (echtes Home). Die autouse-
-Fixture ``_isolated_keyring`` biegt ``crypto.KEY_DIR``/``KEY_FILE`` auf ``tmp_path`` --
-pro Test ein frischer, isolierter Fernet-Key. Deterministisch (HAS_CRYPTO=True ->
-``enc:``-Pfad, encrypt(x) -> decrypt(...) == x), schreibt NICHTS ins echte
-~/.cernis-pro, verschmutzt die Nutzer-Umgebung nicht.
+ISOLATION (CI-deterministisch, KEIN Home-Zugriff): ``secret_cipher`` legt den Fernet-Key
+sonst im echten Benutzer-Datenverzeichnis an. Die autouse-Fixture ``_isolated_keyring``
+biegt ``CERNIS_DATA_DIR`` auf ``tmp_path`` -- ``secret_cipher._data_dir()`` liest genau
+diese Env-Variable zuerst, also landet der Key in einem frischen, isolierten tmp-Ort pro
+Test. Deterministisch (encrypt(x) -> decrypt(...) == x), schreibt NICHTS ins echte
+Datenverzeichnis, verschmutzt die Nutzer-Umgebung nicht.
 """
 
 from pathlib import Path
@@ -24,12 +24,10 @@ from infrastructure.alerting.smtp_config import SettingsSmtpConfigAdapter
 
 @pytest.fixture(autouse=True)
 def _isolated_keyring(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # crypto-Key-Pfad auf tmp_path biegen: kein Schreiben ins echte Home, frischer
-    # Key pro Test. KEY_DIR/KEY_FILE sind Modul-Konstanten, beim Aufruf gelesen.
-    from modules import crypto
-
-    monkeypatch.setattr(crypto, "KEY_DIR", tmp_path / ".cernis-pro")
-    monkeypatch.setattr(crypto, "KEY_FILE", tmp_path / ".cernis-pro" / "keyring")
+    # crypto-Key-Pfad auf tmp_path biegen: kein Schreiben ins echte Datenverzeichnis,
+    # frischer Key pro Test. ``secret_cipher._data_dir()`` liest ``CERNIS_DATA_DIR``
+    # zuerst -- das Env-Setzen isoliert den Schluessel deterministisch.
+    monkeypatch.setenv("CERNIS_DATA_DIR", str(tmp_path / "data"))
 
 
 class _FakeSettingsRepository:

@@ -97,11 +97,11 @@ def test_email_runs_in_executor_not_loop(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_macos_logs_on_error_and_does_not_raise(monkeypatch: pytest.MonkeyPatch) -> None:
-    # osascript fehlt (Linux) -> _run_osascript wirft -> Adapter loggt, wirft NICHT.
-    def boom(title: str, message: str, subtitle: str) -> None:
+    # osascript fehlt (Linux) -> notify_macos wirft -> Adapter loggt, wirft NICHT.
+    def boom(title: str, message: str, subtitle: str = "") -> None:
         raise FileNotFoundError("osascript")
 
-    monkeypatch.setattr(AlertNotifierAdapter, "_run_osascript", staticmethod(boom))
+    monkeypatch.setattr(notifier_mod, "notify_macos", boom)
     warnings: list[str] = []
     monkeypatch.setattr(notifier_mod._logger, "warning", lambda event, **kw: warnings.append(event))
     # darf nicht werfen:
@@ -113,9 +113,9 @@ def test_macos_logs_on_error_and_does_not_raise(monkeypatch: pytest.MonkeyPatch)
 def test_macos_success_no_warning(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: dict[str, str] = {}
     monkeypatch.setattr(
-        AlertNotifierAdapter,
-        "_run_osascript",
-        staticmethod(lambda title, message, subtitle: seen.update(title=title, message=message)),
+        notifier_mod,
+        "notify_macos",
+        lambda title, message, subtitle="": seen.update(title=title, message=message),
     )
     warnings: list[str] = []
     monkeypatch.setattr(notifier_mod._logger, "warning", lambda event, **kw: warnings.append(event))
@@ -127,11 +127,9 @@ def test_macos_success_no_warning(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_macos_runs_in_executor_not_loop(monkeypatch: pytest.MonkeyPatch) -> None:
     call_thread: dict[str, int] = {}
     monkeypatch.setattr(
-        AlertNotifierAdapter,
-        "_run_osascript",
-        staticmethod(
-            lambda title, message, subtitle: call_thread.update(tid=threading.get_ident())
-        ),
+        notifier_mod,
+        "notify_macos",
+        lambda title, message, subtitle="": call_thread.update(tid=threading.get_ident()),
     )
 
     async def _run() -> None:

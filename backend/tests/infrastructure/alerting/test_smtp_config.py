@@ -7,9 +7,11 @@ AUFLAGE 3: Das Mapping als Vertrag gegen die echten settings-Port- + crypto-Sign
 - "from" fehlt -> from_addr = user (Altcode-Default),
 - leeres/None settings -> load() == None.
 
-AUFLAGE 1: decrypt liefert "" trotz Cipher -> SmtpConfig.password = "" (Altcode-treu)
-+ structlog.warning("smtp_password_decrypt_empty") -- der stille S3-Strang wird
-sichtbar gemacht, ohne das Verhalten zu aendern.
+KEIN STILLER FALLBACK (v2-Neubau crypto): decrypt liefert bei kaputtem Cipher NICHT
+mehr "" (der aufgehobene Altcode-S3-Strang), sondern wirft ``DecryptionError``. Der
+Adapter faengt sie, loggt ``smtp_password_decrypt_failed`` MIT dem Fehler und re-raist
+-- eine nicht entschluesselbare ``smtp_config`` ist eine KAPUTTE Konfiguration, kein
+leeres Passwort.
 """
 
 import pytest
@@ -17,6 +19,7 @@ import pytest
 from domain.settings import Setting, SettingValue
 from infrastructure.alerting import smtp_config as smtp_config_mod
 from infrastructure.alerting.smtp_config import SettingsSmtpConfigAdapter
+from infrastructure.crypto.secret_cipher import DecryptionError
 from ports.alerting import SmtpConfigPort
 
 
@@ -148,24 +151,28 @@ def test_empty_password_no_warning_no_decrypt() -> None:
     assert cfg.password == ""
 
 
-# ── AUFLAGE 1: decrypt liefert "" trotz Cipher -> warning ─────
+# ── KEIN stiller Fallback: kaputter Cipher -> DecryptionError + Log ──────────
 
 
-def test_decrypt_empty_despite_cipher_logs_warning(monkeypatch: pytest.MonkeyPatch) -> None:
-    # decrypt simuliert den Altcode-S3-Fallback (kaputter Cipher -> "").
-    monkeypatch.setattr(smtp_config_mod, "decrypt", lambda cipher: "")
-    warnings: list[str] = []
+def test_decrypt_failure_logs_error_and_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    # v2-Neubau: decrypt wirft bei kaputtem Cipher DecryptionError (statt "" wie im
+    # aufgehobenen Altcode-S3-Strang). Der Adapter loggt und re-raist -- er reicht KEIN
+    # leeres Passwort weiter (kaputte Config != Config ohne Passwort).
+    def _raise(_cipher: str) -> str:
+        raise DecryptionError("kaputtes Token")
+
+    monkeypatch.setattr(smtp_config_mod, "decrypt", _raise)
+    errors: list[str] = []
     monkeypatch.setattr(
         smtp_config_mod._logger,
-        "warning",
-        lambda event, **kw: warnings.append(event),
+        "error",
+        lambda event, **kw: errors.append(event),
     )
-    cfg = _adapter({"smtp_config": {"host": "h", "to": "t", "password": "enc:broken"}}).load()
-    assert cfg is not None
-    # Verhalten Altcode-treu: password = "".
-    assert cfg.password == ""
-    # ... aber sichtbar geloggt (v2-Sichtbarmachung des S3-Strangs).
-    assert "smtp_password_decrypt_empty" in warnings
+    adapter = _adapter({"smtp_config": {"host": "h", "to": "t", "password": "enc:broken"}})
+    with pytest.raises(DecryptionError):
+        adapter.load()
+    # Der echte Fehler wurde sichtbar geloggt (nicht still verschluckt).
+    assert "smtp_password_decrypt_failed" in errors
 
 
 # ── load_raw: roh, Cipher NICHT entschluesselt ────────────────
