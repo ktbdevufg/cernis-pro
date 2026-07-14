@@ -95,6 +95,49 @@ jobs:
           $target = Join-Path $PWD "backend\infrastructure\_build_version.py"
           [System.IO.File]::WriteAllText($target, $content, (New-Object System.Text.UTF8Encoding($false)))
 
+      # DIAGNOSE (kein Fix): Misst die MSVC-Umgebung, wie sie auf dem Runner
+      # OHNE ilammy/msvc-dev-cmd zustande kommt. Ruft vswhere direkt, laesst
+      # vcvarsall.bat x64 die Umgebung setzen und gibt die fuer den Linker
+      # relevanten Variablen einzeln aus. continue-on-error, damit die reine
+      # Messung den Lauf nie bricht.
+      - name: MSVC-Umgebung messen (Diagnose)
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          Write-Host "vswhere-Pfad: $vswhere"
+          # MSVC-Umgebung GENAU wie build.ps1 ermitteln: kein -requires,
+          # -latest -products * -property installationPath, Select-Object -First 1
+          # und .Trim() beim Ableiten von vcvarsall.bat.
+          $vsInstall = (& $vswhere -latest -products * -property installationPath 2>$null | Select-Object -First 1)
+          Write-Host "installationPath: $vsInstall"
+
+          $vcvarsall = Join-Path $vsInstall.Trim() "VC\Auxiliary\Build\vcvarsall.bat"
+          Write-Host "vcvarsall: $vcvarsall"
+
+          # vcvarsall.bat x64 in cmd aufrufen und die komplette set-Ausgabe
+          # einsammeln. Danach die interessierenden Variablen filtern.
+          $setOutput = & cmd /c "`"$vcvarsall`" x64 >nul 2>&1 && set"
+
+          $gewuenscht = @("LIB", "INCLUDE", "WindowsSdkDir", "WindowsSDKVersion", "UCRTVersion", "VSINSTALLDIR")
+          foreach ($name in $gewuenscht) {
+            $zeile = $setOutput | Where-Object { $_ -match "^$name=" } | Select-Object -First 1
+            if ($zeile) {
+              $wert = $zeile.Substring($zeile.IndexOf("=") + 1)
+            } else {
+              $wert = ""
+            }
+            if ([string]::IsNullOrEmpty($wert)) {
+              Write-Host "${name}: <LEER>"
+            } else {
+              Write-Host "${name}: $wert"
+            }
+          }
+
+          # Zusaetzlich pruefen, ob ucrt.lib real auf der Platte existiert.
+          Write-Host "Suche nach ucrt.lib auf C:\ ..."
+          Get-ChildItem -Path C:\ -Filter ucrt.lib -Recurse -ErrorAction SilentlyContinue -File | Select-Object -First 5 | ForEach-Object { Write-Host $_.FullName }
+
       # Den unveraenderten build.ps1 ausfuehren. Er erledigt selbst: uv sync
       # (--locked --group dev), Frontend-Build, beide PyInstaller-Binaries,
       # Binaries fuer Tauri bereitstellen, Tauri-Build (NSIS-Installer) und das
@@ -125,15 +168,10 @@ jobs:
           files: |
             src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
 
-      # Fall b) kein v-Tag (push auf rewrite/v2 oder workflow_dispatch): weiter
-      # als Actions-Artefakt, retention-days auf 1 -- Test-Builds sollen sich
-      # nicht ansammeln. Das gesamte bundle/-Verzeichnis wird hochgeladen (wie
-      # im Linux-Workflow), if-no-files-found error bricht ab, falls leer.
-      - name: Bundle als Artefakt hochladen (NSIS-Installer)
-        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: cernis-pro-windows-x64
-          path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/
-          if-no-files-found: error
-          retention-days: 1
+      # Fall b) kein v-Tag (push auf rewrite/v2 oder workflow_dispatch): BEWUSST
+      # KEIN Artefakt-Upload. Ein ~850-MB-Bundle je Push fuellte das 2-GB-Gratis-
+      # Storage-Kontingent auf. Bei Push-Laeufen ist der erfolgreiche Durchlauf
+      # des Builds selbst der Beweis -- der fertige Installer wird nicht gebraucht.
+      # Verteilbare Installer entstehen ausschliesslich an v-Tags und werden dort
+      # (Fall a oben) als GitHub-Release-Asset veroeffentlicht: die zaehlen separat
+      # gegen das Kontingent und verfallen nicht.
