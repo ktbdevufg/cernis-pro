@@ -331,13 +331,25 @@ if (-not $INSTALLER) {
     Write-Host "FEHLER: Kein NSIS-Installer gefunden in $NSIS_DIR" -ForegroundColor Red
     exit 1
 }
-$DEST_FILE = Join-Path $DEST "cernis-pro_${VERSION}_${ARCH}-setup.exe"
-Copy-Item $INSTALLER.FullName $DEST_FILE -Force
-Write-Host "      -> $DEST_FILE"
+# Kopieren nach $DEST nur, wenn der Zielordner existiert. Auf der lokalen VM
+# ist C:\Users\Claude vorhanden; auf dem GitHub-Runner nicht -- dort verbleibt
+# der Installer im Bundle-Verzeichnis. Der Nicht-gefunden-Fehler oben (exit 1)
+# gilt in BEIDEN Faellen, ein Build ohne Installer bleibt ein Fehler.
+if (Test-Path $DEST) {
+    $DEST_FILE = Join-Path $DEST "cernis-pro_${VERSION}_${ARCH}-setup.exe"
+    Copy-Item $INSTALLER.FullName $DEST_FILE -Force
+    $FINAL_INSTALLER = $DEST_FILE
+    Write-Host "      -> $DEST_FILE"
+}
+else {
+    $FINAL_INSTALLER = $INSTALLER.FullName
+    Write-Host "      Installer verbleibt im Bundle-Verzeichnis (Zielordner $DEST existiert nicht - CI-Lauf)"
+    Write-Host "      -> $FINAL_INSTALLER"
+}
 
 Write-Host ""
 Write-Host "============================================"
 Write-Host " BUILD ABGESCHLOSSEN (Version $VERSION, $ARCH)"
 Write-Host " Build-Version: $BUILD_VERSION"
-Write-Host " Installer: $DEST_FILE"
+Write-Host " Installer: $FINAL_INSTALLER"
 Write-Host "============================================"
