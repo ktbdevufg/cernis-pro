@@ -95,6 +95,17 @@ jobs:
           $target = Join-Path $PWD "backend\infrastructure\_build_version.py"
           [System.IO.File]::WriteAllText($target, $content, (New-Object System.Text.UTF8Encoding($false)))
 
+      # MSVC-Umgebung einrichten: die Messung hat belegt, dass vcvarsall LIB auf
+      # eine SDK-Version zeigt, unter der ucrt.lib auf dem Runner NICHT existiert
+      # (LNK1181). ilammy/msvc-dev-cmd setzt PATH, LIB und INCLUDE step-
+      # uebergreifend ueber GITHUB_ENV auf das tatsaechlich vorhandene SDK. Diese
+      # Umgebung uebernimmt build.ps1 unten (Schritt 0 ueberspringt dann vcvarsall,
+      # weil VSINSTALLDIR bereits gesetzt ist).
+      - name: MSVC-Umgebung einrichten (msvc-dev-cmd)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
       # DIAGNOSE (kein Fix): Misst die MSVC-Umgebung, wie sie auf dem Runner
       # OHNE ilammy/msvc-dev-cmd zustande kommt. Ruft vswhere direkt, laesst
       # vcvarsall.bat x64 die Umgebung setzen und gibt die fuer den Linker
@@ -137,6 +148,11 @@ jobs:
           # Zusaetzlich pruefen, ob ucrt.lib real auf der Platte existiert.
           Write-Host "Suche nach ucrt.lib auf C:\ ..."
           Get-ChildItem -Path C:\ -Filter ucrt.lib -Recurse -ErrorAction SilentlyContinue -File | Select-Object -First 5 | ForEach-Object { Write-Host $_.FullName }
+
+          # Alle tatsaechlich vorhandenen SDK-Lib-Versionen auflisten -- zeigt,
+          # welche SDK-Version LIB annimmt (vcvarsall) vs. welche real auf der
+          # Platte liegt (Verzeichnisnamen unter Windows Kits\10\Lib).
+          Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\Lib" -Directory | ForEach-Object { Write-Host ("SDK-Lib-Version: " + $_.Name) }
 
       # Den unveraenderten build.ps1 ausfuehren. Er erledigt selbst: uv sync
       # (--locked --group dev), Frontend-Build, beide PyInstaller-Binaries,

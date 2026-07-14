@@ -83,6 +83,18 @@ Write-Host "============================================"
 Write-Host ""
 Write-Host "[0/6] VS Build Tools Umgebung initialisieren ($VCVARS_ARCH)..."
 
+# Ist die MSVC-Umgebung bereits gesetzt (VSINSTALLDIR vorhanden), NICHT erneut
+# per vcvarsall einrichten -- sonst wuerde eine schon korrekt gesetzte Umgebung
+# ueberschrieben. Im CI richtet ilammy/msvc-dev-cmd PATH/LIB/INCLUDE auf das
+# real vorhandene SDK ein (VSINSTALLDIR gesetzt) und darf nicht durch vcvarsall
+# ersetzt werden, das LIB auf eine fehlende SDK-Version zeigt (LNK1181). Lokal
+# auf der Win11-VM ist VSINSTALLDIR in einer frischen Shell nicht gesetzt --
+# dort laeuft der vcvarsall-Block unveraendert wie bisher.
+if ($env:VSINSTALLDIR) {
+    Write-Host "      VS Build Tools: Umgebung bereits gesetzt (VSINSTALLDIR vorhanden), vcvarsall uebersprungen"
+}
+else {
+
 # vcvarsall.bat finden, OHNE den Pfad hart zu verdrahten: die lokale VM hat
 # die Edition "BuildTools", der GitHub-Runner eine andere Edition an einem
 # anderen Ort -- ein hartkodierter Pfad bricht auf der jeweils anderen Maschine
@@ -172,6 +184,8 @@ foreach ($name in $vsEnvMap.Keys) {
     }
 }
 Write-Host "      VS Build Tools ${VCVARS_ARCH}: OK"
+
+}  # Ende else: vcvarsall-Block nur, wenn VSINSTALLDIR nicht bereits gesetzt war
 
 # ── Schritt 1: Python-Abhaengigkeiten (uv, gegen .venv) ─────
 # Einzige Wahrheit ist uv.lock -- kein pip, kein requirements.txt. '--locked'
