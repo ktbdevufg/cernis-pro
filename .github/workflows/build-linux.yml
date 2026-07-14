@@ -191,17 +191,14 @@ jobs:
             src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/rpm/*.rpm
             src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
 
-      # Fall b) kein v-Tag (push auf rewrite/v2 oder workflow_dispatch): weiter
-      # als Actions-Artefakt wie bisher, aber retention-days auf 1 -- Test-
-      # Builds sollen sich nicht ansammeln und das 500-MB-Limit sprengen.
-      - name: Bundle als Artefakt hochladen (deb + rpm + AppImage)
-        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: cernis-pro-linux-x64
-          path: src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/
-          if-no-files-found: error
-          retention-days: 1
+      # Fall b) kein v-Tag (push auf rewrite/v2 oder workflow_dispatch): BEWUSST
+      # KEIN Artefakt-Upload. Ein ~850-MB-Bundle je Push fuellte das 2-GB-Gratis-
+      # Storage-Kontingent auf. Bei Push-Laeufen ist der erfolgreiche Durchlauf
+      # des Builds (inkl. libpcap-Verifikation oben) selbst der Beweis -- die
+      # fertigen Bundles werden nicht gebraucht. Verteilbare Bundles entstehen
+      # ausschliesslich an v-Tags und werden dort (Fall a oben) als GitHub-
+      # Release-Asset veroeffentlicht: die zaehlen separat gegen das Kontingent
+      # und verfallen nicht.
 
   # Spiegelbild des x64-Jobs fuer aarch64. Laeuft unabhaengig und parallel
   # (keine needs-Abhaengigkeit) auf einem nativen ARM-Runner. Abweichungen zum
@@ -319,12 +316,11 @@ jobs:
             src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/rpm/*.rpm
             src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
 
-      # Fall b) kein v-Tag: Actions-Artefakt, aber arm64-Name und -Pfad.
-      - name: Bundle als Artefakt hochladen (deb + rpm + AppImage)
-        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: cernis-pro-linux-arm64
-          path: src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/
-          if-no-files-found: error
-          retention-days: 1
+      # Fall b) kein v-Tag: BEWUSST KEIN Artefakt-Upload -- gleiche Begruendung
+      # wie im x64-Job. Ein ~850-MB-Bundle je Push fuellte das 2-GB-Gratis-
+      # Storage-Kontingent auf. Bei Push-Laeufen ist der erfolgreiche Durchlauf
+      # des Builds (inkl. libpcap-Verifikation oben) selbst der Beweis -- die
+      # fertigen Bundles werden nicht gebraucht. Verteilbare Bundles entstehen
+      # ausschliesslich an v-Tags und werden dort (Fall a oben) als GitHub-
+      # Release-Asset veroeffentlicht: die zaehlen separat gegen das Kontingent
+      # und verfallen nicht.
