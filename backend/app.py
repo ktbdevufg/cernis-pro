@@ -5292,12 +5292,14 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     # Anzeige-Status je Geraete-Zeile (Klartext fuers PDF): trust_state "trusted"/"watch" sind
     # eindeutig; "neutral" haengt davon ab, ob das Geraet bekannt ist. KEINE Wertung -- nur die
     # Klartext-Beschriftung des vorhandenen Zustands (lokaler Helfer, Muster wie andere oben).
-    def _status_text(is_known: bool, trust_state: str) -> str:
+    def _status_text(is_known: bool, trust_state: str, lang: Lang = "de") -> str:
         if trust_state == "trusted":
-            return "Vertraut"
+            return "Vertraut" if lang == "de" else "Trusted"
         if trust_state == "watch":
-            return "Beobachtet"
-        return "Bekannt" if is_known else "Unbekannt"
+            return "Beobachtet" if lang == "de" else "Watched"
+        if lang == "de":
+            return "Bekannt" if is_known else "Unbekannt"
+        return "Known" if is_known else "Unknown"
 
     # Reine Projektion InventoryReport -> render-fertiges InventoryPdfModel (Muster
     # _project_security_pdf_model): KEINE Uhr -- generated_at_text kommt fertig formatiert herein.
@@ -5320,7 +5322,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 r.last_seen_text,
                 str(r.times_seen),
                 r.category,
-                _status_text(r.is_known, r.trust_state),
+                _status_text(r.is_known, r.trust_state, lang),
             )
             for r in report.device_rows
         )
@@ -5330,7 +5332,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 r.vendor,
                 r.last_ip,
                 r.last_seen_text,
-                _status_text(r.is_known, r.trust_state),
+                _status_text(r.is_known, r.trust_state, lang),
             )
             for r in report.archived_rows
         )
@@ -5515,11 +5517,15 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     # Abdeckungs-Text aus den Host-Zaehlern (am Composition Root, NICHT in der reinen Funktion --
     # die laesst coverage_text leer). Wird im HTTP- UND im PDF-Runner GLEICH gesetzt.
-    def _cve_coverage_text(hosts_total: int, hosts_checked: int) -> str:
+    def _cve_coverage_text(hosts_total: int, hosts_checked: int, lang: Lang = "de") -> str:
+        # (E3c) ``lang`` waehlt die Sprache: de unveraendert, en die englische Fassung. Der
+        # feste Satz inline per ``if lang``, weil er f-string-Platzhalter traegt.
         if hosts_total <= 0:
-            return "Noch keine Hosts geprüft"
+            return "Noch keine Hosts geprüft" if lang == "de" else "No hosts checked yet"
         prozent = round(hosts_checked / hosts_total * 100)
-        return f"{hosts_checked} von {hosts_total} Hosts geprüft ({prozent} %)"
+        if lang == "de":
+            return f"{hosts_checked} von {hosts_total} Hosts geprüft ({prozent} %)"
+        return f"{hosts_checked} of {hosts_total} hosts checked ({prozent} %)"
 
     # (Etappe 3b / E3a) Severity-Stufen als ANZEIGE-Text, je Sprache eine Map. Der ROHE
     # NVD-Schluessel (CRITICAL/HIGH/...) bleibt der technische Schluessel (Sortierung,
@@ -5551,12 +5557,12 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     # Status-Text je Befund-Zeile, Variante C (R3): quittiert UND is_new sind ZWEI
     # Dimensionen. Quittiert schlaegt durch ("Quittiert"); sonst zeigt ein aktiver Befund
     # "Aktiv · NEU" wenn neu, sonst "Aktiv".
-    def _cve_status_text(row: CveFindingRow) -> str:
+    def _cve_status_text(row: CveFindingRow, lang: Lang = "de") -> str:
         if row.acknowledged:
-            return "Quittiert"
+            return "Quittiert" if lang == "de" else "Acknowledged"
         if row.is_new:
-            return "Aktiv · NEU"
-        return "Aktiv"
+            return "Aktiv · NEU" if lang == "de" else "Active · NEW"
+        return "Aktiv" if lang == "de" else "Active"
 
     # (R5 / E3a) Datums-Helfer: NVD published ist ISO (YYYY-MM-DD oder ISO-8601 mit Zeit) ->
     # de TT.MM.JJJJ, en ISO YYYY-MM-DD (Schreibweise wie ``report_texts.format_datum_kurz``).
@@ -5595,7 +5601,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                     r.service,
                     str(r.port),
                     r.first_seen_text,
-                    _cve_status_text(r),
+                    _cve_status_text(r, lang),
                 )
                 for r in g.rows
             )
@@ -5643,7 +5649,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 r.service,
                 str(r.port),
                 r.first_seen_text,
-                _cve_status_text(r),
+                _cve_status_text(r, lang),
             )
             for r in report.all_rows
         )
@@ -5675,7 +5681,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     # coverage_text kommt NICHT aus report (dort leer) -- er wird hier am Root gebildet.
     async def _cve_report() -> CveReportOut:
         report = _build_cve_report_data()
-        coverage = _cve_coverage_text(report.hosts_total, report.hosts_checked)
+        # Der JSON-Endpunkt kennt keine Sprachwahl -> bewusst die deutsche Fassung ("de").
+        coverage = _cve_coverage_text(report.hosts_total, report.hosts_checked, "de")
         return CveReportOut(
             generated_findings_total=report.generated_findings_total,
             active_total=report.active_total,
@@ -5751,7 +5758,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
         now = time.time()
         generated_at_text = format_generated_at(now, normalized)
-        coverage = _cve_coverage_text(report.hosts_total, report.hosts_checked)
+        coverage = _cve_coverage_text(report.hosts_total, report.hosts_checked, normalized)
         model = _project_cve_pdf_model(report, generated_at_text, coverage, normalized)
         pdf_bytes = ReportlabRenderer().render_cve_report_pdf(model, normalized)
         datumsteil = format_datum_kurz(now, normalized)
@@ -5943,18 +5950,28 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     def _project_outbound_pdf_model(
         report: OutboundReport, generated_at_text: str, lang: Lang = "de"
     ) -> OutboundPdfModel:
+        # (E3c) Bezugsrahmen zweisprachig: de unveraendert (deutsche Anfuehrungszeichen),
+        # en mit geraden doppelten Anfuehrungszeichen. Der Roh-Schluessel ``recording_scope``
+        # bleibt unangetastet -- nur der Anzeigetext wird uebersetzt.
         ist_einzeln = report.recording_scope == "single" and bool(report.recording_label)
         if ist_einzeln:
-            scope_text = f"Bezug: Aufzeichnung „{report.recording_label}“"
+            if lang == "de":
+                scope_text = f"Bezug: Aufzeichnung „{report.recording_label}“"
+            else:
+                scope_text = f'Scope: recording "{report.recording_label}"'
             recording_label_display = report.recording_label
-        else:
+        elif lang == "de":
             scope_text = "Bezug: Alle Aufzeichnungen"
             recording_label_display = "Alle Aufzeichnungen"
+        else:
+            scope_text = "Scope: All recordings"
+            recording_label_display = "All recordings"
 
-        def _bewertung(row: OutboundContactRow) -> str:
+        def _bewertung(row: OutboundContactRow, lang: Lang = "de") -> str:
             # Threat hat Vorrang in der Anzeige; sonst Tracker; sonst "-".
             if row.threat_lists:
-                return "Bedrohung: " + ", ".join(row.threat_lists)
+                praefix = "Bedrohung: " if lang == "de" else "Threat: "
+                return praefix + ", ".join(row.threat_lists)
             if row.tracker_lists:
                 return "Tracker: " + ", ".join(row.tracker_lists)
             return "-"
@@ -5969,7 +5986,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 r.country or "—",
                 r.operator or "—",
                 str(r.total_count),
-                _bewertung(r),
+                _bewertung(r, lang),
             )
             for r in report.contact_rows
         )
@@ -6093,24 +6110,39 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     def _project_dns_watch_pdf_model(
         report: DnsWatchReport, generated_at_text: str, lang: Lang = "de"
     ) -> DnsWatchPdfModel:
-        # Kategorie-Anzeige-Labels (roher Schluessel -> Text). Unbekannte Schluessel bleiben roh.
-        kategorie_labels = {
-            "offen": "Offen (fremder Resolver)",
-            "moegliche_doh": "Möglicher DoH",
-            "erwartungsgemaess": "Erwartungsgemäß",
-        }
+        # (E3c) Kategorie-ANZEIGE-Labels je Sprache (roher Schluessel -> Text). Der rohe
+        # Schluessel bleibt der technische Schluessel; unbekannte Schluessel bleiben roh.
+        kategorie_labels = (
+            {
+                "offen": "Offen (fremder Resolver)",
+                "moegliche_doh": "Möglicher DoH",
+                "erwartungsgemaess": "Erwartungsgemäß",
+            }
+            if lang == "de"
+            else {
+                "offen": "Open (foreign resolver)",
+                "moegliche_doh": "Possible DoH",
+                "erwartungsgemaess": "As expected",
+            }
+        )
 
         def _label(schluessel: str) -> str:
             return kategorie_labels.get(schluessel, schluessel)
 
-        if report.expected_servers:
-            expected_text = "Erwartete DNS-Server: " + ", ".join(report.expected_servers)
+        if lang == "de":
+            expected_text = "Erwartete DNS-Server: " + (
+                ", ".join(report.expected_servers) if report.expected_servers else "(keine)"
+            )
+            doh_text = "Bekannte DoH-Anbieter: " + (
+                ", ".join(report.doh_providers) if report.doh_providers else "(keine)"
+            )
         else:
-            expected_text = "Erwartete DNS-Server: (keine)"
-        if report.doh_providers:
-            doh_text = "Bekannte DoH-Anbieter: " + ", ".join(report.doh_providers)
-        else:
-            doh_text = "Bekannte DoH-Anbieter: (keine)"
+            expected_text = "Expected DNS servers: " + (
+                ", ".join(report.expected_servers) if report.expected_servers else "(none)"
+            )
+            doh_text = "Known DoH providers: " + (
+                ", ".join(report.doh_providers) if report.doh_providers else "(none)"
+            )
 
         category_rows = tuple(
             (_label(x.category), str(x.count)) for x in report.category_distribution
@@ -6124,7 +6156,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 r.hostname or "—",
                 r.app_name or "—",
                 str(r.connection_count),
-                "Quittiert" if r.acknowledged else "Aktiv",
+                (
+                    ("Quittiert" if r.acknowledged else "Aktiv")
+                    if lang == "de"
+                    else ("Acknowledged" if r.acknowledged else "Active")
+                ),
             )
             for r in report.contact_rows
         )
@@ -6134,7 +6170,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             footer_left=REPORT_FOOTER_DNS_WATCH.get(lang),
             achse_b_fussnote=ACHSE_B_FUSSNOTE.get(lang),
             einleitung=REPORT_INTRO_DNS_WATCH.get(lang),
-            scope_text="Sicht: nur dieser Rechner (nicht netzweit)",
+            scope_text=(
+                "Sicht: nur dieser Rechner (nicht netzweit)"
+                if lang == "de"
+                else "View: this computer only (not network-wide)"
+            ),
             expected_text=expected_text,
             doh_text=doh_text,
             contacts_total=report.contacts_total,
@@ -6331,18 +6371,31 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     def _project_dns_bypass_pdf_model(
         report: DnsBypassReport, generated_at_text: str, lang: Lang = "de"
     ) -> DnsBypassPdfModel:
+        # (E3c) Bezugsrahmen + erwartete-Server-Zeile zweisprachig (Muster
+        # _project_outbound_pdf_model): de unveraendert, en mit geraden Anfuehrungszeichen.
+        # Der Roh-Schluessel ``recording_scope`` bleibt unangetastet.
         ist_einzeln = report.recording_scope == "single" and bool(report.recording_label)
         if ist_einzeln:
-            scope_text = f"Bezug: Aufzeichnung „{report.recording_label}“"
+            if lang == "de":
+                scope_text = f"Bezug: Aufzeichnung „{report.recording_label}“"
+            else:
+                scope_text = f'Scope: recording "{report.recording_label}"'
             recording_label_display = report.recording_label
-        else:
+        elif lang == "de":
             scope_text = "Bezug: Alle Aufzeichnungen"
             recording_label_display = "Alle Aufzeichnungen"
-
-        if report.expected_servers:
-            expected_text = "Erwartete DNS-Server: " + ", ".join(report.expected_servers)
         else:
-            expected_text = "Erwartete DNS-Server: (keine)"
+            scope_text = "Scope: All recordings"
+            recording_label_display = "All recordings"
+
+        if lang == "de":
+            expected_text = "Erwartete DNS-Server: " + (
+                ", ".join(report.expected_servers) if report.expected_servers else "(keine)"
+            )
+        else:
+            expected_text = "Expected DNS servers: " + (
+                ", ".join(report.expected_servers) if report.expected_servers else "(none)"
+            )
 
         # Ziel-Resolver-Zelle: bekannter Name als Haupttext, rohe IP dezent dahinter
         # (der Name ist Beigabe, die IP bleibt sichtbar). Fehlt der Name -> nur die IP.
@@ -6361,9 +6414,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # "\n" getrennt; der Adapter rendert die zweite Zeile gedaempft). Faellt der Name leer,
         # dient die Quell-IP als Name-Zeile (nie der Leer-Marker fuer den eigenen Host). Bei
         # Nicht-Self bleibt es einzeilig (Name, sonst Leer-Marker) -- unveraendert.
-        def _geraet_zelle(device_name: str, src_ip: str, is_self: bool) -> str:
+        def _geraet_zelle(device_name: str, src_ip: str, is_self: bool, lang: Lang = "de") -> str:
             if is_self:
-                return f"{device_name or src_ip}\nDieser Rechner"
+                zusatz = "Dieser Rechner" if lang == "de" else "This computer"
+                return f"{device_name or src_ip}\n{zusatz}"
             return device_name or "—"
 
         # Spalten-Reihenfolge: Geraet, Quell-IP, Ziel-Resolver, DoH, Anfragen, Abgefragte Namen.
@@ -6371,10 +6425,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # in der Verteilung (Name + IP).
         bypass_rows = tuple(
             (
-                _geraet_zelle(r.device_name, r.src_ip, r.is_self),
+                _geraet_zelle(r.device_name, r.src_ip, r.is_self, lang),
                 r.src_ip,
                 _resolver_zelle(r.resolver_name, r.dst_ip),
-                "Bekannt" if r.is_doh else "—",
+                ("Bekannt" if lang == "de" else "Known") if r.is_doh else "—",
                 str(r.query_count),
                 ", ".join(r.sample_qnames) if r.sample_qnames else "—",
             )
@@ -6554,21 +6608,37 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     ) -> BehaviorPdfModel:
         # Lokalisierte Wochentagskuerzel (Mo..So, Index = weekday 0..6) -- der Adapter
         # beschriftet damit die Heatmap-Zeilen; auch als Klartext fuer den "aktivsten Tag".
-        wochentage = ("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So")
+        # (E3c) Nur die KUERZEL sind zweisprachig; die REIHENFOLGE bleibt in beiden Sprachen
+        # gleich (Montag = Index 0), weil der Index der rohe weekday-Schluessel ist.
+        wochentage = (
+            ("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So")
+            if lang == "de"
+            else ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+        )
 
         # Tagesminute -> "HH:MM" (rein, deterministisch; keine Wanduhr).
         def _hhmm(minute: int) -> str:
             return f"{minute // 60:02d}:{minute % 60:02d}"
 
+        # (E3c) Bezugsrahmen zweisprachig; der Roh-Schluessel ``scope`` (single/all) bleibt roh.
         scope = report.scope
         if scope == "single":
-            scope_text = (
-                f"Bezug: Aufgabe „{report.single_label}“"
-                if report.single_label
-                else "Bezug: Aufgabe (unbekannt)"
-            )
-        else:
+            if lang == "de":
+                scope_text = (
+                    f"Bezug: Aufgabe „{report.single_label}“"
+                    if report.single_label
+                    else "Bezug: Aufgabe (unbekannt)"
+                )
+            else:
+                scope_text = (
+                    f'Scope: task "{report.single_label}"'
+                    if report.single_label
+                    else "Scope: task (unknown)"
+                )
+        elif lang == "de":
             scope_text = "Bezug: Alle Geräte"
+        else:
+            scope_text = "Scope: All devices"
 
         single_kennzahlen: tuple[tuple[str, str], ...] = ()
         day_band: tuple[tuple[int, int, bool], ...] = ()
