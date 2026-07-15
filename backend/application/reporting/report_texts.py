@@ -27,10 +27,10 @@ und formatiert nicht). Darum traegt KEIN Modell ein ``LocalizedText`` -- der Com
 Root (``app.py``) loest es via ``.get(lang)`` zum FERTIGEN String auf und setzt diesen ins
 Modell; der Renderer liest nur noch.
 
-STAND E2: die querschnittlichen Texte aus Kapitel 0 (Achse-B-Fussnote, Kopf-/Fusszeilen-
-Praefixe) PLUS die drei RAHMENTEXTE jedes der sieben Berichte (Titel, Fusszeile, Einleitung).
-Die Satzbausteine im Rumpf der Berichte (Tabellenkoepfe, Schwere-Labels usw.) ziehen in E3
-nach.
+STAND E3a: die querschnittlichen Texte aus Kapitel 0 (Achse-B-Fussnote, Kopf-/Fusszeilen-
+Praefixe), die drei RAHMENTEXTE jedes der sieben Berichte (Titel, Fusszeile, Einleitung) PLUS
+der erste Satzbaustein aus dem Rumpf: die Score-Level-Labels (Kapitel 2). Die uebrigen
+Rumpf-Bausteine (Tabellenkoepfe usw.) ziehen in den weiteren E3-Teilen nach.
 """
 
 from __future__ import annotations
@@ -262,6 +262,24 @@ REPORT_INTRO_BEHAVIOR = LocalizedText(
         "provides context, it does not pass judgement."
     ),
 )
+
+
+# ── Kapitel 2 des Inventars: Satzbausteine im Rumpf (E3a) ──────────────────
+#
+# STEUER-SCHLUESSEL vs. ANZEIGE-TEXT (s. Modul-Docstring): die Schluessel dieses dict sind die
+# ROHEN Level-Schluessel aus ``security_score`` -- sie steuern im Renderer den Farb-Lookup
+# (``_LEVEL_COLORS``) und bleiben darum UNUEBERSETZT. Uebersetzt wird ausschliesslich der
+# Anzeige-Text der Gauge. Muster: ``severity_labels`` im CVE-Bericht (roher Schluessel neben
+# uebersetztem Label).
+#
+# Die de-Texte sind ABSICHTLICH wortgleich mit dem rohen Schluessel: die Anzeige ist klein
+# geschrieben, und "maessig" bleibt bewusst OHNE Umlaut -- der rohe Schluessel schreibt sich
+# so, und Schluessel und deutsche Anzeige sollen hier nicht auseinanderlaufen.
+SCORE_LEVEL_LABELS: dict[str, LocalizedText] = {
+    "gut": LocalizedText(de="gut", en="Good"),
+    "maessig": LocalizedText(de="maessig", en="Moderate"),
+    "kritisch": LocalizedText(de="kritisch", en="Critical"),
+}
 
 
 # ── Datums- und Zahlenformat ────────────────────────────────────────────────

@@ -535,6 +535,7 @@ from application.reporting import (
     REPORT_TITLE_INVENTORY,
     REPORT_TITLE_OUTBOUND,
     REPORT_TITLE_SECURITY,
+    SCORE_LEVEL_LABELS,
     BuildCveReport,
     BuildDnsWatchReport,
     BuildInventoryReport,
@@ -1656,14 +1657,19 @@ class _SpaStaticFiles(StaticFiles):
 # rendert sie nur. Modul-Ebene (nicht in ``create_app``), damit testbar ohne App-Bau.
 
 
-def _format_burden_de(value: float) -> str:
-    """Formatiert einen Lastwert deutsch (Dezimalkomma), schlicht und robust.
+def _format_burden_de(value: float, lang: Lang = "de") -> str:
+    """Formatiert einen Lastwert sprachabhaengig, schlicht und robust.
 
-    Zwei Nachkommastellen, Punkt -> Komma; eine nachlaufende Null wird NUR entfernt, wenn die
-    zweite Nachkommastelle 0 ist (1,00 -> "1,0"; 0,33 bleibt "0,33"). Mehr Kuerzung nicht --
-    bewusst schlicht (Auftrag).
+    Zwei Nachkommastellen; das TRENNZEICHEN richtet sich nach ``lang`` -- de das gewohnte
+    Dezimalkomma ("0,33"), en der Dezimalpunkt ("0.33"). Eine nachlaufende Null wird in BEIDEN
+    Sprachen NUR entfernt, wenn die zweite Nachkommastelle 0 ist (1,00 -> "1,0" / 1.00 ->
+    "1.0"; 0,33 bleibt "0,33"). Mehr Kuerzung nicht -- bewusst schlicht (Auftrag).
+
+    (E3a) Der Name bleibt ``_format_burden_de`` -- die deutsche Ausgabe ist unveraendert.
     """
-    text = f"{value:.2f}".replace(".", ",")
+    text = f"{value:.2f}"
+    if lang == "de":
+        text = text.replace(".", ",")
     if text.endswith("0"):
         text = text[:-1]
     return text
@@ -1729,7 +1735,7 @@ def _project_security_pdf_model(
         (
             c.device_label,
             "kritisch" if c.worst_severity == "critical" else "auffällig",
-            _format_burden_de(c.burden_value),
+            _format_burden_de(c.burden_value, lang),
         )
         for c in score.contributions
     )
@@ -1823,6 +1829,7 @@ def _project_security_pdf_model(
         achse_b_fussnote=ACHSE_B_FUSSNOTE.get(lang),
         score_value=score.score,
         score_level=score.level,
+        score_level_label=SCORE_LEVEL_LABELS[score.level].get(lang),
         score_einordnung=score_einordnung,
         critical_devices=score.critical_devices,
         notable_devices=score.notable_devices,
@@ -5491,8 +5498,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         prozent = round(hosts_checked / hosts_total * 100)
         return f"{hosts_checked} von {hosts_total} Hosts geprüft ({prozent} %)"
 
-    # (Etappe 3b) Severity-Stufen auf Deutsch fuer die ANZEIGE im rein deutschen PDF. Der
-    # ROHE NVD-Schluessel (CRITICAL/HIGH/...) bleibt der technische Schluessel (Sortierung,
+    # (Etappe 3b / E3a) Severity-Stufen als ANZEIGE-Text, je Sprache eine Map. Der ROHE
+    # NVD-Schluessel (CRITICAL/HIGH/...) bleibt der technische Schluessel (Sortierung,
     # Farb-Lookup, JSON); hier wird AUSSCHLIESSLICH der angezeigte Text uebersetzt.
     _SEV_DE = {
         "CRITICAL": "Kritisch",
@@ -5501,9 +5508,22 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         "LOW": "Niedrig",
         "UNKNOWN": "Unbekannt",
     }
+    _SEV_EN = {
+        "CRITICAL": "Critical",
+        "HIGH": "High",
+        "MEDIUM": "Medium",
+        "LOW": "Low",
+        "UNKNOWN": "Unknown",
+    }
 
-    def _sev_de(roh: str) -> str:
-        return _SEV_DE.get(roh.upper(), "Unbekannt")
+    def _sev_label(roh: str, lang: Lang = "de") -> str:
+        """Uebersetzt den ROHEN NVD-Schluessel in den Anzeige-Text der Sprache ``lang``.
+
+        Unbekannter Schluessel -> die "Unbekannt"/"Unknown"-Stufe der jeweiligen Sprache
+        (unveraendertes Verhalten der deutschen Fassung).
+        """
+        tabelle = _SEV_DE if lang == "de" else _SEV_EN
+        return tabelle.get(roh.upper(), tabelle["UNKNOWN"])
 
     # Status-Text je Befund-Zeile, Variante C (R3): quittiert UND is_new sind ZWEI
     # Dimensionen. Quittiert schlaegt durch ("Quittiert"); sonst zeigt ein aktiver Befund
@@ -5515,19 +5535,23 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             return "Aktiv · NEU"
         return "Aktiv"
 
-    # (R5) Datums-Helfer: NVD published ist ISO (YYYY-MM-DD oder ISO-8601 mit Zeit) ->
-    # deutsch TT.MM.JJJJ. Leer -> "—". Unerwartetes Format -> ehrlich der Rohwert (kein Absturz).
-    def _fmt_published(iso: str) -> str:
+    # (R5 / E3a) Datums-Helfer: NVD published ist ISO (YYYY-MM-DD oder ISO-8601 mit Zeit) ->
+    # de TT.MM.JJJJ, en ISO YYYY-MM-DD (Schreibweise wie ``report_texts.format_datum_kurz``).
+    # Leer -> "—" (in beiden Sprachen). Unerwartetes Format -> ehrlich der Rohwert (kein Absturz).
+    def _fmt_published(iso: str, lang: Lang = "de") -> str:
         if not iso:
             return "—"
+        muster = "%d.%m.%Y" if lang == "de" else "%Y-%m-%d"
         try:
-            return datetime.strptime(iso[:10], "%Y-%m-%d").strftime("%d.%m.%Y")
+            return datetime.strptime(iso[:10], "%Y-%m-%d").strftime(muster)
         except ValueError:
             return iso
 
     # (R2) Host-Gruppen-Bloecke fuer das PDF: je HostFindingGroup eine fertige Kopfzeile + die
     # CVE-Zeilen in FINDING_GROUP_COLUMNS-Reihenfolge (ohne Geraet, das steht im Kopf).
-    def _project_cve_host_groups(report: CveReport) -> tuple[HostGroupBlock, ...]:
+    def _project_cve_host_groups(
+        report: CveReport, lang: Lang = "de"
+    ) -> tuple[HostGroupBlock, ...]:
         bloecke: list[HostGroupBlock] = []
         for g in report.host_groups:
             # Host-Kopf sauber bauen -- ohne IP-Teil (und ohne doppelten Trenner), wenn keine IP.
@@ -5537,12 +5561,13 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             if g.ip and g.ip != g.device_label:
                 teile.append(g.ip)
             teile.append(g.mac)
-            teile.append(f"{g.finding_count} Befunde, höchste {_sev_de(g.highest_severity)}")
+            hoechste = _sev_label(g.highest_severity, lang)
+            teile.append(f"{g.finding_count} Befunde, höchste {hoechste}")
             header = " · ".join(teile)
             rows = tuple(
                 (
                     r.cve_id,
-                    _sev_de(r.severity),
+                    _sev_label(r.severity, lang),
                     f"{r.cvss_score:.1f}",
                     r.service,
                     str(r.port),
@@ -5563,13 +5588,13 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # Renderer). severity_labels traegt je (roh_key, deutscher_text) die Legenden-Anzeige.
         severity_rows = tuple((sc.severity, str(sc.count)) for sc in report.severity_counts)
         severity_labels = tuple(
-            (sc.severity, _sev_de(sc.severity)) for sc in report.severity_counts
+            (sc.severity, _sev_label(sc.severity, lang)) for sc in report.severity_counts
         )
         device_rows = tuple(
             (
                 r.device_label,
                 str(r.finding_count),
-                _sev_de(r.highest_severity),
+                _sev_label(r.highest_severity, lang),
                 f"{r.highest_cvss:.1f}",
                 r.services,
             )
@@ -5580,9 +5605,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 r.service,
                 str(r.finding_count),
                 str(r.device_count),
-                _sev_de(r.highest_severity),
+                _sev_label(r.highest_severity, lang),
                 f"{r.highest_cvss:.1f}",
-                _fmt_published(r.oldest_published),
+                _fmt_published(r.oldest_published, lang),
             )
             for r in report.service_rows
         )
@@ -5590,7 +5615,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             (
                 r.device_label,
                 r.cve_id,
-                _sev_de(r.severity),
+                _sev_label(r.severity, lang),
                 f"{r.cvss_score:.1f}",
                 r.service,
                 str(r.port),
@@ -5612,14 +5637,14 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             hosts_total=report.hosts_total,
             hosts_checked=report.hosts_checked,
             coverage_text=coverage_text,
-            highest_severity=_sev_de(report.highest_severity),
-            oldest_published_text=_fmt_published(report.oldest_published),
+            highest_severity=_sev_label(report.highest_severity, lang),
+            oldest_published_text=_fmt_published(report.oldest_published, lang),
             severity_rows=severity_rows,
             severity_labels=severity_labels,
             device_rows=device_rows,
             service_rows=service_rows,
             finding_rows=finding_rows,
-            host_groups=_project_cve_host_groups(report),
+            host_groups=_project_cve_host_groups(report, lang),
         )
 
     # ── CVE-Bericht: HTTP-Endpunkt-Runner (Muster _inventory_report, Regel 4/5) ──

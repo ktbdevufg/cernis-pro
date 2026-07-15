@@ -259,6 +259,8 @@ class SecurityPdfModelLike(Protocol):
     @property
     def score_level(self) -> str: ...
     @property
+    def score_level_label(self) -> str: ...
+    @property
     def score_einordnung(self) -> str: ...
     @property
     def critical_devices(self) -> int: ...
@@ -726,7 +728,7 @@ class ReportlabRenderer:
         story.append(
             _gauge_drawing(
                 model.score_value,
-                model.score_level,
+                model.score_level_label,
                 _LEVEL_COLORS.get(model.score_level, _CRIT),
             )
         )

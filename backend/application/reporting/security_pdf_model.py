@@ -66,10 +66,13 @@ class SecurityPdfModel:
       Deutsch zurueckfallen laesst; der Renderer haelt den Text NICHT mehr selbst).
 
     SCORE-COCKPIT:
-      ``score_value`` der Netz-Gesundheit-Wert 0..100, ``score_level`` die Einstufung als
-      Klartext ("gut"/"maessig"/"kritisch"), ``score_einordnung`` der fertige Erklaersatz
-      darunter. Die Gauge faerbt bis ``score_value`` in der zum Level passenden Farbe (der
-      Adapter waehlt die Farbe ueber ``score_level``).
+      ``score_value`` der Netz-Gesundheit-Wert 0..100, ``score_level`` der ROHE
+      STEUER-SCHLUESSEL der Einstufung ("gut"/"maessig"/"kritisch") -- er steuert allein die
+      FARBE der Gauge und wird darum NIE uebersetzt; ``score_level_label`` der uebersetzte
+      ANZEIGE-TEXT daneben (E3a, aus ``report_texts.SCORE_LEVEL_LABELS`` in der Projektion
+      aufgeloest), ``score_einordnung`` der fertige Erklaersatz darunter. Die Gauge faerbt bis
+      ``score_value`` in der ueber ``score_level`` gewaehlten Farbe und beschriftet sich mit
+      ``score_level_label``.
 
     KENNZAHLEN/DONUT:
       ``critical_devices``/``notable_devices``/``clean_devices`` die drei Zaehler (Donut-
@@ -112,6 +115,7 @@ class SecurityPdfModel:
 
     score_value: int
     score_level: str
+    score_level_label: str
     score_einordnung: str
 
     critical_devices: int
