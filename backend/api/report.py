@@ -161,7 +161,7 @@ async def get_security_report(
 class SecurityReportPdfRunner(Protocol):
     """Schmaler Vertrag des injizierten PDF-Runners (liefert das fertige Download-Ergebnis)."""
 
-    async def __call__(self) -> object:
+    async def __call__(self, lang: str) -> object:
         """Baut den Sicherheitsbericht als PDF und liefert content/media_type/filename."""
         ...
 
@@ -173,19 +173,22 @@ def provide_security_report_pdf() -> SecurityReportPdfRunner:
 @router.get("/security/pdf")
 async def get_security_report_pdf(
     runner: Annotated[SecurityReportPdfRunner, Depends(provide_security_report_pdf)],
+    lang: str = "de",
 ) -> Response:
     """Liefert den Sicherheitsbericht als PDF-Download (Bytes, ``attachment``).
 
-    Der injizierte Composition-Root-Runner baut den Bericht, projiziert ihn auf das
-    render-fertige PDF-Modell und rendert das PDF; er liefert ein Objekt mit ``content``
-    (PDF-Bytes), ``media_type`` (``application/pdf``) und ``filename``. Der Router verpackt
-    es in eine ``Response`` mit ``Content-Disposition: attachment; filename="..."`` -- so
-    laedt der Browser die Datei als Download statt sie inline anzuzeigen.
+    ``lang`` ist ein einfacher Query-Parameter ("de"/"en"); jeder andere Wert faellt im
+    Composition Root auf "de" zurueck (dort behandelt, nicht im Router). Der injizierte
+    Composition-Root-Runner baut den Bericht, projiziert ihn auf das render-fertige
+    PDF-Modell und rendert das PDF; er liefert ein Objekt mit ``content`` (PDF-Bytes),
+    ``media_type`` (``application/pdf``) und ``filename``. Der Router verpackt es in eine
+    ``Response`` mit ``Content-Disposition: attachment; filename="..."`` -- so laedt der
+    Browser die Datei als Download statt sie inline anzuzeigen.
 
     KEIN 404-Fall: liegt kein juengster Scan als Basis vor, ist das ein gueltiges PDF mit
     Score 100 (leere Basis), kein HTTP-Fehler -- analog ``GET /api/report/security``.
     """
-    result = await runner()
+    result = await runner(lang)
     # result kommt aus dem Composition Root; per Attribut-Zugriff gelesen (kein Typ-Import im
     # Router -- der api-Ring kennt nur die drei Attribute, Muster ``api/export.py``).
     return Response(
@@ -347,7 +350,7 @@ async def get_inventory_report(
 class InventoryReportPdfRunner(Protocol):
     """Schmaler Vertrag des injizierten PDF-Runners (liefert das fertige Download-Ergebnis)."""
 
-    async def __call__(self) -> object:
+    async def __call__(self, lang: str) -> object:
         """Baut den Bestandsbericht als PDF und liefert content/media_type/filename."""
         ...
 
@@ -359,18 +362,21 @@ def provide_inventory_report_pdf() -> InventoryReportPdfRunner:
 @router.get("/inventory/pdf")
 async def get_inventory_report_pdf(
     runner: Annotated[InventoryReportPdfRunner, Depends(provide_inventory_report_pdf)],
+    lang: str = "de",
 ) -> Response:
     """Liefert den Bestandsbericht als PDF-Download (Bytes, ``attachment``).
 
-    Der injizierte Composition-Root-Runner baut den Bericht, projiziert ihn auf das
-    render-fertige PDF-Modell und rendert das PDF; er liefert ein Objekt mit ``content``
-    (PDF-Bytes), ``media_type`` (``application/pdf``) und ``filename``. Der Router verpackt es
-    in eine ``Response`` mit ``Content-Disposition: attachment; filename="..."``.
+    ``lang`` ist ein einfacher Query-Parameter ("de"/"en"); jeder andere Wert faellt im
+    Composition Root auf "de" zurueck (dort behandelt, nicht im Router). Der injizierte
+    Composition-Root-Runner baut den Bericht, projiziert ihn auf das render-fertige
+    PDF-Modell und rendert das PDF; er liefert ein Objekt mit ``content`` (PDF-Bytes),
+    ``media_type`` (``application/pdf``) und ``filename``. Der Router verpackt es in eine
+    ``Response`` mit ``Content-Disposition: attachment; filename="..."``.
 
     KEIN 404-Fall: leerer Bestand ist ein gueltiges PDF (alle Zaehler 0, leere Listen), kein
     HTTP-Fehler -- analog ``GET /api/report/inventory``.
     """
-    result = await runner()
+    result = await runner(lang)
     # result kommt aus dem Composition Root; per Attribut-Zugriff gelesen (kein Typ-Import im
     # Router -- der api-Ring kennt nur die drei Attribute, Muster ``get_security_report_pdf``).
     return Response(
@@ -527,7 +533,7 @@ async def get_cve_report(
 class CveReportPdfRunner(Protocol):
     """Schmaler Vertrag des injizierten PDF-Runners (liefert das fertige Download-Ergebnis)."""
 
-    async def __call__(self) -> object:
+    async def __call__(self, lang: str) -> object:
         """Baut den CVE-Bericht als PDF und liefert content/media_type/filename."""
         ...
 
@@ -539,18 +545,21 @@ def provide_cve_report_pdf() -> CveReportPdfRunner:
 @router.get("/cve/pdf")
 async def get_cve_report_pdf(
     runner: Annotated[CveReportPdfRunner, Depends(provide_cve_report_pdf)],
+    lang: str = "de",
 ) -> Response:
     """Liefert den CVE-Bericht als PDF-Download (Bytes, ``attachment``).
 
-    Der injizierte Composition-Root-Runner baut den Bericht, projiziert ihn auf das
-    render-fertige PDF-Modell und rendert das PDF; er liefert ein Objekt mit ``content``
-    (PDF-Bytes), ``media_type`` (``application/pdf``) und ``filename``. Der Router verpackt es
-    in eine ``Response`` mit ``Content-Disposition: attachment; filename="..."``.
+    ``lang`` ist ein einfacher Query-Parameter ("de"/"en"); jeder andere Wert faellt im
+    Composition Root auf "de" zurueck (dort behandelt, nicht im Router). Der injizierte
+    Composition-Root-Runner baut den Bericht, projiziert ihn auf das render-fertige
+    PDF-Modell und rendert das PDF; er liefert ein Objekt mit ``content`` (PDF-Bytes),
+    ``media_type`` (``application/pdf``) und ``filename``. Der Router verpackt es in eine
+    ``Response`` mit ``Content-Disposition: attachment; filename="..."``.
 
     KEIN 404-Fall: leerer Stand ist ein gueltiges PDF (alle Zaehler 0, leere Listen), kein
     HTTP-Fehler -- analog ``GET /api/report/cve``.
     """
-    result = await runner()
+    result = await runner(lang)
     # result kommt aus dem Composition Root; per Attribut-Zugriff gelesen (kein Typ-Import im
     # Router -- der api-Ring kennt nur die drei Attribute, Muster ``get_inventory_report_pdf``).
     return Response(
@@ -686,7 +695,7 @@ def provide_outbound_report() -> OutboundReportRunner:
 class OutboundReportPdfRunner(Protocol):
     """Schmaler Vertrag des injizierten PDF-Runners (liefert das fertige Download-Ergebnis)."""
 
-    async def __call__(self, recording_id: str | None) -> object:
+    async def __call__(self, recording_id: str | None, lang: str) -> object:
         """Baut den Aussenkontakte-Bericht als PDF und liefert content/media_type/filename."""
         ...
 
@@ -744,11 +753,14 @@ async def get_outbound_report(
 async def get_outbound_report_pdf(
     runner: Annotated[OutboundReportPdfRunner, Depends(provide_outbound_report_pdf)],
     recording_id: str | None = None,
+    lang: str = "de",
 ) -> Response:
     """Liefert den Aussenkontakte-Bericht als PDF-Download (Bytes, ``attachment``).
 
-    ``recording_id`` ist optional (None/leer = alle Aufzeichnungen, ein Wert = nur diese). Der
-    injizierte Composition-Root-Runner baut den Bericht, projiziert ihn auf das render-fertige
+    ``recording_id`` ist optional (None/leer = alle Aufzeichnungen, ein Wert = nur diese).
+    ``lang`` ist ein einfacher Query-Parameter ("de"/"en"); jeder andere Wert faellt im
+    Composition Root auf "de" zurueck (dort behandelt, nicht im Router). Der injizierte
+    Composition-Root-Runner baut den Bericht, projiziert ihn auf das render-fertige
     PDF-Modell und rendert das PDF; er liefert ein Objekt mit ``content`` (PDF-Bytes),
     ``media_type`` (``application/pdf``) und ``filename``. Der Router verpackt es in eine
     ``Response`` mit ``Content-Disposition: attachment; filename="..."``.
@@ -756,7 +768,7 @@ async def get_outbound_report_pdf(
     KEIN 404-Fall: leerer Stand ist ein gueltiges PDF (alle Zaehler 0, leere Listen), kein
     HTTP-Fehler -- analog ``GET /api/report/outbound``.
     """
-    result = await runner(recording_id)
+    result = await runner(recording_id, lang)
     # result kommt aus dem Composition Root; per Attribut-Zugriff gelesen (kein Typ-Import im
     # Router -- der api-Ring kennt nur die drei Attribute, Muster ``get_cve_report_pdf``).
     return Response(
@@ -888,7 +900,7 @@ async def get_dns_watch_report(
 class DnsWatchReportPdfRunner(Protocol):
     """Schmaler Vertrag des injizierten PDF-Runners (liefert das fertige Download-Ergebnis)."""
 
-    async def __call__(self) -> object:
+    async def __call__(self, lang: str) -> object:
         """Baut den DNS-Waechter-Bericht als PDF und liefert content/media_type/filename."""
         ...
 
@@ -900,18 +912,21 @@ def provide_dns_watch_report_pdf() -> DnsWatchReportPdfRunner:
 @router.get("/dns-watch/pdf")
 async def get_dns_watch_report_pdf(
     runner: Annotated[DnsWatchReportPdfRunner, Depends(provide_dns_watch_report_pdf)],
+    lang: str = "de",
 ) -> Response:
     """Liefert den DNS-Waechter-Bericht als PDF-Download (Bytes, ``attachment``).
 
-    Der injizierte Composition-Root-Runner baut den Bericht, projiziert ihn auf das
-    render-fertige PDF-Modell und rendert das PDF; er liefert ein Objekt mit ``content``
-    (PDF-Bytes), ``media_type`` (``application/pdf``) und ``filename``. Der Router verpackt es
-    in eine ``Response`` mit ``Content-Disposition: attachment; filename="..."``.
+    ``lang`` ist ein einfacher Query-Parameter ("de"/"en"); jeder andere Wert faellt im
+    Composition Root auf "de" zurueck (dort behandelt, nicht im Router). Der injizierte
+    Composition-Root-Runner baut den Bericht, projiziert ihn auf das render-fertige
+    PDF-Modell und rendert das PDF; er liefert ein Objekt mit ``content`` (PDF-Bytes),
+    ``media_type`` (``application/pdf``) und ``filename``. Der Router verpackt es in eine
+    ``Response`` mit ``Content-Disposition: attachment; filename="..."``.
 
     KEIN 404-Fall: leerer Stand ist ein gueltiges PDF (alle Zaehler 0, leere Listen), kein
     HTTP-Fehler -- analog ``GET /api/report/dns-watch``.
     """
-    result = await runner()
+    result = await runner(lang)
     # result kommt aus dem Composition Root; per Attribut-Zugriff gelesen (kein Typ-Import im
     # Router -- der api-Ring kennt nur die drei Attribute, Muster ``get_inventory_report_pdf``).
     return Response(
@@ -1036,7 +1051,7 @@ def provide_dns_bypass_report() -> DnsBypassReportRunner:
 class DnsBypassReportPdfRunner(Protocol):
     """Schmaler Vertrag des injizierten PDF-Runners (liefert das fertige Download-Ergebnis)."""
 
-    async def __call__(self, recording_id: str | None) -> object:
+    async def __call__(self, recording_id: str | None, lang: str) -> object:
         """Baut den DNS-Umgehungs-Bericht als PDF und liefert content/media_type/filename."""
         ...
 
@@ -1098,11 +1113,14 @@ async def get_dns_bypass_report(
 async def get_dns_bypass_report_pdf(
     runner: Annotated[DnsBypassReportPdfRunner, Depends(provide_dns_bypass_report_pdf)],
     recording_id: str | None = None,
+    lang: str = "de",
 ) -> Response:
     """Liefert den DNS-Umgehungs-Bericht als PDF-Download (Bytes, ``attachment``).
 
-    ``recording_id`` ist optional (None/leer = alle Aufzeichnungen, ein Wert = nur diese). Der
-    injizierte Composition-Root-Runner baut den Bericht, projiziert ihn auf das render-fertige
+    ``recording_id`` ist optional (None/leer = alle Aufzeichnungen, ein Wert = nur diese).
+    ``lang`` ist ein einfacher Query-Parameter ("de"/"en"); jeder andere Wert faellt im
+    Composition Root auf "de" zurueck (dort behandelt, nicht im Router). Der injizierte
+    Composition-Root-Runner baut den Bericht, projiziert ihn auf das render-fertige
     PDF-Modell und rendert das PDF; er liefert ein Objekt mit ``content`` (PDF-Bytes),
     ``media_type`` (``application/pdf``) und ``filename``. Der Router verpackt es in eine
     ``Response`` mit ``Content-Disposition: attachment; filename="..."``.
@@ -1110,7 +1128,7 @@ async def get_dns_bypass_report_pdf(
     KEIN 404-Fall: leerer Stand ist ein gueltiges PDF (alle Zaehler 0, leere Listen), kein
     HTTP-Fehler -- analog ``GET /api/report/dns-bypass``.
     """
-    result = await runner(recording_id)
+    result = await runner(recording_id, lang)
     # result kommt aus dem Composition Root; per Attribut-Zugriff gelesen (kein Typ-Import im
     # Router -- der api-Ring kennt nur die drei Attribute, Muster ``get_outbound_report_pdf``).
     return Response(
@@ -1249,7 +1267,7 @@ def provide_behavior_report() -> BehaviorReportRunner:
 class BehaviorReportPdfRunner(Protocol):
     """Schmaler Vertrag des injizierten PDF-Runners (liefert das fertige Download-Ergebnis)."""
 
-    async def __call__(self, task_id: str | None) -> object:
+    async def __call__(self, task_id: str | None, lang: str) -> object:
         """Baut den Verhaltensprofil-Bericht als PDF und liefert content/media_type/filename."""
         ...
 
@@ -1308,11 +1326,14 @@ async def get_behavior_report(
 async def get_behavior_report_pdf(
     runner: Annotated[BehaviorReportPdfRunner, Depends(provide_behavior_report_pdf)],
     task_id: str | None = None,
+    lang: str = "de",
 ) -> Response:
     """Liefert den Verhaltensprofil-Bericht als PDF-Download (Bytes, ``attachment``).
 
-    ``task_id`` ist optional (None/leer = alle Geraete, ein Wert = nur diese Aufgabe). Der
-    injizierte Composition-Root-Runner baut den Bericht, projiziert ihn auf das render-fertige
+    ``task_id`` ist optional (None/leer = alle Geraete, ein Wert = nur diese Aufgabe).
+    ``lang`` ist ein einfacher Query-Parameter ("de"/"en"); jeder andere Wert faellt im
+    Composition Root auf "de" zurueck (dort behandelt, nicht im Router). Der injizierte
+    Composition-Root-Runner baut den Bericht, projiziert ihn auf das render-fertige
     PDF-Modell und rendert das PDF; er liefert ein Objekt mit ``content`` (PDF-Bytes),
     ``media_type`` (``application/pdf``) und ``filename``. Der Router verpackt es in eine
     ``Response`` mit ``Content-Disposition: attachment; filename="..."``.
@@ -1320,7 +1341,7 @@ async def get_behavior_report_pdf(
     KEIN 404-Fall: leerer Stand ist ein gueltiges PDF, kein HTTP-Fehler -- analog
     ``GET /api/report/behavior``.
     """
-    result = await runner(task_id)
+    result = await runner(task_id, lang)
     # result kommt aus dem Composition Root; per Attribut-Zugriff gelesen (kein Typ-Import im
     # Router -- der api-Ring kennt nur die drei Attribute, Muster ``get_dns_bypass_report_pdf``).
     return Response(

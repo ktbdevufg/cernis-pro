@@ -131,7 +131,7 @@ export default function BehaviorReportView() {
   async function handlePdf() {
     setPdfFehler(false);
     try {
-      await fetchBehaviorReportPdf(bezug === "single" ? selectedTaskId : null);
+      await fetchBehaviorReportPdf(bezug === "single" ? selectedTaskId : null, i18n.language);
     } catch {
       setPdfFehler(true);
     }

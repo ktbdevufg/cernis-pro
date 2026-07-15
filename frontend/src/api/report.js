@@ -107,16 +107,21 @@ export async function fetchSecurityReport() {
   };
 }
 
-// GET /api/report/security/pdf -> loest den Browser-Download des Sicherheitsberichts
-// als PDF aus (Blob via apiDownload). Der echte Dateiname kommt vom Backend ueber
-// Content-Disposition (CERNISPRO_Netzwerk-Sicherheitsbericht_<datum>.pdf); der
-// defaultName hier ist nur Fallback. Bei !ok/Netzfehler -> ApiError (die View faengt
-// das und zeigt einen dezenten PDF-Fehlerhinweis).
-export async function fetchSecurityReportPdf() {
+// GET /api/report/security/pdf?lang=de|en -> loest den Browser-Download des
+// Sicherheitsberichts als PDF in der gewaehlten Sprache aus (Blob via apiDownload).
+// lang faellt sicher auf "de" zurueck, wenn nicht "en" (Muster fetchManualPdf). Der
+// echte Dateiname kommt vom Backend ueber Content-Disposition
+// (CERNISPRO_Netzwerk-Sicherheitsbericht_<datum>.pdf bzw. die englische Entsprechung);
+// der defaultName hier ist nur Fallback. Bei !ok/Netzfehler -> ApiError (die View
+// faengt das und zeigt einen dezenten PDF-Fehlerhinweis).
+export async function fetchSecurityReportPdf(lang) {
+  const sprache = lang === "en" ? "en" : "de";
   return apiDownload(
-    "/api/report/security/pdf",
+    `/api/report/security/pdf?lang=${sprache}`,
     null,
-    "CERNISPRO_Netzwerk-Sicherheitsbericht.pdf",
+    sprache === "en"
+      ? "CERNISPRO_Network-Security-Report.pdf"
+      : "CERNISPRO_Netzwerk-Sicherheitsbericht.pdf",
   );
 }
 
@@ -186,15 +191,20 @@ export async function fetchInventoryReport() {
   };
 }
 
-// GET /api/report/inventory/pdf -> loest den Browser-Download des Bestandsberichts
-// als PDF aus (Blob via apiDownload). Der echte Dateiname kommt vom Backend ueber
-// Content-Disposition; der defaultName hier ist nur Fallback. Bei !ok/Netzfehler
-// -> ApiError (die View faengt das und zeigt einen dezenten PDF-Fehlerhinweis).
-export async function fetchInventoryReportPdf() {
+// GET /api/report/inventory/pdf?lang=de|en -> loest den Browser-Download des
+// Bestandsberichts als PDF in der gewaehlten Sprache aus (Blob via apiDownload). lang
+// faellt sicher auf "de" zurueck, wenn nicht "en" (Muster fetchManualPdf). Der echte
+// Dateiname kommt vom Backend ueber Content-Disposition; der defaultName hier ist nur
+// Fallback. Bei !ok/Netzfehler -> ApiError (die View faengt das und zeigt einen
+// dezenten PDF-Fehlerhinweis).
+export async function fetchInventoryReportPdf(lang) {
+  const sprache = lang === "en" ? "en" : "de";
   return apiDownload(
-    "/api/report/inventory/pdf",
+    `/api/report/inventory/pdf?lang=${sprache}`,
     null,
-    "CERNISPRO_Netzwerk-Bestandsbericht.pdf",
+    sprache === "en"
+      ? "CERNISPRO_Network-Inventory-Report.pdf"
+      : "CERNISPRO_Netzwerk-Bestandsbericht.pdf",
   );
 }
 
@@ -315,13 +325,19 @@ export async function fetchCveReport() {
   };
 }
 
-// GET /api/report/cve/pdf -> loest den Browser-Download des CVE-Berichts als PDF
-// aus (Blob via apiDownload). Der echte Dateiname kommt vom Backend ueber
-// Content-Disposition (CERNISPRO_CVE-Bericht_<datum>.pdf); der defaultName hier ist
-// nur Fallback. Bei !ok/Netzfehler -> ApiError (die View faengt das und zeigt einen
-// dezenten PDF-Fehlerhinweis).
-export async function fetchCveReportPdf() {
-  return apiDownload("/api/report/cve/pdf", null, "CERNISPRO_CVE-Bericht.pdf");
+// GET /api/report/cve/pdf?lang=de|en -> loest den Browser-Download des CVE-Berichts
+// als PDF in der gewaehlten Sprache aus (Blob via apiDownload). lang faellt sicher auf
+// "de" zurueck, wenn nicht "en" (Muster fetchManualPdf). Der echte Dateiname kommt vom
+// Backend ueber Content-Disposition (CERNISPRO_CVE-Bericht_<datum>.pdf bzw. die
+// englische Entsprechung); der defaultName hier ist nur Fallback. Bei !ok/Netzfehler
+// -> ApiError (die View faengt das und zeigt einen dezenten PDF-Fehlerhinweis).
+export async function fetchCveReportPdf(lang) {
+  const sprache = lang === "en" ? "en" : "de";
+  return apiDownload(
+    `/api/report/cve/pdf?lang=${sprache}`,
+    null,
+    sprache === "en" ? "CERNISPRO_CVE-Report.pdf" : "CERNISPRO_CVE-Bericht.pdf",
+  );
 }
 
 // ── Aussenkontakte-Bericht (Etappe 3) ──────────────────────────────────────────
@@ -421,16 +437,25 @@ export async function fetchOutboundReport(recordingId) {
   };
 }
 
-// GET /api/report/outbound/pdf?recording_id=... -> loest den Browser-Download des
-// Aussenkontakte-Berichts als PDF aus (Blob via apiDownload). recordingId leer/null
-// -> ohne Query (alle). Der echte Dateiname kommt vom Backend ueber Content-
-// Disposition; der defaultName hier ist nur Fallback. Bei !ok/Netzfehler -> ApiError
-// (die View faengt das und zeigt einen dezenten PDF-Fehlerhinweis).
-export async function fetchOutboundReportPdf(recordingId) {
+// GET /api/report/outbound/pdf?recording_id=...&lang=de|en -> loest den Browser-
+// Download des Aussenkontakte-Berichts als PDF in der gewaehlten Sprache aus (Blob via
+// apiDownload). recordingId leer/null -> ohne recording_id (alle); lang wird IMMER
+// angehaengt und faellt sicher auf "de" zurueck, wenn nicht "en" (Muster
+// fetchManualPdf). Der echte Dateiname kommt vom Backend ueber Content-Disposition;
+// der defaultName hier ist nur Fallback. Bei !ok/Netzfehler -> ApiError (die View
+// faengt das und zeigt einen dezenten PDF-Fehlerhinweis).
+export async function fetchOutboundReportPdf(recordingId, lang) {
+  const sprache = lang === "en" ? "en" : "de";
   const pfad = recordingId
-    ? `/api/report/outbound/pdf?recording_id=${encodeURIComponent(recordingId)}`
-    : "/api/report/outbound/pdf";
-  return apiDownload(pfad, null, "CERNISPRO_Netzwerk-Aussenkontakte-Bericht.pdf");
+    ? `/api/report/outbound/pdf?recording_id=${encodeURIComponent(recordingId)}&lang=${sprache}`
+    : `/api/report/outbound/pdf?lang=${sprache}`;
+  return apiDownload(
+    pfad,
+    null,
+    sprache === "en"
+      ? "CERNISPRO_Network-External-Contacts-Report.pdf"
+      : "CERNISPRO_Netzwerk-Aussenkontakte-Bericht.pdf",
+  );
 }
 
 // ── DNS-Waechter-Bericht (Etappe 3) ────────────────────────────────────────────
@@ -509,12 +534,19 @@ export async function fetchDnsWatchReport() {
   };
 }
 
-// GET /api/report/dns-watch/pdf -> loest den Browser-Download des DNS-Waechter-
-// Berichts als PDF aus (Blob via apiDownload). Der echte Dateiname kommt vom Backend
-// ueber Content-Disposition; der defaultName hier ist nur Fallback. Bei !ok/Netzfehler
-// -> ApiError (die View faengt das und zeigt einen dezenten PDF-Fehlerhinweis).
-export async function fetchDnsWatchReportPdf() {
-  return apiDownload("/api/report/dns-watch/pdf", null, "CERNISPRO_DNS-Waechter-Bericht.pdf");
+// GET /api/report/dns-watch/pdf?lang=de|en -> loest den Browser-Download des
+// DNS-Waechter-Berichts als PDF in der gewaehlten Sprache aus (Blob via apiDownload).
+// lang faellt sicher auf "de" zurueck, wenn nicht "en" (Muster fetchManualPdf). Der
+// echte Dateiname kommt vom Backend ueber Content-Disposition; der defaultName hier ist
+// nur Fallback. Bei !ok/Netzfehler -> ApiError (die View faengt das und zeigt einen
+// dezenten PDF-Fehlerhinweis).
+export async function fetchDnsWatchReportPdf(lang) {
+  const sprache = lang === "en" ? "en" : "de";
+  return apiDownload(
+    `/api/report/dns-watch/pdf?lang=${sprache}`,
+    null,
+    sprache === "en" ? "CERNISPRO_DNS-Watch-Report.pdf" : "CERNISPRO_DNS-Waechter-Bericht.pdf",
+  );
 }
 
 // ── DNS-Umgehungs-Bericht (netzweit, Etappe 6) ─────────────────────────────────
@@ -602,16 +634,25 @@ export async function fetchDnsBypassReport(recordingId) {
   };
 }
 
-// GET /api/report/dns-bypass/pdf?recording_id=... -> loest den Browser-Download des
-// netzweiten DNS-Umgehungs-Berichts als PDF aus (Blob via apiDownload). recordingId
-// leer/null -> ohne Query (alle). Der echte Dateiname kommt vom Backend ueber Content-
-// Disposition; der defaultName hier ist nur Fallback. Bei !ok/Netzfehler -> ApiError
-// (die View faengt das und zeigt einen dezenten PDF-Fehlerhinweis).
-export async function fetchDnsBypassReportPdf(recordingId) {
+// GET /api/report/dns-bypass/pdf?recording_id=...&lang=de|en -> loest den Browser-
+// Download des netzweiten DNS-Umgehungs-Berichts als PDF in der gewaehlten Sprache aus
+// (Blob via apiDownload). recordingId leer/null -> ohne recording_id (alle); lang wird
+// IMMER angehaengt und faellt sicher auf "de" zurueck, wenn nicht "en" (Muster
+// fetchManualPdf). Der echte Dateiname kommt vom Backend ueber Content-Disposition; der
+// defaultName hier ist nur Fallback. Bei !ok/Netzfehler -> ApiError (die View faengt das
+// und zeigt einen dezenten PDF-Fehlerhinweis).
+export async function fetchDnsBypassReportPdf(recordingId, lang) {
+  const sprache = lang === "en" ? "en" : "de";
   const pfad = recordingId
-    ? `/api/report/dns-bypass/pdf?recording_id=${encodeURIComponent(recordingId)}`
-    : "/api/report/dns-bypass/pdf";
-  return apiDownload(pfad, null, "CERNISPRO_DNS-Umgehungs-Bericht.pdf");
+    ? `/api/report/dns-bypass/pdf?recording_id=${encodeURIComponent(recordingId)}&lang=${sprache}`
+    : `/api/report/dns-bypass/pdf?lang=${sprache}`;
+  return apiDownload(
+    pfad,
+    null,
+    sprache === "en"
+      ? "CERNISPRO_Network-DNS-Bypass-Report.pdf"
+      : "CERNISPRO_DNS-Umgehungs-Bericht.pdf",
+  );
 }
 
 // ── Verhaltensprofil-Bericht (Etappe 5) ────────────────────────────────────────
@@ -688,16 +729,25 @@ export async function fetchBehaviorReport(taskId) {
   };
 }
 
-// GET /api/report/behavior/pdf?task_id=... -> loest den Browser-Download des
-// Verhaltensprofil-Berichts als PDF aus (Blob via apiDownload). taskId leer/null ->
-// ohne Query (alle). Der echte Dateiname kommt vom Backend ueber Content-Disposition;
-// der defaultName hier ist nur Fallback. Bei !ok/Netzfehler -> ApiError (die View
-// faengt das und zeigt einen dezenten PDF-Fehlerhinweis).
-export async function fetchBehaviorReportPdf(taskId) {
+// GET /api/report/behavior/pdf?task_id=...&lang=de|en -> loest den Browser-Download des
+// Verhaltensprofil-Berichts als PDF in der gewaehlten Sprache aus (Blob via
+// apiDownload). taskId leer/null -> ohne task_id (alle); lang wird IMMER angehaengt und
+// faellt sicher auf "de" zurueck, wenn nicht "en" (Muster fetchManualPdf). Der echte
+// Dateiname kommt vom Backend ueber Content-Disposition; der defaultName hier ist nur
+// Fallback. Bei !ok/Netzfehler -> ApiError (die View faengt das und zeigt einen dezenten
+// PDF-Fehlerhinweis).
+export async function fetchBehaviorReportPdf(taskId, lang) {
+  const sprache = lang === "en" ? "en" : "de";
   const pfad = taskId
-    ? `/api/report/behavior/pdf?task_id=${encodeURIComponent(taskId)}`
-    : "/api/report/behavior/pdf";
-  return apiDownload(pfad, null, "CERNISPRO_Verhaltensprofil-Bericht.pdf");
+    ? `/api/report/behavior/pdf?task_id=${encodeURIComponent(taskId)}&lang=${sprache}`
+    : `/api/report/behavior/pdf?lang=${sprache}`;
+  return apiDownload(
+    pfad,
+    null,
+    sprache === "en"
+      ? "CERNISPRO_Behavior-Profile-Report.pdf"
+      : "CERNISPRO_Verhaltensprofil-Bericht.pdf",
+  );
 }
 
 export default {

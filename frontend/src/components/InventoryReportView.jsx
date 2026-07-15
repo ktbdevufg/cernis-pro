@@ -181,7 +181,7 @@ export default function InventoryReportView() {
     setPdfFehler(false);
     setPdfLaedt(true);
     try {
-      await fetchInventoryReportPdf();
+      await fetchInventoryReportPdf(i18n.language);
     } catch {
       setPdfFehler(true);
     } finally {

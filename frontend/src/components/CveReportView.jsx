@@ -230,7 +230,7 @@ export default function CveReportView() {
     setPdfFehler(false);
     setPdfLaedt(true);
     try {
-      await fetchCveReportPdf();
+      await fetchCveReportPdf(i18n.language);
     } catch {
       setPdfFehler(true);
     } finally {

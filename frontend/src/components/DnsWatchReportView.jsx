@@ -249,7 +249,7 @@ function HostBericht({ t }) {
     setPdfFehler(false);
     setPdfLaedt(true);
     try {
-      await fetchDnsWatchReportPdf();
+      await fetchDnsWatchReportPdf(i18n.language);
     } catch {
       setPdfFehler(true);
     } finally {
@@ -507,7 +507,7 @@ function NetzBericht({ t }) {
     setPdfFehler(false);
     setPdfLaedt(true);
     try {
-      await fetchDnsBypassReportPdf(ausgewaehlteId);
+      await fetchDnsBypassReportPdf(ausgewaehlteId, i18n.language);
     } catch {
       setPdfFehler(true);
     } finally {

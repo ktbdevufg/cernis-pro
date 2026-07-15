@@ -109,7 +109,7 @@ export default function OutboundReportView() {
     setPdfFehler(false);
     setPdfLaedt(true);
     try {
-      await fetchOutboundReportPdf(ausgewaehlteId);
+      await fetchOutboundReportPdf(ausgewaehlteId, i18n.language);
     } catch {
       setPdfFehler(true);
     } finally {

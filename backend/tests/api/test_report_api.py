@@ -8,9 +8,17 @@ app.py per ``dependency_overrides`` verdrahtet.
 
 Zwei Faelle: voller Bericht (Score + alle Listen + Rogue-Pruefdatum) und Leerfall
 (``has_scan`` False, Score 100, leere Listen, ``rogue_dhcp_checked_ts`` None).
+
+(E1) Dazu der Sprach-Durchstich der PDF-Routen in ZWEI Schaerfen: die Fake-Runner-Tests
+belegen die Router-Haelfte (``lang`` kommt als Query-Param an, Default "de", der Router
+normalisiert NICHT), die ``isolierte_app``-Tests am Dateiende laufen ohne override GANZ
+durch bis in den echten Composition-Root-Runner (Normalisierung + sprachabhaengiger
+Dateiname inkl. Datumsformat).
 """
 
+import re
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
@@ -432,14 +440,21 @@ class _FakeDnsWatchReportRunner:
 
 
 class _FakeDnsWatchReportPdfRunner:
-    """Fake-PDF-Runner: liefert ein festes Download-Ergebnis (content/media_type/filename)."""
+    """Fake-PDF-Runner: liefert ein festes Download-Ergebnis (content/media_type/filename).
+
+    ``lang`` wird mitgeschrieben (E1): so belegt der Test, dass der Router den Query-Param
+    unveraendert an den Composition-Root-Runner durchreicht (die Normalisierung passiert
+    dort, nicht im Router).
+    """
 
     def __init__(self, content: bytes, media_type: str, filename: str) -> None:
         self._content = content
         self._media_type = media_type
         self._filename = filename
+        self.lang: str = "noch-nicht-aufgerufen"
 
-    async def __call__(self) -> object:
+    async def __call__(self, lang: str) -> object:
+        self.lang = lang
         return _FakeDnsWatchPdfResult(
             content=self._content, media_type=self._media_type, filename=self._filename
         )
@@ -525,7 +540,10 @@ def test_get_dns_watch_report_liefert_200_und_json_form(app: FastAPI) -> None:
 
 
 def test_get_dns_watch_report_pdf_liefert_attachment(app: FastAPI) -> None:
-    """``/api/report/dns-watch/pdf`` -> 200 + Content-Disposition attachment + application/pdf."""
+    """``/api/report/dns-watch/pdf`` -> 200 + Content-Disposition attachment + application/pdf.
+
+    Ohne ``lang``-Query steht der Default "de" am Runner an (E1).
+    """
     runner = _FakeDnsWatchReportPdfRunner(
         content=b"%PDF-FAKE",
         media_type="application/pdf",
@@ -537,12 +555,37 @@ def test_get_dns_watch_report_pdf_liefert_attachment(app: FastAPI) -> None:
         response = client.get("/api/report/dns-watch/pdf")
 
     assert response.status_code == 200
+    assert runner.lang == "de"
     assert response.headers["content-type"].startswith("application/pdf")
     assert (
         response.headers["content-disposition"]
         == 'attachment; filename="CERNISPRO_DNS-Waechter-Bericht.pdf"'
     )
     assert response.content  # nicht-leerer Body
+
+
+def test_get_dns_watch_report_pdf_reicht_lang_durch(app: FastAPI) -> None:
+    """``/api/report/dns-watch/pdf?lang=en`` -> der Router reicht "en" an den Runner durch (E1).
+
+    Der Router normalisiert NICHT (das ist Sache des Composition Roots) -- er reicht den
+    Query-Param unveraendert weiter. Muster ``get_manual_pdf``.
+    """
+    runner = _FakeDnsWatchReportPdfRunner(
+        content=b"%PDF-FAKE",
+        media_type="application/pdf",
+        filename="CERNISPRO_DNS-Watch-Report.pdf",
+    )
+    app.dependency_overrides[provide_dns_watch_report_pdf] = lambda: runner
+
+    with TestClient(app) as client:
+        response = client.get("/api/report/dns-watch/pdf", params={"lang": "en"})
+
+    assert response.status_code == 200
+    assert runner.lang == "en"
+    assert (
+        response.headers["content-disposition"]
+        == 'attachment; filename="CERNISPRO_DNS-Watch-Report.pdf"'
+    )
 
 
 # ── DNS-Umgehungs-Bericht: schlanke Endpunkt-Tests (Etappe 5) ──────────────────
@@ -573,16 +616,22 @@ class _FakeDnsBypassRecordingsRunner:
 
 
 class _FakeDnsBypassReportPdfRunner:
-    """Fake-PDF-Runner: liefert ein festes Download-Ergebnis (content/media_type/filename)."""
+    """Fake-PDF-Runner: liefert ein festes Download-Ergebnis (content/media_type/filename).
+
+    ``recording_id`` UND ``lang`` werden mitgeschrieben (E1): so belegt der Test, dass der
+    Router beide Query-Parameter unveraendert an den Composition-Root-Runner durchreicht.
+    """
 
     def __init__(self, content: bytes, media_type: str, filename: str) -> None:
         self._content = content
         self._media_type = media_type
         self._filename = filename
         self.recording_id: str | None = "noch-nicht-aufgerufen"
+        self.lang: str = "noch-nicht-aufgerufen"
 
-    async def __call__(self, recording_id: str | None) -> object:
+    async def __call__(self, recording_id: str | None, lang: str) -> object:
         self.recording_id = recording_id
+        self.lang = lang
         return _FakeDnsWatchPdfResult(
             content=self._content, media_type=self._media_type, filename=self._filename
         )
@@ -694,7 +743,10 @@ def test_get_dns_bypass_report_recordings_liefert_dropdown_liste(app: FastAPI) -
 
 
 def test_get_dns_bypass_report_pdf_liefert_attachment(app: FastAPI) -> None:
-    """``/api/report/dns-bypass/pdf?recording_id=...`` -> 200 + attachment, id durchgereicht."""
+    """``/api/report/dns-bypass/pdf?recording_id=...`` -> 200 + attachment, id durchgereicht.
+
+    Ohne ``lang``-Query steht der Default "de" am Runner an (E1).
+    """
     runner = _FakeDnsBypassReportPdfRunner(
         content=b"%PDF-FAKE",
         media_type="application/pdf",
@@ -707,9 +759,95 @@ def test_get_dns_bypass_report_pdf_liefert_attachment(app: FastAPI) -> None:
 
     assert response.status_code == 200
     assert runner.recording_id == "rec-9"
+    assert runner.lang == "de"
     assert response.headers["content-type"].startswith("application/pdf")
     assert (
         response.headers["content-disposition"]
         == 'attachment; filename="CERNISPRO_Netzwerk-DNS-Umgehungs-Bericht.pdf"'
     )
     assert response.content  # nicht-leerer Body
+
+
+def test_get_dns_bypass_report_pdf_reicht_recording_id_und_lang_durch(app: FastAPI) -> None:
+    """``/api/report/dns-bypass/pdf?recording_id=...&lang=en`` -> BEIDE Query-Params kommen an.
+
+    Der zweite Bericht mit Bezugsrahmen-Wahl: ``recording_id`` und ``lang`` reisen zusammen
+    (E1) -- der Router reicht beide unveraendert an den Composition-Root-Runner durch.
+    """
+    runner = _FakeDnsBypassReportPdfRunner(
+        content=b"%PDF-FAKE",
+        media_type="application/pdf",
+        filename="CERNISPRO_Network-DNS-Bypass-Report.pdf",
+    )
+    app.dependency_overrides[provide_dns_bypass_report_pdf] = lambda: runner
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/report/dns-bypass/pdf", params={"recording_id": "rec-9", "lang": "en"}
+        )
+
+    assert response.status_code == 200
+    assert runner.recording_id == "rec-9"
+    assert runner.lang == "en"
+
+
+# ── Sprach-Durchstich bis in den ECHTEN Composition-Root-Runner (E1) ───────────
+# Die Tests oben belegen die Router-Haelfte (Fake-Runner, Query-Param kommt an). Hier
+# laeuft der Weg GANZ durch: KEIN dependency_override -- die App baut ihre echten
+# Runner, der echte Root normalisiert lang und bildet den sprachabhaengigen Dateinamen.
+# Der Bestandsbericht ist der einfachste der sieben (keine Bezugsrahmen-Wahl, leerer
+# Bestand ist ein gueltiges Datum -> gueltiges PDF, kein Fehler).
+
+
+@pytest.fixture
+def isolierte_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[FastAPI]:
+    """App mit EIGENEM leerem Datenverzeichnis (CERNIS_DATA_DIR) -- keine echte cernis.db.
+
+    ``get_data_dir`` bevorzugt ``CERNIS_DATA_DIR``; die lru_cache-Repos der App loesen den
+    Pfad beim ersten Zugriff auf, darum wird die Variable VOR ``create_app`` gesetzt.
+    """
+    monkeypatch.setenv("CERNIS_DATA_DIR", str(tmp_path))
+    yield create_app(AppConfig())
+
+
+def test_inventory_pdf_runner_bildet_deutschen_dateinamen(isolierte_app: FastAPI) -> None:
+    """Ohne ``lang`` liefert der ECHTE Runner den deutschen Namen + deutsches Datum (E1).
+
+    Leerer Bestand ist ein DATUM, kein Fehler -- das PDF entsteht trotzdem.
+    """
+    with TestClient(isolierte_app) as client:
+        response = client.get("/api/report/inventory/pdf")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/pdf")
+    disposition = response.headers["content-disposition"]
+    assert "CERNISPRO_Netzwerk-Bestandsbericht_" in disposition
+    # de-Datum: TT.MM.JJJJ (format_datum_kurz) -- NICHT die ISO-Form.
+    assert re.search(r"CERNISPRO_Netzwerk-Bestandsbericht_\d{2}\.\d{2}\.\d{4}\.pdf", disposition)
+    assert response.content.startswith(b"%PDF")
+
+
+def test_inventory_pdf_runner_bildet_englischen_dateinamen(isolierte_app: FastAPI) -> None:
+    """``?lang=en`` -> der ECHTE Runner liefert den ENGLISCHEN Namen + ISO-Datum (E1).
+
+    Der Kern des Durchstichs: die UI-Sprache erreicht den Composition Root und bestimmt
+    dort BEIDE Haelften des Dateinamens (Bezeichnung + Datumsteil, ISO im en-Fall).
+    """
+    with TestClient(isolierte_app) as client:
+        response = client.get("/api/report/inventory/pdf", params={"lang": "en"})
+
+    assert response.status_code == 200
+    disposition = response.headers["content-disposition"]
+    assert "CERNISPRO_Network-Inventory-Report_" in disposition
+    # en-Datum: ISO (JJJJ-MM-TT) -- so entschieden (format_datum_kurz).
+    assert re.search(r"CERNISPRO_Network-Inventory-Report_\d{4}-\d{2}-\d{2}\.pdf", disposition)
+    assert response.content.startswith(b"%PDF")
+
+
+def test_inventory_pdf_runner_faellt_bei_unbekanntem_lang_auf_de(isolierte_app: FastAPI) -> None:
+    """Ein ungueltiges ``lang`` faellt sauber auf "de" -- wie das Handbuch (S3, kein Fehler)."""
+    with TestClient(isolierte_app) as client:
+        response = client.get("/api/report/inventory/pdf", params={"lang": "klingon"})
+
+    assert response.status_code == 200
+    assert "CERNISPRO_Netzwerk-Bestandsbericht_" in response.headers["content-disposition"]

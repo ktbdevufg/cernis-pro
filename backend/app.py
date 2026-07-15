@@ -545,6 +545,8 @@ from application.reporting import (
     SecurityPdfModel,
     SecurityReport,
     build_dns_bypass_report,
+    format_datum_kurz,
+    format_generated_at,
 )
 from application.reporting import (
     CveFinding as ReportCveFinding,
@@ -5119,13 +5121,15 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         media_type: str
         filename: str
 
-    async def _security_report_pdf() -> _SecurityPdfResult:
+    async def _security_report_pdf(lang: str) -> _SecurityPdfResult:
+        # lang normalisieren: "en" bleibt, jeder andere Wert faellt auf "de" (Muster _manual_pdf).
+        normalized: Lang = "en" if lang == "en" else "de"
         report, has_scan, rogue_checked_ts = await _build_security_report_data()
         # Wanduhr GENAU HIER lesen (einziger Ort) -- Projektion und Modell bleiben rein.
         import time
 
         now = time.time()
-        generated_at_text = "Erstellt am " + datetime.fromtimestamp(now).strftime("%d.%m.%Y %H:%M")
+        generated_at_text = format_generated_at(now, normalized)
         # Rogue-Pruefdatum aus dem GESPEICHERTEN Stand (nicht aus der Wanduhr): nur formatiert.
         pruefdatum = (
             datetime.fromtimestamp(rogue_checked_ts).strftime("%d.%m.%Y %H:%M")
@@ -5133,14 +5137,15 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             else ""
         )
         model = _project_security_pdf_model(
-            report, has_scan, generated_at_text, rogue_checked_ts, pruefdatum
+            report, has_scan, generated_at_text, rogue_checked_ts, pruefdatum, normalized
         )
         pdf_bytes = ReportlabRenderer().render_security_report_pdf(model)
-        datumsteil = datetime.fromtimestamp(now).strftime("%Y-%m-%d")
+        datumsteil = format_datum_kurz(now, normalized)
+        name = "Network-Security-Report" if normalized == "en" else "Netzwerk-Sicherheitsbericht"
         return _SecurityPdfResult(
             content=pdf_bytes,
             media_type="application/pdf",
-            filename=f"CERNISPRO_Netzwerk-Sicherheitsbericht_{datumsteil}.pdf",
+            filename=f"CERNISPRO_{name}_{datumsteil}.pdf",
         )
 
     # ── Benutzerhandbuch: PDF-Download-Runner (Muster _security_report_pdf, Regel 4/5) ──
@@ -5358,20 +5363,23 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         media_type: str
         filename: str
 
-    async def _inventory_report_pdf() -> _InventoryPdfResult:
+    async def _inventory_report_pdf(lang: str) -> _InventoryPdfResult:
+        # lang normalisieren: "en" bleibt, jeder andere Wert faellt auf "de" (Muster _manual_pdf).
+        normalized: Lang = "en" if lang == "en" else "de"
         report = _build_inventory_report_data()
         # Wanduhr GENAU HIER lesen (einziger Ort) -- Projektion und Modell bleiben rein.
         import time
 
         now = time.time()
-        generated_at_text = "Erstellt am " + datetime.fromtimestamp(now).strftime("%d.%m.%Y %H:%M")
-        model = _project_inventory_pdf_model(report, generated_at_text)
+        generated_at_text = format_generated_at(now, normalized)
+        model = _project_inventory_pdf_model(report, generated_at_text, normalized)
         pdf_bytes = ReportlabRenderer().render_inventory_report_pdf(model)
-        datumsteil = datetime.fromtimestamp(now).strftime("%Y-%m-%d")
+        datumsteil = format_datum_kurz(now, normalized)
+        name = "Network-Inventory-Report" if normalized == "en" else "Netzwerk-Bestandsbericht"
         return _InventoryPdfResult(
             content=pdf_bytes,
             media_type="application/pdf",
-            filename=f"CERNISPRO_Netzwerk-Bestandsbericht_{datumsteil}.pdf",
+            filename=f"CERNISPRO_{name}_{datumsteil}.pdf",
         )
 
     # ── CVE-Bericht: Datenseite (Muster _build_inventory_report_data, Regel 4/5) ──
@@ -5675,21 +5683,24 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         media_type: str
         filename: str
 
-    async def _cve_report_pdf() -> _CvePdfResult:
+    async def _cve_report_pdf(lang: str) -> _CvePdfResult:
+        # lang normalisieren: "en" bleibt, jeder andere Wert faellt auf "de" (Muster _manual_pdf).
+        normalized: Lang = "en" if lang == "en" else "de"
         report = _build_cve_report_data()
         # Wanduhr GENAU HIER lesen (einziger Ort) -- Projektion und Modell bleiben rein.
         import time
 
         now = time.time()
-        generated_at_text = "Erstellt am " + datetime.fromtimestamp(now).strftime("%d.%m.%Y %H:%M")
+        generated_at_text = format_generated_at(now, normalized)
         coverage = _cve_coverage_text(report.hosts_total, report.hosts_checked)
-        model = _project_cve_pdf_model(report, generated_at_text, coverage)
+        model = _project_cve_pdf_model(report, generated_at_text, coverage, normalized)
         pdf_bytes = ReportlabRenderer().render_cve_report_pdf(model)
-        datumsteil = datetime.fromtimestamp(now).strftime("%Y-%m-%d")
+        datumsteil = format_datum_kurz(now, normalized)
+        name = "CVE-Report" if normalized == "en" else "CVE-Bericht"
         return _CvePdfResult(
             content=pdf_bytes,
             media_type="application/pdf",
-            filename=f"CERNISPRO_CVE-Bericht_{datumsteil}.pdf",
+            filename=f"CERNISPRO_{name}_{datumsteil}.pdf",
         )
 
     # ── Aussenkontakte-Bericht (Etappe 2b): die Naht zu den Quell-Domaenen ──────────
@@ -5934,20 +5945,29 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         media_type: str
         filename: str
 
-    async def _outbound_report_pdf(recording_id: str | None = None) -> _OutboundPdfResult:
+    async def _outbound_report_pdf(
+        recording_id: str | None = None, lang: str = "de"
+    ) -> _OutboundPdfResult:
+        # lang normalisieren: "en" bleibt, jeder andere Wert faellt auf "de" (Muster _manual_pdf).
+        normalized: Lang = "en" if lang == "en" else "de"
         report = _build_outbound_report_data(recording_id)
         # Wanduhr GENAU HIER lesen (einziger Ort) -- Projektion und Modell bleiben rein.
         import time
 
         now = time.time()
-        generated_at_text = "Erstellt am " + datetime.fromtimestamp(now).strftime("%d.%m.%Y %H:%M")
-        datumsteil = datetime.fromtimestamp(now).strftime("%Y-%m-%d")
-        model = _project_outbound_pdf_model(report, generated_at_text)
+        generated_at_text = format_generated_at(now, normalized)
+        datumsteil = format_datum_kurz(now, normalized)
+        model = _project_outbound_pdf_model(report, generated_at_text, normalized)
         pdf_bytes = ReportlabRenderer().render_outbound_report_pdf(model)
+        name = (
+            "Network-External-Contacts-Report"
+            if normalized == "en"
+            else "Netzwerk-Aussenkontakte-Bericht"
+        )
         return _OutboundPdfResult(
             content=pdf_bytes,
             media_type="application/pdf",
-            filename=f"CERNISPRO_Netzwerk-Aussenkontakte-Bericht_{datumsteil}.pdf",
+            filename=f"CERNISPRO_{name}_{datumsteil}.pdf",
         )
 
     # ── DNS-Waechter-Bericht: Datenseite (Muster _build_outbound_report_data, Regel 4/5) ──
@@ -6083,20 +6103,23 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         media_type: str
         filename: str
 
-    async def _dns_watch_report_pdf() -> _DnsWatchPdfResult:
+    async def _dns_watch_report_pdf(lang: str) -> _DnsWatchPdfResult:
+        # lang normalisieren: "en" bleibt, jeder andere Wert faellt auf "de" (Muster _manual_pdf).
+        normalized: Lang = "en" if lang == "en" else "de"
         report = await _build_dns_watch_report_data()
         # Wanduhr GENAU HIER lesen (einziger Ort) -- Projektion und Modell bleiben rein.
         import time
 
         now = time.time()
-        generated_at_text = "Erstellt am " + datetime.fromtimestamp(now).strftime("%d.%m.%Y %H:%M")
-        datumsteil = datetime.fromtimestamp(now).strftime("%Y-%m-%d")
-        model = _project_dns_watch_pdf_model(report, generated_at_text)
+        generated_at_text = format_generated_at(now, normalized)
+        datumsteil = format_datum_kurz(now, normalized)
+        model = _project_dns_watch_pdf_model(report, generated_at_text, normalized)
         pdf_bytes = ReportlabRenderer().render_dns_watch_report_pdf(model)
+        name = "DNS-Watch-Report" if normalized == "en" else "DNS-Waechter-Bericht"
         return _DnsWatchPdfResult(
             content=pdf_bytes,
             media_type="application/pdf",
-            filename=f"CERNISPRO_DNS-Waechter-Bericht_{datumsteil}.pdf",
+            filename=f"CERNISPRO_{name}_{datumsteil}.pdf",
         )
 
     # ── DNS-Umgehungs-Bericht (Etappe 5): die Naht zu den PERSISTENTEN Umgehungs-Laeufen ──
@@ -6332,20 +6355,27 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         media_type: str
         filename: str
 
-    async def _dns_bypass_report_pdf(recording_id: str | None = None) -> _DnsBypassPdfResult:
+    async def _dns_bypass_report_pdf(
+        recording_id: str | None = None, lang: str = "de"
+    ) -> _DnsBypassPdfResult:
+        # lang normalisieren: "en" bleibt, jeder andere Wert faellt auf "de" (Muster _manual_pdf).
+        normalized: Lang = "en" if lang == "en" else "de"
         report = await _build_dns_bypass_report_data(recording_id)
         # Wanduhr GENAU HIER lesen (einziger Ort) -- Projektion und Modell bleiben rein.
         import time
 
         now = time.time()
-        generated_at_text = "Erstellt am " + datetime.fromtimestamp(now).strftime("%d.%m.%Y %H:%M")
-        datumsteil = datetime.fromtimestamp(now).strftime("%Y-%m-%d")
-        model = _project_dns_bypass_pdf_model(report, generated_at_text)
+        generated_at_text = format_generated_at(now, normalized)
+        datumsteil = format_datum_kurz(now, normalized)
+        model = _project_dns_bypass_pdf_model(report, generated_at_text, normalized)
         pdf_bytes = ReportlabRenderer().render_dns_bypass_report_pdf(model)
+        name = (
+            "Network-DNS-Bypass-Report" if normalized == "en" else "Netzwerk-DNS-Umgehungs-Bericht"
+        )
         return _DnsBypassPdfResult(
             content=pdf_bytes,
             media_type="application/pdf",
-            filename=f"CERNISPRO_Netzwerk-DNS-Umgehungs-Bericht_{datumsteil}.pdf",
+            filename=f"CERNISPRO_{name}_{datumsteil}.pdf",
         )
 
     # ── Verhaltensprofil-Bericht (Block 4, Etappe 3): Daten- und Tasks-Runner ──────
@@ -6549,20 +6579,25 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         media_type: str
         filename: str
 
-    async def _behavior_report_pdf(task_id: str | None = None) -> _BehaviorPdfResult:
+    async def _behavior_report_pdf(
+        task_id: str | None = None, lang: str = "de"
+    ) -> _BehaviorPdfResult:
+        # lang normalisieren: "en" bleibt, jeder andere Wert faellt auf "de" (Muster _manual_pdf).
+        normalized: Lang = "en" if lang == "en" else "de"
         report = await _build_behavior_report_data(task_id)
         # Wanduhr GENAU HIER lesen (einziger Ort) -- Projektion und Modell bleiben rein.
         import time
 
         now = time.time()
-        generated_at_text = "Erstellt am " + datetime.fromtimestamp(now).strftime("%d.%m.%Y %H:%M")
-        datumsteil = datetime.fromtimestamp(now).strftime("%Y-%m-%d")
-        model = _project_behavior_pdf_model(report, generated_at_text)
+        generated_at_text = format_generated_at(now, normalized)
+        datumsteil = format_datum_kurz(now, normalized)
+        model = _project_behavior_pdf_model(report, generated_at_text, normalized)
         pdf_bytes = ReportlabRenderer().render_behavior_report_pdf(model)
+        name = "Behavior-Profile-Report" if normalized == "en" else "Verhaltensprofil-Bericht"
         return _BehaviorPdfResult(
             content=pdf_bytes,
             media_type="application/pdf",
-            filename=f"CERNISPRO_Verhaltensprofil-Bericht_{datumsteil}.pdf",
+            filename=f"CERNISPRO_{name}_{datumsteil}.pdf",
         )
 
     app.include_router(report_router)

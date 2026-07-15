@@ -133,7 +133,7 @@ export default function SecurityReportView() {
     setPdfFehler(false);
     setPdfLaedt(true);
     try {
-      await fetchSecurityReportPdf();
+      await fetchSecurityReportPdf(i18n.language);
     } catch {
       setPdfFehler(true);
     } finally {
