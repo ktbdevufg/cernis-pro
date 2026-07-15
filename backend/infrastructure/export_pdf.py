@@ -1284,7 +1284,17 @@ class ReportlabRenderer:
         Das Quadrat ist ein winziges ``Drawing`` mit ``Rect`` in Segmentfarbe (8x8), daneben Label
         und Wert als Klartext. Robuste innere Mini-``Table`` -- nur die uebergebenen Farben (aus
         ``_ACCENT``/``_NOTABLE``/``_CLEAN``), keine festen Farben.
+
+        LEERFALL (Wurzel-Guard): sind ``eintraege`` leer -- etwa im CVE-Bericht bei leerer DB,
+        wo alle Severity-Counts 0 sind und der count-> 0-Filter nichts uebrig laesst --, wuerde
+        ``Table([])`` mit "must have at least a row and column" werfen. Statt dessen eine valide
+        Table mit EINER leeren Zelle: reportlab-sicher, unsichtbar (kein Text, keine Farbe) und
+        sprachneutral -- der Helfer kennt kein ``lang``, darum hier bewusst KEIN Hinweistext.
+        Der Guard sitzt im Helfer, damit JEDER Aufrufer (Bestand wie CVE) abgesichert ist.
         """
+        if not eintraege:
+            return Table([[""]], colWidths=[14.0])
+
         data: list[list[object]] = []
         for label, color, value in eintraege:
             swatch = Drawing(10.0, 10.0)
