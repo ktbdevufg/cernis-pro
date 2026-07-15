@@ -8,7 +8,7 @@ Tabellen -> "Keine Eintraege", kein Absturz), bestaetigt-Tabelle leer -> Rubrik 
 Das Modell wird hier DIREKT gebaut (kein Composition Root) -- die Projektion ist 4b.
 """
 
-from application.reporting import SecurityPdfModel
+from application.reporting import ACHSE_B_FUSSNOTE, SecurityPdfModel
 from infrastructure.export_pdf import ReportlabRenderer
 
 
@@ -18,6 +18,7 @@ def _full_model() -> SecurityPdfModel:
         title="Netzwerk-Sicherheitsbericht",
         generated_at_text="Erzeugt am 23.06.2026 um 22:00 Uhr",
         footer_left="CERNIS PRO 2.0 — Professional Network Scanner & Monitor",
+        achse_b_fussnote=ACHSE_B_FUSSNOTE.get("de"),
         score_value=64,
         score_level="maessig",
         score_einordnung="Das Netz zeigt einzelne offene Auffälligkeiten — bitte prüfen.",
@@ -59,6 +60,7 @@ def _empty_model() -> SecurityPdfModel:
         title="Netzwerk-Sicherheitsbericht",
         generated_at_text="Erzeugt am 23.06.2026 um 22:00 Uhr",
         footer_left="CERNIS PRO 2.0 — Professional Network Scanner & Monitor",
+        achse_b_fussnote=ACHSE_B_FUSSNOTE.get("de"),
         score_value=100,
         score_level="gut",
         score_einordnung="Keine offenen Auffälligkeiten — das Netz ist unauffällig.",
@@ -91,6 +93,7 @@ def test_render_ohne_bestaetigte_rubrik() -> None:
         title=model.title,
         generated_at_text=model.generated_at_text,
         footer_left=model.footer_left,
+        achse_b_fussnote=ACHSE_B_FUSSNOTE.get("de"),
         score_value=model.score_value,
         score_level=model.score_level,
         score_einordnung=model.score_einordnung,
@@ -118,6 +121,7 @@ def test_render_sonderzeichen_brechen_nicht() -> None:
         title="Netzwerk-Sicherheitsbericht",
         generated_at_text="Erzeugt am 23.06.2026",
         footer_left="CERNIS PRO 2.0",
+        achse_b_fussnote=ACHSE_B_FUSSNOTE.get("de"),
         score_value=50,
         score_level="maessig",
         score_einordnung="Test <mit> & Sonderzeichen.",

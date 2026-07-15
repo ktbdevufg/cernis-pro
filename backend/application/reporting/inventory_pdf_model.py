@@ -92,6 +92,7 @@ class InventoryPdfModel:
     generated_at_text: str
     footer_left: str
     einleitung: str
+    achse_b_fussnote: str
 
     total: int
     known: int

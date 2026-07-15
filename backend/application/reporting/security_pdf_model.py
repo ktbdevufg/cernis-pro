@@ -60,7 +60,10 @@ class SecurityPdfModel:
     KOPF/FUSS:
       ``title`` der Berichtstitel ("Netzwerk-Sicherheitsbericht"), ``generated_at_text``
       das schon formatierte Erzeugungsdatum (vom Composition Root -- der Adapter fragt keine
-      Uhr), ``footer_left`` die feste Produktzeile der Fusszeile.
+      Uhr), ``footer_left`` die feste Produktzeile der Fusszeile, ``achse_b_fussnote`` der
+      fertige Achse-B-Satz (E0: aus ``report_texts.ACHSE_B_FUSSNOTE`` in der Projektion nach
+      ``lang`` aufgeloest -- PFLICHTFELD ohne Default, damit kein Bericht ihn still auf
+      Deutsch zurueckfallen laesst; der Renderer haelt den Text NICHT mehr selbst).
 
     SCORE-COCKPIT:
       ``score_value`` der Netz-Gesundheit-Wert 0..100, ``score_level`` die Einstufung als
@@ -99,12 +102,13 @@ class SecurityPdfModel:
     ACHSE-B-TEXTE (fertige Saetze, kein Adapter-Jargon):
       ``einleitung`` der Einleitungs-Absatz (Achse-B-Haltung -- beschreibt/ordnet ein),
       ``rogue_hinweis`` der fertige Rogue-DHCP-Hinweis ODER "" (leer -> Adapter laesst ihn
-      weg). Die feste Achse-B-Fussnote setzt der Adapter selbst (sie ist invariant).
+      weg). Die Achse-B-Fussnote kommt als ``achse_b_fussnote`` aus dem Modell (s. KOPF/FUSS).
     """
 
     title: str
     generated_at_text: str
     footer_left: str
+    achse_b_fussnote: str
 
     score_value: int
     score_level: str

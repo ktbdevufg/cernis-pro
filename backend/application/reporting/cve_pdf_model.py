@@ -121,6 +121,7 @@ class CvePdfModel:
     generated_at_text: str
     footer_left: str
     einleitung: str
+    achse_b_fussnote: str
 
     active_total: int
     acknowledged_total: int

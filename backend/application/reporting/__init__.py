@@ -85,6 +85,15 @@ from application.reporting.outbound_report import (
     OutboundReportInput,
     build_outbound_report,
 )
+from application.reporting.report_texts import (
+    ACHSE_B_FUSSNOTE,
+    ERSTELLT_AM_PRAEFIX,
+    SEITE_PRAEFIX,
+    Lang,
+    LocalizedText,
+    format_datum_kurz,
+    format_generated_at,
+)
 from application.reporting.security_pdf_model import (
     ACK_COLUMNS,
     CVE_COLUMNS,
@@ -109,6 +118,7 @@ from application.reporting.security_score import (
 )
 
 __all__ = [
+    "ACHSE_B_FUSSNOTE",
     "ACK_COLUMNS",
     "ARCHIVED_COLUMNS",
     "CATEGORY_EXPECTED",
@@ -123,12 +133,14 @@ __all__ = [
     "DNS_BYPASS_ROW_COLUMNS",
     "DNS_CATEGORY_COLUMNS",
     "DNS_CONTACT_COLUMNS",
+    "ERSTELLT_AM_PRAEFIX",
     "FINDING_COLUMNS",
     "FINDING_GROUP_COLUMNS",
     "INVENTORY_COLUMNS",
     "NET_COLUMNS",
     "OPERATOR_COLUMNS",
     "PORT_COLUMNS",
+    "SEITE_PRAEFIX",
     "SERVICE_COLUMNS",
     "SEVERITY_ORDER",
     "SEVERITY_RANG",
@@ -161,6 +173,8 @@ __all__ = [
     "InventoryDeviceRow",
     "InventoryPdfModel",
     "InventoryReport",
+    "Lang",
+    "LocalizedText",
     "ManualPdfModel",
     "ManualPdfSection",
     "NetFinding",
@@ -185,5 +199,7 @@ __all__ = [
     "build_outbound_report",
     "build_security_report",
     "compute_security_score",
+    "format_datum_kurz",
+    "format_generated_at",
     "severity_rank",
 ]

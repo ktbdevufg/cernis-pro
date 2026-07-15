@@ -81,6 +81,7 @@ class DnsWatchPdfModel:
     scope_text: str
     expected_text: str
     doh_text: str
+    achse_b_fussnote: str
 
     contacts_total: int
     active_total: int

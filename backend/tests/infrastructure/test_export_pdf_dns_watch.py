@@ -8,6 +8,7 @@ valides PDF ergeben (Leer-Fallback der Rubriken greift).
 """
 
 from application.reporting.dns_watch_pdf_model import DnsWatchPdfModel
+from application.reporting.report_texts import ACHSE_B_FUSSNOTE
 from infrastructure.export_pdf import ReportlabRenderer
 
 
@@ -17,6 +18,7 @@ def _gefuelltes_modell() -> DnsWatchPdfModel:
         title="DNS-Wächter-Bericht",
         generated_at_text="Erstellt am 28.06.2026 12:00",
         footer_left="CERNIS PRO 2.0 — DNS-Wächter-Bericht",
+        achse_b_fussnote=ACHSE_B_FUSSNOTE.get("de"),
         einleitung=(
             "Dieser Bericht fasst die DNS-relevanten Außenkontakte dieses Rechners zusammen und "
             "ordnet sie gegen die erwarteten DNS-Server und die bekannten DoH-Anbieter ein."
@@ -50,6 +52,7 @@ def _leeres_modell() -> DnsWatchPdfModel:
         title="DNS-Wächter-Bericht",
         generated_at_text="Erstellt am 28.06.2026 12:00",
         footer_left="CERNIS PRO 2.0 — DNS-Wächter-Bericht",
+        achse_b_fussnote=ACHSE_B_FUSSNOTE.get("de"),
         einleitung=(
             "Dieser Bericht fasst die DNS-relevanten Außenkontakte dieses Rechners zusammen und "
             "ordnet sie gegen die erwarteten DNS-Server und die bekannten DoH-Anbieter ein."

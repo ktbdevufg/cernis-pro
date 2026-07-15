@@ -8,6 +8,7 @@ valides PDF ergeben (Leer-Fallback der Rubriken greift).
 """
 
 from application.reporting.outbound_pdf_model import OutboundPdfModel
+from application.reporting.report_texts import ACHSE_B_FUSSNOTE
 from infrastructure.export_pdf import ReportlabRenderer
 
 
@@ -17,6 +18,7 @@ def _gefuelltes_modell() -> OutboundPdfModel:
         title="Netzwerk-Außenkontakte-Bericht",
         generated_at_text="Erstellt am 28.06.2026 12:00",
         footer_left="CERNIS PRO 2.0 — Netzwerk-Außenkontakte-Bericht",
+        achse_b_fussnote=ACHSE_B_FUSSNOTE.get("de"),
         einleitung=(
             "Dieser Bericht fasst die aufgezeichneten Außenkontakte dieses Rechners zusammen "
             "und ordnet sie gegen die aktiven Blocklisten ein."
@@ -47,6 +49,7 @@ def _leeres_modell() -> OutboundPdfModel:
         title="Netzwerk-Außenkontakte-Bericht",
         generated_at_text="Erstellt am 28.06.2026 12:00",
         footer_left="CERNIS PRO 2.0 — Netzwerk-Außenkontakte-Bericht",
+        achse_b_fussnote=ACHSE_B_FUSSNOTE.get("de"),
         einleitung=(
             "Dieser Bericht fasst die aufgezeichneten Außenkontakte dieses Rechners zusammen "
             "und ordnet sie gegen die aktiven Blocklisten ein."

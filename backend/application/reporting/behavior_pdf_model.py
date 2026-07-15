@@ -79,6 +79,7 @@ class BehaviorPdfModel:
 
     scope: str
     scope_text: str
+    achse_b_fussnote: str
 
     single_kennzahlen: tuple[tuple[str, str], ...] = ()
     day_band: tuple[tuple[int, int, bool], ...] = ()

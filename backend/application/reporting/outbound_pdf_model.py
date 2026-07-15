@@ -79,6 +79,7 @@ class OutboundPdfModel:
     einleitung: str
     recording_label: str
     scope_text: str
+    achse_b_fussnote: str
 
     contacts_total: int
     remote_total: int

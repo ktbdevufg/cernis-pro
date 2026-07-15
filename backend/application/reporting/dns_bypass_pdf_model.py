@@ -94,6 +94,7 @@ class DnsBypassPdfModel:
     recording_label: str
     scope_text: str
     expected_text: str
+    achse_b_fussnote: str
 
     queries_total: int
     bypass_total: int

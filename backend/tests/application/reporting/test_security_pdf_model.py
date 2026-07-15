@@ -6,7 +6,7 @@ korrekt gefuehrt werden (anzeige-fertige Texte/Zahlen/Tabellenzeilen). Das Rende
 ``tests/infrastructure/test_security_report_pdf.py``.
 """
 
-from application.reporting import SecurityPdfModel
+from application.reporting import ACHSE_B_FUSSNOTE, SecurityPdfModel
 from application.reporting.security_pdf_model import (
     ACK_COLUMNS,
     CVE_COLUMNS,
@@ -21,6 +21,7 @@ def _example_model() -> SecurityPdfModel:
         title="Netzwerk-Sicherheitsbericht",
         generated_at_text="Erzeugt am 23.06.2026 um 22:00 Uhr",
         footer_left="CERNIS PRO 2.0 — Professional Network Scanner & Monitor",
+        achse_b_fussnote=ACHSE_B_FUSSNOTE.get("de"),
         score_value=72,
         score_level="maessig",
         score_einordnung="Das Netz zeigt einzelne offene Auffälligkeiten.",
@@ -111,6 +112,7 @@ def test_model_default_leerfall() -> None:
         title="Netzwerk-Sicherheitsbericht",
         generated_at_text="Erzeugt am 23.06.2026",
         footer_left="CERNIS PRO 2.0",
+        achse_b_fussnote=ACHSE_B_FUSSNOTE.get("de"),
         score_value=100,
         score_level="gut",
         score_einordnung="Keine offenen Auffälligkeiten.",

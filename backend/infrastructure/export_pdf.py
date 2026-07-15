@@ -253,6 +253,8 @@ class SecurityPdfModelLike(Protocol):
     @property
     def footer_left(self) -> str: ...
     @property
+    def achse_b_fussnote(self) -> str: ...
+    @property
     def score_value(self) -> int: ...
     @property
     def score_level(self) -> str: ...
@@ -343,6 +345,8 @@ class InventoryPdfModelLike(Protocol):
     @property
     def footer_left(self) -> str: ...
     @property
+    def achse_b_fussnote(self) -> str: ...
+    @property
     def einleitung(self) -> str: ...
     @property
     def total(self) -> int: ...
@@ -399,6 +403,8 @@ class CvePdfModelLike(Protocol):
     @property
     def footer_left(self) -> str: ...
     @property
+    def achse_b_fussnote(self) -> str: ...
+    @property
     def einleitung(self) -> str: ...
     @property
     def active_total(self) -> int: ...
@@ -450,6 +456,8 @@ class OutboundPdfModelLike(Protocol):
     @property
     def footer_left(self) -> str: ...
     @property
+    def achse_b_fussnote(self) -> str: ...
+    @property
     def einleitung(self) -> str: ...
     @property
     def recording_label(self) -> str: ...
@@ -499,6 +507,8 @@ class DnsWatchPdfModelLike(Protocol):
     @property
     def footer_left(self) -> str: ...
     @property
+    def achse_b_fussnote(self) -> str: ...
+    @property
     def einleitung(self) -> str: ...
     @property
     def scope_text(self) -> str: ...
@@ -546,6 +556,8 @@ class DnsBypassPdfModelLike(Protocol):
     @property
     def footer_left(self) -> str: ...
     @property
+    def achse_b_fussnote(self) -> str: ...
+    @property
     def einleitung(self) -> str: ...
     @property
     def recording_label(self) -> str: ...
@@ -584,6 +596,8 @@ class BehaviorPdfModelLike(Protocol):
     def generated_at_text(self) -> str: ...
     @property
     def footer_left(self) -> str: ...
+    @property
+    def achse_b_fussnote(self) -> str: ...
     @property
     def einleitung(self) -> str: ...
     @property
@@ -781,7 +795,7 @@ class ReportlabRenderer:
         story.append(Spacer(1, 2 * mm))
         story.append(
             Paragraph(
-                "Dieser Bericht beschreibt und ordnet ein — er fällt kein Urteil.",
+                model.achse_b_fussnote,
                 styles["footnote"],
             )
         )
@@ -1133,7 +1147,7 @@ class ReportlabRenderer:
         story.append(Spacer(1, 2 * mm))
         story.append(
             Paragraph(
-                "Dieser Bericht beschreibt und ordnet ein — er fällt kein Urteil.",
+                model.achse_b_fussnote,
                 styles["footnote"],
             )
         )
@@ -1423,7 +1437,7 @@ class ReportlabRenderer:
                     HRFlowable(width="100%", thickness=0.6, color=_LINE),
                     Spacer(1, 2 * mm),
                     Paragraph(
-                        "Dieser Bericht beschreibt und ordnet ein — er fällt kein Urteil.",
+                        model.achse_b_fussnote,
                         styles["footnote"],
                     ),
                     # (R4) Erklaerung der Variante-C-Status-Kennzeichnung "NEU".
@@ -1625,7 +1639,7 @@ class ReportlabRenderer:
                     HRFlowable(width="100%", thickness=0.6, color=_LINE),
                     Spacer(1, 2 * mm),
                     Paragraph(
-                        "Dieser Bericht beschreibt und ordnet ein — er fällt kein Urteil.",
+                        model.achse_b_fussnote,
                         styles["footnote"],
                     ),
                 ]
@@ -1777,7 +1791,7 @@ class ReportlabRenderer:
                     HRFlowable(width="100%", thickness=0.6, color=_LINE),
                     Spacer(1, 2 * mm),
                     Paragraph(
-                        "Dieser Bericht beschreibt und ordnet ein — er fällt kein Urteil.",
+                        model.achse_b_fussnote,
                         styles["footnote"],
                     ),
                 ]
@@ -1932,7 +1946,7 @@ class ReportlabRenderer:
                     HRFlowable(width="100%", thickness=0.6, color=_LINE),
                     Spacer(1, 2 * mm),
                     Paragraph(
-                        "Dieser Bericht beschreibt und ordnet ein — er fällt kein Urteil.",
+                        model.achse_b_fussnote,
                         styles["footnote"],
                     ),
                 ]
@@ -2230,7 +2244,7 @@ class ReportlabRenderer:
                     HRFlowable(width="100%", thickness=0.6, color=_LINE),
                     Spacer(1, 2 * mm),
                     Paragraph(
-                        "Dieser Bericht beschreibt und ordnet ein — er fällt kein Urteil.",
+                        model.achse_b_fussnote,
                         styles["footnote"],
                     ),
                 ]
@@ -2631,9 +2645,14 @@ def _draw_header_footer(canvas: object, doc: object, model: SecurityPdfModelLike
     """Zeichnet die durchgaengige Kopf- UND Fusszeile je Seite (onFirstPage UND onLaterPages).
 
     Kopf: links das CERNIS-Logo (falls das Repo-Asset existiert; sonst NUR der Titel-Text --
-    kein gezeichnetes Ersatz-Logo, Auftrag), daneben der Titel "Netzwerk-Sicherheitsbericht",
-    darunter eine duenne Trennlinie in accent-Farbe. Fuss: links die feste Produktzeile,
-    rechts die Seitenzahl ("Seite X"). KEINE Uhr -- der Zeitstempel steht in der Story.
+    kein gezeichnetes Ersatz-Logo, Auftrag), daneben der Titel aus ``model.title``, darunter
+    eine duenne Trennlinie in accent-Farbe. Fuss: links die feste Produktzeile, rechts die
+    Seitenzahl ("Seite X"). KEINE Uhr -- der Zeitstempel steht in der Story.
+
+    (E0) Der Kopf-Titel ist PARAMETRISCH (``model.title``, wie ``_draw_manual_header_footer``
+    es vormacht) -- vorher stand der Titel des Sicherheitsberichts hier fest verdrahtet. Damit
+    ist KEIN Berichtstitel mehr im Renderer hartkodiert; die Sprache des Titels entscheidet
+    allein die Projektion. Ein pytest-Waechter haelt die Datei frei von diesem Literal.
 
     ``canvas``/``doc`` sind die reportlab-Objekte des onPage-Callbacks (lose typisiert als
     ``object``, weil das Protokoll des Callbacks nicht oeffentlich annotiert ist; die genutzten
@@ -2663,7 +2682,7 @@ def _draw_header_footer(canvas: object, doc: object, model: SecurityPdfModelLike
     # Kopfzeile bewusst nur den Titel; _LOGO_PATH loest frozen wie dev auf).
     c.setFillColor(_TEXT)  # type: ignore[attr-defined]
     c.setFont("Helvetica-Bold", 13)  # type: ignore[attr-defined]
-    c.drawString(text_x, header_baseline, "Netzwerk-Sicherheitsbericht")  # type: ignore[attr-defined]
+    c.drawString(text_x, header_baseline, model.title)  # type: ignore[attr-defined]
     # Trennlinie unter der Kopfzeile in accent-Farbe.
     c.setStrokeColor(_ACCENT)  # type: ignore[attr-defined]
     c.setLineWidth(1.0)  # type: ignore[attr-defined]
@@ -2685,10 +2704,13 @@ def _draw_header_footer(canvas: object, doc: object, model: SecurityPdfModelLike
 def _draw_manual_header_footer(canvas: object, doc: object, model: ManualPdfModelLike) -> None:
     """Kopf-/Fusszeile des Handbuchs je Seite -- wie ``_draw_header_footer``, Titel parametrisch.
 
-    EIGENE Funktion (keine Aenderung an ``_draw_header_footer``, das auf den Sicherheitsbericht
-    mit festem Kopf-Titel zugeschnitten ist und unberuehrt bleibt). Identische Logik, aber der
-    Kopf-Titel ist ``model.title`` statt einer festen Zeichenkette; ``_LOGO_PATH`` wird
-    unveraendert mitgenutzt; Fuss links ``model.footer_left``, rechts "Seite X".
+    EIGENE Funktion fuer den Handbuch-Pfad (eigenes Modell/Protocol). Identische Logik zu
+    ``_draw_header_footer``; ``_LOGO_PATH`` wird unveraendert mitgenutzt; Fuss links
+    ``model.footer_left``, rechts "Seite X".
+
+    (E0) Der Kopf-Titel kommt in BEIDEN Funktionen aus ``model.title`` -- die urspruengliche
+    Begruendung dieser Trennung ("dort fester Titel, hier parametrisch") ist damit entfallen.
+    Die Funktionen bleiben getrennt, weil sie verschiedene Modelle/Protocols bedienen.
 
     ``canvas``/``doc`` sind die reportlab-Objekte des onPage-Callbacks (lose als ``object``
     typisiert -- die genutzten Methoden existieren zur Laufzeit).

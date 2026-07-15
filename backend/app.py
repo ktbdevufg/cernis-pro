@@ -513,6 +513,7 @@ from application.outbound_log import (
 )
 from application.process import CheckProcessPermission, ListProcesses
 from application.reporting import (
+    ACHSE_B_FUSSNOTE,
     BuildCveReport,
     BuildDnsWatchReport,
     BuildInventoryReport,
@@ -534,6 +535,7 @@ from application.reporting import (
     InventoryDeviceRow,
     InventoryPdfModel,
     InventoryReport,
+    Lang,
     ManualPdfModel,
     ManualPdfSection,
     OutboundContactRow,
@@ -1659,6 +1661,7 @@ def _project_security_pdf_model(
     generated_at_text: str,
     rogue_checked_ts: float | None,
     pruefdatum: str = "",
+    lang: Lang = "de",
 ) -> SecurityPdfModel:
     """Projiziert ``SecurityReport`` (+ Statuswerte) auf das render-fertige ``SecurityPdfModel``.
 
@@ -1666,6 +1669,13 @@ def _project_security_pdf_model(
     (Rogue-Pruefdatum) kommen FERTIG formatiert herein. ``has_scan`` ist hier nicht
     text-relevant (die leere Basis traegt sich ueber Score 100 + leere Listen ehrlich selbst),
     wird aber -- analog ``_security_report`` -- mitgefuehrt, weil der Runner es ohnehin haelt.
+
+    (E0) ``lang`` waehlt die Sprache der querschnittlichen Texte: die Projektion loest
+    ``ACHSE_B_FUSSNOTE`` HIER via ``.get(lang)`` zum fertigen String auf und legt ihn ins
+    Modell -- der Renderer liest nur noch (das Modell bleibt anzeige-fertig, ohne
+    ``LocalizedText``). Vorerst fest ``"de"``; der echte lang-Durchstich (Einstellung ->
+    API -> Projektion) ist E1. Die uebrigen Texte dieses Berichts sind noch deutsche
+    Literale -- sie ziehen in E2/E3 nach.
     """
     score = report.score
 
@@ -1787,6 +1797,7 @@ def _project_security_pdf_model(
         title="Netzwerk-Sicherheitsbericht",
         generated_at_text=generated_at_text,
         footer_left="CERNIS PRO 2.0 - Netzwerk-Sicherheitsbericht",
+        achse_b_fussnote=ACHSE_B_FUSSNOTE.get(lang),
         score_value=score.score,
         score_level=score.level,
         score_einordnung=score_einordnung,
@@ -5239,7 +5250,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     # Reine Projektion InventoryReport -> render-fertiges InventoryPdfModel (Muster
     # _project_security_pdf_model): KEINE Uhr -- generated_at_text kommt fertig formatiert herein.
     def _project_inventory_pdf_model(
-        report: InventoryReport, generated_at_text: str
+        report: InventoryReport, generated_at_text: str, lang: Lang = "de"
     ) -> InventoryPdfModel:
         # Verteilungs-Tabellen je Eintrag (label, count-als-Text). Geraete-Tabellen je Zeile ein
         # String-Tupel in der jeweiligen *_COLUMNS-Reihenfolge (Status als Klartext via
@@ -5275,6 +5286,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             title="Netzwerk-Bestandsbericht",
             generated_at_text=generated_at_text,
             footer_left="CERNIS PRO 2.0 — Netzwerk-Bestandsbericht",
+            achse_b_fussnote=ACHSE_B_FUSSNOTE.get(lang),
             einleitung=(
                 "Dieser Bericht listet auf, welche Geräte im Netzwerk gesehen wurden. Er "
                 "beschreibt den Bestand und ordnet ihn ein — er bewertet nicht."
@@ -5523,7 +5535,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     # Reine Projektion CveReport -> render-fertiges CvePdfModel (Muster
     # _project_inventory_pdf_model): KEINE Uhr -- generated_at_text/coverage_text kommen fertig.
     def _project_cve_pdf_model(
-        report: CveReport, generated_at_text: str, coverage_text: str
+        report: CveReport, generated_at_text: str, coverage_text: str, lang: Lang = "de"
     ) -> CvePdfModel:
         # (Etappe 3b) severity_rows BLEIBT roh (Schluessel fuer Farb-Lookup _SEV_COLORS im
         # Renderer). severity_labels traegt je (roh_key, deutscher_text) die Legenden-Anzeige.
@@ -5569,6 +5581,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             title="CVE-Bericht",
             generated_at_text=generated_at_text,
             footer_left="CERNIS PRO 2.0 — CVE-Bericht",
+            achse_b_fussnote=ACHSE_B_FUSSNOTE.get(lang),
             einleitung=(
                 "Dieser Bericht listet die gefundenen Schwachstellen (CVEs) im Netzwerk auf. "
                 "Er beschreibt und ordnet ein — er bewertet nicht."
@@ -5858,7 +5871,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     # die reine Aggregation bleibt sprach-/anzeigefrei. Die Bewertungs-Spalte je Zeile wird hier
     # zu fertigem Text (Threat hat Vorrang in der Anzeige).
     def _project_outbound_pdf_model(
-        report: OutboundReport, generated_at_text: str
+        report: OutboundReport, generated_at_text: str, lang: Lang = "de"
     ) -> OutboundPdfModel:
         ist_einzeln = report.recording_scope == "single" and bool(report.recording_label)
         if ist_einzeln:
@@ -5894,6 +5907,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             title="Netzwerk-Außenkontakte-Bericht",
             generated_at_text=generated_at_text,
             footer_left="CERNIS PRO 2.0 — Netzwerk-Außenkontakte-Bericht",
+            achse_b_fussnote=ACHSE_B_FUSSNOTE.get(lang),
             einleitung=(
                 "Dieser Bericht fasst die aufgezeichneten Außenkontakte dieses Rechners "
                 "zusammen und ordnet sie gegen die aktiven Blocklisten ein."
@@ -6001,7 +6015,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     # Die Anzeige-Texte (Kategorie-Labels, die beiden Rahmen-Zeilen) werden HIER (am Rand)
     # lokalisiert -- ECHTE Umlaute; die reine Aggregation bleibt sprach-/anzeigefrei.
     def _project_dns_watch_pdf_model(
-        report: DnsWatchReport, generated_at_text: str
+        report: DnsWatchReport, generated_at_text: str, lang: Lang = "de"
     ) -> DnsWatchPdfModel:
         # Kategorie-Anzeige-Labels (roher Schluessel -> Text). Unbekannte Schluessel bleiben roh.
         kategorie_labels = {
@@ -6042,6 +6056,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             title="DNS-Wächter-Bericht",
             generated_at_text=generated_at_text,
             footer_left="CERNIS PRO 2.0 — DNS-Wächter-Bericht",
+            achse_b_fussnote=ACHSE_B_FUSSNOTE.get(lang),
             einleitung=(
                 "Dieser Bericht fasst die DNS-relevanten Außenkontakte dieses Rechners zusammen "
                 "und ordnet sie gegen die erwarteten DNS-Server und die bekannten DoH-Anbieter "
@@ -6239,7 +6254,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     # Die Bezugsrahmen-Zeile + das "Alle Aufzeichnungen"-Label + die erwartete-Server-Zeile werden
     # HIER (am Rand) lokalisiert; die reine Aggregation bleibt sprach-/anzeigefrei.
     def _project_dns_bypass_pdf_model(
-        report: DnsBypassReport, generated_at_text: str
+        report: DnsBypassReport, generated_at_text: str, lang: Lang = "de"
     ) -> DnsBypassPdfModel:
         ist_einzeln = report.recording_scope == "single" and bool(report.recording_label)
         if ist_einzeln:
@@ -6294,6 +6309,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             title="Netzwerk-DNS-Umgehungs-Bericht",
             generated_at_text=generated_at_text,
             footer_left="CERNIS PRO 2.0 — Netzwerk-DNS-Umgehungs-Bericht",
+            achse_b_fussnote=ACHSE_B_FUSSNOTE.get(lang),
             einleitung=(
                 "Dieser Bericht fasst die aufgezeichneten netzweiten DNS-Umgehungen zusammen — "
                 "Anfragen von Geräten des Netzes an nicht-erwartete Resolver — und ordnet je Ziel "
@@ -6456,7 +6472,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     # (Muster _project_dns_bypass_pdf_model): ALLE lokalisierten Texte fallen HIER. Das Modell
     # traegt nur fertige Strings/Tupel; der reportlab-Adapter rechnet nichts.
     def _project_behavior_pdf_model(
-        report: BehaviorReport, generated_at_text: str
+        report: BehaviorReport, generated_at_text: str, lang: Lang = "de"
     ) -> BehaviorPdfModel:
         # Lokalisierte Wochentagskuerzel (Mo..So, Index = weekday 0..6) -- der Adapter
         # beschriftet damit die Heatmap-Zeilen; auch als Klartext fuer den "aktivsten Tag".
@@ -6511,6 +6527,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             title="Verhaltensprofil-Bericht",
             generated_at_text=generated_at_text,
             footer_left="CERNIS PRO 2.0 — Verhaltensprofil-Bericht",
+            achse_b_fussnote=ACHSE_B_FUSSNOTE.get(lang),
             einleitung=(
                 "Dieser Bericht zeigt die wiederkehrenden Aktivitätsmuster je Aufgabe bzw. Gerät "
                 "— Tagesverlauf, Wochenmuster und die als untypisch markierten Abweichungen. Er "
