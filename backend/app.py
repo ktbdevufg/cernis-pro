@@ -1675,13 +1675,18 @@ def _format_burden_de(value: float, lang: Lang = "de") -> str:
     return text
 
 
-def _pdf_severity_label(severity: str) -> str:
+def _pdf_severity_label(severity: str, lang: Lang = "de") -> str:
     """Mappt das rohe severity-Feld auf den Achse-B-Klartext ("kritisch"/"auffaellig").
 
     "critical" -> "kritisch", alles andere ("notable") -> "auffaellig". Der Adapter faerbt die
     Zelle/den Balken danach (Badge) -- KEIN Roh-Severity-String im Modell.
+
+    (E3c) ``lang`` waehlt die Sprache: de "kritisch"/"auffaellig" (unveraendert), en
+    "critical"/"notable".
     """
-    return "kritisch" if severity == "critical" else "auffällig"
+    if lang == "de":
+        return "kritisch" if severity == "critical" else "auffällig"
+    return "critical" if severity == "critical" else "notable"
 
 
 def _project_security_pdf_model(
@@ -1703,38 +1708,56 @@ def _project_security_pdf_model(
     Konstanten HIER via ``.get(lang)`` zum fertigen String auf und legt sie ins Modell -- der
     Renderer liest nur noch (das Modell bleibt anzeige-fertig, ohne ``LocalizedText``). Neben
     der querschnittlichen ``ACHSE_B_FUSSNOTE`` gilt das seit E2 auch fuer die drei
-    RAHMENTEXTE (Titel, Fusszeile, Einleitung). Die Satzbausteine im Rumpf (``score_einordnung``,
-    ``rogue_hinweis``, Schwere-Labels) sind noch deutsche Literale -- sie ziehen in E3 nach.
+    RAHMENTEXTE (Titel, Fusszeile, Einleitung). (E3c) Auch die Satzbausteine im Rumpf
+    (``score_einordnung``, ``rogue_hinweis``, Schwere-Labels) sind zweisprachig -- die festen
+    Saetze inline per ``if lang``, weil sie f-string-Platzhalter tragen.
     """
     score = report.score
 
-    # Score-Einordnung: fertiger deutscher Satz aus den Zaehlern (Achse-B: beschreibt/ordnet
-    # ein, KEINE Wertung angehaengt). Bei leerer Basis ehrlich der "keine Geraete"-Satz.
+    # Score-Einordnung: fertiger Satz aus den Zaehlern (Achse-B: beschreibt/ordnet ein, KEINE
+    # Wertung angehaengt). Bei leerer Basis ehrlich der "keine Geraete"-Satz.
     if score.device_count == 0:
-        score_einordnung = "Es wurden keine Geräte in die Bewertung einbezogen."
-    else:
+        if lang == "de":
+            score_einordnung = "Es wurden keine Geräte in die Bewertung einbezogen."
+        else:
+            score_einordnung = "No devices were included in the assessment."
+    elif lang == "de":
         score_einordnung = (
             f"Von {score.device_count} bewerteten Geräten sind {score.critical_devices} "
             f"kritisch und {score.notable_devices} auffällig belastet; "
             f"{score.clean_devices} ohne Befund."
         )
+    else:
+        score_einordnung = (
+            f"Of {score.device_count} assessed devices, {score.critical_devices} "
+            f"are critically and {score.notable_devices} notably burdened; "
+            f"{score.clean_devices} without findings."
+        )
 
     # Rogue-Hinweis: noch nie geprueft (ts None) -> Rechte-Hinweis; sonst das Pruefdatum
     # (kommt als fertiger String ``pruefdatum`` herein -- HIER NICHT aus dem ts gerechnet).
     if rogue_checked_ts is None:
-        rogue_hinweis = (
-            "Hinweis: Auf unerwartete DHCP-Server wurde noch nie geprüft "
-            "(erfordert erhöhte Rechte)."
-        )
-    else:
+        if lang == "de":
+            rogue_hinweis = (
+                "Hinweis: Auf unerwartete DHCP-Server wurde noch nie geprüft "
+                "(erfordert erhöhte Rechte)."
+            )
+        else:
+            rogue_hinweis = (
+                "Note: unexpected DHCP servers have never been checked "
+                "(requires elevated privileges)."
+            )
+    elif lang == "de":
         rogue_hinweis = f"Zuletzt auf unerwartete DHCP-Server geprüft am {pruefdatum}."
+    else:
+        rogue_hinweis = f"Last checked for unexpected DHCP servers on {pruefdatum}."
 
     # Score-Beitragsliste: je belastetem Geraet ein fertiges Tripel (Label, Klartext-Schwere,
     # Lastwert-Text mit Dezimalkomma).
     contributions = tuple(
         (
             c.device_label,
-            "kritisch" if c.worst_severity == "critical" else "auffällig",
+            _pdf_severity_label(c.worst_severity, lang),
             _format_burden_de(c.burden_value, lang),
         )
         for c in score.contributions
@@ -1776,7 +1799,7 @@ def _project_security_pdf_model(
         (
             p.device_label,
             p.ports,
-            _pdf_severity_label(p.severity),
+            _pdf_severity_label(p.severity, lang),
             "Offene Ports, die CERNIS als ungewöhnlich einstuft",
         )
         for p in report.port_findings
@@ -1806,7 +1829,7 @@ def _project_security_pdf_model(
 
     # net_rows (NET_COLUMNS: Art, Gerät, Schwere, Beschreibung).
     net_rows = tuple(
-        (n.kind, n.device_label, _pdf_severity_label(n.severity), n.description)
+        (n.kind, n.device_label, _pdf_severity_label(n.severity, lang), n.description)
         for n in report.net_findings
     )
 
