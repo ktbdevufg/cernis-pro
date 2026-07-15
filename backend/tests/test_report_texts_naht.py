@@ -1,4 +1,4 @@
-"""Waechter der zweisprachigen Berichts-Textnaht (Etappe E0).
+"""Waechter der zweisprachigen Berichts-Textnaht (Etappen E0 + E2).
 
 ZWECK: Dieses Netz haelt das Fundament der Naht fest -- die Textquelle selbst (A/B) UND die
 beiden Regressions-Wachen (C/D), die beweisen, dass der Renderer KEINE Berichts-Texte mehr
@@ -9,6 +9,10 @@ Projektion zu fuehren.
 C/D pruefen bewusst den QUELLTEXT (Datei einlesen, Abwesenheit pruefen) und nicht das
 gerenderte PDF: das Ziel ist die ARCHITEKTUR-Eigenschaft "kein Text im Renderer", nicht die
 Optik einer einzelnen Seite -- und ein Quelltext-Assert benennt bei Bruch sofort die Ursache.
+
+E2 ergaenzt die Wachen um die RAHMENTEXTE (Titel/Fusszeile/Einleitung) der sieben Berichte:
+E/F pruefen die Konstanten selbst, G den Durchstich durch eine echte Projektion (der Beweis,
+dass ``lang`` bis in das fertige Modell durchschlaegt) und H die Fusszeilen-Vereinheitlichung.
 """
 
 from __future__ import annotations
@@ -19,6 +23,27 @@ import time
 from application.reporting.report_texts import (
     ACHSE_B_FUSSNOTE,
     ERSTELLT_AM_PRAEFIX,
+    REPORT_FOOTER_BEHAVIOR,
+    REPORT_FOOTER_CVE,
+    REPORT_FOOTER_DNS_BYPASS,
+    REPORT_FOOTER_DNS_WATCH,
+    REPORT_FOOTER_INVENTORY,
+    REPORT_FOOTER_OUTBOUND,
+    REPORT_FOOTER_SECURITY,
+    REPORT_INTRO_BEHAVIOR,
+    REPORT_INTRO_CVE,
+    REPORT_INTRO_DNS_BYPASS,
+    REPORT_INTRO_DNS_WATCH,
+    REPORT_INTRO_INVENTORY,
+    REPORT_INTRO_OUTBOUND,
+    REPORT_INTRO_SECURITY,
+    REPORT_TITLE_BEHAVIOR,
+    REPORT_TITLE_CVE,
+    REPORT_TITLE_DNS_BYPASS,
+    REPORT_TITLE_DNS_WATCH,
+    REPORT_TITLE_INVENTORY,
+    REPORT_TITLE_OUTBOUND,
+    REPORT_TITLE_SECURITY,
     SEITE_PRAEFIX,
     LocalizedText,
     format_datum_kurz,
@@ -103,3 +128,88 @@ def test_d_keine_achse_b_fussnote_als_literal_im_renderer() -> None:
     # Gegenprobe: die sieben Berichte lesen das Modellfeld wirklich (sonst waere die
     # Abwesenheit oben auch dann gruen, wenn die Fussnote schlicht geloescht worden waere).
     assert _renderer_quelltext().count("model.achse_b_fussnote,") == 7
+
+
+# ── E2: die Rahmentexte der sieben Berichte ─────────────────────────────────
+
+# Je Bericht das Tripel (Titel, Fusszeile, Einleitung) -- die Wachen unten laufen ueber ALLE
+# sieben, damit ein achter Bericht (oder ein vergessener Text) nicht durchrutscht.
+_RAHMEN = (
+    (REPORT_TITLE_SECURITY, REPORT_FOOTER_SECURITY, REPORT_INTRO_SECURITY),
+    (REPORT_TITLE_INVENTORY, REPORT_FOOTER_INVENTORY, REPORT_INTRO_INVENTORY),
+    (REPORT_TITLE_CVE, REPORT_FOOTER_CVE, REPORT_INTRO_CVE),
+    (REPORT_TITLE_OUTBOUND, REPORT_FOOTER_OUTBOUND, REPORT_INTRO_OUTBOUND),
+    (REPORT_TITLE_DNS_WATCH, REPORT_FOOTER_DNS_WATCH, REPORT_INTRO_DNS_WATCH),
+    (REPORT_TITLE_DNS_BYPASS, REPORT_FOOTER_DNS_BYPASS, REPORT_INTRO_DNS_BYPASS),
+    (REPORT_TITLE_BEHAVIOR, REPORT_FOOTER_BEHAVIOR, REPORT_INTRO_BEHAVIOR),
+)
+
+
+def test_e_alle_rahmentexte_tragen_beide_sprachen() -> None:
+    """(E) Alle 21 Rahmentexte sind in beiden Sprachen belegt und wirklich uebersetzt.
+
+    Das ``!=`` ist die eigentliche Wache: eine en-Fassung, die aus Bequemlichkeit den
+    deutschen Satz kopiert, waere ein stiller Fallback (CLAUDE.md/Finding S3) -- der Typ-Zwang
+    von ``LocalizedText`` erzwingt ein en-Feld, aber nicht dessen Inhalt.
+    """
+    for titel, footer, intro in _RAHMEN:
+        for konstante in (titel, footer, intro):
+            assert konstante.get("de").strip()
+            assert konstante.get("en").strip()
+            assert konstante.get("de") != konstante.get("en")
+
+
+def test_f_alle_fusszeilen_tragen_produktname_und_denselben_trenner() -> None:
+    """(F) Fusszeilen-Vereinheitlichung (E2): EIN Trenner ueber alle sieben, beide Sprachen.
+
+    Der Sicherheitsbericht trug hier als einziger einen einfachen Bindestrich; diese Wache
+    haelt die Korrektur fest und verhindert, dass ein neuer Bericht wieder ausschert.
+    """
+    for _titel, footer, _intro in _RAHMEN:
+        for lang in ("de", "en"):
+            text = footer.get(lang)
+            assert text.startswith("CERNIS PRO 2.0 — "), text
+            # Genau EIN Trenner: der Berichtsname selbst fuehrt keinen zweiten Gedankenstrich.
+            assert text.count(" — ") == 1, text
+
+
+def test_g_projektion_zieht_die_rahmentexte_sprachabhaengig() -> None:
+    """(G) DER DURCHSTICH: dieselbe Projektion, zwei Sprachen, zwei Rahmen.
+
+    Der Beweis, dass ``lang`` bis ins fertige Modell durchschlaegt -- nicht nur, dass die
+    Konstanten existieren. Leerer Bericht: die Rahmentexte haengen nicht an Befunden.
+    """
+    # Import in der Funktion: ``app`` zieht den halben Composition Root nach; die uebrigen
+    # Wachen dieser Datei pruefen reine Textquellen und sollen davon unabhaengig bleiben.
+    from app import _project_security_pdf_model
+    from application.reporting import SecurityReport
+    from application.reporting.security_score import compute_security_score
+
+    leer = SecurityReport(
+        score=compute_security_score([]),
+        port_findings=[],
+        cve_findings=[],
+        net_findings=[],
+        acknowledged_port_findings=[],
+        acknowledged_cve_findings=[],
+        acknowledged_net_findings=[],
+        device_labels=[],
+    )
+
+    de_model = _project_security_pdf_model(leer, False, "Erstellt am 06.03.2026 14:05", None)
+    en_model = _project_security_pdf_model(
+        leer, False, "Generated on 2026-03-06 14:05", None, lang="en"
+    )
+
+    # de: unveraendert der gewohnte Wortlaut (ausser dem korrigierten Fusszeilen-Trenner).
+    assert de_model.title == "Netzwerk-Sicherheitsbericht"
+    assert de_model.footer_left == "CERNIS PRO 2.0 — Netzwerk-Sicherheitsbericht"
+    assert de_model.einleitung.startswith("Dieser Bericht fasst")
+
+    # en: der englische Rahmen -- das Ziel der Etappe.
+    assert en_model.title == "Network Security Report"
+    assert en_model.footer_left == "CERNIS PRO 2.0 — Network Security Report"
+    assert en_model.einleitung.startswith("This report brings together")
+
+    # Und die Fussnote der Naht folgt derselben Sprache (E0 bleibt intakt).
+    assert en_model.achse_b_fussnote == ACHSE_B_FUSSNOTE.get("en")

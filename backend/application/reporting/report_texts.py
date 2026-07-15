@@ -27,9 +27,10 @@ und formatiert nicht). Darum traegt KEIN Modell ein ``LocalizedText`` -- der Com
 Root (``app.py``) loest es via ``.get(lang)`` zum FERTIGEN String auf und setzt diesen ins
 Modell; der Renderer liest nur noch.
 
-STAND E0: nur die querschnittlichen Texte aus Kapitel 0 des Inventars (die 7x duplizierte
-Achse-B-Fussnote + die Kopf-/Fusszeilen-Praefixe). Die Texte der sieben Berichte selbst
-ziehen in E1-E3 nach.
+STAND E2: die querschnittlichen Texte aus Kapitel 0 (Achse-B-Fussnote, Kopf-/Fusszeilen-
+Praefixe) PLUS die drei RAHMENTEXTE jedes der sieben Berichte (Titel, Fusszeile, Einleitung).
+Die Satzbausteine im Rumpf der Berichte (Tabellenkoepfe, Schwere-Labels usw.) ziehen in E3
+nach.
 """
 
 from __future__ import annotations
@@ -96,6 +97,170 @@ ERSTELLT_AM_PRAEFIX = LocalizedText(
 SEITE_PRAEFIX = LocalizedText(
     de="Seite ",
     en="Page ",
+)
+
+
+# ── Kapitel 1 des Inventars: die Rahmentexte der sieben Berichte (E2) ───────
+#
+# Je Bericht DREI Rahmentexte: Titel (Kopfzeile), Fusszeile links, Einleitung. Sie bilden den
+# RAHMEN, den jeder Bericht gleich traegt -- der Rumpf (Tabellenkoepfe, Satzbausteine) folgt
+# in E3. Die de-Fassungen sind die bisherigen Literale aus den Projektionen in ``app.py``,
+# woertlich uebernommen; die en-Fassungen sind im nuechternen Handbuch-Ton gehalten (Achse B:
+# beschreiben und einordnen, NICHT bewerten -- die Einleitungen tragen diese Haltung explizit,
+# darum ist ihr Ton in beiden Sprachen bewusst zurueckhaltend).
+#
+# FUSSZEILEN-VEREINHEITLICHUNG (Entscheidung E2): alle de-Fusszeilen trennen Produktname und
+# Berichtsname mit demselben Gedankenstrich (U+2014, "—") -- derselbe Strich, den schon die
+# Achse-B-Fussnote und die uebrigen deutschen Texte dieses Moduls fuehren. Der
+# Sicherheitsbericht trug hier als EINZIGER einen einfachen Bindestrich ("-"); das war ein
+# Ausreisser und ist mit E2 korrigiert. Die en-Fusszeilen fuehren denselben Strich: der
+# Trenner ist Typografie, keine Sprache.
+
+# ── Sicherheitsbericht ──
+REPORT_TITLE_SECURITY = LocalizedText(
+    de="Netzwerk-Sicherheitsbericht",
+    en="Network Security Report",
+)
+REPORT_FOOTER_SECURITY = LocalizedText(
+    de="CERNIS PRO 2.0 — Netzwerk-Sicherheitsbericht",
+    en="CERNIS PRO 2.0 — Network Security Report",
+)
+REPORT_INTRO_SECURITY = LocalizedText(
+    de=(
+        "Dieser Bericht fasst die über CERNIS verteilten Sicherheits-Beobachtungen zu "
+        "einem Bild zusammen. Er beschreibt und ordnet ein - die Bewertung jeder "
+        "Auffälligkeit bleibt bei Ihnen."
+    ),
+    en=(
+        "This report brings together the security observations gathered across CERNIS. "
+        "It describes and provides context — assessing each finding remains up to you."
+    ),
+)
+
+# ── Bestandsbericht ──
+REPORT_TITLE_INVENTORY = LocalizedText(
+    de="Netzwerk-Bestandsbericht",
+    en="Network Inventory Report",
+)
+REPORT_FOOTER_INVENTORY = LocalizedText(
+    de="CERNIS PRO 2.0 — Netzwerk-Bestandsbericht",
+    en="CERNIS PRO 2.0 — Network Inventory Report",
+)
+REPORT_INTRO_INVENTORY = LocalizedText(
+    de=(
+        "Dieser Bericht listet auf, welche Geräte im Netzwerk gesehen wurden. Er "
+        "beschreibt den Bestand und ordnet ihn ein — er bewertet nicht."
+    ),
+    en=(
+        "This report lists the devices that have been seen on the network. It describes "
+        "the inventory and provides context — it does not assess it."
+    ),
+)
+
+# ── CVE-Bericht ──
+REPORT_TITLE_CVE = LocalizedText(
+    de="CVE-Bericht",
+    en="CVE Report",
+)
+REPORT_FOOTER_CVE = LocalizedText(
+    de="CERNIS PRO 2.0 — CVE-Bericht",
+    en="CERNIS PRO 2.0 — CVE Report",
+)
+REPORT_INTRO_CVE = LocalizedText(
+    de=(
+        "Dieser Bericht listet die gefundenen Schwachstellen (CVEs) im Netzwerk auf. "
+        "Er beschreibt und ordnet ein — er bewertet nicht."
+    ),
+    en=(
+        "This report lists the vulnerabilities (CVEs) found on the network. It describes "
+        "and provides context — it does not assess."
+    ),
+)
+
+# ── Aussenkontakte-Bericht ──
+REPORT_TITLE_OUTBOUND = LocalizedText(
+    de="Netzwerk-Außenkontakte-Bericht",
+    en="Network Outbound Contacts Report",
+)
+REPORT_FOOTER_OUTBOUND = LocalizedText(
+    de="CERNIS PRO 2.0 — Netzwerk-Außenkontakte-Bericht",
+    en="CERNIS PRO 2.0 — Network Outbound Contacts Report",
+)
+REPORT_INTRO_OUTBOUND = LocalizedText(
+    de=(
+        "Dieser Bericht fasst die aufgezeichneten Außenkontakte dieses Rechners "
+        "zusammen und ordnet sie gegen die aktiven Blocklisten ein."
+    ),
+    en=(
+        "This report summarises the recorded outbound contacts of this computer and "
+        "places them in context against the active block lists."
+    ),
+)
+
+# ── DNS-Waechter-Bericht ──
+REPORT_TITLE_DNS_WATCH = LocalizedText(
+    de="DNS-Wächter-Bericht",
+    en="DNS Watch Report",
+)
+REPORT_FOOTER_DNS_WATCH = LocalizedText(
+    de="CERNIS PRO 2.0 — DNS-Wächter-Bericht",
+    en="CERNIS PRO 2.0 — DNS Watch Report",
+)
+REPORT_INTRO_DNS_WATCH = LocalizedText(
+    de=(
+        "Dieser Bericht fasst die DNS-relevanten Außenkontakte dieses Rechners zusammen "
+        "und ordnet sie gegen die erwarteten DNS-Server und die bekannten DoH-Anbieter "
+        "ein."
+    ),
+    en=(
+        "This report summarises the DNS-related outbound contacts of this computer and "
+        "places them in context against the expected DNS servers and the known DoH "
+        "providers."
+    ),
+)
+
+# ── DNS-Umgehungs-Bericht ──
+REPORT_TITLE_DNS_BYPASS = LocalizedText(
+    de="Netzwerk-DNS-Umgehungs-Bericht",
+    en="Network DNS Bypass Report",
+)
+REPORT_FOOTER_DNS_BYPASS = LocalizedText(
+    de="CERNIS PRO 2.0 — Netzwerk-DNS-Umgehungs-Bericht",
+    en="CERNIS PRO 2.0 — Network DNS Bypass Report",
+)
+REPORT_INTRO_DNS_BYPASS = LocalizedText(
+    de=(
+        "Dieser Bericht fasst die aufgezeichneten netzweiten DNS-Umgehungen zusammen — "
+        "Anfragen von Geräten des Netzes an nicht-erwartete Resolver — und ordnet je Ziel "
+        "eine mögliche DoH-Nutzung ein."
+    ),
+    en=(
+        "This report summarises the recorded network-wide DNS bypasses — queries from "
+        "devices on the network to resolvers that are not expected — and indicates for "
+        "each destination whether DoH use is possible."
+    ),
+)
+
+# ── Verhaltensprofil-Bericht ──
+REPORT_TITLE_BEHAVIOR = LocalizedText(
+    de="Verhaltensprofil-Bericht",
+    en="Behaviour Profile Report",
+)
+REPORT_FOOTER_BEHAVIOR = LocalizedText(
+    de="CERNIS PRO 2.0 — Verhaltensprofil-Bericht",
+    en="CERNIS PRO 2.0 — Behaviour Profile Report",
+)
+REPORT_INTRO_BEHAVIOR = LocalizedText(
+    de=(
+        "Dieser Bericht zeigt die wiederkehrenden Aktivitätsmuster je Aufgabe bzw. Gerät "
+        "— Tagesverlauf, Wochenmuster und die als untypisch markierten Abweichungen. Er "
+        "beschreibt und ordnet ein, er fällt kein Urteil."
+    ),
+    en=(
+        "This report shows the recurring activity patterns per task or device — daily "
+        "profile, weekly pattern and the deviations marked as untypical. It describes and "
+        "provides context, it does not pass judgement."
+    ),
 )
 
 

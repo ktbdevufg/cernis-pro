@@ -514,6 +514,27 @@ from application.outbound_log import (
 from application.process import CheckProcessPermission, ListProcesses
 from application.reporting import (
     ACHSE_B_FUSSNOTE,
+    REPORT_FOOTER_BEHAVIOR,
+    REPORT_FOOTER_CVE,
+    REPORT_FOOTER_DNS_BYPASS,
+    REPORT_FOOTER_DNS_WATCH,
+    REPORT_FOOTER_INVENTORY,
+    REPORT_FOOTER_OUTBOUND,
+    REPORT_FOOTER_SECURITY,
+    REPORT_INTRO_BEHAVIOR,
+    REPORT_INTRO_CVE,
+    REPORT_INTRO_DNS_BYPASS,
+    REPORT_INTRO_DNS_WATCH,
+    REPORT_INTRO_INVENTORY,
+    REPORT_INTRO_OUTBOUND,
+    REPORT_INTRO_SECURITY,
+    REPORT_TITLE_BEHAVIOR,
+    REPORT_TITLE_CVE,
+    REPORT_TITLE_DNS_BYPASS,
+    REPORT_TITLE_DNS_WATCH,
+    REPORT_TITLE_INVENTORY,
+    REPORT_TITLE_OUTBOUND,
+    REPORT_TITLE_SECURITY,
     BuildCveReport,
     BuildDnsWatchReport,
     BuildInventoryReport,
@@ -1672,12 +1693,12 @@ def _project_security_pdf_model(
     text-relevant (die leere Basis traegt sich ueber Score 100 + leere Listen ehrlich selbst),
     wird aber -- analog ``_security_report`` -- mitgefuehrt, weil der Runner es ohnehin haelt.
 
-    (E0) ``lang`` waehlt die Sprache der querschnittlichen Texte: die Projektion loest
-    ``ACHSE_B_FUSSNOTE`` HIER via ``.get(lang)`` zum fertigen String auf und legt ihn ins
-    Modell -- der Renderer liest nur noch (das Modell bleibt anzeige-fertig, ohne
-    ``LocalizedText``). Vorerst fest ``"de"``; der echte lang-Durchstich (Einstellung ->
-    API -> Projektion) ist E1. Die uebrigen Texte dieses Berichts sind noch deutsche
-    Literale -- sie ziehen in E2/E3 nach.
+    (E2) ``lang`` waehlt die Sprache der Texte: die Projektion loest die ``LocalizedText``-
+    Konstanten HIER via ``.get(lang)`` zum fertigen String auf und legt sie ins Modell -- der
+    Renderer liest nur noch (das Modell bleibt anzeige-fertig, ohne ``LocalizedText``). Neben
+    der querschnittlichen ``ACHSE_B_FUSSNOTE`` gilt das seit E2 auch fuer die drei
+    RAHMENTEXTE (Titel, Fusszeile, Einleitung). Die Satzbausteine im Rumpf (``score_einordnung``,
+    ``rogue_hinweis``, Schwere-Labels) sind noch deutsche Literale -- sie ziehen in E3 nach.
     """
     score = report.score
 
@@ -1796,9 +1817,9 @@ def _project_security_pdf_model(
     )
 
     return SecurityPdfModel(
-        title="Netzwerk-Sicherheitsbericht",
+        title=REPORT_TITLE_SECURITY.get(lang),
         generated_at_text=generated_at_text,
-        footer_left="CERNIS PRO 2.0 - Netzwerk-Sicherheitsbericht",
+        footer_left=REPORT_FOOTER_SECURITY.get(lang),
         achse_b_fussnote=ACHSE_B_FUSSNOTE.get(lang),
         score_value=score.score,
         score_level=score.level,
@@ -1808,11 +1829,7 @@ def _project_security_pdf_model(
         clean_devices=score.clean_devices,
         device_count=score.device_count,
         total_burden=score.total_burden,
-        einleitung=(
-            "Dieser Bericht fasst die über CERNIS verteilten Sicherheits-Beobachtungen zu "
-            "einem Bild zusammen. Er beschreibt und ordnet ein - die Bewertung jeder "
-            "Auffälligkeit bleibt bei Ihnen."
-        ),
+        einleitung=REPORT_INTRO_SECURITY.get(lang),
         rogue_hinweis=rogue_hinweis,
         contributions=contributions,
         geraete_balken=geraete_balken,
@@ -5288,14 +5305,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             for r in report.archived_rows
         )
         return InventoryPdfModel(
-            title="Netzwerk-Bestandsbericht",
+            title=REPORT_TITLE_INVENTORY.get(lang),
             generated_at_text=generated_at_text,
-            footer_left="CERNIS PRO 2.0 — Netzwerk-Bestandsbericht",
+            footer_left=REPORT_FOOTER_INVENTORY.get(lang),
             achse_b_fussnote=ACHSE_B_FUSSNOTE.get(lang),
-            einleitung=(
-                "Dieser Bericht listet auf, welche Geräte im Netzwerk gesehen wurden. Er "
-                "beschreibt den Bestand und ordnet ihn ein — er bewertet nicht."
-            ),
+            einleitung=REPORT_INTRO_INVENTORY.get(lang),
             total=report.total,
             known=report.known,
             unknown=report.unknown,
@@ -5586,14 +5600,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             for r in report.all_rows
         )
         return CvePdfModel(
-            title="CVE-Bericht",
+            title=REPORT_TITLE_CVE.get(lang),
             generated_at_text=generated_at_text,
-            footer_left="CERNIS PRO 2.0 — CVE-Bericht",
+            footer_left=REPORT_FOOTER_CVE.get(lang),
             achse_b_fussnote=ACHSE_B_FUSSNOTE.get(lang),
-            einleitung=(
-                "Dieser Bericht listet die gefundenen Schwachstellen (CVEs) im Netzwerk auf. "
-                "Er beschreibt und ordnet ein — er bewertet nicht."
-            ),
+            einleitung=REPORT_INTRO_CVE.get(lang),
             active_total=report.active_total,
             acknowledged_total=report.acknowledged_total,
             new_total=report.new_total,
@@ -5915,14 +5926,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             for r in report.contact_rows
         )
         return OutboundPdfModel(
-            title="Netzwerk-Außenkontakte-Bericht",
+            title=REPORT_TITLE_OUTBOUND.get(lang),
             generated_at_text=generated_at_text,
-            footer_left="CERNIS PRO 2.0 — Netzwerk-Außenkontakte-Bericht",
+            footer_left=REPORT_FOOTER_OUTBOUND.get(lang),
             achse_b_fussnote=ACHSE_B_FUSSNOTE.get(lang),
-            einleitung=(
-                "Dieser Bericht fasst die aufgezeichneten Außenkontakte dieses Rechners "
-                "zusammen und ordnet sie gegen die aktiven Blocklisten ein."
-            ),
+            einleitung=REPORT_INTRO_OUTBOUND.get(lang),
             recording_label=recording_label_display,
             scope_text=scope_text,
             contacts_total=report.contacts_total,
@@ -6073,15 +6081,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             for r in report.contact_rows
         )
         return DnsWatchPdfModel(
-            title="DNS-Wächter-Bericht",
+            title=REPORT_TITLE_DNS_WATCH.get(lang),
             generated_at_text=generated_at_text,
-            footer_left="CERNIS PRO 2.0 — DNS-Wächter-Bericht",
+            footer_left=REPORT_FOOTER_DNS_WATCH.get(lang),
             achse_b_fussnote=ACHSE_B_FUSSNOTE.get(lang),
-            einleitung=(
-                "Dieser Bericht fasst die DNS-relevanten Außenkontakte dieses Rechners zusammen "
-                "und ordnet sie gegen die erwarteten DNS-Server und die bekannten DoH-Anbieter "
-                "ein."
-            ),
+            einleitung=REPORT_INTRO_DNS_WATCH.get(lang),
             scope_text="Sicht: nur dieser Rechner (nicht netzweit)",
             expected_text=expected_text,
             doh_text=doh_text,
@@ -6329,15 +6333,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             for r in report.bypass_rows
         )
         return DnsBypassPdfModel(
-            title="Netzwerk-DNS-Umgehungs-Bericht",
+            title=REPORT_TITLE_DNS_BYPASS.get(lang),
             generated_at_text=generated_at_text,
-            footer_left="CERNIS PRO 2.0 — Netzwerk-DNS-Umgehungs-Bericht",
+            footer_left=REPORT_FOOTER_DNS_BYPASS.get(lang),
             achse_b_fussnote=ACHSE_B_FUSSNOTE.get(lang),
-            einleitung=(
-                "Dieser Bericht fasst die aufgezeichneten netzweiten DNS-Umgehungen zusammen — "
-                "Anfragen von Geräten des Netzes an nicht-erwartete Resolver — und ordnet je Ziel "
-                "eine mögliche DoH-Nutzung ein."
-            ),
+            einleitung=REPORT_INTRO_DNS_BYPASS.get(lang),
             recording_label=recording_label_display,
             scope_text=scope_text,
             expected_text=expected_text,
@@ -6554,15 +6554,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             )
 
         return BehaviorPdfModel(
-            title="Verhaltensprofil-Bericht",
+            title=REPORT_TITLE_BEHAVIOR.get(lang),
             generated_at_text=generated_at_text,
-            footer_left="CERNIS PRO 2.0 — Verhaltensprofil-Bericht",
+            footer_left=REPORT_FOOTER_BEHAVIOR.get(lang),
             achse_b_fussnote=ACHSE_B_FUSSNOTE.get(lang),
-            einleitung=(
-                "Dieser Bericht zeigt die wiederkehrenden Aktivitätsmuster je Aufgabe bzw. Gerät "
-                "— Tagesverlauf, Wochenmuster und die als untypisch markierten Abweichungen. Er "
-                "beschreibt und ordnet ein, er fällt kein Urteil."
-            ),
+            einleitung=REPORT_INTRO_BEHAVIOR.get(lang),
             scope=scope,
             scope_text=scope_text,
             single_kennzahlen=single_kennzahlen,
