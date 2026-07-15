@@ -29,10 +29,6 @@ on:
   # Manueller Knopf (Actions-Tab) ...
   workflow_dispatch:
   push:
-    # ... push auf den Entwicklungs-Branch loest den Build waehrend der
-    # Entwicklung direkt aus ...
-    branches:
-      - "rewrite/v2"
     # ... und automatisch bei Release-Tags v*.
     tags:
       - "v*"
@@ -43,7 +39,7 @@ jobs:
     # Schreibrecht auf contents ist noetig, damit der Workflow bei v-Tags ein
     # GitHub-Release anlegen und Assets hochladen darf. Bewusst auf Job-Ebene
     # (nicht Workflow-Ebene) und nur dieses eine Recht -- minimale Rechte: die
-    # Branch-/Dispatch-Builds brauchen es nicht, schaden aber nicht.
+    # Dispatch-Builds brauchen es nicht, schaden aber nicht.
     permissions:
       contents: write
     steps:
@@ -184,7 +180,7 @@ jobs:
           files: |
             src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
 
-      # Fall b) kein v-Tag (push auf rewrite/v2 oder workflow_dispatch): BEWUSST
+      # Fall b) kein v-Tag (workflow_dispatch): BEWUSST
       # KEIN Artefakt-Upload. Ein ~850-MB-Bundle je Push fuellte das 2-GB-Gratis-
       # Storage-Kontingent auf. Bei Push-Laeufen ist der erfolgreiche Durchlauf
       # des Builds selbst der Beweis -- der fertige Installer wird nicht gebraucht.
