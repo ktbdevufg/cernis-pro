@@ -5163,7 +5163,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         model = _project_security_pdf_model(
             report, has_scan, generated_at_text, rogue_checked_ts, pruefdatum, normalized
         )
-        pdf_bytes = ReportlabRenderer().render_security_report_pdf(model)
+        pdf_bytes = ReportlabRenderer().render_security_report_pdf(model, normalized)
         datumsteil = format_datum_kurz(now, normalized)
         name = "Network-Security-Report" if normalized == "en" else "Netzwerk-Sicherheitsbericht"
         return _SecurityPdfResult(
@@ -5394,7 +5394,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         now = time.time()
         generated_at_text = format_generated_at(now, normalized)
         model = _project_inventory_pdf_model(report, generated_at_text, normalized)
-        pdf_bytes = ReportlabRenderer().render_inventory_report_pdf(model)
+        pdf_bytes = ReportlabRenderer().render_inventory_report_pdf(model, normalized)
         datumsteil = format_datum_kurz(now, normalized)
         name = "Network-Inventory-Report" if normalized == "en" else "Netzwerk-Bestandsbericht"
         return _InventoryPdfResult(
@@ -5730,7 +5730,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         generated_at_text = format_generated_at(now, normalized)
         coverage = _cve_coverage_text(report.hosts_total, report.hosts_checked)
         model = _project_cve_pdf_model(report, generated_at_text, coverage, normalized)
-        pdf_bytes = ReportlabRenderer().render_cve_report_pdf(model)
+        pdf_bytes = ReportlabRenderer().render_cve_report_pdf(model, normalized)
         datumsteil = format_datum_kurz(now, normalized)
         name = "CVE-Report" if normalized == "en" else "CVE-Bericht"
         return _CvePdfResult(
@@ -5991,7 +5991,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         generated_at_text = format_generated_at(now, normalized)
         datumsteil = format_datum_kurz(now, normalized)
         model = _project_outbound_pdf_model(report, generated_at_text, normalized)
-        pdf_bytes = ReportlabRenderer().render_outbound_report_pdf(model)
+        pdf_bytes = ReportlabRenderer().render_outbound_report_pdf(model, normalized)
         name = (
             "Network-External-Contacts-Report"
             if normalized == "en"
@@ -6143,7 +6143,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         generated_at_text = format_generated_at(now, normalized)
         datumsteil = format_datum_kurz(now, normalized)
         model = _project_dns_watch_pdf_model(report, generated_at_text, normalized)
-        pdf_bytes = ReportlabRenderer().render_dns_watch_report_pdf(model)
+        pdf_bytes = ReportlabRenderer().render_dns_watch_report_pdf(model, normalized)
         name = "DNS-Watch-Report" if normalized == "en" else "DNS-Waechter-Bericht"
         return _DnsWatchPdfResult(
             content=pdf_bytes,
@@ -6393,7 +6393,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         generated_at_text = format_generated_at(now, normalized)
         datumsteil = format_datum_kurz(now, normalized)
         model = _project_dns_bypass_pdf_model(report, generated_at_text, normalized)
-        pdf_bytes = ReportlabRenderer().render_dns_bypass_report_pdf(model)
+        pdf_bytes = ReportlabRenderer().render_dns_bypass_report_pdf(model, normalized)
         name = (
             "Network-DNS-Bypass-Report" if normalized == "en" else "Netzwerk-DNS-Umgehungs-Bericht"
         )
@@ -6613,7 +6613,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         generated_at_text = format_generated_at(now, normalized)
         datumsteil = format_datum_kurz(now, normalized)
         model = _project_behavior_pdf_model(report, generated_at_text, normalized)
-        pdf_bytes = ReportlabRenderer().render_behavior_report_pdf(model)
+        pdf_bytes = ReportlabRenderer().render_behavior_report_pdf(model, normalized)
         name = "Behavior-Profile-Report" if normalized == "en" else "Verhaltensprofil-Bericht"
         return _BehaviorPdfResult(
             content=pdf_bytes,

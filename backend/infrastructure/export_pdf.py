@@ -24,7 +24,7 @@ application/api").
 
 import io
 import os
-from typing import Protocol, cast
+from typing import ClassVar, Protocol, cast
 
 from reportlab.graphics.shapes import Circle, Drawing, Rect, String, Wedge
 from reportlab.lib import colors
@@ -689,7 +689,7 @@ class ReportlabRenderer:
     # SecurityPdfModel (Grafiken + mehrere Tabellen + durchgaengige Kopfzeile). Zustandslos
     # wie der Bestand: ein frischer BytesIO + SimpleDocTemplate pro Aufruf.
 
-    def render_security_report_pdf(self, model: SecurityPdfModelLike) -> bytes:
+    def render_security_report_pdf(self, model: SecurityPdfModelLike, lang: str = "de") -> bytes:
         """Rendert das ``SecurityPdfModel`` zum vollstaendigen Sicherheitsbericht-PDF (A4 hoch).
 
         Layout (Auftrag): durchgaengige Kopf-/Fusszeile je Seite (onFirstPage UND onLaterPages
@@ -773,22 +773,22 @@ class ReportlabRenderer:
         # ── Tabellen-Rubriken: je eigene Seite (PageBreak davor) ──
         story.append(PageBreak())
         self._append_table_section(
-            story, styles, "Rechner mit auffälligen Ports", PORT_COLUMNS, model.port_rows
+            story, styles, "Rechner mit auffälligen Ports", PORT_COLUMNS, model.port_rows, lang
         )
 
         story.append(PageBreak())
-        self._append_table_section(story, styles, "CVE-Befunde", CVE_COLUMNS, model.cve_rows)
+        self._append_table_section(story, styles, "CVE-Befunde", CVE_COLUMNS, model.cve_rows, lang)
 
         story.append(PageBreak())
         self._append_table_section(
-            story, styles, "Netz-Auffälligkeiten", NET_COLUMNS, model.net_rows
+            story, styles, "Netz-Auffälligkeiten", NET_COLUMNS, model.net_rows, lang
         )
 
         # Rubrik 4 nur, wenn nicht leer (Auftrag: sonst weglassen).
         if model.acknowledged_rows:
             story.append(PageBreak())
             self._append_table_section(
-                story, styles, "Bereits bestätigt", ACK_COLUMNS, model.acknowledged_rows
+                story, styles, "Bereits bestätigt", ACK_COLUMNS, model.acknowledged_rows, lang
             )
 
         # ── Achse-B-Fussnote (invariant) + optionaler Rogue-Hinweis ──
@@ -934,6 +934,7 @@ class ReportlabRenderer:
         title: str,
         columns: tuple[str, ...],
         rows: tuple[tuple[str, ...], ...],
+        lang: str = "de",
     ) -> None:
         """Haengt eine Tabellen-Rubrik (nummerierter Titel + accent-Unterstrich + Tabelle) an.
 
@@ -941,6 +942,9 @@ class ReportlabRenderer:
         Lange Textspalten werden als ``Paragraph`` (umbrechbar) gesetzt, damit die Zelle nicht
         ueber den Rand laeuft. Die Schwere-Spalte (sofern "Schwere" in den Spalten) wird als
         Badge eingefaerbt. repeatRows=1 -> Kopf wiederholt sich bei Seitenumbruch.
+
+        ``lang`` steuert AUSSCHLIESSLICH den angezeigten Kopf-Text (``_header_labels``); die
+        Steuer-Rolle von ``columns`` (Breiten, Leertext, Badge-Spalte) bleibt auf dem rohen Tupel.
         """
         story.append(Paragraph(title, styles["h_rubric"]))
         story.append(HRFlowable(width="100%", thickness=1.2, color=_ACCENT, spaceAfter=4))
@@ -954,7 +958,7 @@ class ReportlabRenderer:
         # Die Roh-Zeilen (Strings) fuer das Badge-Einfaerben getrennt fuehren, die Render-Zeilen
         # (Paragraphs) fuer die Table -- der Badge-Helfer braucht den Klartext der Schwere-Zelle.
         badge_data: list[list[object]] = [list(columns)]
-        render_data: list[list[object]] = [list(columns)]
+        render_data: list[list[object]] = [list[object](_header_labels(columns, lang))]
         for row in rows:
             badge_data.append(list(row))
             render_data.append([Paragraph(_esc(value), styles["cell"]) for value in row])
@@ -973,6 +977,7 @@ class ReportlabRenderer:
         title: str,
         columns: tuple[str, ...],
         groups: tuple[_HostGroupBlockLike, ...],
+        lang: str = "de",
     ) -> None:
         """Haengt die nach Host GRUPPIERTE Befundliste (Sektion 4) an -- eigener Render-Pfad.
 
@@ -983,6 +988,9 @@ class ReportlabRenderer:
         Leere ``groups`` -> Leer-Fallback wie ``_append_table_section``. ``repeatRows=1`` wiederholt
         nur den Spaltenkopf; die Host-Trennzeilen wandern mit. Die Severity-Zelle je CVE-Zeile wird
         in ihrer ``_SEV_COLORS``-Farbe eingefaerbt (lokal -- KEIN gemeinsamer Helfer beruehrt).
+
+        ``lang`` steuert AUSSCHLIESSLICH den angezeigten Spaltenkopf (``_header_labels``); die
+        Severity-Spalte wird weiter ueber das rohe ``columns`` bestimmt.
         """
         story.append(Paragraph(title, styles["h_rubric"]))
         story.append(HRFlowable(width="100%", thickness=1.2, color=_ACCENT, spaceAfter=4))
@@ -1001,7 +1009,7 @@ class ReportlabRenderer:
         )
         severity_col = columns.index("Severity") if "Severity" in columns else -1
 
-        data: list[list[object]] = [list(columns)]
+        data: list[list[object]] = [list[object](_header_labels(columns, lang))]
         # Tabellen-Kommandos zusaetzlich zum Basis-Stil: je Host-Kopfzeile SPAN + grau + fett,
         # je CVE-Zeile die Severity-Zelle in ihrer Stufenfarbe.
         extra_cmds: list[tuple[object, ...]] = []
@@ -1069,7 +1077,7 @@ class ReportlabRenderer:
     # Kopf-/Fuss-Funktionen teilen dieselbe _LOGO_PATH-Konstante (cernis-logo-pdf.png) -- der
     # Bestandsbericht erbt damit automatisch das verkleinerte PDF-Logo.
 
-    def render_inventory_report_pdf(self, model: InventoryPdfModelLike) -> bytes:
+    def render_inventory_report_pdf(self, model: InventoryPdfModelLike, lang: str = "de") -> bytes:
         """Rendert das ``InventoryPdfModel`` zum vollstaendigen Bestandsbericht-PDF (A4 hoch).
 
         Layout (Auftrag): durchgaengige Kopf-/Fusszeile je Seite (onFirstPage UND onLaterPages
@@ -1124,23 +1132,29 @@ class ReportlabRenderer:
 
         # ── Verteilung nach Hersteller / Kategorie (zwei schlanke (label, count)-Tabellen) ──
         story.append(Paragraph("Verteilung nach Hersteller", styles["h_section"]))
-        self._append_distribution_table(story, styles, ("Hersteller", "Anzahl"), model.vendor_rows)
+        self._append_distribution_table(
+            story, styles, ("Hersteller", "Anzahl"), model.vendor_rows, lang
+        )
         story.append(Spacer(1, 6 * mm))
 
         story.append(Paragraph("Verteilung nach Kategorie", styles["h_section"]))
-        self._append_distribution_table(story, styles, ("Kategorie", "Anzahl"), model.category_rows)
+        self._append_distribution_table(
+            story, styles, ("Kategorie", "Anzahl"), model.category_rows, lang
+        )
 
         story.append(PageBreak())
 
         # ── Geraete-Rubriken: aktive immer, archivierte nur wenn vorhanden ──
         # _append_table_section rendert Kopf + Tabelle + leer-Fallback selbst. Die Status-Spalte
         # ist KEINE "Schwere"-Spalte -> kein Badge-Einfaerben (korrekt, der Bestand wertet nicht).
-        self._append_table_section(story, styles, "Geräte", INVENTORY_COLUMNS, model.device_rows)
+        self._append_table_section(
+            story, styles, "Geräte", INVENTORY_COLUMNS, model.device_rows, lang
+        )
 
         if model.archived_rows:
             story.append(PageBreak())
             self._append_table_section(
-                story, styles, "Archivierte Geräte", ARCHIVED_COLUMNS, model.archived_rows
+                story, styles, "Archivierte Geräte", ARCHIVED_COLUMNS, model.archived_rows, lang
             )
 
         # ── Achse-B-Fussnote (invariant, wie im Sicherheitsbericht) ──
@@ -1327,6 +1341,7 @@ class ReportlabRenderer:
         styles: dict[str, ParagraphStyle],
         columns: tuple[str, str],
         rows: tuple[tuple[str, str], ...],
+        lang: str = "de",
     ) -> None:
         """Haengt eine schlichte (label, count)-Verteilungs-Tabelle an (Hersteller bzw. Kategorie).
 
@@ -1342,7 +1357,7 @@ class ReportlabRenderer:
 
         content_pt = _CONTENT_WIDTH_MM * mm
         col_widths = [content_pt * 0.78, content_pt * 0.22]
-        render_data: list[list[object]] = [list(columns)]
+        render_data: list[list[object]] = [list[object](_header_labels(columns, lang))]
         for label, count in rows:
             render_data.append(
                 [
@@ -1362,7 +1377,7 @@ class ReportlabRenderer:
     # dafuer wird _draw_manual_header_footer wiederverwendet (liest model.title/footer_left).
     # Teilt dieselbe _LOGO_PATH-Konstante -- der CVE-Bericht erbt damit das verkleinerte PDF-Logo.
 
-    def render_cve_report_pdf(self, model: CvePdfModelLike) -> bytes:
+    def render_cve_report_pdf(self, model: CvePdfModelLike, lang: str = "de") -> bytes:
         """Rendert das ``CvePdfModel`` zum vollstaendigen CVE-Bericht-PDF (A4 hoch).
 
         Layout (Auftrag): durchgaengige Kopf-/Fusszeile je Seite (onFirstPage UND onLaterPages
@@ -1418,13 +1433,13 @@ class ReportlabRenderer:
         # fast leer bleibt. _append_table_section rendert Kopf + Tabelle + leer-Fallback selbst.
         # Die Severity-Spalte bleibt Klartext (KEINE "Schwere"-Spalte -> kein Badge).
         self._append_table_section(
-            story, styles, "Betroffene Geräte", _CVE_DEVICE_COLUMNS, model.device_rows
+            story, styles, "Betroffene Geräte", _CVE_DEVICE_COLUMNS, model.device_rows, lang
         )
 
         # Sektion 3 + 4 je auf eigener Seite (grosse Tabellen) -- diese PageBreaks bleiben.
         story.append(PageBreak())
         self._append_table_section(
-            story, styles, "Muster nach Dienst", _CVE_SERVICE_COLUMNS, model.service_rows
+            story, styles, "Muster nach Dienst", _CVE_SERVICE_COLUMNS, model.service_rows, lang
         )
 
         story.append(PageBreak())
@@ -1436,6 +1451,7 @@ class ReportlabRenderer:
             "Vollständige Befundliste",
             _CVE_FINDING_GROUP_COLUMNS,
             model.host_groups,
+            lang,
         )
 
         # ── Achse-B-Fussnote (invariant, wie im Bestands-/Sicherheitsbericht) ──
@@ -1571,7 +1587,7 @@ class ReportlabRenderer:
     # ABER OHNE Donut/Severity: der Aussenkontakte-Bericht faellt kein Urteil, traegt keine
     # Schwere-Spalte und kein Badge.
 
-    def render_outbound_report_pdf(self, model: OutboundPdfModelLike) -> bytes:
+    def render_outbound_report_pdf(self, model: OutboundPdfModelLike, lang: str = "de") -> bytes:
         """Rendert das ``OutboundPdfModel`` zum vollstaendigen Aussenkontakte-Bericht-PDF (A4 hoch).
 
         Layout (Muster render_cve_report_pdf, ABER ohne Donut/Severity): durchgaengige Kopf-/
@@ -1620,7 +1636,12 @@ class ReportlabRenderer:
         # ── Sektions-Rubriken ueber das BESTEHENDE _append_table_section ──
         # Die Bewertung-Spalte bleibt Klartext (KEINE "Schwere"-Spalte -> kein Badge).
         self._append_table_section(
-            story, styles, "Verteilung nach Land", _OUTBOUND_COUNTRY_COLUMNS, model.country_rows
+            story,
+            styles,
+            "Verteilung nach Land",
+            _OUTBOUND_COUNTRY_COLUMNS,
+            model.country_rows,
+            lang,
         )
         story.append(Spacer(1, 6 * mm))
         self._append_table_section(
@@ -1629,6 +1650,7 @@ class ReportlabRenderer:
             "Verteilung nach Betreiber",
             _OUTBOUND_OPERATOR_COLUMNS,
             model.operator_rows,
+            lang,
         )
 
         # Die Detail-Liste auf eigener Seite (potentiell lang) -- PageBreak davor.
@@ -1639,6 +1661,7 @@ class ReportlabRenderer:
             "Außenkontakte im Detail",
             _OUTBOUND_CONTACT_COLUMNS,
             model.contact_rows,
+            lang,
         )
 
         # ── Achse-B-Fussnote (invariant, wie im CVE-/Bestandsbericht) ──
@@ -1728,7 +1751,7 @@ class ReportlabRenderer:
         )
         return table
 
-    def render_dns_watch_report_pdf(self, model: DnsWatchPdfModelLike) -> bytes:
+    def render_dns_watch_report_pdf(self, model: DnsWatchPdfModelLike, lang: str = "de") -> bytes:
         """Rendert das ``DnsWatchPdfModel`` zum vollstaendigen DNS-Waechter-Bericht-PDF (A4 hoch).
 
         Layout (Muster render_outbound_report_pdf, ABER ohne Dropdown/recording): durchgaengige
@@ -1778,11 +1801,16 @@ class ReportlabRenderer:
 
         # ── Sektions-Rubriken ueber das BESTEHENDE _append_table_section ──
         self._append_table_section(
-            story, styles, "Verteilung nach Kategorie", DNS_CATEGORY_COLUMNS, model.category_rows
+            story,
+            styles,
+            "Verteilung nach Kategorie",
+            DNS_CATEGORY_COLUMNS,
+            model.category_rows,
+            lang,
         )
         story.append(Spacer(1, 6 * mm))
         self._append_table_section(
-            story, styles, "Verteilung nach Programm", DNS_APP_COLUMNS, model.app_rows
+            story, styles, "Verteilung nach Programm", DNS_APP_COLUMNS, model.app_rows, lang
         )
 
         # Die Detail-Liste auf eigener Seite (potentiell lang) -- PageBreak davor.
@@ -1793,6 +1821,7 @@ class ReportlabRenderer:
             "DNS-relevante Außenkontakte",
             DNS_CONTACT_COLUMNS,
             model.contact_rows,
+            lang,
         )
 
         # ── Achse-B-Fussnote (invariant, wie im Aussenkontakte-Bericht) ──
@@ -1878,7 +1907,7 @@ class ReportlabRenderer:
         )
         return table
 
-    def render_dns_bypass_report_pdf(self, model: DnsBypassPdfModelLike) -> bytes:
+    def render_dns_bypass_report_pdf(self, model: DnsBypassPdfModelLike, lang: str = "de") -> bytes:
         """Rendert das ``DnsBypassPdfModel`` zum vollstaendigen DNS-Umgehungs-Bericht-PDF (A4 hoch).
 
         Layout (Muster render_dns_watch_report_pdf, ABER netzweit statt host-lokal + mit
@@ -1948,7 +1977,7 @@ class ReportlabRenderer:
         # Render-Pfad, weil die Geraet-Zelle beim eigenen Host zweizeilig ist (Hostname +
         # dezente Kennzeichnung); _append_table_section kennt nur einzeilige Zellen.
         story.append(PageBreak())
-        self._dns_bypass_detail_tabelle(story, styles, model.bypass_rows)
+        self._dns_bypass_detail_tabelle(story, styles, model.bypass_rows, lang)
 
         # ── Achse-B-Fussnote (invariant, wie im DNS-Waechter-/Aussenkontakte-Bericht) ──
         story.append(Spacer(1, 8 * mm))
@@ -1981,6 +2010,7 @@ class ReportlabRenderer:
         story: list[Flowable],
         styles: dict[str, ParagraphStyle],
         rows: tuple[tuple[str, ...], ...],
+        lang: str = "de",
     ) -> None:
         """Haengt die Umgehungs-Detailliste an -- eigener Pfad wegen der zweizeiligen Geraet-Zelle.
 
@@ -2005,7 +2035,7 @@ class ReportlabRenderer:
         # reportlab-Markup will "#RRGGBB"; hexval() liefert "0xRRGGBB" -> Praefix ersetzen.
         subtil = "#" + _CLEAN.hexval()[2:]
 
-        render_data: list[list[object]] = [list(columns)]
+        render_data: list[list[object]] = [list[object](_header_labels(columns, lang))]
         for row in rows:
             geraet_roh = row[0]
             if "\n" in geraet_roh:
@@ -2150,7 +2180,21 @@ class ReportlabRenderer:
         "Aktivster Tag",
     )
 
-    def render_behavior_report_pdf(self, model: BehaviorPdfModelLike) -> bytes:
+    # Englische Anzeige-Koepfe zu _BEHAVIOR_ENTRY_COLUMNS_LOCAL. Liegt hier statt in
+    # _HEADER_LABELS_EN, weil das deutsche Schluessel-Tupel eine Klassen-Konstante ist und auf
+    # Modul-Ebene noch nicht existiert; Rolle und Fallback-Verhalten sind identisch.
+    _BEHAVIOR_ENTRY_HEADER_LABELS_EN: ClassVar[dict[tuple[str, ...], tuple[str, ...]]] = {
+        _BEHAVIOR_ENTRY_COLUMNS_LOCAL: (
+            "Device",
+            "Recording Days",
+            "Enough Data",
+            "Deviations",
+            "Most Active Time",
+            "Most Active Day",
+        ),
+    }
+
+    def render_behavior_report_pdf(self, model: BehaviorPdfModelLike, lang: str = "de") -> bytes:
         """Rendert das ``BehaviorPdfModel`` zum Verhaltensprofil-Bericht-PDF (A4 hoch).
 
         Layout (Muster ``render_dns_bypass_report_pdf``): durchgaengige Kopf-/Fusszeile je Seite
@@ -2241,7 +2285,10 @@ class ReportlabRenderer:
                 )
             else:
                 columns = self._BEHAVIOR_ENTRY_COLUMNS_LOCAL
-                render_data: list[list[object]] = [list(columns)]
+                kopf = self._BEHAVIOR_ENTRY_HEADER_LABELS_EN.get(columns)
+                render_data: list[list[object]] = [
+                    list(kopf) if lang == "en" and kopf is not None else list(columns)
+                ]
                 for row in model.entry_rows:
                     render_data.append([Paragraph(_esc(value), styles["cell"]) for value in row])
                 table = Table(render_data, repeatRows=1, colWidths=_col_widths(columns))
@@ -2536,6 +2583,92 @@ class ReportlabRenderer:
 # Bewusst Modul-Funktionen (nicht Methoden): die Kopf-/Fusszeile braucht reportlab der
 # onPage-Callback als einfache Funktion, und die Vektor-Grafiken (Gauge/Donut/Balken) sind
 # reine (model-werte -> Drawing)-Funktionen ohne Adapter-Zustand. Alle zustandslos.
+
+# Englische Anzeige-Koepfe je bekanntem Rubrik-Schema. Schluessel ist das ROHE deutsche
+# Kopf-Tupel -- dieses bleibt unveraendert der Steuer-Schluessel (_COL_WEIGHTS,
+# _EMPTY_SECTION_TEXT, columns.index("Schwere"/"Severity")); uebersetzt wird AUSSCHLIESSLICH
+# der angezeigte Kopf-Text. Wie die *_COLUMNS selbst LOKAL gefuehrt: der Adapter darf
+# ``application`` NICHT importieren (import-linter), es gibt hier also weder LocalizedText noch
+# einen Lang-Typ -- die Sprache ist ein schlichtes Literal "de"/"en".
+_HEADER_LABELS_EN: dict[tuple[str, ...], tuple[str, ...]] = {
+    PORT_COLUMNS: ("Device", "Ports", "Severity", "Reason"),
+    CVE_COLUMNS: ("Device", "CVE", "CVSS", "Service", "Description"),
+    NET_COLUMNS: ("Type", "Device", "Severity", "Description"),
+    ACK_COLUMNS: ("Type", "Device", "Detail"),
+    INVENTORY_COLUMNS: (
+        "Device",
+        "Vendor",
+        "Last IP",
+        "First Seen",
+        "Last Seen",
+        "Seen",
+        "Category",
+        "Status",
+    ),
+    ARCHIVED_COLUMNS: ("Device", "Vendor", "Last IP", "Last Seen", "Status"),
+    _CVE_DEVICE_COLUMNS: ("Device", "Findings", "Highest Severity", "Highest CVSS", "Services"),
+    _CVE_SERVICE_COLUMNS: (
+        "Service",
+        "Findings",
+        "Devices",
+        "Highest Severity",
+        "Highest CVSS",
+        "Oldest Published",
+    ),
+    _CVE_FINDING_COLUMNS: (
+        "Device",
+        "CVE",
+        "Severity",
+        "CVSS",
+        "Service",
+        "Port",
+        "First Seen",
+        "Status",
+    ),
+    _CVE_FINDING_GROUP_COLUMNS: (
+        "CVE",
+        "Severity",
+        "CVSS",
+        "Service",
+        "Port",
+        "First Seen",
+        "Status",
+    ),
+    _OUTBOUND_CONTACT_COLUMNS: ("Peer", "Name", "Country", "Operator", "Contacts", "Assessment"),
+    _OUTBOUND_COUNTRY_COLUMNS: ("Country", "Peers"),
+    _OUTBOUND_OPERATOR_COLUMNS: ("Operator", "Peers"),
+    DNS_CATEGORY_COLUMNS: ("Category", "Contacts"),
+    DNS_APP_COLUMNS: ("Application", "Contacts"),
+    DNS_CONTACT_COLUMNS: ("Category", "Peer", "Name", "Application", "Contacts", "Status"),
+    DNS_BYPASS_ROW_COLUMNS: (
+        "Device",
+        "Source IP",
+        "Target Resolver",
+        "DoH",
+        "Queries",
+        "Queried Names",
+    ),
+    # Inline-Schemata der beiden Verteilungs-Tabellen im Bestandsbericht (kein Modul-Konstanten-
+    # Tupel, weil _append_distribution_table sie direkt am Aufrufer uebergeben bekommt).
+    ("Hersteller", "Anzahl"): ("Vendor", "Count"),
+    ("Kategorie", "Anzahl"): ("Category", "Count"),
+}
+
+
+def _header_labels(columns: tuple[str, ...], lang: str) -> list[str]:
+    """Liefert die ANZEIGE-Koepfe eines Rubrik-Schemas in der gewuenschten Sprache.
+
+    Bei ``lang == "en"`` die englischen Koepfe aus ``_HEADER_LABELS_EN``; ist das Schema dort
+    nicht hinterlegt, fallen die rohen deutschen Koepfe durch (Fallback statt ``KeyError``).
+    Bei ``"de"`` -- und jedem anderen Wert -- immer die rohen deutschen Koepfe. Aendert NICHTS
+    an der Steuer-Rolle von ``columns``; der Aufrufer nutzt das rohe Tupel unveraendert weiter.
+    """
+    if lang == "en":
+        english = _HEADER_LABELS_EN.get(columns)
+        if english is not None:
+            return list(english)
+    return list(columns)
+
 
 # Nutzbare Druckbreite einer A4-Hochformat-Seite bei 18 mm Seitenraendern (Single Source fuer
 # die Spaltenbreiten-Berechnung). A4-Breite 210 mm - 2*18 mm = 174 mm.
