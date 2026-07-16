@@ -14,25 +14,6 @@ FRONTEND_DIR="$SCRIPT_DIR/frontend"
 TAURI_SRC="$SCRIPT_DIR/src-tauri"
 TRIPLE="${CERNIS_BUILD_TRIPLE:-x86_64-unknown-linux-gnu}"
 
-# PyInstaller/altgraph zeigt bei der scapy-Modulanalyse einen nicht-
-# deterministischen Fehler ("Graph object does not support item assignment");
-# ein erneuter Lauf geht in aller Regel durch. Darum jeden pyinstaller-Aufruf
-# bis zu 3-mal versuchen. Schlaegt der dritte Versuch fehl, bricht das Skript
-# mit Fehler ab (kein stiller Erfolg).
-run_pyinstaller_retry() {
-    local spec="$1" out="$2"
-    local attempt
-    for attempt in 1 2 3; do
-        echo "      PyInstaller-Versuch $attempt/3: $spec"
-        if pyinstaller "$spec" --noconfirm && [ -f "$out" ]; then
-            return 0
-        fi
-        echo "      Versuch $attempt fehlgeschlagen."
-    done
-    echo "FEHLER: PyInstaller ($spec) nach 3 Versuchen fehlgeschlagen"
-    return 1
-}
-
 echo "============================================"
 echo " CERNIS PRO Linux x86_64 Build"
 echo " Ziel-Triple: $TRIPLE"
@@ -69,7 +50,7 @@ echo ""
 echo "[2/6] Backend-Binary (cernis-backend)..."
 cd "$BACKEND_DIR"
 rm -rf dist/ build/
-run_pyinstaller_retry cernis_linux.spec "$BACKEND_DIR/dist/cernis-backend"
+pyinstaller cernis_linux.spec --noconfirm
 [ -f "$BACKEND_DIR/dist/cernis-backend" ] || { echo "FEHLER: cernis-backend fehlt"; exit 1; }
 echo "      OK"
 
@@ -77,7 +58,7 @@ echo ""
 echo "[3/6] Sniff-Helfer-Binary (cernis-sniffd)..."
 cd "$BACKEND_DIR"
 SNIFFD_BIN="$BACKEND_DIR/dist/cernis-sniffd"
-run_pyinstaller_retry cernis_sniffd_linux.spec "$SNIFFD_BIN"
+pyinstaller cernis_sniffd_linux.spec --noconfirm
 [ -f "$SNIFFD_BIN" ] || { echo "FEHLER: cernis-sniffd fehlt"; exit 1; }
 echo "      OK"
 
