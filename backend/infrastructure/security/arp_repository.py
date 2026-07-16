@@ -155,9 +155,11 @@ class SqliteArpGuardRepository:
     def recent_alerts(self, limit: int) -> list[ArpAlertRecord]:
         # Lese-/Wire-Pfad MIT Zeit: ts + datetime aus den DB-Spalten (das Frontend
         # rendert datetime). KEIN id (bewusste Streichung, s. ArpAlertRecord-Docstring).
+        # ORDER BY ts DESC, id DESC (id nur als deterministischer Tiebreaker bei
+        # gleichem ts, nicht im Record).
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM arp_alerts ORDER BY ts DESC LIMIT ?", (limit,)
+                "SELECT * FROM arp_alerts ORDER BY ts DESC, id DESC LIMIT ?", (limit,)
             ).fetchall()
         return [
             ArpAlertRecord(
