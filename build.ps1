@@ -323,7 +323,6 @@ Write-Host "      OK"
 Write-Host ""
 Write-Host "[6/6] Installer einsammeln..."
 $VERSION = (Get-Content (Join-Path $TAURI_SRC "tauri.conf.json") -Raw | ConvertFrom-Json).version
-$DEST = "C:\Users\Claude"
 
 $NSIS_DIR = Join-Path $TAURI_SRC "target\$TRIPLE\release\bundle\nsis"
 $INSTALLER = Get-ChildItem -Path $NSIS_DIR -Filter "*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -331,21 +330,11 @@ if (-not $INSTALLER) {
     Write-Host "FEHLER: Kein NSIS-Installer gefunden in $NSIS_DIR" -ForegroundColor Red
     exit 1
 }
-# Kopieren nach $DEST nur, wenn der Zielordner existiert. Auf der lokalen VM
-# ist C:\Users\Claude vorhanden; auf dem GitHub-Runner nicht -- dort verbleibt
-# der Installer im Bundle-Verzeichnis. Der Nicht-gefunden-Fehler oben (exit 1)
-# gilt in BEIDEN Faellen, ein Build ohne Installer bleibt ein Fehler.
-if (Test-Path $DEST) {
-    $DEST_FILE = Join-Path $DEST "cernis-pro_${VERSION}_${ARCH}-setup.exe"
-    Copy-Item $INSTALLER.FullName $DEST_FILE -Force
-    $FINAL_INSTALLER = $DEST_FILE
-    Write-Host "      -> $DEST_FILE"
-}
-else {
-    $FINAL_INSTALLER = $INSTALLER.FullName
-    Write-Host "      Installer verbleibt im Bundle-Verzeichnis (Zielordner $DEST existiert nicht - CI-Lauf)"
-    Write-Host "      -> $FINAL_INSTALLER"
-}
+# Der Installer verbleibt immer im Bundle-Verzeichnis -- identisches
+# CI-/Release-Verhalten auf lokaler VM wie auf dem GitHub-Runner. Der
+# Nicht-gefunden-Fehler oben (exit 1) bleibt der einzige Abbruchgrund.
+$FINAL_INSTALLER = $INSTALLER.FullName
+Write-Host "      -> $FINAL_INSTALLER"
 
 Write-Host ""
 Write-Host "============================================"
