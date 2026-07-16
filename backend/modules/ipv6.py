@@ -1,20 +1,16 @@
 """
-CERNIS PRO IPv6 Full Support
-- NDP (Neighbor Discovery Protocol) — discovers link-local hosts
-- ICMPv6 ping for IPv6 hosts
-- DHCPv6 prefix detection
+CERNIS PRO IPv6 Support
+- NDP (Neighbor Discovery Protocol) — liest die Nachbartabelle
+- MAC-basierte IPv6-Anreicherung bestehender Scan-Ergebnisse
 - IPv6 address classification
 """
-import asyncio
-import socket
 import subprocess
 import os
 import re
 import platform
-from dataclasses import dataclass, field, asdict
-from typing import Optional
+from dataclasses import dataclass, asdict
 
-# Externe Kommandos (ping6, ndp, netsh, ip -6 neigh) werden mit erzwungener C-Locale
+# Externe Kommandos (ndp, netsh, ip -6 neigh) werden mit erzwungener C-Locale
 # gestartet, weil lokalisierte Ausgaben (z.B. Zeit= statt time=) das Parsing sonst
 # still scheitern lassen.
 _C_LOCALE_ENV = {**os.environ, "LC_ALL": "C", "LANG": "C"}
@@ -67,41 +63,6 @@ def mac_from_eui64(ipv6: str) -> str:
     return ""
 
 
-async def ping6(addr: str, interface: str = "", timeout: float = 1.0) -> tuple[bool, float]:
-    """Ping an IPv6 address. Returns (alive, rtt_ms)."""
-    sys = platform.system()
-    if sys == "Darwin":
-        cmd = ["ping6", "-c", "1", "-W", str(int(timeout * 1000)), "-t", "2"]
-        if interface:
-            cmd += ["-I", interface]
-        cmd.append(addr)
-    elif sys == "Windows":
-        cmd = ["ping", "-6", "-n", "1", "-w", str(int(timeout * 1000)), addr]
-    else:
-        cmd = ["ping6", "-c", "1", "-W", str(int(timeout))]
-        if interface:
-            cmd += ["-I", interface]
-        cmd.append(addr)
-
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-            env=_C_LOCALE_ENV,
-        )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout + 1)
-        output = stdout.decode("utf-8", errors="replace")
-        alive = proc.returncode == 0
-        rtt = -1.0
-        m = re.search(r"time[=<]([\d.]+)\s*ms", output)
-        if m:
-            rtt = float(m.group(1))
-        return alive, rtt
-    except Exception:
-        return False, -1.0
-
-
 def get_ndp_table() -> dict[str, str]:
     """Read NDP neighbor cache. Returns {ipv6: mac}."""
     sys = platform.system()
@@ -135,90 +96,6 @@ def get_ndp_table() -> dict[str, str]:
         pass
 
     return ndp
-
-
-async def discover_link_local(interface: str, timeout: float = 3.0) -> list[IPv6Host]:
-    """
-    Discover IPv6 link-local hosts using multicast ping.
-    Pings ff02::1 (all-nodes multicast) on the interface.
-    """
-    hosts = []
-    sys = platform.system()
-
-    # Multicast ping to all-nodes
-    try:
-        cmd = ["ping6", "-c", "3", "-W", "1000", "-I", interface, "ff02::1%"+interface] \
-              if sys == "Darwin" else \
-              ["ping6", "-c", "3", "-W", "1", "-I", interface, "ff02::1"]
-
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        await asyncio.wait_for(proc.communicate(), timeout=timeout + 1)
-    except Exception:
-        pass
-
-    # Now read NDP table
-    await asyncio.sleep(0.5)
-    ndp = get_ndp_table()
-
-    for ip, mac in ndp.items():
-        ip_type = classify_ipv6(ip)
-        if ip_type not in ("link-local", "ula", "global"):
-            continue
-        # Try to get hostname
-        hostname = ""
-        try:
-            hostname = socket.gethostbyaddr(ip + f"%{interface}" if ip_type == "link-local" else ip)[0]
-        except Exception:
-            pass
-
-        host = IPv6Host(
-            ipv6=ip,
-            mac=mac,
-            ipv6_type=ip_type,
-            is_alive=True,
-            hostname=hostname,
-        )
-        hosts.append(host)
-
-    return hosts
-
-
-async def scan_ipv6_subnet(cidr6: str, max_concurrent: int = 32,
-                            timeout: float = 1.0) -> list[IPv6Host]:
-    """
-    Scan an IPv6 subnet (e.g. 2001:db8::/120 — small subnets only).
-    For large subnets, use discover_link_local instead.
-    """
-    import ipaddress
-    try:
-        net = ipaddress.ip_network(cidr6, strict=False)
-    except ValueError:
-        return []
-
-    if net.num_addresses > 65536:
-        return []  # Too large for direct scan
-
-    hosts = list(net.hosts())
-    results = []
-    semaphore = asyncio.Semaphore(max_concurrent)
-
-    async def _scan(addr):
-        async with semaphore:
-            alive, rtt = await ping6(str(addr), timeout=timeout)
-            if alive:
-                results.append(IPv6Host(
-                    ipv6=str(addr),
-                    ipv6_type=classify_ipv6(str(addr)),
-                    is_alive=True,
-                    rtt_ms=rtt,
-                ))
-
-    await asyncio.gather(*[_scan(h) for h in hosts])
-    return results
 
 
 def enrich_with_ipv6(hosts: list[dict]) -> list[dict]:
