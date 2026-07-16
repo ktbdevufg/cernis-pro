@@ -308,13 +308,19 @@ class MonitorTargetSource(Protocol):
     """Liefert die aktuell zu ueberwachenden Targets.
 
     Kapselt die heterogene Komposition des Altcodes (``_build_monitor_targets``):
-    Interface-Gateways (Hilfsmodul ``interfaces``), die fest verdrahteten
-    Internet-Targets (8.8.8.8 / 1.1.1.1) und die benutzerdefinierten Targets aus
-    den Settings (``monitor_custom_targets``). Aus Loop-Sicht ist das EINE
-    Verantwortung -- "die Targets" --, die drei Herkuenfte sind Adapter-Sache (M.4).
+    Interface-Gateways (native, sprachunabhaengige Discovery ueber den
+    ``InterfaceDiscoveryPort``), die fest verdrahteten Internet-Targets
+    (8.8.8.8 / 1.1.1.1) und die benutzerdefinierten Targets aus den Settings
+    (``monitor_custom_targets``). Aus Loop-Sicht ist das EINE Verantwortung --
+    "die Targets" --, die drei Herkuenfte sind Adapter-Sache (M.4).
+
+    ``load`` ist ``async`` -- wie die uebrigen I/O-Methoden des Ports: die native
+    Interface-Discovery ist blockierendes System-I/O, das der Adapter ueber
+    ``run_in_executor`` kapselt (ueber den ``InterfaceDiscoveryPort``); der Loop
+    ``await``et die Komposition.
     """
 
-    def load(self) -> list[MonitorTarget]:
+    async def load(self) -> list[MonitorTarget]:
         """Aktuelle Target-Liste, frisch zusammengesetzt.
 
         Bei jedem Aufruf neu gelesen -- so traegt der Altcode-Live-Reload (ein

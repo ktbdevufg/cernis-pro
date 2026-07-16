@@ -152,7 +152,8 @@ class RunMonitor:
 
     async def tick(self) -> None:
         """Eine Mess-Runde ueber alle (frisch geladenen) Targets."""
-        for target in self._target_source.load():
+        targets = await self._target_source.load()
+        for target in targets:
             if not target.enabled:
                 # Disabled Targets werden uebersprungen (kein Ping, kein
                 # Status-Update) -- altcode-treu (``if not target.enabled: continue``).

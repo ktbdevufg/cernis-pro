@@ -46,7 +46,7 @@ Connect-Frame).
 
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from datetime import datetime
 from typing import Annotated, Any
@@ -213,7 +213,7 @@ class AddTargetBody(BaseModel):
 # Liefert die label-angereicherte Status-Map ``{tid: {"alive", "label"}}``. Die
 # Anreicherung (RunMonitor.current_status() + MonitorTargetSource) macht der
 # Composition Root; der Router kennt nur diesen Callable (kein Port-/infra-Import).
-type MonitorStatusProvider = Callable[[], dict[str, dict[str, Any]]]
+type MonitorStatusProvider = Callable[[], Awaitable[dict[str, dict[str, Any]]]]
 
 
 # Dependency-Marker: im Composition Root (app.py) per dependency_overrides mit den
@@ -493,11 +493,11 @@ def _behavior_profile_to_dict(profile: BehaviorProfile) -> dict[str, Any]:
 
 
 @router.get("/monitor/status")
-def monitor_status(
+async def monitor_status(
     status_provider: Annotated[MonitorStatusProvider, Depends(provide_monitor_status)],
 ) -> dict[str, dict[str, Any]]:
     """In-Memory-Status aller Targets als ``{tid: {alive, label}}`` (label-angereichert)."""
-    return status_provider()
+    return await status_provider()
 
 
 @router.get("/monitor/events")

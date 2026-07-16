@@ -118,7 +118,11 @@ def _wired_app(
     job_scheduler = jobs or _FakeJobScheduler()
 
     app = create_app(AppConfig())
-    app.dependency_overrides[provide_monitor_status] = lambda: lambda: status or {}
+
+    async def _status_provider() -> dict[str, dict[str, Any]]:
+        return status or {}
+
+    app.dependency_overrides[provide_monitor_status] = lambda: _status_provider
     app.dependency_overrides[provide_get_monitor_events] = lambda: GetMonitorEvents(events)
     app.dependency_overrides[provide_get_rtt_history] = lambda: GetRttHistory(rtt)
     app.dependency_overrides[provide_get_all_sla_stats] = lambda: GetAllSlaStats(sla)
@@ -143,7 +147,11 @@ def test_status_passthrough_enriched_map() -> None:
     # Composition Root); der Endpunkt reicht sie 1:1 durch.
     status = {"wlan": {"alive": True, "label": "WLAN"}}
     app = create_app(AppConfig())
-    app.dependency_overrides[provide_monitor_status] = lambda: lambda: status
+
+    async def _status_provider() -> dict[str, dict[str, Any]]:
+        return status
+
+    app.dependency_overrides[provide_monitor_status] = lambda: _status_provider
     with TestClient(app) as client:
         resp = client.get("/api/monitor/status")
     assert resp.status_code == 200

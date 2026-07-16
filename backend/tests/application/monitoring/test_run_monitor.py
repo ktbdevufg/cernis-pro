@@ -144,7 +144,7 @@ class _StaticTargetSource:
     def __init__(self, targets: list[MonitorTarget]) -> None:
         self._targets = targets
 
-    def load(self) -> list[MonitorTarget]:
+    async def load(self) -> list[MonitorTarget]:
         return list(self._targets)
 
 

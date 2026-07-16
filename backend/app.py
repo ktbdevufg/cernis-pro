@@ -2763,7 +2763,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     @lru_cache(maxsize=1)
     def target_source() -> CompositeTargetSource:
         # Liest die Custom-Targets ueber den migrierten settings-Port (NICHT modules).
-        return CompositeTargetSource(repository())
+        # Interface-Gateways ueber den nativen, plattformabhaengigen
+        # InterfaceDiscoveryAdapter (sys.platform-Weiche oben, zustandslos).
+        return CompositeTargetSource(repository(), InterfaceDiscoveryAdapter())
 
     # Broadcaster-SINGLETON: EINE langlebige Instanz, die der RunMonitor-Loop
     # bespielt UND in die die /ws/monitor-Handler subscriben. Beide teilen dieselben
@@ -2815,10 +2817,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     # Komposition kennt nur der Composition Root -- darum als Callable gereicht. Greift
     # auf den laufenden RunMonitor (app.state) zu; vor dem Start (kein bootstrap) ->
     # leere Map (kein Loop -> nichts gemessen), niemals ein Fehler.
-    def _monitor_status() -> dict[str, dict[str, Any]]:
+    async def _monitor_status() -> dict[str, dict[str, Any]]:
         run_monitor_uc = getattr(app.state, "run_monitor", None)
         raw = run_monitor_uc.current_status() if run_monitor_uc is not None else {}
-        targets = target_source().load()
+        targets = await target_source().load()
         labels = {t.id: t.label for t in targets}
         return {tid: {"alive": alive, "label": labels.get(tid, tid)} for tid, alive in raw.items()}
 

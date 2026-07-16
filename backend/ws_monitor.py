@@ -48,7 +48,7 @@ Broadcaster = Any
 
 # Liefert die angereicherte Status-Map ``{tid: {"alive": bool, "label": str}}``
 # (RunMonitor.current_status() + TargetSource-Anreicherung). Verdrahtet in app.py.
-StatusProvider = Callable[[], dict[str, dict[str, Any]]]
+StatusProvider = Callable[[], Awaitable[dict[str, dict[str, Any]]]]
 
 
 def make_ws_monitor(
@@ -78,7 +78,7 @@ def make_ws_monitor(
 
         # Connect-Frame VOR dem subscribe (Altcode-Reihenfolge): aktueller Stand mit
         # label-Anreicherung. Form exakt wie Altcode-Connect-Frame.
-        await websocket.send_json({"type": "monitor_status", "status": status_provider()})
+        await websocket.send_json({"type": "monitor_status", "status": await status_provider()})
 
         await broadcaster.subscribe(websocket)
         try:

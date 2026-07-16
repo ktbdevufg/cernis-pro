@@ -54,10 +54,14 @@ def _client(
 ) -> tuple[TestClient, _FakeBroadcaster]:
     bc = broadcaster or _FakeBroadcaster()
     app = FastAPI()
+
     # Origin-Guard-Allowlist (F-01): der TestClient sendet keinen Origin-Header
     # (-> is_origin_allowed None == True), diese Tests connecten ohne Origin und laufen
     # unveraendert durch. Leere Allowlist genuegt.
-    app.add_api_websocket_route("/ws/monitor", make_ws_monitor(bc, lambda: status, []))
+    async def _status_provider() -> dict[str, dict[str, Any]]:
+        return status
+
+    app.add_api_websocket_route("/ws/monitor", make_ws_monitor(bc, _status_provider, []))
     return TestClient(app), bc
 
 
@@ -120,7 +124,7 @@ def test_connect_frame_built_before_subscribe() -> None:
         async def unsubscribe(self, _ws: WebSocket) -> None:
             events.append("unsubscribe")
 
-    def _ordering_status() -> dict[str, dict[str, Any]]:
+    async def _ordering_status() -> dict[str, dict[str, Any]]:
         events.append("status_provider")
         return {"wlan": {"alive": True, "label": "WLAN"}}
 

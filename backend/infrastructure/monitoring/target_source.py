@@ -3,10 +3,16 @@
 Reproduziert die heterogene Komposition des Altcodes (``_build_monitor_targets``,
 in v2 als Uebergangs-Kruecke nach ``app.py`` hochgezogen, P2.1b) aus DREI Quellen:
 
-1. **Interface-Gateways** -- ``modules.interfaces.get_interfaces`` (unmigriertes
-   Hilfsmodul); je Interface mit Gateway + IPv4 ein Gateway-Target. Der
-   ``modules``-Import ist durch die ADR-0007-Erweiterung gedeckt -- der EINZIGE
-   modules-Bezug dieses Adapters.
+1. **Interface-Gateways** -- native, sprachunabhaengige Discovery ueber den
+   injizierten ``InterfaceDiscoveryPort`` (``discover()`` direkt); je Interface
+   mit Gateway + IPv4 ein Gateway-Target. Ersetzt den alten
+   ``modules.interfaces.get_interfaces`` (EN/DE-only Textparser, Blocker auf
+   FR/ES/IT/PL/ZH). Nur die rohen Felder (name/ipv4/gateway) werden gebraucht --
+   die fachliche Anreicherung (``ListInterfaces``: type/status/is_primary) ist
+   fuer Gateway-Targets irrelevant, darum der Port DIREKT (Schichtgrenze:
+   infrastructure -> ports, KEIN infrastructure -> application). Der konkrete
+   Plattform-Adapter wird von aussen injiziert (Composition Root), NICHT hier
+   ueber die sys.platform-Weiche importiert.
 2. **Fest verdrahtete Internet-Targets** -- 8.8.8.8 (Google DNS) / 1.1.1.1
    (Cloudflare), im Adapter konstant.
 3. **Benutzerdefinierte Targets** -- ``monitor_custom_targets`` aus den Settings,
@@ -30,7 +36,7 @@ from typing import Any
 import structlog
 
 from domain.monitoring import CUSTOM_TARGETS_KEY, MonitorTarget
-from modules.interfaces import get_interfaces
+from ports.interfaces import InterfaceDiscoveryPort
 from ports.settings import SettingsRepository
 
 _logger = structlog.get_logger(__name__)
@@ -39,15 +45,21 @@ _logger = structlog.get_logger(__name__)
 class CompositeTargetSource:
     """Erfuellt das ``MonitorTargetSource``-Protocol strukturell (3-Quellen-Komposition)."""
 
-    def __init__(self, settings: SettingsRepository) -> None:
+    def __init__(self, settings: SettingsRepository, discovery: InterfaceDiscoveryPort) -> None:
         self._settings = settings
+        self._discovery = discovery
 
-    def load(self) -> list[MonitorTarget]:
+    async def load(self) -> list[MonitorTarget]:
         """Setzt die Target-Liste frisch aus Interfaces + Hardcoded + Settings zusammen."""
         targets: list[MonitorTarget] = []
 
-        # 1. Interface-Gateways (modules.interfaces, unmigriertes Hilfsmodul).
-        for iface in get_interfaces():
+        # 1. Interface-Gateways (native, sprachunabhaengige Discovery ueber den
+        # injizierten InterfaceDiscoveryPort). Nur die ROHEN Felder
+        # (name/ipv4/gateway) werden gebraucht -- die fachliche Anreicherung
+        # (type/status/is_primary aus ListInterfaces) spielt fuer die
+        # Gateway-Targets keine Rolle; darum der Port direkt (Schichtgrenze:
+        # infrastructure -> ports, KEIN infrastructure -> application).
+        for iface in await self._discovery.discover():
             if iface.gateway and iface.ipv4:
                 targets.append(
                     MonitorTarget(

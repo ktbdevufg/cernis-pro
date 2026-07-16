@@ -111,7 +111,7 @@ class _FakeEventRepo:
 
 
 class _FakeTargetSource:
-    def load(self) -> list[MonitorTarget]:
+    async def load(self) -> list[MonitorTarget]:
         return [MonitorTarget(id="wlan", label="WLAN", host="192.168.1.1", interface="")]
 
 
@@ -359,7 +359,7 @@ def test_event_repo_save_then_recent_newest_first() -> None:
 
 def test_target_source_loads_targets() -> None:
     source: MonitorTargetSource = _FakeTargetSource()
-    targets = source.load()
+    targets = asyncio.run(source.load())
     assert len(targets) == 1
     assert isinstance(targets[0], MonitorTarget)
     assert targets[0].id == "wlan"
