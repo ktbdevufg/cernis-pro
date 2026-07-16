@@ -26,8 +26,8 @@ from ports.settings import SettingsRepository
 class _FakeDiscovery:
     """Vertragstreuer In-Memory-``InterfaceDiscoveryPort`` (nur ``discover``).
 
-    Liefert die rohen ``NetworkInterface``-Objekte, die vorher via
-    ``get_interfaces`` gemockt waren -- gleiche name/ipv4/gateway -> gleiche
+    Liefert die rohen ``NetworkInterface``-Objekte direkt aus dem Fake
+    (``async def discover``) -- gleiche name/ipv4/gateway -> gleiche
     ``gw_<name>``-Gateway-Targets.
     """
 

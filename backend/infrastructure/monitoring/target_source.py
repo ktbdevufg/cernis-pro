@@ -5,9 +5,10 @@ in v2 als Uebergangs-Kruecke nach ``app.py`` hochgezogen, P2.1b) aus DREI Quelle
 
 1. **Interface-Gateways** -- native, sprachunabhaengige Discovery ueber den
    injizierten ``InterfaceDiscoveryPort`` (``discover()`` direkt); je Interface
-   mit Gateway + IPv4 ein Gateway-Target. Ersetzt den alten
+   mit Gateway + IPv4 ein Gateway-Target. Ersetzt den frueheren
    ``modules.interfaces.get_interfaces`` (EN/DE-only Textparser, Blocker auf
-   FR/ES/IT/PL/ZH). Nur die rohen Felder (name/ipv4/gateway) werden gebraucht --
+   FR/ES/IT/PL/ZH), der inzwischen ersatzlos entfernt ist. Nur die rohen Felder
+   (name/ipv4/gateway) werden gebraucht --
    die fachliche Anreicherung (``ListInterfaces``: type/status/is_primary) ist
    fuer Gateway-Targets irrelevant, darum der Port DIREKT (Schichtgrenze:
    infrastructure -> ports, KEIN infrastructure -> application). Der konkrete
