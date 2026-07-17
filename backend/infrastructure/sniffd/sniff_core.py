@@ -29,8 +29,9 @@ NICHT neu importiert. ``normalize_hostname`` kommt aus ``domain.sni``
 promisc=False: SNI braucht nur den eigenen TLS-Traffic; ``promisc=False`` vermeidet
 zusaetzlich den VMware-Promiscuous-Dialog.
 
-Plattform: NUR Linux x64 (``check_raw_permission`` ueber die ``AF_PACKET``-Raw-
-Socket-Probe, ``_pick_iface`` ueber die Default-Route / ``/sys/class/net``).
+Plattform: primaer Linux x64. ``check_raw_permission`` probt plattformabhaengig
+(Linux ``AF_PACKET``, macOS ``AF_INET``/``SOCK_RAW``); ``_pick_iface`` bleibt Linux
+(Default-Route / ``/sys/class/net``).
 """
 
 import contextlib
@@ -39,6 +40,7 @@ import re
 import socket
 import struct
 import subprocess
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -224,10 +226,18 @@ def _pick_iface() -> str:
 def check_raw_permission(zweck: str = "Packet capture") -> str | None:
     """Prueft, ob der rohe Sniff moeglich ist; Fehlertext oder ``None`` wenn OK.
 
-    NUR Linux x64 (Muster ``ScapyPacketSniffer.check_permission``): ``AF_PACKET``-
-    Raw-Socket probieren. ``PermissionError`` -> ``cap_net_raw``-Fix-Hinweis (kein
-    stiller Fallback, S3). ``OSError`` -> ``None`` ("inconclusive" -- kein
-    Permission-Fehler, scapy darf es versuchen).
+    Plattformabhaengige Raw-Socket-Probe (Muster ``ScapyPacketSniffer.check_permission``):
+
+    * Linux (``sys.platform == "linux"``): ``AF_PACKET``-Raw-Socket probieren.
+    * macOS (``sys.platform == "darwin"``): ``AF_INET``/``SOCK_RAW``/``IPPROTO_RAW``-
+      Raw-Socket probieren (``AF_PACKET`` existiert dort nicht) -- gleiches
+      Vertragsmuster.
+    * Sonstige Plattformen: ``None`` (inconclusive) -- keine Probe, scapy darf es
+      versuchen.
+
+    In allen Faellen gilt dasselbe Vertragsmuster: ``PermissionError`` ->
+    ``cap_net_raw``-Fix-Hinweis (kein stiller Fallback, S3). ``OSError`` -> ``None``
+    ("inconclusive" -- kein Permission-Fehler, scapy darf es versuchen).
 
     Der Fix-Text nennt bewusst KEINEN ``/usr/bin/cernis-backend``-Pfad mehr: die
     Cap sitzt kuenftig auf ``cernis-sniffd``, nicht auf dem Backend.
@@ -239,7 +249,12 @@ def check_raw_permission(zweck: str = "Packet capture") -> str | None:
     Variante erhalten (daran haengt die Rechte-Klassifikation der sni-Domaene).
     """
     try:
-        s = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(3))
+        if sys.platform == "linux":
+            s = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(3))
+        elif sys.platform == "darwin":
+            s = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_RAW)
+        else:
+            return None  # inconclusive -- Plattform ohne bekannte Raw-Socket-Probe
         s.close()
         return None
     except PermissionError:
