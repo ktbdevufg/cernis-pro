@@ -26,6 +26,9 @@
     "copyright": "© 2025 Karl Bach",
     "shortDescription": "LAN Scanner & Monitor",
     "longDescription": "CERNIS PRO - Professional LAN Scanner & Monitor",
+    "macOS": {
+      "entitlements": "./Entitlements.plist"
+    },
     "windows": {
       "nsis": {
         "installMode": "both",
