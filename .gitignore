@@ -65,3 +65,6 @@ backend/infrastructure/_build_version.py
 
 # Laufzeit-Datenbank (nie einchecken; wird beim Start erzeugt)
 *.db
+
+# Laufzeit-Versionsstempel (beim Start erzeugt)
+backend/data/.version
