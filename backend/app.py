@@ -727,9 +727,15 @@ from infrastructure.http_guard import is_origin_allowed
 # Plattform-Weiche fuer den Interface-Discovery-Adapter. sys.platform (nicht hasattr),
 # weil mypy --strict den Zweig statisch auswertet und so den plattformspezifischen
 # ctypes-Code des Windows-Adapters nur unter win32 typprueft -- ein hasattr-Guard
-# bliebe fuer mypy beidseitig sichtbar und wuerde die Linux-CI brechen.
+# bliebe fuer mypy beidseitig sichtbar und wuerde die Linux-CI brechen. macOS
+# (darwin) nutzt den eigenen ifconfig/netstat-Adapter; alles uebrige (Linux) den
+# ip-Adapter.
 if sys.platform == "win32":
     from infrastructure.interfaces_windows import (
+        InterfaceDiscoveryAdapter as InterfaceDiscoveryAdapter,
+    )
+elif sys.platform == "darwin":
+    from infrastructure.interfaces_macos import (
         InterfaceDiscoveryAdapter as InterfaceDiscoveryAdapter,
     )
 else:
