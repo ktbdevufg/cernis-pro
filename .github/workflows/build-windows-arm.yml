@@ -3,6 +3,8 @@ name: Build Windows ARM64
 on:
   workflow_dispatch:
   push:
+    branches:
+      - rewrite/v2
     tags:
       - 'v*'
 
