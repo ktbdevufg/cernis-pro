@@ -243,7 +243,14 @@ fn start_backend() -> Result<Child, BackendStatus> {
     log(&format!("Starting backend: {:?}", backend));
     match cmd.spawn() {
         Ok(child) => {
-            log(&format!("Backend process started (PID {})", child.id()));
+            let child_pid = child.id();
+            log(&format!("Backend process started (PID {})", child_pid));
+            // Explizit eigene Prozessgruppe setzen (process_group(0) allein
+            // reicht nicht zuverlaessig — setpgid als Sicherung).
+            #[cfg(unix)]
+            unsafe {
+                libc::setpgid(child_pid as libc::pid_t, child_pid as libc::pid_t);
+            }
             Ok(child)
         }
         Err(e) => {
@@ -613,12 +620,14 @@ fn kill_backend_tree(process: &Arc<Mutex<Option<Child>>>) {
             #[cfg(unix)]
             {
                 unsafe {
-                    // Send SIGTERM to the process group
+                    // Erst direkte PID killen (funktioniert unabhaengig von PGID).
+                    libc::kill(pid as i32, libc::SIGTERM);
+                    // Zusaetzlich Prozessgruppe (uvicorn-Worker-Children).
                     libc::kill(-(pid as i32), libc::SIGTERM);
                 }
                 thread::sleep(Duration::from_millis(500));
-                // Force kill if still alive
                 unsafe {
+                    libc::kill(pid as i32, libc::SIGKILL);
                     libc::kill(-(pid as i32), libc::SIGKILL);
                 }
             }
