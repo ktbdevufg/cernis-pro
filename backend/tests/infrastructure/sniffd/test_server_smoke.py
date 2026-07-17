@@ -1,19 +1,42 @@
 """Smoke-Test des Helfer-Servers: nur Protokoll-/Lifecycle-Pfad, KEIN echter Sniff.
 
-``serve()`` laeuft in einem Thread auf einem temp-Socket (``tmp_path``). Der Test
+``serve()`` laeuft in einem Thread auf einem temp-Socket (``short_socket_dir``). Der Test
 verbindet sich per AF_UNIX, prueft PING -> PONG und dass die Verbindungsende den
 Server-Thread sauber beendet. KEIN scapy-Import, keine echten Raw-Sockets -- ein
 START-Versuch darf an fehlenden Rechten NICHT scheitern (STARTED ODER ERROR ist
 beides gueltig).
 """
 
+import shutil
 import socket
+import tempfile
 import threading
 import time
+from collections.abc import Iterator
 from pathlib import Path
+
+import pytest
 
 from infrastructure.sniffd.protocol import MessageType, recv_message, send_message
 from infrastructure.sniffd.server import serve
+
+
+@pytest.fixture
+def short_socket_dir() -> Iterator[Path]:
+    """Kurzes temp-Verzeichnis fuer den AF_UNIX-Socket (macOS-Limit 104 Zeichen).
+
+    pytests ``tmp_path`` erzeugt auf macOS einen sehr langen Pfad
+    (``/private/var/folders/.../pytest-of-USER/...``), der mit dem angehaengten
+    ``cernis-sniffd.sock`` das ``sun_path``-Limit sprengt -> ``AF_UNIX path too
+    long``. ``tempfile.mkdtemp()`` nutzt die kurze ``$TMPDIR``-Basis und spiegelt
+    zugleich das echte Produktionsverhalten (``mkdtemp``) wider. Teardown raeumt das
+    Verzeichnis best-effort wieder ab.
+    """
+    tmpdir = tempfile.mkdtemp()
+    try:
+        yield Path(tmpdir)
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 def _wait_for_socket(path: Path, timeout: float = 5.0) -> None:
@@ -41,9 +64,9 @@ def _connect(path: Path, timeout: float = 5.0) -> socket.socket:
             time.sleep(0.01)
 
 
-def test_ping_pong_and_clean_shutdown(tmp_path: Path) -> None:
+def test_ping_pong_and_clean_shutdown(short_socket_dir: Path) -> None:
     """PING -> PONG; danach Verbindungsende -> Server-Thread endet sauber."""
-    socket_path = tmp_path / "cernis-sniffd.sock"
+    socket_path = short_socket_dir / "cernis-sniffd.sock"
     server_thread = threading.Thread(target=serve, args=(str(socket_path),), daemon=True)
     server_thread.start()
 
@@ -63,13 +86,13 @@ def test_ping_pong_and_clean_shutdown(tmp_path: Path) -> None:
     assert not socket_path.exists()
 
 
-def test_start_returns_started_or_error(tmp_path: Path) -> None:
+def test_start_returns_started_or_error(short_socket_dir: Path) -> None:
     """START liefert STARTED (falls Rechte) ODER ERROR (ohne Rechte) -- beides gueltig.
 
     Der Test darf an fehlenden Raw-Socket-Rechten NICHT scheitern. Anschliessend
     schliesst er die Verbindung und erwartet einen sauberen Server-Shutdown.
     """
-    socket_path = tmp_path / "cernis-sniffd.sock"
+    socket_path = short_socket_dir / "cernis-sniffd.sock"
     server_thread = threading.Thread(target=serve, args=(str(socket_path),), daemon=True)
     server_thread.start()
 
@@ -87,14 +110,14 @@ def test_start_returns_started_or_error(tmp_path: Path) -> None:
     assert not server_thread.is_alive()
 
 
-def test_start_pcap_returns_started_or_error(tmp_path: Path) -> None:
+def test_start_pcap_returns_started_or_error(short_socket_dir: Path) -> None:
     """START_PCAP liefert STARTED (mit Rechten) ODER ERROR (ohne) -- beides gueltig.
 
     Wie der START-Smoke: ohne Raw-Socket-Rechte/scapy darf der Server NICHT
     crashen, sondern sauber ERROR (oder STARTED, falls Rechte da sind) liefern.
     KEIN echter Sniff wird hier erwartet.
     """
-    socket_path = tmp_path / "cernis-sniffd.sock"
+    socket_path = short_socket_dir / "cernis-sniffd.sock"
     server_thread = threading.Thread(target=serve, args=(str(socket_path),), daemon=True)
     server_thread.start()
 
@@ -112,7 +135,7 @@ def test_start_pcap_returns_started_or_error(tmp_path: Path) -> None:
     assert not server_thread.is_alive()
 
 
-def test_start_lldp_returns_started_or_error_or_neighbors(tmp_path: Path) -> None:
+def test_start_lldp_returns_started_or_error_or_neighbors(short_socket_dir: Path) -> None:
     """START_LLDP: ohne Rechte ERROR; mit Rechten laeuft der Sniff im Thread.
 
     Ohne Raw-Socket-Rechte antwortet der Server synchron mit ERROR. Sind die Rechte
@@ -121,7 +144,7 @@ def test_start_lldp_returns_started_or_error_or_neighbors(tmp_path: Path) -> Non
     NICHT an der Umgebung scheitern. Kurze ``duration``, damit der Thread bei
     vorhandenen Rechten zeitnah endet.
     """
-    socket_path = tmp_path / "cernis-sniffd.sock"
+    socket_path = short_socket_dir / "cernis-sniffd.sock"
     server_thread = threading.Thread(target=serve, args=(str(socket_path),), daemon=True)
     server_thread.start()
 
@@ -139,21 +162,21 @@ def test_start_lldp_returns_started_or_error_or_neighbors(tmp_path: Path) -> Non
     assert not server_thread.is_alive()
 
 
-def test_export_pcap_without_packets_returns_not_ok(tmp_path: Path) -> None:
+def test_export_pcap_without_packets_returns_not_ok(short_socket_dir: Path) -> None:
     """EXPORT_PCAP ohne gesammelte Pakete -> EXPORTED {"ok": false} (deterministisch).
 
     Ohne vorausgegangenen pcap-Lauf ist die Rohpaket-Sammlung leer; ``export_pcap``
     ist best-effort und liefert dann ``False`` -- unabhaengig von scapy/Rechten,
     daher hart pruefbar.
     """
-    socket_path = tmp_path / "cernis-sniffd.sock"
+    socket_path = short_socket_dir / "cernis-sniffd.sock"
     server_thread = threading.Thread(target=serve, args=(str(socket_path),), daemon=True)
     server_thread.start()
 
     _wait_for_socket(socket_path)
     conn = _connect(socket_path)
     try:
-        export_path = str(tmp_path / "out.pcap")
+        export_path = str(short_socket_dir / "out.pcap")
         send_message(conn, {"type": MessageType.EXPORT_PCAP, "path": export_path})
         reply = recv_message(conn)
         assert reply is not None
