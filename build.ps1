@@ -62,7 +62,13 @@ function Invoke-PyInstallerRetry {
     param([string]$Spec, [string]$Out)
     foreach ($attempt in 1, 2, 3) {
         Write-Host "      PyInstaller-Versuch $attempt/3: $Spec"
+        # PS 5.1 mit ErrorActionPreference=Stop wertet Fortschrittsmeldungen
+        # externer Tools auf stderr als NativeCommandError -> Abbruch. Darum um
+        # den externen Aufruf herum auf Continue schalten, danach zurueck auf
+        # Stop. Der Exit-Code wird ueber $LASTEXITCODE geprueft.
+        $ErrorActionPreference = "Continue"
         uv run pyinstaller $Spec --noconfirm
+        $ErrorActionPreference = "Stop"
         if (($LASTEXITCODE -eq 0) -and (Test-Path $Out)) { return }
         Write-Host "      Versuch $attempt fehlgeschlagen."
     }
@@ -195,7 +201,9 @@ Write-Host "      VS Build Tools ${VCVARS_ARCH}: OK"
 Write-Host ""
 Write-Host "[1/6] Python-Abhaengigkeiten (uv sync --locked --group dev)..."
 Push-Location $SCRIPT_DIR
+$ErrorActionPreference = "Continue"
 uv sync --locked --group dev
+$ErrorActionPreference = "Stop"
 Assert-LastExit "uv sync"
 Pop-Location
 Write-Host "      OK"
@@ -208,7 +216,9 @@ Write-Host "      OK"
 # PyInstaller-Lauf entsteht.
 Write-Host ""
 Write-Host "[1b/6] Build-Version erzeugen (_build_version.py)..."
+$ErrorActionPreference = "Continue"
 $SHORT_SHA = (git -C $SCRIPT_DIR rev-parse --short=7 HEAD).Trim()
+$ErrorActionPreference = "Stop"
 Assert-LastExit "git rev-parse"
 $BUILD_VERSION = "2.0.0+$ARCH.$SHORT_SHA"
 Write-Host "      Build-Version: $BUILD_VERSION"
@@ -228,9 +238,13 @@ Write-Host "      OK - $buildVersionFile"
 Write-Host ""
 Write-Host "[2/6] Frontend bauen (npm.cmd ci + build)..."
 Push-Location $FRONTEND_DIR
+$ErrorActionPreference = "Continue"
 npm.cmd ci
+$ErrorActionPreference = "Stop"
 Assert-LastExit "npm ci (frontend)"
+$ErrorActionPreference = "Continue"
 npm.cmd run build
+$ErrorActionPreference = "Stop"
 Assert-LastExit "npm run build (frontend)"
 Pop-Location
 Write-Host "      OK - dist/ erstellt"
@@ -309,9 +323,13 @@ Write-Host "      OK"
 Write-Host ""
 Write-Host "[5/6] Tauri-Build (NSIS-Installer, Target $TRIPLE)..."
 Push-Location $SCRIPT_DIR
+$ErrorActionPreference = "Continue"
 npm.cmd ci
+$ErrorActionPreference = "Stop"
 Assert-LastExit "npm ci (tauri)"
+$ErrorActionPreference = "Continue"
 npx.cmd tauri build --target $TRIPLE
+$ErrorActionPreference = "Stop"
 Assert-LastExit "tauri build"
 Pop-Location
 Write-Host "      OK"
