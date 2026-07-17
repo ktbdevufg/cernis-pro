@@ -815,8 +815,21 @@ from infrastructure.settings_repository import CorruptSettingError, SqliteSettin
 from infrastructure.sni.errors import SniError, SniPermissionError
 from infrastructure.sni.sni_sniffer import ScapySniSniffer
 from infrastructure.system_resolvers import detect_system_resolvers
-from infrastructure.traffic_linux import PsutilTrafficAdapter
-from infrastructure.traffic_permission import TrafficPermissionAdapter
+
+if sys.platform == "darwin":
+    from infrastructure.traffic_macos import (
+        PsutilTrafficAdapter as PsutilTrafficAdapter,
+    )
+    from infrastructure.traffic_macos import (
+        TrafficPermissionAdapter as TrafficPermissionAdapter,
+    )
+else:
+    from infrastructure.traffic_linux import (
+        PsutilTrafficAdapter as PsutilTrafficAdapter,
+    )
+    from infrastructure.traffic_permission import (
+        TrafficPermissionAdapter as TrafficPermissionAdapter,
+    )
 from infrastructure.usage_stats_db import SqliteUsageStatsRepository
 
 # ── ÜBERGANGS-KRÜCKE P2.1b: Bootstrap-Init aus dem Altcode (modules/) ──────────
