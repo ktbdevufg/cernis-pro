@@ -62,3 +62,6 @@ backend/infrastructure/_build_version.py
 *.sqlite
 *.bak
 *.backup
+
+# Laufzeit-Datenbank (nie einchecken; wird beim Start erzeugt)
+*.db
