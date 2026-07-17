@@ -1,0 +1,145 @@
+name: Build macOS
+
+# Baut das verteilbare macOS-Paket (.dmg) nativ auf macos-latest (Apple Silicon /
+# aarch64) und fuehrt dazu den unveraenderten build.sh aus.
+#
+# ENTSCHEIDENDER UNTERSCHIED ZUM LINUX-WORKFLOW (wie schon bei Windows): Auf macOS
+# gibt es KEINEN Container. Der Linux-Job baut sein Debian-13-Image aus einem
+# Dockerfile und fuehrt den Build DARIN aus -- das geht auf macOS-Runnern nicht
+# (Docker ist dort nicht verfuegbar). Statt eines Images kommt die Toolchain hier
+# ueber Setup-Actions: Node 20 (setup-node), uv (setup-uv), Rust stable
+# (rust-toolchain). Es gibt daher keinen "Image bauen"-Schritt und kein chown/
+# Besitzrechte-Zuruecksetzen (kein root im Container, der Runner-User besitzt die
+# Dateien ohnehin).
+#
+# WARUM KEIN actions/setup-python: Das Projekt laesst uv den Interpreter verwalten.
+# Das Linux-Dockerfile haelt fest, dass PyInstaller mit Python 3.13 inkompatibel
+# ist, und ruft darum 'uv python install 3.12'. Wir machen es genauso -- ein
+# eigener Schritt 'uv python install 3.12' vor 'uv sync'. Mit setup-python koennte
+# der Runner 3.13 ziehen und PyInstaller scheitert.
+#
+# SIGNING: Dieser erste CI-Job baut UNSIGNIERT (Tauri signiert ad-hoc, weil KEIN
+# APPLE_SIGNING_IDENTITY gesetzt ist). Echtes Signing + Notarisierung folgt als
+# eigener Block mit Secrets (Developer-ID-Zertifikat, notarytool) -- bewusst nicht
+# in dieser Erstregistrierung. Versions-Suffix arm64.
+
+on:
+  # Manueller Knopf (Actions-Tab) ...
+  workflow_dispatch:
+  push:
+    # TEMPORAER: nur zur Erstregistrierung des Workflows bei GitHub. Ohne einen
+    # push-Trigger auf einem existierenden Branch taucht der Workflow nicht im
+    # Actions-Tab auf und laesst sich nicht per Dispatch starten. Nach der ersten
+    # erfolgreichen Registrierung wird dieser branches-Block wieder entfernt
+    # (analog zum ARM-Workflow) -- finaler Trigger bleibt workflow_dispatch + v*-Tags.
+    branches:
+      - rewrite/v2
+    # ... und automatisch bei Release-Tags v*.
+    tags:
+      - "v*"
+
+jobs:
+  build-macos:
+    # macos-latest zeigt aktuell auf Apple Silicon (arm64) -- nativer aarch64-Build,
+    # kein Cross-Compile noetig.
+    runs-on: macos-latest
+    # Schreibrecht auf contents ist noetig, damit der Workflow bei v-Tags ein
+    # GitHub-Release anlegen und Assets hochladen darf. Bewusst auf Job-Ebene
+    # (nicht Workflow-Ebene) und nur dieses eine Recht -- minimale Rechte: die
+    # Dispatch-Builds brauchen es nicht, schaden aber nicht.
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      # Toolchain via Setup-Actions statt via Container-Image. Versionen exakt
+      # wie in ci.yml und im Linux-Dockerfile (Node 20, uv, Rust stable),
+      # damit kein Drift zwischen den Werkbaenken entsteht.
+      - name: Node einrichten (LTS 20)
+        uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+
+      - name: uv installieren
+        uses: astral-sh/setup-uv@v8.1.0
+
+      - name: Rust-Toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      # Wie im Linux-Dockerfile: PyInstaller ist mit Python 3.13 inkompatibel,
+      # darum uv explizit auf 3.12 festnageln, BEVOR 'uv sync' laeuft. Bewusst
+      # KEIN setup-python -- der wuerde evtl. 3.13 bringen.
+      - name: Python 3.12 via uv installieren (PyInstaller-kompatibel)
+        run: uv python install 3.12
+
+      # Build-Version zur BUILD-ZEIT als Python-Datei erzeugen. config.py liest
+      # os.environ NICHT -- es importiert diese Datei. PyInstaller friert sie
+      # mit ein, damit die installierte App die volle Version kennt (kein
+      # Laufzeit-Env noetig). Der Suffix nennt nur die Architektur (arm64), NICHT
+      # das Paketformat -- gleiche Begruendung wie im Linux-Workflow. Format wie
+      # dort: 2.0.0+arm64.<7-stelliger-sha>, SHA via 'git rev-parse --short=7'.
+      # macos-latest laeuft mit bash, darum dieselbe heredoc-Variante wie im
+      # Linux-Workflow (kein BOM-Problem wie bei PowerShell/Windows).
+      - name: Build-Version erzeugen (_build_version.py)
+        shell: bash
+        run: |
+          SHORT_SHA=$(git rev-parse --short=7 HEAD)
+          BUILD_VERSION="2.0.0+arm64.${SHORT_SHA}"
+          echo "Build-Version: ${BUILD_VERSION}"
+          cat > backend/infrastructure/_build_version.py <<EOF
+          """Im CI erzeugte Build-Version. Nicht committet (siehe .gitignore)."""
+
+          BUILD_VERSION = "${BUILD_VERSION}"
+          EOF
+
+      # build.sh setzt eine vorhandene .venv voraus (Schritt 0 bricht sonst mit
+      # exit 1 ab). Der Linux-Container macht 'uv sync' auch separat VOR
+      # build-linux.sh -- hier genauso: Deps + .venv (inkl. Dev-Gruppe fuer
+      # PyInstaller) vor dem Build synchronisieren.
+      - name: Python-Deps (uv sync)
+        run: uv sync --locked --group dev
+
+      # build.sh Schritt 0 prueft 'nmap' und bricht sonst mit exit 1 ab.
+      # macos-latest-Runner haben nmap NICHT vorinstalliert -- daher hier VOR dem
+      # Build per Homebrew nachinstallieren.
+      - name: nmap installieren (build.sh Schritt 0 erwartet es)
+        run: brew install nmap
+
+      # Den unveraenderten build.sh ausfuehren. Er erledigt selbst: nmap-Check,
+      # venv-Aktivierung, Frontend-Build, beide PyInstaller-Binaries, Binaries
+      # fuer Tauri bereitstellen, Tauri-Build (.dmg) und das Einsammeln. KEIN
+      # APPLE_SIGNING_IDENTITY gesetzt -> Tauri signiert ad-hoc (unsigniert),
+      # wie fuer diesen ersten CI-Job gewuenscht; echtes Signing/Notarisierung
+      # folgt als eigener Block mit Secrets.
+      - name: macOS-Build (build.sh -- Frontend + Binaries + Tauri/dmg)
+        shell: bash
+        run: bash build.sh
+
+      # Ab hier Fallunterscheidung nach Trigger -- identische Logik wie im
+      # Windows-/Linux-Workflow, nur mit dem macOS-Bundle-Pfad (dmg). Das Triple
+      # ist der build.sh-Default aarch64-apple-darwin.
+      #
+      # Fall a) v-Tag: als GitHub-Release-Asset veroeffentlichen (zaehlt nicht
+      # gegen das 500-MB-Artefaktlimit und verfaellt nicht). softprops/action-
+      # gh-release legt ein fehlendes Release idempotent an und bietet mit
+      # fail_on_unmatched_files die geforderte Abbruch-bei-leerem-Glob-Semantik.
+      # Die .dmg ist der von build.sh garantierte Output.
+      - name: Release erstellen und dmg als Asset anhaengen (nur v-Tags)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: CERNIS PRO ${{ github.ref_name }}
+          body: "Release ${{ github.ref_name }} -- Release-Notes werden separat gepflegt."
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: true
+          files: |
+            src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+
+      # Fall b) kein v-Tag (workflow_dispatch / temporaerer rewrite/v2-Push):
+      # BEWUSST KEIN Artefakt-Upload. Ein grosses dmg je Push fuellte das
+      # 2-GB-Gratis-Storage-Kontingent auf. Bei Push-Laeufen ist der erfolgreiche
+      # Durchlauf des Builds selbst der Beweis -- die fertige .dmg wird nicht
+      # gebraucht. Verteilbare Pakete entstehen ausschliesslich an v-Tags und
+      # werden dort (Fall a oben) als GitHub-Release-Asset veroeffentlicht.
