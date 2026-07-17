@@ -884,7 +884,7 @@ class ReportlabRenderer:
         if model.geraete_balken:
             balken_block.append(_geraete_balken_drawing(model.geraete_balken, lang=lang))
         else:
-            balken_block.append(Paragraph("Keine Einträge.", styles["body"]))
+            balken_block.append(Paragraph(_ui("inv.keine_eintraege", lang), styles["body"]))
         story.append(KeepTogether(balken_block))
 
         # ── Tabellen-Rubriken: je eigene Seite (PageBreak davor) ──
@@ -1074,7 +1074,7 @@ class ReportlabRenderer:
         story.append(HRFlowable(width="100%", thickness=1.2, color=_ACCENT, spaceAfter=4))
 
         if not rows:
-            leer_text = _EMPTY_SECTION_TEXT.get(columns, _EMPTY_FALLBACK)
+            leer_text = _empty_text(columns, lang)
             story.append(Paragraph(leer_text, styles["body"]))
             return
 
@@ -1120,7 +1120,7 @@ class ReportlabRenderer:
         story.append(HRFlowable(width="100%", thickness=1.2, color=_ACCENT, spaceAfter=4))
 
         if not groups:
-            leer_text = _EMPTY_SECTION_TEXT.get(columns, _EMPTY_FALLBACK)
+            leer_text = _empty_text(columns, lang)
             story.append(Paragraph(leer_text, styles["body"]))
             return
 
@@ -1499,7 +1499,7 @@ class ReportlabRenderer:
         ``Paragraph`` (Muster ``_append_table_section``).
         """
         if not rows:
-            story.append(Paragraph("Keine Einträge.", styles["body"]))
+            story.append(Paragraph(_ui("inv.keine_eintraege", lang), styles["body"]))
             return
 
         content_pt = _CONTENT_WIDTH_MM * mm
@@ -2214,7 +2214,7 @@ class ReportlabRenderer:
         story.append(HRFlowable(width="100%", thickness=1.2, color=_ACCENT, spaceAfter=4))
 
         if not rows:
-            leer_text = _EMPTY_SECTION_TEXT.get(columns, _EMPTY_FALLBACK)
+            leer_text = _empty_text(columns, lang)
             story.append(Paragraph(leer_text, styles["body"]))
             return
 
@@ -2917,23 +2917,40 @@ _COL_WEIGHTS: dict[tuple[str, ...], tuple[float, ...]] = {
 # Rubrikspezifischer Leertext je Tabellen-Schema (statt generisch "Keine Eintraege.").
 # Unbekannte Rubriken fallen auf _EMPTY_FALLBACK zurueck. ACK braucht keinen Eintrag, da der
 # Aufrufer leere ACK-Rubriken gar nicht erst rendert.
-_EMPTY_FALLBACK = "Keine Einträge in dieser Kategorie."
-_EMPTY_SECTION_TEXT: dict[tuple[str, ...], str] = {
-    PORT_COLUMNS: "Keine auffälligen Ports festgestellt.",
-    CVE_COLUMNS: "Keine CVE-Befunde vorhanden.",
-    NET_COLUMNS: "Keine Netz-Auffälligkeiten festgestellt.",
-    _CVE_DEVICE_COLUMNS: "Keine betroffenen Geräte.",
-    _CVE_SERVICE_COLUMNS: "Keine Dienste mit Befunden.",
-    _CVE_FINDING_COLUMNS: "Keine CVE-Befunde vorhanden.",
-    _CVE_FINDING_GROUP_COLUMNS: "Keine CVE-Befunde vorhanden.",
-    _OUTBOUND_CONTACT_COLUMNS: "Keine Außenkontakte aufgezeichnet.",
-    _OUTBOUND_COUNTRY_COLUMNS: "Keine Länderdaten.",
-    _OUTBOUND_OPERATOR_COLUMNS: "Keine Betreiberdaten.",
-    DNS_CONTACT_COLUMNS: "Keine DNS-relevanten Außenkontakte aufgezeichnet.",
-    DNS_CATEGORY_COLUMNS: "Keine Kategoriedaten.",
-    DNS_APP_COLUMNS: "Keine Programmdaten.",
-    DNS_BYPASS_ROW_COLUMNS: "Keine DNS-Umgehungen aufgezeichnet.",
+_EMPTY_FALLBACK: dict[str, str] = {
+    "de": "Keine Einträge in dieser Kategorie.",
+    "en": "No entries in this category.",
 }
+_EMPTY_SECTION_TEXT: dict[tuple[str, ...], dict[str, str]] = {
+    PORT_COLUMNS: {"de": "Keine auffälligen Ports festgestellt.", "en": "No notable ports found."},
+    CVE_COLUMNS: {"de": "Keine CVE-Befunde vorhanden.", "en": "No CVE findings."},
+    NET_COLUMNS: {"de": "Keine Netz-Auffälligkeiten festgestellt.", "en": "No network findings."},
+    _CVE_DEVICE_COLUMNS: {"de": "Keine betroffenen Geräte.", "en": "No affected devices."},
+    _CVE_SERVICE_COLUMNS: {"de": "Keine Dienste mit Befunden.", "en": "No services with findings."},
+    _CVE_FINDING_COLUMNS: {"de": "Keine CVE-Befunde vorhanden.", "en": "No CVE findings."},
+    _CVE_FINDING_GROUP_COLUMNS: {"de": "Keine CVE-Befunde vorhanden.", "en": "No CVE findings."},
+    _OUTBOUND_CONTACT_COLUMNS: {
+        "de": "Keine Außenkontakte aufgezeichnet.",
+        "en": "No external contacts recorded.",
+    },
+    _OUTBOUND_COUNTRY_COLUMNS: {"de": "Keine Länderdaten.", "en": "No country data."},
+    _OUTBOUND_OPERATOR_COLUMNS: {"de": "Keine Betreiberdaten.", "en": "No operator data."},
+    DNS_CONTACT_COLUMNS: {
+        "de": "Keine DNS-relevanten Außenkontakte aufgezeichnet.",
+        "en": "No DNS-relevant external contacts recorded.",
+    },
+    DNS_CATEGORY_COLUMNS: {"de": "Keine Kategoriedaten.", "en": "No category data."},
+    DNS_APP_COLUMNS: {"de": "Keine Programmdaten.", "en": "No application data."},
+    DNS_BYPASS_ROW_COLUMNS: {
+        "de": "Keine DNS-Umgehungen aufgezeichnet.",
+        "en": "No DNS bypasses recorded.",
+    },
+}
+
+
+def _empty_text(columns: tuple[str, ...], lang: str) -> str:
+    entry = _EMPTY_SECTION_TEXT.get(columns, _EMPTY_FALLBACK)
+    return entry.get(lang) or entry.get("de") or ""
 
 
 def _col_widths(columns: tuple[str, ...]) -> list[float]:
