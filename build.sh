@@ -40,6 +40,16 @@ if ! python3 -c "import PyInstaller" &>/dev/null; then
 fi
 
 echo ""
+echo "[0b/6] Build-Version erzeugen (_build_version.py)..."
+SHORT_SHA=$(git rev-parse --short=7 HEAD)
+BUILD_VERSION="2.0.0+macos.${SHORT_SHA}"
+cat > "$BACKEND_DIR/infrastructure/_build_version.py" << EOF
+"""Im CI erzeugte Build-Version. Nicht committet (siehe .gitignore)."""
+BUILD_VERSION = "${BUILD_VERSION}"
+EOF
+echo "      Build-Version: ${BUILD_VERSION}"
+
+echo ""
 echo "[1/6] Frontend bauen..."
 cd "$FRONTEND_DIR"
 npm install --silent

@@ -81,7 +81,7 @@ jobs:
         shell: pwsh
         run: |
           $shortSha = (git rev-parse --short=7 HEAD).Trim()
-          $buildVersion = "2.0.0+x64.$shortSha"
+          $buildVersion = "2.0.0+winx64.$shortSha"
           Write-Host "Build-Version: $buildVersion"
           $content = @"
           """Im CI erzeugte Build-Version. Nicht committet (siehe .gitignore)."""
