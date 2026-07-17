@@ -4,6 +4,7 @@
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -12,6 +13,12 @@ use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 const BACKEND_PORT: u16 = 8765;
 const BACKEND_URL: &str = "http://127.0.0.1:8765";
 const STARTUP_TIMEOUT_SECS: u64 = 45;
+
+/// Backend-PID fuer den Signalhandler (async-signal-safe lesbar; 0 = keine).
+/// Ein Mutex ist im Signalhandler nicht erlaubt -> die PID zusaetzlich hier
+/// als Atomic, damit SIGTERM/SIGINT (Dock->Beenden) den Backend-Baum killen
+/// kann, OHNE auf das Child-Arc (Mutex) zugreifen zu muessen.
+static BACKEND_PID: AtomicI32 = AtomicI32::new(0);
 
 /// Ergebnis des Backend-Starts: entweder bereit oder ein kategorisierter
 /// Fehlercode (E-1xx), den der Ladebildschirm menschenlesbar anzeigt.
@@ -219,11 +226,23 @@ fn start_backend() -> Result<Child, BackendStatus> {
     cmd.env("CERNIS_PORT", BACKEND_PORT.to_string())
         .env("CERNIS_DATA_DIR", data_dir.to_string_lossy().to_string());
 
-    // Start in own process group so we can kill the entire tree on exit
+    // Backend in EIGENE Session+Prozessgruppe legen, damit kill(-pid) beim Beenden
+    // die ganze Gruppe trifft. process_group(0) wirkt auf macOS nicht zuverlaessig
+    // (Child blieb in Parent-PGID) -> setsid() im Child vor exec ist der sichere Weg:
+    // es macht den Child zum Session- und Prozessgruppenfuehrer (PGID == child-PID).
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
-        cmd.process_group(0);
+        // SAFETY: setsid ist async-signal-safe und der einzige Aufruf im Child
+        // zwischen fork und exec (keine Allokation, kein Lock) -- pre_exec-konform.
+        unsafe {
+            cmd.pre_exec(|| {
+                if libc::setsid() == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
     }
 
     // Redirect backend output to log file
@@ -245,12 +264,8 @@ fn start_backend() -> Result<Child, BackendStatus> {
         Ok(child) => {
             let child_pid = child.id();
             log(&format!("Backend process started (PID {})", child_pid));
-            // Explizit eigene Prozessgruppe setzen (process_group(0) allein
-            // reicht nicht zuverlaessig — setpgid als Sicherung).
-            #[cfg(unix)]
-            unsafe {
-                libc::setpgid(child_pid as libc::pid_t, child_pid as libc::pid_t);
-            }
+            // PID fuer den Signalhandler hinterlegen (Dock->Beenden-Weg).
+            BACKEND_PID.store(child_pid as i32, Ordering::SeqCst);
             Ok(child)
         }
         Err(e) => {
@@ -491,12 +506,57 @@ fn splash_url() -> &'static OnceLock<String> {
     &SPLASH_URL
 }
 
+/// Async-signal-safe Handler fuer SIGTERM/SIGINT: killt den Backend-Baum ueber
+/// die im Atomic hinterlegte PID und beendet dann den eigenen Prozess. NUR
+/// async-signal-safe Aufrufe (Atomic-Load, kill, _exit) -- KEIN Mutex, KEIN
+/// log()/println (nicht signal-safe). Deckt den Dock->Beenden-Weg ab, bei dem
+/// die WindowEvents nicht feuern.
+#[cfg(unix)]
+extern "C" fn handle_termination_signal(_sig: libc::c_int) {
+    let pid = BACKEND_PID.load(Ordering::SeqCst);
+    if pid > 0 {
+        unsafe {
+            // Prozessgruppe (setsid -> PGID == pid) und die PID direkt.
+            libc::kill(-pid, libc::SIGKILL);
+            libc::kill(pid, libc::SIGKILL);
+        }
+    }
+    // Eigenen Prozess beenden (Standard-Exit-Code fuer signalbedingtes Ende).
+    unsafe {
+        libc::_exit(0);
+    }
+}
+
+/// Registriert den Signalhandler fuer SIGTERM und SIGINT (idempotent genug fuer
+/// einen einmaligen Aufruf in main()).
+#[cfg(unix)]
+fn install_signal_handler() {
+    unsafe {
+        // Erst zu Funktions-Zeiger (*const ()), dann zu sighandler_t: der direkte
+        // fn->integer-Cast loest den function_casts_as_integer-Lint aus; der Weg
+        // ueber den Pointer ist die vom Compiler empfohlene, semantisch gleiche Form.
+        libc::signal(
+            libc::SIGTERM,
+            handle_termination_signal as *const () as libc::sighandler_t,
+        );
+        libc::signal(
+            libc::SIGINT,
+            handle_termination_signal as *const () as libc::sighandler_t,
+        );
+    }
+}
+
 fn main() {
     // Clear previous log
     let _ = std::fs::write(log_path(), "");
     log("=== CERNIS PRO starting ===");
 
     configure_rendering();
+
+    // Signalhandler fuer SIGTERM/SIGINT (Dock->Beenden killt sonst Tauri, ohne dass
+    // die WindowEvents feuern -> Backend bliebe als Waise).
+    #[cfg(unix)]
+    install_signal_handler();
 
     // Startup-Status zuruecksetzen: bis der Hintergrund-Thread fertig ist, gilt
     // "noch nicht bereit". Der Splash pollt diese Datei.
@@ -603,11 +663,16 @@ fn main() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error running app");
-
-    // App exited (window closed, signal, etc.) — ensure backend is dead
-    kill_backend_tree(&backend_exit);
+        .build(tauri::generate_context!())
+        .expect("error building app")
+        .run(move |_app_handle, event| {
+            // RunEvent::ExitRequested UND ::Exit feuern auch beim macOS-Apple-Event-Quit
+            // (Dock->Beenden, Cmd+Q) -- anders als die WindowEvents und der Unix-
+            // Signalhandler. Hier den Backend zuverlaessig mitbeenden.
+            if let tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit = event {
+                kill_backend_tree(&backend_exit);
+            }
+        });
 }
 
 fn kill_backend_tree(process: &Arc<Mutex<Option<Child>>>) {
