@@ -107,6 +107,119 @@ _LOGO_PATH = resolve_bundle_path(
 )
 
 
+# ── Lokalisierte UI-Strings (Abschnittstitel, Beschriftungen, Leertext) ───
+# Alle hardkodierten deutschen Strings des Renderers zentral hier.
+# _ui(key, lang) liefert den String in der gewuenschten Sprache (Fallback "de").
+# Neue Strings hier eintragen, nie im Render-Code hart kodieren.
+_UI_STRINGS: dict[str, dict[str, str]] = {
+    # Sicherheitsbericht
+    "sec.netz_gesundheit": {"de": "Netz-Gesundheit", "en": "Network Health"},
+    "sec.geraete_verteilung": {"de": "Geräte-Verteilung", "en": "Device Distribution"},
+    "sec.auffaelligkeiten": {"de": "Auffälligkeiten je Gerät", "en": "Findings per Device"},
+    "sec.ports": {"de": "Rechner mit auffälligen Ports", "en": "Devices with Notable Ports"},
+    "sec.cve": {"de": "CVE-Befunde", "en": "CVE Findings"},
+    "sec.netz_auffaell": {"de": "Netz-Auffälligkeiten", "en": "Network Findings"},
+    "sec.bestaetigt": {"de": "Bereits bestätigt", "en": "Acknowledged"},
+    "sec.krit": {"de": "kritisch", "en": "critical"},
+    "sec.auffaell": {"de": "auffällig", "en": "notable"},
+    "sec.ohne_befund": {"de": "ohne Befund", "en": "no findings"},
+    # Gauge
+    "gauge.von100": {"de": "von 100", "en": "out of 100"},
+    # Donut (Sicherheitsbericht)
+    "donut.geraete": {"de": "Geräte", "en": "Devices"},
+    # Bestandsbericht
+    "inv.kennzahlen": {"de": "Bestands-Kennzahlen", "en": "Inventory Metrics"},
+    "inv.geraete_verteilung": {"de": "Geräte-Verteilung", "en": "Device Distribution"},
+    "inv.nach_hersteller": {"de": "Verteilung nach Hersteller", "en": "Distribution by Vendor"},
+    "inv.nach_kategorie": {"de": "Verteilung nach Kategorie", "en": "Distribution by Category"},
+    "inv.geraete": {"de": "Geräte", "en": "Devices"},
+    "inv.archiviert": {"de": "Archivierte Geräte", "en": "Archived Devices"},
+    "inv.bekannt_unbekannt": {"de": "Bekannt / unbekannt", "en": "Known / Unknown"},
+    "inv.vertrauen": {"de": "Vertrauensstatus", "en": "Trust Status"},
+    "inv.bekannt": {"de": "Bekannt", "en": "Known"},
+    "inv.unbekannt": {"de": "Unbekannt", "en": "Unknown"},
+    "inv.vertraut": {"de": "Vertraut", "en": "Trusted"},
+    "inv.beobachtet": {"de": "Beobachtet", "en": "Watched"},
+    "inv.neutral": {"de": "Neutral", "en": "Neutral"},
+    "inv.gesamt": {"de": "Gesamt", "en": "Total"},
+    "inv.aktiv24h": {"de": "Aktiv (24h)", "en": "Active (24h)"},
+    "inv.keine_eintraege": {"de": "Keine Einträge.", "en": "No entries."},
+    # CVE-Bericht
+    "cve.kennzahlen": {"de": "CVE-Kennzahlen", "en": "CVE Metrics"},
+    "cve.schweregrad": {"de": "Schweregrad-Verteilung", "en": "Severity Distribution"},
+    "cve.betroffene": {"de": "Betroffene Geräte", "en": "Affected Devices"},
+    "cve.muster": {"de": "Muster nach Dienst", "en": "Patterns by Service"},
+    "cve.befundliste": {"de": "Vollständige Befundliste", "en": "Full Finding List"},
+    "cve.aktive": {"de": "Aktive Befunde", "en": "Active Findings"},
+    "cve.neu24h": {"de": "Neu (24h)", "en": "New (24h)"},
+    "cve.betroffene_geraete": {"de": "Betroffene Geräte", "en": "Affected Devices"},
+    "cve.quittiert": {"de": "Quittiert", "en": "Acknowledged"},
+    "cve.hoechste_sev": {"de": "Höchste Severity", "en": "Highest Severity"},
+    "cve.abdeckung": {"de": "Abdeckung", "en": "Coverage"},
+    "cve.aelteste": {"de": "Älteste Veröffentlichung", "en": "Oldest Published"},
+    "cve.neu_hinweis": {
+        "de": "Neu = erstmals innerhalb der letzten 24 Stunden gesehen.",
+        "en": "New = first seen within the last 24 hours.",
+    },
+    "cve.befunde": {"de": "Befunde", "en": "Findings"},
+    # Aussenkontakte-Bericht
+    "out.kennzahlen": {"de": "Kennzahlen", "en": "Metrics"},
+    "out.nach_land": {"de": "Verteilung nach Land", "en": "Distribution by Country"},
+    "out.nach_betreiber": {"de": "Verteilung nach Betreiber", "en": "Distribution by Operator"},
+    "out.detail": {"de": "Außenkontakte im Detail", "en": "External Contacts in Detail"},
+    "out.gegenstellen": {"de": "Gegenstellen", "en": "Peers"},
+    "out.verbindungen": {"de": "Verbindungen", "en": "Connections"},
+    "out.laender": {"de": "Länder", "en": "Countries"},
+    "out.betreiber": {"de": "Betreiber", "en": "Operators"},
+    "out.auffaellig": {"de": "Auffällig", "en": "Flagged"},
+    "out.tracker": {"de": "Tracker", "en": "Trackers"},
+    "out.bedrohung": {"de": "Bedrohung", "en": "Threat"},
+    "out.lokal": {"de": "Lokal", "en": "Local"},
+    # DNS-Waechter-Bericht
+    "dns.kennzahlen": {"de": "Kennzahlen", "en": "Metrics"},
+    "dns.nach_kategorie": {"de": "Verteilung nach Kategorie", "en": "Distribution by Category"},
+    "dns.nach_programm": {"de": "Verteilung nach Programm", "en": "Distribution by Application"},
+    "dns.kontakte": {"de": "DNS-relevante Außenkontakte", "en": "DNS-relevant External Contacts"},
+    "dns.gesamt": {"de": "Kontakte gesamt", "en": "Total Contacts"},
+    "dns.aktiv": {"de": "Aktiv", "en": "Active"},
+    "dns.quittiert": {"de": "Quittiert", "en": "Acknowledged"},
+    "dns.erwartet": {"de": "Erwartungsgemäß", "en": "As Expected"},
+    "dns.offen": {"de": "Offen", "en": "Open"},
+    "dns.doh": {"de": "Möglicher DoH", "en": "Possible DoH"},
+    "dns.flagged": {"de": "Auffällig", "en": "Flagged"},
+    # DNS-Bypass-Bericht
+    "bypass.kennzahlen": {"de": "Kennzahlen", "en": "Metrics"},
+    "bypass.verteilung": {"de": "Verteilung nach Ziel", "en": "Distribution by Target"},
+    "bypass.detail": {"de": "Umgehungen im Detail", "en": "Bypasses in Detail"},
+    "bypass.anfragen": {"de": "Anfragen gesamt", "en": "Total Queries"},
+    "bypass.umgehungen": {"de": "Umgehungen", "en": "Bypasses"},
+    "bypass.erwartet": {"de": "Erwartungsgemäß", "en": "As Expected"},
+    "bypass.geraete": {"de": "Geräte", "en": "Devices"},
+    # Verhaltensprofil-Bericht
+    "beh.kennzahlen": {"de": "Kennzahlen", "en": "Metrics"},
+    "beh.tagesband": {"de": "Tagesverlauf", "en": "Daily Pattern"},
+    "beh.heatmap": {"de": "Wochenmuster", "en": "Weekly Pattern"},
+    "beh.geraete": {"de": "Geräte-Übersicht", "en": "Device Overview"},
+    "beh.keine_daten": {
+        "de": "Noch keine ausreichenden Daten für ein Verhaltensprofil.",
+        "en": "Not enough data yet for a behavior profile.",
+    },
+    "beh.keine_geraete": {
+        "de": "Keine wiederkehrenden Aufgaben mit Verhaltensdaten.",
+        "en": "No recurring tasks with behavior data.",
+    },
+    # Seitenangabe (Fusszeile)
+    "page.seite": {"de": "Seite", "en": "Page"},
+}
+
+
+def _ui(key: str, lang: str) -> str:
+    entry = _UI_STRINGS.get(key)
+    if entry is None:
+        return key
+    return entry.get(lang) or entry.get("de") or key
+
+
 # Spaltenueberschriften der vier Tabellen-Rubriken. SPIEGEL der ``*_COLUMNS`` aus
 # ``application.reporting.security_pdf_model`` -- der Adapter darf ``application`` aber NICHT
 # importieren (import-linter), darum hier als lokale Anzeige-Konstanten gefuehrt. Sie sind
@@ -724,12 +837,13 @@ class ReportlabRenderer:
             story.append(Spacer(1, 6 * mm))
 
         # ── Score-Cockpit: Gauge (Halbkreis) + Einordnung ──
-        story.append(Paragraph("Netz-Gesundheit", styles["h_section"]))
+        story.append(Paragraph(_ui("sec.netz_gesundheit", lang), styles["h_section"]))
         story.append(
             _gauge_drawing(
                 model.score_value,
                 model.score_level_label,
                 _LEVEL_COLORS.get(model.score_level, _CRIT),
+                lang=lang,
             )
         )
         if model.score_einordnung:
@@ -737,7 +851,7 @@ class ReportlabRenderer:
         story.append(Spacer(1, 6 * mm))
 
         # ── Drei Kennzahlen (kritisch / auffaellig / ohne Befund) ──
-        story.append(self._kennzahlen_table(model))
+        story.append(self._kennzahlen_table(model, lang))
         story.append(Spacer(1, 6 * mm))
 
         # Seitenumbruch VOR der Geraete-Verteilung: Donut + Balken beginnen luftig oben auf
@@ -748,12 +862,13 @@ class ReportlabRenderer:
         # Ueberschrift UND Donut zusammenhalten (KeepTogether), damit der Seitenumbruch nicht
         # zwischen Ueberschrift und Ring faellt (analog zum Balken-Block darunter).
         donut_block: list[Flowable] = [
-            Paragraph("Geräte-Verteilung", styles["h_section"]),
+            Paragraph(_ui("sec.geraete_verteilung", lang), styles["h_section"]),
             _donut_drawing(
                 model.critical_devices,
                 model.notable_devices,
                 model.clean_devices,
                 model.device_count,
+                lang=lang,
             ),
         ]
         story.append(KeepTogether(donut_block))
@@ -763,9 +878,11 @@ class ReportlabRenderer:
         # Ueberschrift UND Balken zusammenhalten (KeepTogether), damit der Seitenumbruch nicht
         # zwischen Ueberschrift und Balken faellt (Ueberschrift sonst unten, Balken erst naechste
         # Seite).
-        balken_block: list[Flowable] = [Paragraph("Auffälligkeiten je Gerät", styles["h_section"])]
+        balken_block: list[Flowable] = [
+            Paragraph(_ui("sec.auffaelligkeiten", lang), styles["h_section"])
+        ]
         if model.geraete_balken:
-            balken_block.append(_geraete_balken_drawing(model.geraete_balken))
+            balken_block.append(_geraete_balken_drawing(model.geraete_balken, lang=lang))
         else:
             balken_block.append(Paragraph("Keine Einträge.", styles["body"]))
         story.append(KeepTogether(balken_block))
@@ -773,22 +890,29 @@ class ReportlabRenderer:
         # ── Tabellen-Rubriken: je eigene Seite (PageBreak davor) ──
         story.append(PageBreak())
         self._append_table_section(
-            story, styles, "Rechner mit auffälligen Ports", PORT_COLUMNS, model.port_rows, lang
+            story, styles, _ui("sec.ports", lang), PORT_COLUMNS, model.port_rows, lang
         )
 
         story.append(PageBreak())
-        self._append_table_section(story, styles, "CVE-Befunde", CVE_COLUMNS, model.cve_rows, lang)
+        self._append_table_section(
+            story, styles, _ui("sec.cve", lang), CVE_COLUMNS, model.cve_rows, lang
+        )
 
         story.append(PageBreak())
         self._append_table_section(
-            story, styles, "Netz-Auffälligkeiten", NET_COLUMNS, model.net_rows, lang
+            story, styles, _ui("sec.netz_auffaell", lang), NET_COLUMNS, model.net_rows, lang
         )
 
         # Rubrik 4 nur, wenn nicht leer (Auftrag: sonst weglassen).
         if model.acknowledged_rows:
             story.append(PageBreak())
             self._append_table_section(
-                story, styles, "Bereits bestätigt", ACK_COLUMNS, model.acknowledged_rows, lang
+                story,
+                styles,
+                _ui("sec.bestaetigt", lang),
+                ACK_COLUMNS,
+                model.acknowledged_rows,
+                lang,
             )
 
         # ── Achse-B-Fussnote (invariant) + optionaler Rogue-Hinweis ──
@@ -806,8 +930,8 @@ class ReportlabRenderer:
 
         document.build(
             story,
-            onFirstPage=lambda canvas, doc: _draw_header_footer(canvas, doc, model),
-            onLaterPages=lambda canvas, doc: _draw_header_footer(canvas, doc, model),
+            onFirstPage=lambda canvas, doc: _draw_header_footer(canvas, doc, model, lang),
+            onLaterPages=lambda canvas, doc: _draw_header_footer(canvas, doc, model, lang),
         )
         return buffer.getvalue()
 
@@ -896,7 +1020,7 @@ class ReportlabRenderer:
         }
 
     @staticmethod
-    def _kennzahlen_table(model: SecurityPdfModelLike) -> Table:
+    def _kennzahlen_table(model: SecurityPdfModelLike, lang: str = "de") -> Table:
         """Drei farbige Kennzahl-Boxen (kritisch / auffaellig / ohne Befund) als Tabelle.
 
         Eine 3-spaltige ``Table`` mit der grossen Zahl oben und dem Label darunter, jede Spalte
@@ -905,7 +1029,7 @@ class ReportlabRenderer:
         """
         data = [
             [str(model.critical_devices), str(model.notable_devices), str(model.clean_devices)],
-            ["kritisch", "auffällig", "ohne Befund"],
+            [_ui("sec.krit", lang), _ui("sec.auffaell", lang), _ui("sec.ohne_befund", lang)],
         ]
         table = Table(data, colWidths=[57 * mm, 57 * mm, 57 * mm])
         table.setStyle(
@@ -1114,16 +1238,16 @@ class ReportlabRenderer:
             story.append(Spacer(1, 6 * mm))
 
         # ── Bestands-Kennzahlen ──
-        story.append(Paragraph("Bestands-Kennzahlen", styles["h_section"]))
-        story.append(self._inventory_kennzahlen(model))
+        story.append(Paragraph(_ui("inv.kennzahlen", lang), styles["h_section"]))
+        story.append(self._inventory_kennzahlen(model, lang))
         story.append(Spacer(1, 6 * mm))
 
         # ── Zwei Donuts: Bekannt/unbekannt + Vertrauensstatus (analog Sicherheitsbericht) ──
         # Ueberschrift UND Donut-Paar zusammenhalten (KeepTogether), damit der Seitenumbruch nicht
         # zwischen Ueberschrift und Donuts faellt (Muster donut_block im Sicherheitsbericht).
         donut_block: list[Flowable] = [
-            Paragraph("Geräte-Verteilung", styles["h_section"]),
-            self._inventory_donut_paar(model),
+            Paragraph(_ui("inv.geraete_verteilung", lang), styles["h_section"]),
+            self._inventory_donut_paar(model, lang),
         ]
         story.append(KeepTogether(donut_block))
         story.append(Spacer(1, 6 * mm))
@@ -1131,13 +1255,13 @@ class ReportlabRenderer:
         story.append(PageBreak())
 
         # ── Verteilung nach Hersteller / Kategorie (zwei schlanke (label, count)-Tabellen) ──
-        story.append(Paragraph("Verteilung nach Hersteller", styles["h_section"]))
+        story.append(Paragraph(_ui("inv.nach_hersteller", lang), styles["h_section"]))
         self._append_distribution_table(
             story, styles, ("Hersteller", "Anzahl"), model.vendor_rows, lang
         )
         story.append(Spacer(1, 6 * mm))
 
-        story.append(Paragraph("Verteilung nach Kategorie", styles["h_section"]))
+        story.append(Paragraph(_ui("inv.nach_kategorie", lang), styles["h_section"]))
         self._append_distribution_table(
             story, styles, ("Kategorie", "Anzahl"), model.category_rows, lang
         )
@@ -1148,13 +1272,18 @@ class ReportlabRenderer:
         # _append_table_section rendert Kopf + Tabelle + leer-Fallback selbst. Die Status-Spalte
         # ist KEINE "Schwere"-Spalte -> kein Badge-Einfaerben (korrekt, der Bestand wertet nicht).
         self._append_table_section(
-            story, styles, "Geräte", INVENTORY_COLUMNS, model.device_rows, lang
+            story, styles, _ui("inv.geraete", lang), INVENTORY_COLUMNS, model.device_rows, lang
         )
 
         if model.archived_rows:
             story.append(PageBreak())
             self._append_table_section(
-                story, styles, "Archivierte Geräte", ARCHIVED_COLUMNS, model.archived_rows, lang
+                story,
+                styles,
+                _ui("inv.archiviert", lang),
+                ARCHIVED_COLUMNS,
+                model.archived_rows,
+                lang,
             )
 
         # ── Achse-B-Fussnote (invariant, wie im Sicherheitsbericht) ──
@@ -1175,13 +1304,17 @@ class ReportlabRenderer:
         header_model = cast(ManualPdfModelLike, model)
         document.build(
             story,
-            onFirstPage=lambda canvas, doc: _draw_manual_header_footer(canvas, doc, header_model),
-            onLaterPages=lambda canvas, doc: _draw_manual_header_footer(canvas, doc, header_model),
+            onFirstPage=lambda canvas, doc: _draw_manual_header_footer(
+                canvas, doc, header_model, lang
+            ),
+            onLaterPages=lambda canvas, doc: _draw_manual_header_footer(
+                canvas, doc, header_model, lang
+            ),
         )
         return buffer.getvalue()
 
     @staticmethod
-    def _inventory_kennzahlen(model: InventoryPdfModelLike) -> Table:
+    def _inventory_kennzahlen(model: InventoryPdfModelLike, lang: str = "de") -> Table:
         """Die Bestands-Kennzahlen als zwei Zeilen Kennzahl-Boxen (Zahl oben, Label darunter).
 
         Reihe 1: Gesamt/Bekannt/Unbekannt/Aktiv (24h), Reihe 2: Vertraut/Beobachtet/Neutral.
@@ -1193,9 +1326,14 @@ class ReportlabRenderer:
         # abwechselnd, damit die grosse Zahl ueber dem Label steht (Muster _kennzahlen_table).
         data = [
             [str(model.total), str(model.known), str(model.unknown), str(model.active_24h)],
-            ["Gesamt", "Bekannt", "Unbekannt", "Aktiv (24h)"],
+            [
+                _ui("inv.gesamt", lang),
+                _ui("inv.bekannt", lang),
+                _ui("inv.unbekannt", lang),
+                _ui("inv.aktiv24h", lang),
+            ],
             [str(model.trusted), str(model.watch), str(model.neutral), ""],
-            ["Vertraut", "Beobachtet", "Neutral", ""],
+            [_ui("inv.vertraut", lang), _ui("inv.beobachtet", lang), _ui("inv.neutral", lang), ""],
         ]
         col = 174.0 / 4 * mm
         table = Table(data, colWidths=[col, col, col, col])
@@ -1228,7 +1366,7 @@ class ReportlabRenderer:
         )
         return table
 
-    def _inventory_donut_paar(self, model: InventoryPdfModelLike) -> Table:
+    def _inventory_donut_paar(self, model: InventoryPdfModelLike, lang: str = "de") -> Table:
         """Die zwei Bestands-Donuts nebeneinander (Bekannt/unbekannt links, Vertrauen rechts).
 
         Pro Spalte ein Block aus dezentem Titel, dem ``_inventory_donut_drawing`` und einer
@@ -1253,29 +1391,38 @@ class ReportlabRenderer:
         donut_a = _inventory_donut_drawing(
             ((model.known, _ACCENT), (model.unknown, _NOTABLE)),
             model.total,
-            "Geräte",
+            _ui("donut.geraete", lang),
+            lang=lang,
         )
         legende_a = self._inventory_donut_legende(
-            (("Bekannt", _ACCENT, model.known), ("Unbekannt", _NOTABLE, model.unknown)),
+            (
+                (_ui("inv.bekannt", lang), _ACCENT, model.known),
+                (_ui("inv.unbekannt", lang), _NOTABLE, model.unknown),
+            ),
         )
 
         vertrauen_summe = model.trusted + model.watch + model.neutral
         donut_b = _inventory_donut_drawing(
             ((model.trusted, _ACCENT), (model.watch, _NOTABLE), (model.neutral, _CLEAN)),
             vertrauen_summe,
-            "Geräte",
+            _ui("donut.geraete", lang),
+            lang=lang,
         )
         legende_b = self._inventory_donut_legende(
             (
-                ("Vertraut", _ACCENT, model.trusted),
-                ("Beobachtet", _NOTABLE, model.watch),
-                ("Neutral", _CLEAN, model.neutral),
+                (_ui("inv.vertraut", lang), _ACCENT, model.trusted),
+                (_ui("inv.beobachtet", lang), _NOTABLE, model.watch),
+                (_ui("inv.neutral", lang), _CLEAN, model.neutral),
             ),
         )
 
         # Je Spalte ein vertikaler Block (Titel / Donut / Legende) als innere 1-spaltige Table.
-        spalte_a = Table([[Paragraph("Bekannt / unbekannt", donut_titel)], [donut_a], [legende_a]])
-        spalte_b = Table([[Paragraph("Vertrauensstatus", donut_titel)], [donut_b], [legende_b]])
+        spalte_a = Table(
+            [[Paragraph(_ui("inv.bekannt_unbekannt", lang), donut_titel)], [donut_a], [legende_a]]
+        )
+        spalte_b = Table(
+            [[Paragraph(_ui("inv.vertrauen", lang), donut_titel)], [donut_b], [legende_b]]
+        )
         for spalte in (spalte_a, spalte_b):
             spalte.setStyle(TableStyle([("ALIGN", (0, 0), (-1, -1), "CENTER")]))
 
@@ -1413,16 +1560,16 @@ class ReportlabRenderer:
             story.append(Spacer(1, 6 * mm))
 
         # ── Sektion 1: Ueberblick (CVE-Kennzahlen) ──
-        story.append(Paragraph("CVE-Kennzahlen", styles["h_section"]))
-        story.append(self._cve_kennzahlen(model))
+        story.append(Paragraph(_ui("cve.kennzahlen", lang), styles["h_section"]))
+        story.append(self._cve_kennzahlen(model, lang))
         story.append(Spacer(1, 6 * mm))
 
         # ── Severity-Donut (Ueberschrift + Donut zusammenhalten, Muster donut_block) ──
         story.append(
             KeepTogether(
                 [
-                    Paragraph("Schweregrad-Verteilung", styles["h_section"]),
-                    self._cve_severity_donut(model),
+                    Paragraph(_ui("cve.schweregrad", lang), styles["h_section"]),
+                    self._cve_severity_donut(model, lang),
                 ]
             )
         )
@@ -1433,13 +1580,13 @@ class ReportlabRenderer:
         # fast leer bleibt. _append_table_section rendert Kopf + Tabelle + leer-Fallback selbst.
         # Die Severity-Spalte bleibt Klartext (KEINE "Schwere"-Spalte -> kein Badge).
         self._append_table_section(
-            story, styles, "Betroffene Geräte", _CVE_DEVICE_COLUMNS, model.device_rows, lang
+            story, styles, _ui("cve.betroffene", lang), _CVE_DEVICE_COLUMNS, model.device_rows, lang
         )
 
         # Sektion 3 + 4 je auf eigener Seite (grosse Tabellen) -- diese PageBreaks bleiben.
         story.append(PageBreak())
         self._append_table_section(
-            story, styles, "Muster nach Dienst", _CVE_SERVICE_COLUMNS, model.service_rows, lang
+            story, styles, _ui("cve.muster", lang), _CVE_SERVICE_COLUMNS, model.service_rows, lang
         )
 
         story.append(PageBreak())
@@ -1448,7 +1595,7 @@ class ReportlabRenderer:
         self._append_cve_finding_groups(
             story,
             styles,
-            "Vollständige Befundliste",
+            _ui("cve.befundliste", lang),
             _CVE_FINDING_GROUP_COLUMNS,
             model.host_groups,
             lang,
@@ -1470,7 +1617,7 @@ class ReportlabRenderer:
                     ),
                     # (R4) Erklaerung der Variante-C-Status-Kennzeichnung "NEU".
                     Paragraph(
-                        "Neu = erstmals innerhalb der letzten 24 Stunden gesehen.",
+                        _ui("cve.neu_hinweis", lang),
                         styles["footnote"],
                     ),
                 ]
@@ -1483,13 +1630,17 @@ class ReportlabRenderer:
         header_model = cast(ManualPdfModelLike, model)
         document.build(
             story,
-            onFirstPage=lambda canvas, doc: _draw_manual_header_footer(canvas, doc, header_model),
-            onLaterPages=lambda canvas, doc: _draw_manual_header_footer(canvas, doc, header_model),
+            onFirstPage=lambda canvas, doc: _draw_manual_header_footer(
+                canvas, doc, header_model, lang
+            ),
+            onLaterPages=lambda canvas, doc: _draw_manual_header_footer(
+                canvas, doc, header_model, lang
+            ),
         )
         return buffer.getvalue()
 
     @staticmethod
-    def _cve_kennzahlen(model: CvePdfModelLike) -> Table:
+    def _cve_kennzahlen(model: CvePdfModelLike, lang: str = "de") -> Table:
         """Die CVE-Kennzahlen als zwei Zeilen Kennzahl-Boxen (Wert oben, Label darunter).
 
         Reihe 1 (Zahlen): Aktive Befunde / Neu (24h) / Betroffene Geraete / Quittiert.
@@ -1507,9 +1658,19 @@ class ReportlabRenderer:
                 str(model.affected_devices),
                 str(model.acknowledged_total),
             ],
-            ["Aktive Befunde", "Neu (24h)", "Betroffene Geräte", "Quittiert"],
+            [
+                _ui("cve.aktive", lang),
+                _ui("cve.neu24h", lang),
+                _ui("cve.betroffene_geraete", lang),
+                _ui("cve.quittiert", lang),
+            ],
             [model.highest_severity, model.coverage_text, oldest, ""],
-            ["Höchste Severity", "Abdeckung", "Älteste Veröffentlichung", ""],
+            [
+                _ui("cve.hoechste_sev", lang),
+                _ui("cve.abdeckung", lang),
+                _ui("cve.aelteste", lang),
+                "",
+            ],
         ]
         col = 174.0 / 4 * mm
         table = Table(data, colWidths=[col, col, col, col])
@@ -1544,7 +1705,7 @@ class ReportlabRenderer:
         )
         return table
 
-    def _cve_severity_donut(self, model: CvePdfModelLike) -> Table:
+    def _cve_severity_donut(self, model: CvePdfModelLike, lang: str = "de") -> Table:
         """Der Severity-Donut: ein Ring ueber alle fuenf Stufen (Muster ``_inventory_donut_paar``).
 
         Baut die Segmentliste aus ``model.severity_rows`` in der gelieferten Reihenfolge
@@ -1561,7 +1722,7 @@ class ReportlabRenderer:
             (int(count_text), _SEV_COLORS[severity]) for severity, count_text in model.severity_rows
         )
         summe = sum(count for count, _ in segmente)
-        donut = _inventory_donut_drawing(segmente, summe, "Befunde")
+        donut = _inventory_donut_drawing(segmente, summe, _ui("cve.befunde", lang), lang=lang)
 
         # Legende: nur Stufen mit count > 0. Farbe + Wert kommen aus severity_rows (roher
         # Schluessel fuer _SEV_COLORS), der ANGEZEIGTE Text aus severity_labels (deutsch, je
@@ -1629,8 +1790,8 @@ class ReportlabRenderer:
         story.append(Spacer(1, 4 * mm))
 
         # ── Sektion 1: Ueberblick (Aussenkontakte-Kennzahlen, zwei Reihen Zahlen) ──
-        story.append(Paragraph("Kennzahlen", styles["h_section"]))
-        story.append(self._outbound_kennzahlen(model))
+        story.append(Paragraph(_ui("out.kennzahlen", lang), styles["h_section"]))
+        story.append(self._outbound_kennzahlen(model, lang))
         story.append(Spacer(1, 6 * mm))
 
         # ── Sektions-Rubriken ueber das BESTEHENDE _append_table_section ──
@@ -1638,7 +1799,7 @@ class ReportlabRenderer:
         self._append_table_section(
             story,
             styles,
-            "Verteilung nach Land",
+            _ui("out.nach_land", lang),
             _OUTBOUND_COUNTRY_COLUMNS,
             model.country_rows,
             lang,
@@ -1647,7 +1808,7 @@ class ReportlabRenderer:
         self._append_table_section(
             story,
             styles,
-            "Verteilung nach Betreiber",
+            _ui("out.nach_betreiber", lang),
             _OUTBOUND_OPERATOR_COLUMNS,
             model.operator_rows,
             lang,
@@ -1658,7 +1819,7 @@ class ReportlabRenderer:
         self._append_table_section(
             story,
             styles,
-            "Außenkontakte im Detail",
+            _ui("out.detail", lang),
             _OUTBOUND_CONTACT_COLUMNS,
             model.contact_rows,
             lang,
@@ -1687,13 +1848,17 @@ class ReportlabRenderer:
         header_model = cast(ManualPdfModelLike, model)
         document.build(
             story,
-            onFirstPage=lambda canvas, doc: _draw_manual_header_footer(canvas, doc, header_model),
-            onLaterPages=lambda canvas, doc: _draw_manual_header_footer(canvas, doc, header_model),
+            onFirstPage=lambda canvas, doc: _draw_manual_header_footer(
+                canvas, doc, header_model, lang
+            ),
+            onLaterPages=lambda canvas, doc: _draw_manual_header_footer(
+                canvas, doc, header_model, lang
+            ),
         )
         return buffer.getvalue()
 
     @staticmethod
-    def _outbound_kennzahlen(model: OutboundPdfModelLike) -> Table:
+    def _outbound_kennzahlen(model: OutboundPdfModelLike, lang: str = "de") -> Table:
         """Die Aussenkontakte-Kennzahlen als zwei Zeilen Kennzahl-Boxen (Zahl oben, Label darunter).
 
         Reihe 1: Gegenstellen/Verbindungen/Laender/Betreiber, Reihe 2: Auffaellig/Tracker/
@@ -1710,14 +1875,24 @@ class ReportlabRenderer:
                 str(model.countries_total),
                 str(model.operators_total),
             ],
-            ["Gegenstellen", "Verbindungen", "Länder", "Betreiber"],
+            [
+                _ui("out.gegenstellen", lang),
+                _ui("out.verbindungen", lang),
+                _ui("out.laender", lang),
+                _ui("out.betreiber", lang),
+            ],
             [
                 str(model.flagged_contacts),
                 str(model.tracker_contacts),
                 str(model.threat_contacts),
                 str(model.local_total),
             ],
-            ["Auffällig", "Tracker", "Bedrohung", "Lokal"],
+            [
+                _ui("out.auffaellig", lang),
+                _ui("out.tracker", lang),
+                _ui("out.bedrohung", lang),
+                _ui("out.lokal", lang),
+            ],
         ]
         col = 174.0 / 4 * mm
         table = Table(data, colWidths=[col, col, col, col])
@@ -1795,22 +1970,22 @@ class ReportlabRenderer:
         story.append(Spacer(1, 4 * mm))
 
         # ── Sektion 1: Ueberblick (DNS-Waechter-Kennzahlen, zwei Reihen Zahlen) ──
-        story.append(Paragraph("Kennzahlen", styles["h_section"]))
-        story.append(self._dns_watch_kennzahlen(model))
+        story.append(Paragraph(_ui("dns.kennzahlen", lang), styles["h_section"]))
+        story.append(self._dns_watch_kennzahlen(model, lang))
         story.append(Spacer(1, 6 * mm))
 
         # ── Sektions-Rubriken ueber das BESTEHENDE _append_table_section ──
         self._append_table_section(
             story,
             styles,
-            "Verteilung nach Kategorie",
+            _ui("dns.nach_kategorie", lang),
             DNS_CATEGORY_COLUMNS,
             model.category_rows,
             lang,
         )
         story.append(Spacer(1, 6 * mm))
         self._append_table_section(
-            story, styles, "Verteilung nach Programm", DNS_APP_COLUMNS, model.app_rows, lang
+            story, styles, _ui("dns.nach_programm", lang), DNS_APP_COLUMNS, model.app_rows, lang
         )
 
         # Die Detail-Liste auf eigener Seite (potentiell lang) -- PageBreak davor.
@@ -1818,7 +1993,7 @@ class ReportlabRenderer:
         self._append_table_section(
             story,
             styles,
-            "DNS-relevante Außenkontakte",
+            _ui("dns.kontakte", lang),
             DNS_CONTACT_COLUMNS,
             model.contact_rows,
             lang,
@@ -1845,13 +2020,17 @@ class ReportlabRenderer:
         header_model = cast(ManualPdfModelLike, model)
         document.build(
             story,
-            onFirstPage=lambda canvas, doc: _draw_manual_header_footer(canvas, doc, header_model),
-            onLaterPages=lambda canvas, doc: _draw_manual_header_footer(canvas, doc, header_model),
+            onFirstPage=lambda canvas, doc: _draw_manual_header_footer(
+                canvas, doc, header_model, lang
+            ),
+            onLaterPages=lambda canvas, doc: _draw_manual_header_footer(
+                canvas, doc, header_model, lang
+            ),
         )
         return buffer.getvalue()
 
     @staticmethod
-    def _dns_watch_kennzahlen(model: DnsWatchPdfModelLike) -> Table:
+    def _dns_watch_kennzahlen(model: DnsWatchPdfModelLike, lang: str = "de") -> Table:
         """Die DNS-Waechter-Kennzahlen als zwei Zeilen Kennzahl-Boxen (Zahl oben, Label darunter).
 
         Reihe 1: Kontakte gesamt/Aktiv/Quittiert, Reihe 2: Erwartungsgemaess/Offen/Moeglicher
@@ -1867,14 +2046,19 @@ class ReportlabRenderer:
                 str(model.acknowledged_total),
                 "",
             ],
-            ["Kontakte gesamt", "Aktiv", "Quittiert", ""],
+            [_ui("dns.gesamt", lang), _ui("dns.aktiv", lang), _ui("dns.quittiert", lang), ""],
             [
                 str(model.expected_active),
                 str(model.open_active),
                 str(model.doh_active),
                 str(model.flagged_active),
             ],
-            ["Erwartungsgemäß", "Offen", "Möglicher DoH", "Auffällig"],
+            [
+                _ui("dns.erwartet", lang),
+                _ui("dns.offen", lang),
+                _ui("dns.doh", lang),
+                _ui("dns.flagged", lang),
+            ],
         ]
         col = 174.0 / 4 * mm
         table = Table(data, colWidths=[col, col, col, col])
@@ -1951,8 +2135,8 @@ class ReportlabRenderer:
         story.append(Spacer(1, 4 * mm))
 
         # ── Sektion 1: Ueberblick (Umgehungs-Kennzahlen, eine Reihe Zahlen) ──
-        story.append(Paragraph("Kennzahlen", styles["h_section"]))
-        story.append(self._dns_bypass_kennzahlen(model))
+        story.append(Paragraph(_ui("bypass.kennzahlen", lang), styles["h_section"]))
+        story.append(self._dns_bypass_kennzahlen(model, lang))
         story.append(Spacer(1, 6 * mm))
 
         # ── Verteilungs-Grafik (Variante C): gestapelter Balken + Legende ──
@@ -1962,9 +2146,9 @@ class ReportlabRenderer:
             story.append(
                 KeepTogether(
                     [
-                        Paragraph("Verteilung nach Ziel", styles["h_section"]),
+                        Paragraph(_ui("bypass.verteilung", lang), styles["h_section"]),
                         Spacer(1, 3 * mm),
-                        self._dns_bypass_verteilung_grafik(model),
+                        self._dns_bypass_verteilung_grafik(model, lang),
                     ]
                 )
             )
@@ -2000,8 +2184,12 @@ class ReportlabRenderer:
         header_model = cast(ManualPdfModelLike, model)
         document.build(
             story,
-            onFirstPage=lambda canvas, doc: _draw_manual_header_footer(canvas, doc, header_model),
-            onLaterPages=lambda canvas, doc: _draw_manual_header_footer(canvas, doc, header_model),
+            onFirstPage=lambda canvas, doc: _draw_manual_header_footer(
+                canvas, doc, header_model, lang
+            ),
+            onLaterPages=lambda canvas, doc: _draw_manual_header_footer(
+                canvas, doc, header_model, lang
+            ),
         )
         return buffer.getvalue()
 
@@ -2022,7 +2210,7 @@ class ReportlabRenderer:
         (``_esc``), bevor das ``<br/>``/``<font>``-Markup gesetzt wird.
         """
         columns = DNS_BYPASS_ROW_COLUMNS
-        story.append(Paragraph("Umgehungen im Detail", styles["h_rubric"]))
+        story.append(Paragraph(_ui("bypass.detail", lang), styles["h_rubric"]))
         story.append(HRFlowable(width="100%", thickness=1.2, color=_ACCENT, spaceAfter=4))
 
         if not rows:
@@ -2054,7 +2242,7 @@ class ReportlabRenderer:
         story.append(table)
 
     @staticmethod
-    def _dns_bypass_kennzahlen(model: DnsBypassPdfModelLike) -> Table:
+    def _dns_bypass_kennzahlen(model: DnsBypassPdfModelLike, lang: str = "de") -> Table:
         """Die DNS-Umgehungs-Kennzahlen als eine Reihe Kennzahl-Boxen (Zahl oben, Label darunter).
 
         Reihe: Anfragen gesamt/Umgehungen/Erwartungsgemaess/Geraete. Eine 4-spaltige ``Table`` --
@@ -2069,7 +2257,12 @@ class ReportlabRenderer:
                 str(model.expected_total),
                 str(model.bypass_devices),
             ],
-            ["Anfragen gesamt", "Umgehungen", "Erwartungsgemäß", "Geräte"],
+            [
+                _ui("bypass.anfragen", lang),
+                _ui("bypass.umgehungen", lang),
+                _ui("bypass.erwartet", lang),
+                _ui("bypass.geraete", lang),
+            ],
         ]
         col = 174.0 / 4 * mm
         table = Table(data, colWidths=[col, col, col, col])
@@ -2096,7 +2289,9 @@ class ReportlabRenderer:
         )
         return table
 
-    def _dns_bypass_verteilung_grafik(self, model: DnsBypassPdfModelLike) -> Table:
+    def _dns_bypass_verteilung_grafik(
+        self, model: DnsBypassPdfModelLike, lang: str = "de"
+    ) -> Table:
         """Verteilung nach Ziel (Variante C): gestapelter horizontaler Balken + Legende.
 
         Zeichnet aus ``model.resolver_distribution`` (Tripel ``(resolver_name, dst_ip,
@@ -2239,15 +2434,15 @@ class ReportlabRenderer:
 
         if model.scope == "single":
             # ── Kennzahlen (Label/Wert) ──
-            story.append(Paragraph("Kennzahlen", styles["h_section"]))
-            story.append(self._behavior_kennzahlen(model))
+            story.append(Paragraph(_ui("beh.kennzahlen", lang), styles["h_section"]))
+            story.append(self._behavior_kennzahlen(model, lang))
             story.append(Spacer(1, 6 * mm))
 
             if not model.day_band and not model.week_heatmap:
                 # Zu wenig Daten fuer ein Profil -> dezenter Hinweis statt der Grafiken.
                 story.append(
                     Paragraph(
-                        "Noch keine ausreichenden Daten für ein Verhaltensprofil.",
+                        _ui("beh.keine_daten", lang),
                         styles["body"],
                     )
                 )
@@ -2256,7 +2451,7 @@ class ReportlabRenderer:
                 story.append(
                     KeepTogether(
                         [
-                            Paragraph("Tagesverlauf", styles["h_section"]),
+                            Paragraph(_ui("beh.tagesband", lang), styles["h_section"]),
                             Spacer(1, 3 * mm),
                             self._behavior_tagesband(model),
                         ]
@@ -2267,7 +2462,7 @@ class ReportlabRenderer:
                 story.append(
                     KeepTogether(
                         [
-                            Paragraph("Wochenmuster", styles["h_section"]),
+                            Paragraph(_ui("beh.heatmap", lang), styles["h_section"]),
                             Spacer(1, 3 * mm),
                             self._behavior_heatmap(model),
                         ]
@@ -2275,11 +2470,11 @@ class ReportlabRenderer:
                 )
         else:
             # ── scope == "all": Geraete-Uebersicht ──
-            story.append(Paragraph("Geräte-Übersicht", styles["h_section"]))
+            story.append(Paragraph(_ui("beh.geraete", lang), styles["h_section"]))
             if not model.entry_rows:
                 story.append(
                     Paragraph(
-                        "Keine wiederkehrenden Aufgaben mit Verhaltensdaten.",
+                        _ui("beh.keine_geraete", lang),
                         styles["body"],
                     )
                 )
@@ -2316,13 +2511,17 @@ class ReportlabRenderer:
         header_model = cast(ManualPdfModelLike, model)
         document.build(
             story,
-            onFirstPage=lambda canvas, doc: _draw_manual_header_footer(canvas, doc, header_model),
-            onLaterPages=lambda canvas, doc: _draw_manual_header_footer(canvas, doc, header_model),
+            onFirstPage=lambda canvas, doc: _draw_manual_header_footer(
+                canvas, doc, header_model, lang
+            ),
+            onLaterPages=lambda canvas, doc: _draw_manual_header_footer(
+                canvas, doc, header_model, lang
+            ),
         )
         return buffer.getvalue()
 
     @staticmethod
-    def _behavior_kennzahlen(model: BehaviorPdfModelLike) -> Table:
+    def _behavior_kennzahlen(model: BehaviorPdfModelLike, lang: str = "de") -> Table:
         """Die Einzelprofil-Kennzahlen als schlichte zweispaltige Label/Wert-Tabelle (dezent).
 
         ``model.single_kennzahlen`` ist eine Liste fertiger ``(Label, Wert)``-Paare. Eine
@@ -2786,7 +2985,9 @@ def _apply_severity_badges(style: TableStyle, data: list[list[object]], severity
         style.add("ALIGN", cell, cell, "CENTER")
 
 
-def _draw_header_footer(canvas: object, doc: object, model: SecurityPdfModelLike) -> None:
+def _draw_header_footer(
+    canvas: object, doc: object, model: SecurityPdfModelLike, lang: str = "de"
+) -> None:
     """Zeichnet die durchgaengige Kopf- UND Fusszeile je Seite (onFirstPage UND onLaterPages).
 
     Kopf: links das CERNIS-Logo (falls das Repo-Asset existiert; sonst NUR der Titel-Text --
@@ -2843,10 +3044,12 @@ def _draw_header_footer(canvas: object, doc: object, model: SecurityPdfModelLike
     c.setFont("Helvetica", 8)  # type: ignore[attr-defined]
     c.drawString(margin, footer_y, model.footer_left)  # type: ignore[attr-defined]
     page_no = getattr(doc, "page", 0)
-    c.drawRightString(page_width - margin, footer_y, f"Seite {page_no}")  # type: ignore[attr-defined]
+    c.drawRightString(page_width - margin, footer_y, f"{_ui('page.seite', lang)} {page_no}")  # type: ignore[attr-defined]
 
 
-def _draw_manual_header_footer(canvas: object, doc: object, model: ManualPdfModelLike) -> None:
+def _draw_manual_header_footer(
+    canvas: object, doc: object, model: ManualPdfModelLike, lang: str = "de"
+) -> None:
     """Kopf-/Fusszeile des Handbuchs je Seite -- wie ``_draw_header_footer``, Titel parametrisch.
 
     EIGENE Funktion fuer den Handbuch-Pfad (eigenes Modell/Protocol). Identische Logik zu
@@ -2899,10 +3102,12 @@ def _draw_manual_header_footer(canvas: object, doc: object, model: ManualPdfMode
     c.setFont("Helvetica", 8)  # type: ignore[attr-defined]
     c.drawString(margin, footer_y, model.footer_left)  # type: ignore[attr-defined]
     page_no = getattr(doc, "page", 0)
-    c.drawRightString(page_width - margin, footer_y, f"Seite {page_no}")  # type: ignore[attr-defined]
+    c.drawRightString(page_width - margin, footer_y, f"{_ui('page.seite', lang)} {page_no}")  # type: ignore[attr-defined]
 
 
-def _gauge_drawing(score_value: int, level_label: str, level_color: colors.Color) -> Drawing:
+def _gauge_drawing(
+    score_value: int, level_label: str, level_color: colors.Color, lang: str = "de"
+) -> Drawing:
     """Score-Gauge als Vektor: Halbkreis 0..100, bis ``score_value`` in Level-Farbe, Rest grau.
 
     Der Halbkreis (180°..0°) wird aus ZWEI ``Wedge``-Sektoren gebaut: der gefuellte Anteil
@@ -2961,7 +3166,7 @@ def _gauge_drawing(score_value: int, level_label: str, level_color: colors.Color
         String(
             cx,
             cy + 2,
-            "von 100",
+            _ui("gauge.von100", lang),
             fontName="Helvetica",
             fontSize=9,
             fillColor=_CLEAN,
@@ -2982,7 +3187,9 @@ def _gauge_drawing(score_value: int, level_label: str, level_color: colors.Color
     return drawing
 
 
-def _donut_drawing(critical: int, notable: int, clean: int, device_count: int) -> Drawing:
+def _donut_drawing(
+    critical: int, notable: int, clean: int, device_count: int, lang: str = "de"
+) -> Drawing:
     """Geraete-Verteilung als Donut (Vektor): Anteile critical/notable/clean, Mitte device_count.
 
     Drei ``Wedge``-Sektoren (rot/orange/grau) im Verhaeltnis der drei Zaehler; ein weisser
@@ -3033,7 +3240,7 @@ def _donut_drawing(critical: int, notable: int, clean: int, device_count: int) -
         String(
             cx,
             cy - 12,
-            "Geräte",
+            _ui("donut.geraete", lang),
             fontName="Helvetica",
             fontSize=9,
             fillColor=_CLEAN,
@@ -3047,6 +3254,7 @@ def _inventory_donut_drawing(
     segments: tuple[tuple[int, colors.Color], ...],
     center_value: int,
     center_label: str,
+    lang: str = "de",
 ) -> Drawing:
     """Generischer Donut (Vektor) mit beliebigen Segmenten + frei waehlbarer Mitte-Zahl/-Label.
 
@@ -3108,7 +3316,7 @@ def _inventory_donut_drawing(
     return drawing
 
 
-def _geraete_balken_drawing(balken: tuple[tuple[str, int, int], ...]) -> Drawing:
+def _geraete_balken_drawing(balken: tuple[tuple[str, int, int], ...], lang: str = "de") -> Drawing:
     """Geraete-Balken "Auffaelligkeiten je Geraet" als Vektor -- VOLLSTAENDIGE Liste, kein Top-N.
 
     Je Geraet ein horizontaler, gestapelter Balken: zuerst der kritische Anteil (rot), dann der
