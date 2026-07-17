@@ -27,13 +27,6 @@ on:
   # Manueller Knopf (Actions-Tab) ...
   workflow_dispatch:
   push:
-    # TEMPORAER: nur zur Erstregistrierung des Workflows bei GitHub. Ohne einen
-    # push-Trigger auf einem existierenden Branch taucht der Workflow nicht im
-    # Actions-Tab auf und laesst sich nicht per Dispatch starten. Nach der ersten
-    # erfolgreichen Registrierung wird dieser branches-Block wieder entfernt
-    # (analog zum ARM-Workflow) -- finaler Trigger bleibt workflow_dispatch + v*-Tags.
-    branches:
-      - rewrite/v2
     # ... und automatisch bei Release-Tags v*.
     tags:
       - "v*"
