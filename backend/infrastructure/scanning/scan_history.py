@@ -26,6 +26,13 @@ Stil von ``SqliteDeviceRepository``:
 Der DB-Pfad wird injiziert; die Pfad-Aufloesung passiert im Composition Root
 (``app.py``, S.6-Verdrahtung), nicht im Adapter. Dieser Adapter importiert KEIN
 ``modules`` -- die ADR-0007-Ausnahme wird hier nicht gebraucht.
+
+Der Zeitstempel ``scanned_at`` kommt aus dem injizierten ``Clock``-Port (der EINEN
+Zeitquelle der Anwendung, timezone-aware UTC), NICHT mehr aus dem SQLite-Schema-
+Default ``datetime('now')``: der Default lieferte UTC ohne Zonen-Kennzeichnung, was
+das Frontend als Ortszeit fehlinterpretierte. ``save`` setzt den Wert jetzt explizit
+als ISO-8601-String MIT Zonen-Offset (``+00:00``). Der Schema-Default bleibt nur als
+Sicherheitsnetz stehen, wird durch das explizite INSERT aber nicht mehr benutzt.
 """
 
 import json
@@ -40,6 +47,7 @@ from infrastructure.scanning._serialization import (
     dict_to_host,
     host_to_dict,
 )
+from ports.devices import Clock
 
 # ``CorruptScanError`` wird aus ``_serialization`` re-exportiert (bestehende
 # Importe ``from ...scan_history import CorruptScanError`` bleiben gueltig).
@@ -49,8 +57,10 @@ __all__ = ["CorruptScanError", "SqliteScanHistoryRepository"]
 class SqliteScanHistoryRepository:
     """Erfuellt das ``ScanHistoryRepository``-Protocol strukturell (SQLite)."""
 
-    def __init__(self, db_path: Path) -> None:
+    def __init__(self, db_path: Path, clock: Clock) -> None:
         self._db_path = db_path
+        # Die EINE Zeitquelle (timezone-aware UTC); Verdrahtung im Composition Root.
+        self._clock = clock
         self._ensure_schema()
 
     @contextmanager
@@ -83,10 +93,14 @@ class SqliteScanHistoryRepository:
 
     def save(self, cidr: str, hosts: Sequence[EnrichedHost]) -> None:
         payload = json.dumps([host_to_dict(h) for h in hosts])
+        # scanned_at explizit aus der Clock (timezone-aware UTC) als ISO-8601-String
+        # MIT Zonen-Offset (+00:00) -- nicht mehr ueber den Schema-Default datetime('now').
+        scanned_at = self._clock.now().isoformat()
         with self._connect() as conn:
             conn.execute(
-                "INSERT INTO scan_history (cidr, host_count, result_json) VALUES (?, ?, ?)",
-                (cidr, len(hosts), payload),
+                "INSERT INTO scan_history (cidr, host_count, result_json, scanned_at) "
+                "VALUES (?, ?, ?, ?)",
+                (cidr, len(hosts), payload, scanned_at),
             )
 
     def clear_all(self) -> None:
@@ -106,8 +120,10 @@ class SqliteScanHistoryRepository:
                 scan_id=row["id"],
                 cidr=row["cidr"],
                 host_count=row["host_count"],
-                # ``scanned_at`` ist die ISO-TEXT-Spalte (DEFAULT datetime('now'));
-                # ``or ""`` faengt ein theoretisches NULL ab (Domaenen-Default leer).
+                # ``scanned_at`` ist die ISO-TEXT-Spalte; der Wert kommt aus der Clock
+                # (timezone-aware UTC, ISO-8601 mit +00:00), nicht mehr aus dem
+                # Schema-Default. ``or ""`` faengt ein theoretisches NULL ab (etwa
+                # Altbestand ueber den verbliebenen Default; Domaenen-Default leer).
                 scanned_at=row["scanned_at"] or "",
             )
             for row in rows

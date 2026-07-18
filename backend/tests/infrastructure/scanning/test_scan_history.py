@@ -8,6 +8,7 @@ stillen ``or "[]"``-Rueckfalls bei kaputtem ``result_json``.
 """
 
 import sqlite3
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -21,9 +22,22 @@ from infrastructure.scanning.scan_history import (
 from ports.scanning import ScanHistoryRepository
 
 
+class FakeClock:
+    """Erfuellt das ``Clock``-Protocol strukturell; liefert einen festen Zeitpunkt.
+
+    Timezone-aware UTC -- wie ``SystemClock``, damit ``.isoformat()`` einen Offset
+    (``+00:00``) traegt und der Test deterministisch gegen den Erwartungswert prueft.
+    """
+
+    FIXED = datetime(2026, 7, 18, 13, 23, 45, 123456, tzinfo=UTC)
+
+    def now(self) -> datetime:
+        return self.FIXED
+
+
 @pytest.fixture
 def repo(tmp_path: Path) -> SqliteScanHistoryRepository:
-    return SqliteScanHistoryRepository(tmp_path / "cernis.db")
+    return SqliteScanHistoryRepository(tmp_path / "cernis.db", FakeClock())
 
 
 # ── Struktureller Vertrag ─────────────────────────────────────────────────
@@ -48,8 +62,25 @@ def test_save_then_list_summarizes_without_blob(repo: SqliteScanHistoryRepositor
     assert summaries[0].cidr == "192.168.1.0/24"
     assert summaries[0].host_count == 2  # == len(hosts)
     assert summaries[0].scan_id > 0
-    # scanned_at: ISO-Zeitstempel aus der DB-Spalte (DEFAULT datetime('now')), nicht leer.
+    # scanned_at: ISO-Zeitstempel aus der Clock (timezone-aware UTC), nicht leer.
     assert summaries[0].scanned_at != ""
+
+
+def test_save_sets_scanned_at_from_clock_with_tz_offset(
+    repo: SqliteScanHistoryRepository,
+) -> None:
+    """``scanned_at`` kommt aus der Clock: nicht leer, mit Zonen-Offset, exakter Wert.
+
+    Belegt die A10-Etappe: der Zeitstempel wird explizit ueber den Clock-Port gesetzt
+    (timezone-aware UTC, ISO-8601 mit +00:00) statt ueber den Schema-Default
+    ``datetime('now')`` (UTC ohne Zonen-Kennzeichnung).
+    """
+    repo.save("192.168.1.0/24", ())
+
+    scanned_at = repo.list(20)[0].scanned_at
+    assert scanned_at != ""  # nicht leer
+    assert scanned_at.endswith("+00:00")  # traegt eine Zeitzonen-Kennzeichnung
+    assert scanned_at == FakeClock.FIXED.isoformat()  # exakt der Clock-Wert
 
 
 def test_get_roundtrips_rich_host_lossless(repo: SqliteScanHistoryRepository) -> None:

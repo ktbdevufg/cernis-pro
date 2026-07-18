@@ -25,6 +25,7 @@ from api.scanning import (
 from app import create_app
 from application.scanning import GetArpTable, GetScanDetail, GetScanHistory, LookupVendor
 from domain.scanning import EnrichedHost, PortInfo
+from infrastructure.clock import SystemClock
 from infrastructure.config import AppConfig
 from infrastructure.scanning.scan_history import SqliteScanHistoryRepository
 from infrastructure.scanning.vendor_lookup import VendorLookupAdapter
@@ -45,7 +46,7 @@ _ARP_TABLE = {"192.168.1.2": "AA:BB:CC:DD:EE:01", "192.168.1.3": "AA:BB:CC:DD:EE
 
 @pytest.fixture
 def repo(tmp_path: Path) -> SqliteScanHistoryRepository:
-    return SqliteScanHistoryRepository(tmp_path / "cernis.db")
+    return SqliteScanHistoryRepository(tmp_path / "cernis.db", SystemClock())
 
 
 def _wired_app(repo: SqliteScanHistoryRepository) -> FastAPI:

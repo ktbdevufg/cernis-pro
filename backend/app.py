@@ -2518,11 +2518,13 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     # /ws/scan lebt im Composition Root (ws_scan.py), weil er domain-Event-Typen
     # + Adapter-Exceptions kennt (im api-Ring verboten). Das ScanHistory-Repository
     # teilt die DB mit settings/devices; die uebrigen Adapter sind zustandslos.
+    scan_history_clock = SystemClock()
+
     @lru_cache(maxsize=1)
     def scan_history_repository() -> SqliteScanHistoryRepository:
         from modules.db_path import get_db_path
 
-        return SqliteScanHistoryRepository(get_db_path())
+        return SqliteScanHistoryRepository(get_db_path(), scan_history_clock)
 
     vendor_lookup = VendorLookupAdapter()
     arp_table = ArpTableAdapter()
