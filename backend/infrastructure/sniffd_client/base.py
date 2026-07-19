@@ -29,8 +29,29 @@ SPAWN (frozen vs. dev, Muster ``serve.py._is_frozen`` / ``app.py``):
 ROBUST (S3-frei): scheitert Spawn/Connect, liefert der Verbindungsaufbau einen
 EHRLICHEN Fehlertext (kein Crash, keine stille Leer-Erfassung). Alle scapy-/Rechte-
 Fehler kommen als ERROR-Text vom Helfer und werden 1:1 durchgereicht.
+
+HELFER-AUSGABE (stdout/stderr): der Helfer bekommt eine PIPE und ein eigener
+Drain-Thread (``_drain_output``) holt sie ZEILENWEISE ab und schreibt jede Zeile ins
+Backend-Log (``sniffd_helper_output``). Das ist bewusst so und nicht verhandelbar:
+
+* NICHT geerbte fds (der frueherer Zustand). Dann landete die Helfer-Ausgabe
+  ungefiltert dort, wo das Backend gerade seine eigenen fds hatte -- im Bundle die
+  Tauri-Logdatei, im Dev-Betrieb das Terminal. Die ``sniffd_``-Zeilen waren also nie
+  echte Backend-Log-Zeilen, sondern der Helfer, der in ein fremdes fd schreibt. Ob
+  sie ankommen, haengt damit an der Verpackung statt am Code.
+* NICHT ``DEVNULL``. Die Helfer-Ausgabe ist die EINZIGE Diagnosequelle bei
+  Sniff-Problemen (scapy-/Rechte-Fehler tauchen dort zuerst auf) -- Wegwerfen ist
+  keine Option.
+* NICHT eine Pipe ohne Leser. Genau DAS waere der Deadlock: laeuft der Pipe-Puffer
+  (64 KiB) voll, blockiert der Helfer im ``write`` -- und zwar potenziell BEVOR er
+  ``bind``/``listen`` erreicht. Er lebt dann, legt aber nie die Socket-Datei an.
+  Der Drain-Thread haelt die Pipe darum dauerhaft leer.
+
+Der Drain-Thread laeuft ab dem Popen (also VOR ``_wait_for_socket``), damit schon die
+Startausgabe abfliesst; er endet mit EOF der Pipe und wird im ``_cleanup`` gejoint.
 """
 
+import contextlib
 import os
 import shutil
 import socket
@@ -40,7 +61,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import IO, Any
 
 import structlog
 
@@ -195,6 +216,7 @@ class _BaseSubprocessHelper:
         self._reader: threading.Thread | None = None
         self._reader_stop = threading.Event()
         self._lock = threading.Lock()
+        self._drain: threading.Thread | None = None
 
     # -- Spawn/Connect/Send (gemeinsamer Kern) --------------------------------
 
@@ -218,10 +240,23 @@ class _BaseSubprocessHelper:
         socket_path = str(Path(self._socket_dir) / "sniffd.sock")
 
         try:
-            self._proc = subprocess.Popen(_spawn_command(socket_path))
+            # stderr in DIESELBE Pipe wie stdout (der Helfer nutzt beide: structlog
+            # schreibt per Default auf stdout, Tracebacks/scapy-Warnungen auf stderr).
+            # EIN Strom = EIN Drain-Thread; keine zweite Pipe, die volllaufen kann.
+            self._proc = subprocess.Popen(
+                _spawn_command(socket_path),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
         except OSError as exc:
             self._cleanup()
             return f"{label}-Helfer konnte nicht gestartet werden: {exc}"
+
+        # SOFORT nach dem Popen -- der Drain muss stehen, bevor auf die Socket-Datei
+        # gewartet wird, sonst blockiert ein gespraechiger Helfer im vollen Pipe-Puffer,
+        # noch bevor er bindet.
+        self._start_drain(label)
 
         if not self._wait_for_socket(socket_path):
             err = self._proc_exit_hint()
@@ -258,6 +293,44 @@ class _BaseSubprocessHelper:
                 send_message(sock, payload)
             except OSError as exc:
                 _logger.debug("sniffd_client_send_failed", error=str(exc))
+
+    # -- Drain-Thread fuer die Helfer-Ausgabe ---------------------------------
+
+    def _start_drain(self, label: str) -> None:
+        """Startet den Drain-Thread, der stdout+stderr des Helfers ins Log holt."""
+        proc = self._proc
+        if proc is None or proc.stdout is None:
+            return
+        self._drain = threading.Thread(
+            target=self._drain_output,
+            args=(proc.stdout, label),
+            daemon=True,
+        )
+        self._drain.start()
+
+    def _drain_output(self, stream: IO[bytes], label: str) -> None:
+        """Liest die Helfer-Ausgabe zeilenweise bis EOF und loggt jede Zeile.
+
+        Zeilenweise (Iteration ueber den Stream) statt ``communicate()``: die Ausgabe
+        soll LAUFEND im Backend-Log erscheinen, nicht erst wenn der Helfer endet --
+        bei einem Dauer-Sniff endet er lange nicht. Der Puffer bleibt dadurch
+        dauerhaft leer, der Helfer kann im ``write`` nie blockieren.
+
+        Endet mit EOF (Helfer beendet oder Pipe geschlossen). Ein ``OSError`` beim
+        Lesen (z. B. Pipe im Teardown geschlossen) beendet den Thread still -- der
+        Drain ist reiner Diagnosepfad und darf den Teardown nie stoeren.
+        """
+        try:
+            for raw in stream:
+                line = raw.decode("utf-8", errors="replace").rstrip()
+                if line:
+                    _logger.info("sniffd_helper_output", helper=label, line=line)
+        except (OSError, ValueError) as exc:
+            # ValueError: Stream wurde waehrend des Lesens geschlossen (Teardown).
+            _logger.debug("sniffd_client_drain_ended", helper=label, error=str(exc))
+        finally:
+            with contextlib.suppress(OSError):
+                stream.close()
 
     # -- Reader-Thread-Grundgeruest -------------------------------------------
 
@@ -377,6 +450,25 @@ class _BaseSubprocessHelper:
                     proc.wait(timeout=_TERMINATE_TIMEOUT_SECS)
                 except subprocess.TimeoutExpired:
                     _logger.warning("sniffd_client_kill_timeout")
+
+        # ERST NACH dem Prozess-Ende joinen: das Ende des Helfers schliesst die
+        # Schreibseite der Pipe, der Drain laeuft daraufhin auf EOF und endet von
+        # selbst. Umgekehrt (joinen vor terminate) haenge man am blockierenden
+        # Lesen eines noch laufenden Helfers.
+        #
+        # PyInstaller (frozen) zeigt ZWEI Prozesse: Bootloader + eigentliches Kind.
+        # ``proc`` ist der Bootloader; er reicht Signale an sein Kind weiter und
+        # wartet auf dessen Ende, darum raeumt terminate/kill beide ab. Das Kind
+        # haelt aber DASSELBE Pipe-Schreibende -- EOF kommt daher erst, wenn auch
+        # das Kind weg ist. Der Timeout-Join schuetzt gegen ein Kind, das trotz
+        # Signal haengt: der Drain ist ein Daemon-Thread und blockiert dann
+        # weder Teardown noch Prozess-Ende, statt hier unbegrenzt zu warten.
+        drain = self._drain
+        self._drain = None
+        if drain is not None and drain.is_alive():
+            drain.join(timeout=_TERMINATE_TIMEOUT_SECS)
+            if drain.is_alive():
+                _logger.debug("sniffd_client_drain_join_timeout")
 
         socket_dir = self._socket_dir
         self._socket_dir = None
