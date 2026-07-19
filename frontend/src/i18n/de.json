@@ -665,7 +665,8 @@
         "abgebrochen": "Die Einrichtung wurde abgebrochen. Sie können sie jederzeit nachholen.",
         "fehler": "Die Einrichtung hat nicht geklappt.",
         "erneut": "Erneut versuchen",
-        "schliessen": "Schließen"
+        "schliessen": "Schließen",
+        "jetztEinrichten": "Berechtigung erteilen"
       },
       "sni": {
         "consentTitle": "Echte Domainnamen anzeigen?",
@@ -682,7 +683,7 @@
         "starting": "Echte Domainnamen werden gestartet …",
         "offHinweis": "Echte Domainnamen sind aus. Tracker bleiben dadurch teils unsichtbar.",
         "offShow": "Anzeigen",
-        "startError": "Echte Domainnamen konnten nicht gestartet werden. Vermutlich fehlen die erhöhten Rechte.",
+        "startError": "Echte Domainnamen können nicht angezeigt werden, weil CERNIS die nötige Berechtigung fehlt. Sie können sie jetzt erteilen — das dauert einen Moment und lässt sich jederzeit widerrufen.",
         "threatOne": "Eine Gegenstelle steht auf einer Bedrohungsliste",
         "threatMany": "{{count}} Gegenstellen stehen auf Bedrohungslisten",
         "threatDisclaimer": "Die Einordnung stammt von den gewählten Listen, nicht von CERNIS.",

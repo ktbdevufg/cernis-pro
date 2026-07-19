@@ -524,16 +524,38 @@ export default function OutboundView() {
     setConsent("granted");
     setZeigeConsentDialog(false);
 
+    await pruefeUndBieteEinrichtungAn();
+  };
+
+  // EINZIGER Weg in die Rechteeinrichtung — bewusst als eine Funktion, die BEIDE
+  // Einstiege nutzen: das erstmalige Zustimmen (handleGrant) und der Knopf im
+  // Hinweisstreifen bei fehlenden Rechten (handleRechteEinrichten). Nur so gibt es
+  // keine zwei auseinanderlaufenden Kopien derselben Logik.
+  //
+  // Prüft den Zustand und öffnet NUR bei tatsächlich fehlenden Rechten den Erklär-
+  // Dialog. Stehen die Rechte schon (oder gilt die Einrichtung hier nicht, z. B.
+  // Linux), passiert nichts — es wird kein Dialog gezeigt, den es nicht braucht.
+  const pruefeUndBieteEinrichtungAn = async () => {
     try {
       const status = await fetchCaptureAccess();
       if (status.state === CAPTURE_ACCESS_STATE.MISSING) {
         setZeigeAccessDialog(true);
       }
+      return status.state;
     } catch (fehler) {
       // Status nicht abfragbar (Backend weg): kein Dialog, kein Lärm. SNI meldet
       // fehlende Rechte ohnehin über seinen eigenen Hinweis.
       console.error("Status der Rechteeinrichtung nicht abfragbar", fehler);
+      return null;
     }
+  };
+
+  // Einstieg aus dem Hinweisstreifen „Rechte fehlen". Anders als handleGrant hängt
+  // er NICHT am Consent-Dialog: er ist immer erreichbar, solange die Rechte fehlen —
+  // auch für Nutzer, die der SNI-Erfassung längst zugestimmt haben und den Dialog
+  // deshalb nie wieder sehen.
+  const handleRechteEinrichten = () => {
+    void pruefeUndBieteEinrichtungAn();
   };
 
   // Erklär-Dialog bestätigt: JETZT die Systemabfrage auslösen. Der Aufruf dauert,
@@ -547,6 +569,9 @@ export default function OutboundView() {
     try {
       const ergebnis = await grantCaptureAccess();
       setAccessErgebnis(ergebnis);
+      if (ergebnis.outcome === CAPTURE_ACCESS_OUTCOME.GRANTED) {
+        await uebernehmeNeueRechte();
+      }
     } catch (fehler) {
       // Transportfehler (Backend nicht erreichbar) ist ein echter Fehlschlag —
       // aber ohne Grund vom Backend; der Text kommt dann aus der i18n.
@@ -554,6 +579,25 @@ export default function OutboundView() {
       setAccessErgebnis({ outcome: CAPTURE_ACCESS_OUTCOME.FAILED, reason: "" });
     } finally {
       setAccessLaeuft(false);
+    }
+  };
+
+  // Nach erfolgreicher Einrichtung den neuen Zustand übernehmen, OHNE dass der
+  // Nutzer die App neu starten muss: den zuvor fehlgeschlagenen SNI-Start erneut
+  // versuchen.
+  //
+  // Warum release() vor acquire(): nach einem Fehlstart steht der Reference-Count
+  // des geteilten Hooks bereits auf 1, running aber auf false. Ein bloßes acquire()
+  // würde deshalb nur hochzählen und NICHT neu starten (siehe useHelperResource).
+  // Erst das release() setzt den Zähler zurück, dann startet acquire() wirklich neu.
+  const uebernehmeNeueRechte = async () => {
+    try {
+      await release();
+      await acquire();
+    } catch (fehler) {
+      // Der Neustart ist Komfort, kein Pflichtpfad: schlägt er fehl, bleibt der
+      // bisherige Hinweis stehen und der Nutzer kann es erneut versuchen.
+      console.error("SNI-Neustart nach Rechteeinrichtung fehlgeschlagen", fehler);
     }
   };
 
@@ -764,6 +808,19 @@ export default function OutboundView() {
           <span className="outbound__hinweis-text">
             {t("beobachten.outbound.sni.startError")}
           </span>
+          {/* Weg aus dem Fehlzustand heraus (Etappe 2c): der Hinweis benennt nicht
+              nur, dass Rechte fehlen, sondern bietet die Einrichtung direkt an.
+              Ohne diesen Knopf war die Einrichtung nur beim ERSTMALIGEN Zustimmen
+              erreichbar — wer früher zugestimmt hatte, kam nie mehr heran. Gleicher
+              Weg wie bei handleGrant (eine gemeinsame Funktion, keine Kopie). */}
+          <button
+            type="button"
+            className="outbound__hinweis-button"
+            onClick={handleRechteEinrichten}
+            disabled={accessLaeuft}
+          >
+            {t("beobachten.outbound.access.jetztEinrichten")}
+          </button>
         </div>
       )}
 

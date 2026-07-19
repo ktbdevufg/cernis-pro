@@ -204,11 +204,17 @@ fn start_backend() -> Result<Child, BackendStatus> {
         }
     };
 
-    let data_dir = dirs::data_dir().unwrap_or_default().join("cernis-pro");
-    if let Err(e) = std::fs::create_dir_all(&data_dir) {
-        log(&format!("WARN: Could not create data dir {:?}: {}", data_dir, e));
-    }
-    log(&format!("Data dir: {:?}", data_dir));
+    // KEIN CERNIS_DATA_DIR mehr setzen (Etappe 2c). Frueher legte der Wrapper hier
+    // dirs::data_dir()/cernis-pro fest und gab es als CERNIS_DATA_DIR mit. Das war eine
+    // ZWEITE, konkurrierende Aufloesung desselben Pfades: das Backend loest ihn bereits
+    // in backend/modules/db_path.py auf, und CERNIS_DATA_DIR ist dort Prioritaet 1 --
+    // der Wrapper ueberstimmte damit den Bundle-Zweig (de.cernis.pro), der nie erreicht
+    // wurde. Gemessen geoeffnet wurde deshalb
+    // ~/Library/Application Support/cernis-pro/cernis.db statt .../de.cernis.pro/.
+    //
+    // Es gibt jetzt genau EINE wirksame Quelle fuer den DB-Pfad: get_data_dir() im
+    // Backend. CERNIS_DATA_DIR bleibt als bewusster Override bestehen (Tests, kuenftige
+    // Wrapper), wird hier aber nicht mehr gesetzt.
 
     // Open log file for backend stdout/stderr
     let stdout_file = OpenOptions::new()
@@ -223,8 +229,7 @@ fn start_backend() -> Result<Child, BackendStatus> {
         .ok();
 
     let mut cmd = Command::new(&backend);
-    cmd.env("CERNIS_PORT", BACKEND_PORT.to_string())
-        .env("CERNIS_DATA_DIR", data_dir.to_string_lossy().to_string());
+    cmd.env("CERNIS_PORT", BACKEND_PORT.to_string());
 
     // Backend in EIGENE Session+Prozessgruppe legen, damit kill(-pid) beim Beenden
     // die ganze Gruppe trifft. process_group(0) wirkt auf macOS nicht zuverlaessig

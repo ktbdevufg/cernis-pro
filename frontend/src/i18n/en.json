@@ -665,7 +665,8 @@
         "abgebrochen": "Setup was cancelled. You can do it any time later.",
         "fehler": "Setup did not succeed.",
         "erneut": "Try again",
-        "schliessen": "Close"
+        "schliessen": "Close",
+        "jetztEinrichten": "Grant permission"
       },
       "sni": {
         "consentTitle": "Show real domain names?",
@@ -682,7 +683,7 @@
         "starting": "Starting real domain names …",
         "offHinweis": "Real domain names are off. Some trackers stay invisible as a result.",
         "offShow": "Show",
-        "startError": "Couldn't start real domain names. Elevated rights are probably missing.",
+        "startError": "Real domain names can't be shown because CERNIS is missing the required permission. You can grant it now — it takes a moment and can be revoked at any time.",
         "threatOne": "One peer is on a threat list",
         "threatMany": "{{count}} peers are on threat lists",
         "threatDisclaimer": "The classification comes from the selected lists, not from CERNIS.",
