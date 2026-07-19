@@ -77,8 +77,26 @@ _logger = structlog.get_logger(__name__)
 _HELPER_BINARY_NAME = "cernis-sniffd"
 
 # Wie lange auf das Auftauchen der Socket-Datei nach dem Spawn gewartet wird (Poll-
-# Loop). Der Helfer bindet + listen()t direkt beim Start -- 3 s sind grosszuegig.
-_SOCKET_WAIT_SECS = 3.0
+# Loop).
+#
+# ETAPPE 2e -- 3.0 war zu knapp und die Ursache des Bundle-Fehlers: GEMESSEN braucht
+# der gebundelte Helfer im macOS-Bundle 7 s vom Start bis zur angelegten Socket-Datei
+# (mit und ohne Terminal identisch). Das ist kein Haenger, sondern die Startzeit des
+# PyInstaller-ONEFILE-Binaries: Archiv ins temporaere Verzeichnis entpacken + der
+# scapy-Import. Ein ``sample`` des Prozesses zeigt durchgehend normalen Fortschritt in
+# ``PyImport_ImportModuleLevelObject``. Das Backend gab also nach 3 s auf, WAEHREND der
+# Helfer noch startete -- daher Timeout, leeres Socket-Verzeichnis und (weil der Helfer
+# vor seiner ersten Log-Zeile abgeraeumt wurde) keine Helfer-Ausgabe.
+#
+# 30 s = gemessene 7 s plus grosszuegige Reserve fuer langsamere Maschinen und
+# Kaltstarts (ungecachtes Entpacken, kalter Dateicache, ausgelastete CPU).
+#
+# Das ist eine OBERGRENZE, KEINE Wartedauer: die Poll-Schleife kehrt beim ersten
+# ``path.exists()`` sofort zurueck (alle 0.02 s geprueft), und ein vorzeitig
+# gestorbener Helfer bricht sie ebenso sofort ab. Voll ausgeschoepft werden die 30 s
+# nur von einem LEBENDEN Helfer, der wirklich noch startet -- im Dev-Betrieb bleibt
+# der Erfolgsfall damit unveraendert schnell.
+_SOCKET_WAIT_SECS = 30.0
 _SOCKET_POLL_INTERVAL_SECS = 0.02
 
 # Antwort-Timeout fuer die START-Quittung (STARTED/ERROR). Der Helfer fuehrt eine
