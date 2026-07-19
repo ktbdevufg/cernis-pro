@@ -6,17 +6,25 @@ crashen -- das ist der vom Vertrag vorgesehene "uninteressantes/kaputtes Paket"-
 ``run_lldp_sniff`` darf ohne ``scapy.contrib`` (CI-Fall) NICHT crashen, sondern ``[]``
 liefern. ``export_pcap`` ohne Pakete ist deterministisch ``False``.
 
+Die macOS-Rechteprobe (``/dev/bpf*``) wird plattformfrei per ``monkeypatch`` auf
+``os.open``/``sys.platform`` geprueft -- ohne echte Geraeteknoten, damit sie auch auf
+Linux-CI laeuft.
+
 Ein optionaler scapy-Pfad (echtes synthetisches Paket -> Summary-dict) laeuft NUR,
 wenn scapy lokal verfuegbar ist (``skipif``) -- in CI ohne scapy wird er uebersprungen,
 nicht erzwungen.
 """
 
+import errno
+import os
+import socket
+import sys
 import threading
 from typing import Any
 
 import pytest
 
-from infrastructure.sniffd import _scapy
+from infrastructure.sniffd import _scapy, sniff_core
 from infrastructure.sniffd.sniff_core import (
     export_pcap,
     parse_packet,
@@ -195,3 +203,104 @@ def test_start_dns_sniff_classifies_requests_and_ignores_responses(
     assert query["l4"] == "udp"
     assert query["qname"] == "example.com"
     assert "monotonic_ts" in query
+
+
+# ── macOS-Rechteprobe ueber /dev/bpf* (plattformfrei per monkeypatch) ──────────
+
+
+def _fake_open(results: dict[str, Any]) -> Any:
+    """Baut ein ``os.open``-Double: pro Knotenpfad Exception-Instanz oder fd-Zahl."""
+
+    def _open(path: str, flags: int) -> int:
+        outcome = results[path]
+        if isinstance(outcome, OSError):
+            raise outcome
+        return int(outcome)
+
+    return _open
+
+
+def test_bpf_probe_returns_none_when_a_node_opens(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ein belegter Knoten (EBUSY), der naechste oeffnet -> Recht vorhanden -> ``None``."""
+    closed: list[int] = []
+    monkeypatch.setattr(
+        os,
+        "open",
+        _fake_open(
+            {
+                "/dev/bpf0": OSError(errno.EBUSY, "busy"),
+                "/dev/bpf1": 7,
+            }
+        ),
+    )
+    monkeypatch.setattr(os, "close", closed.append)
+
+    assert sniff_core._check_bpf_permission("SNI capture") is None
+    assert closed == [7]  # der geoeffnete fd wird sofort wieder geschlossen
+
+
+def test_bpf_probe_all_permission_denied_returns_error_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Scheitert JEDER Knoten mit ``PermissionError`` -> Fehlertext mit ``CAP_NET_RAW``.
+
+    Der Text nennt den ``zweck`` und weist ehrlich auf die BPF-Geraete hin statt auf
+    ``setcap`` (das es auf macOS nicht gibt) -- der stabile Substring bleibt erhalten.
+    """
+    monkeypatch.setattr(
+        os,
+        "open",
+        _fake_open(
+            dict.fromkeys(sniff_core._BPF_PROBE_NODES, PermissionError(errno.EACCES, "denied"))
+        ),
+    )
+
+    result = sniff_core._check_bpf_permission("DNS capture")
+
+    assert result is not None
+    assert "CAP_NET_RAW" in result
+    assert "DNS capture" in result
+    assert "/dev/bpf" in result
+    assert "setcap" not in result
+
+
+def test_bpf_probe_missing_nodes_is_inconclusive(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Kein Knoten existiert (ENOENT) -> ``None`` (inconclusive), scapy darf es versuchen."""
+    monkeypatch.setattr(
+        os,
+        "open",
+        _fake_open(dict.fromkeys(sniff_core._BPF_PROBE_NODES, OSError(errno.ENOENT, "missing"))),
+    )
+
+    assert sniff_core._check_bpf_permission("Packet capture") is None
+
+
+def test_check_raw_permission_on_darwin_uses_bpf_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Auf ``darwin`` geht die Probe ueber BPF -- KEIN Raw-Socket wird mehr angelegt."""
+    monkeypatch.setattr(sys, "platform", "darwin")
+
+    def _no_socket(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("darwin darf keinen Raw-Socket mehr proben")
+
+    monkeypatch.setattr(socket, "socket", _no_socket)
+    monkeypatch.setattr(
+        os,
+        "open",
+        _fake_open(
+            dict.fromkeys(sniff_core._BPF_PROBE_NODES, PermissionError(errno.EPERM, "denied"))
+        ),
+    )
+
+    result = sniff_core.check_raw_permission("SNI capture")
+
+    assert result is not None
+    assert "CAP_NET_RAW" in result
+
+
+def test_check_raw_permission_unknown_platform_is_inconclusive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fremde Plattform -> ``None`` (inconclusive), unveraendert zum Bestand."""
+    monkeypatch.setattr(sys, "platform", "win32")
+
+    assert sniff_core.check_raw_permission("Packet capture") is None

@@ -30,8 +30,8 @@ promisc=False: SNI braucht nur den eigenen TLS-Traffic; ``promisc=False`` vermei
 zusaetzlich den VMware-Promiscuous-Dialog.
 
 Plattform: primaer Linux x64. ``check_raw_permission`` probt plattformabhaengig
-(Linux ``AF_PACKET``, macOS ``AF_INET``/``SOCK_RAW``); ``_pick_iface`` bleibt Linux
-(Default-Route / ``/sys/class/net``).
+(Linux ``AF_PACKET``-Raw-Socket, macOS die BPF-Geraeteknoten ``/dev/bpf*``);
+``_pick_iface`` bleibt Linux (Default-Route / ``/sys/class/net``).
 """
 
 import contextlib
@@ -220,24 +220,32 @@ def _pick_iface() -> str:
     raise RuntimeError("Kein nutzbares Netzwerk-Interface gefunden.")
 
 
-# ── Permission-Probe (AF_PACKET-Raw-Socket, wie im Original) ──────────────────
+# ── Permission-Probe (Linux: AF_PACKET-Raw-Socket, macOS: /dev/bpf*) ──────────
+
+# macOS-Probe: scapy sniff't dort ueber die BPF-Geraeteknoten, NICHT ueber Raw-
+# Sockets. Geprobt werden die ersten vier Knoten -- die vorderen sind haeufig
+# belegt (EBUSY), ein freier reicht als Beweis fuer das Recht.
+_BPF_PROBE_NODES = ("/dev/bpf0", "/dev/bpf1", "/dev/bpf2", "/dev/bpf3")
 
 
 def check_raw_permission(zweck: str = "Packet capture") -> str | None:
     """Prueft, ob der rohe Sniff moeglich ist; Fehlertext oder ``None`` wenn OK.
 
-    Plattformabhaengige Raw-Socket-Probe (Muster ``ScapyPacketSniffer.check_permission``):
+    Plattformabhaengige Probe (Muster ``ScapyPacketSniffer.check_permission``):
 
     * Linux (``sys.platform == "linux"``): ``AF_PACKET``-Raw-Socket probieren.
-    * macOS (``sys.platform == "darwin"``): ``AF_INET``/``SOCK_RAW``/``IPPROTO_RAW``-
-      Raw-Socket probieren (``AF_PACKET`` existiert dort nicht) -- gleiches
-      Vertragsmuster.
+    * macOS (``sys.platform == "darwin"``): die BPF-Geraeteknoten ``/dev/bpf0``
+      bis ``/dev/bpf3`` nacheinander lesend oeffnen (sofort wieder schliessen) --
+      scapy sniff't auf macOS ueber BPF, nicht ueber Raw-Sockets. EIN gelungenes
+      Oeffnen -> Recht vorhanden (``None``). Scheitert JEDES mit ``PermissionError``
+      -> Fehlertext. Jeder andere ``OSError`` (Knoten fehlt, alle belegt) ->
+      ``None`` (inconclusive).
     * Sonstige Plattformen: ``None`` (inconclusive) -- keine Probe, scapy darf es
       versuchen.
 
-    In allen Faellen gilt dasselbe Vertragsmuster: ``PermissionError`` ->
-    ``cap_net_raw``-Fix-Hinweis (kein stiller Fallback, S3). ``OSError`` -> ``None``
-    ("inconclusive" -- kein Permission-Fehler, scapy darf es versuchen).
+    In allen Faellen gilt dasselbe Vertragsmuster: fehlendes Recht -> Fix-Hinweis
+    (kein stiller Fallback, S3); ``OSError`` -> ``None`` ("inconclusive" -- kein
+    Permission-Fehler, scapy darf es versuchen).
 
     Der Fix-Text nennt bewusst KEINEN ``/usr/bin/cernis-backend``-Pfad mehr: die
     Cap sitzt kuenftig auf ``cernis-sniffd``, nicht auf dem Backend.
@@ -246,21 +254,49 @@ def check_raw_permission(zweck: str = "Packet capture") -> str | None:
     LLDP-Sniff. ``zweck`` benennt den konkreten Aufrufer (z. B. ``"SNI capture"``,
     ``"DNS capture"``), damit die Meldung ehrlich ist -- ein DNS-Sniff darf nicht
     "SNI capture" melden. Der stabile Substring ``CAP_NET_RAW`` bleibt in JEDER
-    Variante erhalten (daran haengt die Rechte-Klassifikation der sni-Domaene).
+    Variante erhalten (daran haengt die Rechte-Klassifikation der sni-Domaene) --
+    auch im macOS-Text, obwohl der Fix-Hinweis dort ehrlich auf die BPF-Geraete
+    zeigt statt auf ``setcap`` (das es auf macOS nicht gibt).
     """
+    if sys.platform == "darwin":
+        return _check_bpf_permission(zweck)
+    if sys.platform != "linux":
+        return None  # inconclusive -- Plattform ohne bekannte Raw-Probe
     try:
-        if sys.platform == "linux":
-            s = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(3))
-        elif sys.platform == "darwin":
-            s = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_RAW)
-        else:
-            return None  # inconclusive -- Plattform ohne bekannte Raw-Socket-Probe
+        s = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(3))
         s.close()
         return None
     except PermissionError:
         return f"Permission denied -- {zweck} requires root or CAP_NET_RAW."
     except OSError:
         return None  # inconclusive -- kein Rechte-Fehler, scapy darf es versuchen
+
+
+def _check_bpf_permission(zweck: str) -> str | None:
+    """macOS-Probe: ``/dev/bpf*`` lesend oeffnen; Fehlertext oder ``None`` wenn OK.
+
+    Ein gelungenes Oeffnen beweist das Recht (``None``). Nur wenn JEDER geprobte
+    Knoten mit ``PermissionError`` scheitert, ist das Recht sicher weg -> Fehlertext
+    mit erhaltenem ``CAP_NET_RAW``-Substring. Andere ``OSError`` (ENOENT, EBUSY)
+    sind inconclusive -> ``None``, scapy darf es selbst versuchen.
+    """
+    permission_denied = False
+    for node in _BPF_PROBE_NODES:
+        try:
+            fd = os.open(node, os.O_RDONLY)
+        except PermissionError:
+            permission_denied = True
+        except OSError:
+            continue  # inconclusive -- Knoten fehlt oder ist belegt
+        else:
+            os.close(fd)
+            return None
+    if permission_denied:
+        return (
+            f"Permission denied -- {zweck} requires root or CAP_NET_RAW; "
+            f"on macOS this means read access to the BPF devices (/dev/bpf*)."
+        )
+    return None  # inconclusive -- kein Knoten geprobt/erreichbar
 
 
 # ── Roher Sniff-Lifecycle (AsyncSniffer + billiger prn) ───────────────────────
