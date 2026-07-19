@@ -19,7 +19,7 @@ from api.system import (
     provide_url_opener,
 )
 from app import create_app
-from infrastructure.config import APP_VERSION, AppConfig
+from infrastructure.config import APP_VERSION, AppConfig, display_version
 
 
 @pytest.fixture
@@ -33,7 +33,10 @@ def test_status_liefert_200_und_version(app: FastAPI) -> None:
     with TestClient(app) as client:
         response = client.get("/api/status")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "version": APP_VERSION}
+    # ``/api/status`` liefert die ANZEIGE-Form (``display_version``): das ``+`` der
+    # internen ``APP_VERSION`` wird zum Bindestrich (``2.0.0+macos.<sha>`` ->
+    # ``2.0.0-macos.<sha>``), im Dev unveraendert ``2.0.0``.
+    assert response.json() == {"status": "ok", "version": display_version(APP_VERSION)}
 
 
 def test_open_url_oeffnet_http_und_https(app: FastAPI) -> None:

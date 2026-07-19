@@ -22,6 +22,7 @@ from application.cve.use_cases import (
     RunCveMonitor,
 )
 from domain.cve.models import CveFindingRecord
+from infrastructure.clock import SystemClock
 from infrastructure.cve_acknowledgements_db import SqliteCveAcknowledgementRepository
 from infrastructure.cve_checkstate_db import SqliteCveCheckStateRepository
 from infrastructure.cve_findings_db import SqliteCveFindingRepository
@@ -67,7 +68,7 @@ def repos(tmp_path: Path) -> Repos:
     return (
         SqliteCveFindingRepository(db),
         SqliteCveCheckStateRepository(db),
-        SqliteCveAcknowledgementRepository(db),
+        SqliteCveAcknowledgementRepository(db, SystemClock()),
     )
 
 

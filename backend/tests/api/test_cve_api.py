@@ -24,6 +24,7 @@ from api.cve import (
 )
 from application.cve import GetAcknowledgedFindings, GetActiveFindings, GetCveMonitorStatus
 from domain.cve.models import CveFindingRecord
+from infrastructure.clock import SystemClock
 from infrastructure.cve_acknowledgements_db import SqliteCveAcknowledgementRepository
 from infrastructure.cve_checkstate_db import SqliteCveCheckStateRepository
 from infrastructure.cve_findings_db import SqliteCveFindingRepository
@@ -46,7 +47,7 @@ def context(tmp_path: Path) -> Iterator[Context]:
     db = tmp_path / "cernis.db"
     findings = SqliteCveFindingRepository(db)
     checkstate = SqliteCveCheckStateRepository(db)
-    acks = SqliteCveAcknowledgementRepository(db)
+    acks = SqliteCveAcknowledgementRepository(db, SystemClock())
 
     app = FastAPI()
     app.include_router(router)

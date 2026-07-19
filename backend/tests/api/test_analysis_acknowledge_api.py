@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 from api.analysis import provide_acknowledge
 from app import create_app
 from infrastructure.analysis_acknowledgements_db import SqliteAcknowledgementRepository
+from infrastructure.clock import SystemClock
 from infrastructure.config import AppConfig
 
 MAC = "AA:BB:CC:DD:EE:01"
@@ -26,7 +27,7 @@ MAC = "AA:BB:CC:DD:EE:01"
 @pytest.fixture
 def context(tmp_path: Path) -> Iterator[tuple[FastAPI, SqliteAcknowledgementRepository]]:
     application = create_app(AppConfig())
-    repo = SqliteAcknowledgementRepository(tmp_path / "cernis.db")
+    repo = SqliteAcknowledgementRepository(tmp_path / "cernis.db", SystemClock())
     # Acknowledge-Runner wie im Composition Root: Pass-Through an record(...).
     application.dependency_overrides[provide_acknowledge] = lambda: repo.record
     yield application, repo

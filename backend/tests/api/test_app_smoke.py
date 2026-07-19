@@ -3,7 +3,7 @@
 from fastapi.testclient import TestClient
 
 from app import create_app
-from infrastructure.config import AppConfig
+from infrastructure.config import APP_VERSION, AppConfig
 
 
 def test_health_ok(client: TestClient) -> None:
@@ -13,7 +13,10 @@ def test_health_ok(client: TestClient) -> None:
     body = response.json()
     assert body["status"] == "ok"
     assert body["service"] == "cernis-pro"
-    assert body["version"] == "2.0.0"
+    # ``/health`` liefert die interne ``APP_VERSION`` (im Build z. B.
+    # ``2.0.0+macos.<sha>``, im Dev schlicht ``2.0.0``) -- nicht hart ``"2.0.0"``,
+    # damit der Test auch mit vorhandener ``_build_version.py`` gruen ist.
+    assert body["version"] == APP_VERSION
 
 
 def test_scanning_routes_registered() -> None:

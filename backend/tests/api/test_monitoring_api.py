@@ -49,6 +49,7 @@ from application.monitoring import (
     UpdateSchedule,
 )
 from domain.monitoring import CUSTOM_TARGETS_KEY, MonitorEvent, MonitorEventType, PingSample
+from infrastructure.clock import SystemClock
 from infrastructure.config import AppConfig
 from infrastructure.monitoring import (
     SqliteMonitorEventRepository,
@@ -114,7 +115,7 @@ def _wired_app(
     rtt = SqliteRttHistoryRepository(db_path)
     events = SqliteMonitorEventRepository(db_path)
     sla = SqliteSlaSampleRepository(db_path)
-    schedules = SqliteScheduleRepository(db_path)
+    schedules = SqliteScheduleRepository(db_path, SystemClock())
     job_scheduler = jobs or _FakeJobScheduler()
 
     app = create_app(AppConfig())

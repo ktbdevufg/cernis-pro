@@ -2729,11 +2729,13 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
         return SqliteSlaSampleRepository(get_db_path())
 
+    schedule_clock = SystemClock()
+
     @lru_cache(maxsize=1)
     def schedule_repository() -> SqliteScheduleRepository:
         from modules.db_path import get_db_path
 
-        return SqliteScheduleRepository(get_db_path())
+        return SqliteScheduleRepository(get_db_path(), schedule_clock)
 
     # Langzeit-Logging-Repos (B-I): drei eigene Tabellen (``monitoring_log_*``),
     # GETRENNT vom fluechtigen Live-Monitor (rtt_history/monitor_events). lru_cache wie
@@ -3169,11 +3171,13 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
         return SqliteCveCheckStateRepository(get_db_path())
 
+    cve_acknowledgement_clock = SystemClock()
+
     @lru_cache(maxsize=1)
     def cve_acknowledgement_repository() -> SqliteCveAcknowledgementRepository:
         from modules.db_path import get_db_path
 
-        return SqliteCveAcknowledgementRepository(get_db_path())
+        return SqliteCveAcknowledgementRepository(get_db_path(), cve_acknowledgement_clock)
 
     # Host-/Port-QUELLE des Worker (ADR 0037): der JUENGSTE gespeicherte Scan-Record. Er
     # traegt je Host MAC + IP + die offenen Ports MIT Servicename (EnrichedHost.ports), ist
@@ -4433,11 +4437,15 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     # GetObservedSni/sni_sniffer(), resolve_ptr_batch_uc, repository() (Settings),
     # _topology_gateway() (Gateway des primaeren Interface). Die zwei editierbaren Listen
     # sind normale Listen-Settings (value = JSON-Liste von IP-Strings).
+    dns_watch_acknowledgement_clock = SystemClock()
+
     @lru_cache(maxsize=1)
     def dns_watch_acknowledgement_repository() -> SqliteDnsWatchAcknowledgementRepository:
         from modules.db_path import get_db_path
 
-        return SqliteDnsWatchAcknowledgementRepository(get_db_path())
+        return SqliteDnsWatchAcknowledgementRepository(
+            get_db_path(), dns_watch_acknowledgement_clock
+        )
 
     def _dns_watch_read_list(key: str) -> list[str]:
         # Liest einen Settings-Key defensiv als Liste von Strings (S3: kein Wurf bei
@@ -6886,22 +6894,26 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     # Naehte greifen darauf zu: die SCHREIB-Naht am Scan (ws_scan, record_seen) pflegt
     # die Historie, die LESE-Naht in _analyze_snapshot (known_macs) fuellt daraus
     # ObservedHost.is_known. Scan schreibt, GET /api/analysis liest -- siehe ADR 0013.
+    host_history_clock = SystemClock()
+
     @lru_cache(maxsize=1)
     def host_history_repository() -> SqliteHostHistoryRepository:
         from modules.db_path import get_db_path
 
-        return SqliteHostHistoryRepository(get_db_path())
+        return SqliteHostHistoryRepository(get_db_path(), host_history_clock)
 
     # Acknowledge-Audit-Repo (ADR 0031): das append-only Log der quittierten
     # Achse-B-Befunde, teilt die cernis.db (lru_cache, Muster host_history_repository).
     # Zwei Naehte greifen darauf zu: die SCHREIB-Naht am Endpunkt (POST /api/analysis/
     # acknowledge, record) und die LESE-Naht im axis_b-Pfad (acknowledged_ports), die
     # quittierte Ports aus der Bewertung nimmt und ins host_detail-Frame traegt.
+    acknowledgement_clock = SystemClock()
+
     @lru_cache(maxsize=1)
     def acknowledgement_repository() -> SqliteAcknowledgementRepository:
         from modules.db_path import get_db_path
 
-        return SqliteAcknowledgementRepository(get_db_path())
+        return SqliteAcknowledgementRepository(get_db_path(), acknowledgement_clock)
 
     # Kein Poller, kein app.state, kein lifespan-Eingriff -- wie process. Die zwei
     # Adapter (BuiltinRuleProvider/StaticHelpLinkResolver) sind zustandslos. Die

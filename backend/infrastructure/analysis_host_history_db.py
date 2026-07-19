@@ -28,6 +28,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+from ports.devices import Clock
+
 __all__ = ["SqliteHostHistoryRepository"]
 
 
@@ -39,8 +41,10 @@ class SqliteHostHistoryRepository:
     ``record_seen`` (in C.2 am Scan-Abschluss aufgerufen).
     """
 
-    def __init__(self, db_path: Path) -> None:
+    def __init__(self, db_path: Path, clock: Clock) -> None:
         self._db_path = db_path
+        # Die EINE Zeitquelle (timezone-aware UTC); Verdrahtung im Composition Root.
+        self._clock = clock
         self._ensure_schema()
 
     @contextmanager
@@ -56,8 +60,9 @@ class SqliteHostHistoryRepository:
 
     def _ensure_schema(self) -> None:
         # mac ist der PRIMARY KEY (die stabile Geraete-Identitaet). first_seen haelt den
-        # Erst-Sicht-Zeitstempel (datetime('now')-Default) -- gesetzt beim ersten INSERT,
-        # spaeter unveraendert (INSERT OR IGNORE in record_seen).
+        # Erst-Sicht-Zeitstempel -- in record_seen explizit aus der Clock gesetzt (ISO-8601
+        # UTC mit +00:00), gesetzt beim ersten INSERT, spaeter unveraendert (INSERT OR
+        # IGNORE). Der Schema-Default datetime('now') bleibt nur als Sicherheitsnetz.
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:
             conn.executescript(
@@ -106,8 +111,14 @@ class SqliteHostHistoryRepository:
         """
         if not mac:
             return
+        # first_seen explizit aus der Clock (timezone-aware UTC) als ISO-8601-String
+        # MIT Zonen-Offset (+00:00) -- nicht mehr ueber den Schema-Default datetime('now').
+        first_seen = self._clock.now().isoformat()
         with self._connect() as conn:
-            conn.execute("INSERT OR IGNORE INTO analysis_known_hosts (mac) VALUES (?)", (mac,))
+            conn.execute(
+                "INSERT OR IGNORE INTO analysis_known_hosts (mac, first_seen) VALUES (?, ?)",
+                (mac, first_seen),
+            )
 
     def clear_all(self) -> None:
         """Leert die gesamte Host-Historie (nur die eigene Tabelle ``analysis_known_hosts``)."""

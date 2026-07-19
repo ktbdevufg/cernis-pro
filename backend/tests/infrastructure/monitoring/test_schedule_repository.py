@@ -5,6 +5,7 @@ enabled-Default 1, (3) update (enabled/name, None=unveraendert), (4) delete
 (idempotent), (5) list-Reihenfolge (ORDER BY id). Gegen eine temp-DB (tmp_path).
 """
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -25,9 +26,22 @@ _NINE_COLUMNS = {
 }
 
 
+class FakeClock:
+    """Erfuellt das ``Clock``-Protocol strukturell; liefert einen festen Zeitpunkt.
+
+    Timezone-aware UTC -- wie ``SystemClock``, damit ``.isoformat()`` einen Offset
+    (``+00:00``) traegt und der Test deterministisch gegen den Erwartungswert prueft.
+    """
+
+    FIXED = datetime(2026, 7, 18, 13, 23, 45, 123456, tzinfo=UTC)
+
+    def now(self) -> datetime:
+        return self.FIXED
+
+
 @pytest.fixture
 def repo(tmp_path: Path) -> SqliteScheduleRepository:
-    return SqliteScheduleRepository(tmp_path / "cernis.db")
+    return SqliteScheduleRepository(tmp_path / "cernis.db", FakeClock())
 
 
 def test_conforms_to_schedule_repository_protocol(repo: SqliteScheduleRepository) -> None:
@@ -49,6 +63,20 @@ def test_add_then_list_roundtrip_nine_columns(repo: SqliteScheduleRepository) ->
     assert row["enabled"] == 1  # DEFAULT 1
     assert row["last_run"] is None
     assert row["next_run"] is None
+
+
+def test_add_sets_created_at_from_clock_with_tz_offset(repo: SqliteScheduleRepository) -> None:
+    """``created_at`` kommt aus der Clock: nicht leer, mit Zonen-Offset, exakter Wert.
+
+    Belegt die A10-Etappe-2: der Zeitstempel wird explizit ueber den Clock-Port gesetzt
+    (timezone-aware UTC, ISO-8601 mit +00:00) statt ueber den Schema-Default
+    ``datetime('now')`` (UTC ohne Zonen-Kennzeichnung).
+    """
+    repo.add("Nightly", "192.168.1.0/24", "standard", "cron:0 2 * * *")
+
+    created_at = repo.list()[0]["created_at"]
+    assert created_at.endswith("+00:00")  # traegt eine Zeitzonen-Kennzeichnung
+    assert created_at == FakeClock.FIXED.isoformat()  # exakt der Clock-Wert
 
 
 def test_add_stores_schedule_string_unparsed(repo: SqliteScheduleRepository) -> None:

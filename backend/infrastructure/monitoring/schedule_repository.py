@@ -32,12 +32,16 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+from ports.devices import Clock
+
 
 class SqliteScheduleRepository:
     """Erfuellt das ``ScheduleRepository``-Protocol strukturell (SQLite)."""
 
-    def __init__(self, db_path: Path) -> None:
+    def __init__(self, db_path: Path, clock: Clock) -> None:
         self._db_path = db_path
+        # Die EINE Zeitquelle (timezone-aware UTC); Verdrahtung im Composition Root.
+        self._clock = clock
         self._ensure_schema()
 
     @contextmanager
@@ -66,6 +70,9 @@ class SqliteScheduleRepository:
                     enabled     INTEGER DEFAULT 1,
                     last_run    TEXT,
                     next_run    TEXT,
+                    -- Sicherheitsnetz-Default; der Wert wird in add() explizit aus
+                    -- der Clock gesetzt (ISO-8601 UTC mit +00:00), nicht ueber diesen
+                    -- Default (UTC ohne Zonen-Kennzeichnung).
                     created_at  TEXT DEFAULT (datetime('now'))
                 )
                 """
@@ -77,11 +84,15 @@ class SqliteScheduleRepository:
         return [dict(row) for row in rows]
 
     def add(self, name: str, cidr: str, profile_id: str, schedule: str) -> int:
+        # created_at explizit aus der Clock (timezone-aware UTC) als ISO-8601-String
+        # MIT Zonen-Offset (+00:00) -- nicht mehr ueber den Schema-Default datetime('now').
+        created_at = self._clock.now().isoformat()
         with self._connect() as conn:
             cursor = conn.execute(
-                "INSERT INTO scan_schedules (name, cidr, profile_id, schedule, enabled) "
-                "VALUES (?, ?, ?, ?, 1)",
-                (name, cidr, profile_id, schedule),
+                "INSERT INTO scan_schedules "
+                "(name, cidr, profile_id, schedule, enabled, created_at) "
+                "VALUES (?, ?, ?, ?, 1, ?)",
+                (name, cidr, profile_id, schedule, created_at),
             )
             schedule_id = cursor.lastrowid
         # lastrowid ist nach erfolgreichem INSERT immer gesetzt (int); der Vertrag

@@ -7,6 +7,7 @@ Muster der uebrigen infrastructure-Repo-Tests (``tmp_path``-DB, wie
 ``test_analysis_host_history_db.py``).
 """
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -17,9 +18,22 @@ MAC = "aa:bb:cc:dd:ee:ff"
 OTHER = "11:22:33:44:55:66"
 
 
+class FakeClock:
+    """Erfuellt das ``Clock``-Protocol strukturell; liefert einen festen Zeitpunkt.
+
+    Timezone-aware UTC -- wie ``SystemClock``, damit ``.isoformat()`` einen Offset
+    (``+00:00``) traegt und der Test deterministisch gegen den Erwartungswert prueft.
+    """
+
+    FIXED = datetime(2026, 7, 18, 13, 23, 45, 123456, tzinfo=UTC)
+
+    def now(self) -> datetime:
+        return self.FIXED
+
+
 @pytest.fixture
 def repo(tmp_path: Path) -> SqliteAcknowledgementRepository:
-    return SqliteAcknowledgementRepository(tmp_path / "cernis.db")
+    return SqliteAcknowledgementRepository(tmp_path / "cernis.db", FakeClock())
 
 
 # ── Round-trip ────────────────────────────────────────────────────────────────
@@ -30,6 +44,26 @@ def test_ack_dann_acknowledged_ports_enthaelt_port(
 ) -> None:
     repo.record(MAC, 3306, "notable", "ack")
     assert repo.acknowledged_ports(MAC) == {3306}
+
+
+def test_record_setzt_created_at_aus_clock_mit_tz_offset(
+    repo: SqliteAcknowledgementRepository,
+) -> None:
+    """``created_at`` kommt aus der Clock: nicht leer, mit Zonen-Offset, exakter Wert.
+
+    Belegt die A10-Etappe-2: der Zeitstempel wird explizit ueber den Clock-Port gesetzt
+    (timezone-aware UTC, ISO-8601 mit +00:00) statt ueber den Schema-Default
+    ``datetime('now')`` (UTC ohne Zonen-Kennzeichnung). Das Repository hat keinen Lesepfad
+    fuer ``created_at`` -- der Test liest die Spalte direkt aus der Tabelle.
+    """
+    repo.record(MAC, 3306, "notable", "ack")
+    with repo._connect() as conn:
+        created_at = conn.execute(
+            "SELECT created_at FROM analysis_acknowledgements WHERE mac = ?", (MAC,)
+        ).fetchone()["created_at"]
+
+    assert created_at.endswith("+00:00")  # traegt eine Zeitzonen-Kennzeichnung
+    assert created_at == FakeClock.FIXED.isoformat()  # exakt der Clock-Wert
 
 
 def test_keine_eintraege_keine_acknowledged_ports(

@@ -23,14 +23,18 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+from ports.devices import Clock
+
 __all__ = ["SqliteCveAcknowledgementRepository"]
 
 
 class SqliteCveAcknowledgementRepository:
     """Persistiert ack/unack-Aktionen der CVE-Befunde als append-only Log (ADR 0037)."""
 
-    def __init__(self, db_path: Path) -> None:
+    def __init__(self, db_path: Path, clock: Clock) -> None:
         self._db_path = db_path
+        # Die EINE Zeitquelle (timezone-aware UTC); Verdrahtung im Composition Root.
+        self._clock = clock
         self._ensure_schema()
 
     @contextmanager
@@ -47,7 +51,8 @@ class SqliteCveAcknowledgementRepository:
     def _ensure_schema(self) -> None:
         # Append-only Log: AUTOINCREMENT-id ist die strenge zeitliche Ordnung (auch bei
         # gleichem created_at-Sekundenwert). action per CHECK auf 'ack'/'unack' begrenzt.
-        # created_at als datetime('now')-Default (UTC) -- Audit-Zeitstempel.
+        # created_at wird in record() explizit aus der Clock gesetzt (ISO-8601 UTC mit
+        # +00:00) -- der datetime('now')-Default bleibt nur als Sicherheitsnetz stehen.
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:
             conn.executescript(
@@ -72,10 +77,14 @@ class SqliteCveAcknowledgementRepository:
         NICHTS, sondern legt die naechste Zeile an. Der effektive Status ergibt sich erst
         beim Lesen aus dem JUENGSTEN Eintrag.
         """
+        # created_at explizit aus der Clock (timezone-aware UTC) als ISO-8601-String
+        # MIT Zonen-Offset (+00:00) -- nicht mehr ueber den Schema-Default datetime('now').
+        created_at = self._clock.now().isoformat()
         with self._connect() as conn:
             conn.execute(
-                "INSERT INTO cve_acknowledgements (mac, cve_id, port, action) VALUES (?, ?, ?, ?)",
-                (mac, cve_id, port, action),
+                "INSERT INTO cve_acknowledgements (mac, cve_id, port, action, created_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (mac, cve_id, port, action, created_at),
             )
 
     def clear_all(self) -> None:

@@ -10,6 +10,7 @@ Schluessel-Form ist ``f"{remote_ip}:{category}"`` -- der ``AcknowledgedProvider`
 aus 2d-1.
 """
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -24,9 +25,22 @@ CAT_OPEN = "offen"
 CAT_DOH = "moegliche_doh"
 
 
+class FakeClock:
+    """Erfuellt das ``Clock``-Protocol strukturell; liefert einen festen Zeitpunkt.
+
+    Timezone-aware UTC -- wie ``SystemClock``, damit ``.isoformat()`` einen Offset
+    (``+00:00``) traegt und der Test deterministisch gegen den Erwartungswert prueft.
+    """
+
+    FIXED = datetime(2026, 7, 18, 13, 23, 45, 123456, tzinfo=UTC)
+
+    def now(self) -> datetime:
+        return self.FIXED
+
+
 @pytest.fixture
 def repo(tmp_path: Path) -> SqliteDnsWatchAcknowledgementRepository:
-    return SqliteDnsWatchAcknowledgementRepository(tmp_path / "cernis.db")
+    return SqliteDnsWatchAcknowledgementRepository(tmp_path / "cernis.db", FakeClock())
 
 
 # ── Round-trip ────────────────────────────────────────────────────────────────
@@ -37,6 +51,26 @@ def test_ack_dann_acknowledged_keys_enthaelt_schluessel(
 ) -> None:
     repo.record(IP, CAT_OPEN, "ack")
     assert repo.acknowledged_keys() == {f"{IP}:{CAT_OPEN}"}
+
+
+def test_record_setzt_created_at_aus_clock_mit_tz_offset(
+    repo: SqliteDnsWatchAcknowledgementRepository,
+) -> None:
+    """``created_at`` kommt aus der Clock: nicht leer, mit Zonen-Offset, exakter Wert.
+
+    Belegt die A10-Etappe-2: der Zeitstempel wird explizit ueber den Clock-Port gesetzt
+    (timezone-aware UTC, ISO-8601 mit +00:00) statt ueber den Schema-Default
+    ``datetime('now')`` (UTC ohne Zonen-Kennzeichnung). Das Repository hat keinen Lesepfad
+    fuer ``created_at`` -- der Test liest die Spalte direkt aus der Tabelle.
+    """
+    repo.record(IP, CAT_OPEN, "ack")
+    with repo._connect() as conn:
+        created_at = conn.execute(
+            "SELECT created_at FROM dns_watch_acknowledgements WHERE remote_ip = ?", (IP,)
+        ).fetchone()["created_at"]
+
+    assert created_at.endswith("+00:00")  # traegt eine Zeitzonen-Kennzeichnung
+    assert created_at == FakeClock.FIXED.isoformat()  # exakt der Clock-Wert
 
 
 def test_keine_eintraege_keine_acknowledged_keys(

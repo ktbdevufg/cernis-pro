@@ -7,6 +7,8 @@ kommt nicht in die Historie und gilt als bekannt), die Idempotenz von ``record_s
 infrastructure-Repo-Tests (``tmp_path``-DB).
 """
 
+import sqlite3
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -14,9 +16,22 @@ import pytest
 from infrastructure.analysis_host_history_db import SqliteHostHistoryRepository
 
 
+class FakeClock:
+    """Erfuellt das ``Clock``-Protocol strukturell; liefert einen festen Zeitpunkt.
+
+    Timezone-aware UTC -- wie ``SystemClock``, damit ``.isoformat()`` einen Offset
+    (``+00:00``) traegt und der Test deterministisch gegen den Erwartungswert prueft.
+    """
+
+    FIXED = datetime(2026, 7, 18, 13, 23, 45, 123456, tzinfo=UTC)
+
+    def now(self) -> datetime:
+        return self.FIXED
+
+
 @pytest.fixture
 def repo(tmp_path: Path) -> SqliteHostHistoryRepository:
-    return SqliteHostHistoryRepository(tmp_path / "cernis.db")
+    return SqliteHostHistoryRepository(tmp_path / "cernis.db", FakeClock())
 
 
 # ── Round-trip ────────────────────────────────────────────────────────────────
@@ -30,6 +45,28 @@ def test_record_seen_dann_is_known(repo: SqliteHostHistoryRepository) -> None:
 def test_nicht_eingetragene_mac_ist_unbekannt(repo: SqliteHostHistoryRepository) -> None:
     repo.record_seen("aa:bb:cc:dd:ee:ff")
     assert repo.is_known("11:22:33:44:55:66") is False
+
+
+def test_record_seen_setzt_first_seen_aus_clock_mit_tz_offset(
+    repo: SqliteHostHistoryRepository, tmp_path: Path
+) -> None:
+    """``first_seen`` kommt aus der Clock: nicht leer, mit Zonen-Offset, exakter Wert.
+
+    Belegt die A10-Etappe-2: der Zeitstempel wird explizit ueber den Clock-Port gesetzt
+    (timezone-aware UTC, ISO-8601 mit +00:00) statt ueber den Schema-Default
+    ``datetime('now')`` (UTC ohne Zonen-Kennzeichnung). Das Repository hat keinen Lesepfad
+    fuer ``first_seen`` -- der Test liest die Spalte direkt aus der DB.
+    """
+    repo.record_seen("aa:bb:cc:dd:ee:ff")
+
+    conn = sqlite3.connect(tmp_path / "cernis.db")
+    first_seen = conn.execute(
+        "SELECT first_seen FROM analysis_known_hosts WHERE mac = ?", ("aa:bb:cc:dd:ee:ff",)
+    ).fetchone()[0]
+    conn.close()
+
+    assert first_seen.endswith("+00:00")  # traegt eine Zeitzonen-Kennzeichnung
+    assert first_seen == FakeClock.FIXED.isoformat()  # exakt der Clock-Wert
 
 
 # ── leere MAC ─────────────────────────────────────────────────────────────────

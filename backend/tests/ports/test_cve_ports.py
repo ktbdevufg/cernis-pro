@@ -14,6 +14,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from domain.cve.models import HostCheckState
+from infrastructure.clock import SystemClock
 from infrastructure.cve_acknowledgements_db import SqliteCveAcknowledgementRepository
 from infrastructure.cve_checkstate_db import SqliteCveCheckStateRepository
 from infrastructure.cve_findings_db import SqliteCveFindingRepository
@@ -66,7 +67,7 @@ def _assert_lookup(_: CveLookupProvider) -> None: ...
 def test_adapter_erfuellen_persistenz_ports(tmp_path: Path) -> None:
     findings = SqliteCveFindingRepository(tmp_path / "f.db")
     checkstate = SqliteCveCheckStateRepository(tmp_path / "c.db")
-    acks = SqliteCveAcknowledgementRepository(tmp_path / "a.db")
+    acks = SqliteCveAcknowledgementRepository(tmp_path / "a.db", SystemClock())
     _assert_finding_repo(findings)
     _assert_checkstate_repo(checkstate)
     _assert_ack_repo(acks)

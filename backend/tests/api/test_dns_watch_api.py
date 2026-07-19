@@ -21,6 +21,7 @@ from api.dns_watch import (
     provide_dns_watch_acknowledge,
 )
 from app import create_app
+from infrastructure.clock import SystemClock
 from infrastructure.config import AppConfig
 from infrastructure.dns_watch_acknowledgements_db import (
     SqliteDnsWatchAcknowledgementRepository,
@@ -150,7 +151,7 @@ def test_get_dns_watch_leere_sicht_liefert_leere_liste(app: FastAPI) -> None:
 def ack_context(
     app: FastAPI, tmp_path: Path
 ) -> tuple[FastAPI, SqliteDnsWatchAcknowledgementRepository]:
-    repo = SqliteDnsWatchAcknowledgementRepository(tmp_path / "cernis.db")
+    repo = SqliteDnsWatchAcknowledgementRepository(tmp_path / "cernis.db", SystemClock())
     # Acknowledge-Runner wie im Composition Root: Pass-Through an record(...).
     app.dependency_overrides[provide_dns_watch_acknowledge] = lambda: repo.record
     return app, repo
