@@ -648,6 +648,25 @@
         "sourcePattern": "{{source}} (matched on: {{matchedOn}})",
         "badgeTitle": "Which lists this contact is on — the classification comes from the lists, not from CERNIS."
       },
+      "access": {
+        "title": "Set up capture access",
+        "intro": "To read the actual domain names, CERNIS needs one-time read access to your Mac's capture devices. Your Mac will now ask for your password or Touch ID.",
+        "onceTitle": "One time",
+        "onceText": "you are asked once, not on every start.",
+        "limitedTitle": "Limited",
+        "limitedText": "read access for capturing only. CERNIS still does not run as an administrator.",
+        "revocableTitle": "Revocable",
+        "revocableText": "the setup can be undone at any time.",
+        "nextStep": "Next, your Mac will show its usual system window to confirm.",
+        "confirm": "Set up",
+        "later": "Later",
+        "laeuft": "Waiting for confirmation from your system …",
+        "erfolg": "Access is set up. The actual domain names are now shown.",
+        "abgebrochen": "Setup was cancelled. You can do it any time later.",
+        "fehler": "Setup did not succeed.",
+        "erneut": "Try again",
+        "schliessen": "Close"
+      },
       "sni": {
         "consentTitle": "Show real domain names?",
         "consentIntro": "Often only the host appears, not the actual service behind it. The requested domain name is what makes trackers and ad networks visible. CERNIS can read these names passively:",

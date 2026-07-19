@@ -648,6 +648,25 @@
         "sourcePattern": "{{source}} (Treffer: {{matchedOn}})",
         "badgeTitle": "Auf welchen Listen dieser Kontakt steht — die Einordnung stammt aus den Listen, nicht von CERNIS."
       },
+      "access": {
+        "title": "Zugriff für den Mitschnitt einrichten",
+        "intro": "Damit CERNIS die echten Domainnamen mitlesen kann, braucht es einmalig Leserechte auf die Mitschnitt-Geräte Ihres Macs. Ihr Mac fragt dazu gleich nach Ihrem Passwort oder Touch ID.",
+        "onceTitle": "Einmalig",
+        "onceText": "die Abfrage kommt einmal, danach nicht mehr bei jedem Start.",
+        "limitedTitle": "Begrenzt",
+        "limitedText": "nur Leserechte für den Mitschnitt. CERNIS läuft weiterhin nicht als Administrator.",
+        "revocableTitle": "Widerrufbar",
+        "revocableText": "die Einrichtung lässt sich jederzeit wieder rückgängig machen.",
+        "nextStep": "Im nächsten Schritt zeigt Ihr Mac das gewohnte Systemfenster zur Bestätigung.",
+        "confirm": "Einrichten",
+        "later": "Später",
+        "laeuft": "Warten auf die Bestätigung durch Ihr System …",
+        "erfolg": "Der Zugriff ist eingerichtet. Die echten Domainnamen werden jetzt angezeigt.",
+        "abgebrochen": "Die Einrichtung wurde abgebrochen. Sie können sie jederzeit nachholen.",
+        "fehler": "Die Einrichtung hat nicht geklappt.",
+        "erneut": "Erneut versuchen",
+        "schliessen": "Schließen"
+      },
       "sni": {
         "consentTitle": "Echte Domainnamen anzeigen?",
         "consentIntro": "Oft erscheint nur der Hoster, nicht der echte Dienst dahinter. Erst der angefragte Domainname macht Tracker und Werbenetze sichtbar. CERNIS kann diese Namen passiv mitlesen:",

@@ -107,6 +107,11 @@ from api.capture import (
     provide_stop_capture,
 )
 from api.capture import router as capture_router
+from api.capture_access import (
+    provide_get_capture_access_status,
+    provide_grant_capture_access,
+)
+from api.capture_access import router as capture_access_router
 from api.cve import (
     provide_cve_acknowledge,
     provide_get_acknowledged_findings,
@@ -404,6 +409,7 @@ from application.capture import (
     RunCapture,
     StartCapture,
 )
+from application.capture_access import GetCaptureAccessStatus, GrantCaptureAccess
 from application.cve import (
     ActiveFinding,
     GetAcknowledgedFindings,
@@ -829,6 +835,20 @@ else:
     )
     from infrastructure.traffic_permission import (
         TrafficPermissionAdapter as TrafficPermissionAdapter,
+    )
+
+# Plattform-Weiche fuer die Capture-Rechteeinrichtung (Etappe 2), gleiches Muster wie
+# oben: gleicher gebundener Name in beiden Zweigen, die Auswahl trifft NUR der
+# Composition Root. macOS richtet den Zugriff auf die BPF-Geraete ein; auf allen
+# uebrigen Plattformen meldet der Adapter ehrlich "trifft hier nicht zu" (Linux regelt
+# das ueber CAP_NET_RAW im Paket-Postinstall) -- kein Fehler, kein vorgetaeuschter Erfolg.
+if sys.platform == "darwin":
+    from infrastructure.capture_access_macos import (
+        CaptureAccessAdapter as CaptureAccessAdapter,
+    )
+else:
+    from infrastructure.capture_access_other import (
+        CaptureAccessAdapter as CaptureAccessAdapter,
     )
 from infrastructure.usage_stats_db import SqliteUsageStatsRepository
 
@@ -3964,6 +3984,18 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     )
     app.dependency_overrides[provide_start_poll] = lambda: _start_poll
     app.dependency_overrides[provide_stop_poll] = lambda: _stop_poll
+
+    # ── Capture-Rechteeinrichtung verdrahten (Etappe 2, Sniff-Familie) ──────────
+    # Zustandsloser Adapter direkt instanziiert (Muster InterfaceDiscoveryAdapter):
+    # er haelt keinen State, sondern prueft bzw. richtet Rechte ein. Welche Klasse
+    # das ist, entschied die Plattform-Weiche beim Import (macOS vs. uebrige).
+    app.include_router(capture_access_router)
+    app.dependency_overrides[provide_get_capture_access_status] = lambda: GetCaptureAccessStatus(
+        CaptureAccessAdapter()
+    )
+    app.dependency_overrides[provide_grant_capture_access] = lambda: GrantCaptureAccess(
+        CaptureAccessAdapter()
+    )
 
     # ── sni-Domaene v2 verdrahten (ADR 0017, passiver SNI-Mitschnitt) ────────────
     # EIN langlebiger Adapter-Singleton (lru_cache, Muster run_capture/_traffic_adapter):

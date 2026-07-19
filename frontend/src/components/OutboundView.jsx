@@ -14,11 +14,18 @@ import { Globe, GlobeLock, Flag, Filter } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import {
+  CAPTURE_ACCESS_OUTCOME,
+  CAPTURE_ACCESS_STATE,
+  fetchCaptureAccess,
+  grantCaptureAccess,
+} from "../api/captureAccess.js";
 import { fetchOutboundContacts } from "../api/outbound.js";
 import { matchContacts } from "../api/blocklist.js";
 import { fetchSniMap, fetchSniStatus } from "../api/sni.js";
 import { fetchSettings, updateSetting } from "../api/settings.js";
 import { useSni } from "../hooks/useSni.js";
+import CaptureAccessDialog from "./CaptureAccessDialog.jsx";
 import NpcapDialog from "./NpcapDialog.jsx";
 import OutboundRecordingPanel from "./OutboundRecordingPanel.jsx";
 import OutboundConsentDialog from "./OutboundConsentDialog.jsx";
@@ -272,6 +279,17 @@ export default function OutboundView() {
   // Offener NpcapDialog (Marker-String) oder null. Mount/Unmount wie bei Dialogen.
   const [npcapDialogMarker, setNpcapDialogMarker] = useState(null);
 
+  // ── Rechteeinrichtung (Etappe 2) ────────────────────────────────────────────
+  // Ob der Erklär-Dialog offen ist, der VOR der Systemabfrage sagt, was
+  // eingerichtet wird. Erst nach dem Bestätigen dort wird die Abfrage ausgelöst.
+  const [zeigeAccessDialog, setZeigeAccessDialog] = useState(false);
+  // Ob die Systemabfrage gerade läuft (der native Dialog ist offen). Steuert den
+  // Warte-Zustand — der Aufruf dauert, solange der Nutzer nicht geantwortet hat.
+  const [accessLaeuft, setAccessLaeuft] = useState(false);
+  // Ergebnis des letzten Einrichtungsversuchs: { outcome, reason } oder null.
+  // "cancelled" ist KEIN Fehler und bekommt darum eine ruhige, eigene Anzeige.
+  const [accessErgebnis, setAccessErgebnis] = useState(null);
+
   // Geteilter SNI-Lifecycle-Hook: real gestartet beim ERSTEN acquire, real
   // gestoppt erst beim LETZTEN release (Reference-Count). running/starting/error
   // spiegeln den globalen Sniffer-Zustand.
@@ -490,6 +508,13 @@ export default function OutboundView() {
   // Einwilligung erteilt: persistieren (fehlertolerant — UI läuft auch bei
   // Schreibfehler weiter), Zustand setzen, Dialog schließen. dontAsk wird beim
   // Zustimmen nicht gesondert gebraucht (Zustimmen persistiert ohnehin).
+  //
+  // Danach (Etappe 2): prüfen, ob der Zugriff auf die Mitschnitt-Geräte schon
+  // eingerichtet ist. Fehlt er, wird NICHT sofort die Systemabfrage ausgelöst,
+  // sondern erst der Erklär-Dialog gezeigt — der Nutzer soll wissen, was gleich
+  // passiert, bevor ein Passwortfenster erscheint. Ist alles eingerichtet (oder
+  // gilt die Einrichtung hier nicht, z. B. Linux), passiert nichts Zusätzliches:
+  // SNI startet wie bisher über den consent-Zustand.
   const handleGrant = async () => {
     try {
       await updateSetting("outbound_sni_consent", "granted");
@@ -498,6 +523,50 @@ export default function OutboundView() {
     }
     setConsent("granted");
     setZeigeConsentDialog(false);
+
+    try {
+      const status = await fetchCaptureAccess();
+      if (status.state === CAPTURE_ACCESS_STATE.MISSING) {
+        setZeigeAccessDialog(true);
+      }
+    } catch (fehler) {
+      // Status nicht abfragbar (Backend weg): kein Dialog, kein Lärm. SNI meldet
+      // fehlende Rechte ohnehin über seinen eigenen Hinweis.
+      console.error("Status der Rechteeinrichtung nicht abfragbar", fehler);
+    }
+  };
+
+  // Erklär-Dialog bestätigt: JETZT die Systemabfrage auslösen. Der Aufruf dauert,
+  // solange der native Dialog offen ist — darum accessLaeuft als Warte-Zustand.
+  // Alle drei Ausgänge werden ehrlich übernommen: "granted" (SNI läuft weiter wie
+  // bisher), "cancelled" (ruhiger Hinweis, jederzeit nachholbar) und "failed"
+  // (verständliche Meldung mit Grund).
+  const handleAccessGrant = async () => {
+    setZeigeAccessDialog(false);
+    setAccessLaeuft(true);
+    try {
+      const ergebnis = await grantCaptureAccess();
+      setAccessErgebnis(ergebnis);
+    } catch (fehler) {
+      // Transportfehler (Backend nicht erreichbar) ist ein echter Fehlschlag —
+      // aber ohne Grund vom Backend; der Text kommt dann aus der i18n.
+      console.error("Rechteeinrichtung fehlgeschlagen", fehler);
+      setAccessErgebnis({ outcome: CAPTURE_ACCESS_OUTCOME.FAILED, reason: "" });
+    } finally {
+      setAccessLaeuft(false);
+    }
+  };
+
+  // Erklär-Dialog abgelehnt: nichts einrichten, kein Fehler. Die Einwilligung in
+  // die SNI-Beobachtung bleibt bestehen; der Nutzer kann es später nachholen.
+  const handleAccessDismiss = () => setZeigeAccessDialog(false);
+
+  // Ergebnis-Hinweis schließen bzw. erneut versuchen (öffnet wieder den Erklär-
+  // Dialog, damit auch der zweite Anlauf mit der Erklärung beginnt).
+  const handleAccessErgebnisSchliessen = () => setAccessErgebnis(null);
+  const handleAccessErneut = () => {
+    setAccessErgebnis(null);
+    setZeigeAccessDialog(true);
   };
 
   // Einwilligung abgelehnt: nur bei "Nicht mehr fragen" dauerhaft als "denied"
@@ -526,6 +595,65 @@ export default function OutboundView() {
       {zeigeConsentDialog && (
         <OutboundConsentDialog onGrant={handleGrant} onDeny={handleDeny} />
       )}
+
+      {/* Erklär-Dialog vor der Rechteeinrichtung (Etappe 2): erklärt in klarer
+          Sprache, was eingerichtet wird, BEVOR das native Systemfenster nach dem
+          Passwort fragt. Erst „Einrichten" löst die Systemabfrage aus. */}
+      {zeigeAccessDialog && (
+        <CaptureAccessDialog
+          onConfirm={handleAccessGrant}
+          onDismiss={handleAccessDismiss}
+        />
+      )}
+
+      {/* Warte-Streifen, solange das Systemfenster offen ist. Ruhig gehalten —
+          der Nutzer beantwortet gerade eine Passwort-/Touch-ID-Abfrage. */}
+      {accessLaeuft && (
+        <div className="outbound__hinweis" role="status">
+          <span className="outbound__hinweis-text">
+            {t("beobachten.outbound.access.laeuft")}
+          </span>
+        </div>
+      )}
+
+      {/* Ergebnis der Rechteeinrichtung — ehrlich nach Ausgang unterschieden:
+          "granted"   -> kurze Bestätigung, SNI läuft wie bisher weiter.
+          "cancelled" -> RUHIGER Hinweis, KEINE Fehleroptik; jederzeit nachholbar.
+          "failed"    -> verständliche Meldung; der Grund aus dem Backend wird
+                         angehängt, wenn es einen gibt (sonst nur der Klartext).
+          "not_applicable" wird bewusst NICHT angezeigt: auf Linux ist nichts
+          einzurichten, dafür braucht der Nutzer keine Meldung. */}
+      {accessErgebnis &&
+        accessErgebnis.outcome !== CAPTURE_ACCESS_OUTCOME.NOT_APPLICABLE && (
+          <div className="outbound__hinweis" role="note">
+            <span className="outbound__hinweis-text">
+              {accessErgebnis.outcome === CAPTURE_ACCESS_OUTCOME.GRANTED &&
+                t("beobachten.outbound.access.erfolg")}
+              {accessErgebnis.outcome === CAPTURE_ACCESS_OUTCOME.CANCELLED &&
+                t("beobachten.outbound.access.abgebrochen")}
+              {accessErgebnis.outcome === CAPTURE_ACCESS_OUTCOME.FAILED &&
+                (accessErgebnis.reason
+                  ? `${t("beobachten.outbound.access.fehler")} ${accessErgebnis.reason}`
+                  : t("beobachten.outbound.access.fehler"))}
+            </span>
+            {accessErgebnis.outcome !== CAPTURE_ACCESS_OUTCOME.GRANTED && (
+              <button
+                type="button"
+                className="outbound__hinweis-button"
+                onClick={handleAccessErneut}
+              >
+                {t("beobachten.outbound.access.erneut")}
+              </button>
+            )}
+            <button
+              type="button"
+              className="outbound__hinweis-button"
+              onClick={handleAccessErgebnisSchliessen}
+            >
+              {t("beobachten.outbound.access.schliessen")}
+            </button>
+          </div>
+        )}
 
       {/* NpcapDialog: marker-abhängiger Erklär-/Download-Dialog. Mount/Unmount
           über den State (npcapDialogMarker); onClose setzt ihn zurück. */}
