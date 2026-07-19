@@ -264,6 +264,29 @@ def test_bpf_probe_all_permission_denied_returns_error_text(
     assert "setcap" not in result
 
 
+def test_bpf_probe_opens_read_write(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Die Probe oeffnet mit ``O_RDWR`` -- genau das, was scapy danach braucht.
+
+    Etappe 2f: mit ``O_RDONLY`` gelang die Probe auf ``crw-r-----``-Geraeten und
+    meldete faelschlich "Recht vorhanden", waehrend der echte Sniff an
+    "Permission denied: could not open /dev/bpf0" scheiterte (scapy oeffnet BPF
+    schreibend, um die Filter per ioctl zu setzen). Der Modus wird darum
+    festgenagelt: sonst faellt genau diese Diskrepanz wieder durch.
+    """
+    gesehen: list[int] = []
+
+    def _open(path: str, flags: int) -> int:
+        gesehen.append(flags)
+        return 7
+
+    monkeypatch.setattr(os, "open", _open)
+    monkeypatch.setattr(os, "close", lambda _fd: None)
+
+    assert sniff_core._check_bpf_permission("SNI capture") is None
+    assert gesehen, "Die Probe hat keinen BPF-Knoten geoeffnet"
+    assert all(f & os.O_RDWR == os.O_RDWR for f in gesehen)
+
+
 def test_bpf_probe_missing_nodes_is_inconclusive(monkeypatch: pytest.MonkeyPatch) -> None:
     """Kein Knoten existiert (ENOENT) -> ``None`` (inconclusive), scapy darf es versuchen."""
     monkeypatch.setattr(

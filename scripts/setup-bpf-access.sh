@@ -13,9 +13,10 @@
 #
 # NEUFASSUNG nach v2-Regeln, bewusst NICHT abgeleitet vom v1-Skript
 # scripts/install-bpf-permissions.sh. Zwei harte Unterschiede:
-#   1. Rechte-Modell: chgrp auf eine EIGENE Gruppe (cernis-capture) + chmod g+r.
+#   1. Rechte-Modell: chgrp auf eine EIGENE Gruppe (cernis-capture) + chmod g+rw.
 #      Das v1-Skript setzte chmod o+rw und oeffnete die Geraete damit fuer JEDEN
 #      Prozess JEDES Nutzers der Maschine (Mitlesen des gesamten Netzverkehrs).
+#      Der Unterschied bleibt o+rw vs. g+rw: NUR die Gruppe darf, nicht jeder.
 #   2. Fehlerbehandlung: KEIN "|| true" auf sicherheitsrelevanten Schritten. Jeder
 #      fehlgeschlagene Schritt bricht mit Exit-Code != 0 und klarer stderr-Meldung
 #      ab (S3: kein stiller Fallback auf unsicheres Verhalten).
@@ -76,8 +77,9 @@ else
 fi
 
 # ── c) Helferskript nach /usr/local/bin/ legen ───────────────
-# Es weist die BPF-Geraete der Gruppe zu und gibt IHR Leserechte (g+r) -- bewusst
-# NICHT o+rw. /usr/local/bin existiert nicht auf jedem System zwingend.
+# Es weist die BPF-Geraete der Gruppe zu und gibt IHR Lese- und Schreibrechte (g+rw,
+# von scapy zwingend gebraucht) -- bewusst NICHT o+rw. /usr/local/bin existiert nicht
+# auf jedem System zwingend.
 mkdir -p /usr/local/bin || fehler "/usr/local/bin konnte nicht angelegt werden."
 
 # Quoted Heredoc ('HELFER'): der Inhalt wird UNVERAENDERT geschrieben, die Variablen
@@ -85,8 +87,12 @@ mkdir -p /usr/local/bin || fehler "/usr/local/bin konnte nicht angelegt werden."
 cat > "${HELFER_PFAD}" << 'HELFER' || fehler "Helferskript konnte nicht geschrieben werden."
 #!/bin/bash
 # CERNIS PRO 2.0 - setzt die Rechte der BPF-Geraete (vom LaunchDaemon bei jedem Boot).
-# Gruppe cernis-capture erhaelt LESErechte. Bewusst kein o+rw: die Geraete bleiben
-# fuer alle uebrigen Nutzer der Maschine unzugaenglich.
+# Gruppe cernis-capture erhaelt LESE- UND SCHREIBrechte (g+rw). Schreibrechte sind
+# noetig, weil scapy die BPF-Geraete SCHREIBEND oeffnet (Setzen der BPF-Filter per
+# ioctl) -- g+r allein genuegt nicht und endet in "Permission denied: could not open
+# /dev/bpf0". Referenz: Wiresharks ChmodBPF vergibt seiner Capture-Gruppe ebenfalls rw.
+# Bewusst weiterhin kein o+rw: die Geraete bleiben fuer alle uebrigen Nutzer der
+# Maschine unzugaenglich.
 set -euo pipefail
 
 # Vor dem ersten Zugriff existiert ggf. nur /dev/bpf0; nullglob verhindert, dass das
@@ -99,7 +105,7 @@ if [ "${#GERAETE[@]}" -eq 0 ]; then
 fi
 
 chgrp cernis-capture "${GERAETE[@]}"
-chmod g+r "${GERAETE[@]}"
+chmod g+rw "${GERAETE[@]}"
 HELFER
 
 chown root:wheel "${HELFER_PFAD}" || fehler "Eigentuemer des Helferskripts nicht setzbar."

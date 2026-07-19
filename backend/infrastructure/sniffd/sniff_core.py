@@ -235,7 +235,8 @@ def check_raw_permission(zweck: str = "Packet capture") -> str | None:
 
     * Linux (``sys.platform == "linux"``): ``AF_PACKET``-Raw-Socket probieren.
     * macOS (``sys.platform == "darwin"``): die BPF-Geraeteknoten ``/dev/bpf0``
-      bis ``/dev/bpf3`` nacheinander lesend oeffnen (sofort wieder schliessen) --
+      bis ``/dev/bpf3`` nacheinander lesend+schreibend (``O_RDWR``, wie scapy)
+      oeffnen (sofort wieder schliessen) --
       scapy sniff't auf macOS ueber BPF, nicht ueber Raw-Sockets. EIN gelungenes
       Oeffnen -> Recht vorhanden (``None``). Scheitert JEDES mit ``PermissionError``
       -> Fehlertext. Jeder andere ``OSError`` (Knoten fehlt, alle belegt) ->
@@ -273,7 +274,14 @@ def check_raw_permission(zweck: str = "Packet capture") -> str | None:
 
 
 def _check_bpf_permission(zweck: str) -> str | None:
-    """macOS-Probe: ``/dev/bpf*`` lesend oeffnen; Fehlertext oder ``None`` wenn OK.
+    """macOS-Probe: ``/dev/bpf*`` LESEND+SCHREIBEND oeffnen; Fehlertext oder ``None``.
+
+    ``os.O_RDWR`` (nicht ``O_RDONLY``): die Probe muss GENAU das pruefen, was scapy
+    danach braucht -- scapy oeffnet die BPF-Geraete schreibend (Setzen der BPF-Filter
+    per ioctl). Mit ``O_RDONLY`` gelang die Probe auf ``crw-r-----``-Geraeten und
+    meldete "Recht vorhanden", waehrend der echte Sniff danach an
+    "Permission denied: could not open /dev/bpf0" scheiterte -- die Probe muss diese
+    Diskrepanz aufdecken, nicht verdecken (S3: kein falsches Gruen).
 
     Ein gelungenes Oeffnen beweist das Recht (``None``). Nur wenn JEDER geprobte
     Knoten mit ``PermissionError`` scheitert, ist das Recht sicher weg -> Fehlertext
@@ -283,7 +291,7 @@ def _check_bpf_permission(zweck: str) -> str | None:
     permission_denied = False
     for node in _BPF_PROBE_NODES:
         try:
-            fd = os.open(node, os.O_RDONLY)
+            fd = os.open(node, os.O_RDWR)
         except PermissionError:
             permission_denied = True
         except OSError:
@@ -294,7 +302,7 @@ def _check_bpf_permission(zweck: str) -> str | None:
     if permission_denied:
         return (
             f"Permission denied -- {zweck} requires root or CAP_NET_RAW; "
-            f"on macOS this means read access to the BPF devices (/dev/bpf*)."
+            f"on macOS this means read+write access to the BPF devices (/dev/bpf*)."
         )
     return None  # inconclusive -- kein Knoten geprobt/erreichbar
 
