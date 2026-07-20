@@ -110,6 +110,7 @@ from api.capture import router as capture_router
 from api.capture_access import (
     provide_get_capture_access_status,
     provide_grant_capture_access,
+    provide_revoke_capture_access,
 )
 from api.capture_access import router as capture_access_router
 from api.cve import (
@@ -409,7 +410,11 @@ from application.capture import (
     RunCapture,
     StartCapture,
 )
-from application.capture_access import GetCaptureAccessStatus, GrantCaptureAccess
+from application.capture_access import (
+    GetCaptureAccessStatus,
+    GrantCaptureAccess,
+    RevokeCaptureAccess,
+)
 from application.cve import (
     ActiveFinding,
     GetAcknowledgedFindings,
@@ -3994,6 +3999,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         CaptureAccessAdapter()
     )
     app.dependency_overrides[provide_grant_capture_access] = lambda: GrantCaptureAccess(
+        CaptureAccessAdapter()
+    )
+    app.dependency_overrides[provide_revoke_capture_access] = lambda: RevokeCaptureAccess(
         CaptureAccessAdapter()
     )
 

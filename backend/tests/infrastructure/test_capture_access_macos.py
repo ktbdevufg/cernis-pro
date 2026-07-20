@@ -21,7 +21,11 @@ from typing import Any
 
 import pytest
 
-from domain.capture_access import CaptureAccessOutcome, CaptureAccessState
+from domain.capture_access import (
+    CaptureAccessOutcome,
+    CaptureAccessRevokeOutcome,
+    CaptureAccessState,
+)
 from infrastructure import capture_access_macos as adapter_modul
 from infrastructure.capture_access_macos import CaptureAccessAdapter
 
@@ -63,10 +67,12 @@ def _mit_sicherem_skript(monkeypatch: pytest.MonkeyPatch, inhalt: str = _SKRIPT_
 
     Der Adapter LIEST die Datei jetzt (Etappe 2b) und uebergibt den Inhalt; darum wird
     hier auch ``_read_script`` ersetzt. Es wird nie eine echte Datei angefasst.
+
+    ``_resolve_script_path`` nimmt seit Etappe 3 den Skriptnamen als Parameter (beide
+    Skripte liegen am selben Ort); der Ersatz reicht ihn in den Pfad durch, damit
+    Tests sehen koennen, WELCHES Skript aufgeloest wurde.
     """
-    monkeypatch.setattr(
-        adapter_modul, "_resolve_script_path", lambda: "/bundle/setup-bpf-access.sh"
-    )
+    monkeypatch.setattr(adapter_modul, "_resolve_script_path", lambda name: f"/bundle/{name}")
     monkeypatch.setattr(os, "stat", lambda _p: _FakeStat())
     monkeypatch.setattr(adapter_modul, "_read_script", lambda _p: inhalt)
 
@@ -309,7 +315,7 @@ def test_grant_allows_group_writable_script(monkeypatch: pytest.MonkeyPatch) -> 
 def test_grant_refuses_missing_script(monkeypatch: pytest.MonkeyPatch) -> None:
     """Skript nicht vorhanden -> ``FAILED`` mit Grund, keine Ausfuehrung."""
     _als_macos(monkeypatch)
-    monkeypatch.setattr(adapter_modul, "_resolve_script_path", lambda: "/weg/setup-bpf-access.sh")
+    monkeypatch.setattr(adapter_modul, "_resolve_script_path", lambda name: f"/weg/{name}")
 
     def _fehlt(_p: str) -> Any:
         raise FileNotFoundError("nicht da")
@@ -459,9 +465,16 @@ def test_resolve_script_path_prefers_bundle_up_scripts(
     ziel = tmp_path / "CernisPro.app" / "Contents" / "Resources" / "_up_" / "scripts"
     ziel.mkdir(parents=True)
     (ziel / "setup-bpf-access.sh").write_text("#!/bin/bash\n", encoding="utf-8")
+    (ziel / "revoke-bpf-access.sh").write_text("#!/bin/bash\n", encoding="utf-8")
     monkeypatch.setattr(sys, "executable", str(macos_dir / "cernis-backend"))
 
-    assert adapter_modul._resolve_script_path() == str(ziel / "setup-bpf-access.sh")
+    # Beide Skripte liegen an derselben Stelle; der Name entscheidet, welches gemeint ist.
+    assert adapter_modul._resolve_script_path("setup-bpf-access.sh") == str(
+        ziel / "setup-bpf-access.sh"
+    )
+    assert adapter_modul._resolve_script_path("revoke-bpf-access.sh") == str(
+        ziel / "revoke-bpf-access.sh"
+    )
 
 
 def test_resolve_script_path_falls_back_to_repo_scripts(
@@ -472,20 +485,26 @@ def test_resolve_script_path_falls_back_to_repo_scripts(
     macos_dir.mkdir(parents=True)  # KEINE Resources/_up_/scripts angelegt
     monkeypatch.setattr(sys, "executable", str(macos_dir / "cernis-backend"))
 
-    pfad = adapter_modul._resolve_script_path()
+    pfad = adapter_modul._resolve_script_path("setup-bpf-access.sh")
 
     assert pfad.endswith(os.path.join("scripts", "setup-bpf-access.sh"))
     assert "_up_" not in pfad
 
+    widerruf = adapter_modul._resolve_script_path("revoke-bpf-access.sh")
 
-def test_bundled_repo_script_passes_the_source_check() -> None:
-    """Das MITGELIEFERTE Repo-Skript besteht die Quellpruefung tatsaechlich.
+    assert widerruf.endswith(os.path.join("scripts", "revoke-bpf-access.sh"))
+    assert "_up_" not in widerruf
 
-    Kein Mock: prueft die echte Datei unter ``scripts/``. Schlaegt dieser Test fehl,
-    waere die Einrichtung im Dev-Betrieb blockiert -- genau der Fehler, den Etappe 2b
-    behebt.
+
+@pytest.mark.parametrize("name", ["setup-bpf-access.sh", "revoke-bpf-access.sh"])
+def test_bundled_repo_script_passes_the_source_check(name: str) -> None:
+    """BEIDE mitgelieferten Repo-Skripte bestehen die Quellpruefung tatsaechlich.
+
+    Kein Mock: prueft die echten Dateien unter ``scripts/``. Schlaegt dieser Test
+    fehl, waere die Einrichtung bzw. der Widerruf im Dev-Betrieb blockiert -- genau
+    der Fehler, den Etappe 2b behoben hat.
     """
-    pfad = adapter_modul._resolve_script_path()
+    pfad = adapter_modul._resolve_script_path(name)
 
     assert os.path.isfile(pfad)
     assert adapter_modul._verify_script_safe(pfad) is None
@@ -552,3 +571,353 @@ def test_grant_neutralises_shell_metacharacters_in_user(
     # Der gefaehrliche Teil steckt vollstaendig IM gequoteten Argument, steht also
     # nicht als eigener Befehl da.
     assert "'karl; rm -rf /'" in script
+
+
+# ── Etappe 3: Mitglieder der Capture-Gruppe lesen (reine Leseoperation) ─────
+
+
+def _dscl_liefert(monkeypatch: pytest.MonkeyPatch, ergebnis: Any) -> list[dict[str, Any]]:
+    """Ersetzt ``subprocess.run`` fuer die ``dscl``-Abfrage; sammelt die Aufrufe.
+
+    Gesammelt werden Befehl UND ``env``, damit sich die C-Locale-Regel pruefen laesst.
+    """
+    aufrufe: list[dict[str, Any]] = []
+
+    def _run(cmd: list[str], **kwargs: Any) -> Any:
+        aufrufe.append({"cmd": cmd, "env": kwargs.get("env")})
+        if isinstance(ergebnis, BaseException):
+            raise ergebnis
+        return ergebnis
+
+    monkeypatch.setattr(subprocess, "run", _run)
+    return aufrufe
+
+
+class _FakeDscl:
+    """``subprocess.run``-Rueckgabe der ``dscl``-Abfrage (returncode + stdout)."""
+
+    def __init__(self, returncode: int, stdout: str = "") -> None:
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = ""
+
+
+def test_read_group_members_parses_the_membership_line(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``GroupMembership: karl anna`` -> ``("karl", "anna")`` in dieser Reihenfolge."""
+    aufrufe = _dscl_liefert(
+        monkeypatch, _FakeDscl(returncode=0, stdout="GroupMembership: karl anna\n")
+    )
+
+    assert adapter_modul._read_group_members() == ("karl", "anna")
+    # Es wird GELESEN, nicht geschrieben -- kein osascript, kein Passwortdialog.
+    assert aufrufe[0]["cmd"][0] == "dscl"
+    assert "-read" in aufrufe[0]["cmd"]
+
+
+def test_read_group_members_forces_c_locale(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Die Ausgabe wird geparst -> ``LC_ALL=C`` ist Pflicht, sonst kann sie uebersetzt sein."""
+    aufrufe = _dscl_liefert(monkeypatch, _FakeDscl(returncode=0, stdout="GroupMembership: karl\n"))
+
+    adapter_modul._read_group_members()
+
+    assert aufrufe[0]["env"] is not None
+    assert aufrufe[0]["env"]["LC_ALL"] == "C"
+
+
+def test_read_group_members_returns_empty_when_group_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fehlende Gruppe (``dscl`` endet != 0) -> leeres Tuple, KEIN Fehler.
+
+    "Es gibt keine Gruppe" heisst "es gibt keine Mitglieder" -- das ist eine gueltige
+    Antwort und kein Fehlschlag. Wuerde hier geworfen, waere die Status-Abfrage auf
+    jeder nicht eingerichteten Maschine kaputt.
+    """
+    _dscl_liefert(
+        monkeypatch,
+        _FakeDscl(returncode=1, stdout=""),
+    )
+
+    assert adapter_modul._read_group_members() == ()
+
+
+def test_read_group_members_returns_empty_for_group_without_members(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Gruppe ohne Mitglieder liefert die Zeile gar nicht -> leeres Tuple."""
+    _dscl_liefert(
+        monkeypatch,
+        _FakeDscl(returncode=0, stdout="dsAttrTypeNative:objectClass: dsRecTypeStandard:Groups\n"),
+    )
+
+    assert adapter_modul._read_group_members() == ()
+
+
+def test_read_group_members_survives_a_broken_dscl(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Kein/haengendes ``dscl`` -> leeres Tuple; die Status-Abfrage bleibt benutzbar.
+
+    Die Mitgliederliste ist ZUSATZauskunft; ihr Ausfall darf die Zugriffsfrage nicht
+    mit in den Abgrund reissen.
+    """
+    _dscl_liefert(monkeypatch, OSError("kein dscl"))
+
+    assert adapter_modul._read_group_members() == ()
+
+
+def test_status_carries_the_group_members(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``status()`` fuellt ``members`` -- der ``state`` bleibt von der Probe bestimmt."""
+    _als_macos(monkeypatch)
+    monkeypatch.setattr(adapter_modul, "check_raw_permission", lambda _zweck: None)
+    monkeypatch.setattr(adapter_modul, "_read_group_members", lambda: ("karl", "anna"))
+
+    status = CaptureAccessAdapter().status()
+
+    assert status.state is CaptureAccessState.GRANTED
+    assert status.members == ("karl", "anna")
+
+
+def test_status_members_do_not_change_the_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mitglieder vorhanden, Probe meldet aber fehlenden Zugriff -> weiterhin ``MISSING``.
+
+    Die Zugriffsfrage beantwortet ALLEIN die Probe. Waere die Mitgliederliste ein
+    zweiter Indikator, gaebe es wieder zwei "Wahrheiten" ueber denselben Zustand.
+    """
+    _als_macos(monkeypatch)
+    monkeypatch.setattr(adapter_modul, "check_raw_permission", lambda _zweck: "kein Zugriff")
+    monkeypatch.setattr(adapter_modul, "_read_group_members", lambda: ("karl",))
+
+    status = CaptureAccessAdapter().status()
+
+    assert status.state is CaptureAccessState.MISSING
+    assert status.members == ("karl",)
+
+
+# ── Etappe 3: revoke() -- Modus-Weitergabe und die S3-Dreiteilung ───────────
+
+
+def test_revoke_uses_the_revoke_script_not_the_setup_script(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Der Widerruf loest das WIDERRUFS-Skript auf, nicht das Einrichtungsskript."""
+    _als_macos(monkeypatch)
+    gesehen: list[str] = []
+
+    def _pfad(name: str) -> str:
+        gesehen.append(name)
+        return f"/bundle/{name}"
+
+    monkeypatch.setattr(adapter_modul, "_resolve_script_path", _pfad)
+    monkeypatch.setattr(os, "stat", lambda _p: _FakeStat())
+    monkeypatch.setattr(adapter_modul, "_read_script", lambda _p: _SKRIPT_INHALT)
+    _osascript_liefert(monkeypatch, _FakeCompleted(returncode=0))
+
+    CaptureAccessAdapter().revoke(nur_mitgliedschaft=False)
+
+    assert gesehen == ["revoke-bpf-access.sh"]
+
+
+def test_revoke_passes_full_mode_as_second_argument(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``nur_mitgliedschaft=False`` -> zweites Argument ``vollstaendig``.
+
+    Der Modus ist das einzige Unterscheidungsmerkmal der beiden Widerrufsarten;
+    kaeme er falsch an, wuerde still mehr abgeraeumt als angekuendigt.
+    """
+    _als_macos(monkeypatch)
+    _mit_sicherem_skript(monkeypatch)
+    monkeypatch.setattr(getpass, "getuser", lambda: "karl")
+    aufrufe = _osascript_liefert(monkeypatch, _FakeCompleted(returncode=0))
+
+    CaptureAccessAdapter().revoke(nur_mitgliedschaft=False)
+
+    assert "/bin/bash -s -- karl vollstaendig" in aufrufe[0][2]
+
+
+def test_revoke_passes_membership_mode_as_second_argument(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``nur_mitgliedschaft=True`` -> zweites Argument ``mitgliedschaft``."""
+    _als_macos(monkeypatch)
+    _mit_sicherem_skript(monkeypatch)
+    monkeypatch.setattr(getpass, "getuser", lambda: "karl")
+    aufrufe = _osascript_liefert(monkeypatch, _FakeCompleted(returncode=0))
+
+    CaptureAccessAdapter().revoke(nur_mitgliedschaft=True)
+
+    assert "/bin/bash -s -- karl mitgliedschaft" in aufrufe[0][2]
+
+
+def test_revoke_quotes_both_arguments_separately(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Benutzername und Modus bleiben ZWEI Argumente, auch bei Leerzeichen im Namen.
+
+    Ein gemeinsames Quoten wuerde beide zu EINEM Wort verschmelzen; das Skript
+    bekaeme dann nur ein Argument und braeche mit "Genau zwei Argumente erwartet" ab.
+    """
+    _als_macos(monkeypatch)
+    _mit_sicherem_skript(monkeypatch)
+    monkeypatch.setattr(getpass, "getuser", lambda: "karl bach")
+    aufrufe = _osascript_liefert(monkeypatch, _FakeCompleted(returncode=0))
+
+    CaptureAccessAdapter().revoke(nur_mitgliedschaft=True)
+
+    assert "/bin/bash -s -- 'karl bach' mitgliedschaft" in aufrufe[0][2]
+
+
+def test_revoke_success_returns_revoked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exit 0 -> ``REVOKED`` ohne Begruendung; der Aufruf geht ueber ``osascript``."""
+    _als_macos(monkeypatch)
+    _mit_sicherem_skript(monkeypatch)
+    aufrufe = _osascript_liefert(monkeypatch, _FakeCompleted(returncode=0))
+
+    result = CaptureAccessAdapter().revoke(nur_mitgliedschaft=False)
+
+    assert result.outcome is CaptureAccessRevokeOutcome.REVOKED
+    assert result.reason == ""
+    assert aufrufe[0][0] == "osascript"
+    assert "with administrator privileges" in aufrufe[0][2]
+
+
+def test_revoke_user_cancel_is_its_own_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Abbruch (AppleScript -128) -> ``CANCELLED``, NICHT ``FAILED`` und ohne Fehlertext."""
+    _als_macos(monkeypatch)
+    _mit_sicherem_skript(monkeypatch)
+    _osascript_liefert(
+        monkeypatch,
+        _FakeCompleted(returncode=1, stderr="execution error: Von Benutzer:in abgebrochen. (-128)"),
+    )
+
+    result = CaptureAccessAdapter().revoke(nur_mitgliedschaft=False)
+
+    assert result.outcome is CaptureAccessRevokeOutcome.CANCELLED
+    assert result.reason == ""
+
+
+def test_revoke_cancel_detected_language_independently(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Auch hier wird der Abbruch an der NUMMER -128 erkannt, nicht am Text."""
+    _als_macos(monkeypatch)
+    _mit_sicherem_skript(monkeypatch)
+    _osascript_liefert(
+        monkeypatch,
+        _FakeCompleted(returncode=1, stderr="execution error: User canceled. (-128)"),
+    )
+
+    ergebnis = CaptureAccessAdapter().revoke(nur_mitgliedschaft=True)
+
+    assert ergebnis.outcome is CaptureAccessRevokeOutcome.CANCELLED
+
+
+def test_revoke_failure_reports_reason(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Echter Fehlschlag -> ``FAILED`` MIT Grund (benannt, nicht verschluckt)."""
+    _als_macos(monkeypatch)
+    _mit_sicherem_skript(monkeypatch)
+    _osascript_liefert(
+        monkeypatch,
+        _FakeCompleted(returncode=1, stderr="FEHLER: Gruppe konnte nicht geloescht werden."),
+    )
+
+    result = CaptureAccessAdapter().revoke(nur_mitgliedschaft=False)
+
+    assert result.outcome is CaptureAccessRevokeOutcome.FAILED
+    assert "Gruppe konnte nicht geloescht werden" in result.reason
+
+
+def test_revoke_failure_without_stderr_still_names_something(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fehlschlag ohne stderr -> ``FAILED`` mit ehrlichem Ersatztext (nie leer)."""
+    _als_macos(monkeypatch)
+    _mit_sicherem_skript(monkeypatch)
+    _osascript_liefert(monkeypatch, _FakeCompleted(returncode=2, stderr=""))
+
+    result = CaptureAccessAdapter().revoke(nur_mitgliedschaft=False)
+
+    assert result.outcome is CaptureAccessRevokeOutcome.FAILED
+    assert result.reason != ""
+
+
+def test_revoke_timeout_is_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Zeitueberschreitung -> ``FAILED`` mit Grund, kein haengender Aufruf."""
+    _als_macos(monkeypatch)
+    _mit_sicherem_skript(monkeypatch)
+    _osascript_liefert(monkeypatch, subprocess.TimeoutExpired(cmd="osascript", timeout=300))
+
+    result = CaptureAccessAdapter().revoke(nur_mitgliedschaft=False)
+
+    assert result.outcome is CaptureAccessRevokeOutcome.FAILED
+    assert result.reason != ""
+
+
+def test_revoke_missing_osascript_is_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Kein ``osascript`` vorhanden -> ``FAILED``, KEIN stilles No-op."""
+    _als_macos(monkeypatch)
+    _mit_sicherem_skript(monkeypatch)
+    _osascript_liefert(monkeypatch, OSError("kein osascript"))
+
+    result = CaptureAccessAdapter().revoke(nur_mitgliedschaft=False)
+
+    assert result.outcome is CaptureAccessRevokeOutcome.FAILED
+    assert result.reason != ""
+
+
+def test_revoke_not_applicable_off_darwin(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Nicht-macOS -> ``NOT_APPLICABLE``; es wird NICHTS ausgefuehrt."""
+    monkeypatch.setattr(sys, "platform", "linux")
+
+    def _kein_subprocess(*_a: Any, **_k: Any) -> Any:
+        raise AssertionError("ausserhalb von darwin darf nichts ausgefuehrt werden")
+
+    monkeypatch.setattr(subprocess, "run", _kein_subprocess)
+
+    result = CaptureAccessAdapter().revoke(nur_mitgliedschaft=False)
+
+    assert result.outcome is CaptureAccessRevokeOutcome.NOT_APPLICABLE
+    assert "macOS" in result.reason
+
+
+def test_revoke_refuses_world_writable_script(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Weltschreibbare Quelldatei -> ``FAILED`` ohne Ausfuehrung (wie bei ``grant``).
+
+    Die Sicherheitsregeln haengen an "eigener Code laeuft als root", nicht daran, ob
+    eingerichtet oder widerrufen wird.
+    """
+    _als_macos(monkeypatch)
+    _mit_sicherem_skript(monkeypatch)
+    monkeypatch.setattr(os, "stat", lambda _p: _FakeStat(mode=0o100777))
+    aufrufe = _osascript_liefert(monkeypatch, _FakeCompleted(returncode=0))
+
+    result = CaptureAccessAdapter().revoke(nur_mitgliedschaft=False)
+
+    assert result.outcome is CaptureAccessRevokeOutcome.FAILED
+    assert "weltschreibbar" in result.reason
+    assert aufrufe == []
+
+
+def test_revoke_reports_unreadable_script(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Quelldatei besteht die Pruefung, ist aber nicht lesbar -> ``FAILED``, kein Start."""
+    _als_macos(monkeypatch)
+    _mit_sicherem_skript(monkeypatch)
+
+    def _nicht_lesbar(_p: str) -> str:
+        raise PermissionError("keine Leserechte")
+
+    monkeypatch.setattr(adapter_modul, "_read_script", _nicht_lesbar)
+    aufrufe = _osascript_liefert(monkeypatch, _FakeCompleted(returncode=0))
+
+    result = CaptureAccessAdapter().revoke(nur_mitgliedschaft=False)
+
+    assert result.outcome is CaptureAccessRevokeOutcome.FAILED
+    assert "nicht lesbar" in result.reason
+    assert aufrufe == []
+
+
+def test_revoke_passes_script_content_not_a_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Auch beim Widerruf steht der INHALT im Root-Befehl, nicht der Dateipfad (kein TOCTOU)."""
+    _als_macos(monkeypatch)
+    _mit_sicherem_skript(monkeypatch)
+    aufrufe = _osascript_liefert(monkeypatch, _FakeCompleted(returncode=0))
+
+    CaptureAccessAdapter().revoke(nur_mitgliedschaft=False)
+
+    script = aufrufe[0][2]
+    assert "richte BPF-Zugriff ein fuer" in script  # der Stellvertreter-Inhalt
+    assert "/bundle/revoke-bpf-access.sh" not in script
+    assert "/bin/bash -s --" in script

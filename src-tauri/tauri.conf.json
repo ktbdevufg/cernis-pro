@@ -73,7 +73,8 @@
       "cernis-sniffd"
     ],
     "resources": [
-      "../scripts/setup-bpf-access.sh"
+      "../scripts/setup-bpf-access.sh",
+      "../scripts/revoke-bpf-access.sh"
     ]
   }
 }

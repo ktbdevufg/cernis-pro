@@ -1,16 +1,22 @@
-"""macOS-Adapter fuer ``CaptureAccessPort``: BPF-Zugriff pruefen + einrichten.
+"""macOS-Adapter fuer ``CaptureAccessPort``: BPF-Zugriff pruefen, einrichten, widerrufen.
 
-Erfuellt den ``CaptureAccessPort`` strukturell. Zwei Operationen:
+Erfuellt den ``CaptureAccessPort`` strukturell. Drei Operationen:
 
 * ``status`` -- sind die BPF-Geraete fuer den aktuellen Nutzer lesbar? Die Frage
   beantwortet bereits ``sniffd.sniff_core.check_raw_permission`` (Etappe 1, dort
   die ``/dev/bpf*``-Probe). Sie wird HIER WIEDERVERWENDET und NICHT ein zweites Mal
   nachgebaut -- eine zweite Probe koennte abweichen und dann zwei verschiedene
-  "Wahrheiten" ueber dieselbe Frage liefern.
+  "Wahrheiten" ueber dieselbe Frage liefern. Dazu kommt (Etappe 3) die Liste der
+  Mitglieder der Capture-Gruppe als reine Leseauskunft.
 * ``grant`` -- fuehrt die Einrichtung mit Administratorrechten aus. Die
   Passwortabfrage ist der NATIVE macOS-Dialog (Touch ID moeglich), nicht eine
   Terminal-Eingabe: ``osascript`` mit ``do shell script ... with administrator
   privileges``.
+* ``revoke`` -- nimmt die Einrichtung wieder zurueck (Etappe 3), auf demselben Weg
+  und unter denselben Sicherheitsregeln. Weil die BPF-Geraete und der LaunchDaemon
+  SYSTEMWEITE Ressourcen sind, kennt der Widerruf zwei Modi: nur die eigene
+  Mitgliedschaft entfernen oder vollstaendig abraeumen. Welcher gilt, entscheidet
+  der Nutzer in der Oberflaeche -- der Adapter reicht die Wahl nur weiter.
 
 SICHERHEIT 1 -- DER INHALT WIRD UEBERGEBEN, NICHT EIN DATEIPFAD (Etappe 2b):
 Frueher startete ``grant`` das Einrichtungsskript als DATEI (``/bin/bash <pfad>``).
@@ -77,6 +83,8 @@ import structlog
 from domain.capture_access import (
     CaptureAccessOutcome,
     CaptureAccessResult,
+    CaptureAccessRevokeOutcome,
+    CaptureAccessRevokeResult,
     CaptureAccessState,
     CaptureAccessStatus,
 )
@@ -85,8 +93,23 @@ from infrastructure.sniffd.sniff_core import check_raw_permission
 
 _logger = structlog.get_logger(__name__)
 
-# Dateiname des Einrichtungsskripts -- projektintern fest, NIE aus Nutzereingabe.
+# Dateinamen der beiden Skripte -- projektintern fest, NIE aus Nutzereingabe.
 _SCRIPT_NAME = "setup-bpf-access.sh"
+_REVOKE_SCRIPT_NAME = "revoke-bpf-access.sh"
+
+# Name der Capture-Gruppe. Muss mit beiden Skripten uebereinstimmen; wird hier NUR
+# gelesen (Mitglieder ermitteln), nie geschrieben.
+_GRUPPE = "cernis-capture"
+
+# Zeitlimit der reinen Leseabfrage der Gruppenmitglieder. Kurz, weil ``dscl`` lokal
+# antwortet und der Aufruf im Status-Pfad liegt -- ein haengendes ``dscl`` darf die
+# Status-Abfrage nicht blockieren.
+_DSCL_TIMEOUT = 10
+
+# Die beiden Modus-Werte des Widerruf-Skripts. Sie sind Teil seines Vertrags; der
+# Adapter waehlt daraus, der Wert kommt NIE aus einer Nutzereingabe.
+_MODUS_MITGLIEDSCHAFT = "mitgliedschaft"
+_MODUS_VOLLSTAENDIG = "vollstaendig"
 
 # Unterverzeichnis der Ressource im Bundle. Tauri bildet das fuehrende ``..`` des
 # resources-Eintrags auf das Segment ``_up_`` ab (siehe _resolve_script_path).
@@ -113,12 +136,17 @@ _NOT_APPLICABLE_DETAIL = (
 )
 
 
-def _resolve_script_path() -> str:
-    """Loest den Pfad der Skript-QUELLE auf: Bundle-Resources, sonst Repo.
+def _resolve_script_path(script_name: str) -> str:
+    """Loest den Pfad einer Skript-QUELLE auf: Bundle-Resources, sonst Repo.
+
+    ``script_name`` ist der Dateiname des gesuchten Skripts (Einrichtung oder
+    Widerruf) -- ein PARAMETER, weil beide Skripte an derselben Stelle liegen und
+    dieselbe Aufloesung brauchen. Der Wert ist projektintern fest (Modul-Konstante),
+    er kommt NIE aus einer Nutzereingabe.
 
     Bundle: ``sys.executable`` liegt im ``.app`` unter ``Contents/MacOS/``, die
     Ressourcen also eine Ebene hoeher unter ``Contents/Resources/``. Der Eintrag in
-    ``tauri.conf.json`` lautet ``../scripts/setup-bpf-access.sh``; Tauri uebersetzt
+    ``tauri.conf.json`` lautet ``../scripts/<name>``; Tauri uebersetzt
     das fuehrende ``..`` deterministisch in das Segment ``_up_``
     (``tauri-utils::resources::resource_relpath``), die Datei landet also unter
     ``Contents/Resources/_up_/scripts/``. AM GEBAUTEN BUNDLE VERIFIZIERT::
@@ -135,13 +163,11 @@ def _resolve_script_path() -> str:
     resources = os.path.normpath(
         os.path.join(os.path.dirname(os.path.abspath(sys.executable)), "..", "Resources")
     )
-    bundle_script = os.path.join(resources, _BUNDLE_SUBDIR, _SCRIPT_NAME)
+    bundle_script = os.path.join(resources, _BUNDLE_SUBDIR, script_name)
     if os.path.isfile(bundle_script):
         return bundle_script
     return os.path.normpath(
-        os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "..", "..", "scripts", _SCRIPT_NAME
-        )
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "scripts", script_name)
     )
 
 
@@ -190,8 +216,49 @@ def _read_script(path: str) -> str:
         return datei.read()
 
 
+def _read_group_members() -> tuple[str, ...]:
+    """Liest die Login-Namen der Mitglieder von ``cernis-capture``; leer heisst "keine".
+
+    Reine LESEoperation ueber ``dscl . -read /Groups/<gruppe> GroupMembership`` --
+    kein Passwortdialog, keine Rechteaenderung. Sie beantwortet nur die Frage, wer
+    ausser dem aufrufenden Nutzer noch betroffen waere, wenn die SYSTEMWEITE
+    Einrichtung abgeraeumt wuerde (die BPF-Geraete und der LaunchDaemon gehoeren der
+    Maschine, nicht dem Konto).
+
+    ``LC_ALL=C`` in der Umgebung, weil die Ausgabe GEPARST wird: unter einer anderen
+    Locale koennte ``dscl`` Meldungen uebersetzen und das erwartete Format brechen.
+
+    Ausgabeformat ist eine Zeile ``GroupMembership: name1 name2``. Fehlt die Gruppe,
+    endet ``dscl`` mit einem Fehler -- dann ist das leere Tuple die RICHTIGE Antwort
+    und kein Fehlschlag: "es gibt keine Gruppe" heisst "es gibt keine Mitglieder".
+    Eine Gruppe ganz OHNE Mitglieder liefert die Zeile gar nicht; auch das ist leer.
+    """
+    try:
+        ergebnis = subprocess.run(
+            ["dscl", ".", "-read", f"/Groups/{_GRUPPE}", "GroupMembership"],
+            capture_output=True,
+            text=True,
+            timeout=_DSCL_TIMEOUT,
+            check=False,
+            env={**os.environ, "LC_ALL": "C"},
+        )
+    except (OSError, subprocess.TimeoutExpired) as fehler:
+        # Kein lauter Fehler: die Mitgliederliste ist eine ZUSATZauskunft fuer die
+        # Oberflaeche, kein Teil der Zugriffsfrage. Der Status bleibt ohne sie gueltig.
+        _logger.warning("capture_access.members_unreadable", error=str(fehler))
+        return ()
+
+    if ergebnis.returncode != 0:
+        return ()
+
+    for zeile in (ergebnis.stdout or "").splitlines():
+        if zeile.startswith("GroupMembership:"):
+            return tuple(zeile.removeprefix("GroupMembership:").split())
+    return ()
+
+
 class CaptureAccessAdapter:
-    """Erfuellt ``CaptureAccessPort`` auf macOS (BPF-Zugriff pruefen/einrichten)."""
+    """Erfuellt ``CaptureAccessPort`` auf macOS (BPF-Zugriff pruefen/einrichten/widerrufen)."""
 
     def status(self) -> CaptureAccessStatus:
         """``GRANTED``, wenn die BPF-Geraete lesbar sind, sonst ``MISSING`` + Grund.
@@ -200,15 +267,23 @@ class CaptureAccessAdapter:
         heisst "Zugriff moeglich" (das schliesst den inconclusive-Fall ein -- dann
         darf der Sniff es selbst versuchen, statt hier eine Einrichtung zu fordern,
         die vielleicht gar nicht fehlt). Ein Text ist der ehrliche Rechte-Grund.
+
+        Zusaetzlich werden die Mitglieder der Capture-Gruppe mitgeliefert (Etappe 3).
+        Sie beeinflussen den ``state`` NICHT -- die Zugriffsfrage beantwortet allein
+        die Probe. Sie sind reine Zusatzauskunft fuer den Widerruf-Dialog: wer wuerde
+        einen vollstaendigen Widerruf mitbekommen.
         """
         if sys.platform != "darwin":
             return CaptureAccessStatus(
                 state=CaptureAccessState.NOT_APPLICABLE, detail=_NOT_APPLICABLE_DETAIL
             )
+        members = _read_group_members()
         hinweis = check_raw_permission(_PROBE_PURPOSE)
         if hinweis is None:
-            return CaptureAccessStatus(state=CaptureAccessState.GRANTED)
-        return CaptureAccessStatus(state=CaptureAccessState.MISSING, detail=hinweis)
+            return CaptureAccessStatus(state=CaptureAccessState.GRANTED, members=members)
+        return CaptureAccessStatus(
+            state=CaptureAccessState.MISSING, detail=hinweis, members=members
+        )
 
     def grant(self) -> CaptureAccessResult:
         """Fuehrt das Einrichtungsskript als root aus (nativer Dialog, Touch ID moeglich).
@@ -222,7 +297,7 @@ class CaptureAccessAdapter:
                 outcome=CaptureAccessOutcome.NOT_APPLICABLE, reason=_NOT_APPLICABLE_DETAIL
             )
 
-        script_path = _resolve_script_path()
+        script_path = _resolve_script_path(_SCRIPT_NAME)
         unsicher = _verify_script_safe(script_path)
         if unsicher is not None:
             # KEIN Ausfuehren bei verletzter Vorbedingung (S3): lieber ein ehrlicher
@@ -295,4 +370,94 @@ class CaptureAccessAdapter:
         return CaptureAccessResult(
             outcome=CaptureAccessOutcome.FAILED,
             reason=stderr or "Die Einrichtung ist ohne Meldung fehlgeschlagen.",
+        )
+
+    def revoke(self, nur_mitgliedschaft: bool) -> CaptureAccessRevokeResult:
+        """Fuehrt das Widerruf-Skript als root aus (nativer Dialog, Touch ID moeglich).
+
+        Aufbau exakt analog zu ``grant``: darwin-Pruefung, Pfad aufloesen, Quelle
+        pruefen, Inhalt lesen, ueber ``osascript`` mit Administratorrechten starten.
+        Es gelten dieselben drei Sicherheitsregeln des Modul-Docstrings unveraendert
+        (Inhalt statt Dateipfad, Quellpruefung, doppeltes Escaping ohne Heredoc) --
+        sie sind nicht an die Einrichtung gebunden, sondern an "eigener Code laeuft
+        als root".
+
+        ``nur_mitgliedschaft`` waehlt den Modus des Skripts: ``True`` entfernt allein
+        die Mitgliedschaft des aufrufenden Nutzers, ``False`` raeumt die systemweite
+        Einrichtung vollstaendig ab. Der Wert ist ein ``bool`` aus der Oberflaeche und
+        wird hier auf eine der ZWEI festen Modus-Konstanten abgebildet -- es fliesst
+        also kein freier Text ins Skript, unabhaengig vom Escaping.
+
+        Drei unterscheidbare Ausgaenge: ``REVOKED``, ``CANCELLED`` (Nutzer hat
+        abgebrochen -- kein Fehler) und ``FAILED`` mit Grund.
+        """
+        if sys.platform != "darwin":
+            return CaptureAccessRevokeResult(
+                outcome=CaptureAccessRevokeOutcome.NOT_APPLICABLE, reason=_NOT_APPLICABLE_DETAIL
+            )
+
+        script_path = _resolve_script_path(_REVOKE_SCRIPT_NAME)
+        unsicher = _verify_script_safe(script_path)
+        if unsicher is not None:
+            # Wie bei grant: lieber ein ehrlicher Fehlschlag als ein Root-Aufruf mit
+            # einem zweifelhaften Inhalt (S3).
+            _logger.warning("capture_access.script_unsafe", path=script_path, reason=unsicher)
+            return CaptureAccessRevokeResult(
+                outcome=CaptureAccessRevokeOutcome.FAILED, reason=unsicher
+            )
+
+        try:
+            inhalt = _read_script(script_path)
+        except OSError as fehler:
+            return CaptureAccessRevokeResult(
+                outcome=CaptureAccessRevokeOutcome.FAILED,
+                reason=f"Widerrufsskript nicht lesbar ({script_path}): {fehler}",
+            )
+
+        benutzer = getpass.getuser()
+        modus = _MODUS_MITGLIEDSCHAFT if nur_mitgliedschaft else _MODUS_VOLLSTAENDIG
+        # Zwei Argumente statt einem (Benutzername und Modus), beide EINZELN durch
+        # ``quote`` geschuetzt -- ein gemeinsames Quoten wuerde sie zu EINEM Wort
+        # verschmelzen und das Skript bekaeme nur ein Argument. Sonst identisch zu
+        # grant: Inhalt ueber stdin, danach ``escape_applescript_literal`` ueber den
+        # GESAMTEN Befehl, kein Heredoc (Begruendung im Modul-Docstring).
+        befehl = f"printf '%s' {quote(inhalt)} | /bin/bash -s -- {quote(benutzer)} {quote(modus)}"
+        script = (
+            f'do shell script "{escape_applescript_literal(befehl)}" with administrator privileges'
+        )
+
+        try:
+            ergebnis = subprocess.run(
+                ["osascript", "-e", script],
+                capture_output=True,
+                text=True,
+                timeout=_OSASCRIPT_TIMEOUT,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            return CaptureAccessRevokeResult(
+                outcome=CaptureAccessRevokeOutcome.FAILED,
+                reason="Die Systemabfrage wurde nicht rechtzeitig beantwortet.",
+            )
+        except OSError as fehler:
+            return CaptureAccessRevokeResult(
+                outcome=CaptureAccessRevokeOutcome.FAILED,
+                reason=f"Die Systemabfrage konnte nicht gestartet werden: {fehler}",
+            )
+
+        if ergebnis.returncode == 0:
+            _logger.info("capture_access.revoked", script=script_path, modus=modus)
+            return CaptureAccessRevokeResult(outcome=CaptureAccessRevokeOutcome.REVOKED)
+
+        stderr = (ergebnis.stderr or "").strip()
+        if _CANCEL_PATTERN.search(stderr):
+            _logger.info("capture_access.revoke_cancelled")
+            return CaptureAccessRevokeResult(outcome=CaptureAccessRevokeOutcome.CANCELLED)
+
+        _logger.warning(
+            "capture_access.revoke_failed", returncode=ergebnis.returncode, stderr=stderr
+        )
+        return CaptureAccessRevokeResult(
+            outcome=CaptureAccessRevokeOutcome.FAILED,
+            reason=stderr or "Der Widerruf ist ohne Meldung fehlgeschlagen.",
         )

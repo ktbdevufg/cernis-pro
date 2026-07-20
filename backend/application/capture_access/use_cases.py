@@ -1,6 +1,6 @@
-"""Use-Cases der Capture-Rechteeinrichtung: Status abfragen + Einrichtung anstossen.
+"""Use-Cases der Capture-Rechte: Status abfragen, einrichten, widerrufen.
 
-Zwei duenne Use-Cases ueber dem ``CaptureAccessPort`` (Muster der schlanken
+Drei duenne Use-Cases ueber dem ``CaptureAccessPort`` (Muster der schlanken
 Rechte-Nahtstellen ``application.traffic.CheckTrafficPermission``): sie halten
 KEINE eigene Logik ueber BPF, LaunchDaemon oder osascript -- das ist Adapter-Sache.
 Ihre Aufgabe ist, den Port aufzurufen und das Domaenen-Ergebnis unveraendert
@@ -11,14 +11,19 @@ weiterzureichen.
 verdrahtet im Composition Root (``app.py``).
 
 Rueckgabe sind die Domaenenwerte selbst (``CaptureAccessStatus``/
-``CaptureAccessResult``), KEINE Wire-Form -- die Projektion nach JSON macht der
-api-Rand. Damit bleiben die drei Ausgaenge (Erfolg / Abbruch / Fehlschlag)
-unterscheidbar, statt in einem ``{ok: bool}`` zu verschwinden (S3).
+``CaptureAccessResult``/``CaptureAccessRevokeResult``), KEINE Wire-Form -- die
+Projektion nach JSON macht der api-Rand. Damit bleiben die drei Ausgaenge
+(Erfolg / Abbruch / Fehlschlag) unterscheidbar, statt in einem ``{ok: bool}`` zu
+verschwinden (S3).
 """
 
 import asyncio
 
-from domain.capture_access import CaptureAccessResult, CaptureAccessStatus
+from domain.capture_access import (
+    CaptureAccessResult,
+    CaptureAccessRevokeResult,
+    CaptureAccessStatus,
+)
 from ports.capture_access import CaptureAccessPort
 
 
@@ -56,3 +61,27 @@ class GrantCaptureAccess:
         umgedeutet (S3).
         """
         return await asyncio.to_thread(self._access.grant)
+
+
+class RevokeCaptureAccess:
+    """Nimmt die Rechteeinrichtung zurueck (loest auf macOS die Systemabfrage aus)."""
+
+    def __init__(self, access: CaptureAccessPort) -> None:
+        self._access = access
+
+    async def __call__(self, nur_mitgliedschaft: bool) -> CaptureAccessRevokeResult:
+        """Widerruft den Zugriff; liefert Erfolg, Abbruch oder Fehlschlag.
+
+        ``nur_mitgliedschaft`` ist Parameter des AUFRUFS, nicht des Konstruktors: die
+        Entscheidung faellt pro Widerruf am Bildschirm (nur die eigene Mitgliedschaft
+        oder alles abraeumen) und ist keine Eigenschaft des verdrahteten Use-Case.
+
+        ``async`` aus demselben Grund wie bei ``GrantCaptureAccess``: der Aufruf
+        BLOCKIERT, solange der native Passwortdialog offen ist, und wandert darum
+        ueber ``asyncio.to_thread`` in einen Thread.
+
+        Das ``CaptureAccessRevokeResult`` wird unveraendert durchgereicht -- der
+        Abbruch bleibt ein eigener Zustand und wird NICHT zu einem Fehler umgedeutet
+        (S3).
+        """
+        return await asyncio.to_thread(self._access.revoke, nur_mitgliedschaft)
