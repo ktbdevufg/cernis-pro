@@ -289,6 +289,14 @@ export default function OutboundView() {
   // Ergebnis des letzten Einrichtungsversuchs: { outcome, reason } oder null.
   // "cancelled" ist KEIN Fehler und bekommt darum eine ruhige, eigene Anzeige.
   const [accessErgebnis, setAccessErgebnis] = useState(null);
+  // Sonderfall NACH geglückter Einrichtung: das Backend meldet trotzdem weiterhin
+  // fehlende Rechte. Kein Fehler, sondern eine Eigenschaft von Unix — eine neue
+  // Gruppenmitgliedschaft greift NUR für Prozesse, die danach starten: Kindprozesse
+  // erben die Gruppen ihres Elternprozesses so, wie sie bei DESSEN Start galten.
+  // Das laufende Backend hat sie also nicht, obwohl alles korrekt eingerichtet ist.
+  // Real aufgetreten. Dieser Fall braucht einen eigenen, ruhigen Hinweis („greift
+  // nach einem Neustart") statt einer Fehlermeldung über etwas, das gelungen ist.
+  const [accessBrauchtNeustart, setAccessBrauchtNeustart] = useState(false);
 
   // Geteilter SNI-Lifecycle-Hook: real gestartet beim ERSTEN acquire, real
   // gestoppt erst beim LETZTEN release (Reference-Count). running/starting/error
@@ -536,11 +544,22 @@ export default function OutboundView() {
   // Dialog. Stehen die Rechte schon (oder gilt die Einrichtung hier nicht, z. B.
   // Linux), passiert nichts — es wird kein Dialog gezeigt, den es nicht braucht.
   const pruefeUndBieteEinrichtungAn = async () => {
+    const state = await leseZugriffsZustand();
+    if (state === CAPTURE_ACCESS_STATE.MISSING) {
+      setZeigeAccessDialog(true);
+    }
+    return state;
+  };
+
+  // Reines Ablesen des Zugriffs-Zustands, OHNE etwas anzubieten. Getrennt von
+  // pruefeUndBieteEinrichtungAn, weil es einen zweiten Aufrufer gibt, der nur
+  // wissen will, wie es steht, und dabei keinesfalls einen Dialog öffnen darf:
+  // die Gegenprobe NACH einer geglückten Einrichtung (siehe handleAccessGrant).
+  // Liefert den state-String oder null, wenn der Status nicht abfragbar ist —
+  // null heißt "unbekannt" und wird nirgends als Aussage gedeutet.
+  const leseZugriffsZustand = async () => {
     try {
       const status = await fetchCaptureAccess();
-      if (status.state === CAPTURE_ACCESS_STATE.MISSING) {
-        setZeigeAccessDialog(true);
-      }
       return status.state;
     } catch (fehler) {
       // Status nicht abfragbar (Backend weg): kein Dialog, kein Lärm. SNI meldet
@@ -566,11 +585,19 @@ export default function OutboundView() {
   const handleAccessGrant = async () => {
     setZeigeAccessDialog(false);
     setAccessLaeuft(true);
+    setAccessBrauchtNeustart(false);
     try {
       const ergebnis = await grantCaptureAccess();
       setAccessErgebnis(ergebnis);
       if (ergebnis.outcome === CAPTURE_ACCESS_OUTCOME.GRANTED) {
         await uebernehmeNeueRechte();
+        // Gegenprobe am ECHTEN Zustand: meldet das Backend trotz geglückter
+        // Einrichtung weiterhin "missing", greift die neue Gruppenmitgliedschaft
+        // für den laufenden Prozess noch nicht (siehe accessBrauchtNeustart). Das
+        // ist KEIN Fehlschlag — es wird darum auch nicht als solcher gezeigt.
+        // Ist der Status nicht abfragbar (null), wird NICHTS behauptet.
+        const zustand = await leseZugriffsZustand();
+        setAccessBrauchtNeustart(zustand === CAPTURE_ACCESS_STATE.MISSING);
       }
     } catch (fehler) {
       // Transportfehler (Backend nicht erreichbar) ist ein echter Fehlschlag —
@@ -607,9 +634,18 @@ export default function OutboundView() {
 
   // Ergebnis-Hinweis schließen bzw. erneut versuchen (öffnet wieder den Erklär-
   // Dialog, damit auch der zweite Anlauf mit der Erklärung beginnt).
-  const handleAccessErgebnisSchliessen = () => setAccessErgebnis(null);
+  //
+  // Beide setzen accessBrauchtNeustart mit zurück: dieser Zustand unterdrückt den
+  // Streifen „Rechte fehlen". Bliebe er nach dem Schließen stehen, wäre der Weg zur
+  // Einrichtung dauerhaft verdeckt — der Nutzer käme in dieser Sitzung nicht mehr
+  // heran. Der Hinweis gilt nur, solange sein Streifen sichtbar ist.
+  const handleAccessErgebnisSchliessen = () => {
+    setAccessErgebnis(null);
+    setAccessBrauchtNeustart(false);
+  };
   const handleAccessErneut = () => {
     setAccessErgebnis(null);
+    setAccessBrauchtNeustart(false);
     setZeigeAccessDialog(true);
   };
 
@@ -661,7 +697,11 @@ export default function OutboundView() {
       )}
 
       {/* Ergebnis der Rechteeinrichtung — ehrlich nach Ausgang unterschieden:
-          "granted"   -> kurze Bestätigung, SNI läuft wie bisher weiter.
+          "granted"   -> kurze Bestätigung, SNI läuft wie bisher weiter. Greift die
+                         neue Mitgliedschaft für den laufenden Prozess noch nicht
+                         (accessBrauchtNeustart), tritt an ihre Stelle der ruhige
+                         Neustart-Hinweis — die Einrichtung ist ja gelungen, sie
+                         wirkt nur noch nicht.
           "cancelled" -> RUHIGER Hinweis, KEINE Fehleroptik; jederzeit nachholbar.
           "failed"    -> verständliche Meldung; der Grund aus dem Backend wird
                          angehängt, wenn es einen gibt (sonst nur der Klartext).
@@ -672,7 +712,9 @@ export default function OutboundView() {
           <div className="outbound__hinweis" role="note">
             <span className="outbound__hinweis-text">
               {accessErgebnis.outcome === CAPTURE_ACCESS_OUTCOME.GRANTED &&
-                t("beobachten.outbound.access.erfolg")}
+                (accessBrauchtNeustart
+                  ? t("beobachten.outbound.access.erfolgNeustart")
+                  : t("beobachten.outbound.access.erfolg"))}
               {accessErgebnis.outcome === CAPTURE_ACCESS_OUTCOME.CANCELLED &&
                 t("beobachten.outbound.access.abgebrochen")}
               {accessErgebnis.outcome === CAPTURE_ACCESS_OUTCOME.FAILED &&
@@ -799,8 +841,17 @@ export default function OutboundView() {
 
       {/* Start-Fehler der SNI-Beobachtung: ruhiger Hinweis (Stil Ladefehler),
           nur bei erteilter Einwilligung und tatsächlichem Fehler. Entfällt bei
-          aktivem Npcap-Marker (der Ausgrau-Block erklärt die Ursache ehrlicher). */}
-      {consent === "granted" && !istNpcapMarker(sniPermMarker) && sniError && (
+          aktivem Npcap-Marker (der Ausgrau-Block erklärt die Ursache ehrlicher).
+
+          Entfällt ebenso, solange accessBrauchtNeustart gilt: dieser Streifen böte
+          dort ausgerechnet „Berechtigung erteilen" an — also genau das, was der
+          Nutzer gerade erfolgreich getan hat. Er würde damit neben dem Neustart-
+          Hinweis stehen und ihm widersprechen. Der Neustart-Hinweis ERSETZT ihn;
+          die Ursache ist dieselbe und dort ehrlicher benannt. */}
+      {consent === "granted" &&
+        !istNpcapMarker(sniPermMarker) &&
+        sniError &&
+        !accessBrauchtNeustart && (
         <div className="outbound__hinweis" role="note">
           <span className="outbound__hinweis-title">
             {t("beobachten.traffic.permissionTitle")}

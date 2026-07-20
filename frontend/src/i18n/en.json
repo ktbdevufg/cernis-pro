@@ -124,6 +124,7 @@
       "dnswatch": "DNS watchdog",
       "defaultcreds": "Default credentials",
       "defaultcredsList": "Default credentials list",
+      "captureAccess": "Capture access",
       "wartung": "Maintenance"
     },
     "startseite": {
@@ -226,6 +227,29 @@
       "dialogSessionText": "The unlock applies solely to the current CERNIS session. After a restart the feature is locked again.",
       "confirm": "Unlock",
       "cancel": "Cancel"
+    },
+    "captureAccess": {
+      "title": "Capture access",
+      "intro": "Access to your Mac's capture devices is set up. This lets CERNIS read the actual domain names without running as an administrator.",
+      "whatTitle": "What is set up:",
+      "whatGroup": "a dedicated user group for capturing",
+      "whatDaemon": "a small system service that restores the device permissions after every restart",
+      "whatDevices": "read and write permissions on the capture devices",
+      "revokeButton": "Revoke access",
+      "confirmTitle": "Really revoke access?",
+      "confirmSoloBody": "The setup will be removed completely: group, system service and device permissions. CERNIS will no longer be able to read the actual domain names until you set up access again.",
+      "confirmSharedTitle": "Careful — other accounts are affected",
+      "confirmSharedBody": "The capture devices belong to your Mac, not to your account. Besides you, other accounts have access as well. If you remove everything, those accounts lose their access too.",
+      "confirmSharedMembers": "Affected accounts:",
+      "actionMembershipOnly": "Remove only my access",
+      "actionFull": "Remove completely",
+      "confirm": "Revoke",
+      "cancel": "Cancel",
+      "laeuft": "Waiting for confirmation from your system …",
+      "erfolg": "Access has been revoked. You can set it up again at any time.",
+      "fehler": "Revoking did not succeed.",
+      "ladeFehler": "The state of capture access could not be loaded.",
+      "hinweisAnmeldung": "Note: for programs that are already running, the change takes effect after your next login."
     },
     "defaultCredsList": {
       "navLabel": "Default credentials list",
@@ -662,6 +686,7 @@
         "later": "Later",
         "laeuft": "Waiting for confirmation from your system …",
         "erfolg": "Access is set up. The actual domain names are now shown.",
+        "erfolgNeustart": "Access is set up. For it to take effect here, please restart CERNIS once — the actual domain names will then be shown.",
         "abgebrochen": "Setup was cancelled. You can do it any time later.",
         "fehler": "Setup did not succeed.",
         "erneut": "Try again",

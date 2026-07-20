@@ -14,6 +14,12 @@ import { useTranslation } from "react-i18next";
 
 import { fetchAllRules, lookupService, parsePortliste } from "../api/analysis.js";
 import {
+  CAPTURE_ACCESS_REVOKE_OUTCOME,
+  CAPTURE_ACCESS_STATE,
+  fetchCaptureAccess,
+  revokeCaptureAccess,
+} from "../api/captureAccess.js";
+import {
   fetchDefaultCredsState,
   armDefaultCreds,
 } from "../api/security.js";
@@ -1694,6 +1700,208 @@ function DefaultCredsSektion({ onGespeichert }) {
   );
 }
 
+// Widerrufs-Sektion des Mitschnitt-Zugriffs (Etappe 3). Gegenstück zur Einrichtung
+// in OutboundView: dort wird erteilt, hier zurückgenommen — die Zusage „jederzeit
+// widerrufbar" aus dem Einwilligungs-Dialog wird damit einlösbar.
+//
+// Die Sektion erscheint NUR, wenn der Zugriff tatsächlich eingerichtet ist (state
+// granted). Bei „missing" gibt es nichts zu widerrufen, bei „not_applicable" (Linux)
+// gibt es diese Einrichtung gar nicht — beides zeigt keinen Abschnitt, statt einen
+// wirkungslosen Knopf anzubieten.
+//
+// Der Klick auf „Widerrufen" öffnet ZUERST eine Bestätigung und NICHT sofort den
+// Systemdialog: ein unangekündigtes Passwortfenster wäre für eine zerstörende
+// Aktion die falsche Reihenfolge (dasselbe Prinzip wie CaptureAccessDialog vor dem
+// Einrichten).
+//
+// Die Bestätigung unterscheidet zwei Fälle anhand von members. Grund: die
+// Mitschnitt-Geräte und der Systemdienst sind SYSTEMWEITE Ressourcen, die sich alle
+// macOS-Konten der Maschine teilen. Ein vollständiges Abräumen nimmt allen anderen
+// Mitgliedern den Zugriff — das darf nicht unbemerkt passieren.
+//   genau ein Mitglied  -> Alleinbesitz: eine einfache Bestätigung, vollständig.
+//   mehrere Mitglieder  -> die anderen Namen werden genannt, und es gibt ZWEI
+//                          getrennte Aktionen (nur eigener Zugriff / vollständig).
+// Den eigenen Login-Namen liefert das Backend bewusst nicht; die Länge der Liste
+// genügt für diese Unterscheidung.
+function CaptureAccessSektion({ status, onNeuLaden }) {
+  const { t } = useTranslation();
+
+  // ruhe | bestaetigung | laeuft | erfolg | fehler — bewusst EIN Zustand statt
+  // mehrerer Booleans, damit unmögliche Kombinationen gar nicht darstellbar sind.
+  const [phase, setPhase] = useState("ruhe");
+  const [fehlerGrund, setFehlerGrund] = useState("");
+
+  const members = status?.members ?? [];
+  // Mehr als ein Eintrag heißt: weitere Konten teilen sich diese Einrichtung.
+  const geteilt = members.length > 1;
+
+  // Widerruf ausführen. Der Aufruf DAUERT, solange der Systemdialog offen ist.
+  // Die drei Ausgänge bleiben getrennt: „cancelled" führt kommentarlos in den
+  // Ausgangszustand zurück (KEINE Fehleroptik — der Nutzer hat sich legitim anders
+  // entschieden), „failed" zeigt die Begründung im Klartext.
+  const widerrufen = async (nurMitgliedschaft) => {
+    setFehlerGrund("");
+    setPhase("laeuft");
+    try {
+      const ergebnis = await revokeCaptureAccess(nurMitgliedschaft);
+      if (ergebnis.outcome === CAPTURE_ACCESS_REVOKE_OUTCOME.REVOKED) {
+        setPhase("erfolg");
+        onNeuLaden();
+        return;
+      }
+      if (ergebnis.outcome === CAPTURE_ACCESS_REVOKE_OUTCOME.CANCELLED) {
+        setPhase("ruhe");
+        return;
+      }
+      // failed und not_applicable: beide tragen eine Begründung aus dem Backend.
+      setFehlerGrund(ergebnis.reason ?? "");
+      setPhase("fehler");
+    } catch (ursache) {
+      // Transportfehler (Backend nicht erreichbar) — nicht verschlucken.
+      console.error("Widerruf des Mitschnitt-Zugriffs fehlgeschlagen:", ursache);
+      setFehlerGrund("");
+      setPhase("fehler");
+    }
+  };
+
+  // Nach geglücktem Widerruf ERSETZT die Erfolgsmeldung den Abschnitt, statt ihn
+  // zu ergänzen: Einleitung, Was-Liste und Knopf beschreiben eine Einrichtung, die
+  // es nicht mehr gibt. Stünden sie weiter da, widersprächen sich zwei Aussagen auf
+  // demselben Bildschirm („Eingerichtet ist: …" neben „Der Zugriff wurde
+  // widerrufen"). Früher Return statt zusätzlicher Bedingungen an jedem Element —
+  // so ist der Endzustand an einer Stelle beschrieben und kann nicht auseinander-
+  // laufen. Nur der Erfolg räumt ab; bei „laeuft" und „fehler" ist der
+  // Zustandstext weiterhin richtig (es wurde ja nichts entfernt).
+  if (phase === "erfolg") {
+    return (
+      <SettingsSektion title={t("settings.captureAccess.title")}>
+        <span className="settings__hint" role="status" aria-live="polite">
+          {t("settings.captureAccess.erfolg")}
+        </span>
+      </SettingsSektion>
+    );
+  }
+
+  return (
+    <SettingsSektion title={t("settings.captureAccess.title")}>
+      <p className="settings__hint">{t("settings.captureAccess.intro")}</p>
+
+      {/* Was eingerichtet ist — kurz und in nicht-technischer Sprache, damit vor
+          dem Widerruf klar ist, was verschwindet. */}
+      <p className="settings__hint">{t("settings.captureAccess.whatTitle")}</p>
+      <ul className="settings__liste">
+        <li>{t("settings.captureAccess.whatGroup")}</li>
+        <li>{t("settings.captureAccess.whatDaemon")}</li>
+        <li>{t("settings.captureAccess.whatDevices")}</li>
+      </ul>
+
+      {phase === "ruhe" ? (
+        <div className="settings__row settings__row--actions">
+          <span className="settings__hint" />
+          <button
+            type="button"
+            className="settings__button"
+            onClick={() => setPhase("bestaetigung")}
+          >
+            {t("settings.captureAccess.revokeButton")}
+          </button>
+        </div>
+      ) : null}
+
+      {phase === "bestaetigung" ? (
+        <div className="settings__widerruf">
+          <p className="settings__widerruf-titel">
+            {geteilt
+              ? t("settings.captureAccess.confirmSharedTitle")
+              : t("settings.captureAccess.confirmTitle")}
+          </p>
+          <p className="settings__hint">
+            {geteilt
+              ? t("settings.captureAccess.confirmSharedBody")
+              : t("settings.captureAccess.confirmSoloBody")}
+          </p>
+
+          {/* Nur wenn andere betroffen sind: die Namen beim Namen nennen. */}
+          {geteilt ? (
+            <>
+              <p className="settings__hint">
+                {t("settings.captureAccess.confirmSharedMembers")}
+              </p>
+              <ul className="settings__liste">
+                {members.map((name) => (
+                  <li key={name}>{name}</li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+
+          <p className="settings__hint">
+            {t("settings.captureAccess.hinweisAnmeldung")}
+          </p>
+
+          {/* Geteilter Fall: ZWEI getrennte Aktionen, damit die schonende Variante
+              gleichwertig danebensteht und nicht in einem Menü versteckt ist.
+              Alleinbesitz: eine einzige Bestätigung, vollständig. */}
+          <div className="settings__row settings__row--actions">
+            <button
+              type="button"
+              className="settings__link-button"
+              onClick={() => setPhase("ruhe")}
+            >
+              {t("settings.captureAccess.cancel")}
+            </button>
+            <span className="settings__widerruf-aktionen">
+              {geteilt ? (
+                <>
+                  <button
+                    type="button"
+                    className="settings__button"
+                    onClick={() => widerrufen(true)}
+                  >
+                    {t("settings.captureAccess.actionMembershipOnly")}
+                  </button>
+                  <button
+                    type="button"
+                    className="settings__button"
+                    onClick={() => widerrufen(false)}
+                  >
+                    {t("settings.captureAccess.actionFull")}
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="settings__button"
+                  onClick={() => widerrufen(false)}
+                >
+                  {t("settings.captureAccess.confirm")}
+                </button>
+              )}
+            </span>
+          </div>
+        </div>
+      ) : null}
+
+      {phase === "laeuft" ? (
+        <span className="settings__hint" role="status" aria-live="polite">
+          {t("settings.captureAccess.laeuft")}
+        </span>
+      ) : null}
+
+      {/* Der Erfolgsfall kommt hier NICHT vor — er wird oben als eigener Rückgabe-
+          zweig behandelt und ersetzt den gesamten Abschnitt. */}
+
+      {/* Fehlschlag: die Begründung aus dem Backend im Klartext, nicht verschluckt. */}
+      {phase === "fehler" ? (
+        <span className="settings__hint settings__hint--error">
+          {mitCode(t("settings.captureAccess.fehler"), CODES.E_501)}
+          {fehlerGrund ? ` ${fehlerGrund}` : ""}
+        </span>
+      ) : null}
+    </SettingsSektion>
+  );
+}
+
 export default function SettingsView({ lang, onLangChange, onClose, onOpenManual }) {
   const { t } = useTranslation();
 
@@ -1720,6 +1928,31 @@ export default function SettingsView({ lang, onLangChange, onClose, onOpenManual
     zeigeGespeichert();
   };
 
+  // Zustand des Mitschnitt-Zugriffs. Er entscheidet, ob die Widerrufs-Rubrik
+  // überhaupt angeboten wird — darum liegt er HIER und nicht in der Sektion: die
+  // Navigation braucht ihn genauso wie der Inhalt (eine Quelle, kein zweites Laden).
+  // null heißt „noch nicht geladen bzw. nicht ermittelbar" — dann keine Rubrik.
+  const [captureAccess, setCaptureAccess] = useState(null);
+
+  const ladeCaptureAccess = useCallback(async () => {
+    try {
+      setCaptureAccess(await fetchCaptureAccess());
+    } catch (ursache) {
+      // Ruhig behandeln: der Zugriffs-Status ist eine Zusatzauskunft. Fehlt er,
+      // entfällt die Rubrik — die übrigen Einstellungen bleiben benutzbar.
+      console.error("Status des Mitschnitt-Zugriffs laden fehlgeschlagen:", ursache);
+      setCaptureAccess(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    ladeCaptureAccess();
+  }, [ladeCaptureAccess]);
+
+  // Nur bei „granted" gibt es etwas zu widerrufen (siehe CaptureAccessSektion).
+  const captureAccessWiderrufbar =
+    captureAccess?.state === CAPTURE_ACCESS_STATE.GRANTED;
+
   // Teil A — Navigation links, Inhalt rechts. Eine Rubrik zur Zeit sichtbar; der
   // State bleibt lokal (kein Routing). Default ist die erste Rubrik.
   const [rubrik, setRubrik] = useState("general");
@@ -1731,6 +1964,9 @@ export default function SettingsView({ lang, onLangChange, onClose, onOpenManual
     { id: "dnswatch", label: t("settings.nav.dnswatch") },
     { id: "defaultcreds", label: t("settings.nav.defaultcreds") },
     { id: "defaultcredsList", label: t("settings.nav.defaultcredsList") },
+    ...(captureAccessWiderrufbar
+      ? [{ id: "captureAccess", label: t("settings.nav.captureAccess") }]
+      : []),
   ];
 
   return (
@@ -1815,6 +2051,17 @@ export default function SettingsView({ lang, onLangChange, onClose, onOpenManual
 
           {rubrik === "defaultcredsList" ? (
             <DefaultCredsListeSektion onGespeichert={zeigeGespeichert} />
+          ) : null}
+
+          {/* Nach einem geglückten Widerruf meldet der Status nicht mehr „granted";
+              die Rubrik verschwindet dann aus der Navigation. Der Inhalt bleibt so
+              lange stehen, bis der Nutzer selbst weiterklickt — die Erfolgsmeldung
+              soll nicht unter ihm wegspringen. */}
+          {rubrik === "captureAccess" && captureAccess !== null ? (
+            <CaptureAccessSektion
+              status={captureAccess}
+              onNeuLaden={ladeCaptureAccess}
+            />
           ) : null}
         </div>
       </div>

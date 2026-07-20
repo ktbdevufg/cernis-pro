@@ -266,6 +266,52 @@
   cursor: default;
 }
 
+/* ── Sektion „Zugriff für den Mitschnitt" (Widerruf) ──────────────────────── */
+
+/* Aufzählung im Hinweis-Ton: was eingerichtet ist bzw. welche Konten betroffen
+   wären. Bewusst dieselbe Größe/Farbe wie .settings__hint — es ist erläuternder
+   Text, keine eigenständige Datenliste. */
+.settings__liste {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--color-text-tert);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Der Bestätigungsblock. Kein Overlay-Dialog wie beim Einrichten, sondern ein
+   eingebetteter Block: der Widerruf ist eine Einstellung, kein Zwischenruf — der
+   Nutzer soll den Kontext (was eingerichtet ist) weiter sehen. Die abgesetzte
+   Fläche macht ihn trotzdem als eigenen Entscheidungsschritt kenntlich. */
+.settings__widerruf {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.settings__widerruf-titel {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+/* Im geteilten Fall stehen zwei gleichwertige Aktionen nebeneinander: die
+   schonende darf nicht wie eine Nebensache aussehen. Umbruch erlaubt, damit sie
+   in einem schmalen Fenster untereinander rutschen statt zu überlaufen. */
+.settings__widerruf-aktionen {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 /* ── Sektion „Was ist auffällig?" ─────────────────────────────────────────── */
 
 /* Ein Block innerhalb der Sektion (Tabellen-Paar, Schwelle, Regeln, Hinweis).

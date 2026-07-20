@@ -124,6 +124,7 @@
       "dnswatch": "DNS-Wächter",
       "defaultcreds": "Standardzugänge",
       "defaultcredsList": "Standardzugänge-Liste",
+      "captureAccess": "Mitschnitt-Zugriff",
       "wartung": "Wartung"
     },
     "startseite": {
@@ -226,6 +227,29 @@
       "dialogSessionText": "Die Freischaltung gilt ausschließlich für die aktuelle CERNIS-Sitzung. Nach einem Neustart ist die Funktion wieder gesperrt.",
       "confirm": "Freischalten",
       "cancel": "Abbrechen"
+    },
+    "captureAccess": {
+      "title": "Zugriff für den Mitschnitt",
+      "intro": "Der Zugriff auf die Mitschnitt-Geräte Ihres Macs ist eingerichtet. CERNIS kann damit die echten Domainnamen mitlesen, ohne als Administrator zu laufen.",
+      "whatTitle": "Eingerichtet ist:",
+      "whatGroup": "eine eigene Benutzergruppe für den Mitschnitt",
+      "whatDaemon": "ein kleiner Systemdienst, der die Geräterechte nach jedem Neustart wieder setzt",
+      "whatDevices": "Lese- und Schreibrechte auf die Mitschnitt-Geräte",
+      "revokeButton": "Zugriff widerrufen",
+      "confirmTitle": "Zugriff wirklich widerrufen?",
+      "confirmSoloBody": "Die Einrichtung wird vollständig zurückgenommen: Gruppe, Systemdienst und Geräterechte. CERNIS kann danach keine echten Domainnamen mehr mitlesen, bis Sie den Zugriff erneut einrichten.",
+      "confirmSharedTitle": "Achtung — weitere Konten betroffen",
+      "confirmSharedBody": "Die Mitschnitt-Geräte gehören zu Ihrem Mac, nicht zu Ihrem Konto. Neben Ihnen haben noch weitere Konten Zugriff. Wenn Sie vollständig entfernen, verlieren diese Konten ihren Zugriff ebenfalls.",
+      "confirmSharedMembers": "Betroffene Konten:",
+      "actionMembershipOnly": "Nur meinen Zugriff entfernen",
+      "actionFull": "Vollständig entfernen",
+      "confirm": "Widerrufen",
+      "cancel": "Abbrechen",
+      "laeuft": "Warten auf die Bestätigung durch Ihr System …",
+      "erfolg": "Der Zugriff wurde widerrufen. Sie können ihn jederzeit wieder einrichten.",
+      "fehler": "Der Widerruf hat nicht geklappt.",
+      "ladeFehler": "Der Zustand des Mitschnitt-Zugriffs konnte nicht geladen werden.",
+      "hinweisAnmeldung": "Hinweis: Für bereits laufende Programme greift der Entzug erst nach einer neuen Anmeldung."
     },
     "defaultCredsList": {
       "navLabel": "Standardzugänge-Liste",
@@ -662,6 +686,7 @@
         "later": "Später",
         "laeuft": "Warten auf die Bestätigung durch Ihr System …",
         "erfolg": "Der Zugriff ist eingerichtet. Die echten Domainnamen werden jetzt angezeigt.",
+        "erfolgNeustart": "Der Zugriff ist eingerichtet. Damit er auch hier greift, starten Sie CERNIS bitte einmal neu — dann werden die echten Domainnamen angezeigt.",
         "abgebrochen": "Die Einrichtung wurde abgebrochen. Sie können sie jederzeit nachholen.",
         "fehler": "Die Einrichtung hat nicht geklappt.",
         "erneut": "Erneut versuchen",
