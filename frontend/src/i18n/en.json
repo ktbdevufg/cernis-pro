@@ -1109,8 +1109,8 @@
         "aggregate": "Summary"
       },
       "modusHinweis": {
-        "detail": "Records every point in time individually — very precise, but data-heavy. Limited to 24 hours for this reason. For longer observation, choose the summary recording.",
-        "aggregate": "Summarises per remote endpoint (first seen / last seen / how often) — compact, no time limit."
+        "detail": "Records every point in time individually — very precise, but data-heavy. Limited to 24 hours for this reason. For longer observation, choose the summary recording. It additionally preserves the course over time and yields the same summary in the report.",
+        "aggregate": "Summarises per remote endpoint (first seen / last seen / how often) — compact, no time limit. Needs little space and yields the complete summary in the report."
       },
       "tiefeLabel": "Depth",
       "tiefe": {
@@ -1699,10 +1699,11 @@
       "kopf": {
         "erstellt": "Created on {{datum}}"
       },
-      "einleitung": "This report shows which remote peers outside your network were contacted – organised by country, operator and notability. It describes and contextualises – it does not pass judgement.",
+      "einleitung": "This report shows which remote peers outside your network were contacted – organised by country, operator and notability. It draws on your recordings and therefore covers a past period; the list under Outbound Contacts, by contrast, shows the present moment. It describes and contextualises – it does not pass judgement.",
       "fusszeile": "CERNIS PRO 2.0 — Professional Network Scanner & Monitor · Created on {{datum}}",
       "ladeFehler": "The outbound contacts report could not be loaded.",
-      "leerzustand": "No outbound contacts recorded yet – please start a recording in the Outbound Contacts area first.",
+      "leerzustandKeineAufzeichnung": "This report evaluates recorded periods. The list under Outbound Contacts shows the present moment – for a report, a period is recorded from it. You start a recording under Observe, Outbound Contacts, with “New recording”.",
+      "leerzustandNochKeineDaten": "No measurement points are available for this period yet. The view fills up as soon as this computer talks to the outside.",
       "bezug": {
         "label": "Scope",
         "alle": "All recordings"

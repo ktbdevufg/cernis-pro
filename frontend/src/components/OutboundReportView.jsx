@@ -234,6 +234,15 @@ export default function OutboundReportView() {
   // Ehrlicher Leerzustand: Bericht geladen, aber gar keine Aussenkontakte aufgezeichnet.
   const istLeer = bericht && bericht.contactsTotal === 0;
 
+  // Zwei GRUENDE fuer denselben leeren Stand — sie brauchen verschiedene Auskuenfte,
+  // sonst schickt der Hinweis den Nutzer auf einen Weg, den er schon gegangen ist:
+  //   keine Aufzeichnung vorhanden -> erklaeren, worauf der Bericht ueberhaupt beruht
+  //     (Momentaufnahme vs. aufgezeichneter Zeitraum) und wie man eine startet.
+  //   Aufzeichnung vorhanden, aber noch ohne Messpunkte (frisch gestartet) -> ruhig
+  //     sagen, dass sich die Anzeige von selbst fuellt. KEINE Handlungsaufforderung:
+  //     es ist nichts zu tun.
+  const ohneAufzeichnung = recordings.length === 0;
+
   return (
     <div className="outbound-report">
       {/* ── 1. Bericht-Titelkopf: Logo + grosse Ueberschrift + Erstelldatum ──────
@@ -296,11 +305,16 @@ export default function OutboundReportView() {
         </div>
       )}
 
-      {/* ── 2. Ehrlicher Leerzustand: keine Grafiken/Tabellen ──────────────────── */}
+      {/* ── 2. Ehrlicher Leerzustand: keine Grafiken/Tabellen ────────────────────
+          Der Text richtet sich nach dem GRUND (siehe ohneAufzeichnung oben): ohne
+          Aufzeichnung die Einordnung samt Weg, mit Aufzeichnung der ruhige Hinweis,
+          dass noch keine Messpunkte vorliegen. */}
       {istLeer ? (
         <div className="outbound-report__leerzustand" role="note">
           <p className="outbound-report__leerzustand-text">
-            {t("report.outbound.leerzustand")}
+            {ohneAufzeichnung
+              ? t("report.outbound.leerzustandKeineAufzeichnung")
+              : t("report.outbound.leerzustandNochKeineDaten")}
           </p>
         </div>
       ) : null}

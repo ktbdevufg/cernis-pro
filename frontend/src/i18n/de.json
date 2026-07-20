@@ -1109,8 +1109,8 @@
         "aggregate": "Sammlung"
       },
       "modusHinweis": {
-        "detail": "Zeichnet jeden Zeitpunkt einzeln auf — sehr genau, aber datenintensiv. Daher auf 24 Stunden begrenzt. Für längere Beobachtung die Sammel-Aufzeichnung wählen.",
-        "aggregate": "Fasst je Gegenstelle zusammen (erstmals/zuletzt/wie oft) — kompakt, zeitlich unbegrenzt."
+        "detail": "Zeichnet jeden Zeitpunkt einzeln auf — sehr genau, aber datenintensiv. Daher auf 24 Stunden begrenzt. Für längere Beobachtung die Sammel-Aufzeichnung wählen. Bewahrt zusätzlich den zeitlichen Verlauf und liefert im Bericht dieselbe Bilanz.",
+        "aggregate": "Fasst je Gegenstelle zusammen (erstmals/zuletzt/wie oft) — kompakt, zeitlich unbegrenzt. Braucht wenig Platz und liefert im Bericht die vollständige Bilanz."
       },
       "tiefeLabel": "Tiefe",
       "tiefe": {
@@ -1699,10 +1699,11 @@
       "kopf": {
         "erstellt": "Erstellt am {{datum}}"
       },
-      "einleitung": "Dieser Bericht zeigt, mit welchen Gegenstellen außerhalb Ihres Netzes Verbindung aufgenommen wurde – nach Land, Betreiber und Auffälligkeit geordnet. Er beschreibt und ordnet ein – er fällt kein Urteil.",
+      "einleitung": "Dieser Bericht zeigt, mit welchen Gegenstellen außerhalb Ihres Netzes Verbindung aufgenommen wurde – nach Land, Betreiber und Auffälligkeit geordnet. Er stützt sich auf Ihre Aufzeichnungen, wertet also einen zurückliegenden Zeitraum aus; die Liste unter Außenkontakte zeigt dagegen den aktuellen Augenblick. Er beschreibt und ordnet ein – er fällt kein Urteil.",
       "fusszeile": "CERNIS PRO 2.0 — Professional Network Scanner & Monitor · Erstellt am {{datum}}",
       "ladeFehler": "Der Außenkontakte-Bericht konnte nicht geladen werden.",
-      "leerzustand": "Noch keine Außenkontakte aufgezeichnet – bitte zuerst eine Aufzeichnung im Außenkontakte-Bereich starten.",
+      "leerzustandKeineAufzeichnung": "Dieser Bericht wertet aufgezeichnete Zeiträume aus. Die Liste unter Außenkontakte zeigt den aktuellen Augenblick – für einen Bericht wird daraus ein Zeitraum aufgezeichnet. Sie starten eine Aufzeichnung unter Beobachten, Außenkontakte, mit „Neue Aufzeichnung“.",
+      "leerzustandNochKeineDaten": "Für diesen Zeitraum liegen noch keine Messpunkte vor. Die Anzeige füllt sich, sobald dieser Rechner nach außen spricht.",
       "bezug": {
         "label": "Bezug",
         "alle": "Alle Aufzeichnungen"
