@@ -677,7 +677,13 @@ from domain.monitoring import (
     ThresholdCondition,
     compute_sla_stats,
 )
-from domain.outbound_log import AggregatedContact, ContactDelta
+from domain.outbound_log import (
+    AggregatedContact,
+    ContactDelta,
+    OutboundDetailRow,
+    OutboundRecording,
+    RecordingMode,
+)
 from domain.process import classify_kind
 from domain.resolver_names import known_resolver_name
 from domain.scanning import EnrichedHost
@@ -5875,19 +5881,90 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             OutboundReportRecordingOut(id=rec.id, label=rec.label or rec.id) for rec in recordings
         ]
 
+    # Verdichtet die rohen DETAIL-Messpunkte EINER Aufzeichnung auf dieselbe Form, die der
+    # AGGREGATE-Pfad liefert (``AggregatedContact`` je remote_ip). Noetig, weil die beiden
+    # Zeitmodi in GETRENNTE Tabellen schreiben (recorder.py: DETAIL -> outbound_log_detail,
+    # AGGREGATE -> outbound_log_aggregate) -- ohne diese Verdichtung bliebe jede
+    # Detail-Aufzeichnung im Bericht dauerhaft leer, obwohl die Daten vollstaendig vorliegen.
+    #
+    # Die Regel ist NICHT neu erfunden, sondern die des Schreibpfads (``domain.merge_contact``):
+    # ``total_count`` summiert die ``connection_count`` der Messpunkte, ``peak_count`` ist deren
+    # MAXIMUM (Spitze EINES Zyklus), ``first_seen``/``last_seen`` sind min/max der Messpunkt-``ts``.
+    # Die Anreicherungsfelder behalten den ersten nicht-leeren Wert -- identisch zum Alle-Fall
+    # unten, damit ein None/"" keinen bereits bekannten Wert loescht.
+    #
+    # Bewusst hier im Composition Root und NICHT in ``BuildOutboundReport``: der Use-Case bleibt
+    # quellen-agnostisch und bekommt weiterhin fertige Zeilen (Regel 4/5).
+    def _detail_to_aggregate(rows: list[OutboundDetailRow]) -> list[AggregatedContact]:
+        verdichtet: dict[str, AggregatedContact] = {}
+        for row in rows:
+            vorhanden = verdichtet.get(row.remote_ip)
+            if vorhanden is None:
+                verdichtet[row.remote_ip] = AggregatedContact(
+                    remote_ip=row.remote_ip,
+                    first_seen=row.ts,
+                    last_seen=row.ts,
+                    total_count=row.connection_count,
+                    peak_count=row.connection_count,
+                    remote_port=row.remote_port,
+                    hostname=row.hostname,
+                    country=row.country,
+                    operator=row.operator,
+                    asn=row.asn,
+                    app_name=row.app_name,
+                )
+                continue
+            verdichtet[row.remote_ip] = AggregatedContact(
+                remote_ip=vorhanden.remote_ip,
+                first_seen=min(vorhanden.first_seen, row.ts),
+                last_seen=max(vorhanden.last_seen, row.ts),
+                total_count=vorhanden.total_count + row.connection_count,
+                peak_count=max(vorhanden.peak_count, row.connection_count),
+                remote_port=vorhanden.remote_port or row.remote_port,
+                hostname=vorhanden.hostname or row.hostname,
+                country=vorhanden.country or row.country,
+                operator=vorhanden.operator or row.operator,
+                asn=vorhanden.asn or row.asn,
+                app_name=vorhanden.app_name or row.app_name,
+            )
+        return list(verdichtet.values())
+
+    # Waehlt die QUELLE einer Aufzeichnung anhand ihres Zeitmodus und liefert in BEIDEN Faellen
+    # dieselbe Form (``AggregatedContact``-Liste). Der Modus bestimmt nur, WOHER gelesen wird --
+    # nicht, wie das Ergebnis aussieht.
+    #
+    # KEIN stiller Fallback (S3): liefert die zum Modus gehoerende Quelle nichts, bleibt das
+    # Ergebnis ehrlich leer. Es wird NIEMALS ersatzweise die andere Tabelle gelesen -- das wuerde
+    # Zahlen aus einem fremden Erfassungsmodus vortaeuschen.
+    #
+    # ``until`` ist ein absoluter ts vom Aufrufer (die Repos bleiben uhrfrei); ``since=0.0``
+    # bedeutet "von Anfang an" -- exakt das Muster des DNS-Umgehungs-Berichts im selben
+    # Composition Root (``detail_repo.range(rec.id, 0.0, until)``).
+    def _outbound_source_for(rec: OutboundRecording, until: float) -> list[AggregatedContact]:
+        if rec.mode is RecordingMode.DETAIL:
+            return _detail_to_aggregate(outbound_detail_repository().range(rec.id, 0.0, until))
+        return list(outbound_aggregate_repository().list_for(rec.id))
+
     # ── Aussenkontakte-Bericht: Datenseite (Muster _build_cve_report_data, Regel 4/5) ──
-    # Liest die Aggregate (EINE Aufzeichnung oder alle gemergt), bewertet sie gegen die
-    # Blocklisten und projiziert auf die neutralen Berichts-Zeilen. KEINE Uhr -- die Datums-Texte
-    # je Zeile sind reine Formatierung der vorhandenen first_seen/last_seen (kein Wanduhr-Zugriff,
-    # Muster _to_row im CVE-Bericht). MatchContacts ist sync; die Datenseite kann sync bleiben.
+    # Liest die Kontakte EINER Aufzeichnung oder aller gemergt -- je Aufzeichnung aus der zu ihrem
+    # Zeitmodus passenden Quelle --, bewertet sie gegen die Blocklisten und projiziert auf die
+    # neutralen Berichts-Zeilen. Die Datums-Texte je Zeile sind reine Formatierung der vorhandenen
+    # first_seen/last_seen (Muster _to_row im CVE-Bericht). Die Uhr wird NUR fuer die obere
+    # Fenstergrenze der DETAIL-Abfrage gebraucht (Muster _build_dns_bypass_report_data).
+    # MatchContacts ist sync; die Datenseite kann sync bleiben.
     def _build_outbound_report_data(recording_id: str | None) -> OutboundReport:
-        # (1) Bezugsrahmen bestimmen + Aggregate sammeln.
+        import time
+
+        until = time.time()
+
+        # (1) Bezugsrahmen bestimmen + Kontakte je Aufzeichnung aus der passenden Quelle sammeln.
         if recording_id:
             # Nur DIESE Aufzeichnung. Label aus der Recording-Definition (auf id zurueckfallen).
             rec = outbound_recording_repository().get(recording_id)
             recording_label = (rec.label if rec is not None else "") or recording_id
             recording_scope = "single"
-            aggregate = outbound_aggregate_repository().list_for(recording_id)
+            # Unbekannte Aufzeichnung -> ehrlich leer (kein Raten ueber die Quelle).
+            aggregate = [] if rec is None else _outbound_source_for(rec, until)
         else:
             # ALLE Aufzeichnungen zusammengefasst. Der Rand/PDF setzt die "Alle Aufzeichnungen"-
             # Anzeige -> recording_label hier bewusst leer, recording_scope = "all".
@@ -5899,7 +5976,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             # Schreibpfad; hier wird nur gelesen/zusammengefasst).
             gemergt: dict[str, AggregatedContact] = {}
             for rec in outbound_recording_repository().list_all():
-                for a in outbound_aggregate_repository().list_for(rec.id):
+                # Je Aufzeichnung die zu IHREM Modus passende Quelle -- gemischte Bestaende aus
+                # DETAIL- und AGGREGATE-Laeufen laufen so korrekt in denselben Merge zusammen.
+                for a in _outbound_source_for(rec, until):
                     vorhanden = gemergt.get(a.remote_ip)
                     if vorhanden is None:
                         gemergt[a.remote_ip] = a
