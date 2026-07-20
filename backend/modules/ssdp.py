@@ -57,7 +57,17 @@ async def discover_ssdp(timeout: float = 4.0) -> list[SSDPDevice]:
         try:
             import time
             end = time.time() + timeout
-            while time.time() < end:
+            while True:
+                # Empfangsfenster = VERBLEIBENDE Restzeit, nicht das Gesamtfenster.
+                # Mit settimeout(timeout) blockierte recvfrom nach der letzten Antwort
+                # noch ein volles weiteres Fenster, bevor die Schleifenbedingung wieder
+                # geprueft wurde -- ein Aufruf mit 4 s Vorgabe lief real 6,4-7,0 s
+                # (gemessen). Rest <= 0 beendet die Schleife, damit kein Timeout von
+                # null oder negativ an den Socket geht.
+                rest = end - time.time()
+                if rest <= 0:
+                    break
+                sock.settimeout(rest)
                 try:
                     data, addr = sock.recvfrom(65507)
                     dev = _parse_ssdp_response(data, addr)
