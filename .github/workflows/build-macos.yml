@@ -18,10 +18,20 @@ name: Build macOS
 # eigener Schritt 'uv python install 3.12' vor 'uv sync'. Mit setup-python koennte
 # der Runner 3.13 ziehen und PyInstaller scheitert.
 #
-# SIGNING: Dieser erste CI-Job baut UNSIGNIERT (Tauri signiert ad-hoc, weil KEIN
-# APPLE_SIGNING_IDENTITY gesetzt ist). Echtes Signing + Notarisierung folgt als
-# eigener Block mit Secrets (Developer-ID-Zertifikat, notarytool) -- bewusst nicht
-# in dieser Erstregistrierung. Versions-Suffix arm64.
+# SIGNING: JEDER Lauf baut echt signiert (Developer ID) -- auch Dispatch-Laeufe.
+# Das ist keine Vorliebe, sondern eine Konsequenz aus build.sh: seit der Haertung
+# (Commit 2e9f596) bricht build.sh in Schritt 0 mit exit 1 ab, wenn
+# APPLE_SIGNING_IDENTITY leer ist, und prueft am Ende zusaetzlich, dass die .app
+# NICHT ad-hoc signiert ist (Signature=adhoc / fehlender TeamIdentifier -> Fehler).
+# Ein unsignierter Pfad ist damit nicht mehr aufrufbar; der frueher hier stehende
+# Kommentar ("baut unsigniert, Tauri signiert ad-hoc") stammt aus der Zeit VOR
+# dieser Haertung und war veraltet. Darum: Zertifikat-Import in eine temporaere
+# Keychain laeuft IMMER, nicht nur an v-Tags.
+#
+# NOTARISIERUNG dagegen strikt NUR an v-Tags: sie ist langsam (Apple-Roundtrip)
+# und ausschliesslich fuer das echte Release-Asset noetig. Dispatch-Laeufe sind
+# Smoke-Tests des Bauvorgangs -- die brauchen kein Apple-Ticket.
+# Versions-Suffix arm64.
 
 on:
   # Manueller Knopf (Actions-Tab) ...
@@ -99,15 +109,109 @@ jobs:
       - name: nmap installieren (build.sh Schritt 0 erwartet es)
         run: brew install nmap
 
+      # Das Developer-ID-Zertifikat in eine EIGENE, temporaere Keychain importieren --
+      # nie in die login.keychain des Runners. Der Runner ist ephemer, aber eine
+      # dedizierte Keychain haelt den privaten Schluessel auf diesen Job begrenzt und
+      # macht das Aufraeumen trivial (die VM wird verworfen). Das Keychain-Passwort ist
+      # zufaellig und bleibt prozesslokal -- es wird nie ausgegeben.
+      # Laeuft IMMER (nicht nur an v-Tags), weil build.sh die Signatur erzwingt
+      # (siehe Kopfkommentar); ohne diesen Schritt braeche jeder Lauf in Schritt 0 ab.
+      - name: Signing-Zertifikat in temporaere Keychain importieren
+        shell: bash
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN_PWD=$(openssl rand -base64 24)
+          KEYCHAIN="$RUNNER_TEMP/build.keychain"
+          CERT="$RUNNER_TEMP/cert.p12"
+
+          security create-keychain -p "$KEYCHAIN_PWD" "$KEYCHAIN"
+          # Auto-Lock-Timeout 6 h: die Keychain darf waehrend des gesamten Builds
+          # nicht zuschnappen, sonst scheitert codesign mittendrin.
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PWD" "$KEYCHAIN"
+
+          echo "$MACOS_CERTIFICATE" | base64 --decode > "$CERT"
+          security import "$CERT" -k "$KEYCHAIN" -P "$MACOS_CERTIFICATE_PWD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          rm -f "$CERT"
+
+          # Die neue Keychain VORNE in die Suchliste, die bestehenden aber behalten
+          # (sonst findet 'security find-identity' -- und damit build.sh -- nichts,
+          # bzw. es gehen die System-Zertifikate der login.keychain verloren).
+          security list-keychains -d user -s "$KEYCHAIN" \
+            $(security list-keychains -d user | sed s/\"//g)
+          security default-keychain -s "$KEYCHAIN"
+          # Ohne Partition-List fragt macOS beim Signieren interaktiv nach dem
+          # Passwort -- im CI gibt es niemanden, der antwortet: der Build haengt.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PWD" "$KEYCHAIN" > /dev/null
+
+          # Kontrollausgabe: zeigt die Developer-ID (kein Geheimnis) im Log.
+          security find-identity -v -p codesigning "$KEYCHAIN"
+
       # Den unveraenderten build.sh ausfuehren. Er erledigt selbst: nmap-Check,
       # venv-Aktivierung, Frontend-Build, beide PyInstaller-Binaries, Binaries
-      # fuer Tauri bereitstellen, Tauri-Build (.dmg) und das Einsammeln. KEIN
-      # APPLE_SIGNING_IDENTITY gesetzt -> Tauri signiert ad-hoc (unsigniert),
-      # wie fuer diesen ersten CI-Job gewuenscht; echtes Signing/Notarisierung
-      # folgt als eigener Block mit Secrets.
-      - name: macOS-Build (build.sh -- Frontend + Binaries + Tauri/dmg)
+      # fuer Tauri bereitstellen, Tauri-Build (.dmg) und das Einsammeln.
+      # APPLE_SIGNING_IDENTITY ist gesetzt -> echte Developer-ID-Signatur fuer
+      # .app UND .dmg; build.sh verifiziert das am Ende selbst (kein adhoc,
+      # TeamIdentifier vorhanden). Der Wert muss exakt der Identitaet aus der
+      # oben importierten Keychain entsprechen, sonst bricht build.sh ab.
+      - name: macOS-Build (build.sh -- Frontend + Binaries + Tauri/dmg, signiert)
         shell: bash
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
         run: bash build.sh
+
+      # Notarisierung -- NUR an v-Tags (siehe Kopfkommentar: langsamer Apple-
+      # Roundtrip, nur fuers echte Release-Asset noetig). Reihenfolge zwingend:
+      # build.sh signiert .app UND .dmg -> notarytool prueft das eingereichte .dmg
+      # -> stapler heftet das Ticket ans .dmg. Genotarisiert wird das dmg als
+      # Container; die .app darin ist bereits Developer-ID-signiert und wird von
+      # Apple mitgeprueft -- fuer die dmg-Verteilung ist das der uebliche Weg.
+      # Muss VOR dem Release-Asset-Schritt liegen, damit das hochgeladene dmg das
+      # angeheftete Ticket bereits traegt (Gatekeeper offline-tauglich).
+      - name: dmg notarisieren und stapeln (nur v-Tags)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          MACOS_API_KEY: ${{ secrets.MACOS_API_KEY }}
+          MACOS_API_KEY_ID: ${{ secrets.MACOS_API_KEY_ID }}
+          MACOS_API_ISSUER_ID: ${{ secrets.MACOS_API_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          NOTARY_DIR="$RUNNER_TEMP/notary"
+          KEY="$NOTARY_DIR/AuthKey.p8"
+          mkdir -p "$NOTARY_DIR"
+          echo "$MACOS_API_KEY" | base64 --decode > "$KEY"
+          # Der Key liegt im RUNNER_TEMP; unabhaengig vom Ausgang wieder loeschen.
+          trap 'rm -f "$KEY"' EXIT
+
+          DMG=$(ls src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg 2>/dev/null | head -1 || true)
+          if [ -z "$DMG" ] || [ ! -f "$DMG" ]; then
+            echo "FEHLER: kein .dmg unter src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/ gefunden."
+            echo "Ohne Paket gibt es nichts zu notarisieren -- der Build davor kann nicht erfolgreich gewesen sein."
+            exit 1
+          fi
+          echo "Notarisiere: $DMG"
+
+          # --wait blockiert bis zum Apple-Ergebnis; ein abgelehnter Submit liefert
+          # einen Exit-Code != 0 und bricht den Schritt ab (kein stiller Durchlauf).
+          xcrun notarytool submit "$DMG" \
+            --key "$KEY" \
+            --key-id "$MACOS_API_KEY_ID" \
+            --issuer "$MACOS_API_ISSUER_ID" \
+            --wait --timeout 30m
+
+          # Ticket anheften, damit Gatekeeper das dmg auch OHNE Netz akzeptiert.
+          xcrun stapler staple "$DMG"
+          # Harte Gegenprobe: muss erfolgreich sein, sonst ist der Schritt rot.
+          xcrun stapler validate "$DMG"
+          # Zusaetzliche Sichtprueferei fuers Log -- spctl bewertet dmg-Container
+          # nicht immer eindeutig, darum bewusst NICHT abbruchrelevant.
+          spctl -a -vvv -t install "$DMG" 2>&1 || true
 
       # Ab hier Fallunterscheidung nach Trigger -- identische Logik wie im
       # Windows-/Linux-Workflow, nur mit dem macOS-Bundle-Pfad (dmg). Das Triple
