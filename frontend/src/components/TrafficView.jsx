@@ -29,13 +29,40 @@ import { fetchSniMap, fetchSniStatus } from "../api/sni.js";
 import NpcapDialog from "./NpcapDialog.jsx";
 import { useSni } from "../hooks/useSni.js";
 import {
+  TRAFFIC_PERMISSION_STATE,
   fetchPtrNames,
   fetchTraffic,
   fetchTrafficPermission,
 } from "../api/traffic.js";
+import { fetchSettings } from "../api/settings.js";
 import { CODES, mitCode } from "../lib/fehlercodes.js";
 import LookupPanel from "./LookupPanel.jsx";
 import "./TrafficView.css";
+
+// Setting-Key der Darstellung nicht verfügbarer Durchsatz-Angaben. Wird HIER
+// gelesen und in SettingsView geschrieben (Muster overview_sections). Default
+// true = sichtbar mit Erklärung.
+export const TRAFFIC_UNAVAILABLE_KEY = "traffic_show_unavailable";
+
+// Liest den Schalter aus dem rohen Settings-Dict. Toleriert Boolean UND String
+// (Backend-Settings tragen Werte teils als String) — exakt wie leseStartseite.
+// Fehlt der Wert oder ist er unbrauchbar, gilt der Default TRUE: im Zweifel
+// zeigen und einordnen, nicht verschweigen.
+export function leseTrafficSichtbar(settings) {
+  const roh = settings?.[TRAFFIC_UNAVAILABLE_KEY];
+  if (typeof roh === "boolean") {
+    return roh;
+  }
+  if (typeof roh === "string") {
+    if (roh === "false") {
+      return false;
+    }
+    if (roh === "true") {
+      return true;
+    }
+  }
+  return true;
+}
 
 // Abbildung der Icon-Schlüssel (aus api/traffic.js iconAusName) auf lucide-
 // Komponenten. Reine Icon-Anker in der Logo-Akzentfarbe — keine Aussage.
@@ -133,7 +160,7 @@ function appLabel(t, app) {
 // Eine App-Zeile in der linken Liste. Klickbar; Klick meldet die App an
 // onSelect. selected hebt die zum offenen Detail-Panel gehörende Zeile hervor.
 // Ohne echte Rate (down===null): ruhiges "—" statt Balken; mit Rate: Balken.
-function AppZeile({ app, onSelect, selected, anteil }) {
+function AppZeile({ app, onSelect, selected, anteil, durchsatzAusblenden }) {
   const { t } = useTranslation();
   const Icon = APP_ICONS[app.icon] ?? HelpCircle;
 
@@ -183,7 +210,7 @@ function AppZeile({ app, onSelect, selected, anteil }) {
                 })}
               </span>
             </>
-          ) : (
+          ) : durchsatzAusblenden ? null : (
             <span className="traffic-app__rate-none" aria-hidden="true">
               —
             </span>
@@ -216,6 +243,7 @@ function AppListe({
   onSniStop,
   npcapMarker,
   onNpcapInstall,
+  durchsatzAusblenden,
 }) {
   const { t } = useTranslation();
   const max = maxDown(apps);
@@ -317,6 +345,7 @@ function AppListe({
             onSelect={onSelect}
             selected={app.name === selectedName}
             anteil={app.down !== null ? Math.round((app.down / max) * 100) : 0}
+            durchsatzAusblenden={durchsatzAusblenden}
           />
         ))}
       </div>
@@ -526,7 +555,7 @@ function ConnectionList({ conns, onLookup }) {
 // Rechte Spalte: Verbindungs-Detail der gewählten App. Der Lookup einer
 // Verbindung meldet deren Ziel über onLookup nach oben — dort öffnet TrafficView
 // die Gegenstellen-Ansicht (LookupPanel) in dieser Spalte.
-function AppDetailPanel({ app, onClose, onLookup }) {
+function AppDetailPanel({ app, onClose, onLookup, durchsatzAusblenden }) {
   const { t } = useTranslation();
   const Icon = APP_ICONS[app.icon] ?? HelpCircle;
 
@@ -534,6 +563,12 @@ function AppDetailPanel({ app, onClose, onLookup }) {
   const downText =
     app.down !== null ? formatRate(t, app.down) : "—";
   const upText = app.up !== null ? formatRate(t, app.up) : "—";
+
+  // Raten nur ausblenden, wenn sie ohnehin nicht verfügbar sind (der Aufrufer
+  // prüft das) UND kein echter Wert vorliegt. Ein vorhandener Wert wird IMMER
+  // gezeigt — die Einstellung verbirgt niemals Daten.
+  const zeigeRaten =
+    !durchsatzAusblenden || app.down !== null || app.up !== null;
 
   return (
     <aside className="traffic-detail">
@@ -547,10 +582,14 @@ function AppDetailPanel({ app, onClose, onLookup }) {
               {appLabel(t, app)}
             </h3>
             <span className="traffic-detail__rates traffic-mono">
-              {t("beobachten.traffic.down", { value: downText })}
-              {" · "}
-              {t("beobachten.traffic.up", { value: upText })}
-              {" "}
+              {zeigeRaten ? (
+                <>
+                  {t("beobachten.traffic.down", { value: downText })}
+                  {" · "}
+                  {t("beobachten.traffic.up", { value: upText })}
+                  {" "}
+                </>
+              ) : null}
               {t("beobachten.traffic.connCount", { count: app.connectionCount })}
             </span>
           </div>
@@ -646,8 +685,13 @@ export default function TrafficView({
   // Drei Zustände wie LookupPanel: "laedt" / "ok" / "fehler".
   const [status, setStatus] = useState("laedt");
   const [apps, setApps] = useState([]);
-  // Rechte-Naht: null = noch unbekannt; sonst { ok, error }.
+  // Rechte-Naht: null = noch unbekannt; sonst { ok, error, state }.
   const [permission, setPermission] = useState(null);
+
+  // Ob nicht verfügbare Durchsatz-Angaben sichtbar bleiben (Einstellung, Default
+  // true). Betrifft NUR nicht verfügbare Angaben — echte Werte zeigt die Ansicht
+  // immer, unabhängig davon.
+  const [zeigeNichtVerfuegbar, setZeigeNichtVerfuegbar] = useState(true);
 
   // Gewählte App über den Namen; null = keine. Die None-Gruppe (name===null)
   // wird über einen eigenen Sentinel adressiert, damit sie wählbar bleibt.
@@ -851,6 +895,22 @@ export default function TrafficView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Darstellungs-Einstellung einmal beim Mount lesen. Fehler tolerant: bleibt der
+  // Default true (sichtbar) — im Zweifel zeigen und einordnen, nicht verschweigen.
+  useEffect(() => {
+    let aktiv = true;
+    fetchSettings()
+      .then((settings) => {
+        if (aktiv) {
+          setZeigeNichtVerfuegbar(leseTrafficSichtbar(settings));
+        }
+      })
+      .catch(() => {});
+    return () => {
+      aktiv = false;
+    };
+  }, []);
+
   // Klick auf eine Zeile: wählt die App (name kann null sein -> Sentinel).
   const handleSelect = (app) => {
     setLookupZiel(null);
@@ -869,8 +929,26 @@ export default function TrafficView({
       ? null
       : apps.find((app) => app.name === gewaehlterName) ?? null;
 
+  // Ist die Durchsatz-Messung auf DIESER Plattform gar nicht verfügbar? Nur dann
+  // greift die Ausblenden-Einstellung. Bei needs_privileges (Linux ohne Rechte)
+  // bleibt der Hinweis IMMER stehen: dort ist der Zustand behebbar, und der Weg
+  // dahin darf nicht weggeschaltet werden.
+  const durchsatzNichtVerfuegbar =
+    permission !== null &&
+    permission.state === TRAFFIC_PERMISSION_STATE.NOT_APPLICABLE;
+
+  // Durchsatz-Angaben ausblenden: NUR wenn sie ohnehin nicht verfügbar sind UND
+  // der Nutzer die Erklärung abgewählt hat. Liefert die Plattform echte Werte,
+  // ist das hier niemals true — vorhandene Daten werden nie verborgen.
+  const durchsatzAusblenden = durchsatzNichtVerfuegbar && !zeigeNichtVerfuegbar;
+
+  // Der erklärende Streifen entfällt mit der Erklärung selbst (der Nutzer hat sie
+  // bewusst abgewählt); bei behebbaren Rechte-Fällen bleibt er unberührt.
   const zeigePermission =
-    permission !== null && permission.ok === false && permission.error;
+    permission !== null &&
+    permission.ok === false &&
+    permission.error &&
+    !durchsatzAusblenden;
 
   return (
     <div className="traffic">
@@ -905,6 +983,7 @@ export default function TrafficView({
             onSniStop={handleSniStop}
             npcapMarker={sniPermMarker}
             onNpcapInstall={() => setNpcapDialogMarker(sniPermMarker)}
+            durchsatzAusblenden={durchsatzAusblenden}
           />
           {gewaehlteApp &&
             (lookupZiel ? (
@@ -920,6 +999,7 @@ export default function TrafficView({
                 app={gewaehlteApp}
                 onClose={() => setGewaehlterName(undefined)}
                 onLookup={handleLookup}
+                durchsatzAusblenden={durchsatzAusblenden}
               />
             ))}
         </div>

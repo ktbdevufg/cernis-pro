@@ -112,12 +112,29 @@ export async function fetchTraffic() {
   return backend.map(mappeApp);
 }
 
-// Ruft GET /api/traffic/permission. { ok, error } wird unverändert
+// Zustände der Durchsatz-Sicht (Stufe 2), Spiegel von domain.TrafficPermissionState.
+// Als benannte Konstanten, damit die View nicht mit nackten Strings vergleicht.
+//
+// Der Unterschied zwischen NEEDS_PRIVILEGES und NOT_APPLICABLE ist wesentlich:
+// im ersten Fall KÖNNTE die Plattform es (behebbar, Rechte erlangbar), im zweiten
+// bietet sie die Messung gar nicht an (macOS — nicht behebbar, erhöhte Rechte
+// bewirken dort nichts). Beide liefern ok===false mit Text; nur `state` trennt sie.
+export const TRAFFIC_PERMISSION_STATE = {
+  GRANTED: "granted",
+  NEEDS_PRIVILEGES: "needs_privileges",
+  NOT_APPLICABLE: "not_applicable",
+};
+
+// Ruft GET /api/traffic/permission. { ok, error, state } wird unverändert
 // durchgereicht — der error-Text kommt direkt aus dem Backend (nicht neu
 // erfinden); die View zeigt ihn bei ok===false als ruhigen Hinweis-Streifen.
 export async function fetchTrafficPermission() {
   const backend = await apiGet("/api/traffic/permission");
-  return { ok: Boolean(backend.ok), error: backend.error ?? null };
+  return {
+    ok: Boolean(backend.ok),
+    error: backend.error ?? null,
+    state: backend.state ?? null,
+  };
 }
 
 // Löst PTR-Namen für eine Menge von Remote-IPs nachträglich auf (lazy, nicht-

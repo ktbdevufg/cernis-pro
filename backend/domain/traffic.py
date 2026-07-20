@@ -20,6 +20,11 @@ Drei Datentraeger + vier reine Funktionen, gestaffelt nach den Vision-Stufen:
   kumulativen Socket-Byte-Zaehler (``ss -i``/``sock_diag``) eine grobe Rate in
   Bytes/s, Reset- und ``dt<=0``-sicher. Die Domaene rechnet nur, sie misst nicht.
 
+Dazu der Rechte-Befund der Stufe 2 (``TrafficPermissionState``/
+``TrafficPermissionResult``): ob die Durchsatz-Messung steht, ob ihr nur die Rechte
+fehlen oder ob die Plattform sie gar nicht anbietet. Diese Dreiteilung ist eine
+fachliche Aussage und lebt darum hier, nicht im api-Rand (Begruendung am Enum).
+
 DARSTELLUNG bleibt draussen: keine Icons/Emojis, kein Mensch-lesbares Formatieren
 von Raten ("1,2 MB/s") -- das fuehrt api/Frontend. Die Domaene fuehrt nur Zahlen.
 """
@@ -27,6 +32,7 @@ von Raten ("1,2 MB/s") -- das fuehrt api/Frontend. Die Domaene fuehrt nur Zahlen
 import ipaddress
 from collections.abc import Sequence
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Literal
 
 # Transport-Protokoll der Verbindung. PEP-695-Alias wie im uebrigen domain-Ring
@@ -42,6 +48,54 @@ type L4Protocol = Literal["tcp", "udp"]
 # stilles Verwerfen, kein Hochlaufen -- es ist ein gueltiger, nur unspezifischer
 # Zustand).
 type ConnectionStatus = Literal["established", "listen", "none", "other"]
+
+
+class TrafficPermissionState(StrEnum):
+    """Zustand der Durchsatz-Sicht (Stufe 2) -- die Rechte-/Verfuegbarkeits-Frage.
+
+    ``GRANTED`` -- die volle Sicht steht; der Durchsatz ALLER Apps ist messbar
+    (Linux mit Root bzw. ``CAP_NET_ADMIN``).
+    ``NEEDS_PRIVILEGES`` -- die Plattform KOENNTE es, aber dem laufenden Prozess
+    fehlen die Rechte. Der Zustand ist behebbar; der Grund benennt den Weg.
+    ``NOT_APPLICABLE`` -- diese Plattform bietet die Messung ueberhaupt nicht an
+    (macOS: kein ``sock_diag``/``ss``). Ein ehrlicher eigener Zustand, KEIN Fehler
+    und KEIN Rechteproblem -- erhoehte Rechte wuerden daran nichts aendern.
+
+    WARUM EIN EIGENER ZUSTAND UND KEIN TEXT: Der Unterschied zwischen "die Rechte
+    fehlen" und "diese Plattform bietet es nicht" ist eine FACHLICHE Aussage und
+    gehoert deshalb in die Domaene, nicht an den api-Rand. Steckte er nur im
+    Meldungstext, muesste die Oberflaeche ihn aus einer Zeichenkette erraten -- und
+    ein Text ist lokalisierbar, umformulierbar und als Merkmal unbrauchbar.
+
+    Genau dieses Muster existiert im Projekt bereits fuer die Capture-Rechte-
+    einrichtung: ``domain/capture_access.py`` fuehrt ``CaptureAccessState`` mit
+    ``GRANTED``/``MISSING``/``NOT_APPLICABLE``. Benennung und Aufbau folgen diesem
+    Vorbild, damit beide Rechte-Nahtstellen gleich aussehen.
+
+    Muster ``StrEnum`` wie ``domain/capture_access.py`` -- der Wire-Wert ist der
+    jeweilige String.
+    """
+
+    GRANTED = "granted"
+    NEEDS_PRIVILEGES = "needs_privileges"
+    NOT_APPLICABLE = "not_applicable"
+
+
+@dataclass(frozen=True, slots=True)
+class TrafficPermissionResult:
+    """Der Rechte-Befund der Durchsatz-Sicht: Zustand + optionale Begruendung.
+
+    ``reason`` traegt bei ``NEEDS_PRIVILEGES`` den handlungsorientierten Weg zu mehr
+    Rechten und bei ``NOT_APPLICABLE`` die ehrliche Einordnung (was fehlt, warum es
+    fehlt, was trotzdem funktioniert). Bei ``GRANTED`` bleibt ``reason`` leer -- es
+    gibt nichts zu erklaeren.
+
+    Aufbau wie ``CaptureAccessStatus``: ein Zustand plus ein erklaerender Text, nicht
+    ein Text, aus dem der Zustand erst gelesen werden muesste.
+    """
+
+    state: TrafficPermissionState
+    reason: str = ""
 
 
 @dataclass(frozen=True)

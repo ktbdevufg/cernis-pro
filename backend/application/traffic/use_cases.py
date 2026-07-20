@@ -32,6 +32,7 @@ from domain.traffic import (
     AppTraffic,
     Connection,
     ConnSample,
+    TrafficPermissionState,
     aggregate_by_app,
     compute_rate,
     make_socket_key,
@@ -103,20 +104,32 @@ class CheckTrafficPermission:
         self._permission = permission
 
     def __call__(self) -> dict[str, object]:
-        """``{"ok": True, "error": ""}`` bei voller Sicht, sonst ``ok=False`` + Grund.
+        """``{ok, error, state}`` -- ``ok=True`` bei voller Sicht, sonst Grund + Zustand.
 
         ``is_available`` False -> Quelle nicht nutzbar (Plattform/Tooling fehlt).
-        Sonst ``check_permission``: ein nicht-leerer Text ist die Rechte-Begruendung
-        (z. B. "als Root starten") -> ``ok=False`` (Router uebersetzt das in 403).
-        ``None`` -> volle Sicht moeglich.
+        Sonst der Rechte-Befund ueber ``permission_state``.
+
+        ``state`` traegt den Domaenen-Zustand als String (``granted`` /
+        ``needs_privileges`` / ``not_applicable``) und macht damit UNTERSCHEIDBAR,
+        was ``ok``/``error`` allein nicht hergeben: ob die Rechte fehlen (behebbar)
+        oder die Plattform die Messung gar nicht anbietet (nicht behebbar). Die
+        Oberflaeche braucht diesen Unterschied, um keinen wirkungslosen Rat zu geben.
+
+        ``ok`` und ``error`` bleiben UNVERAENDERT erhalten -- bestehende Aufrufer und
+        der 403-Pfad des Routers arbeiten weiter wie bisher (kein Bruch).
         """
         if not self._permission.is_available():
             return {
                 "ok": False,
                 "error": "Per-App-Traffic ist auf dieser Plattform nicht verfuegbar.",
+                "state": str(TrafficPermissionState.NOT_APPLICABLE),
             }
-        text = self._permission.check_permission()
-        return {"ok": text is None, "error": text or ""}
+        befund = self._permission.permission_state()
+        return {
+            "ok": befund.state is TrafficPermissionState.GRANTED,
+            "error": befund.reason,
+            "state": str(befund.state),
+        }
 
     def is_available(self) -> bool:
         """Reiner Verfuegbarkeits-Check (fuer einen spaeteren ``/available``-Pfad)."""

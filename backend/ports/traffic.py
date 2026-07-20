@@ -28,7 +28,7 @@ verboten).
 
 from typing import Protocol
 
-from domain.traffic import Connection, ConnSample
+from domain.traffic import Connection, ConnSample, TrafficPermissionResult
 
 
 class PerProcessTrafficProvider(Protocol):
@@ -84,5 +84,24 @@ class TrafficPermissionPort(Protocol):
         gestartet werden: <konkreter Befehl>"). KEIN stiller Fallback (ADR 0001/S3):
         die fehlende Berechtigung wird benannt, nicht verschwiegen. Schnelle lokale
         Pruefung, daher synchron (Muster ``ports.capture.check_permission``).
+
+        Bleibt als schmale Text-Naht erhalten (bestehende Aufrufer/Wire-Form
+        ``error``); WELCHER Zustand vorliegt, beantwortet ``permission_state``.
+        """
+        ...
+
+    def permission_state(self) -> TrafficPermissionResult:
+        """Liefert den Rechte-Befund als Domaenenwert (Zustand + Begruendung).
+
+        Beantwortet die Frage, die ``check_permission`` NICHT beantworten kann: ob
+        die Durchsatz-Sicht steht (``GRANTED``), ob ihr nur die Rechte fehlen
+        (``NEEDS_PRIVILEGES``) oder ob die Plattform sie gar nicht anbietet
+        (``NOT_APPLICABLE``). Die beiden letzten Faelle sehen in der reinen
+        Text-Naht identisch aus -- der Unterschied ist aber fachlich (behebbar vs.
+        nicht behebbar) und darf nicht aus einer Zeichenkette erraten werden
+        muessen (Begruendung an ``TrafficPermissionState``).
+
+        Rueckgabe ist ein Domaenenwert, KEINE Wire-Form -- die Projektion nach JSON
+        macht der api-Rand. Schnelle lokale Pruefung, daher synchron.
         """
         ...

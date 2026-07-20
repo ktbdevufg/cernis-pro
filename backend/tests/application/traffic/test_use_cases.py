@@ -16,7 +16,14 @@ from application.traffic import (
     MeasureThroughput,
     PollThroughput,
 )
-from domain.traffic import Connection, ConnSample, Endpoint, make_socket_key
+from domain.traffic import (
+    Connection,
+    ConnSample,
+    Endpoint,
+    TrafficPermissionResult,
+    TrafficPermissionState,
+    make_socket_key,
+)
 
 # ── In-Memory-Fakes der Ports ────────────────────────────────────────────────
 
@@ -67,15 +74,30 @@ class SequencedTrafficProvider:
 class FakeTrafficPermission:
     """In-Memory-Implementierung des ``TrafficPermissionPort``-Protocols."""
 
-    def __init__(self, available: bool = True, permission_error: str | None = None) -> None:
+    def __init__(
+        self,
+        available: bool = True,
+        permission_error: str | None = None,
+        state: TrafficPermissionState | None = None,
+    ) -> None:
         self._available = available
         self._permission_error = permission_error
+        # Default: aus dem Text abgeleitet (Text da -> Rechte fehlen). Tests, die
+        # den PLATTFORM-Fall pruefen, geben ``state`` ausdruecklich vor.
+        self._state = state or (
+            TrafficPermissionState.GRANTED
+            if permission_error is None
+            else TrafficPermissionState.NEEDS_PRIVILEGES
+        )
 
     def is_available(self) -> bool:
         return self._available
 
     def check_permission(self) -> str | None:
         return self._permission_error
+
+    def permission_state(self) -> TrafficPermissionResult:
+        return TrafficPermissionResult(state=self._state, reason=self._permission_error or "")
 
 
 def _conn(app_name: str | None, pid: int | None = None, port: int = 443) -> Connection:
@@ -131,14 +153,14 @@ def test_list_app_traffic_provider_called_once() -> None:
 def test_check_permission_available_and_allowed() -> None:
     fake = FakeTrafficPermission(available=True, permission_error=None)
     result = CheckTrafficPermission(fake)()
-    assert result == {"ok": True, "error": ""}
+    assert result == {"ok": True, "error": "", "state": "granted"}
 
 
 def test_check_permission_available_but_denied() -> None:
     msg = "Fuer den Durchsatz aller Apps muss CERNIS PRO als Root gestartet werden."
     fake = FakeTrafficPermission(available=True, permission_error=msg)
     result = CheckTrafficPermission(fake)()
-    assert result == {"ok": False, "error": msg}
+    assert result == {"ok": False, "error": msg, "state": "needs_privileges"}
 
 
 def test_check_permission_not_available() -> None:
@@ -146,6 +168,28 @@ def test_check_permission_not_available() -> None:
     result = CheckTrafficPermission(fake)()
     assert result["ok"] is False
     assert result["error"]  # nicht-leerer Grund
+    assert result["state"] == "not_applicable"
+
+
+def test_check_permission_platform_limit_is_not_a_rights_problem() -> None:
+    """Plattformgrenze -> ``not_applicable``, NICHT ``needs_privileges``.
+
+    Die zentrale Unterscheidung dieser Naht: beide Faelle liefern ``ok=False`` mit
+    einem Text, sind aber fachlich verschieden (behebbar vs. nicht behebbar). Faellt
+    die Trennung je zusammen, kann die Oberflaeche sie nicht mehr auseinanderhalten
+    und wuerde auf macOS zu erhoehten Rechten raten, die dort nichts bewirken.
+    """
+    grund = "Der Durchsatz je Programm laesst sich auf macOS nicht messen."
+    fake = FakeTrafficPermission(
+        available=True,
+        permission_error=grund,
+        state=TrafficPermissionState.NOT_APPLICABLE,
+    )
+
+    result = CheckTrafficPermission(fake)()
+
+    assert result == {"ok": False, "error": grund, "state": "not_applicable"}
+    assert result["state"] != "needs_privileges"
 
 
 def test_check_permission_pass_throughs() -> None:

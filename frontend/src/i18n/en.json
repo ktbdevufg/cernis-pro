@@ -122,6 +122,7 @@
       "fritzbox": "FRITZ!Box",
       "auffaelligkeit": "What is suspicious?",
       "dnswatch": "DNS watchdog",
+      "trafficDarstellung": "Traffic display",
       "defaultcreds": "Default credentials",
       "defaultcredsList": "Default credentials list",
       "captureAccess": "Capture access",
@@ -209,6 +210,14 @@
           "item4": "Settings"
         }
       }
+    },
+    "trafficDarstellung": {
+      "title": "Traffic: unavailable figures",
+      "hint": "Not every operating system can provide every figure. On macOS the throughput per program cannot be measured — which programs talk to which counterparts is shown in full. This setting concerns only such unavailable figures; real measurements are always shown.",
+      "toggleLabel": "Show and explain unavailable figures",
+      "loading": "Loading …",
+      "loadError": "The setting could not be loaded.",
+      "saveError": "The setting could not be saved."
     },
     "defaultCreds": {
       "title": "Check default credentials",

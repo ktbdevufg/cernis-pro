@@ -122,6 +122,7 @@
       "fritzbox": "FRITZ!Box",
       "auffaelligkeit": "Was ist auffällig?",
       "dnswatch": "DNS-Wächter",
+      "trafficDarstellung": "Verkehrs-Darstellung",
       "defaultcreds": "Standardzugänge",
       "defaultcredsList": "Standardzugänge-Liste",
       "captureAccess": "Mitschnitt-Zugriff",
@@ -209,6 +210,14 @@
           "item4": "Einstellungen"
         }
       }
+    },
+    "trafficDarstellung": {
+      "title": "Verkehr: nicht verfügbare Angaben",
+      "hint": "Manche Angaben kann nicht jedes Betriebssystem liefern. Auf macOS lässt sich der Durchsatz je Programm nicht messen — welche Programme mit welchen Gegenstellen sprechen, wird dagegen vollständig angezeigt. Diese Einstellung betrifft ausschließlich solche nicht verfügbaren Angaben; echte Messwerte werden immer angezeigt.",
+      "toggleLabel": "Nicht verfügbare Angaben zeigen und erklären",
+      "loading": "Lädt …",
+      "loadError": "Die Einstellung konnte nicht geladen werden.",
+      "saveError": "Die Einstellung konnte nicht gespeichert werden."
     },
     "defaultCreds": {
       "title": "Standardzugänge prüfen",

@@ -154,7 +154,15 @@ def get_traffic_permission(
 ) -> dict[str, Any]:
     """Rechte-Status fuer den Durchsatz aller Apps (Stufe 2).
 
-    ``{ok, error}``-Form: ``ok=true`` bei voller Sicht (Root/CAP_NET_ADMIN), sonst
-    ``ok=false`` + handlungsorientierter Hinweis (Stufe 1 bleibt nutzbar).
+    ``{ok, error, state}``-Form: ``ok=true`` bei voller Sicht (Root/CAP_NET_ADMIN),
+    sonst ``ok=false`` + Begruendung (Stufe 1 bleibt in jedem Fall nutzbar).
+
+    ``state`` unterscheidet die beiden Gruende, die in ``ok``/``error`` allein
+    zusammenfallen: ``"needs_privileges"`` (die Plattform koennte es, dem Prozess
+    fehlen die Rechte -- behebbar) gegen ``"not_applicable"`` (die Plattform bietet
+    die Messung gar nicht an, z. B. macOS ohne ``sock_diag`` -- nicht behebbar, und
+    erhoehte Rechte wuerden daran nichts aendern). ``"granted"`` = volle Sicht.
+    Ohne diese Unterscheidung muesste die Oberflaeche sie aus dem Fehlertext
+    erraten. ``ok``/``error`` bleiben unveraendert (kein Bruch fuer Aufrufer).
     """
     return check_permission_uc()

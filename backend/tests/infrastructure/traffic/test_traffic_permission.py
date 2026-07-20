@@ -12,6 +12,10 @@ import sys
 import pytest
 
 import infrastructure.traffic_permission as tp
+from domain.traffic import TrafficPermissionState
+from infrastructure.traffic_macos import (
+    TrafficPermissionAdapter as MacosTrafficPermissionAdapter,
+)
 from infrastructure.traffic_permission import TrafficPermissionAdapter, _has_cap_net_admin
 
 # ── _has_cap_net_admin (reine Bit-Pruefung) ──────────────────────────────────
@@ -78,3 +82,70 @@ def test_is_available_on_linux(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_is_available_non_linux(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys, "platform", "darwin")
     assert TrafficPermissionAdapter().is_available() is False
+
+
+# ── permission_state: Rechte-Problem vs. Plattformgrenze (A3) ────────────────
+# Die Kernunterscheidung dieser Naht. Beide Faelle liefern in der schmalen
+# Text-Naht ``ok=False`` samt Begruendung -- fachlich sind sie aber verschieden:
+# auf Linux BEHEBBAR (Rechte erlangbar), auf macOS NICHT (die Plattform bietet die
+# Messung gar nicht an). Faellt die Trennung je zusammen, raet die Oberflaeche auf
+# macOS zu erhoehten Rechten, die dort nichts bewirken.
+
+
+def test_permission_state_linux_granted(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Root -> ``GRANTED`` ohne Begruendung (es gibt nichts zu erklaeren)."""
+    monkeypatch.setattr(os, "geteuid", lambda: 0)
+
+    result = TrafficPermissionAdapter().permission_state()
+
+    assert result.state is TrafficPermissionState.GRANTED
+    assert result.reason == ""
+
+
+def test_permission_state_linux_missing_rights_is_behebbar(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Kein Recht auf Linux -> ``NEEDS_PRIVILEGES`` MIT Weg, NIE ``NOT_APPLICABLE``.
+
+    Auf Linux ist die Messung moeglich; fehlt sie, liegt es an den Rechten des
+    Prozesses. Der handlungsorientierte Hinweis ist hier RICHTIG.
+    """
+    monkeypatch.setattr(os, "geteuid", lambda: 1000)
+    monkeypatch.setattr(tp, "_read_cap_eff", lambda: "0000000000000000")
+
+    result = TrafficPermissionAdapter().permission_state()
+
+    assert result.state is TrafficPermissionState.NEEDS_PRIVILEGES
+    assert "Root" in result.reason
+
+
+def test_permission_state_macos_is_not_applicable() -> None:
+    """macOS -> ``NOT_APPLICABLE``: Plattformgrenze, KEIN Rechteproblem."""
+    result = MacosTrafficPermissionAdapter().permission_state()
+
+    assert result.state is TrafficPermissionState.NOT_APPLICABLE
+
+
+def test_permission_state_macos_gives_no_privilege_advice() -> None:
+    """Der macOS-Text raet NICHT zu erhoehten Rechten -- dort waere das wirkungslos.
+
+    Kernforderung von A3: keine Handlungsaufforderung, die auf dieser Plattform
+    nichts bewirkt. Geprueft wird der Text BEIDER Nahtstellen (Zustand und die
+    schmale Text-Naht), damit der Rat nicht durch eine Hintertuer zurueckkehrt.
+    """
+    result = MacosTrafficPermissionAdapter().permission_state()
+    text_naht = MacosTrafficPermissionAdapter().check_permission() or ""
+
+    for text in (result.reason, text_naht):
+        gesenkt = text.lower()
+        for verboten in ("root", "sudo", "administrator", "erhoehte rechte"):
+            assert verboten not in gesenkt, f"Rechte-Rat '{verboten}' im macOS-Text"
+
+
+def test_permission_state_macos_names_what_still_works() -> None:
+    """Der Text benennt WAS fehlt, WARUM es fehlt und WAS trotzdem funktioniert."""
+    reason = MacosTrafficPermissionAdapter().permission_state().reason
+
+    assert "macOS" in reason  # warum: diese Plattform
+    assert "Stufe 1" in reason or "Programme" in reason  # was trotzdem geht
+    assert reason.strip() != ""

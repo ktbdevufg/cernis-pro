@@ -25,6 +25,8 @@ Bereich, statt eine Halb-Implementierung vorzutaeuschen.
 import os
 import sys
 
+from domain.traffic import TrafficPermissionResult, TrafficPermissionState
+
 # CAP_NET_ADMIN ist Capability-Nummer 12 -> Bit 12 (0-basiert) im Capability-Bitset.
 _CAP_NET_ADMIN_BIT = 12
 
@@ -93,3 +95,17 @@ class TrafficPermissionAdapter:
         if cap_eff is not None and _has_cap_net_admin(cap_eff):
             return None
         return _NEEDS_ROOT_MESSAGE
+
+    def permission_state(self) -> TrafficPermissionResult:
+        """``GRANTED`` bei voller Sicht, sonst ``NEEDS_PRIVILEGES`` mit dem Root-Weg.
+
+        Auf Linux ist die Messung grundsaetzlich moeglich -- fehlt sie, liegt es an
+        den Rechten des laufenden Prozesses und ist damit BEHEBBAR. Darum nie
+        ``NOT_APPLICABLE``: dieser Zustand gehoert Plattformen, die die Messung gar
+        nicht anbieten (siehe ``traffic_macos``). Der Text bleibt derselbe wie in
+        ``check_permission`` -- eine Quelle, zwei Sichten auf denselben Befund.
+        """
+        text = self.check_permission()
+        if text is None:
+            return TrafficPermissionResult(state=TrafficPermissionState.GRANTED)
+        return TrafficPermissionResult(state=TrafficPermissionState.NEEDS_PRIVILEGES, reason=text)

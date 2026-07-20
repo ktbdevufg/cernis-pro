@@ -11,7 +11,28 @@ import socket
 
 import psutil
 
-from domain.traffic import Connection, ConnSample, Endpoint, L4Protocol, normalize_status
+from domain.traffic import (
+    Connection,
+    ConnSample,
+    Endpoint,
+    L4Protocol,
+    TrafficPermissionResult,
+    TrafficPermissionState,
+    normalize_status,
+)
+
+# Begruendung der Nichtverfuegbarkeit. Benennt WAS fehlt, WARUM es fehlt und WAS
+# trotzdem funktioniert -- und enthaelt bewusst KEINE Handlungsaufforderung: die
+# Messung fehlt hier nicht wegen fehlender Rechte, sondern weil macOS sie nicht
+# anbietet. Ein Rat, das Backend mit erhoehten Rechten zu starten (wie ihn der
+# Linux-Adapter gibt), waere hier falsch UND wirkungslos -- root aendert daran
+# nichts, und das Projekt eskaliert grundsaetzlich keine Rechte.
+_NOT_APPLICABLE_REASON = (
+    "Der Durchsatz je Programm (Stufe 2) laesst sich auf macOS nicht messen: das "
+    "System stellt dafuer keine Schnittstelle bereit (unter Linux liefert sie "
+    "sock_diag). Welche Programme mit welchen Gegenstellen sprechen (Stufe 1), "
+    "wird vollstaendig angezeigt."
+)
 
 _L4_BY_SOCKET_KIND: dict[int, L4Protocol] = {
     int(socket.SOCK_STREAM): "tcp",
@@ -89,8 +110,22 @@ class TrafficPermissionAdapter:
         return True
 
     def check_permission(self) -> str | None:
-        """Stufe 2 nicht verfuegbar auf macOS (kein ss/sock_diag)."""
-        return (
-            "Stufe 1 (eigene Verbindungen) ist verfuegbar. "
-            "Durchsatz-Messung (Stufe 2) ist auf macOS nicht verfuegbar."
+        """Stufe 2 nicht verfuegbar auf macOS (kein ss/sock_diag) -- mit Begruendung.
+
+        Die schmale Text-Naht (bestehende Wire-Form ``error``). Dass es sich um eine
+        PLATTFORMGRENZE und nicht um ein Rechteproblem handelt, sagt der Zustand aus
+        ``permission_state`` -- nicht dieser Text.
+        """
+        return _NOT_APPLICABLE_REASON
+
+    def permission_state(self) -> TrafficPermissionResult:
+        """Immer ``NOT_APPLICABLE`` mit Begruendung -- hier gibt es diese Messung nicht.
+
+        Bewusst NICHT ``NEEDS_PRIVILEGES``: es fehlen keine Rechte, die man erlangen
+        koennte. macOS bietet kein ``sock_diag``-Aequivalent, also gibt es auf dieser
+        Plattform nichts einzurichten und nichts zu eskalieren. Die Oberflaeche kann
+        den Unterschied damit ehrlich zeigen, statt einen wirkungslosen Rat zu geben.
+        """
+        return TrafficPermissionResult(
+            state=TrafficPermissionState.NOT_APPLICABLE, reason=_NOT_APPLICABLE_REASON
         )

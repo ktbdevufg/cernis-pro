@@ -30,6 +30,10 @@ import {
   secretGesetzt,
 } from "../api/settings.js";
 import { CODES, mitCode } from "../lib/fehlercodes.js";
+import {
+  TRAFFIC_UNAVAILABLE_KEY,
+  leseTrafficSichtbar,
+} from "../components/TrafficView.jsx";
 import { FunctionShell } from "../components/AreaShell.jsx";
 import DefaultCredsConsentDialog from "../components/DefaultCredsConsentDialog.jsx";
 import DefaultCredsListeSektion from "../components/DefaultCredsListeSektion.jsx";
@@ -117,6 +121,10 @@ function SettingsSektion({ title, children }) {
 // Booleans; fehlt der Key -> alle Defaults true. SPIEGELT bewusst OverviewView
 // (SECTIONS_KEY / SECTION_DEFAULTS): OverviewView liest, diese Sektion schreibt.
 const STARTSEITE_KEY = "overview_sections";
+
+// Setting-Key + Lesefunktion der Darstellung nicht verfügbarer Durchsatz-Angaben
+// kommen aus TrafficView (dort werden sie ausgewertet) — EINE Quelle, keine zweite
+// Kopie, die auseinanderlaufen könnte. Hier wird nur geschrieben.
 
 // Default-Sichtbarkeit aller Startseiten-Bereiche (alle true). Identisch zu
 // OverviewView.SECTION_DEFAULTS — fehlt ein einzelner Schalter, gilt sein Default.
@@ -1562,6 +1570,117 @@ function DnsWatchSektion({ onGespeichert }) {
 // KEINE Bestätigung: direkt armDefaultCreds(false). Fehler (Backend nicht
 // erreichbar) werden ruhig behandelt: der Schalter bleibt im letzten sicheren
 // Zustand, eine kurze Meldung erscheint, kein Absturz.
+// Per-App-Verkehr: Darstellung nicht verfügbarer Durchsatz-Angaben (A3).
+//
+// Betrifft AUSSCHLIESSLICH Angaben, die diese Plattform nicht liefern kann (macOS
+// misst den Durchsatz je Programm nicht). Liefert eine Plattform echte Werte, sind
+// sie IMMER sichtbar — diese Einstellung verbirgt niemals vorhandene Daten.
+//
+// Default ist SICHTBAR mit Erklärung: eine still fehlende Angabe ließe den Nutzer
+// im Unklaren. Die Anwendung zeigt und ordnet ein, statt zu verschweigen. Wer die
+// Erklärung nicht braucht, kann sie bewusst abwählen — dann entfallen sowohl die
+// Durchsatz-Darstellung als auch der erklärende Streifen.
+function TrafficDarstellungSektion({ onGespeichert }) {
+  const { t } = useTranslation();
+
+  const [sichtbar, setSichtbar] = useState(true);
+  const [ladeStatus, setLadeStatus] = useState("laedt"); // laedt | bereit | fehler
+  const [speicherFehler, setSpeicherFehler] = useState(false);
+
+  // Einmal beim Mount laden. Fehlt der Wert, gilt der Default true (sichtbar) —
+  // kein stiller Rückfall auf "ausblenden", das wäre die verschweigende Variante.
+  useEffect(() => {
+    let aktiv = true;
+    (async () => {
+      try {
+        const settings = await fetchSettings();
+        if (!aktiv) {
+          return;
+        }
+        setSichtbar(leseTrafficSichtbar(settings));
+        setLadeStatus("bereit");
+      } catch (fehler) {
+        if (!aktiv) {
+          return;
+        }
+        console.error("Verkehrs-Darstellung laden fehlgeschlagen:", fehler);
+        setLadeStatus("fehler");
+      }
+    })();
+    return () => {
+      aktiv = false;
+    };
+  }, []);
+
+  const handleToggle = async (an) => {
+    setSpeicherFehler(false);
+    setSichtbar(an);
+    try {
+      await updateSetting(TRAFFIC_UNAVAILABLE_KEY, an);
+      onGespeichert();
+    } catch (fehler) {
+      console.error(`${TRAFFIC_UNAVAILABLE_KEY} speichern fehlgeschlagen:`, fehler);
+      setSpeicherFehler(true);
+    }
+  };
+
+  if (ladeStatus === "laedt") {
+    return (
+      <SettingsSektion title={t("settings.trafficDarstellung.title")}>
+        <div className="settings__row">
+          <span className="settings__hint">
+            {t("settings.trafficDarstellung.loading")}
+          </span>
+        </div>
+      </SettingsSektion>
+    );
+  }
+
+  if (ladeStatus === "fehler") {
+    return (
+      <SettingsSektion title={t("settings.trafficDarstellung.title")}>
+        <div className="settings__row">
+          <span className="settings__hint settings__hint--error">
+            {t("settings.trafficDarstellung.loadError")}
+          </span>
+        </div>
+      </SettingsSektion>
+    );
+  }
+
+  return (
+    <SettingsSektion title={t("settings.trafficDarstellung.title")}>
+      <p className="settings__hint">{t("settings.trafficDarstellung.hint")}</p>
+
+      <div className="auffaelligkeit__block">
+        <ul className="auffaelligkeit__rules">
+          <li className="auffaelligkeit__rule">
+            <span className="auffaelligkeit__rule-label">
+              <span className="auffaelligkeit__rule-title">
+                {t("settings.trafficDarstellung.toggleLabel")}
+              </span>
+            </span>
+            <span className="auffaelligkeit__rule-switchbox">
+              <input
+                type="checkbox"
+                className="auffaelligkeit__switch"
+                checked={sichtbar}
+                onChange={(e) => handleToggle(e.target.checked)}
+              />
+            </span>
+          </li>
+        </ul>
+      </div>
+
+      {speicherFehler ? (
+        <span className="settings__hint settings__hint--error">
+          {mitCode(t("settings.trafficDarstellung.saveError"), CODES.E_501)}
+        </span>
+      ) : null}
+    </SettingsSektion>
+  );
+}
+
 function DefaultCredsSektion({ onGespeichert }) {
   const { t } = useTranslation();
 
@@ -1962,6 +2081,7 @@ export default function SettingsView({ lang, onLangChange, onClose, onOpenManual
     { id: "fritzbox", label: t("settings.nav.fritzbox") },
     { id: "auffaelligkeit", label: t("settings.nav.auffaelligkeit") },
     { id: "dnswatch", label: t("settings.nav.dnswatch") },
+    { id: "trafficDarstellung", label: t("settings.nav.trafficDarstellung") },
     { id: "defaultcreds", label: t("settings.nav.defaultcreds") },
     { id: "defaultcredsList", label: t("settings.nav.defaultcredsList") },
     ...(captureAccessWiderrufbar
@@ -2043,6 +2163,10 @@ export default function SettingsView({ lang, onLangChange, onClose, onOpenManual
 
           {rubrik === "dnswatch" ? (
             <DnsWatchSektion onGespeichert={zeigeGespeichert} />
+          ) : null}
+
+          {rubrik === "trafficDarstellung" ? (
+            <TrafficDarstellungSektion onGespeichert={zeigeGespeichert} />
           ) : null}
 
           {rubrik === "defaultcreds" ? (
