@@ -591,7 +591,20 @@ function KontaktListe({
                       : "outbound-report__zeile"
                   }
                 >
-                  <td className="outbound-report__mono">{r.remoteIp}</td>
+                  {/* Lokale Gegenstellen bleiben sichtbar, sind aber dezent als solche
+                      gekennzeichnet — sonst stehen sie ununterscheidbar zwischen den
+                      echten Aussenkontakten (Achse B: zeigen + einordnen, nicht urteilen). */}
+                  <td className="outbound-report__mono">
+                    {r.remoteIp}
+                    {r.isLocal ? (
+                      <span
+                        className="outbound-report__lokal-marke"
+                        title={t("report.outbound.lokal.titel")}
+                      >
+                        {t("report.outbound.lokal.marke")}
+                      </span>
+                    ) : null}
+                  </td>
                   <td>{r.hostname || "—"}</td>
                   <td>{r.country || "—"}</td>
                   <td>{r.operator || "—"}</td>

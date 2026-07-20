@@ -417,6 +417,23 @@
   border: 1px solid var(--color-border);
 }
 
+/* Lokal-Kennzeichnung in der Gegenstellen-Spalte: dezente Marke direkt an der IP, damit
+   lokale/Infrastruktur-Zeilen nicht als Aussenkontakt gelesen werden. Ruhig gehalten
+   (Tertiaerfarbe, kein Farbsignal) — sie ordnet ein, sie warnt nicht. */
+.outbound-report__lokal-marke {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  color: var(--color-text-tert);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
 /* Ruhige Leer-Meldung (statt leerem Kasten). */
 .outbound-report__leer {
   margin: 0;

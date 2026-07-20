@@ -1771,6 +1771,10 @@
         "bedrohungTitel": "Listed as a threat in: {{listen}}",
         "trackerTitel": "Listed as a tracker in: {{listen}}"
       },
+      "lokal": {
+        "marke": "Local",
+        "titel": "Peer inside your own network (local/infrastructure) – not an outbound contact."
+      },
       "tabelle": {
         "leer": "No contacts in this selection."
       },

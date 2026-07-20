@@ -1771,6 +1771,10 @@
         "bedrohungTitel": "Als Bedrohung geführt in: {{listen}}",
         "trackerTitel": "Als Tracker geführt in: {{listen}}"
       },
+      "lokal": {
+        "marke": "Lokal",
+        "titel": "Gegenstelle im eigenen Netz (lokal/Infrastruktur) – kein Außenkontakt."
+      },
       "tabelle": {
         "leer": "Keine Kontakte in dieser Auswahl."
       },
