@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+      Zusaetzliche Info.plist-Schluessel fuer das macOS-Bundle. Tauri MERGT diese
+      Datei in die generierte Info.plist (bundle.macOS.infoPlist in tauri.conf.json).
+      Nicht zu verwechseln mit Entitlements.plist - die traegt die Signatur-
+      Entitlements und bleibt davon unberuehrt.
+
+      Anders als die Quelltextkommentare des Projekts nutzt diese Datei ECHTE
+      UMLAUTE: sie ist UTF-8, und der Verwendungszweck-Text wird dem Nutzer im
+      System-Dialog woertlich angezeigt.
+    -->
+
+    <!--
+      Seit macOS 15 ist der Zugriff auf das lokale Netzwerk zustimmungspflichtig.
+      Ohne diesen Verwendungszweck-Text zeigt das System den Zustimmungsdialog nicht
+      ordnungsgemaess an, und der laufende Multicast-Versuch geht ins Leere - genau
+      das Muster des gemessenen Erstscan-Ausfalls (mDNS und SSDP gemeinsam leer,
+      Portscan und Hostnamensaufloesung unbeeintraechtigt).
+    -->
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>CERNIS PRO sucht im lokalen Netzwerk nach Geräten, um sie im Netzwerk-Scan anzuzeigen. Es werden ausschliesslich Geräte Ihres eigenen Netzes erfasst; nichts wird an Dritte übertragen.</string>
+
+    <!--
+      Die Bonjour-Diensttypen, die der mDNS-Scan tatsaechlich durchsucht. Quelle ist
+      backend/modules/mdns.py (BONJOUR_SERVICE_TYPES + NDI_SERVICE_TYPES), von dort
+      vollstaendig uebernommen - 20 Typen, keiner erfunden, keiner weggelassen.
+
+      SCHREIBWEISE: hier OHNE den abschliessenden Bestandteil ".local." (also
+      "_http._tcp" statt "_http._tcp.local."). An den Bundles installierter Apps
+      verifiziert (z. B. /System/Applications/Games.app: <string>_http._tcp</string>).
+
+      Nur deklarierte Typen darf die Anwendung durchsuchen; ein fehlender Eintrag
+      wird vom System stillschweigend blockiert.
+    -->
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_http._tcp</string>
+        <string>_https._tcp</string>
+        <string>_ftp._tcp</string>
+        <string>_ssh._tcp</string>
+        <string>_afpovertcp._tcp</string>
+        <string>_smb._tcp</string>
+        <!-- VNC -->
+        <string>_rfb._tcp</string>
+        <!-- iTunes -->
+        <string>_daap._tcp</string>
+        <!-- AirPlay -->
+        <string>_raop._tcp</string>
+        <!-- AirPlay 2 -->
+        <string>_airplay._tcp</string>
+        <string>_googlecast._tcp</string>
+        <string>_homekit._tcp</string>
+        <string>_hap._tcp</string>
+        <string>_printer._tcp</string>
+        <string>_ipp._tcp</string>
+        <string>_pdl-datastream._tcp</string>
+        <string>_device-info._tcp</string>
+        <!--
+          Meta-Query (KEIN regulaerer Dienst): dient der Aufzaehlung aller auf dem
+          Netz angebotenen Diensttypen. Bewusst AUFGENOMMEN, weil der Code ihn
+          tatsaechlich durchsucht (mdns.py, BONJOUR_SERVICE_TYPES) - ohne Eintrag
+          waere genau diese Aufzaehlung blockiert. Er ist in NSBonjourServices
+          zulaessig und wird fuer diesen Zweck ausdruecklich so deklariert.
+        -->
+        <string>_services._dns-sd._udp</string>
+        <!-- NDI (Network Device Interface) -->
+        <string>_ndi._tcp</string>
+        <string>_ndi._udp</string>
+    </array>
+</dict>
+</plist>

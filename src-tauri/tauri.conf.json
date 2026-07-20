@@ -27,7 +27,8 @@
     "shortDescription": "LAN Scanner & Monitor",
     "longDescription": "CERNIS PRO - Professional LAN Scanner & Monitor",
     "macOS": {
-      "entitlements": "./Entitlements.plist"
+      "entitlements": "./Entitlements.plist",
+      "infoPlist": "./Info.plist"
     },
     "windows": {
       "nsis": {
