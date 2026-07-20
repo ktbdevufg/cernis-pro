@@ -23,7 +23,15 @@
       font-weight: 700;
       letter-spacing: 4px;
       margin-bottom: 8px;
+      /* Die Wortmarke wird per JS Buchstabe fuer Buchstabe aufgebaut; die Zeile
+         haelt ihre Hoehe von Anfang an, damit beim Fuellen nichts springt. */
+      min-height: 1.2em;
     }
+    /* Wortmarken-Farben. Diese Datei ist eigenstaendiges HTML ohne die App-Tokens,
+       die Werte stehen daher lokal -- bewusst auf den Header-Markenton vereinheitlicht
+       (frueher Cyan #00e5ff). Hintergrund ist dunkel (#0d1117), also die Dunkel-Werte. */
+    .logo-cernis { color: #2e9bd6; }
+    .logo-pro { color: #9aa2ac; font-weight: 600; }
     .subtitle {
       font-size: 13px;
       color: #4a5568;
@@ -64,7 +72,8 @@
   </style>
 </head>
 <body>
-  <div class="logo">CERNIS PRO</div>
+  <!-- Inhalt wird per JS aufgebaut (siehe starteWortmarke) -- bewusst leer. -->
+  <div class="logo" id="logo" aria-label="CERNIS PRO"></div>
   <div class="subtitle">LAN Scanner &amp; Monitor</div>
   <div class="spinner" id="spinner"></div>
   <div class="status" id="status">Starte Backend...</div>
@@ -84,9 +93,60 @@
 
     var fertig = false;
 
+    // ── Wortmarken-Aufbau: "CERNIS PRO" Buchstabe fuer Buchstabe im Halbsekundentakt ──
+    // Reine DOM-Textmanipulation (kein innerHTML): je Schritt ein <span> mit der
+    // Zielfarbe -- "CERNIS" im Markenblau, "PRO" gedaempft/fetter. Das Leerzeichen
+    // zwischen beiden Woertern ist ein eigener Schritt (kurze Pause vor dem "P").
+    // Laeuft unabhaengig vom Backend-Poll: die Animation blockiert und verzoegert ihn
+    // nicht, und der Poll wartet nicht auf sie. Ist das Backend schneller fertig,
+    // gewinnt geheZurApp() -- die Animation muss davon nichts wissen.
+    var WORTMARKE = 'CERNIS PRO';
+    var SCHRITT_MS = 500;
+    var wortmarkeTimer = null;
+
+    function stoppeWortmarke() {
+      if (wortmarkeTimer !== null) {
+        clearInterval(wortmarkeTimer);
+        wortmarkeTimer = null;
+      }
+    }
+
+    function starteWortmarke() {
+      var logo = document.getElementById('logo');
+      if (!logo) return;
+      var index = 0;
+
+      function naechstesZeichen() {
+        var zeichen = WORTMARKE.charAt(index);
+        var span = document.createElement('span');
+        // Ab Position 7 ("PRO") die gedaempfte Farbe; davor der Markenton. Das
+        // Leerzeichen an Position 6 traegt keine sichtbare Farbe.
+        span.className = index >= 7 ? 'logo-pro' : 'logo-cernis';
+        span.textContent = zeichen;
+        logo.appendChild(span);
+        index++;
+      }
+
+      // Das "C" steht sofort (der Aufbau beginnt ohne Anfangs-Leerlauf); die
+      // uebrigen Zeichen folgen im Halbsekundentakt.
+      naechstesZeichen();
+      wortmarkeTimer = setInterval(function () {
+        if (index >= WORTMARKE.length) {
+          // Fertig aufgebaut: die vollstaendige Wortmarke bleibt stehen.
+          stoppeWortmarke();
+          return;
+        }
+        naechstesZeichen();
+      }, SCHRITT_MS);
+    }
+
+    starteWortmarke();
+
     function zeigeFehler(code) {
       if (fertig) return;
       fertig = true;
+      // Der Splash-Inhalt wird gleich ausgetauscht -- kein Interval weiterlaufen lassen.
+      stoppeWortmarke();
       var spinner = document.getElementById('spinner');
       var status = document.getElementById('status');
       var fehlercode = document.getElementById('fehlercode');
@@ -119,6 +179,8 @@
     function geheZurApp() {
       if (fertig) return;
       fertig = true;
+      // Nach der Navigation darf kein Interval weiterlaufen.
+      stoppeWortmarke();
       window.location.href = '/';
     }
 
