@@ -27,6 +27,8 @@
 set -euo pipefail
 
 GRUPPE="cernis-capture"
+# Feste GID der Capture-Gruppe (Begruendung der Wahl bei der Anlage in Abschnitt a).
+GRUPPE_GID="447"
 HELFER_PFAD="/usr/local/bin/cernis-bpf-access.sh"
 PLIST_LABEL="de.cernis.capture"
 PLIST_PFAD="/Library/LaunchDaemons/${PLIST_LABEL}.plist"
@@ -58,12 +60,34 @@ fi
 
 # ── a) Gruppe anlegen (idempotent) ───────────────────────────
 # dseditgroup -o read liefert != 0, wenn die Gruppe fehlt. Nur dann anlegen.
+#
+# FESTE GID: ohne -i vergibt dseditgroup eine willkuerliche GID (real beobachtet die 501,
+# also die des ersten Benutzerkontos). Das ist unschaedlich -- alles loest ueber den NAMEN
+# auf --, aber unsauber. Wir vergeben daher eine feste GID aus dem Bereich 400-499: macOS
+# nutzt <400 fuer System-/Apple-Gruppen und laesst 400-499 fuer lokale Drittanbieter-
+# Gruppen faktisch frei (die 300er sind teils belegt). 447 ist innerhalb dieses Bereichs
+# frei gewaehlt.
+#
+# S3: die GID wird NICHT blind gesetzt. Ist sie auf dieser Maschine unerwartet schon
+# vergeben, wird die Gruppe ehrlich OHNE feste GID angelegt (bisheriges Verhalten) und
+# eine Warnung ausgegeben -- ein harter Abbruch waere hier unangemessen, denn die feste
+# GID ist Kosmetik, die Funktion haengt allein am Namen.
 if dseditgroup -o read "${GRUPPE}" >/dev/null 2>&1; then
     echo "Gruppe '${GRUPPE}' existiert bereits."
 else
-    dseditgroup -o create -r "CERNIS PRO Packet Capture" "${GRUPPE}" \
-        || fehler "Gruppe '${GRUPPE}' konnte nicht angelegt werden."
-    echo "Gruppe '${GRUPPE}' angelegt."
+    # Achtung: 'dscl . -search' liefert auch bei LEEREM Treffer den Exit-Code 0 -- die
+    # Belegung muss deshalb an der AUSGABE geprueft werden, nicht am Exit-Code.
+    if [ -z "$(dscl . -search /Groups PrimaryGroupID "${GRUPPE_GID}" 2>/dev/null)" ]; then
+        dseditgroup -o create -i "${GRUPPE_GID}" -r "CERNIS PRO Packet Capture" "${GRUPPE}" \
+            || fehler "Gruppe '${GRUPPE}' konnte nicht angelegt werden."
+        echo "Gruppe '${GRUPPE}' angelegt (GID ${GRUPPE_GID})."
+    else
+        echo "WARNUNG: GID ${GRUPPE_GID} ist auf diesem System bereits vergeben -" >&2
+        echo "         '${GRUPPE}' wird ohne feste GID angelegt (Aufloesung ueber den Namen)." >&2
+        dseditgroup -o create -r "CERNIS PRO Packet Capture" "${GRUPPE}" \
+            || fehler "Gruppe '${GRUPPE}' konnte nicht angelegt werden."
+        echo "Gruppe '${GRUPPE}' angelegt (GID automatisch vergeben)."
+    fi
 fi
 
 # ── b) Aufrufenden Nutzer der Gruppe hinzufuegen (idempotent) ─
