@@ -4291,9 +4291,16 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # domain.traffic.Connection -> RawConnection und filtert remote=None raus (der
         # Provider liefert NUR Verbindungen mit Gegenstelle).
         conns = await _traffic_adapter().list_connections()
+        # Kanonisierung der Gegenstellen-IP GENAU HIER (nicht in der Domaene): eine IPv6 mit
+        # eingebetteter IPv4 (``::ffff:1.2.3.4`` mapped bzw. ``::1.2.3.4`` compatible) wird auf
+        # die reine IPv4 reduziert. Dadurch gruppiert ``BuildOutboundContacts._group_by_ip``
+        # schon auf der kanonischen IP und mapped/compatible/reine IPv4 fallen zu EINER
+        # Gegenstelle zusammen -- identisch zum Berichts-Lesepfad (_build_outbound_report_data),
+        # der denselben Helfer nutzt. remote_port/app_name/pid bleiben unveraendert (die erste
+        # Verbindung je kanonischer IP gewinnt, wie bisher in der Domaenenlogik).
         raws = [
             RawConnection(
-                remote_ip=c.remote.ip,
+                remote_ip=_canonical_remote_ip(c.remote.ip),
                 remote_port=c.remote.port,
                 app_name=c.app_name,
                 pid=c.pid,
@@ -4364,9 +4371,17 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     # api-Projektion (kein OutboundOverviewOut), KEIN pid (ContactDelta fuehrt kein pid).
     async def _outbound_contact_deltas() -> list[ContactDelta]:
         conns = await _traffic_adapter().list_connections()
+        # Dieselbe Kanonisierung wie im Live-Pfad -- hier zusaetzlich fuer den SCHREIBpfad:
+        # outbound_log_detail/-aggregate erhalten damit von vornherein die kanonische IP,
+        # statt dass der Bericht ::v4-Formen erst zur Lesezeit zusammenfuehren muss. Der
+        # Aggregat-Schluessel (recording_id + remote_ip) faellt fuer mapped/compatible und
+        # reine IPv4 damit zusammen -- genau die gewuenschte Zusammenfuehrung; der Merge je
+        # remote_ip (``merge_contact``) bleibt korrekt, da ``_group_by_ip`` pro Tick ohnehin
+        # nur EIN Delta je kanonischer IP liefert. Alt-Bestand wird NICHT migriert: der
+        # Berichts-Lesepfad fuehrt vorhandene ::v4-Eintraege weiterhin lesend zusammen.
         raws = [
             RawConnection(
-                remote_ip=c.remote.ip,
+                remote_ip=_canonical_remote_ip(c.remote.ip),
                 remote_port=c.remote.port,
                 app_name=c.app_name,
                 pid=c.pid,
@@ -5873,6 +5888,55 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             or adresse.is_reserved
         )
 
+    # Kanonische Form einer Gegenstellen-IP fuer die Gruppierung im Bericht. Eine IPv6-Adresse mit
+    # EINGEBETTETER IPv4 wird auf diese IPv4 reduziert -- sonst erscheint DIESELBE Gegenstelle
+    # zweimal (einmal als 1.2.3.4, einmal in IPv6-Schreibweise) und wird bei Gegenstellen/Laendern/
+    # Betreibern doppelt gezaehlt. Abgedeckt sind BEIDE Notationen:
+    #   * IPv4-MAPPED   ``::ffff:a.b.c.d`` -- ueber ``ipv4_mapped``.
+    #   * IPv4-COMPATIBLE ``::a.b.c.d``    -- ``ipv4_mapped`` liefert hier None; erkannt wird sie
+    #     daran, dass die oberen 96 Bit 0 sind (``int(adresse) <= 0xFFFFFFFF``). Diese Notation
+    #     stellt den Grossteil des Realbestands.
+    # AUSGENOMMEN bleiben ``::`` (unspecified, int 0) und ``::1`` (Loopback, int 1): das sind KEINE
+    # eingebetteten IPv4 und duerfen nicht zu 0.0.0.0/0.0.0.1 verfaelscht werden. Reine IPv4 sowie
+    # echte IPv6 (fe80::… link-local, 2xxx:… global) bleiben unveraendert -- S3: nichts
+    # stillschweigend umschreiben, was nicht sicher erkannt wurde.
+    def _canonical_remote_ip(ip: str) -> str:
+        if not ip:
+            return ip
+        try:
+            adresse = ipaddress.ip_address(ip)
+        except ValueError:
+            return ip
+        if isinstance(adresse, ipaddress.IPv6Address):
+            if adresse.ipv4_mapped is not None:
+                return str(adresse.ipv4_mapped)
+            roh = int(adresse)
+            if 1 < roh <= 0xFFFFFFFF:
+                return str(ipaddress.IPv4Address(roh))
+        return ip
+
+    # Verschmilzt zwei Aggregate EINER Gegenstelle zu einem: total_count summiert, peak_count
+    # maximal (Spitze EINES Zyklus), first_seen/last_seen min/max, Anreicherungsfelder behalten den
+    # ersten nicht-leeren Wert (vorhandener Wert hat Vorrang -- ein None/"" loescht nichts).
+    # ``key_ip`` ist die remote_ip des Ergebnisses; so nutzen der Alle-Merge (unveraenderte IP) und
+    # der kanonische Pass (kanonische IP) DIESELBE Regel ohne Code-Duplikat.
+    def _merge_aggregated(
+        vorhanden: AggregatedContact, neu: AggregatedContact, key_ip: str
+    ) -> AggregatedContact:
+        return AggregatedContact(
+            remote_ip=key_ip,
+            first_seen=min(vorhanden.first_seen, neu.first_seen),
+            last_seen=max(vorhanden.last_seen, neu.last_seen),
+            total_count=vorhanden.total_count + neu.total_count,
+            peak_count=max(vorhanden.peak_count, neu.peak_count),
+            remote_port=vorhanden.remote_port or neu.remote_port,
+            hostname=vorhanden.hostname or neu.hostname,
+            country=vorhanden.country or neu.country,
+            operator=vorhanden.operator or neu.operator,
+            asn=vorhanden.asn or neu.asn,
+            app_name=vorhanden.app_name or neu.app_name,
+        )
+
     # Recordings-Runner fuer das Dropdown: die Recording-Definitionen auf die schlanke Wire-Form
     # projizieren. Leer -> [] (ein ehrliches Datum, kein Fehler).
     async def _outbound_report_recordings() -> list[OutboundReportRecordingOut]:
@@ -5983,22 +6047,24 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                     if vorhanden is None:
                         gemergt[a.remote_ip] = a
                         continue
-                    gemergt[a.remote_ip] = AggregatedContact(
-                        remote_ip=vorhanden.remote_ip,
-                        first_seen=min(vorhanden.first_seen, a.first_seen),
-                        last_seen=max(vorhanden.last_seen, a.last_seen),
-                        total_count=vorhanden.total_count + a.total_count,
-                        peak_count=max(vorhanden.peak_count, a.peak_count),
-                        # Anreicherung: ersten nicht-leeren Wert behalten (vorhandener Wert hat
-                        # Vorrang, sonst der neue -- ein None/"" loescht keinen Bestandswert).
-                        remote_port=vorhanden.remote_port or a.remote_port,
-                        hostname=vorhanden.hostname or a.hostname,
-                        country=vorhanden.country or a.country,
-                        operator=vorhanden.operator or a.operator,
-                        asn=vorhanden.asn or a.asn,
-                        app_name=vorhanden.app_name or a.app_name,
-                    )
+                    # Anreicherung: ersten nicht-leeren Wert behalten (vorhandener Wert hat
+                    # Vorrang, sonst der neue -- ein None/"" loescht keinen Bestandswert).
+                    gemergt[a.remote_ip] = _merge_aggregated(vorhanden, a, vorhanden.remote_ip)
             aggregate = list(gemergt.values())
+
+        # (1b) Kanonischer Zusammenfuehr-Pass -- gilt fuer BEIDE Zweige (der Alle-Merge oben
+        # gruppiert auf der ROHEN remote_ip, der Einzel-Zweig merged gar nicht). 1.2.3.4 und
+        # ::ffff:1.2.3.4 sind dieselbe Gegenstelle und werden hier zu EINER Zeile. Iteration in
+        # bestehender Reihenfolge, dict bewahrt die Einfuegereihenfolge -> deterministisch.
+        kanonisch: dict[str, AggregatedContact] = {}
+        for a in aggregate:
+            key_ip = _canonical_remote_ip(a.remote_ip)
+            vorhanden = kanonisch.get(key_ip)
+            if vorhanden is None:
+                kanonisch[key_ip] = a if a.remote_ip == key_ip else replace(a, remote_ip=key_ip)
+                continue
+            kanonisch[key_ip] = _merge_aggregated(vorhanden, a, key_ip)
+        aggregate = list(kanonisch.values())
 
         # (2) Blocklist-Bewertung ueber MatchContacts (Ergebnis in EINGABE-Reihenfolge -> per
         # Index zuordnen). Strenge/Gruppen kommen aus den Settings (wie im _blocklist_match-Pfad).
@@ -6126,12 +6192,18 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 return "Tracker: " + ", ".join(row.tracker_lists)
             return "-"
 
+        # Lokale/Infrastruktur-Gegenstellen bleiben in der Liste sichtbar, werden aber in der
+        # Gegenstellen-Spalte als solche gekennzeichnet -- sonst stehen sie ununterscheidbar
+        # zwischen den echten Aussenkontakten. Reine Anzeige (Achse B: einordnen, nicht urteilen);
+        # die Kennzahlen (remote_total/local_total) bleiben davon unberuehrt.
+        lokal_marke = " (lokal)" if lang == "de" else " (local)"
+
         country_rows = tuple((c.country, str(c.count)) for c in report.country_distribution)
         operator_rows = tuple((o.operator, str(o.count)) for o in report.operator_distribution)
         # Spalten-Reihenfolge: Gegenstelle, Name, Land, Betreiber, Kontakte, Bewertung.
         contact_rows = tuple(
             (
-                r.remote_ip,
+                r.remote_ip + (lokal_marke if r.is_local else ""),
                 r.hostname or "—",
                 r.country or "—",
                 r.operator or "—",
