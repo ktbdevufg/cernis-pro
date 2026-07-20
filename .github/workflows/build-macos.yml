@@ -229,7 +229,10 @@ jobs:
           name: CERNIS PRO ${{ github.ref_name }}
           body: "Release ${{ github.ref_name }} -- Release-Notes werden separat gepflegt."
           draft: false
-          prerelease: false
+          # Bewusst Pre-Release: der erste notarisierte Release soll erst auf einem
+          # ZWEITEN Mac geprueft werden (installiert Gatekeeper das dmg wirklich
+          # ohne Warnung?), bevor er als regulaerer Release markiert wird.
+          prerelease: true
           fail_on_unmatched_files: true
           files: |
             src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
