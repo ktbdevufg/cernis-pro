@@ -6,11 +6,23 @@ import time
 from dataclasses import dataclass, field
 from typing import Optional
 
+import structlog
+
+_logger = structlog.get_logger(__name__)
+
 try:
     from zeroconf import Zeroconf, ServiceBrowser, ServiceInfo, ZeroconfServiceTypes
     HAS_ZEROCONF = True
 except ImportError:
     HAS_ZEROCONF = False
+
+# S3: kein stiller Leerzustand. Fehlt zeroconf, bleibt die mDNS-Discovery dauerhaft leer --
+# das wird EINMAL beim Import gesagt (nicht bei jedem scan()/discover_mdns()-Aufruf, das
+# waere Spam). Der leere Rueckgabewert bleibt ein ehrliches Datum, nur nicht mehr stumm.
+if not HAS_ZEROCONF:
+    _logger.debug(
+        "zeroconf nicht verfuegbar -- mDNS-Discovery liefert dauerhaft eine leere Liste"
+    )
 
 # NDI uses mDNS with specific service types
 NDI_SERVICE_TYPES = [
@@ -79,8 +91,15 @@ class MDNSScanner:
                 key = f"{addr}|{name}"
                 with self._lock:
                     self.services[key] = svc
-        except Exception:
-            pass
+        except Exception as fehler:
+            # S3: Best-Effort-Discovery bleibt (kein Re-Raise), aber nicht mehr stumm --
+            # ein Dienst, der sich nicht aufloesen laesst, ist sonst unsichtbar.
+            _logger.debug(
+                "mDNS-Dienst konnte nicht uebernommen werden",
+                service_type=service_type,
+                name=name,
+                fehler=str(fehler),
+            )
 
     def scan(self, duration: float = 5.0, service_types: list[str] | None = None) -> list[MDNSService]:
         if not HAS_ZEROCONF:

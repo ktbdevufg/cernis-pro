@@ -7,6 +7,10 @@ import re
 import ipaddress
 from dataclasses import dataclass
 
+import structlog
+
+_logger = structlog.get_logger(__name__)
+
 # Externe Kommandos (ping, arp, ip neigh) werden mit erzwungener C-Locale gestartet,
 # weil lokalisierte Ausgaben (z.B. Zeit= statt time=) das Parsing sonst still
 # scheitern lassen.
@@ -65,7 +69,13 @@ async def ping_host(ip: str, timeout: float = 1.0) -> DiscoveredHost:
                 rtt = float(m.group(2))
 
         return DiscoveredHost(ip=ip, is_alive=alive, rtt_ms=rtt)
-    except (asyncio.TimeoutError, Exception):
+    except Exception as fehler:
+        # ``asyncio.TimeoutError`` ist eine ``Exception`` -- der fruehere Doppelfang
+        # ``(asyncio.TimeoutError, Exception)`` war redundant, beide Faelle enden ohnehin im
+        # selben Tot-Zustand. ``asyncio.CancelledError`` erbt seit Python 3.8 von
+        # ``BaseException`` und wird hier BEWUSST nicht gefangen (Abbruch bleibt Abbruch).
+        # S3: der Tot-Zustand bleibt unveraendert, er ist nur nicht mehr stumm.
+        _logger.debug("Ping fehlgeschlagen", ip=ip, fehler=str(fehler))
         return DiscoveredHost(ip=ip, is_alive=False)
 
 
