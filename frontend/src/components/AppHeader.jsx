@@ -54,8 +54,11 @@ export default function AppHeader({ theme, onThemeChange, onOpenSettings, onOpen
           alt="CERNIS PRO"
         />
         <span className="app-header__wordmark">
-          {/* Wortmarke ist fester Markenname, wird nicht übersetzt. */}
-          CERNIS PRO
+          {/* Wortmarke ist fester Markenname, wird nicht übersetzt. "PRO" steht in
+              einem eigenen Element, um es farblich/im Gewicht vom Markenton
+              abzusetzen; den Abstand setzt der Flex-gap der Wortmarke. */}
+          <span className="app-header__marke">CERNIS</span>
+          <span className="app-header__pro">PRO</span>
           <span className="app-header__version">{version ?? t("app.version")}</span>
         </span>
       </button>

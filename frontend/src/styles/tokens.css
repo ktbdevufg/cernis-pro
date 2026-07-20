@@ -29,6 +29,10 @@
   --color-accent-bg-strong: #CEE7EE;
   --color-accent-border: #84C2D4;
 
+  /* Wortmarke: "PRO" wird vom Markenton abgesetzt -- gedaempftes Mittelgrau, damit
+     "CERNIS" den Akzent traegt und "PRO" ruhig danebensteht. */
+  --color-wordmark-pro: #586470;
+
   --sev-high-text: #A32D2D;
   --sev-high-bd: #E24B4A;
   --sev-high-bg: #FCEBEB;
@@ -101,6 +105,9 @@
   --color-accent-bg: #0C3743;
   --color-accent-bg-strong: #104858;
   --color-accent-border: #16657B;
+
+  /* Wortmarke im Dunkelmodus: gedaempftes Hellgrau (s. Hell-Block). */
+  --color-wordmark-pro: #9aa2ac;
 
   --sev-high-text: #F09595;
   --sev-high-bd: #A32D2D;

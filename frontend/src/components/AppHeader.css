@@ -31,6 +31,15 @@
   color: var(--color-accent);
 }
 
+/* "PRO" der Wortmarke: erbt Schriftgroesse und Laufweite von .app-header__wordmark,
+   weicht NUR in Farbe und Gewicht ab. Die Farbe kommt ausschliesslich aus dem Token
+   (--color-wordmark-pro), damit der Hell/Dunkel-Wechsel automatisch greift.
+   "CERNIS" bleibt unveraendert im Markenton des Containers. */
+.app-header__pro {
+  color: var(--color-wordmark-pro);
+  font-weight: 600;
+}
+
 .app-header__version {
   font-size: 12px;
   font-weight: 400;
