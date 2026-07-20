@@ -91,6 +91,15 @@ class _Session:
         # das gemeinsame Senden ab; das blosse ``.append`` einer Liste ist unter
         # CPython atomar genug fuer dieses Append-only-Sammeln.
         self._raw_packets: list[Any] = []
+        # Bereitschafts-Gate fuer den Versand der STROM-Frames (PACKET/HIT). Ein Sniffer ist
+        # scharf, SOBALD ``start_*_sniff`` zurueckkehrt -- der prn-Thread kann also schon
+        # einen Frame senden, BEVOR die Kommando-Schleife das nachgelagerte ``STARTED``
+        # geschrieben hat. Bei vorhandenen Rechten + Live-Traffic gewinnt dieser Frame das
+        # Rennen und der Client sieht PACKET bzw. HIT als erste Antwort auf START_PCAP bzw.
+        # START -- das bricht den Protokoll-Vertrag "STARTED ist der erste Frame". Das Gate
+        # wird ERST nach gesendetem ``STARTED`` gesetzt (initial clear) und gilt fuer BEIDE
+        # Stroeme; ``_claim_sniffer`` (Session-Ende) clear-t es wieder.
+        self._stream_frames_ready = threading.Event()
 
     def _send(self, payload: dict[str, Any]) -> None:
         """Thread-sicheres Senden (Lock um ``send_message``)."""
@@ -109,18 +118,49 @@ class _Session:
         with self._sniffer_lock:
             sniffer = self._sniffer
             self._sniffer = None
+            # Der Claim ist das Ende der Session (STOP, Selbst-Ende oder Teardown) --
+            # ab hier duerfen keine spaeten Strom-Frames (PACKET/HIT) mehr durchrutschen.
+            # Race-frei, weil dies der EINZIGE Pfad ist, der ``_sniffer`` nullt, und ein
+            # frisches ``START``/``START_PCAP`` das Gate ohnehin selbst clear-t und erst
+            # nach seinem ``STARTED`` wieder setzt.
+            self._stream_frames_ready.clear()
             return sniffer
 
     def _on_hit(self, hit: dict[str, Any]) -> None:
-        """Sniff-Callback: rohen Hit als ``HIT``-Nachricht senden (Hit-Thread)."""
+        """Sniff-Callback: rohen Hit als ``HIT``-Nachricht senden (Hit-Thread).
+
+        Gegattet ueber ``_stream_frames_ready`` -- dieselbe Handshake-Regel wie bei
+        ``_on_packet``: vor dem gesendeten ``STARTED`` wird der Frame VERWORFEN, damit
+        ``STARTED`` sicher die erste Antwort auf ``START`` ist. Best-Effort-Strom; die
+        ersten Millisekunden-Hits vor dem Handshake sind fuer die Anzeige irrelevant.
+        """
+        if not self._stream_frames_ready.is_set():
+            return
         self._send({"type": MessageType.HIT, **hit})
 
     def _on_query(self, query: dict[str, Any]) -> None:
-        """DNS-Callback: erkannte Anfrage als ``DNS_QUERY``-Nachricht senden (Sniff-Thread)."""
+        """DNS-Callback: erkannte Anfrage als ``DNS_QUERY``-Nachricht senden (Sniff-Thread).
+
+        Gegattet ueber ``_stream_frames_ready`` -- dieselbe Handshake-Regel wie bei
+        ``_on_packet``/``_on_hit``: vor dem gesendeten ``STARTED`` wird der Frame
+        VERWORFEN, damit ``STARTED`` sicher die erste Antwort auf ``START_DNS`` ist.
+        """
+        if not self._stream_frames_ready.is_set():
+            return
         self._send({"type": MessageType.DNS_QUERY, **query})
 
     def _on_packet(self, summary: dict[str, Any]) -> None:
-        """pcap-Callback: Summary-dict als ``PACKET``-Nachricht senden (Sniff-Thread)."""
+        """pcap-Callback: Summary-dict als ``PACKET``-Nachricht senden (Sniff-Thread).
+
+        Gegattet ueber ``_stream_frames_ready``: solange das ``STARTED`` des Handshakes
+        nicht raus ist, wird der Frame VERWORFEN (nicht gepuffert) -- so bleibt der
+        Vertrag "STARTED vor dem ersten PACKET" garantiert, ohne Speicherwachstum oder
+        eine verzoegerte Frame-Flut. Die ersten Millisekunden-Pakete vor dem Handshake
+        sind fuer die ANZEIGE irrelevant; das Roh-Sammeln fuer ``EXPORT_PCAP``
+        (``_on_raw``) laeuft ungegattet weiter und verliert nichts.
+        """
+        if not self._stream_frames_ready.is_set():
+            return
         self._send({"type": MessageType.PACKET, **summary})
 
     def _on_raw(self, pkt: Any) -> None:
@@ -160,6 +200,9 @@ class _Session:
 
         interface = message.get("interface")
         self._stop_event.clear()
+        # Sauberer Ausgangszustand: HIT-Frames bleiben gesperrt, bis das ``STARTED``
+        # unten raus ist (Handshake-Reihenfolge, s. ``_stream_frames_ready``).
+        self._stream_frames_ready.clear()
         try:
             self._sniffer = start_raw_sniff(self._on_hit, interface, self._stop_event)
         except RuntimeError as exc:
@@ -168,6 +211,8 @@ class _Session:
             return
 
         self._send({"type": MessageType.STARTED})
+        # Erst JETZT duerfen HIT-Frames raus -- ``STARTED`` ist geschrieben.
+        self._stream_frames_ready.set()
 
     def _handle_start_pcap(self, message: dict[str, Any]) -> None:
         """``START_PCAP``: Recht pruefen, dann ``start_pcap_sniff`` aufspinnen + ``STARTED``.
@@ -193,6 +238,9 @@ class _Session:
         max_packets = message.get("max_packets", 0)
         self._raw_packets = []
         self._stop_event.clear()
+        # Sauberer Ausgangszustand fuer die frische Session: PACKET-Frames bleiben
+        # gesperrt, bis das ``STARTED`` unten raus ist (Handshake-Reihenfolge).
+        self._stream_frames_ready.clear()
         try:
             self._sniffer = start_pcap_sniff(
                 self._on_packet,
@@ -209,6 +257,8 @@ class _Session:
             return
 
         self._send({"type": MessageType.STARTED})
+        # Erst JETZT duerfen PACKET-Frames raus -- ``STARTED`` ist geschrieben.
+        self._stream_frames_ready.set()
 
     def _handle_start_lldp(self, message: dict[str, Any]) -> None:
         """``START_LLDP``: Recht pruefen, dann zeitbegrenzten LLDP/CDP-Sniff -> ``NEIGHBORS``.
@@ -262,6 +312,9 @@ class _Session:
 
         interface = message.get("interface")
         self._stop_event.clear()
+        # Sauberer Ausgangszustand: DNS_QUERY-Frames bleiben gesperrt, bis das
+        # ``STARTED`` unten raus ist (Handshake-Reihenfolge).
+        self._stream_frames_ready.clear()
         try:
             self._sniffer = start_dns_sniff(self._on_query, interface, self._stop_event)
         except RuntimeError as exc:
@@ -270,6 +323,8 @@ class _Session:
             return
 
         self._send({"type": MessageType.STARTED})
+        # Erst JETZT duerfen DNS_QUERY-Frames raus -- ``STARTED`` ist geschrieben.
+        self._stream_frames_ready.set()
 
     def _handle_export_pcap(self, message: dict[str, Any]) -> None:
         """``EXPORT_PCAP``: gesammelte Rohpakete nach ``path`` schreiben -> ``EXPORTED``.
