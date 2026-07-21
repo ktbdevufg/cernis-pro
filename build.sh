@@ -72,7 +72,11 @@ echo "      Signieridentitaet: $APPLE_SIGNING_IDENTITY"
 echo ""
 echo "[0b/7] Build-Version erzeugen (_build_version.py)..."
 SHORT_SHA=$(git rev-parse --short=7 HEAD)
-BUILD_VERSION="2.0.0+macos.${SHORT_SHA}"
+# Produktversion aus pyproject.toml ableiten (Quelle der Wahrheit) -- nicht fest
+# eintippen, damit der naechste Versionsbump hier automatisch ankommt.
+PRODUCT_VERSION=$(grep -m1 -E '^version = ' "$SCRIPT_DIR/pyproject.toml" | sed -E 's/^version = "(.*)"/\1/')
+[ -n "$PRODUCT_VERSION" ] || { echo "FEHLER: Produktversion aus pyproject.toml nicht lesbar"; exit 1; }
+BUILD_VERSION="${PRODUCT_VERSION}+macos.${SHORT_SHA}"
 cat > "$BACKEND_DIR/infrastructure/_build_version.py" << EOF
 """Im CI erzeugte Build-Version. Nicht committet (siehe .gitignore)."""
 BUILD_VERSION = "${BUILD_VERSION}"

@@ -88,7 +88,10 @@ jobs:
         shell: bash
         run: |
           SHORT_SHA=$(git rev-parse --short=7 HEAD)
-          BUILD_VERSION="2.0.0+arm64.${SHORT_SHA}"
+          # Produktversion aus pyproject.toml ableiten (Quelle der Wahrheit).
+          PRODUCT_VERSION=$(grep -m1 -E '^version = ' pyproject.toml | sed -E 's/^version = "(.*)"/\1/')
+          [ -n "$PRODUCT_VERSION" ] || { echo "FEHLER: Produktversion aus pyproject.toml nicht lesbar"; exit 1; }
+          BUILD_VERSION="${PRODUCT_VERSION}+arm64.${SHORT_SHA}"
           echo "Build-Version: ${BUILD_VERSION}"
           cat > backend/infrastructure/_build_version.py <<EOF
           """Im CI erzeugte Build-Version. Nicht committet (siehe .gitignore)."""

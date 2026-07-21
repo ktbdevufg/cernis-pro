@@ -5,21 +5,61 @@ bzw. einer ``.env``-Datei. Infrastruktur-Concern: bindet die Anwendung an die
 Aussenwelt (Environment). Wird im Composition Root (``app.py``) instanziiert.
 """
 
+import re
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 APP_NAME = "cernis-pro"
+
+# Allerletzter Notnagel, wenn pyproject.toml weder gefunden noch gelesen werden
+# kann (z. B. eingefrorener Build ohne mitgelieferte Quelldatei UND ohne
+# _build_version.py). Beim Versionsbump mitziehen -- im Normalfall greift diese
+# Zahl NIE, weil die Produktversion aus pyproject.toml stammt.
+_FALLBACK_PRODUCT_VERSION = "2.0.3"
+
+# ``[project] version = "..."`` in pyproject.toml. Bewusst zeilenweise per Regex
+# statt per TOML-Parser: die Ableitung soll auch dann tragen, wenn tomllib aus
+# irgendeinem Grund nicht verfuegbar ist, und die Zeile ist eindeutig genug.
+_VERSION_ZEILE = re.compile(r'^\s*version\s*=\s*["\']([^"\']+)["\']', re.MULTILINE)
+
+
+def _lese_produkt_version() -> str:
+    """Produktversion aus ``pyproject.toml`` (Quelle der Wahrheit).
+
+    ``config.py`` liegt in ``backend/infrastructure/`` -> die Projekt-Wurzel ist
+    zwei Ebenen darueber. Zusaetzlich werden die weiteren Elternverzeichnisse
+    abgesucht, damit die Ableitung auch bei verschobenem Arbeitsverzeichnis
+    greift. Gelesen wird die ``version``-Zeile des ``[project]``-Abschnitts.
+    Schlaegt alles fehl, greift ``_FALLBACK_PRODUCT_VERSION``.
+    """
+    for verzeichnis in Path(__file__).resolve().parents:
+        pyproject = verzeichnis / "pyproject.toml"
+        try:
+            inhalt = pyproject.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        # Nur der [project]-Abschnitt zaehlt -- [tool.*]-Abschnitte koennen
+        # ebenfalls eine version-Zeile tragen.
+        abschnitt = inhalt.partition("[project]")[2]
+        treffer = _VERSION_ZEILE.search(abschnitt)
+        if treffer is not None:
+            return treffer.group(1)
+    return _FALLBACK_PRODUCT_VERSION
 
 
 def _lese_build_version() -> str:
     """Volle interne Version inkl. Build-Metadaten (SemVer-Build-Metadata).
 
     Im CI wird VOR dem Build ``infrastructure/_build_version.py`` mit einer
-    Konstante ``BUILD_VERSION`` erzeugt (z. B. ``"2.0.0+x64.a1b2c3d"``) und
+    Konstante ``BUILD_VERSION`` erzeugt (z. B. ``"2.0.3+x64.a1b2c3d"``) und
     von PyInstaller mit eingefroren -- damit ist die Build-Version in der
     installierten App verfuegbar, ohne dass zur Laufzeit eine Env gesetzt sein
-    muss. Fehlt die Datei (Dev-Betrieb, nie committet), gilt der Fallback
-    ``"2.0.0"``. Die Datei liegt in ``infrastructure/`` -- config.py ist
-    ebenfalls ``infrastructure/`` -> hexagonal erlaubt.
+    muss. Fehlt die Datei (Dev-Betrieb, nie committet), gilt die aus
+    ``pyproject.toml`` abgeleitete Produktversion -- KEINE Hartkodierung mehr,
+    damit die Anzeige beim naechsten Bump automatisch stimmt. Die Datei liegt in
+    ``infrastructure/`` -- config.py ist ebenfalls ``infrastructure/`` ->
+    hexagonal erlaubt.
     """
     try:
         # Die Datei existiert nur im CI-Build (nie committet) -> mypy kennt sie
@@ -28,22 +68,22 @@ def _lese_build_version() -> str:
             BUILD_VERSION,
         )
     except ImportError:
-        return "2.0.0"
+        return _lese_produkt_version()
     return str(BUILD_VERSION)
 
 
 # Volle interne Version. Enthaelt im CI-Build die SemVer-Build-Metadaten. Der
 # Suffix nennt nur die Architektur (x64), NICHT das Paketformat -- ein Build
-# erzeugt deb, rpm und AppImage aus denselben Binaries ("2.0.0+x64.<sha>"). Im
-# Dev schlicht "2.0.0".
+# erzeugt deb, rpm und AppImage aus denselben Binaries ("2.0.3+x64.<sha>"). Im
+# Dev schlicht die Produktversion aus pyproject.toml ("2.0.3").
 APP_VERSION = _lese_build_version()
 
 
 def display_version(version: str = APP_VERSION) -> str:
-    """Anzeige-Form aus der internen Version: ``"2.0.0+x64.a1b2c3d"`` ->
-    ``"2.0.0-x64.a1b2c3d"``. Das ``"+"`` der internen Form wird zum
+    """Anzeige-Form aus der internen Version: ``"2.0.3+x64.a1b2c3d"`` ->
+    ``"2.0.3-x64.a1b2c3d"``. Das ``"+"`` der internen Form wird zum
     Bindestrich -- KEINE Klammern, KEIN Leerzeichen. Ohne Build-Metadaten (kein
-    ``"+"``) bleibt sie unveraendert (``"2.0.0"`` -> ``"2.0.0"``). Nach
+    ``"+"``) bleibt sie unveraendert (``"2.0.3"`` -> ``"2.0.3"``). Nach
     aussen/GUI = Anzeige-Form.
     """
     kern, trenner, metadaten = version.partition("+")

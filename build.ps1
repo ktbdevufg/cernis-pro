@@ -220,7 +220,12 @@ $ErrorActionPreference = "Continue"
 $SHORT_SHA = (git -C $SCRIPT_DIR rev-parse --short=7 HEAD).Trim()
 $ErrorActionPreference = "Stop"
 Assert-LastExit "git rev-parse"
-$BUILD_VERSION = "2.0.0+$ARCH.$SHORT_SHA"
+# Produktversion aus pyproject.toml ableiten (Quelle der Wahrheit) -- nicht fest
+# eintippen, damit der naechste Versionsbump hier automatisch ankommt.
+$pyprojectPfad = Join-Path $SCRIPT_DIR "pyproject.toml"
+$PRODUCT_VERSION = (Select-String -Path $pyprojectPfad -Pattern '^version = "(.*)"' | Select-Object -First 1).Matches.Groups[1].Value
+if (-not $PRODUCT_VERSION) { throw "Produktversion aus pyproject.toml nicht lesbar" }
+$BUILD_VERSION = "$PRODUCT_VERSION+$ARCH.$SHORT_SHA"
 Write-Host "      Build-Version: $BUILD_VERSION"
 $buildVersionFile = Join-Path $BACKEND_DIR "infrastructure\_build_version.py"
 $buildVersionContent = @"

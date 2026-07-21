@@ -35,7 +35,10 @@ jobs:
         shell: pwsh
         run: |
           $shortSha = (git rev-parse --short=7 HEAD).Trim()
-          $buildVersion = "2.0.0+winarm64.$shortSha"
+          # Produktversion aus pyproject.toml ableiten (Quelle der Wahrheit).
+          $productVersion = (Select-String -Path pyproject.toml -Pattern '^version = "(.*)"' | Select-Object -First 1).Matches.Groups[1].Value
+          if (-not $productVersion) { Write-Error "Produktversion aus pyproject.toml nicht lesbar"; exit 1 }
+          $buildVersion = "$productVersion+winarm64.$shortSha"
           Write-Host "Build-Version: $buildVersion"
           $content = @"
           """Im CI erzeugte Build-Version. Nicht committet (siehe .gitignore)."""
