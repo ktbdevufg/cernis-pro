@@ -39,19 +39,15 @@ DEFAULT_DOH_PROVIDER_IPS: tuple[str, ...] = (
 )
 
 
-def expected_servers_or_default(configured: Sequence[str], gateway: str | None) -> tuple[str, ...]:
-    """Die erwarteten DNS-Server: Konfiguration gewinnt, sonst Gateway-Fallback.
+def expected_servers_or_default(configured: Sequence[str]) -> tuple[str, ...]:
+    """Die erwarteten DNS-Server: genau die konfigurierte Liste, sonst leer.
 
-    Ist ``configured`` nicht leer -> genau diese Liste (als Tupel). Sonst, wenn ein
-    ``gateway`` gesetzt (und nicht leer) ist -> nur das Gateway. Sonst leeres Tupel
-    (dann ist jede Port-53-Verbindung "offen" -- ehrlicher Default ohne Annahme).
-    Reine Funktion, kein I/O.
+    Erwartet ist ausschliesslich, was der Nutzer gesetzt hat (als Tupel). Leere
+    Konfiguration -> leeres Tupel -> jede Port-53-Verbindung gilt als "offen"
+    (ehrlicher Default ohne Annahme, KEINE Gateway-Vermutung mehr). Reine
+    Funktion, kein I/O.
     """
-    if configured:
-        return tuple(configured)
-    if gateway:
-        return (gateway,)
-    return ()
+    return tuple(configured)
 
 
 def doh_providers_or_default(configured: Sequence[str]) -> tuple[str, ...]:

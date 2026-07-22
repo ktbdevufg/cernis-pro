@@ -11,9 +11,9 @@ quellen-AGNOSTISCH per Constructor-Injection als schmale Protocols/Callables her
 
 FACHLICHE GRENZE (ADR 0042): die Domaene bekommt die Quell-IP als ROHEN Schluessel. Die
 Zuordnung Quell-IP -> Geraet (Bestand) und die DoH-Blocklist-Bewertung liegen NICHT hier,
-sondern spaeter im Composition Root (Regel 5). Auch die "erwartet-oder-Gateway"-Ableitung
-der erwarteten Menge (``domain.dns_watch.expected_servers_or_default``) faellt dort -- der
-``ExpectedServersProvider`` bekommt die fertige Menge hier bereits herein.
+sondern spaeter im Composition Root (Regel 5). Auch die Ableitung der erwarteten Menge
+aus der Konfiguration (``domain.dns_watch.expected_servers_or_default``) faellt dort --
+der ``ExpectedServersProvider`` bekommt die fertige Menge hier bereits herein.
 """
 
 from collections.abc import Callable, Sequence
@@ -59,7 +59,7 @@ _MAX_SAMPLE_QNAMES = 5
 
 # ── Quellen-agnostische Nahtstelle (lokal definiert, KEINE Fremd-Domaenentypen) ──
 
-# Liefert die erwartete-Resolver-Menge (roh). Die "erwartet-oder-Gateway"-Ableitung
+# Liefert die erwartete-Resolver-Menge (roh). Die Ableitung aus der Konfiguration
 # (``domain.dns_watch.expected_servers_or_default``) und die Persistenz liegen im
 # Composition Root -- hier nur die Naht. Sync -- ein lokaler Lese-Snapshot.
 ExpectedServersProvider = Callable[[], Sequence[str]]

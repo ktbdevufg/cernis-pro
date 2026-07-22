@@ -4500,9 +4500,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     # (Verbindungen/Namen/Quittierungen/erwartete-Server/DoH-Listen). Der application-Ring
     # (BuildDnsWatch) nennt KEINE Quell-Domaene -- die Provider werden HIER aus den schon
     # in Scope stehenden Root-Helfern gebaut (NICHTS neu): _traffic_adapter(),
-    # GetObservedSni/sni_sniffer(), resolve_ptr_batch_uc, repository() (Settings),
-    # _topology_gateway() (Gateway des primaeren Interface). Die zwei editierbaren Listen
-    # sind normale Listen-Settings (value = JSON-Liste von IP-Strings).
+    # GetObservedSni/sni_sniffer(), resolve_ptr_batch_uc, repository() (Settings).
+    # Die zwei editierbaren Listen sind normale Listen-Settings (value = JSON-Liste
+    # von IP-Strings); erwartete Server sind GENAU die konfigurierten (D4: kein
+    # Gateway-Fallback mehr).
     dns_watch_acknowledgement_clock = SystemClock()
 
     @lru_cache(maxsize=1)
@@ -4555,20 +4556,15 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             ptr_by_ip = await resolve_ptr_batch_uc(tuple(ips))
             return {ip: sni_by_ip.get(ip) or ptr_by_ip.get(ip) for ip in ips}
 
-        # (3) Gateway des primaeren Interface fuer den expected-Default (sonst leer/None);
-        # ueber den schon vorhandenen Interface-Weg (_topology_gateway, kein neuer Adapter).
-        gateway = await _topology_gateway()
-
-        # (4) Die fuenf Provider fuer BuildDnsWatch: acknowledged liest die quittierten
-        # Befund-Schluessel; die zwei Listen-Closures fallen ueber die domain-Defaults
-        # (Gateway-Fallback bzw. DoH-Startliste), wenn der Nutzer nichts konfiguriert hat.
+        # (3) Die fuenf Provider fuer BuildDnsWatch: acknowledged liest die quittierten
+        # Befund-Schluessel; erwartet sind GENAU die konfigurierten Server (leer ->
+        # leeres Tupel, keine Gateway-Vermutung mehr, D4); die DoH-Liste faellt auf
+        # die domain-Startliste, wenn der Nutzer nichts konfiguriert hat.
         overview = await BuildDnsWatch(
             _connections_provider,
             _hostname_provider,
             dns_watch_acknowledgement_repository().acknowledged_keys,
-            lambda: expected_servers_or_default(
-                _dns_watch_read_list(DNS_EXPECTED_SERVERS_KEY), gateway
-            ),
+            lambda: expected_servers_or_default(_dns_watch_read_list(DNS_EXPECTED_SERVERS_KEY)),
             lambda: doh_providers_or_default(_dns_watch_read_list(DNS_DOH_PROVIDERS_KEY)),
         )()
         # Projektion application.DnsWatchOverview -> api.DnsWatchOverviewOut (Regel 4:

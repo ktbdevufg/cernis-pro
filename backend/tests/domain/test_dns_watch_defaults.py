@@ -1,8 +1,8 @@
 """Tests fuer die reine Default-Listen-Logik des DNS-Waechters (Block 2, 2d).
 
-Belegt beide Funktionen: ``configured`` gewinnt vor jedem Fallback, der
-Gateway-Fallback bei leerer Konfiguration, der leere Fall ohne Gateway sowie das
-Greifen der DoH-Startliste. Reine Funktionen -- kein I/O, keine Fixtures noetig.
+Belegt beide Funktionen: erwartet sind GENAU die konfigurierten Server (leer ->
+leeres Tupel, KEIN Gateway-Fallback mehr, D4) sowie das Greifen der
+DoH-Startliste. Reine Funktionen -- kein I/O, keine Fixtures noetig.
 """
 
 from domain.dns_watch import (
@@ -14,23 +14,17 @@ from domain.dns_watch import (
 # ── expected_servers_or_default ───────────────────────────────────────────────
 
 
-def test_expected_configured_gewinnt_vor_gateway() -> None:
-    assert expected_servers_or_default(["192.168.0.1", "10.0.0.1"], "192.168.0.254") == (
+def test_expected_ist_genau_die_konfigurierte_liste() -> None:
+    assert expected_servers_or_default(["192.168.0.1", "10.0.0.1"]) == (
         "192.168.0.1",
         "10.0.0.1",
     )
 
 
-def test_expected_leer_faellt_auf_gateway() -> None:
-    assert expected_servers_or_default([], "192.168.0.254") == ("192.168.0.254",)
-
-
-def test_expected_leer_ohne_gateway_ist_leer() -> None:
-    assert expected_servers_or_default([], None) == ()
-
-
-def test_expected_leer_mit_leerem_gateway_ist_leer() -> None:
-    assert expected_servers_or_default([], "") == ()
+def test_expected_leer_bleibt_leer_kein_gateway_fallback() -> None:
+    # D4: leere Konfiguration -> leeres Tupel; jede Port-53-Verbindung gilt dann
+    # ehrlich als "offen", es wird KEIN Gateway mehr als erwartet vermutet.
+    assert expected_servers_or_default([]) == ()
 
 
 # ── doh_providers_or_default ──────────────────────────────────────────────────
