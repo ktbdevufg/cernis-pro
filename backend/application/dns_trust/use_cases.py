@@ -34,6 +34,7 @@ __all__ = [
     "ListDnsTrustServers",
     "PlausibilityProvider",
     "PublicResolverCheck",
+    "SetDnsServerRank",
     "SetDnsServerTrust",
     "SyncDnsTrustServer",
     "ThreatCheck",
@@ -155,6 +156,8 @@ class SyncDnsTrustServer:
                 display_name=detected_name or existing.display_name,
                 notes=existing.notes,
                 is_platform_placeholder=placeholder,
+                # expected_rank ist User-gesteuert (wie trust_state) -- bewahren.
+                expected_rank=existing.expected_rank,
             )
             self._repo.upsert(updated)
             return updated
@@ -238,3 +241,69 @@ class TrustedDnsServerIps:
             for server in self._repo.list_all()
             if server.trust_state is DnsTrustState.TRUSTED
         }
+
+
+class SetDnsServerRank:
+    """Setzt den erwarteten Rang EINER ``ip`` und haelt die Rang-Sequenz kompakt (D4 E3).
+
+    Der Rang ist die nutzergesetzte erwartete Prioritaet (1..N, kleiner = hoeher);
+    ``rank == 0`` entfernt die ``ip`` aus der Rangordnung (unrangiert). Nach jedem
+    Aufruf sind die Raenge der betroffenen Menge eine LUECKENLOSE 1..N-Folge ohne
+    Doppelraenge: die Ziel-``ip`` landet auf dem gewuenschten Platz, die uebrigen
+    ruecken in ihrer bisherigen Ordnung nach.
+
+    Betroffen sind alle Server, die ``TRUSTED`` sind ODER bereits einen Rang tragen
+    (``expected_rank > 0``) -- so bleibt ein Rang verlustfrei erhalten, auch wenn ein
+    Server voruebergehend nicht trusted ist. ``rank < 0`` ist ein Fehler (kein stiller
+    Fallback, S3): ``ValueError``. ``now`` kommt als Parameter herein (keine Uhr im
+    Use-Case); geschrieben wird nur, was sich tatsaechlich aendert (``repo.set_rank``).
+    """
+
+    def __init__(self, repo: DnsTrustRepository) -> None:
+        self._repo = repo
+
+    def __call__(self, ip: str, rank: int, now: float) -> None:
+        if rank < 0:
+            raise ValueError(f"ungueltiger Rang (muss >= 0 sein): {rank}")
+
+        # Betroffene Menge: trusted ODER bereits rangiert (verlustfrei).
+        betroffen = [
+            server
+            for server in self._repo.list_all()
+            if server.trust_state is DnsTrustState.TRUSTED or server.expected_rank > 0
+        ]
+
+        # Gewuenschter Rang je ip: die Ziel-ip bekommt den Wunsch, alle anderen ihren
+        # bisherigen Rang. 0 heisst "aus der Ordnung raus" (bleibt/wird unrangiert).
+        gewuenscht = {server.ip: server.expected_rank for server in betroffen}
+        if ip in gewuenscht:
+            gewuenscht[ip] = rank
+
+        # Stabile Ordnung der zu rangierenden Server: (gewuenschter Rang, dann bisheriger
+        # Rang, dann first_seen). Bei Rang-Kollision nimmt die Ziel-ip den Platz des
+        # bisherigen Inhabers ein -- RICHTUNGSABHAENGIG: beim ABSENKEN (Wunsch >
+        # bisheriger Rang) rueckt sie HINTER den Inhaber (sie will ja nach unten, der
+        # Inhaber weicht nach vorn); beim ANHEBEN/Neuaufnehmen VOR ihn (der Inhaber
+        # weicht nach hinten). Nur so ist der Pfeil-Tausch in BEIDE Richtungen ein
+        # echter Tausch (ein fixes "Ziel immer vorn/hinten" macht je eine Richtung
+        # zum No-Op).
+        alter_rang = next((s.expected_rank for s in betroffen if s.ip == ip), 0)
+        ziel_absenkung = alter_rang > 0 and rank > alter_rang
+        zu_rangieren = [server for server in betroffen if gewuenscht[server.ip] > 0]
+        zu_rangieren.sort(
+            key=lambda server: (
+                gewuenscht[server.ip],
+                (1.0 if ziel_absenkung else 0.0) if server.ip == ip else 0.5,
+                server.expected_rank if server.expected_rank > 0 else float("inf"),
+                server.first_seen,
+            )
+        )
+
+        # 1..N frisch durchnummerieren; alles andere (rank==0-Wunsch bzw. nicht-trusted
+        # ohne Rang) erhaelt 0. Nur echte Aenderungen schreiben.
+        neu: dict[str, int] = {server.ip: 0 for server in betroffen}
+        for position, server in enumerate(zu_rangieren, start=1):
+            neu[server.ip] = position
+        for server in betroffen:
+            if neu[server.ip] != server.expected_rank:
+                self._repo.set_rank(server.ip, neu[server.ip], now)

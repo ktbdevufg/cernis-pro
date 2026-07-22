@@ -233,6 +233,100 @@ def test_set_trust_unknown_ip_is_noop(repo: SqliteDnsTrustRepository, tmp_path: 
     assert _count_rows(tmp_path / "cernis.db") == 0
 
 
+# ── set_rank: schmaler Schreibpfad (D4 E3) ──────────────────────────────────
+
+
+def test_set_rank_changes_only_rank_and_last_seen(repo: SqliteDnsTrustRepository) -> None:
+    repo.upsert(
+        _server(
+            "1.1.1.1",
+            category=DnsServerCategory.GATEWAY,
+            first_seen=100.0,
+            last_seen=100.0,
+            trust_state=DnsTrustState.TRUSTED,
+            display_name="gw",
+        )
+    )
+    repo.set_rank("1.1.1.1", 2, now=555.0)
+    loaded = repo.get("1.1.1.1")
+    assert loaded is not None
+    # Nur Rang + last_seen wandern.
+    assert loaded.expected_rank == 2
+    assert loaded.last_seen == 555.0
+    # Kategorie/first_seen/trust_state bleiben unberuehrt.
+    assert loaded.category is DnsServerCategory.GATEWAY
+    assert loaded.first_seen == 100.0
+    assert loaded.trust_state is DnsTrustState.TRUSTED
+
+
+def test_set_rank_unknown_ip_is_noop(repo: SqliteDnsTrustRepository, tmp_path: Path) -> None:
+    # Unbekannte ip -> 0 Zeilen betroffen, kein stilles Anlegen, kein Fehler.
+    repo.set_rank("nie_existiert", 1, now=1.0)
+    assert repo.get("nie_existiert") is None
+    assert _count_rows(tmp_path / "cernis.db") == 0
+
+
+def test_expected_rank_roundtrips_via_upsert(repo: SqliteDnsTrustRepository) -> None:
+    repo.upsert(
+        TrustedDnsServer(
+            ip="1.1.1.1",
+            category=DnsServerCategory.PUBLIC_RESOLVER,
+            first_seen=1.0,
+            last_seen=1.0,
+            expected_rank=3,
+        )
+    )
+    loaded = repo.get("1.1.1.1")
+    assert loaded is not None
+    assert loaded.expected_rank == 3
+
+
+def test_ensure_schema_adds_rank_column_to_legacy_table(tmp_path: Path) -> None:
+    # Muster des placeholder-Migrationstests: eine VOR D4 E3 angelegte Tabelle besitzt
+    # expected_rank noch nicht; der Schema-Guard muss die Spalte beim Oeffnen nachruesten.
+    db_path = tmp_path / "cernis.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        # ALTE Tabellenform: mit is_platform_placeholder, aber OHNE expected_rank.
+        conn.execute(
+            """
+            CREATE TABLE dns_trust_servers (
+                ip           TEXT PRIMARY KEY,
+                category     TEXT,
+                trust_state  TEXT,
+                first_seen   REAL,
+                last_seen    REAL,
+                display_name TEXT,
+                notes        TEXT,
+                is_platform_placeholder INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO dns_trust_servers "
+            "(ip, category, trust_state, first_seen, last_seen, display_name, notes) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("1.1.1.1", "public_resolver", "neutral", 1.0, 1.0, "alt", ""),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    repo = SqliteDnsTrustRepository(db_path)
+
+    conn = sqlite3.connect(db_path)
+    try:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(dns_trust_servers)")}
+    finally:
+        conn.close()
+    assert "expected_rank" in cols
+
+    # Bestehender Eintrag lesbar; die nachgeruestete Spalte traegt den Default 0.
+    loaded = repo.get("1.1.1.1")
+    assert loaded is not None
+    assert loaded.expected_rank == 0
+
+
 # ── delete idempotent + clear_all ──────────────────────────────────────────
 
 

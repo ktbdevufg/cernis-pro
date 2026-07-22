@@ -21,8 +21,10 @@ from api.dns_trust import (
     TrustedDnsServerOut,
     provide_dns_trust_decision,
     provide_dns_trust_list,
+    provide_dns_trust_rank,
 )
 from app import create_app
+from application.dns_trust import SetDnsServerRank
 from domain.dns_trust import (
     DnsServerCategory,
     DnsTrustState,
@@ -67,6 +69,7 @@ def test_get_dns_trust_liefert_200_und_json_form(app: FastAPI) -> None:
             display_name="FritzBox",
             notes="",
             is_platform_placeholder=False,
+            expected_rank=1,
             plausibility=DnsServerPlausibilityOut(
                 in_inventory=True,
                 first_seen_days=12,
@@ -84,6 +87,7 @@ def test_get_dns_trust_liefert_200_und_json_form(app: FastAPI) -> None:
             display_name="",
             notes="",
             is_platform_placeholder=True,
+            expected_rank=0,
             plausibility=None,
         ),
     ]
@@ -105,6 +109,7 @@ def test_get_dns_trust_liefert_200_und_json_form(app: FastAPI) -> None:
             "display_name": "FritzBox",
             "notes": "",
             "is_platform_placeholder": False,
+            "expected_rank": 1,
             "plausibility": {
                 "in_inventory": True,
                 "first_seen_days": 12,
@@ -122,6 +127,7 @@ def test_get_dns_trust_liefert_200_und_json_form(app: FastAPI) -> None:
             "display_name": "",
             "notes": "",
             "is_platform_placeholder": True,
+            "expected_rank": 0,
             "plausibility": None,
         },
     ]
@@ -218,3 +224,50 @@ def test_unbekannte_ip_ist_kein_500(
     assert resp.status_code == 200
     assert resp.json() == {"ok": True}
     assert repo.get("203.0.113.7") is None
+
+
+# ── POST /rank: Rang-Schreibpfad gegen echtes tmp-DB-Repo ─────────────────────
+
+
+@pytest.fixture
+def rank_context(app: FastAPI, tmp_path: Path) -> tuple[FastAPI, SqliteDnsTrustRepository]:
+    repo = SqliteDnsTrustRepository(tmp_path / "cernis.db")
+    # EIN bestehender TRUSTED-Server, an dem der Rang sichtbar wird.
+    repo.upsert(
+        TrustedDnsServer(
+            ip=IP,
+            category=DnsServerCategory.LOCAL_PRIVATE,
+            first_seen=100.0,
+            last_seen=100.0,
+            trust_state=DnsTrustState.TRUSTED,
+        )
+    )
+    # Rang-Runner wie im Composition Root: (ip, rank) -> SetDnsServerRank mit fester now.
+    rank_use_case = SetDnsServerRank(repo)
+    app.dependency_overrides[provide_dns_trust_rank] = lambda: (
+        lambda ip, rank: rank_use_case(ip, rank, 999.0)
+    )
+    return app, repo
+
+
+def test_rank_schreibt_und_ist_sichtbar(
+    rank_context: tuple[FastAPI, SqliteDnsTrustRepository],
+) -> None:
+    application, repo = rank_context
+    client = TestClient(application)
+    resp = client.post("/api/dns-trust/rank", json={"ip": IP, "rank": 1})
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True}
+    stored = repo.get(IP)
+    assert stored is not None
+    assert stored.expected_rank == 1
+
+
+def test_negativer_rank_ist_422(
+    rank_context: tuple[FastAPI, SqliteDnsTrustRepository],
+) -> None:
+    """``rank < 0`` scheitert an der Body-Validierung (Field ge=0) -> 422."""
+    application, _ = rank_context
+    client = TestClient(application)
+    resp = client.post("/api/dns-trust/rank", json={"ip": IP, "rank": -1})
+    assert resp.status_code == 422

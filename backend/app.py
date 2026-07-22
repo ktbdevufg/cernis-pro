@@ -165,6 +165,7 @@ from api.dns_trust import (
     TrustedDnsServerOut,
     provide_dns_trust_decision,
     provide_dns_trust_list,
+    provide_dns_trust_rank,
 )
 from api.dns_trust import router as dns_trust_router
 from api.dns_watch import (
@@ -461,6 +462,7 @@ from application.dns_bypass import (
 from application.dns_trust import (
     DnsServerPlausibility,
     ListDnsTrustServers,
+    SetDnsServerRank,
     SetDnsServerTrust,
     SyncDnsTrustServer,
     TrustedDnsServerIps,
@@ -4940,6 +4942,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 display_name=server.display_name,
                 notes=server.notes,
                 is_platform_placeholder=server.is_platform_placeholder,
+                expected_rank=server.expected_rank,
                 plausibility=(
                     None
                     if indizien is None
@@ -4962,9 +4965,19 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
         _set_dns_server_trust(ip, decision, time.time())
 
+    _set_dns_server_rank = SetDnsServerRank(dns_trust_repository())
+
+    def _dns_trust_rank(ip: str, rank: int) -> None:
+        # Rang-Runner (Muster _dns_trust_decision): now am Rand, Use-Case uhrfrei;
+        # unbekannte ip ist ein definierter No-Op (repo.set_rank betrifft 0 Zeilen).
+        import time
+
+        _set_dns_server_rank(ip, rank, time.time())
+
     app.include_router(dns_trust_router)
     app.dependency_overrides[provide_dns_trust_list] = lambda: _dns_trust_list
     app.dependency_overrides[provide_dns_trust_decision] = lambda: _dns_trust_decision
+    app.dependency_overrides[provide_dns_trust_rank] = lambda: _dns_trust_rank
 
     # ── Sicherheitsbericht: Fuenf-Quellen-Projektion (Etappe 2b, Regel 5/Composition Root) ──
     # DIESE Naht KENNT alle fuenf Quell-Domaenen (analysis/cve/security/dns_watch/diagnostics)

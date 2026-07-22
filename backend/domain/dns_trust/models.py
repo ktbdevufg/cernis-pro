@@ -74,6 +74,9 @@ class TrustedDnsServer:
     Das ist eine ANDERE Achse als ``category`` (Herkunft) -- hier geht es um die
     Funktionsfaehigkeit, nicht die Rolle. Default ``False`` (regulaerer, funktionierender
     Eintrag). Die Erkennung leistet die reine ``logic.is_platform_placeholder``.
+
+    ``expected_rank`` ist die nutzergesetzte erwartete Prioritaet (1..N, kleiner =
+    hoeher); ``0`` = kein Rang. Reine Nutzer-Angabe, KEINE Messung.
     """
 
     ip: str
@@ -84,6 +87,7 @@ class TrustedDnsServer:
     display_name: str = ""
     notes: str = ""
     is_platform_placeholder: bool = False
+    expected_rank: int = 0
 
 
 def trust(server: TrustedDnsServer, now: float) -> TrustedDnsServer:

@@ -69,7 +69,8 @@ class SqliteDnsTrustRepository:
                     last_seen              REAL,
                     display_name           TEXT,
                     notes                  TEXT,
-                    is_platform_placeholder INTEGER NOT NULL DEFAULT 0
+                    is_platform_placeholder INTEGER NOT NULL DEFAULT 0,
+                    expected_rank          INTEGER NOT NULL DEFAULT 0
                 )
                 """
             )
@@ -78,12 +79,18 @@ class SqliteDnsTrustRepository:
             # Spalte is_platform_placeholder noch nicht (CREATE TABLE IF NOT EXISTS legt sie
             # dann NIE nach) -- per PRAGMA table_info pruefen und bei Bedarf per ALTER
             # nachruesten. NOT NULL DEFAULT 0 -> bestehende Zeilen erhalten verlustfrei den
-            # Default (regulaerer, funktionierender Eintrag).
+            # Default (regulaerer, funktionierender Eintrag). Gleiches Muster fuer
+            # expected_rank (D4 E3): Default 0 = unrangiert.
             cols = {row["name"] for row in conn.execute("PRAGMA table_info(dns_trust_servers)")}
             if "is_platform_placeholder" not in cols:
                 conn.execute(
                     "ALTER TABLE dns_trust_servers ADD COLUMN"
                     " is_platform_placeholder INTEGER NOT NULL DEFAULT 0"
+                )
+            if "expected_rank" not in cols:
+                conn.execute(
+                    "ALTER TABLE dns_trust_servers ADD COLUMN"
+                    " expected_rank INTEGER NOT NULL DEFAULT 0"
                 )
 
     def upsert(self, server: TrustedDnsServer) -> None:
@@ -95,8 +102,9 @@ class SqliteDnsTrustRepository:
                 """
                 INSERT OR REPLACE INTO dns_trust_servers (
                     ip, category, trust_state, first_seen,
-                    last_seen, display_name, notes, is_platform_placeholder
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    last_seen, display_name, notes, is_platform_placeholder,
+                    expected_rank
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     server.ip,
@@ -107,6 +115,7 @@ class SqliteDnsTrustRepository:
                     server.display_name,
                     server.notes,
                     int(server.is_platform_placeholder),
+                    server.expected_rank,
                 ),
             )
 
@@ -114,7 +123,7 @@ class SqliteDnsTrustRepository:
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT ip, category, trust_state, first_seen, "
-                "last_seen, display_name, notes, is_platform_placeholder "
+                "last_seen, display_name, notes, is_platform_placeholder, expected_rank "
                 "FROM dns_trust_servers WHERE ip = ?",
                 (ip,),
             ).fetchone()
@@ -127,7 +136,7 @@ class SqliteDnsTrustRepository:
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT ip, category, trust_state, first_seen, "
-                "last_seen, display_name, notes, is_platform_placeholder "
+                "last_seen, display_name, notes, is_platform_placeholder, expected_rank "
                 "FROM dns_trust_servers ORDER BY first_seen ASC"
             ).fetchall()
         return [self._row_to_server(row) for row in rows]
@@ -140,6 +149,15 @@ class SqliteDnsTrustRepository:
             conn.execute(
                 "UPDATE dns_trust_servers SET trust_state = ?, last_seen = ? WHERE ip = ?",
                 (str(state), now, ip),
+            )
+
+    def set_rank(self, ip: str, rank: int, now: float) -> None:
+        # Schmaler Schreibpfad (Muster set_trust): NUR expected_rank + last_seen aendern.
+        # Unbekannte ip -> 0 Zeilen betroffen (definierter No-Op, kein stilles Anlegen).
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE dns_trust_servers SET expected_rank = ?, last_seen = ? WHERE ip = ?",
+                (rank, now, ip),
             )
 
     def delete(self, ip: str) -> None:
@@ -165,4 +183,5 @@ class SqliteDnsTrustRepository:
             display_name=row["display_name"],
             notes=row["notes"],
             is_platform_placeholder=bool(row["is_platform_placeholder"]),
+            expected_rank=row["expected_rank"],
         )

@@ -69,6 +69,16 @@ class DnsTrustRepository(Protocol):
         """
         ...
 
+    def set_rank(self, ip: str, rank: int, now: float) -> None:
+        """Aendert NUR die erwartete Prioritaet (+ ``last_seen``) eines Servers.
+
+        Schmaler Schreibpfad (Muster ``set_trust``): aendert ausschliesslich
+        ``expected_rank`` und ``last_seen``; Kategorie/``first_seen``/``trust_state``
+        bleiben unberuehrt. Unbekannte ``ip`` schreibt nichts (0 Zeilen betroffen --
+        definierter No-Op).
+        """
+        ...
+
     def delete(self, ip: str) -> None:
         """Loescht den Server mit ``ip``.
 

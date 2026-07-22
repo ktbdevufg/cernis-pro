@@ -23,6 +23,8 @@ Endpunkte:
 * ``POST /api/dns-trust/decision`` -> vertraut/lehnt ab/setzt zurueck EINEN Server pro ``ip``
   ueber den injizierten Schreib-Runner (``SetDnsServerTrust``). ``{"ok": true}``. KEIN Loeschen
   hier (Loeschen kommt spaeter in der Wartungsrubrik).
+* ``POST /api/dns-trust/rank`` -> setzt die erwartete Prioritaet EINES Servers pro ``ip``
+  (``SetDnsServerRank``; ``rank == 0`` = unrangiert). ``{"ok": true}``.
 
 Die ``now``-Uhr faellt NICHT im Router, sondern am Rand (Composition Root / Runner-Wrapper);
 der Router reicht nur ``ip`` + ``decision`` durch.
@@ -32,7 +34,7 @@ from collections.abc import Callable
 from typing import Annotated, Literal, Protocol
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/api/dns-trust", tags=["dns_trust"])
 
@@ -78,6 +80,8 @@ class TrustedDnsServerOut(BaseModel):
     display_name: str
     notes: str
     is_platform_placeholder: bool
+    # Nutzergesetzte erwartete Prioritaet (1..N, kleiner = hoeher); 0 = kein Rang.
+    expected_rank: int
     plausibility: DnsServerPlausibilityOut | None
 
 
@@ -110,6 +114,26 @@ type DnsTrustDecisionRunner = Callable[[str, str], None]
 
 def provide_dns_trust_decision() -> DnsTrustDecisionRunner:
     raise NotImplementedError("DnsTrustDecisionRunner wird in app.py verdrahtet")
+
+
+# Rang-Runner: setzt die erwartete Prioritaet (ip, rank) -> None. Muster des
+# Decision-Runners: das Callable wird im Composition Root verdrahtet (now-Uhr dort).
+type DnsTrustRankRunner = Callable[[str, int], None]
+
+
+def provide_dns_trust_rank() -> DnsTrustRankRunner:
+    raise NotImplementedError("DnsTrustRankRunner wird in app.py verdrahtet")
+
+
+class RankBody(BaseModel):
+    """POST /api/dns-trust/rank -- die erwartete Prioritaet EINER ``ip`` setzen.
+
+    ``rank >= 0`` per Body-Constraint (pydantic ``Field(ge=0)``, Muell -> 422);
+    ``rank == 0`` entfernt die ``ip`` aus der Rangordnung (unrangiert).
+    """
+
+    ip: str
+    rank: int = Field(ge=0)
 
 
 class TrustDecisionBody(BaseModel):
@@ -149,4 +173,19 @@ def set_dns_trust_decision(
     ein definierter No-Op im Use-Case (kein 500). Erfolg -> 200 ``{"ok": true}``.
     """
     record(body.ip, body.decision)
+    return {"ok": True}
+
+
+@router.post("/rank")
+def set_dns_trust_rank(
+    body: RankBody,
+    record: Annotated[DnsTrustRankRunner, Depends(provide_dns_trust_rank)],
+) -> dict[str, bool]:
+    """Setzt die erwartete Prioritaet EINES DNS-Servers pro ``ip`` (ueber den Root-Runner).
+
+    ``rank >= 0`` per Body-Constraint erzwungen (Muell -> 422); ``rank == 0`` entfernt
+    die ``ip`` aus der Rangordnung. Eine unbekannte ``ip`` ist ein definierter No-Op.
+    Erfolg -> 200 ``{"ok": true}``.
+    """
+    record(body.ip, body.rank)
     return {"ok": True}

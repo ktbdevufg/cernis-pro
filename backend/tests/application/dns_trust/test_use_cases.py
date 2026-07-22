@@ -19,12 +19,14 @@ Der einzige async Use-Case (``SyncDnsTrustServer``, wegen ``GatewayProvider``) w
 """
 
 import asyncio
+from dataclasses import replace
 
 import pytest
 
 from application.dns_trust import (
     DnsServerPlausibility,
     ListDnsTrustServers,
+    SetDnsServerRank,
     SetDnsServerTrust,
     SyncDnsTrustServer,
     TrustedDnsServerIps,
@@ -68,7 +70,14 @@ class FakeRepo:
             trust_state=state,
             display_name=existing.display_name,
             notes=existing.notes,
+            expected_rank=existing.expected_rank,
         )
+
+    def set_rank(self, ip: str, rank: int, now: float) -> None:
+        existing = self._store.get(ip)
+        if existing is None:
+            return  # definierter No-Op (unbekannte ip)
+        self._store[ip] = replace(existing, expected_rank=rank, last_seen=now)
 
     def delete(self, ip: str) -> None:
         self._store.pop(ip, None)
@@ -324,3 +333,105 @@ def test_list_stellt_plausibilitaet_bei() -> None:
     # 8.8.8.8 ist nicht im Bestand -> Indizien-Seite None.
     assert result[1][0].ip == "8.8.8.8"
     assert result[1][1] is None
+
+
+# ── SetDnsServerRank: kompakte, kollisionsfreie 1..N-Rangfolge ────────────────
+
+
+def _trusted(ip: str, first_seen: float, rank: int = 0) -> TrustedDnsServer:
+    """Kurz-Fabrik: ein TRUSTED-Server mit optionalem Rang."""
+    return TrustedDnsServer(
+        ip,
+        DnsServerCategory.LOCAL_PRIVATE,
+        first_seen,
+        first_seen,
+        trust_state=DnsTrustState.TRUSTED,
+        expected_rank=rank,
+    )
+
+
+def _rank_map(repo: FakeRepo) -> dict[str, int]:
+    return {server.ip: server.expected_rank for server in repo.list_all()}
+
+
+def test_rank_erster_rang_auf_trusted_server() -> None:
+    repo = FakeRepo([_trusted("10.0.0.1", 1.0)])
+    SetDnsServerRank(repo)("10.0.0.1", 1, now=99.0)
+    assert _rank_map(repo) == {"10.0.0.1": 1}
+
+
+def test_rank_umsortieren_erzeugt_lueckenlose_folge_ohne_doppel() -> None:
+    # Drei rangierte Server 1/2/3; der dritte soll auf Platz 1 -> die anderen
+    # ruecken nach, Ergebnis ist eine lueckenlose 1..3-Folge ohne Doppelraenge.
+    repo = FakeRepo(
+        [
+            _trusted("10.0.0.1", 1.0, rank=1),
+            _trusted("10.0.0.2", 2.0, rank=2),
+            _trusted("10.0.0.3", 3.0, rank=3),
+        ]
+    )
+    SetDnsServerRank(repo)("10.0.0.3", 1, now=99.0)
+    assert _rank_map(repo) == {"10.0.0.3": 1, "10.0.0.1": 2, "10.0.0.2": 3}
+    raenge = sorted(_rank_map(repo).values())
+    assert raenge == [1, 2, 3]  # lueckenlos, keine Doppel
+
+
+def test_rank_null_entfernt_und_schliesst_die_luecke() -> None:
+    repo = FakeRepo(
+        [
+            _trusted("10.0.0.1", 1.0, rank=1),
+            _trusted("10.0.0.2", 2.0, rank=2),
+            _trusted("10.0.0.3", 3.0, rank=3),
+        ]
+    )
+    SetDnsServerRank(repo)("10.0.0.2", 0, now=99.0)
+    # Der mittlere ist raus (0), die uebrigen bilden wieder 1..2 ohne Luecke.
+    assert _rank_map(repo) == {"10.0.0.1": 1, "10.0.0.2": 0, "10.0.0.3": 2}
+
+
+def test_rank_negativ_wirft() -> None:
+    repo = FakeRepo([_trusted("10.0.0.1", 1.0)])
+    with pytest.raises(ValueError):
+        SetDnsServerRank(repo)("10.0.0.1", -1, now=99.0)
+
+
+def test_rank_absenken_tauscht_mit_dem_inhaber() -> None:
+    # Gemeldeter Bug: A(1) auf Rang 2 setzen (Runter-Pfeil) war ein No-Op. Erwartet
+    # ist der echte Tausch: A nimmt Platz 2 ein, B weicht nach vorn auf 1.
+    repo = FakeRepo(
+        [
+            _trusted("10.0.0.1", 1.0, rank=1),  # A
+            _trusted("10.0.0.2", 2.0, rank=2),  # B
+        ]
+    )
+    SetDnsServerRank(repo)("10.0.0.1", 2, now=99.0)
+    assert _rank_map(repo) == {"10.0.0.2": 1, "10.0.0.1": 2}
+
+
+def test_rank_anheben_tauscht_mit_dem_inhaber() -> None:
+    # Umkehrfall (Hoch-Pfeil): B(2) auf Rang 1 -> B nimmt Platz 1 ein, A weicht
+    # nach hinten auf 2. Beide Richtungen sind echte Tausche, lueckenlos, ohne Doppel.
+    repo = FakeRepo(
+        [
+            _trusted("10.0.0.1", 1.0, rank=1),  # A
+            _trusted("10.0.0.2", 2.0, rank=2),  # B
+        ]
+    )
+    SetDnsServerRank(repo)("10.0.0.2", 1, now=99.0)
+    assert _rank_map(repo) == {"10.0.0.2": 1, "10.0.0.1": 2}
+
+
+def test_rank_bewahrt_rang_eines_nicht_trusted_servers() -> None:
+    # Verlustfrei: ein rangierter, aber (voruebergehend) NEUTRAL gestellter Server
+    # behaelt seinen Platz in der Ordnung.
+    neutral_rangiert = TrustedDnsServer(
+        "10.0.0.9",
+        DnsServerCategory.LOCAL_PRIVATE,
+        1.0,
+        1.0,
+        trust_state=DnsTrustState.NEUTRAL,
+        expected_rank=1,
+    )
+    repo = FakeRepo([neutral_rangiert, _trusted("10.0.0.2", 2.0)])
+    SetDnsServerRank(repo)("10.0.0.2", 2, now=99.0)
+    assert _rank_map(repo) == {"10.0.0.9": 1, "10.0.0.2": 2}
