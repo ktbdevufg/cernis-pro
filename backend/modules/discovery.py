@@ -82,6 +82,25 @@ async def ping_host(ip: str, timeout: float = 1.0) -> DiscoveredHost:
         return DiscoveredHost(ip=ip, is_alive=False)
 
 
+def normalize_arp_mac(raw: str) -> str:
+    """Bringt eine rohe ARP-MAC auf das kanonische Format oder verwirft sie.
+
+    Eingabe: MAC mit ':' oder '-' als Trenner, Oktette mit 1-2 Hex-Ziffern
+    (macOS' ``arp -a`` gibt Oktette OHNE fuehrende Null aus, z.B.
+    "b0:f2:8:dc:c1:e7"). Ausgabe: sechs zweistellig gepolsterte, lowercase
+    Hex-Oktette mit ':' verbunden ("b0:f2:08:dc:c1:e7") -- oder ``""`` bei
+    ungueltiger Eingabe (falsche Oktett-Zahl, kein Hex). Einheitliches Format,
+    damit ARP-MACs gegen die gepolsterten MACs anderer Quellen matchen.
+    """
+    teile = raw.strip().replace("-", ":").split(":")
+    if len(teile) != 6:
+        return ""
+    try:
+        return ":".join(f"{int(teil, 16):02x}" for teil in teile)
+    except ValueError:
+        return ""
+
+
 def get_arp_table() -> dict[str, str]:
     """Read the system ARP cache: {ip: mac}."""
     system = platform.system()
@@ -90,22 +109,31 @@ def get_arp_table() -> dict[str, str]:
     if system == "Darwin":
         out = subprocess.run(["arp", "-a"], capture_output=True, encoding="utf-8", errors="replace", env=_C_LOCALE_ENV).stdout or ""
         for line in out.splitlines():
-            m = re.search(r"\((\d+\.\d+\.\d+\.\d+)\) at ([0-9a-f:]{17})", line)
+            # Unpadded-tolerant: macOS gibt Oktette ohne fuehrende Null aus
+            # ("at b0:f2:8:dc:c1:e7"); ein starres {17}-Muster verwirft solche
+            # Eintraege komplett. incomplete-Zeilen ohne MAC matchen weiter nicht.
+            m = re.search(r"\((\d+\.\d+\.\d+\.\d+)\) at ([0-9a-f]{1,2}(?::[0-9a-f]{1,2}){5})", line, re.IGNORECASE)
             if m:
-                arp_map[m.group(1)] = m.group(2)
+                mac = normalize_arp_mac(m.group(2))
+                if mac:
+                    arp_map[m.group(1)] = mac
     elif system == "Windows":
         out = subprocess.run(["arp", "-a"], capture_output=True, encoding="utf-8", errors="replace", env=_C_LOCALE_ENV).stdout or ""
         for line in out.splitlines():
-            m = re.search(r"(\d+\.\d+\.\d+\.\d+)\s+([0-9a-f]{2}-[0-9a-f]{2}-[0-9a-f]{2}-[0-9a-f]{2}-[0-9a-f]{2}-[0-9a-f]{2})", line, re.IGNORECASE)
+            m = re.search(r"(\d+\.\d+\.\d+\.\d+)\s+([0-9a-f]{1,2}(?:-[0-9a-f]{1,2}){5})", line, re.IGNORECASE)
             if m:
-                arp_map[m.group(1)] = m.group(2).replace("-", ":").lower()
+                mac = normalize_arp_mac(m.group(2))
+                if mac:
+                    arp_map[m.group(1)] = mac
     elif system == "Linux":
         try:
             out = subprocess.run(["ip", "neigh"], capture_output=True, encoding="utf-8", errors="replace", env=_C_LOCALE_ENV).stdout or ""
             for line in out.splitlines():
                 parts = line.split()
                 if len(parts) >= 5 and re.match(r"\d+\.\d+\.\d+\.\d+", parts[0]):
-                    mac = parts[4] if parts[4] != "FAILED" else ""
+                    # ip neigh liefert bereits gepolsterte MACs; die Normalisierung
+                    # ist dort idempotent und stellt das kanonische Format sicher.
+                    mac = normalize_arp_mac(parts[4]) if parts[4] != "FAILED" else ""
                     if mac:
                         arp_map[parts[0]] = mac
         except Exception:
