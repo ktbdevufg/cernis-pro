@@ -443,12 +443,18 @@ export default function OverviewView({ onNavigate, onOpenManual }) {
             <span className="overview-status__fact">
               {t("overview.status.observations", { count: beobachtungen })}
             </span>
-            {/* Monitoring-Baustein NUR bei aktiven Zielen UND aktivem Unter-Schalter. */}
+            {/* Monitoring-Baustein NUR bei aktiven Zielen UND aktivem Unter-Schalter.
+                Klickbar: springt direkt zur Live-Überwachung (observe:monitor). */}
             {sektionen.status_monitoring && monitorAnzahl > 0 && (
-              <span className="overview-status__fact overview-status__fact--monitor">
+              <button
+                type="button"
+                className="overview-status__fact overview-status__fact--monitor overview-status__fact--clickable"
+                onClick={() => springe("observe", "monitor")}
+                title={t("overview.status.monitoringActiveHint")}
+              >
                 <Activity size={14} aria-hidden="true" />
                 {t("overview.status.monitoringActive", { count: monitorAnzahl })}
-              </span>
+              </button>
             )}
           </div>
           <button

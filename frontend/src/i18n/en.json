@@ -402,6 +402,7 @@
       "observations_other": "{{count}} observations",
       "monitoringActive_one": "1 target monitored",
       "monitoringActive_other": "{{count}} targets monitored",
+      "monitoringActiveHint": "Go to live monitoring",
       "newScan": "New scan"
     },
     "quickAccessHeading": "Quick access",

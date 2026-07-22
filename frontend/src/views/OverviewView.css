@@ -49,6 +49,29 @@
   color: var(--color-accent-strong);
 }
 
+/* Klickbarer Fakt (Button statt span): Button-Optik neutralisieren, Layout
+   identisch zu .overview-status__fact halten (kein Padding, gleiches gap). */
+.overview-status__fact--clickable {
+  padding: 0;
+  gap: 6px;
+  background: none;
+  border: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.overview-status__fact--clickable:hover {
+  color: var(--color-accent);
+  text-decoration: underline;
+}
+
+.overview-status__fact--clickable:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-md);
+}
+
 .overview-status__scan-btn {
   display: inline-flex;
   align-items: center;

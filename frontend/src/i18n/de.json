@@ -402,6 +402,7 @@
       "observations_other": "{{count}} Beobachtungen",
       "monitoringActive_one": "1 Ziel überwacht",
       "monitoringActive_other": "{{count}} Ziele überwacht",
+      "monitoringActiveHint": "Zur Live-Überwachung wechseln",
       "newScan": "Neuer Scan"
     },
     "quickAccessHeading": "Schnellzugriff",
