@@ -741,10 +741,12 @@
       "markKnown": "Mark as known",
       "unmarkKnown": "Undo marking",
       "footerExpected": "Expected DNS servers: {{servers}}",
-      "settingsHint": "Adjustable in the settings.",
+      "settingsHint": "Adjustable in administration under “DNS servers & trust”.",
       "empty": "No device bypasses the expected DNS. Everything talks to the expected resolvers.",
       "loadError": "DNS watchdog could not be loaded.",
-      "connectionsSuffix": "×{{count}}"
+      "connectionsSuffix": "×{{count}}",
+      "noExpectedHint": "No expected DNS servers defined yet.",
+      "decideLink": "Decide in administration under “DNS servers & trust”."
     },
     "dnsscreen": {
       "tabHost": "This machine",
@@ -1919,16 +1921,40 @@
       },
       "einleitung": "This report shows the recurring activity patterns per task or device – daily rhythm, weekly pattern and the deviations flagged as atypical. It describes and contextualises – it passes no judgement.",
       "ladeFehler": "The behaviour profile report could not be loaded.",
-      "bezug": { "single": "This task", "all": "All devices" },
+      "bezug": {
+        "single": "This task",
+        "all": "All devices"
+      },
       "aufgabeWahl": "Task",
       "aufgabeHinweis": "Please select a task.",
       "keineAufgaben": "No recurring tasks with behaviour data available.",
-      "kennzahl": { "aufzeichnungstage": "Recorded days", "genugDaten": "Enough data", "abweichungen": "Deviations", "ja": "yes", "nein": "no" },
+      "kennzahl": {
+        "aufzeichnungstage": "Recorded days",
+        "genugDaten": "Enough data",
+        "abweichungen": "Deviations",
+        "ja": "yes",
+        "nein": "no"
+      },
       "tagesverlauf": "Daily rhythm",
       "wochenmuster": "Weekly pattern",
       "keineDaten": "Not enough data yet for a behaviour profile.",
-      "spalte": { "geraet": "Device", "aufzeichnungstage": "Recorded days", "genugDaten": "Enough data", "abweichungen": "Deviations", "aktivsteZeit": "Busiest time", "aktivsterTag": "Busiest day" },
-      "wochentage": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+      "spalte": {
+        "geraet": "Device",
+        "aufzeichnungstage": "Recorded days",
+        "genugDaten": "Enough data",
+        "abweichungen": "Deviations",
+        "aktivsteZeit": "Busiest time",
+        "aktivsterTag": "Busiest day"
+      },
+      "wochentage": [
+        "Mon",
+        "Tue",
+        "Wed",
+        "Thu",
+        "Fri",
+        "Sat",
+        "Sun"
+      ],
       "pdf": "Download as PDF",
       "pdfFehler": "The PDF could not be created."
     }
@@ -1953,36 +1979,25 @@
       }
     },
     "dnsTrust": {
-      "intro": "This function lists the DNS servers CERNIS has observed on your network, grouped by their kind. For each server you see a few clues and can decide whether to trust it, reject it, or take back your decision.",
+      "intro": "This function shows the DNS servers CERNIS has observed on your network. Define which servers you expect and in what order, bring detected servers into your expectation, or reject a server. For each server you see a few clues to help you decide.",
       "redLine": "CERNIS shows and classifies, but does not judge. Whether a DNS server is trustworthy is your call — the clues only help.",
       "loading": "Loading DNS servers …",
       "empty": "No DNS servers detected yet — they appear after the next start or a recording.",
       "ladeFehler": "The DNS servers could not be loaded. Please check whether the backend is running.",
       "aktionFehler": "The decision could not be saved.",
       "groups": {
-        "trusted": {
-          "title": "Trustworthy",
-          "lead": "Your router (trusted automatically) and every server you have deliberately trusted."
+        "expected": {
+          "title": "Expected — ordered",
+          "lead": "The DNS servers you expect — in your order. The order is your expectation, not a measurement.",
+          "empty": "No expected DNS server yet. Use “Mark as expected” below to add a detected server."
         },
-        "localPrivate": {
-          "title": "Please confirm — local",
-          "lead": "Servers from your own network. Take a moment to check whether you expect them."
-        },
-        "publicResolver": {
-          "title": "Unclear — public resolver",
-          "lead": "Known public DNS services. Legitimate, but you should know who is being queried."
-        },
-        "unknown": {
-          "title": "Unclear — unknown",
-          "lead": "Servers that don't match any known kind. Have a look at the clues."
-        },
-        "threat": {
-          "title": "Warning — on a threat list",
-          "lead": "These servers appear on a threat list. Trust them only if you are absolutely sure."
+        "detected": {
+          "title": "Detected, not yet expected",
+          "lead": "Servers this machine actually uses or has seen. Decide whether they belong to your expectation."
         },
         "rejected": {
           "title": "Rejected",
-          "lead": "Servers you have rejected. You can take back the decision at any time."
+          "lead": "Servers you have rejected. You can revoke the decision at any time."
         }
       },
       "category": {
@@ -1992,11 +2007,6 @@
         "unknown": "Unknown",
         "threat_listed": "On a threat list"
       },
-      "state": {
-        "trusted": "Trusted",
-        "neutral": "Still open",
-        "rejected": "Rejected"
-      },
       "plausibility": {
         "inInventorySince": "In inventory for {{days}} days",
         "inInventoryPlain": "In inventory",
@@ -2005,15 +2015,24 @@
         "openPorts": "Open ports: {{ports}}"
       },
       "actions": {
-        "trust": "Trust",
-        "reject": "Reject",
         "reset": "Reset",
-        "trustDespiteThreat": "Trust despite the threat-list entry"
+        "trustDespiteThreat": "Trust despite the threat-list entry",
+        "markExpected": "Mark as expected",
+        "rankUp": "Move up",
+        "rankDown": "Move down",
+        "removeExpected": "Remove from expectation",
+        "reject": "Reject"
       },
       "placeholder": {
         "badge": "non-functional (Windows default)",
         "noDecisionNeeded": "no decision needed",
         "note": "Windows reports three built-in IPv6 addresses as DNS servers. They are not used for name resolution. CERNIS shows them because Windows reports them, but does not treat them as foreign resolvers."
+      },
+      "rejected": {
+        "toggleShow": "Show",
+        "toggleHide": "Hide",
+        "count_one": "(1)",
+        "count_other": "({{count}})"
       }
     },
     "blocklist": {

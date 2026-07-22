@@ -741,10 +741,12 @@
       "markKnown": "Als bekannt markieren",
       "unmarkKnown": "Markierung zurücknehmen",
       "footerExpected": "Erwartete DNS-Server: {{servers}}",
-      "settingsHint": "In den Einstellungen anpassbar.",
+      "settingsHint": "In der Verwaltung unter „DNS-Server & Vertrauen“ anpassbar.",
       "empty": "Kein Gerät umgeht den erwarteten DNS. Alles spricht mit den erwarteten Resolvern.",
       "loadError": "DNS-Wächter konnte nicht geladen werden.",
-      "connectionsSuffix": "×{{count}}"
+      "connectionsSuffix": "×{{count}}",
+      "noExpectedHint": "Noch keine erwarteten DNS-Server festgelegt.",
+      "decideLink": "In der Verwaltung unter „DNS-Server & Vertrauen“ entscheiden."
     },
     "dnsscreen": {
       "tabHost": "Dieser Rechner",
@@ -1919,16 +1921,40 @@
       },
       "einleitung": "Dieser Bericht zeigt die wiederkehrenden Aktivitätsmuster je Aufgabe bzw. Gerät – Tagesverlauf, Wochenmuster und die als untypisch markierten Abweichungen. Er beschreibt und ordnet ein – er fällt kein Urteil.",
       "ladeFehler": "Der Verhaltensprofil-Bericht konnte nicht geladen werden.",
-      "bezug": { "single": "Diese Aufgabe", "all": "Alle Geräte" },
+      "bezug": {
+        "single": "Diese Aufgabe",
+        "all": "Alle Geräte"
+      },
       "aufgabeWahl": "Aufgabe",
       "aufgabeHinweis": "Bitte eine Aufgabe wählen.",
       "keineAufgaben": "Keine wiederkehrenden Aufgaben mit Verhaltensdaten vorhanden.",
-      "kennzahl": { "aufzeichnungstage": "Aufzeichnungstage", "genugDaten": "Genug Daten", "abweichungen": "Abweichungen", "ja": "ja", "nein": "nein" },
+      "kennzahl": {
+        "aufzeichnungstage": "Aufzeichnungstage",
+        "genugDaten": "Genug Daten",
+        "abweichungen": "Abweichungen",
+        "ja": "ja",
+        "nein": "nein"
+      },
       "tagesverlauf": "Tagesverlauf",
       "wochenmuster": "Wochenmuster",
       "keineDaten": "Noch keine ausreichenden Daten für ein Verhaltensprofil.",
-      "spalte": { "geraet": "Gerät", "aufzeichnungstage": "Aufzeichnungstage", "genugDaten": "Genug Daten", "abweichungen": "Abweichungen", "aktivsteZeit": "Aktivste Zeit", "aktivsterTag": "Aktivster Tag" },
-      "wochentage": ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"],
+      "spalte": {
+        "geraet": "Gerät",
+        "aufzeichnungstage": "Aufzeichnungstage",
+        "genugDaten": "Genug Daten",
+        "abweichungen": "Abweichungen",
+        "aktivsteZeit": "Aktivste Zeit",
+        "aktivsterTag": "Aktivster Tag"
+      },
+      "wochentage": [
+        "Mo",
+        "Di",
+        "Mi",
+        "Do",
+        "Fr",
+        "Sa",
+        "So"
+      ],
       "pdf": "Als PDF herunterladen",
       "pdfFehler": "Das PDF konnte nicht erstellt werden."
     }
@@ -1953,32 +1979,21 @@
       }
     },
     "dnsTrust": {
-      "intro": "Diese Funktion listet die DNS-Server auf, die CERNIS in Ihrem Netz beobachtet hat, gruppiert nach ihrer Art. Zu jedem Server sehen Sie ein paar Anhaltspunkte und können festlegen, ob Sie ihm vertrauen, ihn ablehnen oder Ihre Entscheidung zurücknehmen.",
+      "intro": "Diese Funktion zeigt die DNS-Server, die CERNIS in Ihrem Netz beobachtet hat. Legen Sie fest, welche Server Sie erwarten und in welcher Reihenfolge, holen Sie erkannte Server in Ihre Erwartung, oder lehnen Sie einen Server ab. Zu jedem Server sehen Sie ein paar Anhaltspunkte als Entscheidungshilfe.",
       "redLine": "CERNIS zeigt und ordnet ein, urteilt aber nicht. Ob ein DNS-Server vertrauenswürdig ist, entscheiden Sie — die Anhaltspunkte helfen nur dabei.",
       "loading": "DNS-Server werden geladen …",
       "empty": "Noch keine DNS-Server erkannt — sie erscheinen nach dem nächsten Start oder einer Aufzeichnung.",
       "ladeFehler": "Die DNS-Server konnten nicht geladen werden. Bitte prüfen Sie, ob das Backend läuft.",
       "aktionFehler": "Die Entscheidung konnte nicht gespeichert werden.",
       "groups": {
-        "trusted": {
-          "title": "Vertrauenswürdig",
-          "lead": "Ihr Router (automatisch vertraut) und alle Server, denen Sie bewusst vertraut haben."
+        "expected": {
+          "title": "Erwartet — geordnet",
+          "lead": "Die DNS-Server, die Sie erwarten — in Ihrer Reihenfolge. Die Reihenfolge ist Ihre Erwartung, keine Messung.",
+          "empty": "Noch kein erwarteter DNS-Server. Wählen Sie unten „Als erwartet“, um einen erkannten Server aufzunehmen."
         },
-        "localPrivate": {
-          "title": "Bitte bestätigen — lokal",
-          "lead": "Server aus Ihrem eigenen Netz. Prüfen Sie kurz, ob Sie diese erwarten."
-        },
-        "publicResolver": {
-          "title": "Unklar — öffentlicher Resolver",
-          "lead": "Bekannte öffentliche DNS-Dienste. Legitim, aber Sie sollten wissen, wer angefragt wird."
-        },
-        "unknown": {
-          "title": "Unklar — unbekannt",
-          "lead": "Server, die sich keiner bekannten Art zuordnen lassen. Sehen Sie sich die Anhaltspunkte an."
-        },
-        "threat": {
-          "title": "Warnung — auf Bedrohungsliste",
-          "lead": "Diese Server stehen auf einer Bedrohungsliste. Vertrauen Sie ihnen nur, wenn Sie sich ganz sicher sind."
+        "detected": {
+          "title": "Erkannt, noch nicht erwartet",
+          "lead": "Server, die dieser Rechner tatsächlich nutzt oder gesehen hat. Entscheiden Sie, ob sie zu Ihrer Erwartung gehören."
         },
         "rejected": {
           "title": "Abgelehnt",
@@ -1992,11 +2007,6 @@
         "unknown": "Unbekannt",
         "threat_listed": "Auf Bedrohungsliste"
       },
-      "state": {
-        "trusted": "Vertraut",
-        "neutral": "Noch offen",
-        "rejected": "Abgelehnt"
-      },
       "plausibility": {
         "inInventorySince": "Im Bestand seit {{days}} Tagen",
         "inInventoryPlain": "Im Bestand",
@@ -2005,15 +2015,24 @@
         "openPorts": "Offene Ports: {{ports}}"
       },
       "actions": {
-        "trust": "Vertrauen",
-        "reject": "Ablehnen",
         "reset": "Zurücksetzen",
-        "trustDespiteThreat": "Trotz Bedrohungslisten-Eintrag vertrauen"
+        "trustDespiteThreat": "Trotz Bedrohungslisten-Eintrag vertrauen",
+        "markExpected": "Als erwartet",
+        "rankUp": "Nach oben",
+        "rankDown": "Nach unten",
+        "removeExpected": "Aus Erwartung entfernen",
+        "reject": "Ablehnen"
       },
       "placeholder": {
         "badge": "ohne Funktion (Windows-Vorgabe)",
         "noDecisionNeeded": "keine Entscheidung nötig",
         "note": "Windows meldet drei fest eingebaute IPv6-Adressen als DNS-Server. Sie werden nicht zur Namensauflösung genutzt. CERNIS zeigt sie, weil Windows sie meldet, bewertet sie aber nicht als fremde Resolver."
+      },
+      "rejected": {
+        "toggleShow": "Anzeigen",
+        "toggleHide": "Ausblenden",
+        "count_one": "(1)",
+        "count_other": "({{count}})"
       }
     },
     "blocklist": {

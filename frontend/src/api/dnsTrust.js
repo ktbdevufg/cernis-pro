@@ -6,14 +6,17 @@
 // null = ehrlich nicht vorhanden (KEIN erfundener Fallback), Fehler ueber ApiError.
 // Pfade bleiben relativ; NIE einen Host hartkodieren.
 //
-// Wire-Form (verifiziert, E5, Prefix /api/dns-trust, NICHT aendern):
+// Wire-Form (verifiziert, E5 + D4 E3, Prefix /api/dns-trust, NICHT aendern):
 //   GET  ""          -> [ { ip, category, trust_state, first_seen, last_seen,
 //                          display_name, notes, is_platform_placeholder,
+//                          expected_rank,
 //                          plausibility: { in_inventory, first_seen_days, vendor,
 //                          open_ports[], display_name } | null } ]
-//     category    in {gateway, local_private, public_resolver, unknown, threat_listed}
-//     trust_state in {trusted, neutral, rejected}
+//     category      in {gateway, local_private, public_resolver, unknown, threat_listed}
+//     trust_state   in {trusted, neutral, rejected}
+//     expected_rank int, nutzergesetzte erwartete Prioritaet (0 = unrangiert)
 //   POST "/decision" Body { ip, decision: "trust"|"reject"|"reset" } -> {ok:true}
+//   POST "/rank"     Body { ip, rank } (rank >= 0; 0 = unrangiert) -> {ok:true}
 
 import { apiGet, apiPost } from "./client.js";
 
@@ -51,6 +54,7 @@ export function mappeServer(s) {
     displayName: s.display_name ?? null,
     notes: s.notes ?? null,
     isPlatformPlaceholder: Boolean(s.is_platform_placeholder),
+    expectedRank: Number(s.expected_rank ?? 0),
     plausibility: mappePlausibilitaet(s.plausibility),
   };
 }
@@ -70,9 +74,17 @@ export async function setDnsTrustDecision(ip, decision) {
   return apiPost(`${BASIS}/decision`, { ip, decision });
 }
 
+// POST "/rank" -> setzt die erwartete Prioritaet fuer eine IP (rank >= 0; 0 =
+// unrangiert). Das Backend haelt die Rang-Sequenz kompakt (1..N); die View laedt
+// danach neu, statt die Folge lokal zu raten.
+export async function setDnsTrustRank(ip, rank) {
+  return apiPost(`${BASIS}/rank`, { ip, rank });
+}
+
 export default {
   mappePlausibilitaet,
   mappeServer,
   fetchDnsTrustServers,
   setDnsTrustDecision,
+  setDnsTrustRank,
 };

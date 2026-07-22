@@ -225,15 +225,25 @@ export default function DnsWatchView() {
         </ul>
       )}
 
-      {/* Fußzeile: erwartete DNS-Server + Hinweis, dass sie in den Einstellungen
-          anpassbar sind (nur Text/Hinweis, KEIN Editor hier). */}
+      {/* Fußzeile: erwartete DNS-Server + Verweis auf die Verwaltungs-Rubrik.
+          Ist die erwartete Menge LEER, steht statt der schiefen "—"-Anzeige ein
+          ruhiger Hinweis + Verweis. HINWEIS (D4 E4): DnsWatchView erhaelt keinen
+          Sprung-/onNavigate-Prop (DnsWatchScreen rendert sie ohne Props, und
+          handleNavigate in App.jsx kennt keinen Verwaltungs-Funktions-Deep-Link)
+          -> der Verweis ist bewusst reiner Text, KEIN toter Button. */}
       <div className="dnswatch__footer">
-        <span className="dnswatch__footer-servers dnswatch-mono">
-          {t("beobachten.dnswatch.footerExpected", {
-            servers:
-              expectedServers.length > 0 ? expectedServers.join(", ") : "—",
-          })}
-        </span>
+        {expectedServers.length === 0 ? (
+          <span className="dnswatch__footer-servers">
+            {t("beobachten.dnswatch.noExpectedHint")}{" "}
+            {t("beobachten.dnswatch.decideLink")}
+          </span>
+        ) : (
+          <span className="dnswatch__footer-servers dnswatch-mono">
+            {t("beobachten.dnswatch.footerExpected", {
+              servers: expectedServers.join(", "),
+            })}
+          </span>
+        )}
         <span className="dnswatch__footer-hint">
           {t("beobachten.dnswatch.settingsHint")}
         </span>

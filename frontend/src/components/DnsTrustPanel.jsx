@@ -1,80 +1,39 @@
-// DNS-Vertrauens-Panel (CERNIS PRO 2.0, E6)
+// DNS-Vertrauens-Panel (CERNIS PRO 2.0, E6 + D4 E4, Variante H)
 //
 // Die Funktion hinter der Verwaltungs-Kachel „DNS-Server & Vertrauen" (ADR 0043):
-// listet die erkannten DNS-Server nach Kategorie gruppiert auf und laesst je Server
-// vertrauen / ablehnen / zuruecksetzen. Als Entscheidungshilfe zeigt jede Zeile
-// deskriptive Plausibilitaets-Indizien (Bestand, Hersteller, offene Ports); ein
-// Bedrohungslisten-Treffer bekommt einen deutlichen Warnbefund. Reines Frontend
-// gegen die E5-api (api/dnsTrust.js). Markup-/CSS-Konventionen wie BlocklistPanel
-// (CSS-Tokens, keine festen Farben; dt-* statt bl-*).
+// DREI Bereiche statt Kategorie-Gruppen:
+//   1. „Erwartet — geordnet":  alle trusted-Server, sortiert nach expectedRank
+//      (0 = unrangiert ans Ende), mit Rang-Badge + Hoch/Runter/Entfernen.
+//   2. „Erkannt, noch nicht erwartet": alle neutral-Server, mit „Als erwartet".
+//   3. „Abgelehnt": alle rejected-Server, eingeklappt (nur wenn vorhanden).
+// Als Entscheidungshilfe zeigt jede Zeile deskriptive Plausibilitaets-Indizien
+// (Bestand, Hersteller, offene Ports); ein Bedrohungslisten-Treffer macht das
+// Erwarten zur warnenden Aktion. Reines Frontend gegen api/dnsTrust.js.
+// Markup-/CSS-Konventionen wie BlocklistPanel (CSS-Tokens, keine festen Farben).
 //
 // Daten laden in einem useEffect ueber einen gemeinsamen useCallback-Pfad (laden0);
-// Reload nach jeder Entscheidung. t/i18n NIE in useEffect/useMemo-Dependencies
-// (Render-Loop), Muster wie BlocklistPanel.jsx.
+// Reload nach jeder Entscheidung/Rang-Aktion (kein lokales Raten). t/i18n NIE in
+// useEffect/useMemo-Dependencies (Render-Loop), Muster wie BlocklistPanel.jsx.
 //
 // Produkt-These (Ton): zeigen + einordnen, nicht urteilen. CERNIS ist passiv. Die
-// Indizien sind rein deskriptiv, die Entscheidung trifft der muendige Nutzer.
+// Reihenfolge ist eine ERWARTUNG des Nutzers, keine Messung.
 
+import { ChevronDown, ChevronUp, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { fetchDnsTrustServers, setDnsTrustDecision } from "../api/dnsTrust.js";
+import {
+  fetchDnsTrustServers,
+  setDnsTrustDecision,
+  setDnsTrustRank,
+} from "../api/dnsTrust.js";
 import { CODES, mitCode } from "../lib/fehlercodes.js";
 import "./DnsTrustPanel.css";
 
-// Die Gruppen in ihrer verbindlichen Anzeige-Reihenfolge. Jeder Server landet in
-// GENAU einer Gruppe -- die Zuordnung (siehe gruppeFuer) prueft in exakt dieser
-// Reihenfolge, damit bei Konflikt die spezifischere/warnende Gruppe gewinnt:
-//   threat vor rejected vor trusted vor den neutralen Kategorien.
-// „warn"/„danger" faerben die Gruppen-Ueberschrift (Bedrohung/Ablehnung).
-const GRUPPEN = [
-  { id: "trusted", ton: "ok" },
-  { id: "localPrivate", ton: "neutral" },
-  { id: "publicResolver", ton: "neutral" },
-  { id: "unknown", ton: "neutral" },
-  { id: "threat", ton: "warn" },
-  { id: "rejected", ton: "danger" },
-];
-
-// Ein Server -> die id GENAU einer Gruppe (oder null, falls unerwartet nichts
-// passt; solche Server werden bewusst NICHT still verschluckt, sondern unter
-// „unknown" einsortiert -- siehe unten). Reihenfolge = Prioritaet: die warnende/
-// spezifischere Gruppe gewinnt.
-//   1. threat_listed -> immer „threat" (Warnung schlaegt alles).
-//   2. rejected      -> „rejected".
-//   3. gateway ODER trusted -> „trusted" (Auto-Vertrauen + manuell vertraut).
-//   4. neutral je Kategorie: local_private / public_resolver / unknown.
-function gruppeFuer(server) {
-  if (server.category === "threat_listed") {
-    return "threat";
-  }
-  if (server.trustState === "rejected") {
-    return "rejected";
-  }
-  if (server.category === "gateway" || server.trustState === "trusted") {
-    return "trusted";
-  }
-  if (server.trustState === "neutral") {
-    if (server.category === "local_private") {
-      return "localPrivate";
-    }
-    if (server.category === "public_resolver") {
-      return "publicResolver";
-    }
-  }
-  // Rest (neutral/unknown oder ein unerwarteter Zustand): ehrlich unter „unklar".
-  return "unknown";
-}
-
 // Ein Kategorie-Label (Wire-Wert -> i18n-Schluessel). Dient nur der Anzeige der
-// rohen Kategorie je Zeile; die Gruppierung laeuft ueber gruppeFuer, nicht hierueber.
+// rohen Kategorie je Zeile.
 function kategorieSchluessel(category) {
   return `verwaltung.dnsTrust.category.${category}`;
-}
-
-// Ein Zustands-Label (Wire-Wert -> i18n-Schluessel).
-function zustandSchluessel(trustState) {
-  return `verwaltung.dnsTrust.state.${trustState}`;
 }
 
 // Deskriptive Plausibilitaets-Indizien einer Zeile (best-effort, nur vorhandene).
@@ -131,117 +90,141 @@ function PlausibilitaetsIndizien({ plausibility }) {
   return <span className="dt-hints">{teile}</span>;
 }
 
-// Eine Server-Zeile mit Namen/IP, Kategorie- + Zustands-Marke, Indizien und den
-// zustandsabhaengigen Aktions-Knoepfen. threat_listed macht „Vertrauen" zur
-// warnenden Aktion (sev-high-Optik), nicht zur neutralen Wahl.
-function ServerZeile({ server, busy, onEntscheidung }) {
+// Gemeinsamer Identitaets-Block einer Zeile: Name/IP, Kategorie-Marke (+ ggf.
+// Platzhalter-Marke) und die Plausibilitaets-Indizien. Von allen drei Bereichen
+// genutzt; die Aktionen unterscheiden sich je Bereich (rechts daneben).
+function ZeilenIdent({ server, mitIndizien = true }) {
   const { t } = useTranslation();
-
   const anzeigeName = server.displayName || server.ip;
   const nameIstIp = !server.displayName;
-  const istThreat = server.category === "threat_listed";
-  const istGateway = server.category === "gateway";
-  // Funktionsloser Windows-Vorgabe-Platzhalter: eine Adresse, die keine DNS-Anfragen
-  // beantwortet. Vertrauen/Ablehnen/Zuruecksetzen und die Zustands-Marke „Noch offen"
-  // sind hier sinnlos -- statt der Knoepfe steht ein dezenter, nicht anklickbarer
-  // Hinweis, die Zustands-Marke entfaellt. Kategorie- und Platzhalter-Marke bleiben.
-  const istPlatzhalter = server.isPlatformPlaceholder;
 
-  // Welche Aktionen die Zeile anbietet (aus dem Zustand abgeleitet):
-  //   „Vertrauen"     bei neutral/rejected (noch nicht vertraut).
-  //   „Ablehnen"      bei trusted/neutral (noch nicht abgelehnt).
-  //   „Zuruecksetzen" bei getroffener Entscheidung (trusted/rejected).
-  const kannVertrauen = server.trustState === "neutral" || server.trustState === "rejected";
-  const kannAblehnen = server.trustState === "trusted" || server.trustState === "neutral";
-  const kannZuruecksetzen =
-    server.trustState === "trusted" || server.trustState === "rejected";
+  return (
+    <div className="dt-row__ident">
+      <span className="dt-row__name">{anzeigeName}</span>
+      {/* Rohe IP dezent -- entfaellt, wenn der Name ohnehin die IP ist. */}
+      {nameIstIp ? null : <span className="dt-row__ip">{server.ip}</span>}
+      <span className="dt-row__meta">
+        <span className="dt-badge">{t(kategorieSchluessel(server.category))}</span>
+        {/* Informative Marke NEBEN der Kategorie: funktionsloser Windows-
+            Vorgabe-Platzhalter. Kategorie bleibt unveraendert. */}
+        {server.isPlatformPlaceholder ? (
+          <span className="dt-badge dt-badge--placeholder">
+            {t("verwaltung.dnsTrust.placeholder.badge")}
+          </span>
+        ) : null}
+      </span>
+      {mitIndizien ? <PlausibilitaetsIndizien plausibility={server.plausibility} /> : null}
+    </div>
+  );
+}
+
+// Bereich 1: eine „Erwartet"-Zeile mit Rang-Badge (laufende Position 1..N) und den
+// Rang-/Entfernen-Aktionen. position ist 1-basiert; Hoch/Runter setzen den Rang
+// auf position∓1 (das Backend haelt die Sequenz kompakt, die View laedt neu).
+function ErwartetZeile({ server, position, istErste, istLetzte, busy, onRang, onEntscheidung }) {
+  const { t } = useTranslation();
 
   return (
     <div className="dt-row">
-      <div className="dt-row__ident">
-        <span className="dt-row__name">{anzeigeName}</span>
-        {/* Rohe IP dezent -- entfaellt, wenn der Name ohnehin die IP ist. */}
-        {nameIstIp ? null : <span className="dt-row__ip">{server.ip}</span>}
-        <span className="dt-row__meta">
-          <span className="dt-badge">{t(kategorieSchluessel(server.category))}</span>
-          {/* Zusaetzliche, informative Marke NEBEN der Kategorie (nicht statt ihr):
-              funktionsloser Windows-Vorgabe-Platzhalter. Kategorie bleibt unveraendert. */}
-          {server.isPlatformPlaceholder ? (
-            <span className="dt-badge dt-badge--placeholder">
-              {t("verwaltung.dnsTrust.placeholder.badge")}
-            </span>
-          ) : null}
-          {/* Zustands-Marke („Noch offen"/„Vertraut"/„Abgelehnt") -- bei einem
-              funktionslosen Platzhalter entfaellt sie, denn es steht keine
-              Entscheidung aus und ein Vertrauenszustand ist bedeutungslos. */}
-          {istPlatzhalter ? null : (
-            <span className="dt-badge dt-badge--state" data-state={server.trustState}>
-              {t(zustandSchluessel(server.trustState))}
-            </span>
-          )}
-        </span>
-        <PlausibilitaetsIndizien plausibility={server.plausibility} />
-      </div>
-
+      <span className="dt-rank" aria-hidden="true">
+        {position}
+      </span>
+      <ZeilenIdent server={server} />
       <div className="dt-row__actions">
-        {/* Funktionsloser Platzhalter: keine Entscheidungs-Knoepfe (Vertrauen/
-            Ablehnen/Zuruecksetzen), sondern ein dezenter, nicht anklickbarer,
-            nicht fokussierbarer Hinweistext an ihrer Stelle. Gleiche Zeile,
-            damit die Liste ruhig bleibt und keine Luecke entsteht. */}
-        {istPlatzhalter ? (
+        <button
+          type="button"
+          className="dt-rank-btn"
+          onClick={() => onRang(server.ip, position - 1)}
+          disabled={busy || istErste}
+          aria-label={t("verwaltung.dnsTrust.actions.rankUp")}
+          title={t("verwaltung.dnsTrust.actions.rankUp")}
+        >
+          <ChevronUp size={15} aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          className="dt-rank-btn"
+          onClick={() => onRang(server.ip, position + 1)}
+          disabled={busy || istLetzte}
+          aria-label={t("verwaltung.dnsTrust.actions.rankDown")}
+          title={t("verwaltung.dnsTrust.actions.rankDown")}
+        >
+          <ChevronDown size={15} aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          className="dt-rank-btn dt-rank-btn--remove"
+          onClick={() => onEntscheidung(server.ip, "reset")}
+          disabled={busy}
+          aria-label={t("verwaltung.dnsTrust.actions.removeExpected")}
+          title={t("verwaltung.dnsTrust.actions.removeExpected")}
+        >
+          <X size={15} aria-hidden="true" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Bereich 2: eine „Erkannt"-Zeile mit „Als erwartet" + dezentem „Ablehnen"
+// (fuehrt in Bereich 3). Bei threat_listed ist NUR der Vertrauen-Knopf die
+// warnende Aktion (sev-high-Optik), Ablehnen bleibt normal verfuegbar; beim
+// funktionslosen Platzhalter stehen KEINE Knoepfe, nur der dezente Hinweis.
+function ErkanntZeile({ server, busy, onEntscheidung }) {
+  const { t } = useTranslation();
+  const istThreat = server.category === "threat_listed";
+
+  return (
+    <div className="dt-row">
+      <ZeilenIdent server={server} />
+      <div className="dt-row__actions">
+        {server.isPlatformPlaceholder ? (
           <span className="dt-actions-note">
             {t("verwaltung.dnsTrust.placeholder.noDecisionNeeded")}
           </span>
         ) : (
           <>
-            {/* threat_listed: „Vertrauen" nur als klar warnende Aktion. */}
-            {kannVertrauen ? (
-              istThreat ? (
-                <button
-                  type="button"
-                  className="dt-action dt-action--warn"
-                  onClick={() => onEntscheidung(server.ip, "trust")}
-                  disabled={busy}
-                >
-                  {t("verwaltung.dnsTrust.actions.trustDespiteThreat")}
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="dt-action dt-action--trust"
-                  onClick={() => onEntscheidung(server.ip, "trust")}
-                  disabled={busy}
-                >
-                  {t("verwaltung.dnsTrust.actions.trust")}
-                </button>
-              )
-            ) : null}
-
-            {kannAblehnen ? (
-              <button
-                type="button"
-                // Gateway (Auto-Vertrauen): Ablehnen bleibt technisch moeglich, aber
-                // dezent (kein Zwang) -- daher der leisere „subtle"-Stil.
-                className={`dt-action dt-action--reject${istGateway ? " dt-action--subtle" : ""}`}
-                onClick={() => onEntscheidung(server.ip, "reject")}
-                disabled={busy}
-              >
-                {t("verwaltung.dnsTrust.actions.reject")}
-              </button>
-            ) : null}
-
-            {kannZuruecksetzen ? (
-              <button
-                type="button"
-                className="dt-action dt-action--reset"
-                onClick={() => onEntscheidung(server.ip, "reset")}
-                disabled={busy}
-              >
-                {t("verwaltung.dnsTrust.actions.reset")}
-              </button>
-            ) : null}
+            <button
+              type="button"
+              className={`dt-action ${istThreat ? "dt-action--warn" : "dt-action--trust"}`}
+              onClick={() => onEntscheidung(server.ip, "trust")}
+              disabled={busy}
+            >
+              {istThreat
+                ? t("verwaltung.dnsTrust.actions.trustDespiteThreat")
+                : t("verwaltung.dnsTrust.actions.markExpected")}
+            </button>
+            <button
+              type="button"
+              className="dt-action dt-action--reject"
+              onClick={() => onEntscheidung(server.ip, "reject")}
+              disabled={busy}
+            >
+              {t("verwaltung.dnsTrust.actions.reject")}
+            </button>
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+// Bereich 3: eine „Abgelehnt"-Zeile (ohne Indizien, nur Ident + Zuruecksetzen).
+function AbgelehntZeile({ server, busy, onEntscheidung }) {
+  const { t } = useTranslation();
+
+  return (
+    <div className="dt-row">
+      <ZeilenIdent server={server} mitIndizien={false} />
+      <div className="dt-row__actions">
+        <button
+          type="button"
+          className="dt-action dt-action--reset"
+          onClick={() => onEntscheidung(server.ip, "reset")}
+          disabled={busy}
+        >
+          {t("verwaltung.dnsTrust.actions.reset")}
+        </button>
       </div>
     </div>
   );
@@ -253,10 +236,12 @@ export default function DnsTrustPanel() {
   const [servers, setServers] = useState([]);
   const [laden, setLaden] = useState(true);
   const [fehler, setFehler] = useState(null);
-  // IPs mit gerade laufender Entscheidung (Knoepfe der Zeile gesperrt).
+  // IPs mit gerade laufender Entscheidung/Rang-Aktion (Knoepfe der Zeile gesperrt).
   const [busy, setBusy] = useState(new Set());
+  // Bereich 3 („Abgelehnt") ist per Default eingeklappt.
+  const [abgelehntOffen, setAbgelehntOffen] = useState(false);
 
-  // Server laden. Gemeinsamer Pfad fuer Mount und Reload nach einer Entscheidung.
+  // Server laden. Gemeinsamer Pfad fuer Mount und Reload nach einer Aktion.
   // t/i18n NICHT in den Dependencies.
   const laden0 = useCallback(async () => {
     setLaden(true);
@@ -299,15 +284,48 @@ export default function DnsTrustPanel() {
     [laden0],
   );
 
-  // Server in ihre Gruppen einsortieren (jeder in genau eine). Rein aus servers
-  // abgeleitet -- t/i18n gehoert NICHT in diese Deps.
-  const gruppiert = useMemo(() => {
-    const koerbe = new Map(GRUPPEN.map((g) => [g.id, []]));
-    for (const server of servers) {
-      const id = gruppeFuer(server);
-      koerbe.get(id).push(server);
-    }
-    return koerbe;
+  // Eine Rang-Aktion senden (analog handleEntscheidung): busy-Sperre der Zeile,
+  // setDnsTrustRank, danach laden0 (das Backend haelt die 1..N-Sequenz kompakt).
+  const handleRang = useCallback(
+    async (ip, position) => {
+      setFehler(null);
+      setBusy((prev) => new Set(prev).add(ip));
+      try {
+        await setDnsTrustRank(ip, position);
+        await laden0();
+      } catch (ursache) {
+        console.error("DNS-Rang setzen fehlgeschlagen:", ursache);
+        setFehler("aktionFehler");
+      } finally {
+        setBusy((prev) => {
+          const next = new Set(prev);
+          next.delete(ip);
+          return next;
+        });
+      }
+    },
+    [laden0],
+  );
+
+  // Die drei H-Bereiche aus servers ableiten (Dependencies NUR [servers]):
+  //   erwartet:  trusted, sortiert nach expectedRank aufsteigend (0/unrangiert ans
+  //              ENDE), bei Gleichstand nach firstSeen aufsteigend.
+  //   erkannt:   neutral (jede Kategorie).
+  //   abgelehnt: rejected.
+  const bereiche = useMemo(() => {
+    const erwartet = servers
+      .filter((server) => server.trustState === "trusted")
+      .sort((a, b) => {
+        const rangA = a.expectedRank > 0 ? a.expectedRank : Number.POSITIVE_INFINITY;
+        const rangB = b.expectedRank > 0 ? b.expectedRank : Number.POSITIVE_INFINITY;
+        if (rangA !== rangB) {
+          return rangA - rangB;
+        }
+        return (a.firstSeen ?? 0) - (b.firstSeen ?? 0);
+      });
+    const erkannt = servers.filter((server) => server.trustState === "neutral");
+    const abgelehnt = servers.filter((server) => server.trustState === "rejected");
+    return { erwartet, erkannt, abgelehnt };
   }, [servers]);
 
   // Gibt es mindestens einen funktionslosen Plattform-Platzhalter? Nur dann erscheint
@@ -349,33 +367,97 @@ export default function DnsTrustPanel() {
         <p className="dt-empty">{t("verwaltung.dnsTrust.empty")}</p>
       ) : (
         <>
-          {GRUPPEN.map((gruppe) => {
-            const zeilen = gruppiert.get(gruppe.id);
-            // Leere Gruppen ausblenden.
-            if (!zeilen || zeilen.length === 0) {
-              return null;
-            }
-            return (
-              <section key={gruppe.id} className="dt-group" data-ton={gruppe.ton}>
-                <h3 className="dt-group__title">
-                  {t(`verwaltung.dnsTrust.groups.${gruppe.id}.title`)}
-                </h3>
-                <p className="dt-group__lead">
-                  {t(`verwaltung.dnsTrust.groups.${gruppe.id}.lead`)}
+          {/* Bereich 1: Erwartet — geordnet (alle trusted, Rang-Reihenfolge). */}
+          <section className="dt-group" data-ton="ok">
+            <h3 className="dt-group__title">
+              {t("verwaltung.dnsTrust.groups.expected.title")}
+            </h3>
+            <p className="dt-group__lead">
+              {t("verwaltung.dnsTrust.groups.expected.lead")}
+            </p>
+            <div className="dt-group__rows">
+              {bereiche.erwartet.map((server, index) => (
+                <ErwartetZeile
+                  key={server.ip}
+                  server={server}
+                  position={index + 1}
+                  istErste={index === 0}
+                  istLetzte={index === bereiche.erwartet.length - 1}
+                  busy={busy.has(server.ip)}
+                  onRang={handleRang}
+                  onEntscheidung={handleEntscheidung}
+                />
+              ))}
+              {bereiche.erwartet.length === 0 ? (
+                <p className="dt-group__empty">
+                  {t("verwaltung.dnsTrust.groups.expected.empty")}
                 </p>
-                <div className="dt-group__rows">
-                  {zeilen.map((server) => (
-                    <ServerZeile
-                      key={server.ip}
-                      server={server}
-                      busy={busy.has(server.ip)}
-                      onEntscheidung={handleEntscheidung}
-                    />
-                  ))}
-                </div>
-              </section>
-            );
-          })}
+              ) : null}
+            </div>
+          </section>
+
+          {/* Bereich 2: Erkannt, noch nicht erwartet (alle neutral). */}
+          {bereiche.erkannt.length > 0 ? (
+            <section className="dt-group" data-ton="neutral">
+              <h3 className="dt-group__title">
+                {t("verwaltung.dnsTrust.groups.detected.title")}
+              </h3>
+              <p className="dt-group__lead">
+                {t("verwaltung.dnsTrust.groups.detected.lead")}
+              </p>
+              <div className="dt-group__rows">
+                {bereiche.erkannt.map((server) => (
+                  <ErkanntZeile
+                    key={server.ip}
+                    server={server}
+                    busy={busy.has(server.ip)}
+                    onEntscheidung={handleEntscheidung}
+                  />
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          {/* Bereich 3: Abgelehnt — nur wenn vorhanden, eingeklappt per Default. */}
+          {bereiche.abgelehnt.length > 0 ? (
+            <section className="dt-group dt-collapsible" data-ton="danger">
+              <button
+                type="button"
+                className="dt-collapsible__head"
+                onClick={() => setAbgelehntOffen((offen) => !offen)}
+                aria-expanded={abgelehntOffen}
+              >
+                <span className="dt-group__title">
+                  {t("verwaltung.dnsTrust.groups.rejected.title")}{" "}
+                  {t("verwaltung.dnsTrust.rejected.count", {
+                    count: bereiche.abgelehnt.length,
+                  })}
+                </span>
+                <span className="dt-collapsible__toggle">
+                  {abgelehntOffen
+                    ? t("verwaltung.dnsTrust.rejected.toggleHide")
+                    : t("verwaltung.dnsTrust.rejected.toggleShow")}
+                </span>
+              </button>
+              {abgelehntOffen ? (
+                <>
+                  <p className="dt-group__lead">
+                    {t("verwaltung.dnsTrust.groups.rejected.lead")}
+                  </p>
+                  <div className="dt-group__rows">
+                    {bereiche.abgelehnt.map((server) => (
+                      <AbgelehntZeile
+                        key={server.ip}
+                        server={server}
+                        busy={busy.has(server.ip)}
+                        onEntscheidung={handleEntscheidung}
+                      />
+                    ))}
+                  </div>
+                </>
+              ) : null}
+            </section>
+          ) : null}
 
           {/* EINMALIGER Erklaertext unterhalb der Liste -- nur wenn mindestens ein
               funktionsloser Plattform-Platzhalter vorhanden ist (nicht pro Zeile). */}
