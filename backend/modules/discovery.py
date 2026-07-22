@@ -40,10 +40,13 @@ async def ping_host(ip: str, timeout: float = 1.0) -> DiscoveredHost:
         alive, rtt = await icmp_echo(ip, timeout)
         return DiscoveredHost(ip=ip, rtt_ms=rtt, is_alive=alive, source="ping")
 
+    # "-n": keine Namensaufloesung durch ping selbst -- 64 parallele pings ohne -n
+    # fluten sonst den lokalen DNS-Resolver mit PTR-Anfragen (gemessene Ursache
+    # fuer leere Hostnamen in der Enrich-Phase). Erreichbarkeitsmessung unveraendert.
     if system == "Darwin":
-        cmd = ["ping", "-c", "1", "-W", str(int(timeout * 1000)), "-t", "1", ip]
+        cmd = ["ping", "-n", "-c", "1", "-W", str(int(timeout * 1000)), "-t", "1", ip]
     else:
-        cmd = ["ping", "-c", "1", "-W", str(int(timeout)), ip]
+        cmd = ["ping", "-n", "-c", "1", "-W", str(int(timeout)), ip]
 
     try:
         proc = await asyncio.create_subprocess_exec(

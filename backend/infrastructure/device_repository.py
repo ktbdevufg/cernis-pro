@@ -327,7 +327,12 @@ class SqliteDeviceRepository:
                 " first_seen = excluded.first_seen,"
                 " last_seen = excluded.last_seen, last_ip = excluded.last_ip,"
                 " times_seen = excluded.times_seen, open_ports = excluded.open_ports,"
-                " hostname = excluded.hostname, os_guess = excluded.os_guess",
+                # Ueberschreibschutz: ein leerer Hostname heisst "beim Scan gerade
+                # nicht ermittelt" (z.B. Resolver-Loeschfenster), NICHT "hat keinen
+                # Namen" -- ein bekannter Name darf davon nicht geloescht werden.
+                " hostname = CASE WHEN excluded.hostname != '' THEN excluded.hostname"
+                " ELSE hostname END,"
+                " os_guess = excluded.os_guess",
                 (
                     device.mac,
                     device.vendor,

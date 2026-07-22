@@ -153,6 +153,38 @@ def test_save_upsert_overwrites_existing(repo: SqliteDeviceRepository) -> None:
     assert len(repo.get_all(known_only=False)) == 1  # kein Duplikat
 
 
+def test_save_upsert_empty_hostname_keeps_stored_name(repo: SqliteDeviceRepository) -> None:
+    """Ueberschreibschutz: leerer Hostname im Folge-save loescht den Bestand NICHT.
+
+    Ein leerer Hostname heisst "beim Scan gerade nicht ermittelt" (z.B.
+    Resolver-Loeschfenster), NICHT "hat keinen Namen".
+    """
+    repo.save(_device(hostname="foo.local"))
+    repo.save(_device(hostname=""))
+    got = repo.get(MAC)
+    assert got is not None
+    assert got.hostname == "foo.local"  # Bestand bleibt erhalten
+
+
+def test_save_upsert_nonempty_hostname_still_overwrites(repo: SqliteDeviceRepository) -> None:
+    """Ein NICHT-leerer neuer Hostname ueberschreibt weiterhin korrekt."""
+    repo.save(_device(hostname="foo.local"))
+    repo.save(_device(hostname="bar.local"))
+    got = repo.get(MAC)
+    assert got is not None
+    assert got.hostname == "bar.local"
+
+
+def test_save_first_insert_with_empty_hostname_stays_empty(
+    repo: SqliteDeviceRepository,
+) -> None:
+    """Erst-Insert mit leerem Hostname bleibt "" (der Schutz greift nur beim Update)."""
+    repo.save(_device(hostname=""))
+    got = repo.get(MAC)
+    assert got is not None
+    assert got.hostname == ""
+
+
 # ── IP-History ───────────────────────────────────────────────────────────────
 
 

@@ -2560,6 +2560,12 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     vendor_lookup = VendorLookupAdapter()
     arp_table = ArpTableAdapter()
 
+    # PTR/Forward-DNS-Adapter (dig) EINMAL gebaut und geteilt: er ist zustandslos, und
+    # GENAU DIESELBE Instanz traegt den Scan-HostnameResolver (cache-freie PTR-Abfrage,
+    # umgeht den negativen mDNSResponder-Cache), den reichen ResolveEndpoint und den
+    # schlanken Batch-PTR-Use-Case (Verdrahtung weiter unten im resolver-Block).
+    ptr_resolver = DigDnsPtrResolver()
+
     app.include_router(scanning_router)
     app.dependency_overrides[provide_get_scan_history] = lambda: GetScanHistory(
         scan_history_repository()
@@ -2589,7 +2595,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             discovery=HostDiscoveryAdapter(),
             port_scanner=PortScannerAdapter(),
             vendor_lookup=vendor_lookup,
-            resolver=HostnameResolverAdapter(),
+            resolver=HostnameResolverAdapter(ptr_resolver=ptr_resolver),
             mdns=MdnsAdapter(),
             ssdp=SsdpAdapter(),
             ipv6=Ipv6EnrichmentAdapter(),
@@ -4231,11 +4237,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     def geo_asn_db() -> CsvGeoAsnDb:
         return CsvGeoAsnDb()
 
-    # PTR/Forward-DNS-Adapter (dig) EINMAL gebaut und geteilt: er ist zustandslos, und
-    # GENAU DIESELBE Instanz traegt sowohl den reichen ResolveEndpoint als auch den
-    # schlanken Batch-PTR-Use-Case (Paket 5, Auftrag: eine Instanz wiederverwenden, nicht
-    # neu bauen). Kein lru_cache noetig -- der Adapter haelt keinen Zustand.
-    ptr_resolver = DigDnsPtrResolver()
+    # Der PTR/Forward-DNS-Adapter ``ptr_resolver`` ist bereits weiter oben (Scan-
+    # Verdrahtung) EINMAL gebaut -- dieselbe zustandslose Instanz traegt hier den
+    # reichen ResolveEndpoint und den schlanken Batch-PTR-Use-Case (Paket 5,
+    # Auftrag: eine Instanz wiederverwenden, nicht neu bauen).
 
     # Runner: reicht ip/port an den ResolveEndpoint-Use-Case durch und gibt das
     # RemoteEndpointFacts als Any zurueck (der api-Ring serialisiert, kennt keine domain-

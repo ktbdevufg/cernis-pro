@@ -115,9 +115,17 @@ class DigDnsPtrResolver:
         """
         if shutil.which("dig") is None:
             raise ResolverToolMissing("dig")
-        # "--" nach -x, vor dem nutzergesteuerten ip: -x bleibt als Reverse-Flag wirksam,
-        # ein mit "-" beginnender ip-Wert wird nicht mehr als Option interpretiert.
-        return _first_ptr_name(_run_dig("+short", "-x", "--", ip))
+        # F-07-Schutz per VALIDIERUNG statt "--": macOS-System-dig (9.10.6) bindet
+        # "--" faelschlich als Argument an -x (Query "--.in-addr.arpa" -> immer leer)
+        # bzw. lehnt es als "Invalid option" ab -- der Terminator ist dort funktional
+        # kaputt. Eine per ``ip_address`` validierte IP kann nie mit "-" beginnen,
+        # ein Optionen-Schmuggel ist damit gleichwertig ausgeschlossen. Ungueltige
+        # Eingabe -> "" (gueltiger Leer-Zustand, erreicht dig gar nicht erst).
+        try:
+            ipaddress.ip_address(ip)
+        except ValueError:
+            return ""
+        return _first_ptr_name(_run_dig("+short", "-x", ip))
 
     async def resolve_forward(self, hostname: str) -> tuple[str, ...]:
         """Loest die Vorwaerts-IPs zum ``hostname`` (A + AAAA) -> IP-Tuple oder ``()``.
@@ -139,9 +147,11 @@ class DigDnsPtrResolver:
         """
         if shutil.which("dig") is None:
             raise ResolverToolMissing("dig")
-        # "--" vor dem nutzergesteuerten hostname (record_type ist fix und darf danach
-        # stehen): ein mit "-" beginnender hostname wird nicht als Option interpretiert.
-        combined = _run_dig("+short", "--", hostname, "A") + _run_dig(
-            "+short", "--", hostname, "AAAA"
-        )
+        # F-07-Schutz per VALIDIERUNG statt "--": macOS-System-dig (9.10.6) lehnt
+        # "--" als "Invalid option" ab (rc=1 -> immer leer). Ein mit "-" beginnender
+        # hostname wird stattdessen VOR dem Aufruf verworfen (erreicht dig nie) --
+        # gleichwertiger Schutz gegen Optionen-Schmuggel, funktionsfaehig auf jedem dig.
+        if hostname.startswith("-"):
+            return ()
+        combined = _run_dig("+short", hostname, "A") + _run_dig("+short", hostname, "AAAA")
         return _valid_ips(combined)

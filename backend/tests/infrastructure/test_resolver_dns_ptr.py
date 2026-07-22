@@ -103,11 +103,13 @@ def test_resolve_ptr_tool_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "dig" in exc_info.value.message
 
 
-def test_resolve_ptr_places_terminator_after_x_before_ip(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``resolve_ptr`` setzt ``--`` NACH ``-x`` und VOR der nutzergesteuerten ip (F-07).
+def test_resolve_ptr_rejects_non_ip_before_dig(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``resolve_ptr`` verwirft nicht-IP-Eingaben VOR dem ``dig``-Aufruf (F-07).
 
-    ``-x`` muss VOR ``--`` bleiben (sonst kein Reverse-Lookup); die ip muss NACH ``--``
-    stehen (sonst wuerde ein mit ``-`` beginnender Wert als Option interpretiert).
+    Ein mit ``-`` beginnender Wert (Optionen-Schmuggel) ist keine gueltige IP und
+    darf ``dig`` gar nicht erst erreichen -- Ergebnis ist der Leer-Zustand ``""``.
+    (Schutz per ``ip_address``-Validierung statt ``--``-Terminator: macOS-System-dig
+    9.10.6 verarbeitet ``--`` fehlerhaft, siehe Adapter-Kommentar.)
     """
     captured: list[tuple[str, ...]] = []
 
@@ -117,10 +119,22 @@ def test_resolve_ptr_places_terminator_after_x_before_ip(monkeypatch: pytest.Mon
 
     monkeypatch.setattr(shutil, "which", lambda _name: "/usr/bin/dig")
     monkeypatch.setattr("infrastructure.resolver.dns_ptr._run_dig", _capture_dig)
-    asyncio.run(DigDnsPtrResolver().resolve_ptr("-leading-dash"))
-    args = captured[0]
-    assert "-x" in args and "--" in args
-    assert args.index("-x") < args.index("--") < args.index("-leading-dash")
+    assert asyncio.run(DigDnsPtrResolver().resolve_ptr("-leading-dash")) == ""
+    assert captured == []  # dig wurde NIE aufgerufen
+
+
+def test_resolve_ptr_passes_valid_ip_to_dig(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Eine gueltige IP erreicht ``dig`` als ``+short -x <ip>`` (ohne ``--``)."""
+    captured: list[tuple[str, ...]] = []
+
+    def _capture_dig(*args: str) -> str:
+        captured.append(args)
+        return ""
+
+    monkeypatch.setattr(shutil, "which", lambda _name: "/usr/bin/dig")
+    monkeypatch.setattr("infrastructure.resolver.dns_ptr._run_dig", _capture_dig)
+    asyncio.run(DigDnsPtrResolver().resolve_ptr("1.1.1.1"))
+    assert captured == [("+short", "-x", "1.1.1.1")]
 
 
 # ── resolve_forward (Adapter-Kern, gemocktes _run_dig/which) ──────────────────
@@ -157,13 +171,14 @@ def test_resolve_forward_tool_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     assert exc_info.value.tool == "dig"
 
 
-def test_resolve_forward_places_terminator_before_hostname(
+def test_resolve_forward_rejects_leading_dash_before_dig(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``resolve_forward`` setzt ``--`` VOR den nutzergesteuerten hostname (F-07).
+    """``resolve_forward`` verwirft ``-``-beginnende hostnames VOR dem ``dig``-Aufruf (F-07).
 
-    Der record_type (``A``/``AAAA``) ist fix und darf nach dem hostname bleiben; ein mit
-    ``-`` beginnender hostname darf nicht als Option interpretiert werden.
+    Ein mit ``-`` beginnender Wert (Optionen-Schmuggel) darf ``dig`` gar nicht erst
+    erreichen -- Ergebnis ist der Leer-Zustand ``()``. (Schutz per Validierung statt
+    ``--``-Terminator: macOS-System-dig 9.10.6 lehnt ``--`` als Invalid option ab.)
     """
     captured: list[tuple[str, ...]] = []
 
@@ -173,8 +188,5 @@ def test_resolve_forward_places_terminator_before_hostname(
 
     monkeypatch.setattr(shutil, "which", lambda _name: "/usr/bin/dig")
     monkeypatch.setattr("infrastructure.resolver.dns_ptr._run_dig", _capture_dig)
-    asyncio.run(DigDnsPtrResolver().resolve_forward("-leading-dash"))
-    # Beide Aufrufe (A + AAAA) setzen "--" vor den hostname.
-    for args in captured:
-        assert "--" in args
-        assert args.index("--") < args.index("-leading-dash")
+    assert asyncio.run(DigDnsPtrResolver().resolve_forward("-leading-dash")) == ()
+    assert captured == []  # dig wurde NIE aufgerufen
