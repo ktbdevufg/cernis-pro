@@ -313,10 +313,17 @@
   gap: 8px;
 }
 
+/* Zweizeilig: Kopf (Name + Zahl) ueber der Balkenbahn in voller Breite. */
 .security-report__balken-zeile {
-  display: grid;
-  grid-template-columns: minmax(80px, 160px) 1fr auto;
-  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.security-report__balken-kopf {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
   gap: 10px;
 }
 
@@ -332,6 +339,8 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
+  flex: 1;
 }
 
 .security-report__balken-bahn {

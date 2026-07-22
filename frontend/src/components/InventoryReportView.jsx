@@ -469,21 +469,23 @@ function Verteilung({ eintraege, modus, onModus, t }) {
                     : "inventory-report__balken-zeile"
                 }
               >
-                <span
-                  className="inventory-report__balken-label"
-                  title={e.label || t("report.inventory.verteilung.ohne")}
-                >
-                  {e.label || t("report.inventory.verteilung.ohne")}
-                </span>
+                <div className="inventory-report__balken-kopf">
+                  <span
+                    className="inventory-report__balken-label"
+                    title={e.label || t("report.inventory.verteilung.ohne")}
+                  >
+                    {e.label || t("report.inventory.verteilung.ohne")}
+                  </span>
+                  <span className="inventory-report__balken-zahl inventory-report__mono">
+                    {e.count}
+                  </span>
+                </div>
                 <div className="inventory-report__balken-bahn">
                   <div
                     className="inventory-report__balken-fueller"
                     style={{ width: `${((e.count / maxCount) * 100).toFixed(1)}%` }}
                   />
                 </div>
-                <span className="inventory-report__balken-zahl inventory-report__mono">
-                  {e.count}
-                </span>
               </div>
             ))}
           </div>

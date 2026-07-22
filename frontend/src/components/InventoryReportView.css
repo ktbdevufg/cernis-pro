@@ -274,10 +274,17 @@
   gap: 8px;
 }
 
+/* Zweizeilig: Kopf (Name + Zahl) ueber der Balkenbahn in voller Breite. */
 .inventory-report__balken-zeile {
-  display: grid;
-  grid-template-columns: minmax(80px, 160px) 1fr auto;
-  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.inventory-report__balken-kopf {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
   gap: 10px;
 }
 
@@ -293,6 +300,8 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
+  flex: 1;
 }
 
 .inventory-report__balken-bahn {
@@ -552,9 +561,8 @@
 /* ── Druck: Balken/Tabellen vollstaendig, Bedien-Controls weg ──────────────────── */
 @media print {
   /* Ueberzaehlige Zeilen aufs Papier holen, "weitere"-Hinweise weg. */
-  .inventory-report__balken-zeile--ueberzaehlig,
-  .inventory-report__zeile--ueberzaehlig {
-    display: grid;
+  .inventory-report__balken-zeile--ueberzaehlig {
+    display: flex;
   }
   .inventory-report__zeile--ueberzaehlig {
     display: table-row;

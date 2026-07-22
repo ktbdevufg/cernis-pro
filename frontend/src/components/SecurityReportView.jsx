@@ -622,9 +622,12 @@ function GeraeteBalken({ geraete, t }) {
                 : "security-report__balken-zeile"
             }
           >
-            <span className="security-report__balken-label" title={g.label}>
-              {g.label}
-            </span>
+            <div className="security-report__balken-kopf">
+              <span className="security-report__balken-label" title={g.label}>
+                {g.label}
+              </span>
+              <span className="security-report__balken-zahl security-report__mono">{g.gesamt}</span>
+            </div>
             <div className="security-report__balken-bahn">
               {g.kritisch > 0 ? (
                 <div
@@ -639,7 +642,6 @@ function GeraeteBalken({ geraete, t }) {
                 />
               ) : null}
             </div>
-            <span className="security-report__balken-zahl security-report__mono">{g.gesamt}</span>
           </div>
         ))}
       </div>

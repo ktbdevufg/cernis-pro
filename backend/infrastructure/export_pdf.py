@@ -2877,13 +2877,13 @@ _CONTENT_WIDTH_MM = 174.0
 # So fuellt jede Tabelle exakt die Druckbreite, mit sinnvoll breiten Text-/schmalen Wertspalten.
 _COL_WEIGHTS: dict[tuple[str, ...], tuple[float, ...]] = {
     PORT_COLUMNS: (3.0, 2.0, 1.6, 4.0),
-    CVE_COLUMNS: (2.6, 2.2, 1.0, 2.2, 4.0),
+    CVE_COLUMNS: (3.4, 1.6, 1.0, 1.7, 4.0),
     NET_COLUMNS: (2.2, 2.6, 1.6, 5.0),
     ACK_COLUMNS: (2.4, 3.0, 5.0),
     # Bestandsbericht: Geraet-Spalte breiter, die schmalen Wert-Spalten (Gesehen) schlank --
     # damit fuellt die 8-spaltige Geraete-Tabelle die Druckbreite lesbar (Muster der Security-
     # Gewichte). Eigene Keys, die bestehenden Aufrufer (PORT/CVE/NET/ACK) bleiben unberuehrt.
-    INVENTORY_COLUMNS: (2.6, 1.8, 1.4, 1.7, 1.7, 1.0, 1.6, 1.6),
+    INVENTORY_COLUMNS: (2.4, 1.6, 1.5, 1.9, 1.9, 1.1, 1.7, 1.5),
     ARCHIVED_COLUMNS: (3.0, 2.2, 1.8, 2.0, 1.8),
     # CVE-Bericht: Geraet/Dienst breit, die schmalen Wert-/Severity-Spalten schlank -- damit
     # fuellen die drei CVE-Tabellen die Druckbreite lesbar (Muster der Inventory-Gewichte).
@@ -3344,8 +3344,8 @@ def _geraete_balken_drawing(balken: tuple[tuple[str, int, int], ...], lang: str 
     """
     row_h = 16.0
     top_pad = 6.0
-    label_w = 120.0  # Platz fuer das Geraete-Label links
-    bar_max_w = 230.0  # maximale Balkenlaenge
+    label_w = 165.0  # Platz fuer das Geraete-Label links
+    bar_max_w = 185.0  # maximale Balkenlaenge (Gesamtbreite bleibt 380)
     count_w = 30.0  # Platz fuer die Summe rechts
     width = label_w + bar_max_w + count_w
     height = top_pad * 2 + row_h * len(balken)
@@ -3359,7 +3359,7 @@ def _geraete_balken_drawing(balken: tuple[tuple[str, int, int], ...], lang: str 
     y = height - top_pad - row_h
     for label, critical_count, notable_count in balken:
         # Label (links, gekuerzt auf die Spaltenbreite ueber Zeichenmass -- grobe Annaeherung).
-        shown = label if len(label) <= 22 else label[:21] + "…"
+        shown = label if len(label) <= 32 else label[:31] + "…"
         drawing.add(String(0, y + 4, shown, fontName="Helvetica", fontSize=8, fillColor=_TEXT))
         bar_x = label_w
         # Kritischer Anteil (rot).
