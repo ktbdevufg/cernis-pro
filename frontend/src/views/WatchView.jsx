@@ -70,7 +70,11 @@ function anzeigeName(geraet) {
 // Callbacks nach oben (die Liste entfernt das Gerät bzw. patcht es).
 function WacheZeile({ geraet, jetzt, onEingeordnet, onAusgeblendet, onFehler }) {
   const { t } = useTranslation();
-  const [notizOffen, setNotizOffen] = useState(false);
+  // Notizfeld startet offen, wenn bereits eine Notiz hinterlegt ist — die
+  // Notiz soll dauerhaft sichtbar bleiben, nicht hinter dem Button verschwinden.
+  const [notizOffen, setNotizOffen] = useState(
+    Boolean((geraet.notes ?? "").trim()),
+  );
   const [notizEntwurf, setNotizEntwurf] = useState(geraet.notes ?? "");
   // Während eines Schreibvorgangs sperren wir die Aktionen dieser Zeile.
   const [busy, setBusy] = useState(false);
@@ -110,7 +114,8 @@ function WacheZeile({ geraet, jetzt, onEingeordnet, onAusgeblendet, onFehler }) 
   };
 
   // "Notiz" speichern: schreibt nur das Notizfeld; das Gerät bleibt in der Wache
-  // (Notieren ist kein Einordnen). Schließt das Feld bei Erfolg.
+  // (Notieren ist kein Einordnen). Schließt das Feld nur bei LEERER Notiz —
+  // eine hinterlegte Notiz bleibt sichtbar.
   const handleNotizSpeichern = async () => {
     if (busy) {
       return;
@@ -118,7 +123,7 @@ function WacheZeile({ geraet, jetzt, onEingeordnet, onAusgeblendet, onFehler }) 
     setBusy(true);
     try {
       await updateDeviceMeta(geraet.mac, { notes: notizEntwurf });
-      setNotizOffen(false);
+      setNotizOffen(Boolean(notizEntwurf.trim()));
     } catch {
       onFehler(mitCode(t("beobachten.watch.actionError"), CODES.E_503));
     } finally {
@@ -156,7 +161,7 @@ function WacheZeile({ geraet, jetzt, onEingeordnet, onAusgeblendet, onFehler }) 
           </button>
           <button
             type="button"
-            className="watch__aktion"
+            className={`watch__aktion${(geraet.notes ?? "").trim() ? " watch__aktion--hat-notiz" : ""}`}
             onClick={() => setNotizOffen((offen) => !offen)}
             disabled={busy}
             aria-expanded={notizOffen}

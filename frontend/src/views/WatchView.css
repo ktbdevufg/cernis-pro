@@ -164,6 +164,13 @@
   color: var(--color-accent-strong);
 }
 
+/* Notiz-Button, wenn bereits eine Notiz hinterlegt ist: dezenter Akzent-Rahmen
+   und Akzent-Text als ruhiger Hinweis, dass eine Notiz existiert. */
+.watch__aktion--hat-notiz {
+  color: var(--color-accent-strong);
+  border-color: var(--color-accent-border);
+}
+
 /* Inline-Notizfeld unter der Zeile. */
 .watch__notiz {
   display: flex;
