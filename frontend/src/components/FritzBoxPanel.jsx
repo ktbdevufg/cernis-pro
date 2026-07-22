@@ -19,12 +19,14 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { fetchDevices } from "../api/devices.js";
 import {
   fetchFritzDetail,
   formatBytes,
   formatUptime,
   mappeDetail,
 } from "../api/fritz.js";
+import { fetchInterfaces, primaeresInterface } from "../api/interfaces.js";
 import {
   fetchSettings,
   secretGesetzt,
@@ -83,22 +85,57 @@ function VerbindenMaske({ authFehler, onVerbunden }) {
   const [arbeitet, setArbeitet] = useState(false);
 
   // Vorbelegung aus GET /api/settings: Host/User als Klartext, Passwort-Präsenz
-  // als Marker (nie der Klartext selbst).
+  // als Marker (nie der Klartext selbst). Ist KEIN fritz_host gespeichert, wird
+  // best-effort der beim Scan ermittelte Gateway vorbelegt — Priorität:
+  // gespeicherter fritz_host > Gateway-Hostname > Gateway-IP > "fritz.box".
   useEffect(() => {
     let aktiv = true;
     (async () => {
+      let hostGespeichert = false;
       try {
         const settings = await fetchSettings();
         if (!aktiv) {
           return;
         }
         if (settings.fritz_host) {
+          hostGespeichert = true;
           setHostWert(String(settings.fritz_host));
         }
         setUserWert(String(settings.fritz_user ?? ""));
         setPasswortGesetzt(secretGesetzt(settings, "fritz_password"));
       } catch (fehler) {
         console.error("FritzBox-Einstellungen laden fehlgeschlagen:", fehler);
+      }
+      if (hostGespeichert) {
+        return;
+      }
+      // Gateway-Ermittlung: eigener try/catch, best-effort. Schlägt sie fehl,
+      // bleibt die statische Vorgabe "fritz.box" — kein Fehler nach außen.
+      try {
+        const interfaces = await fetchInterfaces();
+        const gatewayIp = String(
+          primaeresInterface(interfaces)?.gateway ||
+            (interfaces ?? []).find((iface) => iface.gateway)?.gateway ||
+            "",
+        );
+        if (!gatewayIp) {
+          return;
+        }
+        const devices = await fetchDevices(false);
+        const gatewayHostname = String(
+          (devices ?? []).find((geraet) => geraet.lastIp === gatewayIp)
+            ?.hostname ?? "",
+        ).trim();
+        if (!aktiv) {
+          return;
+        }
+        if (gatewayHostname) {
+          setHostWert(gatewayHostname);
+        } else {
+          setHostWert(gatewayIp);
+        }
+      } catch (fehler) {
+        console.error("FritzBox-Gateway-Vorbelegung fehlgeschlagen:", fehler);
       }
     })();
     return () => {
