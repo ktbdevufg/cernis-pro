@@ -641,7 +641,6 @@
       "showMore_one": "+ 1 weiteres Ziel einblenden",
       "showMore_other": "+ {{count}} weitere Ziele einblenden",
       "showLess": "weniger anzeigen",
-      "state": "Zustand: {{value}}",
       "lookup": "nachschlagen",
       "refresh": "Aktualisieren",
       "refreshIntervalLabel": "Automatisch aktualisieren",
@@ -651,7 +650,18 @@
       "sniStarting": "wird gestartet …",
       "sniActive": "SNI aktiv",
       "sniHint": "Zeigt die echten von Apps angefragten Domainnamen (statt nur des Hosters). Erfordert erhöhte Rechte.",
-      "sniPermission": "SNI-Beobachtung braucht erhöhte Rechte."
+      "sniPermission": "SNI-Beobachtung braucht erhöhte Rechte.",
+      "stateLabel": {
+        "established": "aktiv",
+        "other": "Zustand unklar",
+        "listen": "wartet",
+        "none": "verbindungslos"
+      },
+      "groupActive": "Aktiver Außenverkehr",
+      "groupLocal": "Lokal, ohne feste Gegenstelle ({{count}})",
+      "groupLocalHint": "Dienste, die auf Verbindungen warten, und verbindungsloser UDP-Verkehr wie die lokale Gerätesuche. Normales lokales Netzverhalten ohne Gegenstelle.",
+      "groupLocalToggleShow": "Anzeigen",
+      "groupLocalToggleHide": "Ausblenden"
     },
     "outbound": {
       "hostScopeLocal": "Kontakte dieses Rechners — passiv beobachtet, kein netzweiter Blick.",

@@ -670,9 +670,83 @@
   letter-spacing: 0.03em;
 }
 
-.traffic-detail__conn-state {
+/* Zustands-Pill (D3): Klartext statt Rohwert. Neutral-gedaempft als Grundton
+   (Optik wie die ×N-Pill), "aktiv" (established) in der positiven ok-Toenung. */
+.traffic-detail__state-pill {
+  align-self: center;
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 999px;
+  color: var(--color-text-sec);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+.traffic-detail__state-pill--aktiv {
+  color: var(--status-active-text);
+  border-color: var(--status-active-bd);
+  background: var(--status-active-bg);
+}
+
+/* Gruppen-Ueberschrift der Verbindungsliste (D3): ruhige Abschnitts-Marke. */
+.traffic-detail__group-title {
+  margin: 0 0 6px 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   color: var(--color-text-tert);
+}
+
+.traffic-detail__group-title--inline {
+  margin: 0;
+}
+
+/* Einklappbarer Lokal-Block (D3): ziel-lose Eintraege hinter einer ruhigen,
+   anklickbaren Kopfzeile; darunter (ausgeklappt) ein Erklaersatz + die Liste. */
+.traffic-detail__lokal {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.traffic-detail__lokal-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0;
+  background: none;
+  border: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.traffic-detail__lokal-head:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.traffic-detail__lokal-toggle {
   font-size: 12px;
+  color: var(--color-text-tert);
+  white-space: nowrap;
+}
+
+.traffic-detail__lokal-head:hover .traffic-detail__lokal-toggle {
+  color: var(--color-accent);
+}
+
+.traffic-detail__lokal-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-tert);
 }
 
 /* Ziel-lose Verbindung (remote===null, z. B. mDNS/Multicast): reiner Text,

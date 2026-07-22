@@ -382,6 +382,30 @@ function buendeleVerbindungen(conns) {
   return [...buendel.values()];
 }
 
+// Zustands-Klartext (D3): mappt den rohen Backend-Zustand (established/other/
+// listen/none) auf einen verstaendlichen i18n-Text. Greift kein Mapping (Key
+// fehlt/unbekannter Wert), wird der Rohwert EHRLICH gezeigt — kein stiller
+// Fallback auf "aktiv". Reine Funktion, t kommt herein (nicht global).
+const ZUSTAND_KEYS = new Set(["established", "other", "listen", "none"]);
+
+function zustandLabel(state, t) {
+  if (ZUSTAND_KEYS.has(state)) {
+    return t(`beobachten.traffic.stateLabel.${state}`);
+  }
+  return String(state ?? "");
+}
+
+// Zustands-Pill: "established" positiv getoent (ok-Toenung), alles andere
+// neutral-gedaempft. Nur die Optik — das Label liefert zustandLabel.
+function ZustandsPill({ state }) {
+  const { t } = useTranslation();
+  const klasse =
+    state === "established"
+      ? "traffic-detail__state-pill traffic-detail__state-pill--aktiv"
+      : "traffic-detail__state-pill";
+  return <span className={klasse}>{zustandLabel(state, t)}</span>;
+}
+
 // Eine gebündelte Ziel-Zeile MIT echtem Ziel. Der Zieltext (mono) ist der
 // Lookup-Trigger — für JEDE Verbindung (F3-Klick-Trigger): Klick (oder
 // Enter/Space) öffnet die Gegenstellen-Ansicht. Ist ein PTR-Name (host) lazy
@@ -446,9 +470,7 @@ function BuendelZeile({ buendel, onLookup }) {
             {buendel.service}
           </span>
         )}
-        <span className="traffic-detail__conn-state">
-          {t("beobachten.traffic.state", { value: buendel.state })}
-        </span>
+        <ZustandsPill state={buendel.state} />
       </div>
     </li>
   );
@@ -487,9 +509,7 @@ function ZiellosZeile({ buendel }) {
         </span>
       </div>
       <div className="traffic-detail__conn-sub">
-        <span className="traffic-detail__conn-state">
-          {t("beobachten.traffic.state", { value: buendel.state })}
-        </span>
+        <ZustandsPill state={buendel.state} />
       </div>
     </li>
   );
@@ -504,6 +524,9 @@ const STANDARD_OFFEN = 10; // echte Ziele anfangs offen sichtbar
 function ConnectionList({ conns, onLookup }) {
   const { t } = useTranslation();
   const [erweitert, setErweitert] = useState(false);
+  // Lokal-Block ("ohne feste Gegenstelle") ist per Default eingeklappt (D3):
+  // lauschende Dienste + verbindungsloses UDP sind normales Hintergrundrauschen.
+  const [lokalOffen, setLokalOffen] = useState(false);
 
   const buendel = buendeleVerbindungen(conns);
   const echteZiele = buendel
@@ -524,6 +547,12 @@ function ConnectionList({ conns, onLookup }) {
 
   return (
     <div className="traffic-detail__connlist">
+      {/* Abschnitt 1: Aktiver Aussenverkehr (Verbindungen mit echtem Ziel). */}
+      {echteZiele.length > 0 && (
+        <h4 className="traffic-detail__group-title">
+          {t("beobachten.traffic.groupActive")}
+        </h4>
+      )}
       <ul className="traffic-detail__conns">
         {sichtbar.map((b) => (
           <BuendelZeile
@@ -531,10 +560,6 @@ function ConnectionList({ conns, onLookup }) {
             buendel={b}
             onLookup={onLookup}
           />
-        ))}
-        {/* Ziel-lose Verbindungen ans Ende, klar markiert und nicht anklickbar. */}
-        {ziellos.map((b) => (
-          <ZiellosZeile key={buendelSchluessel(b)} buendel={b} />
         ))}
       </ul>
       {toggleSinnvoll && (
@@ -547,6 +572,40 @@ function ConnectionList({ conns, onLookup }) {
             ? t("beobachten.traffic.showLess")
             : t("beobachten.traffic.showMore", { count: versteckt })}
         </button>
+      )}
+
+      {/* Abschnitt 2: ziel-lose Eintraege (lauschende Dienste + verbindungsloses
+          UDP) in einem ruhigen, einklappbaren Block — nur wenn vorhanden. */}
+      {ziellos.length > 0 && (
+        <div className="traffic-detail__lokal">
+          <button
+            type="button"
+            className="traffic-detail__lokal-head"
+            onClick={() => setLokalOffen((offen) => !offen)}
+            aria-expanded={lokalOffen}
+          >
+            <span className="traffic-detail__group-title traffic-detail__group-title--inline">
+              {t("beobachten.traffic.groupLocal", { count: ziellos.length })}
+            </span>
+            <span className="traffic-detail__lokal-toggle">
+              {lokalOffen
+                ? t("beobachten.traffic.groupLocalToggleHide")
+                : t("beobachten.traffic.groupLocalToggleShow")}
+            </span>
+          </button>
+          {lokalOffen && (
+            <>
+              <p className="traffic-detail__lokal-hint">
+                {t("beobachten.traffic.groupLocalHint")}
+              </p>
+              <ul className="traffic-detail__conns">
+                {ziellos.map((b) => (
+                  <ZiellosZeile key={buendelSchluessel(b)} buendel={b} />
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
       )}
     </div>
   );

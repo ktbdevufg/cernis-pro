@@ -641,7 +641,6 @@
       "showMore_one": "+ show 1 more target",
       "showMore_other": "+ show {{count}} more targets",
       "showLess": "show less",
-      "state": "State: {{value}}",
       "lookup": "look up",
       "refresh": "Refresh",
       "refreshIntervalLabel": "Auto-refresh",
@@ -651,7 +650,18 @@
       "sniStarting": "starting …",
       "sniActive": "SNI active",
       "sniHint": "Shows the real domain names apps request (instead of just the host). Requires elevated privileges.",
-      "sniPermission": "SNI observation requires elevated privileges."
+      "sniPermission": "SNI observation requires elevated privileges.",
+      "stateLabel": {
+        "established": "active",
+        "other": "status unclear",
+        "listen": "waiting",
+        "none": "connectionless"
+      },
+      "groupActive": "Active outbound traffic",
+      "groupLocal": "Local, no fixed peer ({{count}})",
+      "groupLocalHint": "Services waiting for connections, and connectionless UDP traffic such as local device discovery. Normal local network behaviour without a peer.",
+      "groupLocalToggleShow": "Show",
+      "groupLocalToggleHide": "Hide"
     },
     "outbound": {
       "hostScopeLocal": "Contacts of this machine — passively observed, not a network-wide view.",
