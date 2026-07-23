@@ -142,7 +142,7 @@ filecache = [
 
 [[package]]
 name = "cernis-pro"
-version = "2.0.3"
+version = "2.0.4"
 source = { virtual = "." }
 dependencies = [
     { name = "apscheduler" },

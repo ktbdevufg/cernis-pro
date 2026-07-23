@@ -407,7 +407,7 @@ def make_ws_scan(
                     # Kuratierte Felder + Vorzustands-IP aus der devices-DB lesen --
                     # die DB ist die Wahrheit fuer label/tags/notes, der frische Scan
                     # traegt sie leer. WICHTIG (ADR 0020): Dieser Lesevorgang muss VOR
-                    # dem devices-Upsert (_record_host -> RecordScannedHost -> merge_scan)
+                    # dem devices-Upsert (record_host_best_effort -> merge_scan)
                     # laufen, denn merge_scan ueberschreibt last_ip UNBEDINGT mit der
                     # neuen Scan-IP. Fuer den is_changed-Vergleich (DHCP-Lease-Wechsel)
                     # brauchen wir aber den VORZUSTAND von last_ip -- also erst lesen,
@@ -420,8 +420,8 @@ def make_ws_scan(
                     # die MAC in die Historie eintragen -- die Baseline fuer new_host_seen.
                     # Beide Naehte sind best-effort und unabhaengig; die Reihenfolge ist
                     # unkritisch (keine schreibt der anderen Daten vor).
-                    _record_host(record_host, event.host)
-                    _record_seen_host(record_seen, event.host)
+                    record_host_best_effort(record_host, event.host)
+                    record_seen_best_effort(record_seen, event.host)
                     frame = _host_detail_frame(event.host)
                     frame["is_known"] = baseline_known
                     # is_changed (ADR 0020): bekanntes Geraet, dessen gespeicherte IP
@@ -482,7 +482,7 @@ def make_ws_scan(
     return ws_scan
 
 
-def _record_host(record_host: Any, host: EnrichedHost) -> None:
+def record_host_best_effort(record_host: Any, host: EnrichedHost) -> None:
     """Verbucht einen angereicherten Host in der devices-DB (best-effort, S.7d).
 
     Hosts OHNE MAC werden uebersprungen: ``ScannedHost``/``RecordScannedHost`` sind
@@ -501,7 +501,7 @@ def _record_host(record_host: Any, host: EnrichedHost) -> None:
         logger.warning("record_scanned_host_failed", ip=host.ip, mac=host.mac, error=str(exc))
 
 
-def _record_seen_host(record_seen: Any, host: EnrichedHost) -> None:
+def record_seen_best_effort(record_seen: Any, host: EnrichedHost) -> None:
     """Traegt die Host-MAC in die analysis-Host-Historie ein (best-effort, C.2).
 
     Die zweite, von der devices-Projektion UNABHAENGIGE Schreib-Naht. Sie pflegt das
@@ -510,7 +510,7 @@ def _record_seen_host(record_seen: Any, host: EnrichedHost) -> None:
     Regel ``new_host_seen`` (ADR 0013): nach dem ERSTEN Scan sind alle gesehenen Hosts
     bekannt, "neu" feuert ab dem ZWEITEN Scan fuer echte Neuzugaenge.
 
-    Hosts OHNE MAC werden uebersprungen -- gleiche Linie wie ``_record_host`` und das
+    Hosts OHNE MAC werden uebersprungen -- gleiche Linie wie ``record_host_best_effort`` und das
     Repository (``record_seen`` ist MAC-keyed; ohne stabile Identitaet waere "neu" nur
     Rauschen). Ein Fehler (z.B. gesperrte DB) wird gefangen + geloggt, der Scan laeuft
     weiter (best-effort wie die devices-Projektion). Mit Warn-Log kein stiller

@@ -688,7 +688,7 @@ from domain.outbound_log import (
 )
 from domain.process import classify_kind
 from domain.resolver_names import known_resolver_name
-from domain.scanning import EnrichedHost
+from domain.scanning import EnrichedHost, HostEnriched, ScanConfig
 from domain.scheduler.models import DailyWindow
 from domain.security import CredentialKandidat, DefaultCredsEintrag
 from infrastructure.agent import (
@@ -882,7 +882,7 @@ from ports.security import PortQuery
 from ports.settings import SettingsRepository
 from ws_monitor import make_ws_monitor
 from ws_pcap import make_ws_pcap
-from ws_scan import make_ws_scan
+from ws_scan import make_ws_scan, record_host_best_effort, record_seen_best_effort
 
 logger = structlog.get_logger()
 
@@ -905,17 +905,45 @@ def _check_version_upgrade() -> None:
         version_file.write_text(APP_VERSION)
 
 
-async def _scheduled_scan(cidr: str, profile_id: str, schedule_id: int) -> None:
-    # Bewusste Abweichung von main.py: die dortige Profil-/`config`-Maschinerie war
-    # toter Code (das berechnete `config` wurde nie genutzt -- discover_subnet nimmt
-    # nur `cidr`) und barg einen latenten KeyError bei fehlendem "standard"-Profil.
-    # Hier nur das beobachtbare Verhalten: Subnetz scannen, Ergebnis speichern.
-    from modules.discovery import discover_subnet
-    from modules.storage import save_scan
+# Fabrik-Naht des geplanten Scans (E1): liefert (RunNetworkScan, RecordScannedHost,
+# record_seen-Callable). Wird von create_app auf die dortigen Builder gebunden
+# (spaetes Binden, Muster der "HIER gebunden"-Naehte) -- _scheduled_scan selbst
+# bleibt Modul-Level, weil seine Signatur der M.6-ScanTriggerCallback ist und die
+# Aufrufer (job_scheduler/ManageSchedules) unveraendert bleiben.
+_scheduled_scan_bausteine: Callable[[], tuple[Any, Any, Any]] | None = None
 
+
+async def _scheduled_scan(cidr: str, profile_id: str, schedule_id: int) -> None:
+    # E1: der geplante Scan nimmt DENSELBEN Pfad wie der manuelle -- voller
+    # RunNetworkScan (Enrich, Hostnamen, Historie ueber den scan_history-Port des
+    # Use-Case) plus die beiden Nachbearbeitungen pro angereichertem Host
+    # (devices-Projektion, analysis-Host-Historie), in der ws_scan.py-Reihenfolge.
+    # profile_id bleibt in der Signatur (M.6-ScanTriggerCallback, Aufrufer
+    # unveraendert), ist aber weiterhin ohne Wirkung -- ehrlich festgehalten,
+    # keine erfundene Profil-Logik.
     logger.info("scheduled_scan", cidr=cidr, profile=profile_id)
-    discovered = await discover_subnet(cidr, max_concurrent=64, timeout=1.0)
-    save_scan(cidr, [{"ip": h.ip, "mac": h.mac, "rtt_ms": h.rtt_ms} for h in discovered])
+    if _scheduled_scan_bausteine is None:
+        # Vor create_app kann kein Scheduler feuern; falls doch, ist das ein
+        # Verdrahtungsfehler -- laut loggen, den Scheduler NICHT reissen.
+        logger.error("scheduled_scan_unverdrahtet", cidr=cidr)
+        return
+    try:
+        run_scan, record_host, record_seen = _scheduled_scan_bausteine()
+        config = ScanConfig(cidrs=(cidr,))
+        angereichert = 0
+        async for event in run_scan.run(config):
+            if isinstance(event, HostEnriched):
+                # Gleiche Reihenfolge wie der WS-Handler (ws_scan.py): erst die
+                # devices-Projektion, dann die Host-Historie -- beide best-effort
+                # (Fehler pro Host werden dort gefangen + geloggt).
+                record_host_best_effort(record_host, event.host)
+                record_seen_best_effort(record_seen, event.host)
+                angereichert += 1
+        logger.info("scheduled_scan_done", cidr=cidr, hosts=angereichert)
+    except Exception as exc:
+        # Ein geplanter Scan darf den Scheduler NICHT reissen: Fehler loggen,
+        # nicht werfen (best-effort-Linie des WS-Handlers).
+        logger.warning("scheduled_scan_failed", cidr=cidr, error=str(exc))
 
 
 # ── FritzBox-Hosts: Verdrahtungs-Wrapper (best-effort, S.7c) ──────────────────
@@ -2623,6 +2651,20 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     # ObservedHost.is_known fuellt -- die Baseline der new_host_seen-Regel (ADR 0013).
     def _build_record_seen() -> Any:
         return host_history_repository().record_seen
+
+    # Fabrik-Naht des geplanten Scans (E1) an die drei Builder binden -- ab hier
+    # nimmt _scheduled_scan denselben Pfad wie der manuelle Scan. global statt
+    # app.state, weil _scheduled_scan als M.6-ScanTriggerCallback auf Modul-Level
+    # lebt (Signatur/Aufrufer unveraendert) und kein app-Objekt kennt.
+    def _scheduled_scan_bausteine_impl() -> tuple[Any, Any, Any]:
+        return (
+            _build_run_network_scan(),
+            _build_record_scanned_host(),
+            _build_record_seen(),
+        )
+
+    global _scheduled_scan_bausteine
+    _scheduled_scan_bausteine = _scheduled_scan_bausteine_impl
 
     # Baseline-Anreicherung des host_detail-Frames (ADR 0019): zwei zusaetzliche
     # Lese-Pfade, die der WS-Handler pro angereichertem Host konsultiert.

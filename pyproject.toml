@@ -5,7 +5,7 @@
 
 [project]
 name = "cernis-pro"
-version = "2.0.3"
+version = "2.0.4"
 description = "CERNIS PRO — lokaler Netzwerk- und System-Scanner (Backend-Rewrite v2)"
 requires-python = ">=3.12"
 # Gesamtwerk ist GPL-2.0-only: scapy (GPL-2.0-only) im Sniffer zwingt v2,
