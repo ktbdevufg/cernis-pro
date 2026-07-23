@@ -179,7 +179,8 @@ jobs:
           name: CERNIS PRO ${{ github.ref_name }}
           body: "Release ${{ github.ref_name }} -- Release-Notes werden separat gepflegt."
           draft: false
-          prerelease: false
+          # Gemeinsame Festlegung ALLER Build-Workflows: prerelease true, Freigabe von Hand.
+          prerelease: true
           fail_on_unmatched_files: true
           files: |
             src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
