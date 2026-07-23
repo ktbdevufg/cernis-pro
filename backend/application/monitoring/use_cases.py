@@ -377,21 +377,72 @@ class GetSchedules:
 
 
 class UpdateSchedule:
-    """Aktualisiert ``enabled``/``name`` eines Schedules (Pass-Through, nur Repo).
+    """Aktualisiert ``enabled``/``name`` eines Schedules UND zieht den Job nach (E1b).
 
-    BEFUND (charakterisierungstreu bewahrt, NICHT in M.6 gefixt): Bei
-    ``enabled=False`` wird der laufende Job NICHT entfernt -- ein deaktiviertes
-    Schedule laeuft weiter (latenter Altcode-Bug). Der Fix (``enabled=False`` ->
-    ``ScanJobScheduler.unregister``) gaebe diesem Use-Case spaeter den Job-Port dazu;
-    das ist ein bewusster eigener Schritt, kein M.6-Auftrag -- darum hier nur das
-    Repo (Pass-Through), kein Job-Port.
+    Der Schalter schaltet jetzt wirklich (Fix des in M.6 bewusst bewahrten
+    Altcode-Bugs "deaktiviertes Schedule laeuft weiter"): ``enabled=False``
+    entfernt den APScheduler-Job (``unregister``, idempotent), ``enabled=True``
+    registriert ihn aus der aktualisierten Zeile neu -- mit demselben im ctor
+    gebundenen ``ScanTriggerCallback`` wie ``ManageSchedules`` (EINE
+    Callback-Quelle, M.9-Muster). ``enabled=None`` heisst: nur der Name wurde
+    geaendert, am Job aendert sich nichts.
     """
 
-    def __init__(self, repository: ScheduleRepository) -> None:
+    def __init__(
+        self,
+        repository: ScheduleRepository,
+        job_scheduler: ScanJobScheduler,
+        callback: ScanTriggerCallback,
+    ) -> None:
         self._repository = repository
+        self._job_scheduler = job_scheduler
+        self._callback = callback
 
     def __call__(self, schedule_id: int, enabled: bool | None, name: str | None) -> None:
+        # REIHENFOLGE bewusst (Muster ``delete``): erst die Zeile
+        # (``repository.update``), dann der Job. Bei einem Teilausfall ist der
+        # Zeilen-Zustand die Wahrheit, an der sich der Job beim naechsten
+        # ``start()``/Neustart ohnehin ausrichtet -- ein kurz nachlaufender bzw.
+        # kurz fehlender Job heilt sich also selbst, waehrend die umgekehrte
+        # Richtung (Job weg, Zeile sagt noch "aktiv") einen dauerhaft stillen
+        # Tot-Eintrag hinterlassen koennte. Die Reihenfolge nicht umdrehen.
         self._repository.update(schedule_id, enabled, name)
+        if enabled is None:
+            return  # reine Namensaenderung -- der Job bleibt unangetastet.
+        if enabled is False:
+            # unregister ist idempotent (+ Log) -- ein nie/schon entfernter Job
+            # ist kein Fehler.
+            self._job_scheduler.unregister(schedule_id)
+            return
+        # enabled is True: den Job aus der aktualisierten Zeile neu registrieren.
+        # Der Port hat bewusst keinen Einzel-Lesezugriff -- list() + id-Suche
+        # genuegt (Schedules sind eine Handvoll Zeilen, keine Port-Erweiterung
+        # ohne Not).
+        row = next(
+            (r for r in self._repository.list() if r.get("id") == schedule_id),
+            None,
+        )
+        if row is None:
+            # Zwischen update und list geloescht -- Warn-Log statt Wurf.
+            _logger.warning("schedule_row_missing", schedule_id=schedule_id)
+            return
+        job_row = {
+            "id": row["id"],
+            "cidr": row["cidr"],
+            "profile_id": row["profile_id"],
+            "schedule": row["schedule"],
+        }
+        try:
+            self._job_scheduler.register(job_row, self._callback)
+        except ScheduleParseError as exc:
+            # GEZIELTER Fang (Muster ManageSchedules.add): kaputter schedule-String
+            # -> Warn-Log, Job nicht registriert, die Zeile ist trotzdem aktualisiert.
+            _logger.warning(
+                "schedule_job_not_registered",
+                schedule_id=schedule_id,
+                schedule=row["schedule"],
+                error=str(exc),
+            )
 
 
 # ── SLA-Lese-Use-Cases (M.7) ────────────────────────────────────────────────

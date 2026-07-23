@@ -8,7 +8,11 @@ Schwerpunkte:
   kaputtem Schedule: DB-Zeile entsteht, Job NICHT, ScheduleParseError GEZIELT
   gefangen (kein Crash).
 * ManageSchedules.delete: orchestriert repo.delete + jobengine.unregister.
-* GetSchedules / UpdateSchedule: Pass-Through aufs Repo.
+* GetSchedules: Pass-Through aufs Repo.
+* UpdateSchedule (E1b): schreibt die Zeile UND zieht den Job nach -- enabled=False
+  entfernt ihn (unregister), enabled=True registriert ihn aus der aktualisierten
+  Zeile neu, enabled=None (nur Name) laesst ihn unangetastet; ScheduleParseError
+  beim Re-Registrieren wird gezielt gefangen.
 """
 
 from typing import Any
@@ -186,11 +190,77 @@ def test_get_schedules_passes_through() -> None:
     assert rows[0]["name"] == "A"
 
 
-def test_update_schedule_passes_through() -> None:
+def test_update_schedule_schreibt_zeile() -> None:
     repo = _FakeRepo()
+    jobs = _FakeJobScheduler()
     sid = repo.add("A", "10.0.0.0/24", "p", "interval:1h")
-    uc = UpdateSchedule(repo)
+    uc = UpdateSchedule(repo, jobs, _callback)
     uc(sid, enabled=False, name="B")
     row = repo.list()[0]
     assert row["enabled"] == 0
     assert row["name"] == "B"
+
+
+# ── UpdateSchedule: Job-Nachzug (E1b) ───────────────────────────────────────
+
+
+def test_update_enabled_false_entfernt_den_job() -> None:
+    repo = _FakeRepo()
+    jobs = _FakeJobScheduler()
+    sid = repo.add("A", "10.0.0.0/24", "p", "interval:1h")
+    uc = UpdateSchedule(repo, jobs, _callback)
+
+    uc(sid, enabled=False, name=None)
+
+    assert jobs.unregistered == [sid]  # Job mit der richtigen id entfernt
+    assert jobs.registered == []
+
+
+def test_update_enabled_true_registriert_aus_aktualisierter_zeile() -> None:
+    repo = _FakeRepo()
+    jobs = _FakeJobScheduler()
+    sid = repo.add("A", "10.0.0.0/24", "p", "interval:1h")
+    uc = UpdateSchedule(repo, jobs, _callback)
+
+    uc(sid, enabled=True, name=None)
+
+    assert jobs.registered == [sid]  # Job aus der Zeile (id/cidr/profile/schedule)
+    assert jobs.unregistered == []
+
+
+def test_update_nur_name_laesst_job_unangetastet() -> None:
+    repo = _FakeRepo()
+    jobs = _FakeJobScheduler()
+    sid = repo.add("A", "10.0.0.0/24", "p", "interval:1h")
+    uc = UpdateSchedule(repo, jobs, _callback)
+
+    uc(sid, enabled=None, name="Neuer Name")
+
+    assert jobs.registered == []  # weder register ...
+    assert jobs.unregistered == []  # ... noch unregister
+    assert repo.list()[0]["name"] == "Neuer Name"
+
+
+def test_update_enabled_true_parse_error_gezielt_gefangen() -> None:
+    repo = _FakeRepo()
+    jobs = _FakeJobScheduler(raise_parse_error=True)
+    sid = repo.add("A", "10.0.0.0/24", "p", "kaputt")
+    uc = UpdateSchedule(repo, jobs, _callback)
+
+    # Kein Wurf: ScheduleParseError wird gezielt gefangen (Warn-geloggt), die
+    # Zeile bleibt aktualisiert.
+    uc(sid, enabled=True, name=None)
+
+    assert jobs.registered == []
+    assert repo.list()[0]["enabled"] == 1
+
+
+def test_update_geloeschte_zeile_ist_warn_noop() -> None:
+    repo = _FakeRepo()
+    jobs = _FakeJobScheduler()
+    uc = UpdateSchedule(repo, jobs, _callback)
+
+    # id existiert nicht (geloescht) -> Warn-Log statt Wurf, kein register.
+    uc(999, enabled=True, name=None)
+
+    assert jobs.registered == []

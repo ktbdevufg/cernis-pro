@@ -132,7 +132,9 @@ def _wired_app(
     app.dependency_overrides[provide_manage_schedules] = lambda: ManageSchedules(
         schedules, job_scheduler, _scheduled_scan_stub
     )
-    app.dependency_overrides[provide_update_schedule] = lambda: UpdateSchedule(schedules)
+    app.dependency_overrides[provide_update_schedule] = lambda: UpdateSchedule(
+        schedules, job_scheduler, _scheduled_scan_stub
+    )
     # targets-Schreibpfad auf einer tmp-Settings-DB (kein echtes cernis.db).
     settings = SqliteSettingsRepository(db_path)
     app.dependency_overrides[provide_add_monitor_target] = lambda: AddMonitorTarget(settings)

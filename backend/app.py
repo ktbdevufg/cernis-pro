@@ -2947,7 +2947,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         schedule_repository(), job_scheduler(), _scheduled_scan
     )
     app.dependency_overrides[provide_update_schedule] = lambda: UpdateSchedule(
-        schedule_repository()
+        schedule_repository(), job_scheduler(), _scheduled_scan
     )
     # targets-Schreibpfad (M.9-Nachzuegler): Add/Delete auf den migrierten settings-
     # ``repository()`` (Custom-Targets liegen als ``monitor_custom_targets``-Setting).
