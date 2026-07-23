@@ -212,6 +212,16 @@ export default function RouteView() {
         </button>
       </form>
 
+      {/* Sichtbarer Laufhinweis waehrend der Messung: der deaktivierte Knopf allein
+          liest sich wie "kaputt". role=status + aria-live, damit Screenreader die
+          Zustandsaenderung mitbekommen. Kein Timer/Fortschritt — die echte
+          Restdauer ist nicht bekannt, eine Prozentanzeige waere unehrlich. */}
+      {laedt && (
+        <div className="route__running" role="status" aria-live="polite">
+          {t("untersuchen.route.runningHint")}
+        </div>
+      )}
+
       {zeigeRechteHinweis && (
         <div className="route__permission" role="note">
           {t("untersuchen.route.permissionHint")}

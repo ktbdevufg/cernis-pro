@@ -60,6 +60,17 @@
   border-radius: var(--radius-md);
 }
 
+/* Laufhinweis waehrend der Messung: ruhiger Streifen im Stil von
+   .route__permission (gleiche Metrik/Toene), kein Spinner, kein Fortschritt. */
+.route__running {
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  color: var(--color-text-sec);
+  background: var(--color-bar);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
 .route__error {
   padding: 10px 12px;
   font-size: 0.9rem;

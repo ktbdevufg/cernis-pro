@@ -1396,7 +1396,8 @@
       "colIp": "IP",
       "colCountry": "Land",
       "colOperator": "Betreiber / ASN",
-      "colRtt": "RTT"
+      "colRtt": "RTT",
+      "runningHint": "Die Messung läuft — das kann je nach Ziel bis zu einer Minute dauern."
     },
     "cve": {
       "loading": "Lade CVE-Befunde …",

@@ -1396,7 +1396,8 @@
       "colIp": "IP",
       "colCountry": "Country",
       "colOperator": "Operator / ASN",
-      "colRtt": "RTT"
+      "colRtt": "RTT",
+      "runningHint": "Measurement in progress — depending on the target this can take up to a minute."
     },
     "cve": {
       "loading": "Loading CVE findings …",
