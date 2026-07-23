@@ -661,7 +661,8 @@
       "groupLocal": "Local, no fixed peer ({{count}})",
       "groupLocalHint": "Services waiting for connections, and connectionless UDP traffic such as local device discovery. Normal local network behaviour without a peer.",
       "groupLocalToggleShow": "Show",
-      "groupLocalToggleHide": "Hide"
+      "groupLocalToggleHide": "Hide",
+      "durchsatzNichtMessbar": "On macOS it is not possible to measure how much data an individual program transfers — unlike Linux or Windows, the operating system provides no interface for this. It cannot be unlocked. What is shown in full, however, is which program talks to which peer."
     },
     "outbound": {
       "hostScopeLocal": "Contacts of this machine — passively observed, not a network-wide view.",

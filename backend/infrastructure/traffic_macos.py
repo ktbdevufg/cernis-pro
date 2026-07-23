@@ -28,10 +28,10 @@ from domain.traffic import (
 # Linux-Adapter gibt), waere hier falsch UND wirkungslos -- root aendert daran
 # nichts, und das Projekt eskaliert grundsaetzlich keine Rechte.
 _NOT_APPLICABLE_REASON = (
-    "Der Durchsatz je Programm (Stufe 2) laesst sich auf macOS nicht messen: das "
-    "System stellt dafuer keine Schnittstelle bereit (unter Linux liefert sie "
+    "Der Durchsatz je Programm (Stufe 2) lässt sich auf macOS nicht messen: das "
+    "System stellt dafür keine Schnittstelle bereit (unter Linux liefert sie "
     "sock_diag). Welche Programme mit welchen Gegenstellen sprechen (Stufe 1), "
-    "wird vollstaendig angezeigt."
+    "wird vollständig angezeigt."
 )
 
 _L4_BY_SOCKET_KIND: dict[int, L4Protocol] = {

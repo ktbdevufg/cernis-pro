@@ -661,7 +661,8 @@
       "groupLocal": "Lokal, ohne feste Gegenstelle ({{count}})",
       "groupLocalHint": "Dienste, die auf Verbindungen warten, und verbindungsloser UDP-Verkehr wie die lokale Gerätesuche. Normales lokales Netzverhalten ohne Gegenstelle.",
       "groupLocalToggleShow": "Anzeigen",
-      "groupLocalToggleHide": "Ausblenden"
+      "groupLocalToggleHide": "Ausblenden",
+      "durchsatzNichtMessbar": "Auf macOS lässt sich nicht messen, wie viele Daten ein einzelnes Programm überträgt — das Betriebssystem stellt dafür im Gegensatz zu Linux oder Windows keine Schnittstelle bereit. Das lässt sich nicht freischalten. Vollständig angezeigt wird dagegen, welches Programm mit welcher Gegenstelle spricht."
     },
     "outbound": {
       "hostScopeLocal": "Kontakte dieses Rechners — passiv beobachtet, kein netzweiter Blick.",

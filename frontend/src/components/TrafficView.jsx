@@ -1011,7 +1011,19 @@ export default function TrafficView({
 
   return (
     <div className="traffic">
-      {zeigePermission && <PermissionHinweis text={permission.error} />}
+      {/* not_applicable (Plattform bietet die Messung nicht, z. B. macOS): eigener,
+          uebersetzter UI-Text statt des rohen Backend-Strings (D2). Bei allen
+          anderen Faellen (v. a. needs_privileges) bleibt die Backend-Begruendung —
+          sie nennt dort den behebbaren Weg. */}
+      {zeigePermission && (
+        <PermissionHinweis
+          text={
+            durchsatzNichtVerfuegbar
+              ? t("beobachten.traffic.durchsatzNichtMessbar")
+              : permission.error
+          }
+        />
+      )}
       {sniError && <SniHinweis text={sniError} />}
 
       {status === "laedt" && (
