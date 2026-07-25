@@ -149,6 +149,18 @@ class _FakeScheduleRepo:
                 if name is not None:
                     row["name"] = name
 
+    def set_run_times(
+        self,
+        schedule_id: int,
+        last_run: str | None,
+        next_run: str | None,
+    ) -> None:
+        """Setzt BEIDE Zeit-Spalten (``None`` = leer), wie der Vertrag es fordert."""
+        for row in self.rows:
+            if row["id"] == schedule_id:
+                row["last_run"] = last_run
+                row["next_run"] = next_run
+
     def delete(self, schedule_id: int) -> None:
         self.rows = [r for r in self.rows if r["id"] != schedule_id]
 
@@ -173,6 +185,12 @@ class _FakeJobScheduler:
 
     def unregister(self, schedule_id: int) -> None:
         self.registered = [s for s in self.registered if s != schedule_id]
+
+    def next_run_time(self, schedule_id: int) -> str | None:
+        """Feuerzeit nur fuer registrierte Jobs -- sonst ehrlich ``None``."""
+        if schedule_id not in self.registered:
+            return None
+        return "2026-06-03T02:00:00+00:00"
 
 
 class _FakeSlaRepo:

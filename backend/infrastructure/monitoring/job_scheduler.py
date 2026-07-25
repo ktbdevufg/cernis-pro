@@ -28,6 +28,7 @@ S3-FIXES (bewusste v2-Abweichungen, kein Charakterisierer deckt den Job-Pfad):
   legitimer Leer-Zustand, aber sichtbar gemacht.
 """
 
+from datetime import UTC, datetime
 from typing import Any, assert_never
 
 import structlog
@@ -119,3 +120,32 @@ class ApschedulerJobScheduler:
             # "Job gibt es nicht" ist ein legitimer Leer-Zustand (z. B. nie
             # registriert) -- idempotent, aber sichtbar geloggt statt stumm.
             _logger.warning("scan_job_unregister_noop", schedule_id=schedule_id)
+
+    def next_run_time(self, schedule_id: int) -> str | None:
+        """Naechste Feuerzeit des Jobs als ISO-8601-UTC-String (oder ``None``).
+
+        Liest den registrierten APScheduler-Job und projiziert seine
+        ``next_run_time`` auf einen reinen ``str`` -- der APScheduler-``datetime``
+        (in der lokalen Scheduler-Zeitzone) verlaesst den Adapter NICHT. Die
+        Umrechnung auf UTC passiert HIER, damit der geschriebene Wert dasselbe
+        Format traegt wie ``created_at`` (ISO 8601, UTC, mit ``+00:00``).
+
+        Ehrlich leer statt erfunden (S3): keine laufende Engine, kein Job unter
+        der id, oder ein Job ohne naechste Feuerzeit -> ``None``.
+        """
+        if self._scheduler is None:
+            return None
+        try:
+            job = self._scheduler.get_job(f"scan_{schedule_id}")
+        except Exception:
+            # Engine im Auf-/Abbau (z. B. Jobstore noch nicht bereit) -- kein
+            # Grund zu werfen: die Zeit bleibt ehrlich leer, sichtbar geloggt.
+            _logger.warning("scan_job_next_run_lookup_failed", schedule_id=schedule_id)
+            return None
+        if job is None:
+            return None
+        next_run: datetime | None = getattr(job, "next_run_time", None)
+        if next_run is None:
+            # Registrierter, aber (noch) nicht eingeplanter Job (z. B. pausiert).
+            return None
+        return next_run.astimezone(UTC).isoformat()

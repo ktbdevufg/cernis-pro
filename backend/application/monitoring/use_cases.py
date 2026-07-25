@@ -94,6 +94,7 @@ from domain.monitoring import (
     stop as domain_stop,
 )
 from domain.settings import Setting, SettingValue
+from ports.devices import Clock
 from ports.monitoring import (
     AlertRaiserPort,
     LoggingEventRepository,
@@ -275,6 +276,50 @@ class GetRttHistory:
 # application). Muster wie GetScanHistory/GetDevices.
 
 
+def _row_last_run(row: dict[str, Any] | None) -> str | None:
+    """Die ``last_run``-Zeit einer Repo-Zeile als ``str`` (oder ``None`` = leer).
+
+    Die Zeilen sind rohe ``dict``s (Port-Vertrag: 1:1-Tabellen-Dump), der Wert ist
+    ``TEXT`` oder ``NULL`` -- der ``str()``-Cast macht das fuer mypy explizit, ohne
+    je aus ``None`` einen Text zu erfinden.
+    """
+    if row is None:
+        return None
+    value = row.get("last_run")
+    return None if value is None else str(value)
+
+
+def _write_run_times(
+    repository: ScheduleRepository,
+    schedule_id: int,
+    last_run: str | None,
+    next_run: str | None,
+) -> None:
+    """Schreibt die Ausfuehrungszeiten BEST-EFFORT (Finding 3).
+
+    Die Zeiten sind eine ANZEIGE-Information -- ihr Schreiben darf niemals den
+    fachlichen Vorgang reissen, an dem es haengt: weder einen laufenden geplanten
+    Scan (``RecordScheduleRun``) noch das Anlegen/Aktualisieren eines Schedules.
+    Ein Persistenz-Fehler wird darum GELOGGT und geschluckt, nicht geworfen.
+
+    Das ist KEIN stiller Fallback (S3): es wird nichts erfunden und nichts leise
+    ersetzt -- der Fehlschlag ist im Log sichtbar, und die Spalte behaelt schlicht
+    ihren alten Wert. Erfundene Werte gaebe es nur, wenn hier bei ``None`` ein
+    Ersatz-Zeitstempel eingesetzt wuerde; genau das passiert nicht (``None`` wird
+    unveraendert als "leer" durchgereicht).
+    """
+    try:
+        repository.set_run_times(schedule_id, last_run, next_run)
+    except Exception as exc:
+        _logger.warning(
+            "schedule_run_times_not_written",
+            schedule_id=schedule_id,
+            last_run=last_run,
+            next_run=next_run,
+            error=str(exc),
+        )
+
+
 class ManageSchedules:
     """Legt Schedules an / loescht sie -- orchestriert Repo (DB) + Job-Engine.
 
@@ -348,6 +393,17 @@ class ManageSchedules:
                 schedule=schedule,
                 error=str(exc),
             )
+            # Kein Job -> keine naechste Feuerzeit. Die Zeile bleibt (best-effort),
+            # ihre next_run bleibt ehrlich leer (S3: kein erfundener Wert).
+            return schedule_id
+        # Job steht -> next_run aus der Engine nachziehen (last_run bleibt leer:
+        # ein frisches Schedule ist noch nie gelaufen).
+        _write_run_times(
+            self._repository,
+            schedule_id,
+            last_run=None,
+            next_run=self._job_scheduler.next_run_time(schedule_id),
+        )
         return schedule_id
 
     def delete(self, schedule_id: int) -> None:
@@ -413,6 +469,15 @@ class UpdateSchedule:
             # unregister ist idempotent (+ Log) -- ein nie/schon entfernter Job
             # ist kein Fehler.
             self._job_scheduler.unregister(schedule_id)
+            # Kein Job mehr -> keine naechste Feuerzeit: next_run wird LEER
+            # (Finding 3). last_run bleibt erhalten -- der letzte Lauf hat
+            # stattgefunden, das Deaktivieren macht ihn nicht ungeschehen.
+            _write_run_times(
+                self._repository,
+                schedule_id,
+                last_run=self._last_run_of(schedule_id),
+                next_run=None,
+            )
             return
         # enabled is True: den Job aus der aktualisierten Zeile neu registrieren.
         # Der Port hat bewusst keinen Einzel-Lesezugriff -- list() + id-Suche
@@ -443,6 +508,85 @@ class UpdateSchedule:
                 schedule=row["schedule"],
                 error=str(exc),
             )
+            # Kein Job -> next_run bleibt ehrlich leer (S3), last_run unberuehrt.
+            _write_run_times(
+                self._repository,
+                schedule_id,
+                last_run=_row_last_run(row),
+                next_run=None,
+            )
+            return
+        # Job steht wieder -> next_run aus der Engine nachziehen; last_run bleibt,
+        # wie es war (das Aktivieren ist kein Lauf).
+        _write_run_times(
+            self._repository,
+            schedule_id,
+            last_run=_row_last_run(row),
+            next_run=self._job_scheduler.next_run_time(schedule_id),
+        )
+
+    def _last_run_of(self, schedule_id: int) -> str | None:
+        """Liest die bestehende ``last_run``-Zeit einer Zeile (unveraendert durchreichen).
+
+        ``set_run_times`` setzt BEIDE Spalten (``None`` = leer) -- wer nur
+        ``next_run`` aendern will, muss ``last_run`` mitgeben. Der Port hat bewusst
+        keinen Einzel-Lesezugriff; ``list()`` + id-Suche genuegt (Muster oben:
+        Schedules sind eine Handvoll Zeilen, keine Port-Erweiterung ohne Not).
+        Zeile weg -> ``None`` (dann trifft das UPDATE ohnehin keine Zeile).
+        """
+        row = next(
+            (r for r in self._repository.list() if r.get("id") == schedule_id),
+            None,
+        )
+        return _row_last_run(row)
+
+
+class RecordScheduleRun:
+    """Haelt den Ausloesezeitpunkt eines geplanten Scans fest (Finding 3).
+
+    Der DRITTE Schreibpfad der Ausfuehrungszeiten neben ``ManageSchedules.add``
+    und ``UpdateSchedule`` -- und der einzige, der ``last_run`` wirklich fuellt:
+    Wenn der Scheduler ein Schedule ausloest, wird ``last_run`` auf DIESEN
+    Zeitpunkt gesetzt UND ``next_run`` frisch aus der Job-Engine nachgezogen
+    (der APScheduler hat seinen Trigger zu diesem Zeitpunkt bereits
+    weitergestellt, die neue Zeit ist also die naechste, nicht die eben
+    gefeuerte).
+
+    RING-ZUORDNUNG: Der Ausloeser selbst (``app.py._scheduled_scan``) lebt im
+    Composition Root, weil er den scanning-Use-Case verdrahtet. Die
+    Zeit-Schreiblogik gehoert aber nicht dorthin -- sie ist ein fachlicher
+    Schritt ueber zwei Ports und lebt darum HIER im application-Ring, als eigener
+    Use-Case, den der Composition Root nur noch aufruft. So bleibt die Richtung
+    ``infrastructure -> application`` unberuehrt (der Adapter wird gerufen, er
+    ruft nicht).
+
+    ZEITQUELLE: der injizierte ``Clock``-Port (Muster ``RecordScannedHost``/
+    ``GetDeviceStats``) -- ``clock.now().isoformat()`` liefert exakt das Format
+    von ``created_at`` (ISO 8601, UTC, mit ``+00:00``). Keine eigene Uhr im
+    Use-Case, kein ``datetime.now()``.
+
+    BEST-EFFORT (Punkt E): Ein Fehler beim Schreiben der Zeiten darf einen
+    laufenden geplanten Scan NIEMALS verhindern -- ``__call__`` wirft nicht, es
+    loggt (s. ``_write_run_times``).
+    """
+
+    def __init__(
+        self,
+        repository: ScheduleRepository,
+        job_scheduler: ScanJobScheduler,
+        clock: Clock,
+    ) -> None:
+        self._repository = repository
+        self._job_scheduler = job_scheduler
+        self._clock = clock
+
+    def __call__(self, schedule_id: int) -> None:
+        last_run = self._clock.now().isoformat()
+        # next_run NACH dem Feuern gelesen: die Engine hat den Trigger zu diesem
+        # Zeitpunkt schon weitergestellt. Kein Job/keine Engine -> None (ehrlich
+        # leer, kein erfundener Wert).
+        next_run = self._job_scheduler.next_run_time(schedule_id)
+        _write_run_times(self._repository, schedule_id, last_run=last_run, next_run=next_run)
 
 
 # ── SLA-Lese-Use-Cases (M.7) ────────────────────────────────────────────────

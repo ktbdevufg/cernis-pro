@@ -87,6 +87,13 @@ class _FakeJobScheduler:
     def unregister(self, schedule_id: int) -> None:
         self.unregistered.append(schedule_id)
 
+    def next_run_time(self, schedule_id: int) -> str | None:
+        # Feste Feuerzeit fuer registrierte Jobs (Finding 3), sonst ehrlich None --
+        # so kann der API-Test die durchgereichten Zeiten deterministisch pruefen.
+        if schedule_id not in self.registered:
+            return None
+        return "2026-06-03T02:00:00+00:00"
+
 
 @pytest.fixture
 def db_path(tmp_path: Path) -> Path:

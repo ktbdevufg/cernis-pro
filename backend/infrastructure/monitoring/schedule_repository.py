@@ -20,6 +20,13 @@ den ``schedule``-String UNGEPARST (das Parsen + Job-Registrieren macht der Use-C
 ueber den ``ScanJobScheduler``); so landet auch ein unparsbarer String in der
 Liste, und der best-effort-Pfad in ``ManageSchedules`` entscheidet ueber den Job.
 
+``set_run_times`` (Finding 3) ist der EINZIGE Schreibpfad der beiden Spalten
+``last_run``/``next_run``, die bis dahin nur im Schema existierten (keine einzige
+Schreibstelle im Backend -> die Liste zeigte dauerhaft leere Zeiten). Es schreibt
+fertige ISO-8601-UTC-Strings des Aufrufers, formatiert also selbst nichts -- das
+Repo bleibt uhrfrei (die Zeiten entstehen im application-Ring aus der ``Clock``
+bzw. aus dem Job-Scheduler-Port).
+
 BEFUND (charakterisierungstreu bewahrt, NICHT in M.6 gefixt): ``update`` mit
 ``enabled=False`` entfernt NICHT den laufenden Job -- ein deaktiviertes Schedule
 laeuft weiter (latenter Altcode-Bug). Das Repo macht nur DB; der Fix waere ein
@@ -113,6 +120,23 @@ class SqliteScheduleRepository:
                     "UPDATE scan_schedules SET name=? WHERE id=?",
                     (name, schedule_id),
                 )
+
+    def set_run_times(
+        self,
+        schedule_id: int,
+        last_run: str | None,
+        next_run: str | None,
+    ) -> None:
+        # Der EINZIGE Schreibpfad der beiden bis dato toten Spalten (Finding 3).
+        # BEIDE Werte werden immer gesetzt -- ``None`` schreibt NULL (explizit
+        # "leer"), nicht "unveraendert lassen" wie bei ``update``. Die Zeiten
+        # kommen als fertige ISO-8601-UTC-Strings vom Aufrufer (application-Ring);
+        # das Repo bleibt uhrfrei -- es formatiert nichts und erfindet nichts.
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE scan_schedules SET last_run=?, next_run=? WHERE id=?",
+                (last_run, next_run, schedule_id),
+            )
 
     def delete(self, schedule_id: int) -> None:
         # Idempotent: DELETE auf eine nicht-existente id ist kein Fehler (0 rows).

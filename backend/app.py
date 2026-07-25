@@ -499,6 +499,7 @@ from application.monitoring import (
     LoggingTaskNotFound,
     ManageSchedules,
     PauseLoggingTask,
+    RecordScheduleRun,
     ResumeActiveLoggingTasks,
     ResumeLoggingTask,
     RunLoggingRetention,
@@ -912,6 +913,12 @@ def _check_version_upgrade() -> None:
 # Aufrufer (job_scheduler/ManageSchedules) unveraendert bleiben.
 _scheduled_scan_bausteine: Callable[[], tuple[Any, Any, Any]] | None = None
 
+# Zweite, EIGENE Fabrik-Naht (Finding 3): der Use-Case, der die Ausfuehrungszeiten
+# des ausgeloesten Schedules festhaelt. Bewusst NICHT in das Bausteine-Tupel oben
+# gepackt -- das buendelt die Scan-Bausteine; die Zeit-Buchung ist ein eigener,
+# unabhaengiger Belang (sie muss auch dann laufen, wenn der Scan spaeter scheitert).
+_scheduled_scan_zeitbuchung: Callable[[], RecordScheduleRun] | None = None
+
 
 async def _scheduled_scan(cidr: str, profile_id: str, schedule_id: int) -> None:
     # E1: der geplante Scan nimmt DENSELBEN Pfad wie der manuelle -- voller
@@ -922,6 +929,13 @@ async def _scheduled_scan(cidr: str, profile_id: str, schedule_id: int) -> None:
     # unveraendert), ist aber weiterhin ohne Wirkung -- ehrlich festgehalten,
     # keine erfundene Profil-Logik.
     logger.info("scheduled_scan", cidr=cidr, profile=profile_id)
+    # Finding 3: den Ausloesezeitpunkt SOFORT buchen (last_run = jetzt, next_run
+    # frisch aus der Engine) -- VOR dem eigentlichen Scan und ausserhalb dessen
+    # try/except. Ein geplanter Lauf HAT stattgefunden, auch wenn er spaeter
+    # scheitert; und der Use-Case ist selbst best-effort (er wirft nie), kann den
+    # Scan also nicht verhindern.
+    if _scheduled_scan_zeitbuchung is not None:
+        _scheduled_scan_zeitbuchung()(schedule_id)
     if _scheduled_scan_bausteine is None:
         # Vor create_app kann kein Scheduler feuern; falls doch, ist das ein
         # Verdrahtungsfehler -- laut loggen, den Scheduler NICHT reissen.
@@ -2665,6 +2679,16 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     global _scheduled_scan_bausteine
     _scheduled_scan_bausteine = _scheduled_scan_bausteine_impl
+
+    # Zeitbuchungs-Naht (Finding 3) an den Use-Case binden -- gleiches Muster, aber
+    # eigene Naht (s. Modul-Kommentar). Spaete Namensaufloesung von
+    # schedule_repository/job_scheduler/schedule_clock, die erst im monitoring-Block
+    # weiter unten entstehen (Muster _build_is_known/host_history_repository).
+    def _scheduled_scan_zeitbuchung_impl() -> RecordScheduleRun:
+        return RecordScheduleRun(schedule_repository(), job_scheduler(), schedule_clock)
+
+    global _scheduled_scan_zeitbuchung
+    _scheduled_scan_zeitbuchung = _scheduled_scan_zeitbuchung_impl
 
     # Baseline-Anreicherung des host_detail-Frames (ADR 0019): zwei zusaetzliche
     # Lese-Pfade, die der WS-Handler pro angereichertem Host konsultiert.

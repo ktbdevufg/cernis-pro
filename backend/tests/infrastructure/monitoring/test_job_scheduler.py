@@ -4,7 +4,9 @@ Getestet: (1) Port-Konformitaet, (2) ``_build_trigger`` baut die richtigen
 APScheduler-Trigger aus der ``ScheduleSpec`` (Interval m/h/d, Cron), (3) ``register``
 parst via ``parse_schedule`` und legt den Job an; ein kaputter String propagiert
 ``ScheduleParseError`` (kein stiller Fallback), (4) ``unregister`` ist idempotent
-(nie registrierter Job -> kein Fehler), (5) start/stop-Lifecycle + Doppelstart-Schutz.
+(nie registrierter Job -> kein Fehler), (5) start/stop-Lifecycle + Doppelstart-Schutz,
+(6) ``next_run_time`` (Finding 3): ISO-8601-UTC-``str`` in der Zukunft fuer einen
+registrierten Job, ``None`` ohne Engine / ohne Job / nach ``unregister``.
 
 ``AsyncIOScheduler.start()`` bindet sich an ``asyncio.get_running_loop()`` -- die
 start-abhaengigen Tests laufen daher INNERHALB eines ``asyncio.run`` (kein
@@ -14,6 +16,7 @@ kein echter Job; nur der Scheduler-/Job-Zustand wird geprueft. Die reinen
 """
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from apscheduler.triggers.cron import CronTrigger
@@ -132,6 +135,74 @@ def test_unregister_removes_registered_job() -> None:
             assert sched._scheduler.get_job("scan_5") is not None
             sched.unregister(5)
             assert sched._scheduler.get_job("scan_5") is None
+        finally:
+            sched.stop()
+
+    asyncio.run(_run())
+
+
+# ── next_run_time (Finding 3) ───────────────────────────────────────────────
+
+
+def test_next_run_time_liefert_iso_utc_string() -> None:
+    """Der registrierte Job meldet seine Feuerzeit als ISO-8601-UTC-``str``."""
+
+    async def _run() -> None:
+        sched = ApschedulerJobScheduler()
+        sched.start(_noop_callback)
+        try:
+            sched.register(
+                {"id": 3, "cidr": "10.0.0.0/24", "profile_id": "p", "schedule": "interval:2m"},
+                _noop_callback,
+            )
+            wert = sched.next_run_time(3)
+            assert wert is not None
+            # Reiner str -- KEIN APScheduler-/datetime-Fremdtyp verlaesst den Adapter.
+            assert isinstance(wert, str)
+            # Gleiches Format wie created_at: ISO 8601, UTC, mit Zonensuffix.
+            assert wert.endswith("+00:00")
+            geparst = datetime.fromisoformat(wert)
+            assert geparst.tzinfo is not None
+            assert geparst.utcoffset() == timedelta(0)
+            # Ein interval:2m-Job feuert in der Zukunft (Toleranz: <= 2 Minuten).
+            jetzt = datetime.now(UTC)
+            assert jetzt < geparst <= jetzt + timedelta(minutes=2, seconds=5)
+        finally:
+            sched.stop()
+
+    asyncio.run(_run())
+
+
+def test_next_run_time_unbekannter_job_ist_none() -> None:
+    async def _run() -> None:
+        sched = ApschedulerJobScheduler()
+        sched.start(_noop_callback)
+        try:
+            assert sched.next_run_time(9999) is None  # nie registriert -> ehrlich leer
+        finally:
+            sched.stop()
+
+    asyncio.run(_run())
+
+
+def test_next_run_time_ohne_engine_ist_none() -> None:
+    # Kein start() -> keine Engine, keine Feuerzeit. Kein Fehler, kein Loop noetig.
+    sched = ApschedulerJobScheduler()
+    assert sched.next_run_time(1) is None
+
+
+def test_next_run_time_nach_unregister_ist_none() -> None:
+    async def _run() -> None:
+        sched = ApschedulerJobScheduler()
+        sched.start(_noop_callback)
+        try:
+            sched.register(
+                {"id": 4, "cidr": "10.0.0.0/24", "profile_id": "p", "schedule": "interval:2m"},
+                _noop_callback,
+            )
+            assert sched.next_run_time(4) is not None
+            sched.unregister(4)
+            assert sched.next_run_time(4) is None  # Job weg -> Zeit leer
         finally:
             sched.stop()
 

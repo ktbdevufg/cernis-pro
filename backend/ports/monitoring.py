@@ -381,6 +381,32 @@ class ScheduleRepository(Protocol):
         """
         ...
 
+    def set_run_times(
+        self,
+        schedule_id: int,
+        last_run: str | None,
+        next_run: str | None,
+    ) -> None:
+        """Setzt die beiden Ausfuehrungszeiten einer Schedule-Zeile (UPDATE).
+
+        Die BEIDEN toten Spalten ``last_run``/``next_run`` bekommen hier ihren
+        einzigen Schreibpfad (Finding 3: bis dato existierten sie nur im Schema,
+        ohne jede Schreibstelle -- die Liste zeigte dauerhaft leere Zeiten).
+
+        Beide Werte sind ISO-8601-Zeichenketten in UTC MIT Zonensuffix -- exakt
+        das Format von ``created_at`` (``Clock.now().isoformat()``). ``None``
+        bedeutet EXPLIZIT "leer" und schreibt ``NULL`` (kein "unveraendert
+        lassen" wie bei ``update``): ein deaktiviertes Schedule hat keine
+        naechste Feuerzeit, und das muss sichtbar leer werden, nicht auf einem
+        alten Wert stehenbleiben. Wer nur EINE der beiden Zeiten aendern will,
+        reicht die andere unveraendert mit durch -- der Aufrufer kennt sie.
+
+        REIN Persistenz: beruehrt weder Job-Engine noch die uebrigen Spalten.
+        Idempotent gegenueber einer fehlenden ``id`` (UPDATE trifft 0 Zeilen,
+        kein Fehler -- Muster ``delete``).
+        """
+        ...
+
     def delete(self, schedule_id: int) -> None:
         """Loescht die Schedule-Zeile. Idempotent (kein Fehler bei fehlender id).
 
@@ -434,6 +460,23 @@ class ScanJobScheduler(Protocol):
     def unregister(self, schedule_id: int) -> None:
         """Entfernt den Job einer Schedule-id. Idempotent -- ein nie registrierter
         (oder schon entfernter) Job ist KEIN Fehler (best-effort + Log im Adapter).
+        """
+        ...
+
+    def next_run_time(self, schedule_id: int) -> str | None:
+        """Naechste Feuerzeit des Jobs ``scan_<schedule_id>`` als ISO-8601-UTC-String.
+
+        Die Lese-Gegenseite zu ``register``: der Adapter fragt den registrierten
+        APScheduler-Job nach seiner naechsten Ausloesung und liefert sie als
+        ISO-8601-Zeichenkette in UTC MIT Zonensuffix -- dasselbe Format wie
+        ``created_at``/``ScheduleRepository.set_run_times``. BEWUSST ein ``str``
+        und KEIN ``datetime``/APScheduler-Typ: der Port gibt keine Fremdtypen der
+        Engine nach aussen, und der Aufrufer (application-Ring) schreibt den Wert
+        unveraendert in die ``next_run``-Spalte.
+
+        ``None`` heisst EHRLICH LEER (kein erfundener Wert, S3): kein Job unter
+        dieser id registriert, die Engine laeuft nicht, oder der Job hat keine
+        naechste Feuerzeit (z. B. pausiert). Der Aufrufer schreibt dann ``NULL``.
         """
         ...
 

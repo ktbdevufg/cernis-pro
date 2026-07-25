@@ -2,7 +2,9 @@
 
 Getestet: (1) Port-Konformitaet, (2) add->list-Round-trip mit den neun Spalten +
 enabled-Default 1, (3) update (enabled/name, None=unveraendert), (4) delete
-(idempotent), (5) list-Reihenfolge (ORDER BY id). Gegen eine temp-DB (tmp_path).
+(idempotent), (5) list-Reihenfolge (ORDER BY id), (6) set_run_times (Finding 3):
+beide Zeiten schreiben, ``None`` = wirklich leer (nicht "unveraendert"), uebrige
+Spalten unberuehrt, unbekannte id idempotent. Gegen eine temp-DB (tmp_path).
 """
 
 from datetime import UTC, datetime
@@ -101,6 +103,53 @@ def test_update_none_args_are_noops(repo: SqliteScheduleRepository) -> None:
     row = repo.list()[0]
     assert row["enabled"] == 1
     assert row["name"] == "A"
+
+
+def test_set_run_times_schreibt_beide_zeiten(repo: SqliteScheduleRepository) -> None:
+    """Finding 3: der erste und einzige Schreibpfad der beiden toten Spalten."""
+    sid = repo.add("A", "10.0.0.0/24", "p", "interval:2m")
+    assert repo.list()[0]["last_run"] is None  # Ausgangszustand: leer
+    assert repo.list()[0]["next_run"] is None
+
+    repo.set_run_times(sid, "2026-07-18T13:23:45+00:00", "2026-07-18T13:25:45+00:00")
+
+    row = repo.list()[0]
+    assert row["last_run"] == "2026-07-18T13:23:45+00:00"
+    assert row["next_run"] == "2026-07-18T13:25:45+00:00"
+
+
+def test_set_run_times_none_setzt_leer_statt_unveraendert(
+    repo: SqliteScheduleRepository,
+) -> None:
+    """``None`` heisst EXPLIZIT leer -- nicht "unveraendert lassen" wie bei ``update``."""
+    sid = repo.add("A", "10.0.0.0/24", "p", "interval:2m")
+    repo.set_run_times(sid, "2026-07-18T13:23:45+00:00", "2026-07-18T13:25:45+00:00")
+
+    # next_run auf leer (Fall "Schedule deaktiviert"), last_run bleibt bestehen.
+    repo.set_run_times(sid, "2026-07-18T13:23:45+00:00", None)
+
+    row = repo.list()[0]
+    assert row["last_run"] == "2026-07-18T13:23:45+00:00"
+    assert row["next_run"] is None  # wirklich NULL, kein Altwert
+
+
+def test_set_run_times_laesst_uebrige_spalten_unberuehrt(
+    repo: SqliteScheduleRepository,
+) -> None:
+    sid = repo.add("A", "10.0.0.0/24", "p", "interval:2m")
+    vorher = repo.list()[0]
+
+    repo.set_run_times(sid, "2026-07-18T13:23:45+00:00", "2026-07-18T13:25:45+00:00")
+
+    nachher = repo.list()[0]
+    for spalte in ("id", "name", "cidr", "profile_id", "schedule", "enabled", "created_at"):
+        assert nachher[spalte] == vorher[spalte]
+
+
+def test_set_run_times_unknown_id_is_idempotent(repo: SqliteScheduleRepository) -> None:
+    # UPDATE auf eine nicht-existente id trifft 0 Zeilen -- kein Fehler (Muster delete).
+    repo.set_run_times(9999, "2026-07-18T13:23:45+00:00", None)
+    assert repo.list() == []
 
 
 def test_delete_removes_row(repo: SqliteScheduleRepository) -> None:
