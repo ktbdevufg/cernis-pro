@@ -1,109 +1,100 @@
 """Linux-Adapter fuer ``TrafficPermissionPort`` (T.3, Rechte-/Sicht-Erkennung).
 
 Erfuellt den ``TrafficPermissionPort`` strukturell: schnelle, synchrone, LOKALE
-Pruefung der Sicht-Tiefe -- KEIN externes Tooling, kein Netz-/Loop-I/O (Muster
-``infrastructure/capture`` ``check_permission``).
+Pruefung der Sicht-Tiefe -- kein Netz-/Loop-I/O (Muster ``infrastructure/capture``
+``check_permission``).
 
-Rechte-Modell (Vision 4.2/S4/S5): Stufe 1 (eigene Verbindungen) laeuft IMMER
-rootless. Den Durchsatz ALLER Apps (Stufe 2) sieht nur ein Prozess mit erhoehten
-Rechten. "Erhoehte Rechte" = ``os.geteuid() == 0`` ODER ``CAP_NET_ADMIN`` im
-effektiven Capability-Set (``CapEff`` in ``/proc/self/status``, Bit 12) -- so
-funktioniert das Feature auch, wenn das Backend per Capability statt voller Root
-gestartet wurde (minimal-invasiv, direkter Gegenentwurf zu S5).
+MESSBEFUND (L3, Findings 5/6): Der Durchsatz je Programm braucht auf Linux KEINE
+erhoehten Rechte. ``ss -tin`` liefert die kumulativen TCP-Byte-Zaehler
+(``bytes_sent``/``bytes_received``) als gewoehnlicher Benutzer vollstaendig -- auf
+zwei Distributionen unabhaengig geprueft (Ubuntu: als Benutzer und als
+Systemverwalter byte-identische Ausgabe; Fedora: je dieselbe Verbindungszahl).
+Die frueher hier verankerte Annahme "Stufe 2 nur mit Root/CAP_NET_ADMIN" war
+schlicht falsch und hat die Messung nie blockiert, sondern nur einen irrefuehrenden
+Hinweis erzeugt. Darum entfaellt die Capability-/euid-Pruefung ersatzlos: Es gibt
+nichts zu pruefen, wenn das Recht nicht gebraucht wird.
 
-KEIN stiller Fallback (S3): ist ``/proc/self/status`` nicht lesbar, faellt die
-Pruefung auf ``geteuid`` zurueck (dokumentiert) -- das ist die konservativere
-Annahme (kein faelschliches "volle Sicht"), kein verschwiegener Fehler. Der Adapter
-verschafft sich selbst NIE Rechte; er stellt nur fest, welche da sind, und benennt
-den Weg zu mehr (handlungsorientierter Text mit konkretem Befehl).
+WAS STATTDESSEN GEPRUEFT WIRD: die einzige Bedingung, die den Durchsatz auf Linux
+wirklich verhindern kann -- ob das Werkzeug ``ss`` (iproute2) ueberhaupt vorhanden
+ist. Fehlt es, ist das ein echter, benennbarer Fehler (``NEEDS_PRIVILEGES`` als
+"nicht nutzbar, mit Grund") und KEINE stille Null (S3). Der Rechte-Begriff im
+Zustandsnamen bleibt aus Kompatibilitaet zur Wire-Form erhalten; die Bedeutung ist
+"die Quelle steht nicht zur Verfuegung, hier ist der Grund".
+
+Der Adapter verschafft sich selbst NIE Rechte und fordert auch keine an: Karls
+Entscheidung (S57) ist, dass es keine Rechteerweiterung, keinen Terminal-Befehl im
+Text und keinen Zustimmungsdialog gibt.
 
 SCOPE (CLAUDE.md "Nur Linux x64"): ``is_available`` ist auf Nicht-Linux ``False``
 (``/proc``/``sock_diag`` fehlen) -- der Use-Case sperrt dann den ganzen Feature-
 Bereich, statt eine Halb-Implementierung vorzutaeuschen.
 """
 
-import os
+import shutil
 import sys
 
 from domain.traffic import TrafficPermissionResult, TrafficPermissionState
 
-# CAP_NET_ADMIN ist Capability-Nummer 12 -> Bit 12 (0-basiert) im Capability-Bitset.
-_CAP_NET_ADMIN_BIT = 12
+# Das Werkzeug, aus dem der Durchsatz stammt (siehe ``traffic_linux._run``). EINE
+# Quelle fuer den Namen, damit Pruefung und Messung nicht auseinanderlaufen koennen.
+_SS_BINARY = "ss"
 
-# Handlungsorientierter Hinweis bei fehlenden Rechten (kein nackter "denied"-Text):
-# Stufe 1 funktioniert, fuer Stufe 2 wird der Weg zu mehr Rechten konkret benannt.
-_NEEDS_ROOT_MESSAGE = (
-    "Stufe 1 (eigene Verbindungen) ist verfuegbar. Fuer den Durchsatz aller Apps "
-    "(Stufe 2) muss CERNIS PRO mit erhoehten Rechten laufen - starte das Backend "
-    "als Root, z.B. 'sudo cernis-backend'."
+# Grund, wenn das Werkzeug fehlt: sachlich, ohne Rechte-Rat (er wuerde hier nichts
+# bewirken -- fehlendes iproute2 ist kein Rechteproblem). Die Oberflaeche zeigt
+# ihren eigenen, uebersetzten Text; dieser Grund ist die technische Begruendung
+# fuer Protokoll und API-Aufrufer.
+_SS_MISSING_MESSAGE = (
+    "Der Durchsatz je Programm braucht das Werkzeug 'ss' (Paket iproute2); "
+    "es ist auf diesem System nicht auffindbar. Die Verbindungsliste bleibt "
+    "davon unberuehrt."
 )
 
 
-def _has_cap_net_admin(cap_eff_hex: str) -> bool:
-    """``True``, wenn Bit 12 (CAP_NET_ADMIN) im ``CapEff``-Hexwert gesetzt ist -- rein.
+def _ss_vorhanden() -> bool:
+    """``True``, wenn ``ss`` im ``PATH`` auffindbar ist (I/O: nur PATH-Lookup).
 
-    ``cap_eff_hex`` ist der rohe Wert aus ``/proc/self/status`` (Zeile ``CapEff:``,
-    z. B. ``0000003fffffffff``). Ungueltiger/leerer Hex -> ``False`` (defensiv: ein
-    nicht parsbarer Wert ist KEIN Nachweis fuer das Recht). Rein: kein I/O.
+    ``shutil.which`` ist der billige, seiteneffektfreie Weg -- kein Prozessstart.
+    Damit ist die Pruefung so schnell wie die frueheren ``/proc``-Leseoperationen
+    und erfuellt weiterhin den synchronen Port-Vertrag (kein Netz-/Loop-I/O).
     """
-    try:
-        cap_bits = int(cap_eff_hex.strip(), 16)
-    except ValueError:
-        return False
-    return bool(cap_bits & (1 << _CAP_NET_ADMIN_BIT))
-
-
-def _read_cap_eff() -> str | None:
-    """Liest den ``CapEff``-Hexwert aus ``/proc/self/status`` (I/O, Linux).
-
-    Nicht lesbar (Datei fehlt / Permission) -> ``None`` (der Aufrufer faellt dann
-    auf ``geteuid`` zurueck -- kein stiller Fallback auf "volle Sicht", S3).
-    """
-    try:
-        with open("/proc/self/status") as status_file:
-            for line in status_file:
-                if line.startswith("CapEff:"):
-                    return line.split(":", 1)[1]
-    except OSError:
-        return None
-    return None
+    return shutil.which(_SS_BINARY) is not None
 
 
 class TrafficPermissionAdapter:
-    """Erfuellt das ``TrafficPermissionPort``-Protocol (lokale Rechte-Pruefung, Linux)."""
+    """Erfuellt das ``TrafficPermissionPort``-Protocol (lokale Quellen-Pruefung, Linux)."""
 
     def is_available(self) -> bool:
         """``True`` auf Linux (psutil/``/proc`` da), sonst ``False``.
 
-        Stufe 1 (psutil) ist plattformneutral, aber die Stufe-2-Quelle (``sock_diag``,
-        ``/proc``) und das Capability-Modell sind Linux -- auf Nicht-Linux wird der
-        ganze Feature-Bereich ehrlich als nicht verfuegbar gemeldet, statt eine
-        Halb-Implementierung vorzutaeuschen (CLAUDE.md "Nur Linux x64").
+        Stufe 1 (psutil) ist plattformneutral, aber die Stufe-2-Quelle (``sock_diag``
+        ueber ``ss``) ist Linux -- auf Nicht-Linux wird der ganze Feature-Bereich
+        ehrlich als nicht verfuegbar gemeldet, statt eine Halb-Implementierung
+        vorzutaeuschen (CLAUDE.md "Nur Linux x64").
         """
         return sys.platform.startswith("linux")
 
     def check_permission(self) -> str | None:
-        """``None`` bei voller Sicht (Root/CAP_NET_ADMIN), sonst der Root-Hinweis.
+        """``None``, wenn der Durchsatz messbar ist, sonst der Grund (fehlendes ``ss``).
 
-        Volle Sicht = ``geteuid() == 0`` ODER ``CAP_NET_ADMIN`` im ``CapEff``. Ist
-        ``/proc/self/status`` nicht lesbar (``_read_cap_eff`` -> ``None``), zaehlt nur
-        ``geteuid`` (konservativer Rueckfall, kein verschwiegener Fehler -- S3).
+        Auf Linux ist der Durchsatz rootless messbar (Messbefund oben) -- die
+        einzige Bedingung ist das vorhandene Werkzeug. Ist es da, gibt es nichts zu
+        melden (``None``); fehlt es, wird das benannt statt verschwiegen (S3).
         """
-        if hasattr(os, "geteuid") and os.geteuid() == 0:
+        if _ss_vorhanden():
             return None
-        cap_eff = _read_cap_eff()
-        if cap_eff is not None and _has_cap_net_admin(cap_eff):
-            return None
-        return _NEEDS_ROOT_MESSAGE
+        return _SS_MISSING_MESSAGE
 
     def permission_state(self) -> TrafficPermissionResult:
-        """``GRANTED`` bei voller Sicht, sonst ``NEEDS_PRIVILEGES`` mit dem Root-Weg.
+        """``GRANTED``, wenn der Durchsatz messbar ist, sonst ``NEEDS_PRIVILEGES``+Grund.
 
-        Auf Linux ist die Messung grundsaetzlich moeglich -- fehlt sie, liegt es an
-        den Rechten des laufenden Prozesses und ist damit BEHEBBAR. Darum nie
-        ``NOT_APPLICABLE``: dieser Zustand gehoert Plattformen, die die Messung gar
-        nicht anbieten (siehe ``traffic_macos``). Der Text bleibt derselbe wie in
-        ``check_permission`` -- eine Quelle, zwei Sichten auf denselben Befund.
+        Auf Linux ist die Messung ohne erhoehte Rechte moeglich, darum ist ``GRANTED``
+        der Normalfall -- der Zustand beschreibt die Sicht auf den Durchsatz, und die
+        steht. Fehlt das Werkzeug, ist die Quelle nicht nutzbar: das bleibt ein
+        sichtbarer Fehlzustand mit Grund, nie eine stille Null. ``NOT_APPLICABLE``
+        gehoert weiterhin ausschliesslich Plattformen, die die Messung gar nicht
+        anbieten (siehe ``traffic_macos``) -- dieser Adapter vergibt ihn nie.
+        Der Text bleibt derselbe wie in ``check_permission`` -- eine Quelle, zwei
+        Sichten auf denselben Befund.
         """
         text = self.check_permission()
         if text is None:

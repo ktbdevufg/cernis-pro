@@ -8,6 +8,7 @@ ueber die Runner-Callables. Der echte asyncio-Task-Lebenszyklus wird NICHT hier,
 sondern im Laufzeit-Smoke geprueft (TestClient ohne bootstrap -> keine echten Tasks).
 """
 
+import sys
 from collections.abc import Iterator
 from typing import Any
 
@@ -17,6 +18,7 @@ from fastapi.testclient import TestClient
 
 from api.traffic import (
     provide_list_app_traffic,
+    provide_poll_error,
     provide_start_poll,
     provide_stop_poll,
 )
@@ -117,3 +119,57 @@ def test_poll_stop_returns_ok(app: FastAPI) -> None:
     assert response.status_code == 200
     assert response.json() == {"ok": True}
     assert calls == ["stop"]
+
+
+# ── GET /api/traffic/permission: Zustand der Durchsatz-Sicht ────────────────
+# Wichtig ist hier die ECHTE Verdrahtung aus app.py (kein Fake fuer den
+# Rechte-Adapter): auf Linux muss der Durchsatz als messbar gemeldet werden --
+# das ist der Kern von Finding 5.
+
+
+def test_permission_endpunkt_liefert_form(app: FastAPI) -> None:
+    with TestClient(app) as client:
+        antwort = client.get("/api/traffic/permission")
+
+    assert antwort.status_code == 200
+    daten = antwort.json()
+    assert set(daten) == {"ok", "error", "state"}
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux-Verhalten")
+def test_permission_auf_linux_ist_granted_ohne_root(app: FastAPI) -> None:
+    """Rootless auf Linux -> ok=true/granted, KEIN Rechte-Hinweis (Finding 5).
+
+    Laeuft der Test ausnahmsweise als Root, gilt dasselbe Ergebnis -- die
+    Aussage haengt nicht mehr an der Kennung.
+    """
+    with TestClient(app) as client:
+        daten = client.get("/api/traffic/permission").json()
+
+    assert daten["ok"] is True
+    assert daten["state"] == "granted"
+    assert not daten["error"]
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux-Verhalten")
+def test_permission_text_raet_nie_zu_sudo(app: FastAPI) -> None:
+    """Kein sudo/Root-Rat mehr in der Wire-Form (Finding 6, Karls Entscheidung S57)."""
+    with TestClient(app) as client:
+        daten = client.get("/api/traffic/permission").json()
+
+    text = (daten["error"] or "").lower()
+    for verboten in ("sudo", "root", "cernis-backend"):
+        assert verboten not in text
+
+
+def test_permission_meldet_laufenden_messfehler(app: FastAPI) -> None:
+    """Ein gescheiterter Messlauf schlaegt auf ok=false durch (keine stille Null)."""
+    app.dependency_overrides[provide_poll_error] = lambda: (
+        lambda: "Werkzeug 'ss' nicht gefunden (Paket iproute2)"
+    )
+    with TestClient(app) as client:
+        daten = client.get("/api/traffic/permission").json()
+
+    assert daten["ok"] is False
+    assert "iproute2" in daten["error"]
+    assert daten["state"] == "needs_privileges"

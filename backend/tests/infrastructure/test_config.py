@@ -12,8 +12,9 @@ from infrastructure.config import AppConfig
 
 def test_traffic_poll_defaults() -> None:
     cfg = AppConfig()
-    # Default: AUTO aus (sparsam, on-demand), Intervall 1.0s (Vision-Regler).
-    assert cfg.traffic_poll_auto is False
+    # Default: AUTO AN (L3/Finding 5) -- stand er auf False, lief der Poller nie
+    # und alle Durchsatz-Felder blieben dauerhaft null. Intervall 1.0s (Regler).
+    assert cfg.traffic_poll_auto is True
     assert cfg.traffic_poll_interval == 1.0
 
 
@@ -23,3 +24,9 @@ def test_traffic_poll_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
     cfg = AppConfig()
     assert cfg.traffic_poll_auto is True
     assert cfg.traffic_poll_interval == 0.25
+
+
+def test_traffic_poll_auto_abschaltbar(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Der Dauer-Loop bleibt abschaltbar (sparsamer Betrieb, MANUELL on-demand).
+    monkeypatch.setenv("CERNIS_TRAFFIC_POLL_AUTO", "false")
+    assert AppConfig().traffic_poll_auto is False

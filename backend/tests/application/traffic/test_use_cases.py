@@ -9,6 +9,7 @@ kein pytest-asyncio).
 """
 
 import asyncio
+import contextlib
 
 from application.traffic import (
     CheckTrafficPermission,
@@ -332,3 +333,167 @@ def test_list_app_traffic_aggregates_app_rate_totals() -> None:
     app = result[0]
     assert app.total_send_rate_bps == 150.0
     assert app.total_recv_rate_bps == 15.0
+
+
+# ── Kumulative Byte-Zaehler (Finding 5: bytes_* duerfen nicht null bleiben) ──
+# Die Zaehler stehen schon nach dem ERSTEN Messpunkt, die Raten erst nach zwei --
+# darum werden sie getrennt hereingereicht und getrennt nachgeschlagen.
+
+
+def test_list_app_traffic_setzt_byte_zaehler() -> None:
+    conn = _conn("firefox", pid=10)
+    fake = FakePerProcessTrafficProvider(connections=[conn])
+    counters = {_key_of(conn): (98765, 4321)}
+
+    result = asyncio.run(ListAppTraffic(fake)(None, counters))
+
+    assert result[0].connections[0].bytes_sent == 98765
+    assert result[0].connections[0].bytes_received == 4321
+
+
+def test_list_app_traffic_zaehler_ohne_raten() -> None:
+    # Nach dem ersten tick: Zaehler da, Raten noch nicht -- beides ehrlich getrennt.
+    conn = _conn("firefox", pid=10)
+    fake = FakePerProcessTrafficProvider(connections=[conn])
+
+    result = asyncio.run(ListAppTraffic(fake)({}, {_key_of(conn): (500, 200)}))
+
+    assert result[0].connections[0].bytes_sent == 500
+    assert result[0].connections[0].send_rate_bps is None
+
+
+def test_list_app_traffic_raten_und_zaehler_zusammen() -> None:
+    conn = _conn("firefox", pid=10)
+    fake = FakePerProcessTrafficProvider(connections=[conn])
+
+    result = asyncio.run(
+        ListAppTraffic(fake)({_key_of(conn): (12.0, 34.0)}, {_key_of(conn): (500, 200)})
+    )
+
+    verbindung = result[0].connections[0]
+    assert (verbindung.send_rate_bps, verbindung.recv_rate_bps) == (12.0, 34.0)
+    assert (verbindung.bytes_sent, verbindung.bytes_received) == (500, 200)
+
+
+def test_list_app_traffic_fremder_zaehler_laesst_none() -> None:
+    fake = FakePerProcessTrafficProvider(connections=[_conn("firefox", pid=10)])
+
+    result = asyncio.run(ListAppTraffic(fake)(None, {"tcp:9.9.9.9:1:8.8.8.8:2": (1, 2)}))
+
+    assert result[0].connections[0].bytes_sent is None
+
+
+def test_poll_current_counters_nach_erstem_tick() -> None:
+    # Ein einzelner Messpunkt liefert noch keine Rate, aber sehr wohl die Zaehler.
+    sample = ConnSample(key="tcp:a", bytes_sent=1000, bytes_received=2000, monotonic_ts=1.0)
+    poll = PollThroughput(SequencedTrafficProvider([[sample]]))
+
+    asyncio.run(poll.tick())
+
+    assert poll.current_rates() == {}
+    assert poll.current_counters() == {"tcp:a": (1000, 2000)}
+
+
+def test_poll_current_counters_ist_defensive_kopie() -> None:
+    sample = ConnSample(key="tcp:a", bytes_sent=1, bytes_received=2, monotonic_ts=1.0)
+    poll = PollThroughput(SequencedTrafficProvider([[sample]]))
+    asyncio.run(poll.tick())
+
+    poll.current_counters()["tcp:a"] = (999, 999)
+
+    assert poll.current_counters() == {"tcp:a": (1, 2)}
+
+
+# ── Messfehler im Poll-Loop: gemerkt, nicht verschluckt (S3) ─────────────────
+
+
+class FailingTrafficProvider:
+    """Provider, dessen ``sample_throughput`` immer scheitert (Werkzeug fehlt)."""
+
+    def __init__(self, message: str = "Werkzeug 'ss' nicht gefunden") -> None:
+        self._message = message
+
+    async def list_connections(self) -> list[Connection]:
+        return []
+
+    async def sample_throughput(self) -> list[ConnSample]:
+        raise RuntimeError(self._message)
+
+
+def test_poll_tick_reicht_messfehler_durch() -> None:
+    # tick selbst schluckt nichts -- sonst fielen die Raten still auf den alten Stand.
+    poll = PollThroughput(FailingTrafficProvider())
+
+    try:
+        asyncio.run(poll.tick())
+    except RuntimeError as exc:
+        assert "ss" in str(exc)
+    else:
+        raise AssertionError("tick haette den Messfehler durchreichen muessen")
+
+
+def test_poll_run_merkt_fehler_und_laeuft_weiter() -> None:
+    """Der Loop stirbt nicht am Messfehler, aber er verschweigt ihn auch nicht."""
+    poll = PollThroughput(FailingTrafficProvider(), interval=0.0)
+
+    async def kurz_laufen() -> None:
+        task = asyncio.create_task(poll.run())
+        await asyncio.sleep(0.05)
+        poll.stop()
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    asyncio.run(kurz_laufen())
+
+    assert poll.last_error() is not None
+    assert "ss" in (poll.last_error() or "")
+    assert poll.current_rates() == {}
+
+
+def test_poll_last_error_anfangs_none() -> None:
+    poll = PollThroughput(SequencedTrafficProvider([[]]))
+
+    assert poll.last_error() is None
+
+
+def test_poll_gelungener_tick_loescht_fehler() -> None:
+    sample = ConnSample(key="tcp:a", bytes_sent=1, bytes_received=2, monotonic_ts=1.0)
+    poll = PollThroughput(SequencedTrafficProvider([[sample]]))
+    poll._last_error = "alter Fehler"
+
+    asyncio.run(poll.tick())
+
+    assert poll.last_error() is None
+
+
+# ── Status-Naht: laufender Messfehler schlaegt auf ok=false durch ────────────
+
+
+def test_check_permission_messfehler_schlaegt_durch() -> None:
+    """Statisch in Ordnung, echter Messlauf scheitert -> ok=false MIT Grund."""
+    fake = FakeTrafficPermission(available=True, permission_error=None)
+
+    result = CheckTrafficPermission(fake)("ss endete mit Status 2")
+
+    assert result["ok"] is False
+    assert result["error"] == "ss endete mit Status 2"
+    assert result["state"] == str(TrafficPermissionState.NEEDS_PRIVILEGES)
+
+
+def test_check_permission_ohne_messfehler_bleibt_granted() -> None:
+    fake = FakeTrafficPermission(available=True, permission_error=None)
+
+    result = CheckTrafficPermission(fake)(None)
+
+    assert result["ok"] is True
+    assert result["state"] == str(TrafficPermissionState.GRANTED)
+
+
+def test_check_permission_messfehler_ueberschreibt_not_applicable_nicht() -> None:
+    """Die Plattformgrenze bleibt Plattformgrenze -- sie wird nicht zum Messfehler."""
+    fake = FakeTrafficPermission(available=False, permission_error=None)
+
+    result = CheckTrafficPermission(fake)("irgendein Messfehler")
+
+    assert result["state"] == str(TrafficPermissionState.NOT_APPLICABLE)

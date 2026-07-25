@@ -27,9 +27,17 @@ Stufe 2 (``sample_throughput``, T.4a) liest die KUMULATIVEN TCP-Byte-Zaehler ueb
 je Aufruf; die Raten-Berechnung aus zwei Messpunkten macht der Use-Case ueber die
 Domaene (``match_samples``/``compute_rate``). Der ``key`` ist ``tcp:local:remote``
 (kein Inode/PID noetig -- ``ss -tin`` zeigt sie ohnehin nicht, und das Parsing
-braucht KEIN Root). NUR TCP: UDP hat keine kumulativen Byte-Zaehler. Der Adapter
-stempelt ``monotonic_ts`` (die Uhr lebt in der Infrastruktur, nie in der Domaene).
-Der Poller + Lebenszyklus (AUTO/MANUELL) folgen in T.4b.
+braucht KEIN Root: gemessen liefert ``ss -tin`` als gewoehnlicher Benutzer
+dieselben Zaehlwerte wie als Systemverwalter). NUR TCP: UDP hat keine kumulativen
+Byte-Zaehler. Der Adapter stempelt ``monotonic_ts`` (die Uhr lebt in der
+Infrastruktur, nie in der Domaene). Der Poller + Lebenszyklus (AUTO/MANUELL) folgen
+in T.4b.
+
+SCHEITERN IST EIN FEHLER, KEINE NULL (S3): fehlt ``ss``, laeuft es in einen Timeout
+oder endet mit Fehlerstatus, wirft ``_run`` eine ``ThroughputUnavailableError``,
+statt einen leeren Messpunkt vorzutaeuschen -- eine leere Messung waere von "null
+Bytes uebertragen" nicht zu unterscheiden. Stufe 1 (Verbindungsliste ueber psutil)
+ist davon voellig unberuehrt und laeuft weiter.
 
 Self-contained stdlib + psutil -- kein ``modules``-Import (import-linter-Contract
 "neue Ringe importieren NICHT modules" bleibt unberuehrt).
@@ -93,13 +101,30 @@ def _endpoint(addr: object) -> Endpoint | None:
     return Endpoint(ip=addr.ip, port=addr.port)  # type: ignore[attr-defined]
 
 
-def _run(cmd: list[str]) -> str:
-    """Fuehrt ein Kommando aus und gibt stdout zurueck (Fehler -> leerer String).
+class ThroughputUnavailableError(RuntimeError):
+    """Der Durchsatz konnte nicht gemessen werden -- mit benennbarem Grund.
 
-    Best-effort wie ``infrastructure/interfaces_linux._run``: ein fehlendes Tool
-    (``ss`` nicht da) / Timeout ist KEIN Fehler des Durchsatz-Pfads, sondern liefert
-    "keine Daten" -> leerer Output -> ``[]`` (der vertragliche Leer-Zustand des Ports,
-    kein verdecktes Scheitern).
+    Ersetzt den frueheren stillen Rueckfall auf "keine Daten" (S3): ein fehlendes
+    ``ss``, ein Timeout oder ein Fehlerstatus des Werkzeugs ist ein ECHTER
+    Fehlschlag des Durchsatz-Pfads und darf nicht als leere Messung erscheinen --
+    sonst sieht "nichts gemessen" genauso aus wie "null Bytes uebertragen".
+
+    Betrifft AUSSCHLIESSLICH Stufe 2 (Durchsatz). Die Verbindungsliste (Stufe 1,
+    psutil) laeuft voellig unabhaengig davon weiter.
+    """
+
+
+def _run(cmd: list[str]) -> str:
+    """Fuehrt das Durchsatz-Werkzeug aus und gibt stdout zurueck.
+
+    KEIN stiller Fallback (S3): schlaegt der Aufruf fehl -- Werkzeug nicht
+    vorhanden, Timeout, Fehlerstatus --, wird ``ThroughputUnavailableError``
+    geworfen statt ein leerer String zurueckgegeben. Ein leerer String waere von
+    "es gibt gerade keine TCP-Verbindungen" nicht zu unterscheiden und wuerde den
+    Fehlschlag in eine Null verwandeln.
+
+    Ein leeres stdout bei Rueckgabewert 0 ist dagegen KEIN Fehler, sondern die
+    ehrliche Aussage "keine Sockets" -> ``""`` -> ``[]``.
     """
     try:
         result = subprocess.run(
@@ -110,9 +135,29 @@ def _run(cmd: list[str]) -> str:
             errors="replace",
             env=_C_LOCALE_ENV,
         )
-        return result.stdout or ""
-    except Exception:
-        return ""
+    except FileNotFoundError as exc:
+        raise ThroughputUnavailableError(
+            f"Werkzeug '{cmd[0]}' nicht gefunden (Paket iproute2) -- "
+            "der Durchsatz je Programm kann nicht gemessen werden."
+        ) from exc
+    except subprocess.TimeoutExpired as exc:
+        raise ThroughputUnavailableError(
+            f"Werkzeug '{cmd[0]}' hat nicht rechtzeitig geantwortet -- "
+            "der Durchsatz je Programm kann nicht gemessen werden."
+        ) from exc
+    except OSError as exc:
+        raise ThroughputUnavailableError(
+            f"Werkzeug '{cmd[0]}' nicht ausfuehrbar ({exc}) -- "
+            "der Durchsatz je Programm kann nicht gemessen werden."
+        ) from exc
+    if result.returncode != 0:
+        stderr = (result.stderr or "").strip()
+        raise ThroughputUnavailableError(
+            f"Werkzeug '{cmd[0]}' endete mit Status {result.returncode}"
+            f"{f': {stderr}' if stderr else ''} -- "
+            "der Durchsatz je Programm kann nicht gemessen werden."
+        )
+    return result.stdout or ""
 
 
 # Byte-Zaehler-Tokens in der ss-Detailzeile (z. B. ``bytes_sent:11320827``).
@@ -251,7 +296,9 @@ class PsutilTrafficAdapter:
         """Stufe 2: EIN Messpunkt der kumulativen TCP-Byte-Zaehler (``ss -tin``).
 
         Blockierendes ``ss``-Subprocess-I/O -> ``run_in_executor`` (Loop bleibt frei).
-        ``ss`` fehlt/Timeout -> leerer Output -> ``[]`` (vertraglicher Leer-Zustand).
+        Keine TCP-Sockets -> ``[]`` (vertraglicher Leer-Zustand). ``ss`` fehlt /
+        Timeout / Fehlerstatus -> ``ThroughputUnavailableError`` (ehrlicher Fehler
+        statt stiller Null, S3).
         """
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self._sample_throughput_sync)

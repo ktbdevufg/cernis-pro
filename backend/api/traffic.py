@@ -47,6 +47,12 @@ type ListAppTrafficRunner = Callable[[], Awaitable[list[Any]]]
 type StartPollRunner = Callable[[], dict[str, Any]]
 type StopPollRunner = Callable[[], None]
 
+# Composition-Root-Callable: der Grund eines gescheiterten LAUFENDEN Mess-tick
+# (``PollThroughput.last_error`` ueber ``app.state``), ``None`` wenn die letzte
+# Messung gelang. Als Callable injiziert, weil der Poll-State nur dem Composition
+# Root bekannt ist -- der api-Ring kennt weder app.state noch den Use-Case-Singleton.
+type PollErrorReader = Callable[[], str | None]
+
 
 # Dependency-Marker: im Composition Root (app.py) per dependency_overrides mit den
 # echten Callables/Use-Cases verdrahtet. Ohne Verdrahtung bewusst ein lauter Fehler.
@@ -64,6 +70,10 @@ def provide_start_poll() -> StartPollRunner:
 
 def provide_stop_poll() -> StopPollRunner:
     raise NotImplementedError("StopPollRunner wird in app.py verdrahtet")
+
+
+def provide_poll_error() -> PollErrorReader:
+    raise NotImplementedError("PollErrorReader wird in app.py verdrahtet")
 
 
 def _endpoint_to_dict(endpoint: Any) -> dict[str, Any] | None:
@@ -151,18 +161,27 @@ def get_traffic_permission(
     check_permission_uc: Annotated[
         CheckTrafficPermission, Depends(provide_check_traffic_permission)
     ],
+    poll_error: Annotated[PollErrorReader, Depends(provide_poll_error)],
 ) -> dict[str, Any]:
-    """Rechte-Status fuer den Durchsatz aller Apps (Stufe 2).
+    """Status der Durchsatz-Sicht (Stufe 2).
 
-    ``{ok, error, state}``-Form: ``ok=true`` bei voller Sicht (Root/CAP_NET_ADMIN),
-    sonst ``ok=false`` + Begruendung (Stufe 1 bleibt in jedem Fall nutzbar).
+    ``{ok, error, state}``-Form: ``ok=true``, wenn der Durchsatz messbar ist, sonst
+    ``ok=false`` + Begruendung (Stufe 1, die Verbindungsliste, bleibt in jedem Fall
+    nutzbar). Auf Linux ist der Durchsatz OHNE erhoehte Rechte messbar (gemessen:
+    ``ss -tin`` liefert die Byte-Zaehler als gewoehnlicher Benutzer) -- ``ok=true``
+    ist dort der Normalfall.
 
     ``state`` unterscheidet die beiden Gruende, die in ``ok``/``error`` allein
-    zusammenfallen: ``"needs_privileges"`` (die Plattform koennte es, dem Prozess
-    fehlen die Rechte -- behebbar) gegen ``"not_applicable"`` (die Plattform bietet
-    die Messung gar nicht an, z. B. macOS ohne ``sock_diag`` -- nicht behebbar, und
-    erhoehte Rechte wuerden daran nichts aendern). ``"granted"`` = volle Sicht.
-    Ohne diese Unterscheidung muesste die Oberflaeche sie aus dem Fehlertext
-    erraten. ``ok``/``error`` bleiben unveraendert (kein Bruch fuer Aufrufer).
+    zusammenfallen: ``"needs_privileges"`` (die Plattform koennte es, die Quelle ist
+    aber gerade nicht nutzbar -- Werkzeug fehlt oder der Messlauf scheitert; mit
+    Grund benannt) gegen ``"not_applicable"`` (die Plattform bietet die Messung gar
+    nicht an, z. B. macOS ohne ``sock_diag`` -- nicht behebbar). ``"granted"`` =
+    Durchsatz messbar. Ohne diese Unterscheidung muesste die Oberflaeche sie aus dem
+    Fehlertext erraten. ``ok``/``error`` bleiben in ihrer Bedeutung unveraendert
+    (kein Bruch fuer Aufrufer).
+
+    Scheitert die LAUFENDE Messung (``poll_error`` traegt einen Grund), schlaegt das
+    auf ``ok=false`` durch, auch wenn die statische Pruefung nichts zu beanstanden
+    hat -- ein fehlgeschlagener Messlauf darf nicht als "keine Werte" erscheinen.
     """
-    return check_permission_uc()
+    return check_permission_uc(poll_error())

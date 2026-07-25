@@ -353,6 +353,7 @@ from api.system import router as system_router
 from api.traffic import (
     provide_check_traffic_permission,
     provide_list_app_traffic,
+    provide_poll_error,
     provide_start_poll,
     provide_stop_poll,
 )
@@ -4039,7 +4040,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     async def _list_app_traffic() -> list[Any]:
         poll = getattr(app.state, "poll_throughput", None)
         rates = poll.current_rates() if poll is not None else {}
-        return await ListAppTraffic(_traffic_adapter())(rates)
+        # Kumulative Zaehler getrennt: sie stehen schon nach dem ERSTEN tick, die
+        # Raten erst nach dem zweiten -- so tragen die Byte-Felder sofort Werte.
+        counters = poll.current_counters() if poll is not None else {}
+        return await ListAppTraffic(_traffic_adapter())(rates, counters)
 
     # MANUELL-Lebenszyklus (Muster _start_capture): startet den Poll-Loop als Task an
     # app.state, kein Doppelstart (task.done()-Check). AUTO (lifespan) nutzt denselben
@@ -4062,6 +4066,16 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         if task is not None:
             task.cancel()
 
+    # Grund eines gescheiterten laufenden Mess-tick fuer die Status-Naht (der
+    # api-Ring kennt app.state nicht). Ohne laufenden Poller gibt es keinen
+    # Messfehler zu melden -> None.
+    def _poll_error() -> str | None:
+        poll = getattr(app.state, "poll_throughput", None)
+        if poll is None:
+            return None
+        error: str | None = poll.last_error()
+        return error
+
     app.include_router(traffic_router)
     app.dependency_overrides[provide_list_app_traffic] = lambda: _list_app_traffic
     app.dependency_overrides[provide_check_traffic_permission] = lambda: CheckTrafficPermission(
@@ -4069,6 +4083,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     )
     app.dependency_overrides[provide_start_poll] = lambda: _start_poll
     app.dependency_overrides[provide_stop_poll] = lambda: _stop_poll
+    app.dependency_overrides[provide_poll_error] = lambda: _poll_error
 
     # ── Capture-Rechteeinrichtung verdrahten (Etappe 2, Sniff-Familie) ──────────
     # Zustandsloser Adapter direkt instanziiert (Muster InterfaceDiscoveryAdapter):

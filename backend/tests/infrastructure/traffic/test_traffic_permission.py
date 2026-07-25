@@ -1,12 +1,15 @@
-"""Tests des TrafficPermissionAdapter -- reine Capability-/Rechte-Logik.
+"""Tests des TrafficPermissionAdapter -- Verfuegbarkeit der Durchsatz-Quelle.
 
-Prueft die reine ``_has_cap_net_admin``-Bit-Pruefung (Bit 12, defensiv gegen
-ungueltigen Hex) und die ``check_permission``-Naht (Root / CAP_NET_ADMIN / kein
-Recht) ueber Monkeypatch von ``os.geteuid`` und der gekapselten ``_read_cap_eff``-
-I/O-Stelle. Kein echtes ``/proc`` noetig.
+Der Durchsatz je Programm braucht auf Linux KEINE erhoehten Rechte (gemessen:
+``ss -tin`` liefert die Byte-Zaehler als gewoehnlicher Benutzer). Geprueft wird
+darum die einzige Bedingung, die ihn wirklich verhindern kann: ob das Werkzeug
+``ss`` vorhanden ist. Der Test faelscht die gekapselte Pruefstelle
+``_ss_vorhanden`` -- kein echtes PATH-Gefummel noetig.
+
+Der macOS-Pfad (Plattformgrenze, ``NOT_APPLICABLE``) bleibt unveraendert
+mitgeprueft: er darf durch die Linux-Aenderung nicht mitkippen.
 """
 
-import os
 import sys
 
 import pytest
@@ -16,59 +19,45 @@ from domain.traffic import TrafficPermissionState
 from infrastructure.traffic_macos import (
     TrafficPermissionAdapter as MacosTrafficPermissionAdapter,
 )
-from infrastructure.traffic_permission import TrafficPermissionAdapter, _has_cap_net_admin
+from infrastructure.traffic_permission import TrafficPermissionAdapter
 
-# ── _has_cap_net_admin (reine Bit-Pruefung) ──────────────────────────────────
-
-
-def test_has_cap_net_admin_bit_set() -> None:
-    # Bit 12 gesetzt -> True. (1 << 12) == 0x1000.
-    assert _has_cap_net_admin("0000000000001000") is True
-    # voller Root-Capset enthaelt Bit 12 ebenfalls.
-    assert _has_cap_net_admin("000001ffffffffff") is True
+# ── check_permission (Werkzeug vorhanden / fehlt) ────────────────────────────
 
 
-def test_has_cap_net_admin_bit_unset() -> None:
-    assert _has_cap_net_admin("0000000000000000") is False
-    # Bits 0..11 gesetzt, aber NICHT 12 -> False.
-    assert _has_cap_net_admin("0000000000000fff") is False
+def test_check_permission_ohne_root_messbar(monkeypatch: pytest.MonkeyPatch) -> None:
+    """KERN (Finding 5): als gewoehnlicher Benutzer ist der Durchsatz messbar.
 
+    Frueher meldete diese Naht ohne Root einen Rechte-Hinweis; sie darf es nicht
+    mehr -- die Rechte-Annahme war messbar falsch.
+    """
+    monkeypatch.setattr(tp, "_ss_vorhanden", lambda: True)
 
-def test_has_cap_net_admin_invalid_hex_defensive() -> None:
-    assert _has_cap_net_admin("nicht-hex") is False
-    assert _has_cap_net_admin("") is False
-
-
-# ── check_permission (Root / Capability / kein Recht) ────────────────────────
-
-
-def test_check_permission_root_full_view(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(os, "geteuid", lambda: 0)
     assert TrafficPermissionAdapter().check_permission() is None
 
 
-def test_check_permission_cap_net_admin_full_view(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(os, "geteuid", lambda: 1000)
-    monkeypatch.setattr(tp, "_read_cap_eff", lambda: "0000000000001000")  # Bit 12
-    assert TrafficPermissionAdapter().check_permission() is None
+def test_check_permission_werkzeug_fehlt_nennt_grund(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fehlendes ``ss`` -> benannter Grund (kein stilles Nichts, S3)."""
+    monkeypatch.setattr(tp, "_ss_vorhanden", lambda: False)
 
-
-def test_check_permission_no_rights_returns_hint(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(os, "geteuid", lambda: 1000)
-    monkeypatch.setattr(tp, "_read_cap_eff", lambda: "0000000000000000")  # kein Bit 12
     result = TrafficPermissionAdapter().check_permission()
+
     assert result is not None
-    assert "Root" in result  # handlungsorientierter Hinweis
+    assert "ss" in result
+    assert "iproute2" in result
 
 
-def test_check_permission_proc_unreadable_falls_back_to_geteuid(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # /proc nicht lesbar -> _read_cap_eff None; nicht-root -> Hinweis (kein stiller
-    # Fallback auf "volle Sicht", S3).
-    monkeypatch.setattr(os, "geteuid", lambda: 1000)
-    monkeypatch.setattr(tp, "_read_cap_eff", lambda: None)
-    assert TrafficPermissionAdapter().check_permission() is not None
+def test_check_permission_raet_nie_zu_erhoehten_rechten(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Kein Rechte-Rat, kein Terminal-Befehl im Text (Karls Entscheidung S57).
+
+    Auch im Fehlerfall: ein fehlendes Paket ist kein Rechteproblem, und ein
+    ``sudo``-Rat waere dort schlicht falsch.
+    """
+    monkeypatch.setattr(tp, "_ss_vorhanden", lambda: False)
+
+    text = (TrafficPermissionAdapter().check_permission() or "").lower()
+
+    for verboten in ("root", "sudo", "administrator", "erhoehte rechte", "erhöhte rechte"):
+        assert verboten not in text, f"Rechte-Rat '{verboten}' im Linux-Text"
 
 
 # ── is_available (Plattform-Riegel) ──────────────────────────────────────────
@@ -84,17 +73,16 @@ def test_is_available_non_linux(monkeypatch: pytest.MonkeyPatch) -> None:
     assert TrafficPermissionAdapter().is_available() is False
 
 
-# ── permission_state: Rechte-Problem vs. Plattformgrenze (A3) ────────────────
-# Die Kernunterscheidung dieser Naht. Beide Faelle liefern in der schmalen
-# Text-Naht ``ok=False`` samt Begruendung -- fachlich sind sie aber verschieden:
-# auf Linux BEHEBBAR (Rechte erlangbar), auf macOS NICHT (die Plattform bietet die
-# Messung gar nicht an). Faellt die Trennung je zusammen, raet die Oberflaeche auf
-# macOS zu erhoehten Rechten, die dort nichts bewirken.
+# ── permission_state: messbar vs. Quelle fehlt vs. Plattformgrenze ───────────
 
 
-def test_permission_state_linux_granted(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Root -> ``GRANTED`` ohne Begruendung (es gibt nichts zu erklaeren)."""
-    monkeypatch.setattr(os, "geteuid", lambda: 0)
+def test_permission_state_linux_granted_ohne_root(monkeypatch: pytest.MonkeyPatch) -> None:
+    """KERN (Finding 5): rootless -> ``GRANTED`` ohne Begruendung.
+
+    Genau hier sass die falsche Annahme: dieser Fall lieferte frueher
+    ``NEEDS_PRIVILEGES`` samt sudo-Rat, obwohl die Messung laeuft.
+    """
+    monkeypatch.setattr(tp, "_ss_vorhanden", lambda: True)
 
     result = TrafficPermissionAdapter().permission_state()
 
@@ -102,25 +90,31 @@ def test_permission_state_linux_granted(monkeypatch: pytest.MonkeyPatch) -> None
     assert result.reason == ""
 
 
-def test_permission_state_linux_missing_rights_is_behebbar(
+def test_permission_state_werkzeug_fehlt_ist_fehler_mit_grund(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Kein Recht auf Linux -> ``NEEDS_PRIVILEGES`` MIT Weg, NIE ``NOT_APPLICABLE``.
+    """Fehlendes Werkzeug -> ``NEEDS_PRIVILEGES`` MIT Grund, nie ``GRANTED``.
 
-    Auf Linux ist die Messung moeglich; fehlt sie, liegt es an den Rechten des
-    Prozesses. Der handlungsorientierte Hinweis ist hier RICHTIG.
+    Der echte Fehlerfall bleibt sichtbar -- er darf nicht zur stillen Null werden.
     """
-    monkeypatch.setattr(os, "geteuid", lambda: 1000)
-    monkeypatch.setattr(tp, "_read_cap_eff", lambda: "0000000000000000")
+    monkeypatch.setattr(tp, "_ss_vorhanden", lambda: False)
 
     result = TrafficPermissionAdapter().permission_state()
 
     assert result.state is TrafficPermissionState.NEEDS_PRIVILEGES
-    assert "Root" in result.reason
+    assert result.reason.strip() != ""
+
+
+def test_permission_state_linux_nie_not_applicable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``NOT_APPLICABLE`` gehoert Plattformen ohne Messung -- Linux vergibt ihn nie."""
+    for vorhanden in (True, False):
+        monkeypatch.setattr(tp, "_ss_vorhanden", lambda v=vorhanden: v)
+        state = TrafficPermissionAdapter().permission_state().state
+        assert state is not TrafficPermissionState.NOT_APPLICABLE
 
 
 def test_permission_state_macos_is_not_applicable() -> None:
-    """macOS -> ``NOT_APPLICABLE``: Plattformgrenze, KEIN Rechteproblem."""
+    """macOS -> ``NOT_APPLICABLE``: Plattformgrenze, KEIN Rechteproblem (unveraendert)."""
     result = MacosTrafficPermissionAdapter().permission_state()
 
     assert result.state is TrafficPermissionState.NOT_APPLICABLE

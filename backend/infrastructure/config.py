@@ -135,10 +135,15 @@ class AppConfig(BaseSettings):
 
     # Per-App-Durchsatz (traffic Stufe 2): ob der Poller beim Start als Dauer-Loop
     # mitlaeuft (AUTO). Greift NUR zusammen mit ``bootstrap_on_startup`` (kein Poll
-    # in Tests/ohne produktiven Owner). Default False -> der Durchsatz wird erst auf
-    # Anforderung erfasst (MANUELL ueber POST /api/traffic/poll/start), sparsam wie
-    # der capture-Loop. Ueber ``CERNIS_TRAFFIC_POLL_AUTO`` einschaltbar.
-    traffic_poll_auto: bool = False
+    # in Tests/ohne produktiven Owner).
+    #
+    # Default True (L3, Finding 5): der Durchsatz je Programm ist das Versprechen
+    # der Ansicht, und er ist auf Linux rootless messbar. Stand der Default auf
+    # False, lief der Poller nie -- niemand rief den MANUELL-Pfad -- und ALLE
+    # Durchsatz-Felder blieben dauerhaft ``null``, ohne dass das je als Fehler
+    # sichtbar wurde. Die Last ist ein ``ss -tin``-Aufruf je Intervall.
+    # Ueber ``CERNIS_TRAFFIC_POLL_AUTO=false`` abschaltbar.
+    traffic_poll_auto: bool = True
 
     # Poll-Intervall des Durchsatz-Pollers in Sekunden (Vision-"Regler": kleiner =
     # feiner aufgeloeste Momentanrate, mehr Last). Gilt fuer AUTO und MANUELL.
