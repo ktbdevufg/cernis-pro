@@ -1429,7 +1429,7 @@
       "status": {
         "sleeping": "Worker schläft (kein Host fällig)",
         "checking": "Worker prüft … ({{due}} fällig)",
-        "hosts": "{{checked}}/{{total}} Hosts geprüft",
+        "hosts": "{{checked}} Geräte geprüft · {{total}} aktuell prüfbar",
         "active": "{{count}} aktive Befunde"
       }
     }
@@ -1585,7 +1585,8 @@
         "kategorie": "Kategorie",
         "weitere": "+ {{anzahl}} weitere",
         "leer": "Keine Einträge.",
-        "ohne": "(ohne)"
+        "ohneHersteller": "Kein Hersteller ermittelt",
+        "ohneKategorie": "Keine Kategorie ermittelt"
       },
       "liste": {
         "titel": "Geräteliste",

@@ -1429,7 +1429,7 @@
       "status": {
         "sleeping": "Worker sleeping (no host due)",
         "checking": "Worker checking … ({{due}} due)",
-        "hosts": "{{checked}}/{{total}} hosts checked",
+        "hosts": "{{checked}} devices checked · {{total}} currently checkable",
         "active": "{{count}} active findings"
       }
     }
@@ -1585,7 +1585,8 @@
         "kategorie": "Category",
         "weitere": "+ {{anzahl}} more",
         "leer": "No entries.",
-        "ohne": "(none)"
+        "ohneHersteller": "No vendor identified",
+        "ohneKategorie": "No category identified"
       },
       "liste": {
         "titel": "Device list",

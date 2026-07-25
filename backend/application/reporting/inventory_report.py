@@ -72,8 +72,9 @@ class DistributionEntry:
 
     ``label`` ist der Hersteller- bzw. Kategorie-Name, ``count`` die Anzahl der
     Geraete dazu. Ein leerer Hersteller/eine leere Kategorie wird in der Aggregation
-    als "(ohne)" gezaehlt (siehe ``build_inventory_report``); ``label`` wird sonst
-    UNVERAENDERT durchgereicht.
+    als maschineller Marker (``EMPTY_VENDOR_MARKER`` bzw. ``EMPTY_CATEGORY_MARKER``)
+    gezaehlt (siehe ``build_inventory_report``) -- die ANZEIGE dazu entsteht erst beim
+    Uebersetzen; ``label`` wird sonst UNVERAENDERT durchgereicht.
     """
 
     label: str
@@ -121,19 +122,25 @@ class InventoryReport:
 # (trusted/watch) erzeugen.
 _TRUST_STATES = ("trusted", "watch", "neutral")
 
-# Platzhalter fuer einen leeren Hersteller/eine leere Kategorie in den Verteilungen.
-_EMPTY_LABEL = "(ohne)"
+# Maschinelle Marker fuer einen leeren Hersteller bzw. eine leere Kategorie in den
+# Verteilungen. BEWUSST kein Anzeigetext: die Beschriftung entsteht erst dort, wo
+# uebersetzt wird (Frontend aus den Sprachdateien, PDF ueber ``_ui``). Die beiden
+# Verteilungen brauchen unterschiedliche Texte ("Kein Hersteller ermittelt" vs. "Keine
+# Kategorie ermittelt"), darum ZWEI Marker statt einem geteilten.
+EMPTY_VENDOR_MARKER = "__vendor_unknown__"
+EMPTY_CATEGORY_MARKER = "__category_unknown__"
 
 
-def _distribution(values: list[str]) -> list[DistributionEntry]:
+def _distribution(values: list[str], empty_marker: str) -> list[DistributionEntry]:
     """Gruppiert eine Werteliste zu Verteilungs-Eintraegen (reine Helferfunktion).
 
-    Leere Werte werden als ``_EMPTY_LABEL`` ("(ohne)") gezaehlt. Sortiert absteigend
-    nach ``count``, bei Gleichstand ``label`` aufsteigend. Deterministisch.
+    Leere Werte werden als ``empty_marker`` gezaehlt (maschineller Marker, KEIN
+    Anzeigetext). Sortiert absteigend nach ``count``, bei Gleichstand ``label``
+    aufsteigend. Deterministisch.
     """
     counts: dict[str, int] = {}
     for value in values:
-        key = value if value else _EMPTY_LABEL
+        key = value if value else empty_marker
         counts[key] = counts.get(key, 0) + 1
     entries = [DistributionEntry(label=label, count=count) for label, count in counts.items()]
     return sorted(entries, key=lambda e: (-e.count, e.label))
@@ -152,10 +159,10 @@ def build_inventory_report(
       1. Vertrauens-Verteilung (``trusted``/``watch``/``neutral``) ueber ALLE Zeilen
          (inkl. archivierte) nach ``trust_state``; ein unbekannter ``trust_state``
          zaehlt als "neutral".
-      2. ``vendor_distribution`` ueber ALLE Zeilen nach ``vendor`` (leer -> "(ohne)"),
-         ``category_distribution`` ueber ALLE Zeilen nach ``category`` (leer ->
-         "(ohne)") -- beide absteigend nach ``count``, bei Gleichstand ``label``
-         aufsteigend.
+      2. ``vendor_distribution`` ueber ALLE Zeilen nach ``vendor`` (leer ->
+         ``EMPTY_VENDOR_MARKER``), ``category_distribution`` ueber ALLE Zeilen nach
+         ``category`` (leer -> ``EMPTY_CATEGORY_MARKER``) -- beide absteigend nach
+         ``count``, bei Gleichstand ``label`` aufsteigend.
       3. ``device_rows`` = nur Zeilen mit ``archived == False``, ``archived_rows`` =
          nur Zeilen mit ``archived == True`` -- beide sortiert nach
          ``(-last_seen_ts, device_label)``.
@@ -169,8 +176,8 @@ def build_inventory_report(
         state = row.trust_state if row.trust_state in trust_counts else "neutral"
         trust_counts[state] += 1
 
-    vendor_distribution = _distribution([row.vendor for row in rows])
-    category_distribution = _distribution([row.category for row in rows])
+    vendor_distribution = _distribution([row.vendor for row in rows], EMPTY_VENDOR_MARKER)
+    category_distribution = _distribution([row.category for row in rows], EMPTY_CATEGORY_MARKER)
 
     def _sort_key(row: InventoryDeviceRow) -> tuple[float, str]:
         return (-row.last_seen_ts, row.device_label)

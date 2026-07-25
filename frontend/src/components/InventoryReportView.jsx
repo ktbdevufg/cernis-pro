@@ -417,11 +417,22 @@ export default function InventoryReportView() {
 // IMMER ALLE Eintraege gerendert; am Bildschirm blendet CSS die ueber TOP_VERTEILUNG
 // hinausgehenden Zeilen aus (--ueberzaehlig) und zeigt die "+ X weitere"-Zeile. Im
 // Druck dreht @media print das um: alle sichtbar, "weitere" weg. Balkenbreite relativ
-// zum groessten count ueber ALLE Eintraege (auch im Druck stimmig). Leerer Label-Wert
-// -> i18n-"(ohne)".
+// zum groessten count ueber ALLE Eintraege (auch im Druck stimmig).
+//
+// Leerer Hersteller / leere Kategorie: das Backend liefert dafuer einen MASCHINELLEN
+// Marker (__vendor_unknown__ / __category_unknown__), keinen Anzeigetext. Uebersetzt
+// wird er erst hier, aus den Sprachdateien -- je Verteilung mit eigenem Wortlaut. Der
+// rohe Marker darf nie sichtbar werden.
+const LEER_MARKER = {
+  vendor: { marker: "__vendor_unknown__", key: "report.inventory.verteilung.ohneHersteller" },
+  category: { marker: "__category_unknown__", key: "report.inventory.verteilung.ohneKategorie" },
+};
+
 function Verteilung({ eintraege, modus, onModus, t }) {
   const rest = eintraege.length - TOP_VERTEILUNG;
   const maxCount = eintraege.reduce((acc, e) => Math.max(acc, e.count), 0) || 1;
+  const leer = LEER_MARKER[modus] ?? LEER_MARKER.vendor;
+  const labelText = (e) => (e.label === leer.marker ? t(leer.key) : e.label);
 
   return (
     <section className="inventory-report__verteilung">
@@ -470,11 +481,8 @@ function Verteilung({ eintraege, modus, onModus, t }) {
                 }
               >
                 <div className="inventory-report__balken-kopf">
-                  <span
-                    className="inventory-report__balken-label"
-                    title={e.label || t("report.inventory.verteilung.ohne")}
-                  >
-                    {e.label || t("report.inventory.verteilung.ohne")}
+                  <span className="inventory-report__balken-label" title={labelText(e)}>
+                    {labelText(e)}
                   </span>
                   <span className="inventory-report__balken-zahl inventory-report__mono">
                     {e.count}

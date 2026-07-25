@@ -144,6 +144,16 @@ _UI_STRINGS: dict[str, dict[str, str]] = {
     "inv.gesamt": {"de": "Gesamt", "en": "Total"},
     "inv.aktiv24h": {"de": "Aktiv (24h)", "en": "Active (24h)"},
     "inv.keine_eintraege": {"de": "Keine Einträge.", "en": "No entries."},
+    # Anzeige fuer die maschinellen Leer-Marker der beiden Verteilungen. Der Marker selbst
+    # (``__vendor_unknown__``/``__category_unknown__``) darf nie im PDF landen.
+    "inv.ohne_hersteller": {
+        "de": "Kein Hersteller ermittelt",
+        "en": "No vendor identified",
+    },
+    "inv.ohne_kategorie": {
+        "de": "Keine Kategorie ermittelt",
+        "en": "No category identified",
+    },
     # CVE-Bericht
     "cve.kennzahlen": {"de": "CVE-Kennzahlen", "en": "CVE Metrics"},
     "cve.schweregrad": {"de": "Schweregrad-Verteilung", "en": "Severity Distribution"},
@@ -218,6 +228,35 @@ def _ui(key: str, lang: str) -> str:
     if entry is None:
         return key
     return entry.get(lang) or entry.get("de") or key
+
+
+# Maschinelle Leer-Marker der beiden Bestands-Verteilungen. SPIEGEL von
+# ``EMPTY_VENDOR_MARKER``/``EMPTY_CATEGORY_MARKER`` aus
+# ``application.reporting.inventory_report`` -- der Adapter darf ``application`` aber NICHT
+# importieren (import-linter), darum hier als lokale Konstanten gefuehrt (Muster
+# ``PORT_COLUMNS``).
+_EMPTY_VENDOR_MARKER = "__vendor_unknown__"
+_EMPTY_CATEGORY_MARKER = "__category_unknown__"
+
+# Marker -> _UI_STRINGS-Schluessel. Trennt die beiden Verteilungen, die
+# unterschiedliche Texte brauchen.
+_MARKER_UI_KEYS = {
+    _EMPTY_VENDOR_MARKER: "inv.ohne_hersteller",
+    _EMPTY_CATEGORY_MARKER: "inv.ohne_kategorie",
+}
+
+
+def _resolve_distribution_marker(
+    rows: tuple[tuple[str, str], ...], marker: str, lang: str
+) -> tuple[tuple[str, str], ...]:
+    """Ersetzt den maschinellen Leer-Marker einer Verteilung durch seinen Anzeigetext.
+
+    Nur der EINE zur Verteilung passende Marker wird aufgeloest (Hersteller bzw.
+    Kategorie); alle anderen Labels bleiben unveraendert. Reihenfolge und ``count``
+    werden nicht angefasst -- die Sortierung entsteht in ``application``.
+    """
+    ui_key = _MARKER_UI_KEYS[marker]
+    return tuple((_ui(ui_key, lang) if label == marker else label, count) for label, count in rows)
 
 
 # Spaltenueberschriften der vier Tabellen-Rubriken. SPIEGEL der ``*_COLUMNS`` aus
@@ -1257,13 +1296,21 @@ class ReportlabRenderer:
         # ── Verteilung nach Hersteller / Kategorie (zwei schlanke (label, count)-Tabellen) ──
         story.append(Paragraph(_ui("inv.nach_hersteller", lang), styles["h_section"]))
         self._append_distribution_table(
-            story, styles, ("Hersteller", "Anzahl"), model.vendor_rows, lang
+            story,
+            styles,
+            ("Hersteller", "Anzahl"),
+            _resolve_distribution_marker(model.vendor_rows, _EMPTY_VENDOR_MARKER, lang),
+            lang,
         )
         story.append(Spacer(1, 6 * mm))
 
         story.append(Paragraph(_ui("inv.nach_kategorie", lang), styles["h_section"]))
         self._append_distribution_table(
-            story, styles, ("Kategorie", "Anzahl"), model.category_rows, lang
+            story,
+            styles,
+            ("Kategorie", "Anzahl"),
+            _resolve_distribution_marker(model.category_rows, _EMPTY_CATEGORY_MARKER, lang),
+            lang,
         )
 
         story.append(PageBreak())

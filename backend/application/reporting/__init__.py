@@ -62,6 +62,8 @@ from application.reporting.inventory_pdf_model import (
     InventoryPdfModel,
 )
 from application.reporting.inventory_report import (
+    EMPTY_CATEGORY_MARKER,
+    EMPTY_VENDOR_MARKER,
     DistributionEntry,
     InventoryDeviceRow,
     InventoryReport,
@@ -155,6 +157,8 @@ __all__ = [
     "DNS_BYPASS_ROW_COLUMNS",
     "DNS_CATEGORY_COLUMNS",
     "DNS_CONTACT_COLUMNS",
+    "EMPTY_CATEGORY_MARKER",
+    "EMPTY_VENDOR_MARKER",
     "ERSTELLT_AM_PRAEFIX",
     "FINDING_COLUMNS",
     "FINDING_GROUP_COLUMNS",

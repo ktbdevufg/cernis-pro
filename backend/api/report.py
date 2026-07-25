@@ -254,8 +254,10 @@ async def get_manual_pdf(
 class InventoryDistributionOut(BaseModel):
     """Ein Eintrag einer Verteilungs-Tabelle (Hersteller bzw. Kategorie, Wire-Form).
 
-    ``label`` der Hersteller- bzw. Kategorie-Name (ein leerer wird vom Root als "(ohne)"
-    gefuehrt), ``count`` die Anzahl der Geraete dazu.
+    ``label`` der Hersteller- bzw. Kategorie-Name. Ein leerer Wert wird als maschineller
+    Marker gefuehrt (``__vendor_unknown__`` bzw. ``__category_unknown__``) -- KEIN
+    Anzeigetext; das Frontend uebersetzt ihn ueber die Sprachdateien. ``count`` die Anzahl
+    der Geraete dazu.
     """
 
     label: str
