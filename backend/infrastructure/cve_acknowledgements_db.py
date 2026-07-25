@@ -23,9 +23,14 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+import structlog
+
+from infrastructure._cve_mac import migrate_macs_to_upper, normalize_mac_case
 from ports.devices import Clock
 
 __all__ = ["SqliteCveAcknowledgementRepository"]
+
+_logger = structlog.get_logger(__name__)
 
 
 class SqliteCveAcknowledgementRepository:
@@ -67,6 +72,17 @@ class SqliteCveAcknowledgementRepository:
                 );
                 """
             )
+            # Altbestand EINMALIG auf Grossschreibung heben (Finding 8). Hier reines
+            # Hochschreiben -- mac ist kein Schluessel, Dubletten sind unschaedlich (der
+            # effektive Status ist ohnehin die max(id)-Ableitung je Tripel). Zweiter
+            # Start -> No-op. Fehlschlag wird LAUT geloggt, blockiert den Start nicht.
+            try:
+                migrated = migrate_macs_to_upper(conn, "cve_acknowledgements")
+            except Exception as exc:
+                _logger.error("cve_acknowledgements_mac_migration_failed", error=str(exc))
+            else:
+                if migrated:
+                    _logger.info("cve_acknowledgements_mac_migration_done", rows=migrated)
 
     # ── Schreib-Pfad ──────────────────────────────────────────────────────────
 
@@ -76,6 +92,11 @@ class SqliteCveAcknowledgementRepository:
         Append-only: ein zweites ``record`` mit denselben (mac, cve_id, port) ueberschreibt
         NICHTS, sondern legt die naechste Zeile an. Der effektive Status ergibt sich erst
         beim Lesen aus dem JUENGSTEN Eintrag.
+
+        Die MAC wird auf die kanonische Grossschreibung gehoben -- so quittiert ein ack
+        denselben Befund, egal ob die MAC in Bestands- oder Scan-Schreibweise
+        hereinkommt, und ``acknowledged_keys()`` trifft die (ebenfalls grossgeschriebenen)
+        Befund-Schluessel aus ``cve_findings``.
         """
         # created_at explizit aus der Clock (timezone-aware UTC) als ISO-8601-String
         # MIT Zonen-Offset (+00:00) -- nicht mehr ueber den Schema-Default datetime('now').
@@ -84,7 +105,7 @@ class SqliteCveAcknowledgementRepository:
             conn.execute(
                 "INSERT INTO cve_acknowledgements (mac, cve_id, port, action, created_at) "
                 "VALUES (?, ?, ?, ?, ?)",
-                (mac, cve_id, port, action, created_at),
+                (normalize_mac_case(mac), cve_id, port, action, created_at),
             )
 
     def clear_all(self) -> None:
@@ -101,6 +122,14 @@ class SqliteCveAcknowledgementRepository:
         id je (mac, cve_id, port)) ``action == 'ack'`` ist; ein spaeteres ``unack`` hebt
         das wieder auf. Effizient per Subquery auf ``max(id)`` je Tripel -- KEIN Laden der
         ganzen History in Python.
+
+        Gruppiert wird ueber ``upper(mac)``, und die Schluessel kommen grossgeschrieben
+        heraus: so trifft die Menge die (ebenfalls grossgeschriebenen) Befund-Schluessel
+        aus ``cve_findings``. Die Gruppierung ueber die kanonische Form ist auch dann
+        richtig, wenn die einmalige Migration ausnahmsweise fehlschlug -- ein altes
+        kleingeschriebenes ``ack`` und ein neues grossgeschriebenes ``unack`` desselben
+        Befunds landen in DERSELBEN Gruppe, sodass wirklich die juengste Entscheidung
+        gilt statt zweier konkurrierender Straenge.
         """
         with self._connect() as conn:
             rows = conn.execute(
@@ -110,9 +139,11 @@ class SqliteCveAcknowledgementRepository:
                 WHERE a.id = (
                     SELECT max(b.id)
                     FROM cve_acknowledgements AS b
-                    WHERE b.mac = a.mac AND b.cve_id = a.cve_id AND b.port = a.port
+                    WHERE upper(b.mac) = upper(a.mac)
+                      AND b.cve_id = a.cve_id
+                      AND b.port = a.port
                 )
                   AND a.action = 'ack'
                 """
             ).fetchall()
-        return {(row["mac"], row["cve_id"], row["port"]) for row in rows}
+        return {(normalize_mac_case(row["mac"]), row["cve_id"], row["port"]) for row in rows}

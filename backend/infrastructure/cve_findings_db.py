@@ -20,9 +20,14 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+import structlog
+
 from domain.cve.models import CveFindingRecord
+from infrastructure._cve_mac import migrate_macs_to_upper, normalize_mac_case
 
 __all__ = ["SqliteCveFindingRepository"]
+
+_logger = structlog.get_logger(__name__)
 
 
 class SqliteCveFindingRepository:
@@ -69,6 +74,16 @@ class SqliteCveFindingRepository:
                 );
                 """
             )
+            # Altbestand EINMALIG auf Grossschreibung heben (Finding 8), kollisionssicher
+            # (aeltestes first_seen_ts bleibt erhalten). Zweiter Start -> No-op. Ein
+            # Fehlschlag wird LAUT geloggt, verhindert den Backend-Start aber nicht.
+            try:
+                migrated = migrate_macs_to_upper(conn, "cve_findings")
+            except Exception as exc:
+                _logger.error("cve_findings_mac_migration_failed", error=str(exc))
+            else:
+                if migrated:
+                    _logger.info("cve_findings_mac_migration_done", rows=migrated)
 
     # ── Schreib-Pfad ──────────────────────────────────────────────────────────
 
@@ -79,6 +94,11 @@ class SqliteCveFindingRepository:
         BEWUSST NICHT angefasst (bleibt der erste Sicht-Zeitpunkt); ``last_seen_ts`` und
         die veraenderlichen NVD-Felder (Severity/Score kann NVD nachtraeglich aendern)
         werden auf die neuen Werte gesetzt.
+
+        Die MAC geht in kanonischer Grossschreibung in die Spalte -- damit faellt ein
+        Befund desselben Hosts IMMER auf denselben Schluessel, egal in welcher Form der
+        Worker ihn hereinreicht (der ``CveFindingRecord`` selbst bleibt unveraendert,
+        er ist frozen; normalisiert wird der SQL-Parameter).
         """
         with self._connect() as conn:
             conn.execute(
@@ -99,7 +119,7 @@ class SqliteCveFindingRepository:
                     last_seen_ts = excluded.last_seen_ts
                 """,
                 (
-                    record.mac,
+                    normalize_mac_case(record.mac),
                     record.cve_id,
                     record.port,
                     record.severity,
@@ -130,13 +150,20 @@ class SqliteCveFindingRepository:
         return [self._row_to_record(row) for row in rows]
 
     def list_for_host(self, mac: str) -> list[CveFindingRecord]:
-        """Alle Befunde eines Hosts. Leere MAC -> ``[]`` (kein stabiler Schluessel)."""
+        """Alle Befunde eines Hosts. Leere MAC -> ``[]`` (kein stabiler Schluessel).
+
+        Die MAC wird vor der Abfrage auf die kanonische Grossschreibung gehoben. Genau
+        hier sass Finding 8: eine Anfrage in der Schreibweise des Geraetebestands
+        (GROSS) lief gegen kleingeschriebene Zeilen ins Leere und lieferte faelschlich
+        eine leere Liste -- der Host sah dann schwachstellenfrei aus, obwohl Befunde
+        gespeichert waren.
+        """
         if not mac:
             return []
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM cve_findings WHERE mac = ? ORDER BY cvss_score DESC, cve_id, port",
-                (mac,),
+                (normalize_mac_case(mac),),
             ).fetchall()
         return [self._row_to_record(row) for row in rows]
 

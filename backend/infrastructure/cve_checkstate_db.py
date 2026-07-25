@@ -24,9 +24,14 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+import structlog
+
 from domain.cve.models import HostCheckState
+from infrastructure._cve_mac import migrate_macs_to_upper, normalize_mac_case
 
 __all__ = ["SqliteCveCheckStateRepository"]
+
+_logger = structlog.get_logger(__name__)
 
 
 def _ports_to_text(ports: frozenset[int]) -> str:
@@ -72,15 +77,31 @@ class SqliteCveCheckStateRepository:
                 );
                 """
             )
+            # Altbestand EINMALIG auf Grossschreibung heben (Finding 8). Beim zweiten
+            # Start findet der Guard nichts mehr -> No-op. Ein Fehlschlag wird LAUT
+            # geloggt, laesst den Start aber weiterlaufen: der Adapter ist auch mit
+            # unmigriertem Bestand benutzbar (nur die Alt-Zeilen bleiben unerreichbar),
+            # ein toter Backend-Start waere der schlechtere Ausgang.
+            try:
+                migrated = migrate_macs_to_upper(conn, "cve_check_state")
+            except Exception as exc:
+                _logger.error("cve_checkstate_mac_migration_failed", error=str(exc))
+            else:
+                if migrated:
+                    _logger.info("cve_checkstate_mac_migration_done", rows=migrated)
 
     def get(self, mac: str) -> HostCheckState | None:
-        """Pruefstand einer MAC, oder ``None`` (Fall 1: noch nie geprueft)."""
+        """Pruefstand einer MAC, oder ``None`` (Fall 1: noch nie geprueft).
+
+        Die MAC wird auf die kanonische Grossschreibung gehoben, bevor gesucht wird --
+        so trifft auch eine Anfrage in Scan-Schreibweise (klein) ihren Stand.
+        """
         if not mac:
             return None
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT mac, last_checked_ts, ports FROM cve_check_state WHERE mac = ?",
-                (mac,),
+                (normalize_mac_case(mac),),
             ).fetchone()
         if row is None:
             return None
@@ -91,7 +112,12 @@ class SqliteCveCheckStateRepository:
         )
 
     def record(self, mac: str, ports: frozenset[int], checked_ts: float) -> None:
-        """Setzt/aktualisiert den Pruefstand einer MAC (Upsert auf mac)."""
+        """Setzt/aktualisiert den Pruefstand einer MAC (Upsert auf mac).
+
+        Geschrieben wird die kanonische Grossschreibung -- unabhaengig davon, in welcher
+        Form der Worker die MAC aus dem Scan-Bestand hereinreicht.
+        """
+        mac = normalize_mac_case(mac)
         with self._connect() as conn:
             conn.execute(
                 """
