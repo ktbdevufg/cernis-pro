@@ -426,7 +426,7 @@
       "traffic": {
         "title": "Per-App-Verkehr",
         "subtitle": "Welche Anwendung wohin verbindet, aufgeschlüsselt je App.",
-        "locked": "erst nach Start der Beobachtung"
+        "locked": ""
       },
       "outbound": {
         "title": "Außenkontakte",
@@ -452,11 +452,6 @@
         "title": "Topologie",
         "subtitle": "Das Heimnetz als radialer Graph — Gateway im Zentrum, Geräte ringsum.",
         "locked": ""
-      },
-      "processes": {
-        "title": "Prozesse",
-        "subtitle": "Laufende Prozesse mit ihren Netzverbindungen.",
-        "locked": "erst nach Start der Beobachtung"
       }
     },
     "scan": {

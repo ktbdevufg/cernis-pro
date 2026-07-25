@@ -426,7 +426,7 @@
       "traffic": {
         "title": "Per-app traffic",
         "subtitle": "Which application connects where, broken down by app.",
-        "locked": "available once observation has started"
+        "locked": ""
       },
       "outbound": {
         "title": "Outbound contacts",
@@ -452,11 +452,6 @@
         "title": "Topology",
         "subtitle": "The home network as a radial graph — gateway at the center, devices around it.",
         "locked": ""
-      },
-      "processes": {
-        "title": "Processes",
-        "subtitle": "Running processes with their network connections.",
-        "locked": "available once observation has started"
       }
     },
     "scan": {

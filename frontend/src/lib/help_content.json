@@ -177,20 +177,6 @@
       "lang": "The traffic view shows you, per program (app), which network connections it currently maintains and how much data flows over them. This lets you see at a glance which application is 'talking' to where.\n\nConnections that cannot be attributed to a program (for example from other devices) are collected in a separate 'unattributable' group - they are not simply left out.\n\nYou have the choice between automatic refresh (the view updates itself) and manual refresh (you trigger each update yourself). Both are equally valid - you decide what fits your way of working.\n\nRemote endpoints are initially shown as a plain IP address. You can look up who is behind them using the resolve function.\n\nWhat this view can show depends on the operating system. Two things are distinct: WHICH programs talk to which counterparts, and HOW MUCH flows in the process. The first works everywhere. The second - throughput per program - cannot be measured on macOS because the system provides no interface for it; on Linux it requires elevated privileges. Where a figure is missing, a dash appears in its place rather than an invented zero. In the settings you can choose whether such unavailable figures stay visible and explained (the default) or are hidden entirely. Real measurements are always shown.\n\nSpecial case on macOS: on macOS the operating system provides no interface for measuring the data throughput of individual programs - unlike Linux and Windows. This cannot be unlocked; it is not a matter of privileges. Other tools on macOS solve this in one of two ways: via undocumented system interfaces that Apple did not intend for third parties and that can disappear at any time, or via a network system extension that actively routes all traffic through its own filter. Both are deliberately out of the question for CERNIS: CERNIS observes passively and never interferes with traffic. That is why CERNIS honestly shows a dash here instead of an invented number - and, in return, shows in full which program talks to which peer."
     }
   },
-  "help.process.uebersicht": {
-    "status": "final",
-    "kategorie": "Beobachten",
-    "de": {
-      "titel": "Prozess-Sicht",
-      "kurz": "Die Prozess-Sicht listet die laufenden Programme mit ihrem Pfad auf und weist dezent darauf hin, wenn ein Programm sich moeglicherweise als etwas anderes ausgibt.",
-      "lang": "Die Prozess-Sicht zeigt die auf Ihrem System laufenden Programme zusammen mit dem Pfad, aus dem sie gestartet wurden. Der Pfad ist oft aufschlussreich: Ein bekanntes Programm, das aus einem ungewoehnlichen Verzeichnis startet, kann ein Hinweis auf etwas Unsauberes sein.\n\nCERNIS PRO weist dezent darauf hin, wenn ein Programm moeglicherweise versucht, sich als ein anderes auszugeben (Masquerade). Wie viele Details Sie sehen, haengt von den Rechten ab, mit denen das Programm laeuft - das wird ehrlich angezeigt, statt Luecken zu verschleiern.\n\nReine System-Hintergrundprozesse (Kernel-Threads) werden ausgeblendet, damit die Liste uebersichtlich bleibt."
-    },
-    "en": {
-      "titel": "Process view",
-      "kurz": "The process view lists running programs with their path and discreetly points out when a program may be disguising itself as something else.",
-      "lang": "The process view shows the programs running on your system together with the path they were started from. The path is often revealing: a well-known program starting from an unusual directory can be a hint of something improper.\n\nCERNIS PRO discreetly points out when a program may be trying to pass itself off as another (masquerade). How much detail you see depends on the privileges the program runs with - this is shown honestly rather than concealing gaps.\n\nPure system background processes (kernel threads) are hidden to keep the list clear."
-    }
-  },
   "help.diagnostics.dns_traceroute": {
     "status": "final",
     "kategorie": "Diagnose",

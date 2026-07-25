@@ -5,7 +5,6 @@
 // Funktionen:
 //   "scan"     Netzwerk-Scan (aktiv) -> bestehende Scan-Tabelle
 //   "traffic"  Per-App-Verkehr (aktiv) -> App-Liste + Verbindungs-Detail
-//   "processes" Prozesse (gesperrt bis Beobachtung läuft)
 //
 // Datenquelle der Tabelle ist ausschließlich der Import aus mockData/scanMock.
 // Die View weiß nicht, ob die Daten echt oder Platzhalter sind. Bei echter
@@ -15,7 +14,6 @@ import {
   Activity,
   FileClock,
   Globe,
-  ListTree,
   Network,
   Radar,
   Repeat,
@@ -92,7 +90,6 @@ const FUNKTIONEN = [
   { id: "monitor", icon: Activity, locked: false, helpId: "help.monitor.live" },
   { id: "logging", icon: FileClock, locked: false, helpId: "help.monitor.logging" },
   { id: "topology", icon: Network, locked: false, helpId: "help.topology.uebersicht" },
-  { id: "processes", icon: ListTree, locked: true, helpId: "help.process.uebersicht" },
 ];
 
 // Sweep-Overlay als eigene, memoisierte Komponente OHNE Props. Dadurch rendert
