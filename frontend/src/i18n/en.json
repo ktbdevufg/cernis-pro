@@ -612,9 +612,10 @@
       "notablePill": "notable",
       "down": "↓ {{value}}",
       "up": "↑ {{value}}",
-      "rateKb": "{{value}} KB/s",
-      "rateMb": "{{value}} MB/s",
-      "rateBps": "{{value}} bit/s",
+      "rateBit": "{{value}} bit/s",
+      "rateKbit": "{{value}} kbit/s",
+      "rateMbit": "{{value}} Mbit/s",
+      "rateGbit": "{{value}} Gbit/s",
       "unattributed": "Unattributed (needs root)",
       "noTarget": "no target",
       "mdns": "Multicast (mDNS)",
@@ -657,7 +658,8 @@
       "groupLocalHint": "Services waiting for connections, and connectionless UDP traffic such as local device discovery. Normal local network behaviour without a peer.",
       "groupLocalToggleShow": "Show",
       "groupLocalToggleHide": "Hide",
-      "durchsatzNichtMessbar": "On macOS it is not possible to measure how much data an individual program transfers — unlike Linux or Windows, the operating system provides no interface for this. It cannot be unlocked. What is shown in full, however, is which program talks to which peer."
+      "durchsatzNichtMessbar": "On macOS it is not possible to measure how much data an individual program transfers — unlike Linux or Windows, the operating system provides no interface for this. It cannot be unlocked. What is shown in full, however, is which program talks to which peer.",
+      "durchsatzOhneWerte": "No throughput values are currently available for the connections shown. What is displayed are the connections of your own user account."
     },
     "outbound": {
       "hostScopeLocal": "Contacts of this machine — passively observed, not a network-wide view.",

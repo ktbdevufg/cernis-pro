@@ -612,9 +612,10 @@
       "notablePill": "auffällig",
       "down": "↓ {{value}}",
       "up": "↑ {{value}}",
-      "rateKb": "{{value}} KB/s",
-      "rateMb": "{{value}} MB/s",
-      "rateBps": "{{value}} bit/s",
+      "rateBit": "{{value}} bit/s",
+      "rateKbit": "{{value}} kbit/s",
+      "rateMbit": "{{value}} Mbit/s",
+      "rateGbit": "{{value}} Gbit/s",
       "unattributed": "Nicht zugeordnet (ohne Root)",
       "noTarget": "kein Ziel",
       "mdns": "Multicast (mDNS)",
@@ -657,7 +658,8 @@
       "groupLocalHint": "Dienste, die auf Verbindungen warten, und verbindungsloser UDP-Verkehr wie die lokale Gerätesuche. Normales lokales Netzverhalten ohne Gegenstelle.",
       "groupLocalToggleShow": "Anzeigen",
       "groupLocalToggleHide": "Ausblenden",
-      "durchsatzNichtMessbar": "Auf macOS lässt sich nicht messen, wie viele Daten ein einzelnes Programm überträgt — das Betriebssystem stellt dafür im Gegensatz zu Linux oder Windows keine Schnittstelle bereit. Das lässt sich nicht freischalten. Vollständig angezeigt wird dagegen, welches Programm mit welcher Gegenstelle spricht."
+      "durchsatzNichtMessbar": "Auf macOS lässt sich nicht messen, wie viele Daten ein einzelnes Programm überträgt — das Betriebssystem stellt dafür im Gegensatz zu Linux oder Windows keine Schnittstelle bereit. Das lässt sich nicht freischalten. Vollständig angezeigt wird dagegen, welches Programm mit welcher Gegenstelle spricht.",
+      "durchsatzOhneWerte": "Für die angezeigten Verbindungen liegen gerade keine Durchsatzwerte vor. Angezeigt werden die Verbindungen des eigenen Benutzerkontos."
     },
     "outbound": {
       "hostScopeLocal": "Kontakte dieses Rechners — passiv beobachtet, kein netzweiter Blick.",

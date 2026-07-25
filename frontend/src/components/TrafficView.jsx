@@ -35,6 +35,7 @@ import {
   fetchTrafficPermission,
 } from "../api/traffic.js";
 import { fetchSettings } from "../api/settings.js";
+import { formatiereDatenrate } from "../lib/datenrate.js";
 import { CODES, mitCode } from "../lib/fehlercodes.js";
 import LookupPanel from "./LookupPanel.jsx";
 import "./TrafficView.css";
@@ -145,12 +146,9 @@ function maxDown(apps) {
   );
 }
 
-// Rohrate (bps) schlicht lesbar machen. Die echte Umrechnung kommt erst mit dem
-// Poller; vorerst nur die Roh-Bits/s als ehrliche Zahl. null wird hier nie
-// übergeben (Aufrufer prüft vorher und zeigt sonst "—").
-function formatRate(t, bps) {
-  return t("beobachten.traffic.rateBps", { value: bps });
-}
+// Rohrate (bit/s) wird über formatiereDatenrate (lib/datenrate.js) in der
+// passenden Einheit (bit/s … Gbit/s, Basis 1000) mit sprachrichtiger Zahl
+// dargestellt. Die Aufrufer prüfen vorher auf null und zeigen sonst "—".
 
 // App-Anzeigename: echter Name oder das ehrliche None-Gruppen-Label.
 function appLabel(t, app) {
@@ -161,7 +159,7 @@ function appLabel(t, app) {
 // onSelect. selected hebt die zum offenen Detail-Panel gehörende Zeile hervor.
 // Ohne echte Rate (down===null): ruhiges "—" statt Balken; mit Rate: Balken.
 function AppZeile({ app, onSelect, selected, anteil, durchsatzAusblenden }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const Icon = APP_ICONS[app.icon] ?? HelpCircle;
 
   const rowKlasse = selected
@@ -206,7 +204,7 @@ function AppZeile({ app, onSelect, selected, anteil, durchsatzAusblenden }) {
               </span>
               <span className="traffic-app__rate-value traffic-mono">
                 {t("beobachten.traffic.down", {
-                  value: formatRate(t, app.down),
+                  value: formatiereDatenrate(t, app.down, i18n.language),
                 })}
               </span>
             </>
@@ -615,13 +613,14 @@ function ConnectionList({ conns, onLookup }) {
 // Verbindung meldet deren Ziel über onLookup nach oben — dort öffnet TrafficView
 // die Gegenstellen-Ansicht (LookupPanel) in dieser Spalte.
 function AppDetailPanel({ app, onClose, onLookup, durchsatzAusblenden }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const Icon = APP_ICONS[app.icon] ?? HelpCircle;
 
   // Raten-Zeile im Detail: echte Werte oder ehrliches "—" je Richtung.
   const downText =
-    app.down !== null ? formatRate(t, app.down) : "—";
-  const upText = app.up !== null ? formatRate(t, app.up) : "—";
+    app.down !== null ? formatiereDatenrate(t, app.down, i18n.language) : "—";
+  const upText =
+    app.up !== null ? formatiereDatenrate(t, app.up, i18n.language) : "—";
 
   // Raten nur ausblenden, wenn sie ohnehin nicht verfügbar sind (der Aufrufer
   // prüft das) UND kein echter Wert vorliegt. Ein vorhandener Wert wird IMMER
@@ -1001,26 +1000,34 @@ export default function TrafficView({
   // ist das hier niemals true — vorhandene Daten werden nie verborgen.
   const durchsatzAusblenden = durchsatzNichtVerfuegbar && !zeigeNichtVerfuegbar;
 
+  // Liegt für mindestens eine App ein Durchsatzwert vor? Auf Linux ist das der
+  // Normalfall (der Durchsatz ist rootless messbar) — dann braucht es gar keinen
+  // Hinweis. Erst wenn wirklich nichts gemessen vorliegt, wird erklärt, was gilt.
+  const durchsatzWerteVorhanden = apps.some(
+    (app) => app.down !== null || app.up !== null,
+  );
+
   // Der erklärende Streifen entfällt mit der Erklärung selbst (der Nutzer hat sie
-  // bewusst abgewählt); bei behebbaren Rechte-Fällen bleibt er unberührt.
+  // bewusst abgewählt); bei behebbaren Fällen bleibt er unberührt. Zusätzlich
+  // entfällt er, sobald echte Werte da sind — dann ist nichts zu erklären.
   const zeigePermission =
     permission !== null &&
     permission.ok === false &&
-    permission.error &&
-    !durchsatzAusblenden;
+    !durchsatzAusblenden &&
+    !durchsatzWerteVorhanden;
 
   return (
     <div className="traffic">
-      {/* not_applicable (Plattform bietet die Messung nicht, z. B. macOS): eigener,
-          uebersetzter UI-Text statt des rohen Backend-Strings (D2). Bei allen
-          anderen Faellen (v. a. needs_privileges) bleibt die Backend-Begruendung —
-          sie nennt dort den behebbaren Weg. */}
+      {/* Beide Hinweise kommen aus den Sprachdateien, nie aus dem rohen error-Feld
+          des Backends (das ist eine technische Begruendung, kein Oberflaechentext).
+          not_applicable = die Plattform bietet die Messung nicht an (macOS);
+          sonst = auf dieser Plattform messbar, aber gerade ohne Werte. */}
       {zeigePermission && (
         <PermissionHinweis
           text={
             durchsatzNichtVerfuegbar
               ? t("beobachten.traffic.durchsatzNichtMessbar")
-              : permission.error
+              : t("beobachten.traffic.durchsatzOhneWerte")
           }
         />
       )}
