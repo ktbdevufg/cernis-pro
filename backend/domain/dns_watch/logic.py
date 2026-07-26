@@ -21,9 +21,11 @@ Verbindungen, die weder Port 53 noch DoH-IP-443 sind, sind NICHT DNS-relevant
 from domain.dns_watch.models import RawDnsConnection
 
 __all__ = [
+    "ACKNOWLEDGED_COUNT_KEYS",
     "CATEGORY_EXPECTED",
     "CATEGORY_OPEN",
     "CATEGORY_POSSIBLE_DOH",
+    "acknowledged_count_key",
     "classify",
     "is_dns_relevant",
 ]
@@ -33,6 +35,36 @@ __all__ = [
 CATEGORY_EXPECTED = "erwartungsgemaess"
 CATEGORY_OPEN = "offen"
 CATEGORY_POSSIBLE_DOH = "moegliche_doh"
+
+# Praefix der QUITTIERTEN Zaehler in ``DnsWatchOverview.counts``: je Kategorie traegt
+# ``counts`` zusaetzlich einen Schluessel ``"quittiert_<kategorie>"`` mit der Anzahl der
+# als bekannt markierten Befunde dieser Kategorie. Reine Daten (wie die Kategorie-
+# Schluessel selbst); der api-Rand/das Frontend macht daraus Anzeigetexte.
+#
+# VERLUSTFREIHEIT (Projektlinie, Muster ``findings_total``/``findings_active`` im
+# CVE-Bereich): die Kategorie-Schluessel zaehlen nach dieser Etappe nur noch die AKTIVEN
+# (nicht quittierten) Befunde; die quittierten sind nicht weggerechnet, sondern stehen
+# vollstaendig in den zusaetzlichen Schluesseln. Der Bestand je Kategorie bleibt damit als
+# Summe beider Zahlen ablesbar.
+_ACKNOWLEDGED_COUNT_PREFIX = "quittiert_"
+
+
+def acknowledged_count_key(category: str) -> str:
+    """Der ``counts``-Schluessel der QUITTIERTEN Befunde einer Kategorie.
+
+    Reine Namensbildung ohne I/O: ``"offen"`` -> ``"quittiert_offen"``. EINE Stelle
+    bildet den Namen, damit Use-Case, Wire-Form und Tests nicht auseinanderlaufen.
+    """
+    return f"{_ACKNOWLEDGED_COUNT_PREFIX}{category}"
+
+
+# Die drei quittierten Zaehler-Schluessel in derselben Reihenfolge wie die Kategorien --
+# damit ``counts`` IMMER alle sechs Schluessel traegt (auch bei 0, ehrlicher Beleg).
+ACKNOWLEDGED_COUNT_KEYS = (
+    acknowledged_count_key(CATEGORY_EXPECTED),
+    acknowledged_count_key(CATEGORY_OPEN),
+    acknowledged_count_key(CATEGORY_POSSIBLE_DOH),
+)
 
 _PORT_DNS = 53
 _PORT_HTTPS = 443

@@ -7,13 +7,17 @@ Behauptungen:
 (1) Verbindungen werden je ``(remote_ip, category)`` gruppiert; ``connection_count``
     stimmt, ``remote_port``/``app_name``/``pid`` stammen aus der ERSTEN Verbindung der
     Gruppe; nicht-relevante Verbindungen werden ignoriert.
-(2) ``counts`` zaehlt die KONTAKTE je Kategorie (nicht ``connection_count``) und deckt
-    immer alle drei Kategorien ab.
+(2) ``counts`` zaehlt die AKTIVEN (nicht quittierten) KONTAKTE je Kategorie (nicht
+    ``connection_count``) und deckt immer alle sechs Schluessel ab (drei Kategorien +
+    drei ``quittiert_<kategorie>``).
 (3) ``acknowledged`` ist True genau fuer die im Set hinterlegten ``ip:category``-Schluessel.
 (4) Die Reihenfolge ist deterministisch (Kategorie offen < moegliche_doh <
     erwartungsgemaess, dann count absteigend, dann remote_ip aufsteigend).
 (5) Leere relevante Menge -> leere ``contacts``, ``counts`` alle 0, Listen gefuellt.
 (6) Ein werfender Hostname-Provider bricht NICHT ab (best-effort, S3).
+(7) S62 L7b: ein QUITTIERTER Befund zaehlt nicht als offen, sondern in
+    ``quittiert_<kategorie>``; die Liste bleibt vollstaendig; ein zurueckgenommenes
+    Quittieren zaehlt wieder als offen.
 
 Async via ``asyncio.run`` (Projektmuster, kein pytest-asyncio).
 """
@@ -144,7 +148,7 @@ def test_gleiche_ip_verschiedene_kategorie_sind_zwei_befunde() -> None:
 
 
 def test_counts_zaehlt_kontakte_je_kategorie() -> None:
-    """counts = Anzahl Kontakte je Kategorie, deckt alle drei ab (auch 0)."""
+    """counts = Anzahl AKTIVER Kontakte je Kategorie, deckt alle sechs Schluessel ab."""
     conns = [
         _conn("192.168.0.1", 53),  # erwartungsgemaess
         _conn("8.8.8.8", 53),  # offen
@@ -158,6 +162,9 @@ def test_counts_zaehlt_kontakte_je_kategorie() -> None:
         "erwartungsgemaess": 1,
         "offen": 2,
         "moegliche_doh": 1,
+        "quittiert_erwartungsgemaess": 0,
+        "quittiert_offen": 0,
+        "quittiert_moegliche_doh": 0,
     }
 
 
@@ -188,6 +195,76 @@ def test_acknowledged_schluessel_ist_kategorie_spezifisch() -> None:
     by_cat = {c.category: c for c in overview.contacts}
     assert by_cat["offen"].acknowledged is True
     assert by_cat["moegliche_doh"].acknowledged is False
+
+
+# ── (7) S62 L7b: quittierte zaehlen nicht als offen ───────────────────────────
+
+
+def test_quittierter_befund_zaehlt_nicht_als_offen() -> None:
+    """Ein quittierter offener Befund faellt aus ``offen`` und in ``quittiert_offen``."""
+    conns = [
+        _conn("8.8.8.8", 53),  # offen -> quittiert
+        _conn("9.9.9.9", 53),  # offen -> bleibt offen
+    ]
+    overview = _run(_build(conns, acknowledged={"8.8.8.8:offen"}))
+
+    assert overview.counts["offen"] == 1
+    assert overview.counts["quittiert_offen"] == 1
+
+
+def test_quittierter_befund_bleibt_in_der_liste_und_erkennbar() -> None:
+    """Verlustfreiheit: die Gegenstelle bleibt in ``contacts`` und traegt ``acknowledged``."""
+    conns = [
+        _conn("8.8.8.8", 53),  # offen -> quittiert
+        _conn("9.9.9.9", 53),  # offen -> bleibt offen
+    ]
+    overview = _run(_build(conns, acknowledged={"8.8.8.8:offen"}))
+
+    # Nichts wird ausgeblendet: BEIDE Gegenstellen sind weiterhin da ...
+    assert {c.remote_ip for c in overview.contacts} == {"8.8.8.8", "9.9.9.9"}
+    # ... und die quittierte bleibt als quittiert erkennbar.
+    by_ip = {c.remote_ip: c for c in overview.contacts}
+    assert by_ip["8.8.8.8"].acknowledged is True
+    # Der Bestand je Kategorie ist die Summe beider Zahlen (verlustfrei).
+    assert overview.counts["offen"] + overview.counts["quittiert_offen"] == 2
+
+
+def test_zurueckgenommenes_quittieren_zaehlt_wieder_als_offen() -> None:
+    """Ohne Quittier-Schluessel (unack) zaehlt derselbe Befund wieder als offen."""
+    conns = [_conn("8.8.8.8", 53)]
+
+    quittiert = _run(_build(conns, acknowledged={"8.8.8.8:offen"}))
+    assert quittiert.counts["offen"] == 0
+    assert quittiert.counts["quittiert_offen"] == 1
+
+    # ``unack`` laesst den Schluessel aus dem Set fallen (append-only Ableitung im Repo).
+    zurueckgenommen = _run(_build(conns, acknowledged=set()))
+    assert zurueckgenommen.counts["offen"] == 1
+    assert zurueckgenommen.counts["quittiert_offen"] == 0
+
+
+def test_quittierte_zaehlen_je_kategorie_getrennt() -> None:
+    """Auch ``moegliche_doh`` wird gleich behandelt: eigener quittiert-Zaehler."""
+    conns = [
+        _conn("1.1.1.1", 443),  # moegliche_doh -> quittiert
+        _conn("8.8.8.8", 53),  # offen -> quittiert
+        _conn("192.168.0.1", 53),  # erwartungsgemaess -> nicht quittiert
+    ]
+    overview = _run(
+        _build(
+            conns,
+            expected=["192.168.0.1"],
+            doh=["1.1.1.1"],
+            acknowledged={"1.1.1.1:moegliche_doh", "8.8.8.8:offen"},
+        )
+    )
+
+    assert overview.counts["offen"] == 0
+    assert overview.counts["quittiert_offen"] == 1
+    assert overview.counts["moegliche_doh"] == 0
+    assert overview.counts["quittiert_moegliche_doh"] == 1
+    assert overview.counts["erwartungsgemaess"] == 1
+    assert overview.counts["quittiert_erwartungsgemaess"] == 0
 
 
 # ── (4) Deterministische Reihenfolge ──────────────────────────────────────────
@@ -231,7 +308,14 @@ def test_leere_relevante_menge_gibt_leere_aber_gefuellte_sicht() -> None:
     overview = _run(_build(conns, expected=["192.168.0.1"], doh=["1.1.1.1"]))
 
     assert overview.contacts == ()
-    assert overview.counts == {"erwartungsgemaess": 0, "offen": 0, "moegliche_doh": 0}
+    assert overview.counts == {
+        "erwartungsgemaess": 0,
+        "offen": 0,
+        "moegliche_doh": 0,
+        "quittiert_erwartungsgemaess": 0,
+        "quittiert_offen": 0,
+        "quittiert_moegliche_doh": 0,
+    }
     assert overview.expected_servers == ("192.168.0.1",)
     assert overview.doh_providers == ("1.1.1.1",)
     assert overview.host_scope == HOST_SCOPE_LOCAL

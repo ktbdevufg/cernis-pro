@@ -79,7 +79,12 @@ class DnsWatchOverview:
     ``contacts`` ist deterministisch sortiert (Auffaelliges zuerst: Kategorie
     ``offen`` < ``moegliche_doh`` < ``erwartungsgemaess``, dann ``connection_count``
     absteigend, dann ``remote_ip`` aufsteigend -- s. Use-Case). ``counts`` haelt die
-    Anzahl der KONTAKTE je Kategorie (nicht ``connection_count``). ``expected_servers``
+    Anzahl der KONTAKTE je Kategorie (nicht ``connection_count``), und zwar der AKTIVEN
+    (nicht quittierten); die QUITTIERTEN stehen daneben unter ``quittiert_<kategorie>``
+    (s. ``domain.dns_watch.acknowledged_count_key``). Der Bestand je Kategorie ist die
+    Summe beider Zahlen -- verlustfrei, nur anders gegliedert. ``contacts`` selbst bleibt
+    davon unberuehrt vollstaendig (quittierte werden NICHT ausgeblendet).
+    ``expected_servers``
     und ``doh_providers`` sind die zur Klassifikation genutzten, editierbaren Listen
     (als ehrlicher Beleg, was der Befund bedeutet). ``host_scope`` ist der FESTE
     Marker-Schluessel (``"local_host"``), der festhaelt, dass dies die Befunde DIESES

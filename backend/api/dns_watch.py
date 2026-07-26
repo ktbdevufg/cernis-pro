@@ -74,6 +74,15 @@ class DnsWatchOverviewOut(BaseModel):
     ehrlich festhaelt, dass dies die Befunde DIESES Rechners sind und NICHT netzweit.
     ``expected_servers``/``doh_providers`` sind die zur Klassifikation genutzten,
     editierbaren Listen (ehrlicher Beleg, was der Befund bedeutet).
+
+    ``counts`` traegt SECHS Schluessel: die drei Kategorien mit der Anzahl der AKTIVEN
+    (nicht quittierten) Befunde und dazu ``quittiert_erwartungsgemaess`` /
+    ``quittiert_offen`` / ``quittiert_moegliche_doh`` mit der Anzahl der quittierten.
+    Die drei Kategorie-Schluessel behalten ihren NAMEN, aber ihre Bedeutung ist seit
+    S62 L7b "aktiver Warnstand" statt "Bestand" -- der Bestand ist die Summe aus
+    Kategorie- und zugehoerigem quittiert-Zaehler (verlustfrei, Muster CVE
+    ``findings_total``/``findings_active``). ``contacts`` bleibt unabhaengig davon
+    VOLLSTAENDIG: quittierte Gegenstellen werden weiter geliefert (``acknowledged``).
     """
 
     contacts: list[DnsContactOut]

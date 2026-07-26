@@ -251,6 +251,54 @@ def test_acknowledged_listen_unveraendert_durchgereicht() -> None:
     assert report.acknowledged_net_findings == ack_net
 
 
+def test_quittierter_dns_befund_erzeugt_keinen_befund_und_hebt_den_score_nicht() -> None:
+    """S62 L7b: ein quittierter DNS-Befund bleibt aus net_findings UND aus dem Score heraus.
+
+    Derselbe DNS-Umgehungs-Befund einmal offen (in ``net_findings``) und einmal quittiert
+    (in ``ack_net``): offen belastet das Geraet und druckt den Score, quittiert nicht. Der
+    quittierte bleibt dabei vollstaendig einsehbar (``acknowledged_net_findings``) -- er
+    wird nicht weggerechnet, sondern nur anders gegliedert.
+    """
+    dns_befund = NetFinding(
+        kind="DNS-Umgehung",
+        device_label="pc-1",
+        description="DNS-Kontakt eingestuft als offen",
+        severity="notable",
+    )
+    offen = build_security_report(
+        device_labels=["pc-1"],
+        port_findings=[],
+        cve_findings=[],
+        net_findings=[dns_befund],
+        ack_port=[],
+        ack_cve=[],
+        ack_net=[],
+    )
+    quittiert = build_security_report(
+        device_labels=["pc-1"],
+        port_findings=[],
+        cve_findings=[],
+        net_findings=[],
+        ack_port=[],
+        ack_cve=[],
+        ack_net=[dns_befund],
+    )
+
+    # Offen: EIN Befund, das Geraet ist belastet.
+    assert offen.net_findings == [dns_befund]
+    assert offen.score.notable_devices == 1
+    assert offen.score.clean_devices == 0
+
+    # Quittiert: KEIN Befund, das Geraet gilt als sauber -- aber der Befund bleibt sichtbar.
+    assert quittiert.net_findings == []
+    assert quittiert.acknowledged_net_findings == [dns_befund]
+    assert quittiert.score.notable_devices == 0
+    assert quittiert.score.clean_devices == 1
+
+    # Und der Bewertungswert steigt entsprechend (die Quittierung wirkt auf den Score).
+    assert quittiert.score.score > offen.score.score
+
+
 def test_leere_eingabe_leerer_report_score_100() -> None:
     """device_labels leer -> leerer Report, Score 100 (ueber compute_security_score)."""
     report = build_security_report(

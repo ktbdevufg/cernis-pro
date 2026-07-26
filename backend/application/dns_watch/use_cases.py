@@ -25,6 +25,7 @@ from typing import Protocol
 import structlog
 
 from domain.dns_watch import (
+    ACKNOWLEDGED_COUNT_KEYS,
     CATEGORY_EXPECTED,
     CATEGORY_OPEN,
     CATEGORY_POSSIBLE_DOH,
@@ -32,6 +33,7 @@ from domain.dns_watch import (
     DnsContact,
     DnsWatchOverview,
     RawDnsConnection,
+    acknowledged_count_key,
     classify,
 )
 
@@ -112,6 +114,13 @@ class BuildDnsWatch:
     ``None`` und der Use-Case wirft NICHT. ``acknowledged`` ist True, wenn
     ``f"{remote_ip}:{category}"`` im quittierten Set liegt.
 
+    ZAEHLUNG (Muster CVE ``findings_total``/``findings_active``): ein QUITTIERTER Befund
+    zaehlt nicht mehr als offen. Er faellt aus dem Kategorie-Zaehler heraus und in den
+    zusaetzlichen ``quittiert_<kategorie>``-Zaehler -- verlustfrei, denn der Bestand je
+    Kategorie ist die Summe beider Zahlen. Die Liste ``contacts`` bleibt davon UNBERUEHRT
+    vollstaendig: quittierte Gegenstellen werden weiter gezeigt und tragen ihr
+    ``acknowledged``-Merkmal (es wird nichts ausgeblendet).
+
     REIHENFOLGE deterministisch: Kategorie (``offen`` < ``moegliche_doh`` <
     ``erwartungsgemaess``, Auffaelliges zuerst), dann ``connection_count`` absteigend,
     dann ``remote_ip`` aufsteigend (stabiler Tie-Breaker).
@@ -136,7 +145,8 @@ class BuildDnsWatch:
 
         Holt die editierbaren Listen, klassifiziert jede Verbindung, gruppiert die
         relevanten nach ``(remote_ip, category)``, reichert die Namen defensiv (Batch) an,
-        markiert quittierte Befunde, zaehlt die Kontakte je Kategorie und gibt die
+        markiert quittierte Befunde, zaehlt die Kontakte je Kategorie -- AKTIVE unter dem
+        Kategorie-Schluessel, QUITTIERTE unter ``quittiert_<kategorie>`` -- und gibt die
         deterministisch sortierten Befunde mit ``host_scope = "local_host"`` zurueck. Eine
         leere relevante Menge ergibt leere ``contacts`` und ``counts`` alle 0 -- die Listen
         sind trotzdem gefuellt (ehrlicher Beleg).
@@ -150,12 +160,14 @@ class BuildDnsWatch:
 
         grouped = self._group_relevant(self._connections(), expected_set, doh_set)
 
-        # counts deckt IMMER alle drei Kategorien ab (auch bei 0) -- ehrlicher Beleg.
+        # counts deckt IMMER alle drei Kategorien ab (auch bei 0) -- ehrlicher Beleg -- und
+        # dazu die drei quittierten Zaehler ``quittiert_<kategorie>``.
         counts: dict[str, int] = {
             CATEGORY_EXPECTED: 0,
             CATEGORY_OPEN: 0,
             CATEGORY_POSSIBLE_DOH: 0,
         }
+        counts.update(dict.fromkeys(ACKNOWLEDGED_COUNT_KEYS, 0))
 
         if not grouped:
             # Keine DNS-relevante Verbindung -> leere, aber ehrlich markierte Sicht.
@@ -174,7 +186,15 @@ class BuildDnsWatch:
         contacts: list[DnsContact] = []
         for (ip, category), group in grouped.items():
             first, count = group
-            counts[category] += 1
+            # Das Quittier-Merkmal steht VOR der Zaehlung fest: ein quittierter Befund
+            # zaehlt nicht mehr in seiner Kategorie (dem AKTIVEN Warnstand), sondern in
+            # ``quittiert_<kategorie>``. Weggerechnet wird nichts -- die Gegenstelle bleibt
+            # in ``contacts`` und der Bestand ist die Summe beider Zahlen.
+            acknowledged = f"{ip}:{category}" in acknowledged_keys
+            if acknowledged:
+                counts[acknowledged_count_key(category)] += 1
+            else:
+                counts[category] += 1
             contacts.append(
                 DnsContact(
                     remote_ip=ip,
@@ -184,7 +204,7 @@ class BuildDnsWatch:
                     app_name=first.app_name,
                     pid=first.pid,
                     connection_count=count,
-                    acknowledged=f"{ip}:{category}" in acknowledged_keys,
+                    acknowledged=acknowledged,
                 )
             )
 

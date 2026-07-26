@@ -12,8 +12,15 @@
 //       ("erwartungsgemaess"/"offen"/"moegliche_doh"), hostname:str|null,
 //       app_name:str|null, pid:int|null, connection_count:int,
 //       acknowledged:bool } ],
-//     host_scope:str, counts:{erwartungsgemaess:int, offen:int, moegliche_doh:int},
+//     host_scope:str,
+//     counts:{erwartungsgemaess:int, offen:int, moegliche_doh:int,
+//       quittiert_erwartungsgemaess:int, quittiert_offen:int,
+//       quittiert_moegliche_doh:int},
 //     expected_servers:[str], doh_providers:[str] }
+//   Die drei Kategorie-Zähler nennen seit S62 L7b nur die AKTIVEN (nicht
+//   quittierten) Befunde; die quittierten stehen daneben in „quittiert_*".
+//   Der Bestand je Kategorie ist die Summe beider Zahlen (verlustfrei).
+//   contacts bleibt davon unberührt vollständig (quittierte tragen acknowledged).
 //   POST /api/dns-watch/acknowledge  Body {remote_ip:str, category:str,
 //     action:"ack"|"unack"} -> {ok:true}
 

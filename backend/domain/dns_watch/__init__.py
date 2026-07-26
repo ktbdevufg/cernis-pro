@@ -11,9 +11,11 @@ from domain.dns_watch.defaults import (
     doh_providers_or_default,
 )
 from domain.dns_watch.logic import (
+    ACKNOWLEDGED_COUNT_KEYS,
     CATEGORY_EXPECTED,
     CATEGORY_OPEN,
     CATEGORY_POSSIBLE_DOH,
+    acknowledged_count_key,
     classify,
     is_dns_relevant,
 )
@@ -25,6 +27,7 @@ from domain.dns_watch.models import (
 )
 
 __all__ = [
+    "ACKNOWLEDGED_COUNT_KEYS",
     "CATEGORY_EXPECTED",
     "CATEGORY_OPEN",
     "CATEGORY_POSSIBLE_DOH",
@@ -33,6 +36,7 @@ __all__ = [
     "DnsContact",
     "DnsWatchOverview",
     "RawDnsConnection",
+    "acknowledged_count_key",
     "classify",
     "doh_providers_or_default",
     "is_dns_relevant",

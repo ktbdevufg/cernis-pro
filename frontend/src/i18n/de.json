@@ -740,6 +740,7 @@
       "countOpen": "offen",
       "countDoh": "mögliche DoH",
       "countExpected": "erwartungsgemäß",
+      "countAcknowledged": "quittiert",
       "categoryLabels": {
         "offen": "offen",
         "moegliche_doh": "mögliche DoH",

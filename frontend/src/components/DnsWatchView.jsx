@@ -15,14 +15,37 @@ import { useTranslation } from "react-i18next";
 import { acknowledgeDnsWatch, fetchDnsWatch } from "../api/dnsWatch.js";
 import "./DnsWatchView.css";
 
-// Anzeigereihenfolge der drei Kennzahlen: „offen" zuerst (dort lohnt der Blick),
-// dann „mögliche DoH", dann „erwartungsgemäß". key zeigt auf das counts-Feld
-// (Backend-Schlüssel), labelKey auf den i18n-Text, ton steuert die Optik.
+// Anzeigereihenfolge der vier Kennzahlen: „offen" zuerst (dort lohnt der Blick),
+// dann „mögliche DoH", „erwartungsgemäß" und zuletzt „quittiert". key zeigt auf das
+// counts-Feld (Backend-Schlüssel), labelKey auf den i18n-Text, ton steuert die Optik.
+//
+// Die drei Kategorie-Zähler nennen seit S62 L7b nur noch die AKTIVEN (nicht
+// quittierten) Befunde; die quittierten stehen daneben in „quittiert_<kategorie>".
+// Weggerechnet ist damit nichts — der Bestand je Kategorie ist die Summe beider
+// Zahlen. Die vierte Karte fasst die quittierten über alle Kategorien zusammen.
 const KENNZAHLEN = [
   { key: "offen", labelKey: "countOpen", ton: "offen" },
   { key: "moegliche_doh", labelKey: "countDoh", ton: "neutral" },
   { key: "erwartungsgemaess", labelKey: "countExpected", ton: "neutral" },
+  {
+    keys: [
+      "quittiert_offen",
+      "quittiert_moegliche_doh",
+      "quittiert_erwartungsgemaess",
+    ],
+    labelKey: "countAcknowledged",
+    ton: "neutral",
+  },
 ];
+
+// Wert einer Kennzahl aus counts: entweder ein einzelner Schlüssel (key) oder die
+// Summe mehrerer (keys). Fehlt ein Schlüssel, zählt er als 0 (ehrlich, kein Raten).
+function kennzahlWert(counts, kennzahl) {
+  if (kennzahl.keys) {
+    return kennzahl.keys.reduce((summe, k) => summe + (counts[k] ?? 0), 0);
+  }
+  return counts[kennzahl.key] ?? 0;
+}
 
 // Eine ruhige Kennzahl-Karte: große Zahl + Label darunter. ton="offen" hebt die
 // Zahl im Severity-Orange hervor, alles andere bleibt neutral.
@@ -197,12 +220,13 @@ export default function DnsWatchView() {
         </div>
       )}
 
-      {/* Drei Kennzahlen ganz oben: offen / mögliche DoH / erwartungsgemäß. */}
+      {/* Vier Kennzahlen ganz oben: offen / mögliche DoH / erwartungsgemäß /
+          quittiert. Die ersten drei zählen nur AKTIVE (nicht quittierte) Befunde. */}
       <div className="dnswatch__kennzahlen">
         {KENNZAHLEN.map((k) => (
           <KennzahlKarte
-            key={k.key}
-            wert={counts[k.key] ?? 0}
+            key={k.key ?? k.labelKey}
+            wert={kennzahlWert(counts, k)}
             label={t(`beobachten.dnswatch.${k.labelKey}`)}
             ton={k.ton}
           />
