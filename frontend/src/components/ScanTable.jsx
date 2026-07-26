@@ -63,7 +63,9 @@ const ALPHA_FELD = {
 };
 
 // Umschaltbare Spalten-IDs in fester Anzeige-Reihenfolge. ipv6 ist NEU und
-// standardmäßig AUS — der Default unten lässt es bewusst weg.
+// standardmäßig AUS — der Default unten lässt es bewusst weg. ssdp steht direkt
+// hinter mdns (beides Dienst-Erkennung, aber getrennte Verfahren) und ist
+// ebenfalls standardmäßig AUS.
 export const UMSCHALTBARE_SPALTEN = [
   "ipv6",
   "mac",
@@ -71,13 +73,14 @@ export const UMSCHALTBARE_SPALTEN = [
   "hostname",
   "ports",
   "mdns",
+  "ssdp",
   "os",
   "ping",
 ];
 
-// Default-Sichtbarkeit: alle umschaltbaren Spalten AUSSER ipv6 und mdns.
+// Default-Sichtbarkeit: alle umschaltbaren Spalten AUSSER ipv6, mdns und ssdp.
 export const DEFAULT_SICHTBARE_SPALTEN = UMSCHALTBARE_SPALTEN.filter(
-  (id) => id !== "ipv6" && id !== "mdns",
+  (id) => id !== "ipv6" && id !== "mdns" && id !== "ssdp",
 );
 
 // Formatiert den Ping-Wert (ms) für die Anzeige. Unverändert aus der bisherigen
@@ -214,6 +217,11 @@ function baueSpalten() {
       render: (geraet) => (
         <MdnsChips services={geraet.mdnsServices} isNdi={geraet.isNdi} />
       ),
+    },
+    {
+      id: "ssdp",
+      sortKey: null,
+      render: (geraet) => <SsdpChips services={geraet.ssdpServices} />,
     },
     {
       id: "os",
@@ -364,6 +372,53 @@ function MdnsChips({ services, isNdi }) {
       {sichtbar.map((typ) => (
         <span key={typ} className="scan-table__chip scan-table__chip--mdns">
           {kuerzeMdnsTyp(typ)}
+        </span>
+      ))}
+      {rest > 0 && (
+        <span
+          className="scan-table__chip scan-table__chip--mehr"
+          title={t("beobachten.scan.morePortsTitle", { count: rest })}
+        >
+          {t("beobachten.scan.morePorts", { count: rest })}
+        </span>
+      )}
+    </span>
+  );
+}
+
+// Beschriftung eines SSDP-Chips: server, wenn vorhanden, sonst st. Ist beides
+// leer, liefert die Funktion einen leeren String — der Eintrag wird dann NICHT
+// dargestellt (kein Ersatzwert, keine Erfindung).
+function ssdpChipText(dienst) {
+  return dienst?.server || dienst?.st || "";
+}
+
+// SSDP-/UPnP-Zelle: eigene Komponente statt Wiederverwendung von MdnsChips, weil
+// SSDP andere Felder trägt (server/st/location statt Dienst-Typ). Optik und
+// Kürzungsverhalten folgen MdnsChips: bestehende CSS-Klassen, bis MAX_PORT_CHIPS
+// einzeln, Rest als "+N". Der Einzel-Chip bleibt auf der Basisklasse
+// scan-table__chip — ein eigener Farb-Modifier wäre eine neue Design-Entscheidung
+// und braucht Tokens, die es nicht gibt. Leer -> "—" wie bei mDNS/Ports.
+function SsdpChips({ services }) {
+  const { t } = useTranslation();
+  // Einträge ohne jeden Text (weder server noch st) fallen VOR der Begrenzung
+  // heraus, damit "+N" die tatsächlich darstellbaren Dienste zählt.
+  const darstellbar = (services ?? []).filter((dienst) => ssdpChipText(dienst));
+  if (darstellbar.length === 0) {
+    return <span className="scan-table__ports-leer">—</span>;
+  }
+  const sichtbar = darstellbar.slice(0, MAX_PORT_CHIPS);
+  const rest = darstellbar.length - sichtbar.length;
+  return (
+    <span className="scan-table__ports">
+      {sichtbar.map((dienst, index) => (
+        <span
+          // Kein fachlicher Schlüssel vorhanden: server/st sind pro Gerät nicht
+          // garantiert eindeutig. Text + Index hält die Liste stabil.
+          key={`${ssdpChipText(dienst)}#${index}`}
+          className="scan-table__chip"
+        >
+          {ssdpChipText(dienst)}
         </span>
       ))}
       {rest > 0 && (

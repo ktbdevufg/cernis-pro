@@ -102,6 +102,17 @@ export function mappeHost(host) {
     // mDNS-Dienst-Typen (roh, z.B. "_googlecast._tcp.local."). Die Anzeige kürzt
     // sie lesbar. Leere Liste, wenn keine mDNS-Dienste erkannt.
     mdnsServices: (host.mdns_services ?? []).map((s) => s.type).filter(Boolean),
+    // SSDP-/UPnP-Dienste (eigene Spalte, eigenes Erkennungsverfahren — NICHT mit
+    // mDNS zusammenlegen). Nur server/st/location: die drei Felder, die BEIDE
+    // Quellen führen. Das in der DB zusätzlich gespeicherte ip fehlt im
+    // WebSocket-Frame und wird darum bewusst nicht übernommen (sonst bliebe eine
+    // darauf gebaute Anzeige im Live-Scan leer). Leere Liste, wenn keine
+    // SSDP-Dienste erkannt.
+    ssdpServices: (host.ssdp_services ?? []).map((s) => ({
+      server: s.server ?? "",
+      st: s.st ?? "",
+      location: s.location ?? "",
+    })),
     // NDI-Videostream-Quelle (eigenes Signal, eigenes Badge in der Anzeige).
     isNdi: host.is_ndi === true,
     pingMs: typeof host.rtt_ms === "number" ? Math.round(host.rtt_ms) : null,
@@ -169,6 +180,9 @@ export function mappeHostFound(frame) {
     osGuess: "",
     ports: [],
     mdnsServices: [],
+    // Das schnelle Frame trägt keine SSDP-Dienste — leer wie mdnsServices. Das
+    // nachfolgende host_detail (gleicher schluessel) liefert die echten Werte.
+    ssdpServices: [],
     isNdi: false,
     pingMs: typeof frame.rtt_ms === "number" ? Math.round(frame.rtt_ms) : null,
     // Es gibt derzeit keine verlässliche "neu/auffällig"-Quelle im Scan-Wire

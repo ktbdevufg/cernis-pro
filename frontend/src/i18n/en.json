@@ -467,6 +467,7 @@
         "hostname": "Hostname",
         "ports": "Ports",
         "mdns": "mDNS / NDI",
+        "ssdp": "SSDP / UPnP",
         "os": "OS",
         "ping": "Ping"
       },
