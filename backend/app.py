@@ -13,6 +13,7 @@ import asyncio
 import ipaddress
 import json
 import os
+import sqlite3
 import sys
 from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager, suppress
@@ -170,7 +171,6 @@ from api.dns_trust import (
 from api.dns_trust import router as dns_trust_router
 from api.dns_watch import (
     DNS_DOH_PROVIDERS_KEY,
-    DNS_EXPECTED_SERVERS_KEY,
     DnsContactOut,
     DnsWatchOverviewOut,
     provide_dns_watch,
@@ -659,8 +659,8 @@ from domain.blocklist import (
 )
 from domain.devices import Device, DeviceSource, normalize_mac
 from domain.dns_bypass import AggregatedBypass
-from domain.dns_trust import DnsServerCategory, DnsTrustState
-from domain.dns_watch import doh_providers_or_default, expected_servers_or_default
+from domain.dns_trust import DnsServerCategory, DnsTrustState, categorize_dns_server
+from domain.dns_watch import doh_providers_or_default
 from domain.export import (
     ExportableAnalysis,
     ExportableFinding,
@@ -693,6 +693,7 @@ from domain.resolver_names import known_resolver_name
 from domain.scanning import EnrichedHost, HostEnriched, ScanConfig
 from domain.scheduler.models import DailyWindow
 from domain.security import CredentialKandidat, DefaultCredsEintrag
+from infrastructure._dns_expected_migration import migrate_expected_servers_to_trust
 from infrastructure.agent import (
     SqliteAgentRepository,
     UrllibAgentPinger,
@@ -4640,14 +4641,20 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             return {ip: sni_by_ip.get(ip) or ptr_by_ip.get(ip) for ip in ips}
 
         # (3) Die fuenf Provider fuer BuildDnsWatch: acknowledged liest die quittierten
-        # Befund-Schluessel; erwartet sind GENAU die konfigurierten Server (leer ->
-        # leeres Tupel, keine Gateway-Vermutung mehr, D4); die DoH-Liste faellt auf
-        # die domain-Startliste, wenn der Nutzer nichts konfiguriert hat.
+        # Befund-Schluessel; die erwartete Menge kommt aus DEM VERTRAUENSMODELL
+        # (S62 L7a) -- ueber _dns_trust_expected_servers, also GENAU DIESELBE Naht wie
+        # beim netzweiten Waechter (TrustedDnsServerIps, frisch gelesen, deterministisch
+        # geordnet). Der frueher eigene Einstellungs-Schluessel dns_expected_servers
+        # ENTFAELLT: eine Quelle, ein Ergebnis, beide Sichten zeigen dieselbe Menge in
+        # derselben Reihenfolge. Das Gateway ist damit automatisch erwartet (beim
+        # Bootstrap TRUSTED), jeder weitere Resolver erst nach bewusster Bestaetigung in
+        # der Vertrauens-Ansicht. Die DoH-Liste faellt unveraendert auf die
+        # domain-Startliste, wenn der Nutzer nichts konfiguriert hat.
         overview = await BuildDnsWatch(
             _connections_provider,
             _hostname_provider,
             dns_watch_acknowledgement_repository().acknowledged_keys,
-            lambda: expected_servers_or_default(_dns_watch_read_list(DNS_EXPECTED_SERVERS_KEY)),
+            _dns_trust_expected_servers,
             lambda: doh_providers_or_default(_dns_watch_read_list(DNS_DOH_PROVIDERS_KEY)),
         )()
         # Projektion application.DnsWatchOverview -> api.DnsWatchOverviewOut (Regel 4:
@@ -4712,20 +4719,31 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
         return SqliteDnsBypassAggregateRepository(get_db_path())
 
-    def _dns_bypass_expected_servers() -> list[str]:
-        # SYNCHRONE erwartete-Menge fuer den Recorder-Tick (Klassifikation beim Schreiben) --
-        # DAS VERTRAUENSMODELL (ADR 0043, E4): die Menge der als TRUSTED kuratierten DNS-Server
-        # (TrustedDnsServerIps). Damit ist das Gateway automatisch erwartet (beim Bootstrap
-        # TRUSTED) und ein lokaler Resolver (Pi-hole) nach Nutzer-Bestaetigung ebenfalls --
-        # alles andere bleibt Umgehung. Der frueher dokumentierte "Gateway fehlt im sync-
-        # Recorder"-Kompromiss ENTFAELLT, weil das Gateway beim Bootstrap TRUSTED wird und damit
-        # synchron in der Menge steht. Die Menge wird bei JEDEM Tick FRISCH gelesen (das
-        # Callable fragt jedes Mal repo.list_all() ab, kein eingefrorenes Set): eine
-        # nachtraegliche Vertrauens-Aenderung (Nutzer bestaetigt einen Resolver) greift beim
-        # naechsten Tick/View ohne Neustart. TrustedDnsServerIps wird HIER lazy erzeugt (die
-        # lru_cache-Factory dns_trust_repository ist zur Laufzeit gebunden, auch wenn sie im
-        # Quelltext weiter unten steht).
-        return list(TrustedDnsServerIps(dns_trust_repository())())
+    def _dns_trust_expected_servers() -> list[str]:
+        # DIE erwartete DNS-Server-Menge -- EINE Quelle fuer BEIDE Waechter (ADR 0043, E4;
+        # S62 L7a). Der Name nennt bewusst die QUELLE (dns_trust), nicht einen der beiden
+        # Verbraucher: sie speist den netzweiten Umgehungs-Waechter (Recorder-Tick +
+        # Live-View + Bericht) UND den host-lokalen DNS-Waechter. Wer hier etwas aendert,
+        # aendert beide Sichten.
+        #
+        # QUELLE: die Menge der als TRUSTED kuratierten DNS-Server (TrustedDnsServerIps).
+        # Damit ist das Gateway automatisch erwartet (beim Bootstrap TRUSTED) und ein
+        # lokaler Resolver (Pi-hole) nach Nutzer-Bestaetigung ebenfalls -- alles andere
+        # bleibt Umgehung. Der frueher dokumentierte "Gateway fehlt im sync-Recorder"-
+        # Kompromiss ENTFAELLT, weil das Gateway beim Bootstrap TRUSTED wird und damit
+        # synchron in der Menge steht.
+        #
+        # REIHENFOLGE: deterministisch -- TrustedDnsServerIps sortiert nach dem
+        # nutzergesetzten expected_rank, dann nach ip. Sie schlaegt bis in Oberflaeche,
+        # Bericht und PDF durch, ein unsortiertes Set duerfte das nicht.
+        #
+        # SYNCHRON und FRISCH: das Callable fragt bei JEDEM Tick/View erneut
+        # repo.list_all() ab (kein eingefrorenes Set) -- eine nachtraegliche
+        # Vertrauens-Aenderung (Nutzer bestaetigt einen Resolver) greift ohne Neustart.
+        # TrustedDnsServerIps wird HIER lazy erzeugt (die lru_cache-Factory
+        # dns_trust_repository ist zur Laufzeit gebunden, auch wenn sie im Quelltext
+        # weiter unten steht).
+        return TrustedDnsServerIps(dns_trust_repository())()
 
     def _dns_bypass_trust_lookup(ip: str) -> tuple[DnsServerCategory, DnsTrustState] | None:
         # SYNCHRONE (Kategorie, Trust-Zustand)-Naht fuer die Recorder-Tick-Klassifikation
@@ -4785,7 +4803,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # DNS-Server"-Beleg zeigt dann die TRUSTED-IPs. Ist eine Aufzeichnung vorhanden, gilt
         # aber ihr eingefrorener expected_servers-Beleg als Wahrheit (gegen den beim Schreiben
         # klassifiziert wurde) -- ehrliche Historie, nicht nachtraeglich umgedeutet.
-        display_expected = _dns_bypass_expected_servers()
+        display_expected = _dns_trust_expected_servers()
         expected_servers = (
             list(report.recording.expected_servers)
             if report.recording is not None
@@ -4858,7 +4876,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         err = StartDnsBypassRecording(
             rec,
             dns_bypass_recording_repository(),
-            _dns_bypass_expected_servers,
+            _dns_trust_expected_servers,
         )(interface, recording_id=str(uuid4()), now=time.time())
         if err is not None:
             return err
@@ -4984,6 +5002,66 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         with suppress(Exception):
             await _make_sync_dns_trust_server()(ip, time.time())
 
+    async def _dns_expected_servers_migration() -> None:
+        # EINMAL-MIGRATION des entfallenen Settings-Schluessels dns_expected_servers
+        # (S62 L7a, Muster _cve_mac): die Adressen der alten "erwartete DNS-Server"-Liste
+        # in die Vertrauens-Tabelle uebernehmen und als vertraut markieren. Sie stand
+        # fuer genau diese Aussage; sie einfach fallen zu lassen waere stiller Datenverlust.
+        #
+        # Die Kategorie kommt aus der VORHANDENEN Ableitung: das categorize-Callable
+        # loest die drei Flags GENAU so auf wie SyncDnsTrustServer (Gateway ueber
+        # _topology_gateway, oeffentlicher Resolver / Bedrohungsliste ueber dieselben zwei
+        # Checks) und ruft dann die reine domain.categorize_dns_server. Das Gateway wird
+        # dafuer EINMAL vorab aufgeloest (die Migration laeuft sync in einer Transaktion,
+        # der Gateway-Lookup ist async) -- die Migration erfindet keine zweite Ableitung.
+        #
+        # Ein Fehler wird LAUT protokolliert, der Start laeuft trotzdem weiter (Muster der
+        # cve-Migration): ein unmigrierter Altbestand ist unschoen, ein toter Backend-Start
+        # waere der schlechtere Ausgang. Die Transaktion des _connect rollt bei einem Bruch
+        # alles zurueck -- entweder uebernommen UND Schluessel geloescht, oder nichts.
+        import time
+
+        from modules.db_path import get_db_path
+
+        try:
+            gateway_ip = await _topology_gateway()
+
+            def _categorize(ip: str) -> str:
+                return str(
+                    categorize_dns_server(
+                        ip,
+                        is_gateway=bool(gateway_ip) and ip == gateway_ip,
+                        is_public_resolver=_dns_trust_is_public_resolver(ip),
+                        is_threat_listed=_dns_trust_is_threat_listed(ip),
+                    )
+                )
+
+            # Beide Tabellen liegen in derselben cernis.db; beide Adapter sind zu diesem
+            # Zeitpunkt konstruiert (repository()/dns_trust_repository() haben ihr
+            # _ensure_schema gelaufen), die Tabellen existieren also.
+            repository()
+            dns_trust_repository()
+            conn = sqlite3.connect(get_db_path())
+            try:
+                with conn:
+                    ergebnis = migrate_expected_servers_to_trust(conn, _categorize, time.time())
+            finally:
+                conn.close()
+        except Exception as exc:
+            logger.error("dns_expected_servers_migration_failed", error=str(exc))
+            return
+
+        if not ergebnis.ran:
+            return
+        # Nichts still verschlucken: uebernommene, bewahrte und uebersprungene Werte
+        # kommen in EINE Protokollzeile (uebersprungen = unbrauchbare Altwerte, s. Modul).
+        logger.info(
+            "dns_expected_servers_migration_done",
+            migriert=ergebnis.migrated,
+            bestehend_bewahrt=ergebnis.kept,
+            uebersprungen=ergebnis.skipped,
+        )
+
     async def _dns_trust_bootstrap() -> None:
         # BOOTSTRAP-Erfassung (ADR 0043, E3): einmalig beim Backend-Start die
         # vertrauenswuerdigen Kandidaten in den Bestand nehmen -- die real genutzten
@@ -4991,6 +5069,12 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # (_topology_gateway). So kommen Pi-hole/Gateway/VPN-Resolver in den Vertrauens-
         # Bestand, unabhaengig von einer Aufzeichnung. best-effort, Fehler schlucken (kein
         # Startup-Crash) -- Muster _register_self_host.
+        #
+        # REIHENFOLGE (S62 L7a, zwingend): die Altbestands-Migration laeuft VOR der
+        # Erfassung. Andersherum legte der Sync eine Altbestands-Adresse zuerst als
+        # NEUTRAL an, und die Migration ueberspraenge sie danach als "bereits vorhanden" --
+        # der uebernommene Vertrauens-Zustand ginge verloren.
+        await _dns_expected_servers_migration()
         with suppress(Exception):
             for resolver_ip in await detect_system_resolvers():
                 await _dns_trust_sync_detected(resolver_ip)
@@ -6605,9 +6689,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                     )
             aggregates = list(gemergt.values())
             # expected_servers = AKTUELL erwartete Menge = TRUSTED-Menge (ADR 0043, E4 --
-            # DIESELBE Quelle wie Recorder/Live-View, FRISCH gelesen), NICHT mehr die alte
-            # expected_servers_or_default-Bildung.
-            expected_servers = tuple(_dns_bypass_expected_servers())
+            # DIESELBE Quelle wie Recorder/Live-View/host-lokaler Waechter, FRISCH gelesen
+            # und deterministisch geordnet).
+            expected_servers = tuple(_dns_trust_expected_servers())
 
         # (2) Anreicherung (Regel 5, faellt NUR hier): Geraete-Namens-Map einmal, DoH-Bewertung
         # je Aggregat ueber die eigene Lookup-Naht (Ziel-IP + best-effort erstes sample_qname) --

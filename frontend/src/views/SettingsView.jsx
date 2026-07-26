@@ -63,11 +63,14 @@ const DEFAULT_PORT_COUNT = 10;
 // ist winzig; alles über 1 MB wird abgelehnt, statt den Browser zu blockieren.
 const UPLOAD_MAX_BYTES = 1024 * 1024;
 
-// Settings-Keys der zwei editierbaren DNS-Wächter-Listen (JSON-Arrays von
-// IP-Strings). SPIEGELT bewusst die Modulkonstanten aus backend/api/dns_watch.py
-// (DNS_EXPECTED_SERVERS_KEY / DNS_DOH_PROVIDERS_KEY) — normale Listen-Settings,
-// leeres Array zulässig (dann greift der Backend-Default, z. B. Gateway).
-const DNS_EXPECTED_SERVERS_KEY = "dns_expected_servers";
+// Settings-Key der EINEN verbliebenen editierbaren DNS-Wächter-Liste (JSON-Array von
+// IP-Strings). SPIEGELT bewusst die Modulkonstante aus backend/api/dns_watch.py
+// (DNS_DOH_PROVIDERS_KEY) — ein normales Listen-Setting, leeres Array zulässig (dann
+// greift die eingebaute DoH-Startliste des Backends).
+//
+// Die frühere Liste „Erwartete DNS-Server" ist hier ENTFALLEN (S62 L7a): die erwartete
+// Menge kommt jetzt aus dem Vertrauensmodell und wird in der Verwaltungs-Rubrik
+// „DNS-Server & Vertrauen" gepflegt, nicht mehr über eine eigene Einstellung.
 const DNS_DOH_PROVIDERS_KEY = "dns_doh_providers";
 
 // Grobe IP-Prüfung ohne Library (analog OutboundView.istLokaleIp): IPv4 als vier
@@ -1442,15 +1445,18 @@ function IpListe({ titel, hinweis, ips, onChange }) {
   );
 }
 
-// DNS-Wächter-Sektion: zwei editierbare IP-Listen (erwartete DNS-Server + bekannte
-// DoH-Anbieter). Eigener Daten-State analog AuffaelligkeitSektion (laden beim Mount,
-// schreiben pro Änderung gegen die Settings-API). onGespeichert ist das gemeinsame
-// zeigeGespeichert-Feedback aus SettingsView. Fehlt ein Key (frische DB), gilt das
-// leere Array — dann greift im Backend der Default (z. B. Gateway als DNS-Server).
+// DNS-Wächter-Sektion: EINE editierbare IP-Liste (bekannte DoH-Anbieter). Eigener
+// Daten-State analog AuffaelligkeitSektion (laden beim Mount, schreiben pro Änderung
+// gegen die Settings-API). onGespeichert ist das gemeinsame zeigeGespeichert-Feedback
+// aus SettingsView. Fehlt der Key (frische DB), gilt das leere Array — dann greift im
+// Backend die eingebaute DoH-Startliste.
+//
+// Die Liste „Erwartete DNS-Server" ist hier ENTFALLEN (S62 L7a): die erwartete Menge
+// ist jetzt die Menge der als vertraut markierten Server aus dem Vertrauensmodell und
+// wird unter „DNS-Server & Vertrauen" gepflegt.
 function DnsWatchSektion({ onGespeichert }) {
   const { t } = useTranslation();
 
-  const [expectedServers, setExpectedServers] = useState([]);
   const [dohProviders, setDohProviders] = useState([]);
   const [ladeStatus, setLadeStatus] = useState("laedt"); // laedt | bereit | fehler
   const [speicherFehler, setSpeicherFehler] = useState(false);
@@ -1465,13 +1471,6 @@ function DnsWatchSektion({ onGespeichert }) {
         if (!aktiv) {
           return;
         }
-        setExpectedServers(
-          Array.isArray(settings[DNS_EXPECTED_SERVERS_KEY])
-            ? settings[DNS_EXPECTED_SERVERS_KEY].filter(
-                (eintrag) => typeof eintrag === "string",
-              )
-            : [],
-        );
         setDohProviders(
           Array.isArray(settings[DNS_DOH_PROVIDERS_KEY])
             ? settings[DNS_DOH_PROVIDERS_KEY].filter(
@@ -1531,14 +1530,6 @@ function DnsWatchSektion({ onGespeichert }) {
 
   return (
     <SettingsSektion title={t("settings.dnswatch.title")}>
-      <IpListe
-        titel={t("settings.dnswatch.expectedTitle")}
-        hinweis={t("settings.dnswatch.expectedHint")}
-        ips={expectedServers}
-        onChange={(neu) =>
-          schreibeListe(DNS_EXPECTED_SERVERS_KEY, setExpectedServers, neu)
-        }
-      />
       <IpListe
         titel={t("settings.dnswatch.dohTitle")}
         hinweis={t("settings.dnswatch.dohHint")}

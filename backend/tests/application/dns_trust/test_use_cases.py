@@ -9,9 +9,11 @@ bestehenden application-Tests: kein echtes SQLite/Netz). Kern der Behauptungen:
     gepflegt, ``trust_state`` und ``first_seen`` bleiben (User-Wertung NIE ueberschreiben).
 (3) Die Kategorie-Ableitung folgt den Flags (gateway/public/threat) in fester Prioritaet.
 (4) ``SetDnsServerTrust`` bildet alle drei decisions korrekt ab; ein Unbekannter wirft.
-(5) ``TrustedDnsServerIps`` liefert genau die TRUSTED-IPs (die als "erwartet" angezeigte
-    Beleg-Menge des netzweiten Waechters; die eigentliche Drei-Zustands-Klassifikation
-    testet ``domain.dns_trust.bypass_verdict`` bzw. der Recorder-Tick, ADR 0043, E4).
+(5) ``TrustedDnsServerIps`` liefert genau die TRUSTED-IPs in DETERMINISTISCHER Ordnung
+    (rangierte nach ``expected_rank`` zuerst, dann unrangierte nach ``ip``). Das ist die
+    als "erwartet" angezeigte Beleg-Menge BEIDER Waechter-Sichten (S62 L7a: auch der
+    host-lokale Waechter bezieht sie hier); die eigentliche Drei-Zustands-Klassifikation
+    testet ``domain.dns_trust.bypass_verdict`` bzw. der Recorder-Tick (ADR 0043, E4).
 (6) ``ListDnsTrustServers`` stellt je Server die Plausibilitaet bei (bzw. ``None``).
 
 Der einzige async Use-Case (``SyncDnsTrustServer``, wegen ``GatewayProvider``) wird ueber
@@ -304,12 +306,99 @@ def test_trusted_ips_filtert_auf_trusted() -> None:
             ),
         ]
     )
-    assert TrustedDnsServerIps(repo)() == {"1.1.1.1", "192.168.1.1"}
+    # Beide unrangiert (expected_rank == 0) -> Stichentscheid ist die ip als Zeichenkette:
+    # "1.1.1.1" < "192.168.1.1".
+    assert TrustedDnsServerIps(repo)() == ["1.1.1.1", "192.168.1.1"]
 
 
 def test_trusted_ips_leer_wenn_keiner_trusted() -> None:
     repo = FakeRepo()
-    assert TrustedDnsServerIps(repo)() == set()
+    assert TrustedDnsServerIps(repo)() == []
+
+
+def test_trusted_ips_rangierte_zuerst_dann_nach_rang() -> None:
+    """S62 L7a: der nutzergesetzte Rang bestimmt die Reihenfolge der Anzeige."""
+    repo = FakeRepo(
+        [
+            TrustedDnsServer(
+                "10.0.0.9",
+                DnsServerCategory.LOCAL_PRIVATE,
+                1.0,
+                1.0,
+                trust_state=DnsTrustState.TRUSTED,
+                expected_rank=2,
+            ),
+            TrustedDnsServer(
+                "10.0.0.1",
+                DnsServerCategory.GATEWAY,
+                2.0,
+                2.0,
+                trust_state=DnsTrustState.TRUSTED,
+                expected_rank=1,
+            ),
+        ]
+    )
+    # Rang 1 vor Rang 2 -- NICHT die first_seen-Ordnung des Repos (die waere umgekehrt).
+    assert TrustedDnsServerIps(repo)() == ["10.0.0.1", "10.0.0.9"]
+
+
+def test_trusted_ips_unrangierte_hinter_rangierten_und_nach_ip() -> None:
+    """S62 L7a: unrangierte folgen den rangierten, untereinander stabil nach ip."""
+    repo = FakeRepo(
+        [
+            TrustedDnsServer(
+                "10.0.0.200",
+                DnsServerCategory.LOCAL_PRIVATE,
+                1.0,
+                1.0,
+                trust_state=DnsTrustState.TRUSTED,
+            ),
+            TrustedDnsServer(
+                "10.0.0.30",
+                DnsServerCategory.LOCAL_PRIVATE,
+                2.0,
+                2.0,
+                trust_state=DnsTrustState.TRUSTED,
+            ),
+            TrustedDnsServer(
+                "192.168.5.1",
+                DnsServerCategory.GATEWAY,
+                3.0,
+                3.0,
+                trust_state=DnsTrustState.TRUSTED,
+                expected_rank=1,
+            ),
+        ]
+    )
+    # Der einzige Rangierte zuerst; dahinter die zwei unrangierten als Zeichenketten
+    # sortiert ("10.0.0.200" < "10.0.0.30", weil "2" < "3" an der vierten Stelle).
+    assert TrustedDnsServerIps(repo)() == ["192.168.5.1", "10.0.0.200", "10.0.0.30"]
+
+
+def test_trusted_ips_ordnung_ist_unabhaengig_von_der_repo_reihenfolge() -> None:
+    """S62 L7a: dieselbe Menge liefert dieselbe Ordnung, egal wie sie im Repo liegt.
+
+    Die Ordnung darf NICHT von der Einfuege-/first_seen-Reihenfolge abhaengen -- sonst
+    zeigte derselbe Bestand je nach Prozess-Start eine andere Fusszeile.
+    """
+    server_a = TrustedDnsServer(
+        "203.0.113.4",
+        DnsServerCategory.UNKNOWN,
+        9.0,
+        9.0,
+        trust_state=DnsTrustState.TRUSTED,
+    )
+    server_b = TrustedDnsServer(
+        "198.51.100.7",
+        DnsServerCategory.UNKNOWN,
+        1.0,
+        1.0,
+        trust_state=DnsTrustState.TRUSTED,
+    )
+    vorwaerts = TrustedDnsServerIps(FakeRepo([server_a, server_b]))()
+    rueckwaerts = TrustedDnsServerIps(FakeRepo([server_b, server_a]))()
+
+    assert vorwaerts == rueckwaerts == ["198.51.100.7", "203.0.113.4"]
 
 
 # ── ListDnsTrustServers: mit Plausibilitaet ───────────────────────────────────

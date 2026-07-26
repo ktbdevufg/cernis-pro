@@ -105,8 +105,6 @@
       "loading": "Loading …",
       "loadError": "Settings could not be loaded.",
       "saveError": "Saving failed.",
-      "expectedTitle": "Expected DNS servers",
-      "expectedHint": "IPs of the DNS servers this machine regularly uses. Leave empty to use the gateway as default — then any other resolver counts as “open”.",
       "dohTitle": "Known DoH providers",
       "dohHint": "IPs of known DNS-over-HTTPS providers. Matches are only flagged heuristically as “possible DoH”, not as suspicious.",
       "addPlaceholder": "Add IP address",

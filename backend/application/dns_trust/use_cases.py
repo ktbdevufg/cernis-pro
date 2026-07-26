@@ -225,22 +225,48 @@ class SetDnsServerTrust:
 
 
 class TrustedDnsServerIps:
-    """Liefert die IPs aller als ``TRUSTED`` kuratierten Server (rein lesend) -> ``set[str]``.
+    """Die IPs aller als ``TRUSTED`` kuratierten Server, DETERMINISTISCH geordnet.
 
-    ``repo.list_all()`` gefiltert auf ``trust_state == TRUSTED``. Das ist die kuenftige
-    "erwartete Menge" fuer den Umgehungs-Waechter (E4) -- HIER nur bereitgestellt, NICHT
-    verdrahtet (kein Umbau der bestehenden ``expected_servers``-Klassifikation).
+    ``repo.list_all()`` gefiltert auf ``trust_state == TRUSTED``. Das ist die EINE
+    erwartete Menge BEIDER Waechter-Sichten (S62 L7a): der netzweite Umgehungs-Waechter
+    UND der host-lokale DNS-Waechter beziehen sie hier -- eine Quelle, keine zweite
+    Ableitung aus einem Einstellungs-Schluessel mehr.
+
+    RUECKGABE IST EINE ``list``, KEIN ``set``: die Menge wird in Oberflaeche, Bericht und
+    PDF ANGEZEIGT (Fusszeile "Erwartete DNS-Server: ..."). Ein ``set`` haette dort eine
+    lauf-zu-lauf wechselnde Reihenfolge durchschlagen lassen -- derselbe Bestand haette
+    je nach Prozess-Start anders ausgesehen. Die Ordnung ist darum fachlich begruendet
+    und stabil:
+
+    1. Rangierte Server (``expected_rank`` 1..N) VOR unrangierten -- der Rang ist die
+       nutzergesetzte erwartete Prioritaet und gehoert an den Anfang.
+    2. Innerhalb der Rangierten aufsteigend nach ``expected_rank`` (kleiner = hoeher).
+    3. Alle uebrigen (``expected_rank == 0``) aufsteigend nach ``ip`` als Zeichenkette --
+       ein rein mechanischer, aber vollstaendig reproduzierbarer Stichentscheid. Bewusst
+       NICHT ``first_seen``: zwei Eintraege koennen denselben Zeitstempel tragen (ein
+       Bootstrap schreibt sie in derselben Sekunde), die ``ip`` ist als Primaerschluessel
+       dagegen eindeutig -- damit ist die Ordnung total, nicht nur teilweise.
+
+    Rein lesend, keine Uhr, kein Schreiben.
     """
 
     def __init__(self, repo: DnsTrustRepository) -> None:
         self._repo = repo
 
-    def __call__(self) -> set[str]:
-        return {
-            server.ip
+    def __call__(self) -> list[str]:
+        trusted = [
+            server
             for server in self._repo.list_all()
             if server.trust_state is DnsTrustState.TRUSTED
-        }
+        ]
+        # Unrangierte hinter ALLE rangierten: rank 0 -> +inf als Sortier-Schluessel.
+        trusted.sort(
+            key=lambda server: (
+                server.expected_rank if server.expected_rank > 0 else float("inf"),
+                server.ip,
+            )
+        )
+        return [server.ip for server in trusted]
 
 
 class SetDnsServerRank:

@@ -1,31 +1,18 @@
 """Tests fuer die reine Default-Listen-Logik des DNS-Waechters (Block 2, 2d).
 
-Belegt beide Funktionen: erwartet sind GENAU die konfigurierten Server (leer ->
-leeres Tupel, KEIN Gateway-Fallback mehr, D4) sowie das Greifen der
-DoH-Startliste. Reine Funktionen -- kein I/O, keine Fixtures noetig.
+Belegt das Greifen der DoH-Startliste. Reine Funktion -- kein I/O, keine Fixtures noetig.
+
+Die frueher hier ebenfalls belegte ``expected_servers_or_default`` ist mit S62 L7a
+ENTFALLEN (samt ihrer Tests, insbesondere dem, der "leere Liste bleibt leer"
+festschrieb): die erwartete DNS-Server-Menge kommt nicht mehr aus einem
+Einstellungs-Schluessel, sondern aus dem Vertrauensmodell. Sie wird jetzt in
+``tests/application/dns_trust/test_use_cases.py`` (``TrustedDnsServerIps``) belegt.
 """
 
 from domain.dns_watch import (
     DEFAULT_DOH_PROVIDER_IPS,
     doh_providers_or_default,
-    expected_servers_or_default,
 )
-
-# ── expected_servers_or_default ───────────────────────────────────────────────
-
-
-def test_expected_ist_genau_die_konfigurierte_liste() -> None:
-    assert expected_servers_or_default(["192.168.0.1", "10.0.0.1"]) == (
-        "192.168.0.1",
-        "10.0.0.1",
-    )
-
-
-def test_expected_leer_bleibt_leer_kein_gateway_fallback() -> None:
-    # D4: leere Konfiguration -> leeres Tupel; jede Port-53-Verbindung gilt dann
-    # ehrlich als "offen", es wird KEIN Gateway mehr als erwartet vermutet.
-    assert expected_servers_or_default([]) == ()
-
 
 # ── doh_providers_or_default ──────────────────────────────────────────────────
 

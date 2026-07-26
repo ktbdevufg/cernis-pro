@@ -6,9 +6,9 @@ NICHT in der erwarteten-Resolver-Menge? Quellen-agnostisch ueber ``RawDnsQuery``
 
 FACHLICHE REGEL (bewusst schlicht, ADR 0042): eine Anfrage ist eine Umgehung, wenn ihr
 Ziel (``dst_ip``) NICHT in der erwarteten Menge liegt -- KEINE eigene Reputationslogik,
-keine Blocklist, keine DoH-Bewertung. Die konkrete Ableitung der Menge aus der
-Konfiguration existiert schon als ``domain.dns_watch.expected_servers_or_default`` und
-wird erst im Composition Root genutzt; hier bekommt die Domaene die Menge fertig herein.
+keine Blocklist, keine DoH-Bewertung. Die konkrete Herkunft der Menge (die als vertraut
+kuratierten Server, ``application.dns_trust.TrustedDnsServerIps``) faellt erst im
+Composition Root; hier bekommt die Domaene die Menge fertig herein.
 """
 
 from domain.dns_bypass.models import RawDnsQuery

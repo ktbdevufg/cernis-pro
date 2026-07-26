@@ -9,7 +9,6 @@ keine Fremd-Domaene, kein Framework, kein infrastructure/modules-Import.
 from domain.dns_watch.defaults import (
     DEFAULT_DOH_PROVIDER_IPS,
     doh_providers_or_default,
-    expected_servers_or_default,
 )
 from domain.dns_watch.logic import (
     CATEGORY_EXPECTED,
@@ -36,6 +35,5 @@ __all__ = [
     "RawDnsConnection",
     "classify",
     "doh_providers_or_default",
-    "expected_servers_or_default",
     "is_dns_relevant",
 ]

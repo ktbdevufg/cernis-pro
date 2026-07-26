@@ -21,10 +21,16 @@ Endpunkte:
 * ``POST /api/dns-watch/acknowledge`` -> quittiert (oder entquittiert) einen Befund
   pro (remote_ip, category) ueber den injizierten Schreib-Runner. ``{"ok": true}``.
 
-Die zwei Settings-Key-Namen leben hier als Modulkonstanten (der Composition Root liest
-die zwei editierbaren Listen ueber die bestehende Settings-Naht; es sind normale
-Listen-Settings, KEINE Aenderung an ``domain/settings``). Sie stehen im api-Ring, weil
-hier der DNS-Waechter-Vertrag liegt; ``app.py`` re-importiert sie an der Lesestelle.
+Der Settings-Key-Name der DoH-Liste lebt hier als Modulkonstante (der Composition Root
+liest diese editierbare Liste ueber die bestehende Settings-Naht; es ist ein normales
+Listen-Setting, KEINE Aenderung an ``domain/settings``). Er steht im api-Ring, weil hier
+der DNS-Waechter-Vertrag liegt; ``app.py`` re-importiert ihn an der Lesestelle.
+
+Die frueher daneben stehende erwartete-Server-Liste hat KEINEN eigenen Settings-Key mehr
+(S62 L7a): die erwartete Menge kommt aus dem Vertrauensmodell (``dns_trust``), nicht aus
+einer separat gepflegten Einstellung. Der Altbestand des entfallenen Schluessels wird
+beim Start einmalig in die Vertrauens-Tabelle uebernommen
+(``infrastructure/_dns_expected_migration.py``).
 """
 
 from collections.abc import Callable
@@ -35,10 +41,10 @@ from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/dns-watch", tags=["dns_watch"])
 
-# ── Settings-Key-Namen (normale Listen-Settings, value = JSON-Liste von IP-Strings) ──
-# Die zwei editierbaren Listen des DNS-Waechters liegen ueber die bestehende
-# Settings-Naht (value=Any). KEINE neue Settings-Domaenen-Aenderung -- nur die Namen.
-DNS_EXPECTED_SERVERS_KEY = "dns_expected_servers"
+# ── Settings-Key-Name (normales Listen-Setting, value = JSON-Liste von IP-Strings) ──
+# Die EINE verbliebene editierbare Liste des DNS-Waechters (bekannte DoH-Anbieter) liegt
+# ueber die bestehende Settings-Naht (value=Any). KEINE Settings-Domaenen-Aenderung --
+# nur der Name.
 DNS_DOH_PROVIDERS_KEY = "dns_doh_providers"
 
 

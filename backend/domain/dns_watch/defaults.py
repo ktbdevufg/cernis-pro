@@ -1,12 +1,17 @@
 """Reine Default-Listen-Logik des DNS-Waechters (Block 2, Etappe 2d).
 
 Reine, testbare Funktionen OHNE I/O, OHNE Uhr, OHNE Framework (ADR 0002) -- sie
-beantworten nur eine Fachfrage: welche erwarteten DNS-Server bzw. welche
-DoH-Anbieter-IPs gelten, wenn der Nutzer nichts (oder etwas) konfiguriert hat. Reine
-Fachdaten, deshalb in der Domaene.
+beantworten nur eine Fachfrage: welche DoH-Anbieter-IPs gelten, wenn der Nutzer nichts
+(oder etwas) konfiguriert hat. Reine Fachdaten, deshalb in der Domaene.
 
-Die Settings-Keys (``dns_expected_servers`` / ``dns_doh_providers``) und das Verdrahten
-dieser Funktionen im Composition Root kommen in 2d-3 -- HIER nur die Bausteine.
+Der Settings-Key (``dns_doh_providers``) und das Verdrahten dieser Funktion im
+Composition Root liegen dort -- HIER nur der Baustein.
+
+Die frueher hier wohnende ``expected_servers_or_default`` ist ENTFALLEN (S62 L7a): die
+erwartete DNS-Server-Menge wird nicht mehr aus einem Einstellungs-Schluessel abgeleitet,
+sondern ist die Menge der als vertraut kuratierten Server aus der ``dns_trust``-Domaene
+(``application.dns_trust.TrustedDnsServerIps``). Eine reine Ableitungsfunktion ist dafuer
+nicht mehr noetig, darum steht hier keine zurueck.
 """
 
 from collections.abc import Sequence
@@ -14,7 +19,6 @@ from collections.abc import Sequence
 __all__ = [
     "DEFAULT_DOH_PROVIDER_IPS",
     "doh_providers_or_default",
-    "expected_servers_or_default",
 ]
 
 # Startliste bekannter oeffentlicher DoH-Resolver (reine IP-Strings, IPv4 + IPv6).
@@ -37,17 +41,6 @@ DEFAULT_DOH_PROVIDER_IPS: tuple[str, ...] = (
     "2620:fe::fe",
     "2620:fe::9",
 )
-
-
-def expected_servers_or_default(configured: Sequence[str]) -> tuple[str, ...]:
-    """Die erwarteten DNS-Server: genau die konfigurierte Liste, sonst leer.
-
-    Erwartet ist ausschliesslich, was der Nutzer gesetzt hat (als Tupel). Leere
-    Konfiguration -> leeres Tupel -> jede Port-53-Verbindung gilt als "offen"
-    (ehrlicher Default ohne Annahme, KEINE Gateway-Vermutung mehr). Reine
-    Funktion, kein I/O.
-    """
-    return tuple(configured)
 
 
 def doh_providers_or_default(configured: Sequence[str]) -> tuple[str, ...]:
