@@ -1,6 +1,6 @@
 name: Build Linux
 
-# Baut das verteilbare Linux-Paket (deb + rpm + AppImage) auf der Debian-13-
+# Baut das verteilbare Linux-Paket (deb + rpm) auf der Debian-13-
 # Werkbank. Grund: Ubuntus libpcap.so.0.8 ist gegen libibverbs.so.1 (RDMA)
 # gelinkt; Debian-Ziele haben libibverbs nicht. cernis-sniffd traegt cap_net_raw
 # via setcap und laeuft als AT_SECURE-Prozess -- glibc ignoriert dann
@@ -13,7 +13,7 @@ name: Build Linux
 # DARIN. Bewusst NICHT das container:-Feld von Actions mit einer im YAML
 # wiederholten Paketliste: das Dockerfile bleibt so die EINZIGE Quelle der
 # Wahrheit fuer Toolchain und System-Pakete (Node/Rust/uv/Python 3.12, libpcap,
-# file, desktop-file-utils, zsync). Kein Drift zwischen Dockerfile und Workflow.
+# file, desktop-file-utils). Kein Drift zwischen Dockerfile und Workflow.
 # build-linux.sh selbst bleibt unveraendert -- der Container ruft es nur auf.
 
 on:
@@ -39,7 +39,7 @@ jobs:
 
       # Das Build-Image aus der repo-eigenen Dockerfile.build.debian13 bauen.
       # Alle Toolchains (Node 20, Rust stable, uv, Python 3.12) und System-Deps
-      # (libpcap0.8-dev, file, desktop-file-utils, zsync, Tauri-GTK-Deps) sind
+      # (libpcap0.8-dev, file, desktop-file-utils, Tauri-GTK-Deps) sind
       # bereits im Image -- deshalb entfallen setup-node / rust-toolchain /
       # setup-uv und der separate System-Abhaengigkeiten-apt-Schritt.
       - name: Build-Image bauen (Debian 13, Quelle der Wahrheit)
@@ -49,8 +49,8 @@ jobs:
       # os.environ NICHT -- es importiert diese Datei. PyInstaller friert sie
       # mit ein, damit die installierte App die volle Version kennt (kein
       # Laufzeit-Env noetig). Der Suffix nennt nur die Architektur (x64), NICHT
-      # das Paketformat: ein Build erzeugt aus denselben Binaries deb, rpm und
-      # AppImage -- ein Format-Suffix waere bei zwei von drei Bundles falsch. Das
+      # das Paketformat: ein Build erzeugt aus denselben Binaries deb und
+      # rpm -- ein Format-Suffix waere bei einem von zwei Bundles falsch. Das
       # Format sieht der Nutzer an der Dateiendung. Die Architektur bleibt drin,
       # weil spaeter ARM-Builds dazukommen.
       # git laeuft auf dem Host (Runner), die Datei landet im ausgecheckten Repo
@@ -187,12 +187,11 @@ jobs:
           prerelease: true
           # fail_on_unmatched_files bricht ab, wenn ein Glob KEINE Datei findet.
           # Damit erfuellt: das Release bleibt nicht still leer, wenn z.B. die
-          # AppImage fehlt -- der Schritt schlaegt fehl.
+          # rpm fehlt -- der Schritt schlaegt fehl.
           fail_on_unmatched_files: true
           files: |
             src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb
             src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/rpm/*.rpm
-            src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
 
       # Fall b) kein v-Tag (workflow_dispatch): BEWUSST
       # KEIN Artefakt-Upload. Ein ~850-MB-Bundle je Push fuellte das 2-GB-Gratis-
@@ -321,7 +320,6 @@ jobs:
           files: |
             src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/deb/*.deb
             src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/rpm/*.rpm
-            src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
 
       # Fall b) kein v-Tag: BEWUSST KEIN Artefakt-Upload -- gleiche Begruendung
       # wie im x64-Job. Ein ~850-MB-Bundle je Push fuellte das 2-GB-Gratis-

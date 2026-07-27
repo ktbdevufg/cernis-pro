@@ -3,7 +3,7 @@
 #  Zweck: Frischer, definierter Container fuer den PyInstaller-
 #         /Tauri-Build. Das Repo wird zur LAUFZEIT als Volume
 #         nach /build gemountet -- KEIN COPY ins Image, damit
-#         die erzeugten deb/AppImage auf dem Host sichtbar sind.
+#         die erzeugten deb/rpm auf dem Host sichtbar sind.
 #  Basis: ubuntu:24.04
 # ============================================================
 FROM ubuntu:24.04

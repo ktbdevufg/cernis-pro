@@ -1,9 +1,10 @@
 #!/bin/bash
 # ============================================================
 #  CERNIS PRO - Linux Build Script (Ubuntu / Linux x86_64)
-#  Ergebnis: .deb + .AppImage (Version aus tauri.conf.json)
+#  Ergebnis: .deb (Version aus tauri.conf.json)
 #  Baut BEIDE Binaries (cernis-backend + cernis-sniffd, ADR 0041)
 #  gegen den venv-Python und bundelt via Tauri.
+#  Kein AppImage: src-tauri/tauri.linux.conf.json ueberschreibt bundle.targets nur fuer Linux.
 #  Aufruf: bash build-linux.sh
 # ============================================================
 set -e
@@ -85,12 +86,9 @@ chmod +x "$TAURI_RELEASE/cernis-backend" "$TAURI_RELEASE/cernis-sniffd"
 echo "      OK"
 
 echo ""
-echo "[5/6] Tauri-Build (deb + AppImage)..."
+echo "[5/6] Tauri-Build (deb + rpm)..."
 cd "$SCRIPT_DIR"
 npm install --silent
-# linuxdeploy und appimagetool brauchen sonst FUSE, das in Containern/CI nicht
-# verfuegbar ist; mit dieser Variable entpacken sie sich selbst statt zu mounten.
-export APPIMAGE_EXTRACT_AND_RUN=1
 npx tauri build --target "$TRIPLE"
 
 echo ""
@@ -99,9 +97,7 @@ VERSION=$(python3 -c "import json; print(json.load(open('$TAURI_SRC/tauri.conf.j
 DEST="$HOME/Desktop"; mkdir -p "$DEST"
 BUNDLE_DIR="$TAURI_SRC/target/$TRIPLE/release/bundle"
 DEB=$(find "$BUNDLE_DIR/deb" -name "*.deb" -print -quit 2>/dev/null || true)
-APPIMAGE=$(find "$BUNDLE_DIR/appimage" -name "*.AppImage" -print -quit 2>/dev/null || true)
 [ -n "$DEB" ] && cp "$DEB" "$DEST/cernis-pro_${VERSION}_amd64.deb" && echo "      -> $DEST/cernis-pro_${VERSION}_amd64.deb"
-[ -n "$APPIMAGE" ] && cp "$APPIMAGE" "$DEST/cernis-pro_${VERSION}_amd64.AppImage" && echo "      -> $DEST/cernis-pro_${VERSION}_amd64.AppImage"
 
 echo ""
 echo "============================================"

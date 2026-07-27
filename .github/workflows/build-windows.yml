@@ -164,8 +164,8 @@ jobs:
         run: .\build.ps1
 
       # Ab hier Fallunterscheidung nach Trigger -- identische Logik wie im
-      # Linux-Workflow, nur mit den Windows-Bundle-Pfaden (NSIS statt deb/rpm/
-      # AppImage). Das Triple ist der build.ps1-Default x86_64-pc-windows-msvc.
+      # Linux-Workflow, nur mit den Windows-Bundle-Pfaden (NSIS statt deb/rpm).
+      # Das Triple ist der build.ps1-Default x86_64-pc-windows-msvc.
       #
       # Fall a) v-Tag: als GitHub-Release-Asset veroeffentlichen (zaehlt nicht
       # gegen das 500-MB-Artefaktlimit und verfaellt nicht). softprops/action-

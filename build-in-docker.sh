@@ -3,7 +3,7 @@
 #  CERNIS PRO - Build in Docker (reproduzierbare Werkbank)
 #  Baut das Build-Image aus Dockerfile.build und fuehrt darin
 #  den unveraenderten build-linux.sh gegen das als Volume
-#  gemountete Repo aus. Die erzeugten deb/AppImage landen im
+#  gemountete Repo aus. Die erzeugten deb/rpm landen im
 #  gemounteten Repo unter src-tauri/target/.../bundle/ und sind
 #  damit fuer den Host sichtbar.
 #
@@ -68,7 +68,6 @@ echo ""
 echo "[3/3] Ergebnis einsammeln ..."
 BUNDLE_DIR="$REPO_ROOT/src-tauri/target/$TRIPLE/release/bundle"
 DEB="$(find "$BUNDLE_DIR/deb" -name '*.deb' -print -quit 2>/dev/null || true)"
-APPIMAGE="$(find "$BUNDLE_DIR/appimage" -name '*.AppImage' -print -quit 2>/dev/null || true)"
 
 echo ""
 echo "============================================"
@@ -78,10 +77,5 @@ if [ -n "$DEB" ]; then
     echo " deb:      $DEB"
 else
     echo " deb:      NICHT GEFUNDEN unter $BUNDLE_DIR/deb"
-fi
-if [ -n "$APPIMAGE" ]; then
-    echo " AppImage: $APPIMAGE"
-else
-    echo " AppImage: NICHT GEFUNDEN unter $BUNDLE_DIR/appimage"
 fi
 echo "============================================"

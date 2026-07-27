@@ -74,7 +74,7 @@ def _lese_build_version() -> str:
 
 # Volle interne Version. Enthaelt im CI-Build die SemVer-Build-Metadaten. Der
 # Suffix nennt nur die Architektur (x64), NICHT das Paketformat -- ein Build
-# erzeugt deb, rpm und AppImage aus denselben Binaries ("2.0.3+x64.<sha>"). Im
+# erzeugt deb und rpm aus denselben Binaries ("2.0.3+x64.<sha>"). Im
 # Dev schlicht die Produktversion aus pyproject.toml ("2.0.3").
 APP_VERSION = _lese_build_version()
 
