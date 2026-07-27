@@ -5,8 +5,13 @@ der ``TrustedDnsServerOut`` inkl. Plausibilitaets-Projektion) und
 ``POST /api/dns-trust/decision`` ab. Der Schreibpfad laeuft -- wie ``test_dns_watch_api.py``
 -- gegen ein echtes tmp_path-DB-Repo (so wird der Adapter-Schreibpfad + der
 ``SetDnsServerTrust``-Use-Case mitgeprueft), der Runner wird analog app.py per
-``dependency_overrides`` verdrahtet. Muell (ungueltige ``decision``) -> 422; eine
-unbekannte ``ip`` ist ein definierter No-Op (kein 500).
+``dependency_overrides`` verdrahtet. Muell (ungueltige ``decision``) -> 422.
+
+Seit S62 L7c melden beide Schreibwege einen Nichtvollzug ehrlich, statt Erfolg fuer
+etwas zu quittieren, das nicht geschieht: eine ``ip`` ohne erfassten Server -> 404
+(Muster ``api/devices.py``), ein ``rank > 0`` fuer einen weder bestaetigten noch bereits
+rangierten Server -> 409 (Muster ``api/outbound_log.py``). Die gueltigen Wege sind
+unveraendert und werden hier weiter mitgeprueft.
 """
 
 from collections.abc import Iterator
@@ -24,7 +29,7 @@ from api.dns_trust import (
     provide_dns_trust_rank,
 )
 from app import create_app
-from application.dns_trust import SetDnsServerRank
+from application.dns_trust import SetDnsServerRank, SetDnsServerTrust
 from domain.dns_trust import (
     DnsServerCategory,
     DnsTrustState,
@@ -34,6 +39,8 @@ from infrastructure.config import AppConfig
 from infrastructure.dns_trust_repository import SqliteDnsTrustRepository
 
 IP = "192.168.0.1"
+# Ein erfasster, aber NICHT bestaetigter Server ohne Rang (S62 L7c F2).
+IP_NEUTRAL = "192.168.0.156"
 
 
 class _FakeDnsTrustListRunner:
@@ -161,17 +168,12 @@ def decision_context(app: FastAPI, tmp_path: Path) -> tuple[FastAPI, SqliteDnsTr
             trust_state=DnsTrustState.NEUTRAL,
         )
     )
-    # Schreib-Runner wie im Composition Root: (ip, decision) -> set_trust mit fester now.
+    # Schreib-Runner wie im Composition Root: (ip, decision) -> SetDnsServerTrust mit
+    # fester now. Bewusst der ECHTE Use-Case (nicht repo.set_trust direkt): nur so laeuft
+    # der Test ueber dieselbe Naht wie app.py und sieht dessen Fehlerwuerfe (S62 L7c).
+    trust_use_case = SetDnsServerTrust(repo)
     app.dependency_overrides[provide_dns_trust_decision] = lambda: (
-        lambda ip, decision: repo.set_trust(
-            ip,
-            {
-                "trust": DnsTrustState.TRUSTED,
-                "reject": DnsTrustState.REJECTED,
-                "reset": DnsTrustState.NEUTRAL,
-            }[decision],
-            999.0,
-        )
+        lambda ip, decision: trust_use_case(ip, decision, 999.0)
     )
     return app, repo
 
@@ -214,15 +216,20 @@ def test_invalide_decision_ist_422(
     assert resp.status_code == 422
 
 
-def test_unbekannte_ip_ist_kein_500(
+def test_unbekannte_ip_ist_404_statt_stillem_erfolg(
     decision_context: tuple[FastAPI, SqliteDnsTrustRepository],
 ) -> None:
-    """Entscheidung fuer eine unbekannte ip -> definierter No-Op (200, kein 500)."""
+    """S62 L7c F1: Entscheidung fuer eine nicht erfasste ip -> 404, KEIN stiller Erfolg.
+
+    Bis L7c antwortete dieser Weg 200 ``{"ok": true}``, ohne eine Zeile zu schreiben
+    (gemessen mit 9.9.9.9). Jetzt benennt er den Nichtvollzug -- 404 nach dem Muster
+    ``api/devices.py`` (unbekannte MAC -> 404). Kein 500.
+    """
     application, repo = decision_context
     client = TestClient(application)
     resp = client.post("/api/dns-trust/decision", json=_body(ip="203.0.113.7", decision="trust"))
-    assert resp.status_code == 200
-    assert resp.json() == {"ok": True}
+    assert resp.status_code == 404
+    assert "(E-503)" in resp.json()["detail"]
     assert repo.get("203.0.113.7") is None
 
 
@@ -240,6 +247,17 @@ def rank_context(app: FastAPI, tmp_path: Path) -> tuple[FastAPI, SqliteDnsTrustR
             first_seen=100.0,
             last_seen=100.0,
             trust_state=DnsTrustState.TRUSTED,
+        )
+    )
+    # UND ein erfasster, aber nicht bestaetigter Server ohne Rang (S62 L7c F2): fuer ihn
+    # kam der Rang bis L7c nie an, gemeldet wurde trotzdem Erfolg.
+    repo.upsert(
+        TrustedDnsServer(
+            ip=IP_NEUTRAL,
+            category=DnsServerCategory.LOCAL_PRIVATE,
+            first_seen=200.0,
+            last_seen=200.0,
+            trust_state=DnsTrustState.NEUTRAL,
         )
     )
     # Rang-Runner wie im Composition Root: (ip, rank) -> SetDnsServerRank mit fester now.
@@ -271,3 +289,50 @@ def test_negativer_rank_ist_422(
     client = TestClient(application)
     resp = client.post("/api/dns-trust/rank", json={"ip": IP, "rank": -1})
     assert resp.status_code == 422
+
+
+def test_rank_auf_nicht_bestaetigten_server_ist_409(
+    rank_context: tuple[FastAPI, SqliteDnsTrustRepository],
+) -> None:
+    """S62 L7c F2: Rang fuer einen weder bestaetigten noch rangierten Server -> 409.
+
+    Bis L7c antwortete dieser Weg 200 ``{"ok": true}``, der Wert kam nie an (gemessen mit
+    172.18.0.156, Rang 1 angefordert, danach weiterhin 0). Der Zustand laesst die Aktion
+    nicht zu -> 409 nach dem Muster ``api/outbound_log.py``. Die fachliche Regel selbst
+    bleibt unveraendert.
+    """
+    application, repo = rank_context
+    client = TestClient(application)
+    resp = client.post("/api/dns-trust/rank", json={"ip": IP_NEUTRAL, "rank": 1})
+    assert resp.status_code == 409
+    assert "(E-503)" in resp.json()["detail"]
+    # Nichts geschrieben -- weder am Ziel noch am bestaetigten Nachbarn.
+    stored = repo.get(IP_NEUTRAL)
+    assert stored is not None
+    assert stored.expected_rank == 0
+
+
+def test_rank_auf_gar_nicht_erfasste_ip_ist_404(
+    rank_context: tuple[FastAPI, SqliteDnsTrustRepository],
+) -> None:
+    """Getrennter Grund: gar kein Server erfasst -> 404 (nicht 409)."""
+    application, repo = rank_context
+    client = TestClient(application)
+    resp = client.post("/api/dns-trust/rank", json={"ip": "203.0.113.7", "rank": 1})
+    assert resp.status_code == 404
+    assert "(E-503)" in resp.json()["detail"]
+    assert repo.get("203.0.113.7") is None
+
+
+def test_rank_null_auf_nicht_bestaetigten_server_bleibt_200(
+    rank_context: tuple[FastAPI, SqliteDnsTrustRepository],
+) -> None:
+    """``rank == 0`` dort ist KEIN Nichtvollzug: unrangiert ist bereits der Zielzustand."""
+    application, repo = rank_context
+    client = TestClient(application)
+    resp = client.post("/api/dns-trust/rank", json={"ip": IP_NEUTRAL, "rank": 0})
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True}
+    stored = repo.get(IP_NEUTRAL)
+    assert stored is not None
+    assert stored.expected_rank == 0

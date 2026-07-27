@@ -5125,7 +5125,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     def _dns_trust_decision(ip: str, decision: str) -> None:
         # Schreib-Runner: vertrauen/ablehnen/zuruecksetzen. now am Rand (time.time), der
-        # Use-Case bleibt uhrfrei; unbekannte ip ist ein definierter No-Op (kein 500).
+        # Use-Case bleibt uhrfrei. Eine ip ohne erfassten Server wirft im Use-Case
+        # DnsTrustServerNotFoundError -- der Router mappt sie auf 404; hier NICHT fangen
+        # (kein stiller Fallback, S3).
         import time
 
         _set_dns_server_trust(ip, decision, time.time())
@@ -5133,8 +5135,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     _set_dns_server_rank = SetDnsServerRank(dns_trust_repository())
 
     def _dns_trust_rank(ip: str, rank: int) -> None:
-        # Rang-Runner (Muster _dns_trust_decision): now am Rand, Use-Case uhrfrei;
-        # unbekannte ip ist ein definierter No-Op (repo.set_rank betrifft 0 Zeilen).
+        # Rang-Runner (Muster _dns_trust_decision): now am Rand, Use-Case uhrfrei. Eine
+        # ip ohne erfassten Server bzw. ein rank > 0 fuer einen nicht bestaetigten Server
+        # wirft im Use-Case (404 bzw. 409 am Router); hier NICHT fangen (S3).
         import time
 
         _set_dns_server_rank(ip, rank, time.time())

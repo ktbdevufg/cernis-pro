@@ -22,6 +22,7 @@ import { ChevronDown, ChevronUp, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { ApiError } from "../api/client.js";
 import {
   fetchDnsTrustServers,
   setDnsTrustDecision,
@@ -29,6 +30,22 @@ import {
 } from "../api/dnsTrust.js";
 import { CODES, mitCode } from "../lib/fehlercodes.js";
 import "./DnsTrustPanel.css";
+
+// Welcher i18n-Schluessel gehoert zu einem fehlgeschlagenen Schreibversuch? Das
+// Backend benennt seit S62 L7c den Nichtvollzug ueber den Statuscode (404 = die
+// Adresse ist noch nicht bekannt, 409 = der Server ist nicht bestaetigt); alles
+// andere bleibt die generische Aktions-Meldung. Muster der Fehler-Unterscheidung
+// wie DeviceManagementPanel.jsx (ApiError.status auswerten, kein detail-Parsing --
+// client.js liest detail nicht aus).
+function aktionsFehlerSchluessel(ursache) {
+  if (ursache instanceof ApiError && ursache.status === 404) {
+    return "aktionFehlerUnbekannt";
+  }
+  if (ursache instanceof ApiError && ursache.status === 409) {
+    return "aktionFehlerNichtBestaetigt";
+  }
+  return "aktionFehler";
+}
 
 // Ein Kategorie-Label (Wire-Wert -> i18n-Schluessel). Dient nur der Anzeige der
 // rohen Kategorie je Zeile.
@@ -272,7 +289,7 @@ export default function DnsTrustPanel() {
         await laden0();
       } catch (ursache) {
         console.error("DNS-Vertrauens-Entscheidung fehlgeschlagen:", ursache);
-        setFehler("aktionFehler");
+        setFehler(aktionsFehlerSchluessel(ursache));
       } finally {
         setBusy((prev) => {
           const next = new Set(prev);
@@ -295,7 +312,7 @@ export default function DnsTrustPanel() {
         await laden0();
       } catch (ursache) {
         console.error("DNS-Rang setzen fehlgeschlagen:", ursache);
-        setFehler("aktionFehler");
+        setFehler(aktionsFehlerSchluessel(ursache));
       } finally {
         setBusy((prev) => {
           const next = new Set(prev);
@@ -354,11 +371,12 @@ export default function DnsTrustPanel() {
       {/* Dezenter Lade-/Aktions-Fehlerhinweis. */}
       {fehler ? (
         <p className="dt-error" role="alert">
-          {/* Nur der Aktions-Fehler traegt einen Schema-Code (E-503); der
-              Lade-Fehler bleibt ohne Code. */}
-          {fehler === "aktionFehler"
-            ? mitCode(t(`verwaltung.dnsTrust.${fehler}`), CODES.E_503)
-            : t(`verwaltung.dnsTrust.${fehler}`)}
+          {/* Nur die Aktions-Fehler tragen einen Schema-Code (E-503) -- auch die
+              beiden benannten Nichtvollzuege (404/409); der Lade-Fehler bleibt
+              ohne Code. */}
+          {fehler === "ladeFehler"
+            ? t(`verwaltung.dnsTrust.${fehler}`)
+            : mitCode(t(`verwaltung.dnsTrust.${fehler}`), CODES.E_503)}
         </p>
       ) : null}
 

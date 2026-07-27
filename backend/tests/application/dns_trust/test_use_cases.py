@@ -8,7 +8,13 @@ bestehenden application-Tests: kein echtes SQLite/Netz). Kern der Behauptungen:
 (2) ``SyncDnsTrustServer`` aktualisiert bestehend -- Kategorie/last_seen/display_name werden
     gepflegt, ``trust_state`` und ``first_seen`` bleiben (User-Wertung NIE ueberschreiben).
 (3) Die Kategorie-Ableitung folgt den Flags (gateway/public/threat) in fester Prioritaet.
-(4) ``SetDnsServerTrust`` bildet alle drei decisions korrekt ab; ein Unbekannter wirft.
+(4) ``SetDnsServerTrust`` bildet alle drei decisions korrekt ab; ein unbekannter
+    ``decision``-Wert wirft -- und seit S62 L7c auch eine ``ip``, zu der gar kein Server
+    erfasst ist (frueher ein stiller No-Op mit Erfolgsmeldung nach aussen).
+(4b) ``SetDnsServerRank`` benennt denselben Nichtvollzug: ein ``rank > 0`` fuer einen
+    weder bestaetigten noch bereits rangierten Server wirft, statt den Wunsch still
+    fallen zu lassen. Die fachliche Regel selbst bleibt (Rang ordnet nur die erwartete
+    Menge); ``rank == 0`` bleibt dort ein echter No-Op.
 (5) ``TrustedDnsServerIps`` liefert genau die TRUSTED-IPs in DETERMINISTISCHER Ordnung
     (rangierte nach ``expected_rank`` zuerst, dann unrangierte nach ``ip``). Das ist die
     als "erwartet" angezeigte Beleg-Menge BEIDER Waechter-Sichten (S62 L7a: auch der
@@ -27,6 +33,8 @@ import pytest
 
 from application.dns_trust import (
     DnsServerPlausibility,
+    DnsTrustServerNotConfirmedError,
+    DnsTrustServerNotFoundError,
     ListDnsTrustServers,
     SetDnsServerRank,
     SetDnsServerTrust,
@@ -268,9 +276,15 @@ def test_set_trust_unbekannte_decision_wirft() -> None:
         SetDnsServerTrust(repo)("1.1.1.1", "maybe", now=1.0)
 
 
-def test_set_trust_unbekannte_ip_ist_noop() -> None:
+def test_set_trust_unbekannte_ip_wirft_statt_still_nichts_zu_tun() -> None:
+    """S62 L7c: ohne erfassten Server schriebe set_trust 0 Zeilen -- das ist ein Fehler.
+
+    Frueher ein stiller No-Op, der nach aussen als Erfolg zurueckkam (die Schnittstelle
+    antwortete 200, die Tabelle blieb unveraendert). Muster ``DeviceNotFoundError``.
+    """
     repo = FakeRepo()
-    SetDnsServerTrust(repo)("203.0.113.7", "trust", now=1.0)  # kein Wurf
+    with pytest.raises(DnsTrustServerNotFoundError):
+        SetDnsServerTrust(repo)("203.0.113.7", "trust", now=1.0)
     assert repo.get("203.0.113.7") is None
 
 
@@ -524,3 +538,79 @@ def test_rank_bewahrt_rang_eines_nicht_trusted_servers() -> None:
     repo = FakeRepo([neutral_rangiert, _trusted("10.0.0.2", 2.0)])
     SetDnsServerRank(repo)("10.0.0.2", 2, now=99.0)
     assert _rank_map(repo) == {"10.0.0.9": 1, "10.0.0.2": 2}
+
+
+# ── SetDnsServerRank: der Nichtvollzug wird benannt (S62 L7c) ─────────────────
+# Bis L7c ungetestete Luecke: ein Server, der WEDER bestaetigt ist NOCH bereits einen
+# Rang traegt, fiel aus der betroffenen Menge und der Rang-Wunsch verschwand still --
+# nach aussen als Erfolg. Die fachliche Regel selbst (Rang nur innerhalb der
+# erwarteten Menge) bleibt unveraendert; ehrlich wird nur ihre Rueckmeldung.
+
+
+def _neutral(ip: str, first_seen: float, rank: int = 0) -> TrustedDnsServer:
+    """Kurz-Fabrik: ein NEUTRAL-Server (nicht bestaetigt) mit optionalem Rang."""
+    return TrustedDnsServer(
+        ip,
+        DnsServerCategory.LOCAL_PRIVATE,
+        first_seen,
+        first_seen,
+        trust_state=DnsTrustState.NEUTRAL,
+        expected_rank=rank,
+    )
+
+
+def test_rank_auf_weder_trusted_noch_rangiert_wirft() -> None:
+    """Der gemessene Fall F2: neutral + rank 0 -> Rang 1 kam nie an, Erfolg gemeldet."""
+    repo = FakeRepo([_neutral("172.18.0.156", 1.0), _trusted("10.0.0.1", 2.0, rank=1)])
+    with pytest.raises(DnsTrustServerNotConfirmedError):
+        SetDnsServerRank(repo)("172.18.0.156", 1, now=99.0)
+    # Nichts geschrieben -- weder am Ziel noch an der bestehenden Ordnung.
+    assert _rank_map(repo) == {"172.18.0.156": 0, "10.0.0.1": 1}
+
+
+def test_rank_auf_abgelehnten_server_wirft() -> None:
+    """Auch REJECTED ist nicht bestaetigt -- gleiche Behandlung wie NEUTRAL."""
+    abgelehnt = TrustedDnsServer(
+        "203.0.113.9",
+        DnsServerCategory.UNKNOWN,
+        1.0,
+        1.0,
+        trust_state=DnsTrustState.REJECTED,
+    )
+    repo = FakeRepo([abgelehnt])
+    with pytest.raises(DnsTrustServerNotConfirmedError):
+        SetDnsServerRank(repo)("203.0.113.9", 1, now=99.0)
+    assert _rank_map(repo) == {"203.0.113.9": 0}
+
+
+def test_rank_auf_gar_nicht_erfasste_ip_wirft_not_found() -> None:
+    """Getrennter Grund: gar kein Server erfasst -> NotFound (404), nicht 409."""
+    repo = FakeRepo([_trusted("10.0.0.1", 1.0, rank=1)])
+    with pytest.raises(DnsTrustServerNotFoundError):
+        SetDnsServerRank(repo)("203.0.113.7", 1, now=99.0)
+    assert _rank_map(repo) == {"10.0.0.1": 1}
+
+
+def test_rank_null_auf_nicht_bestaetigten_server_bleibt_noop() -> None:
+    """``rank == 0`` ist dort KEIN Nichtvollzug: unrangiert ist bereits der Zielzustand."""
+    repo = FakeRepo([_neutral("172.18.0.156", 1.0), _trusted("10.0.0.1", 2.0, rank=1)])
+    SetDnsServerRank(repo)("172.18.0.156", 0, now=99.0)  # kein Wurf
+    assert _rank_map(repo) == {"172.18.0.156": 0, "10.0.0.1": 1}
+
+
+def test_rank_auf_bestaetigten_server_bleibt_unveraendert_erfolgreich() -> None:
+    """Gegenprobe: der gueltige Weg schreibt weiterhin (kein Verhalten geaendert).
+
+    Nur die Ziel-ip traegt einen Rang-Wunsch; der unrangierte Nachbar bleibt unrangiert
+    (dokumentiertes Bestandsverhalten: wer keinen Wunsch hat, erhaelt 0).
+    """
+    repo = FakeRepo([_trusted("10.0.0.1", 1.0), _trusted("10.0.0.2", 2.0)])
+    SetDnsServerRank(repo)("10.0.0.2", 1, now=99.0)
+    assert _rank_map(repo) == {"10.0.0.2": 1, "10.0.0.1": 0}
+
+
+def test_rank_auf_rangierten_aber_nicht_trusted_server_bleibt_erlaubt() -> None:
+    """Verlustfreiheit bleibt: wer bereits einen Rang traegt, darf ihn aendern."""
+    repo = FakeRepo([_neutral("10.0.0.9", 1.0, rank=1), _trusted("10.0.0.2", 2.0, rank=2)])
+    SetDnsServerRank(repo)("10.0.0.9", 2, now=99.0)  # kein Wurf
+    assert _rank_map(repo) == {"10.0.0.2": 1, "10.0.0.9": 2}

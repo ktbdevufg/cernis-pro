@@ -1995,6 +1995,8 @@
       "empty": "No DNS servers detected yet — they appear after the next start or a recording.",
       "ladeFehler": "The DNS servers could not be loaded. Please check whether the backend is running.",
       "aktionFehler": "The decision could not be saved.",
+      "aktionFehlerUnbekannt": "This address is not known yet and therefore cannot be rated.",
+      "aktionFehlerNichtBestaetigt": "An order can only be assigned to confirmed servers.",
       "groups": {
         "expected": {
           "title": "Expected — ordered",

@@ -19,6 +19,10 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import ClassVar
 
+from application.dns_trust.errors import (
+    DnsTrustServerNotConfirmedError,
+    DnsTrustServerNotFoundError,
+)
 from domain.dns_trust import (
     DnsTrustState,
     TrustedDnsServer,
@@ -203,9 +207,14 @@ class SetDnsServerTrust:
     ``decision`` ist einer von ``"trust"``/``"reject"``/``"reset"`` und wird auf den
     passenden ``DnsTrustState`` abgebildet (trust -> TRUSTED, reject -> REJECTED, reset ->
     NEUTRAL). Der schmale Schreibpfad des Repos aendert NUR ``trust_state`` + ``last_seen``
-    (Kategorie/``first_seen`` bleiben); eine unbekannte ``ip`` ist ein definierter No-Op
-    (kein Wurf). Ein unbekannter ``decision``-Wert ist ein Fehler (kein stiller Fallback --
-    Finding S3): ``ValueError``.
+    (Kategorie/``first_seen`` bleiben). Ein unbekannter ``decision``-Wert ist ein Fehler
+    (kein stiller Fallback -- Finding S3): ``ValueError``.
+
+    Eine ``ip``, zu der GAR KEIN Server erfasst ist, ist ebenfalls ein Fehler:
+    ``DnsTrustServerNotFoundError``. Zuvor war das ein stiller No-Op (``repo.set_trust``
+    betraf 0 Zeilen, die Schnittstelle meldete trotzdem Erfolg) -- der Nutzer traf eine
+    Entscheidung, die folgenlos blieb, ohne es zu erfahren. Dieselbe Korrektur, die
+    ``DeviceNotFoundError`` fuer ``update_device_meta`` bereits vorgenommen hat.
     """
 
     _DECISIONS: ClassVar[dict[str, DnsTrustState]] = {
@@ -221,6 +230,10 @@ class SetDnsServerTrust:
         state = self._DECISIONS.get(decision)
         if state is None:
             raise ValueError(f"unbekannte Vertrauens-Entscheidung: {decision!r}")
+        # Nichtvollzug ehrlich benennen: ohne erfassten Server schriebe set_trust
+        # 0 Zeilen -- das darf nicht als Erfolg zurueckgemeldet werden (S3).
+        if self._repo.get(ip) is None:
+            raise DnsTrustServerNotFoundError(ip)
         self._repo.set_trust(ip, state, now)
 
 
@@ -283,6 +296,17 @@ class SetDnsServerRank:
     Server voruebergehend nicht trusted ist. ``rank < 0`` ist ein Fehler (kein stiller
     Fallback, S3): ``ValueError``. ``now`` kommt als Parameter herein (keine Uhr im
     Use-Case); geschrieben wird nur, was sich tatsaechlich aendert (``repo.set_rank``).
+
+    Ein ``rank > 0`` fuer eine ``ip`` AUSSERHALB dieser Menge ist ein Fehler -- und zwar
+    nach GRUND getrennt: ist zu der ``ip`` gar kein Server erfasst,
+    ``DnsTrustServerNotFoundError`` (api-Rand: 404); ist er erfasst, aber weder bestaetigt
+    noch rangiert, ``DnsTrustServerNotConfirmedError`` (api-Rand: 409). Die Einschraenkung
+    selbst bleibt fachlich gewollt -- der Rang ordnet die ERWARTETE Menge
+    (``TrustedDnsServerIps`` filtert auf ``TRUSTED``), fuer einen nicht bestaetigten Server
+    hat er keine Wirkung. Zuvor fiel der Wunsch still weg (die ``ip`` stand nicht in
+    ``gewuenscht``, es wurde nichts geschrieben, die Schnittstelle meldete Erfolg).
+    ``rank == 0`` auf eine solche ``ip`` bleibt dagegen ein echter No-Op: der Zielzustand
+    "unrangiert" liegt bereits vor, es findet kein Nichtvollzug statt.
     """
 
     def __init__(self, repo: DnsTrustRepository) -> None:
@@ -304,6 +328,16 @@ class SetDnsServerRank:
         gewuenscht = {server.ip: server.expected_rank for server in betroffen}
         if ip in gewuenscht:
             gewuenscht[ip] = rank
+        elif rank > 0:
+            # Nichtvollzug ehrlich benennen statt den Wunsch still fallen zu lassen (S3):
+            # ausserhalb der betroffenen Menge kaeme der Rang nie an. ``rank == 0`` ist
+            # dagegen bereits erfuellt (unrangiert) -- echter No-Op, kein Fehler.
+            # Die beiden Gruende sind fachlich verschieden und werden getrennt benannt:
+            # gar kein Server erfasst (unbekannte Adresse) vs. erfasst, aber nicht
+            # bestaetigt und ohne Rang.
+            if self._repo.get(ip) is None:
+                raise DnsTrustServerNotFoundError(ip)
+            raise DnsTrustServerNotConfirmedError(ip)
 
         # Stabile Ordnung der zu rangierenden Server: (gewuenschter Rang, dann bisheriger
         # Rang, dann first_seen). Bei Rang-Kollision nimmt die Ziel-ip den Platz des

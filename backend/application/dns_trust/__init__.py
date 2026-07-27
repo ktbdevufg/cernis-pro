@@ -11,6 +11,11 @@ NOCH KEINE api, KEIN Frontend, KEIN Umbau der bestehenden Waechter-Klassifikatio
 (``expected_servers``) -- das ist E4/E5/E6.
 """
 
+from application.dns_trust.errors import (
+    DnsTrustApplicationError,
+    DnsTrustServerNotConfirmedError,
+    DnsTrustServerNotFoundError,
+)
 from application.dns_trust.use_cases import (
     DnsServerPlausibility,
     GatewayProvider,
@@ -26,6 +31,9 @@ from application.dns_trust.use_cases import (
 
 __all__ = [
     "DnsServerPlausibility",
+    "DnsTrustApplicationError",
+    "DnsTrustServerNotConfirmedError",
+    "DnsTrustServerNotFoundError",
     "GatewayProvider",
     "ListDnsTrustServers",
     "PlausibilityProvider",

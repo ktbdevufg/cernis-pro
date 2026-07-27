@@ -1,18 +1,26 @@
 """FastAPI-Router des DNS-Server-Vertrauensmodells (ADR 0043, Etappe 5), prefix ``/api/dns-trust``.
 
-Aeusserer Ring: nimmt HTTP entgegen. Wie ``api/dns_watch.py`` (Vorbild dieses Blocks)
-kennt dieser Router WEDER ``application`` NOCH ``infrastructure`` NOCH ``modules``
-(Regel 4): die injizierten Runner kommen als schmale lokale Vertraege per Dependency
-herein, verdrahtet im Composition Root (``app.py``).
+Aeusserer Ring: nimmt HTTP entgegen. ``infrastructure``/``domain``/``ports`` bleiben
+draussen (Regel 4): die injizierten Runner kommen als schmale lokale Vertraege per
+Dependency herein, verdrahtet im Composition Root (``app.py``).
 
-Damit der api-Ring application-frei bleibt UND der Aufruf trotzdem typsicher ist (mypy
-strict), beschreibt ein schmales lokales ``Protocol`` den Vertrag des injizierten
-Lese-Runners (liefert die fertig projizierte Sicht), und ein ``Callable`` den des
-Schreib-Runners (trust/reject/reset). Der api-Ring definiert eigene schmale pydantic-
-Response-Modelle (``TrustedDnsServerOut``/``DnsServerPlausibilityOut``); die Projektion vom
-application-Typ (``TrustedDnsServer`` + ``DnsServerPlausibility``) auf diese Wire-Form macht
-der Composition-Root-Runner in ``app.py``, NICHT der Router -- so nennt der api-Ring den
-application-Typ nie.
+Aus ``application`` wird GENAU EINES importiert: die beiden Fehlertypen des
+Vertrauensmodells (``application/dns_trust/errors.py``). Dieser Router war urspruenglich
+zusaetzlich application-frei gebaut (lokale Stilkonvention nach dem Vorbild
+``api/dns_watch.py``/``api/blocklist.py``, KEIN Contract -- der Architektur-Contract
+erlaubt api -> application ausdruecklich und 18 Router nutzen das). Die Konvention wird
+hier bewusst aufgegeben, weil die beiden Nichtvollzuege fachlich verschieden sind
+(Adresse nicht erfasst -> 404 vs. Server nicht bestaetigt -> 409) und stdlib-Ausnahmen
+diesen Unterschied nicht tragen koennen: fuer 404 gibt es das belegte ``KeyError``-Muster
+(``api/blocklist.py``), fuer 409 kein stdlib-Gegenstueck im Projekt.
+
+Alles UEBRIGE bleibt application-frei: ein schmales lokales ``Protocol`` beschreibt den
+Vertrag des injizierten Lese-Runners (liefert die fertig projizierte Sicht), ein
+``Callable`` den des Schreib-Runners (trust/reject/reset). Der api-Ring definiert eigene
+schmale pydantic-Response-Modelle (``TrustedDnsServerOut``/``DnsServerPlausibilityOut``);
+die Projektion vom application-Typ (``TrustedDnsServer`` + ``DnsServerPlausibility``) auf
+diese Wire-Form macht der Composition-Root-Runner in ``app.py``, NICHT der Router -- so
+nennt der api-Ring die application-DATENtypen weiterhin nie.
 
 Endpunkte:
 
@@ -22,9 +30,12 @@ Endpunkte:
   (aeltester zuerst), ohne Re-Sortierung im Router.
 * ``POST /api/dns-trust/decision`` -> vertraut/lehnt ab/setzt zurueck EINEN Server pro ``ip``
   ueber den injizierten Schreib-Runner (``SetDnsServerTrust``). ``{"ok": true}``. KEIN Loeschen
-  hier (Loeschen kommt spaeter in der Wartungsrubrik).
+  hier (Loeschen kommt spaeter in der Wartungsrubrik). Eine ``ip``, zu der kein Server
+  erfasst ist -> 404 (frueher ein stiller No-Op mit Erfolgsmeldung).
 * ``POST /api/dns-trust/rank`` -> setzt die erwartete Prioritaet EINES Servers pro ``ip``
-  (``SetDnsServerRank``; ``rank == 0`` = unrangiert). ``{"ok": true}``.
+  (``SetDnsServerRank``; ``rank == 0`` = unrangiert). ``{"ok": true}``. Unbekannte ``ip``
+  -> 404; ein ``rank > 0`` fuer einen weder bestaetigten noch bereits rangierten Server
+  -> 409 (frueher fiel der Wunsch still weg, gemeldet wurde Erfolg).
 
 Die ``now``-Uhr faellt NICHT im Router, sondern am Rand (Composition Root / Runner-Wrapper);
 der Router reicht nur ``ip`` + ``decision`` durch.
@@ -33,17 +44,23 @@ der Router reicht nur ``ip`` + ``decision`` durch.
 from collections.abc import Callable
 from typing import Annotated, Literal, Protocol
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
+
+from application.dns_trust import (
+    DnsTrustServerNotConfirmedError,
+    DnsTrustServerNotFoundError,
+)
 
 router = APIRouter(prefix="/api/dns-trust", tags=["dns_trust"])
 
 
-# ── schmale api-Response-Modelle (eigene Wire-Form, KEIN application-Typ) ──────
+# ── schmale api-Response-Modelle (eigene Wire-Form, KEIN application-Datentyp) ──
 # Die Felder spiegeln ``application.dns_trust.DnsServerPlausibility`` bzw.
 # ``domain.dns_trust.TrustedDnsServer``, ohne diese Typen zu importieren. Der
-# Composition-Root-Runner projiziert die application-Sicht auf genau diese Form
-# (Regel 4: api kennt application/domain nicht).
+# Composition-Root-Runner projiziert die application-Sicht auf genau diese Form.
+# Importiert wird aus ``application`` NUR das Fehler-Vokabular (s. Modul-Docstring),
+# nie ein Datentyp; ``domain`` bleibt ganz draussen (Regel 4).
 
 
 class DnsServerPlausibilityOut(BaseModel):
@@ -169,10 +186,19 @@ def set_dns_trust_decision(
 ) -> dict[str, bool]:
     """Vertraut/lehnt ab/setzt EINEN DNS-Server pro ``ip`` zurueck (ueber den Root-Runner).
 
-    ``decision`` per Body-Constraint erzwungen (Muell -> 422). Eine unbekannte ``ip`` ist
-    ein definierter No-Op im Use-Case (kein 500). Erfolg -> 200 ``{"ok": true}``.
+    ``decision`` per Body-Constraint erzwungen (Muell -> 422). Eine ``ip``, zu der kein
+    Server erfasst ist -> 404 (Muster ``api/devices.py``): frueher schrieb der Weg dort
+    nichts und meldete trotzdem Erfolg. Erfolg -> 200 ``{"ok": true}``.
     """
-    record(body.ip, body.decision)
+    try:
+        record(body.ip, body.decision)
+    except DnsTrustServerNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                "Diese Adresse ist noch nicht bekannt und kann darum nicht bewertet werden. (E-503)"
+            ),
+        ) from exc
     return {"ok": True}
 
 
@@ -184,8 +210,23 @@ def set_dns_trust_rank(
     """Setzt die erwartete Prioritaet EINES DNS-Servers pro ``ip`` (ueber den Root-Runner).
 
     ``rank >= 0`` per Body-Constraint erzwungen (Muell -> 422); ``rank == 0`` entfernt
-    die ``ip`` aus der Rangordnung. Eine unbekannte ``ip`` ist ein definierter No-Op.
-    Erfolg -> 200 ``{"ok": true}``.
+    die ``ip`` aus der Rangordnung. Eine ``ip`` ohne erfassten Server -> 404; ein
+    ``rank > 0`` fuer einen weder bestaetigten noch bereits rangierten Server -> 409
+    (Zustand laesst die Aktion nicht zu, Muster ``api/outbound_log.py``) -- frueher fiel
+    der Wunsch dort still weg. Erfolg -> 200 ``{"ok": true}``.
     """
-    record(body.ip, body.rank)
+    try:
+        record(body.ip, body.rank)
+    except DnsTrustServerNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                "Diese Adresse ist noch nicht bekannt und kann darum nicht bewertet werden. (E-503)"
+            ),
+        ) from exc
+    except DnsTrustServerNotConfirmedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Eine Reihenfolge laesst sich nur fuer bestaetigte Server vergeben. (E-503)",
+        ) from exc
     return {"ok": True}

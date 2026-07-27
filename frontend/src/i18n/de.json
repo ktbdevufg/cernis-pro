@@ -1995,6 +1995,8 @@
       "empty": "Noch keine DNS-Server erkannt — sie erscheinen nach dem nächsten Start oder einer Aufzeichnung.",
       "ladeFehler": "Die DNS-Server konnten nicht geladen werden. Bitte prüfen Sie, ob das Backend läuft.",
       "aktionFehler": "Die Entscheidung konnte nicht gespeichert werden.",
+      "aktionFehlerUnbekannt": "Diese Adresse ist noch nicht bekannt und kann darum nicht bewertet werden.",
+      "aktionFehlerNichtBestaetigt": "Eine Reihenfolge lässt sich nur für bestätigte Server vergeben.",
       "groups": {
         "expected": {
           "title": "Erwartet — geordnet",
