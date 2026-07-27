@@ -9,12 +9,14 @@
 // Wire-Form (verifiziert, E5 + D4 E3, Prefix /api/dns-trust, NICHT aendern):
 //   GET  ""          -> [ { ip, category, trust_state, first_seen, last_seen,
 //                          display_name, notes, is_platform_placeholder,
-//                          expected_rank,
+//                          expected_rank, origin,
 //                          plausibility: { in_inventory, first_seen_days, vendor,
 //                          open_ports[], display_name } | null } ]
 //     category      in {gateway, local_private, public_resolver, unknown, threat_listed}
 //     trust_state   in {trusted, neutral, rejected}
 //     expected_rank int, nutzergesetzte erwartete Prioritaet (0 = unrangiert)
+//     origin        in {observed, manual, migrated} -- Herkunft des Eintrags (S63 L7d)
+//   POST ""          Body { ip, name } -> {ok:true}; 409 = bereits erfasst, 422 = ip kaputt
 //   POST "/decision" Body { ip, decision: "trust"|"reject"|"reset" } -> {ok:true}
 //   POST "/rank"     Body { ip, rank } (rank >= 0; 0 = unrangiert) -> {ok:true}
 
@@ -55,6 +57,10 @@ export function mappeServer(s) {
     notes: s.notes ?? null,
     isPlatformPlaceholder: Boolean(s.is_platform_placeholder),
     expectedRank: Number(s.expected_rank ?? 0),
+    // Herkunft: fehlt sie (aeltere Antwort), ist "observed" der ehrliche Normalfall --
+    // die Von-Hand-Kennzeichnung ist eine ZUSAETZLICHE Aussage, die nur das Backend
+    // treffen kann; ohne sie wird nichts behauptet.
+    origin: s.origin ?? "observed",
     plausibility: mappePlausibilitaet(s.plausibility),
   };
 }
@@ -81,10 +87,19 @@ export async function setDnsTrustRank(ip, rank) {
   return apiPost(`${BASIS}/rank`, { ip, rank });
 }
 
+// POST "" -> hinterlegt einen DNS-Server VON HAND (auch einen nie beobachteten). Er
+// entsteht direkt als vertraut mit der Herkunft "manual". Der Name ist optional.
+// Fehlerlagen (ApiError): 409 = die Adresse ist bereits erfasst, 422 = keine gueltige
+// IP. Die View laedt danach die Liste neu, statt den neuen Eintrag lokal zu raten.
+export async function createDnsTrustServer(ip, name) {
+  return apiPost(BASIS, { ip, name });
+}
+
 export default {
   mappePlausibilitaet,
   mappeServer,
   fetchDnsTrustServers,
+  createDnsTrustServer,
   setDnsTrustDecision,
   setDnsTrustRank,
 };

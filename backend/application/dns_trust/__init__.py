@@ -13,10 +13,13 @@ NOCH KEINE api, KEIN Frontend, KEIN Umbau der bestehenden Waechter-Klassifikatio
 
 from application.dns_trust.errors import (
     DnsTrustApplicationError,
+    DnsTrustInvalidIpError,
+    DnsTrustServerAlreadyExistsError,
     DnsTrustServerNotConfirmedError,
     DnsTrustServerNotFoundError,
 )
 from application.dns_trust.use_cases import (
+    AddDnsTrustServer,
     DnsServerPlausibility,
     GatewayProvider,
     ListDnsTrustServers,
@@ -30,8 +33,11 @@ from application.dns_trust.use_cases import (
 )
 
 __all__ = [
+    "AddDnsTrustServer",
     "DnsServerPlausibility",
     "DnsTrustApplicationError",
+    "DnsTrustInvalidIpError",
+    "DnsTrustServerAlreadyExistsError",
     "DnsTrustServerNotConfirmedError",
     "DnsTrustServerNotFoundError",
     "GatewayProvider",

@@ -14,10 +14,10 @@ schreibt KEINE Uhr: ``first_seen``/``last_seen`` kommen fertig aus dem ``server`
 ``is_platform_placeholder`` (funktionsloser Windows-Platzhalter-DNS-Server) liegt als
 ``INTEGER`` (0/1) mit Default 0 und wird beim Lesen ueber ``bool(...)`` zurueckgehoben.
 
-ENUM-ROUND-TRIP: ``category`` und ``trust_state`` werden als ihr ``str``-Wert gespeichert
-(``StrEnum`` -> roher String) und beim Lesen via ``DnsServerCategory(...)`` /
-``DnsTrustState(...)`` zurueck in die Domaenen-Enums gehoben -- Muster
-``SqliteDnsBypassRecordingRepository._row_to_recording``.
+ENUM-ROUND-TRIP: ``category``, ``trust_state`` und ``origin`` werden als ihr ``str``-Wert
+gespeichert (``StrEnum`` -> roher String) und beim Lesen via ``DnsServerCategory(...)`` /
+``DnsTrustState(...)`` / ``DnsServerOrigin(...)`` zurueck in die Domaenen-Enums gehoben --
+Muster ``SqliteDnsBypassRecordingRepository._row_to_recording``.
 
 SCHMALER SCHREIBPFAD: ``set_trust`` aendert per ``UPDATE`` NUR ``trust_state`` + ``last_seen``
 (Kategorie/``first_seen`` unberuehrt). Eine unbekannte ``ip`` betrifft 0 Zeilen -- ein
@@ -31,6 +31,7 @@ from pathlib import Path
 
 from domain.dns_trust import (
     DnsServerCategory,
+    DnsServerOrigin,
     DnsTrustState,
     TrustedDnsServer,
 )
@@ -70,7 +71,8 @@ class SqliteDnsTrustRepository:
                     display_name           TEXT,
                     notes                  TEXT,
                     is_platform_placeholder INTEGER NOT NULL DEFAULT 0,
-                    expected_rank          INTEGER NOT NULL DEFAULT 0
+                    expected_rank          INTEGER NOT NULL DEFAULT 0,
+                    origin                 TEXT NOT NULL DEFAULT 'observed'
                 )
                 """
             )
@@ -80,7 +82,9 @@ class SqliteDnsTrustRepository:
             # dann NIE nach) -- per PRAGMA table_info pruefen und bei Bedarf per ALTER
             # nachruesten. NOT NULL DEFAULT 0 -> bestehende Zeilen erhalten verlustfrei den
             # Default (regulaerer, funktionierender Eintrag). Gleiches Muster fuer
-            # expected_rank (D4 E3): Default 0 = unrangiert.
+            # expected_rank (D4 E3): Default 0 = unrangiert, und fuer origin (S63 L7d):
+            # Default 'observed' -- jeder Bestandseintrag stammt aus realer Beobachtung
+            # bzw. der Altbestands-Uebernahme, die Von-Hand-Herkunft gibt es erst ab jetzt.
             cols = {row["name"] for row in conn.execute("PRAGMA table_info(dns_trust_servers)")}
             if "is_platform_placeholder" not in cols:
                 conn.execute(
@@ -91,6 +95,11 @@ class SqliteDnsTrustRepository:
                 conn.execute(
                     "ALTER TABLE dns_trust_servers ADD COLUMN"
                     " expected_rank INTEGER NOT NULL DEFAULT 0"
+                )
+            if "origin" not in cols:
+                conn.execute(
+                    "ALTER TABLE dns_trust_servers ADD COLUMN"
+                    " origin TEXT NOT NULL DEFAULT 'observed'"
                 )
 
     def upsert(self, server: TrustedDnsServer) -> None:
@@ -103,8 +112,8 @@ class SqliteDnsTrustRepository:
                 INSERT OR REPLACE INTO dns_trust_servers (
                     ip, category, trust_state, first_seen,
                     last_seen, display_name, notes, is_platform_placeholder,
-                    expected_rank
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    expected_rank, origin
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     server.ip,
@@ -116,6 +125,7 @@ class SqliteDnsTrustRepository:
                     server.notes,
                     int(server.is_platform_placeholder),
                     server.expected_rank,
+                    str(server.origin),
                 ),
             )
 
@@ -123,7 +133,7 @@ class SqliteDnsTrustRepository:
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT ip, category, trust_state, first_seen, "
-                "last_seen, display_name, notes, is_platform_placeholder, expected_rank "
+                "last_seen, display_name, notes, is_platform_placeholder, expected_rank, origin "
                 "FROM dns_trust_servers WHERE ip = ?",
                 (ip,),
             ).fetchone()
@@ -136,7 +146,7 @@ class SqliteDnsTrustRepository:
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT ip, category, trust_state, first_seen, "
-                "last_seen, display_name, notes, is_platform_placeholder, expected_rank "
+                "last_seen, display_name, notes, is_platform_placeholder, expected_rank, origin "
                 "FROM dns_trust_servers ORDER BY first_seen ASC"
             ).fetchall()
         return [self._row_to_server(row) for row in rows]
@@ -184,4 +194,5 @@ class SqliteDnsTrustRepository:
             notes=row["notes"],
             is_platform_placeholder=bool(row["is_platform_placeholder"]),
             expected_rank=row["expected_rank"],
+            origin=DnsServerOrigin(row["origin"]),
         )

@@ -20,6 +20,7 @@ from domain.dns_trust.models import DnsServerCategory, DnsTrustState
 __all__ = [
     "BypassVerdict",
     "bypass_verdict",
+    "canonical_dns_ip",
     "categorize_dns_server",
     "default_trust_for",
     "is_platform_placeholder",
@@ -49,6 +50,28 @@ def is_private_ip(ip: str) -> bool:
         return ipaddress.ip_address(ip.strip()).is_private
     except ValueError:
         return False
+
+
+def canonical_dns_ip(ip: str) -> str | None:
+    """Kanonische Schreibweise einer DNS-Server-Adresse, oder ``None`` bei Unbrauchbarem.
+
+    ``dns_trust_servers.ip`` ist der Primaerschluessel des Vertrauensmodells UND die
+    Vergleichsgrundlage beider Waechter -- dort darf nur eine echte, eindeutig
+    geschriebene Adresse landen. ``ipaddress.ip_address`` (stdlib, streng) leistet
+    beides in einem Schritt: es weist Unbrauchbares ab (leer, Hostname, halbe
+    IPv6-Fragmente wie ``"1:2"``, Muell) und normalisiert Gleichwertiges auf EINE
+    Form (``"::0001"`` -> ``"::1"``). Ohne diese Normalisierung koennte dieselbe
+    Adresse in zwei Schreibweisen zwei Zeilen belegen.
+
+    Unbrauchbar -> ``None``, KEIN Wurf und KEINE stille Ersatz-Adresse (S3): der
+    Aufrufer entscheidet, was der Nichtvollzug bedeutet (der Anlege-Use-Case macht
+    daraus einen fachlichen Fehler). Rein, kein I/O -- dieselbe stdlib-Pruefung, die
+    ``is_private_ip``/``is_platform_placeholder`` hier schon nutzen.
+    """
+    try:
+        return str(ipaddress.ip_address(ip.strip()))
+    except ValueError:
+        return None
 
 
 def is_platform_placeholder(ip: str) -> bool:

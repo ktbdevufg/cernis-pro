@@ -20,12 +20,16 @@ from dataclasses import dataclass
 from typing import ClassVar
 
 from application.dns_trust.errors import (
+    DnsTrustInvalidIpError,
+    DnsTrustServerAlreadyExistsError,
     DnsTrustServerNotConfirmedError,
     DnsTrustServerNotFoundError,
 )
 from domain.dns_trust import (
+    DnsServerOrigin,
     DnsTrustState,
     TrustedDnsServer,
+    canonical_dns_ip,
     categorize_dns_server,
     default_trust_for,
     is_platform_placeholder,
@@ -33,6 +37,7 @@ from domain.dns_trust import (
 from ports.dns_trust import DnsTrustRepository
 
 __all__ = [
+    "AddDnsTrustServer",
     "DnsServerPlausibility",
     "GatewayProvider",
     "ListDnsTrustServers",
@@ -104,6 +109,12 @@ class SyncDnsTrustServer:
     ``trust_state`` ueber ``domain.default_trust_for(category)`` (nur GATEWAY -> TRUSTED,
     sonst NEUTRAL). In beiden Faellen ``repo.upsert`` und den (ggf. neuen) Record zurueck.
 
+    ``origin`` ist in BEIDEN Zweigen ``OBSERVED``: dieser Use-Case laeuft ausschliesslich
+    auf realer Beobachtung (Bootstrap-Resolver, Gateway, Umgehungs-Ziel eines Ticks). Bei
+    der Neuanlage ist das der Default, im Update-Zweig wird es AKTIV gesetzt -- ein zuvor
+    von Hand hinterlegter (``MANUAL``) oder uebernommener (``MIGRATED``) Eintrag ist ab der
+    ersten Beobachtung kein "noch nie gesehener" Eintrag mehr (S63 L7d).
+
     ``display_name`` wird best-effort ueber den ``PlausibilityProvider`` beigestellt (die
     IP kann ein bekanntes Geraet sein); kein Treffer -> ``""`` beim Neuanlegen bzw. der
     bestehende Name beim Update bleibt erhalten, falls kein neuer ermittelt wurde.
@@ -162,6 +173,13 @@ class SyncDnsTrustServer:
                 is_platform_placeholder=placeholder,
                 # expected_rank ist User-gesteuert (wie trust_state) -- bewahren.
                 expected_rank=existing.expected_rank,
+                # origin dagegen IMMER auf OBSERVED: dieser Aufruf IST die reale
+                # Beobachtung. Ein von Hand hinterlegter (MANUAL) oder aus dem Altbestand
+                # uebernommener (MIGRATED) Server ist ab jetzt gesehen worden -- die
+                # Herkunft "noch nie beobachtet" trifft nicht mehr zu und der Eintrag
+                # verlaesst den Von-Hand-Bereich der Oberflaeche. Der kuratierte
+                # trust_state bleibt davon unberuehrt.
+                origin=DnsServerOrigin.OBSERVED,
             )
             self._repo.upsert(updated)
             return updated
@@ -175,6 +193,92 @@ class SyncDnsTrustServer:
             trust_state=default_trust_for(category),
             display_name=detected_name,
             is_platform_placeholder=placeholder,
+        )
+        self._repo.upsert(created)
+        return created
+
+
+class AddDnsTrustServer:
+    """Legt EINEN von Hand hinterlegten DNS-Server an, der (noch) nie beobachtet wurde (L7d).
+
+    Der Gegenweg zu ``SyncDnsTrustServer``: dort entsteht ein Eintrag aus realer
+    Beobachtung, hier aus einer Nutzer-Angabe. Der Nutzer erklaert damit "diesen Server
+    erwarte ich", noch bevor ihn irgendein Waechter gesehen hat -- der Eintrag wird darum
+    direkt ``trust_state=TRUSTED`` und ``origin=MANUAL`` angelegt. Sobald er real beobachtet
+    wird, hebt ``SyncDnsTrustServer`` die Herkunft auf ``OBSERVED``.
+
+    KANONISIEREN VOR ALLEM ANDEREN: die Adresse laeuft zuerst durch die reine
+    ``domain.canonical_dns_ip``; erst die kanonische Form ist der Schluessel, mit dem
+    Duplikat-Pruefung und Anlage arbeiten. Andernfalls koennte dieselbe Adresse in zwei
+    Schreibweisen (``"::0001"`` / ``"::1"``) zwei Zeilen belegen und die Duplikat-Pruefung
+    liefe daran vorbei. Unbrauchbar -> ``DnsTrustInvalidIpError`` (api-Rand: 422).
+
+    KEIN UPSERT: ist die kanonische ``ip`` bereits erfasst, ist das ein Fehler
+    (``DnsTrustServerAlreadyExistsError``, api-Rand: 409) und NICHT ein Ueberschreiben --
+    ein ``upsert`` verwuerfe den kuratierten ``trust_state``, den ``expected_rank`` und das
+    ``first_seen`` des Bestands-Eintrags stillschweigend (Finding S3).
+
+    Die Kategorie kommt aus der VORHANDENEN Ableitung: dieselben drei Flags wie in
+    ``SyncDnsTrustServer`` (Gateway/oeffentlicher Resolver/Bedrohungsliste) und dieselbe
+    reine ``domain.categorize_dns_server`` -- hier wird keine zweite Ableitung erfunden.
+    Auch ``is_platform_placeholder`` laeuft ueber dieselbe reine Funktion. ``__call__`` ist
+    darum ``async`` wie im Sync: die Gateway-Naht ist ein Await.
+
+    ``display_name``: der uebergebene Name hat Vorrang; ohne ihn der best-effort Name aus
+    den Bestands-Indizien (die IP KANN ein bekanntes Geraet sein, auch wenn sie als
+    DNS-Server nie beobachtet wurde), sonst ``""``.
+    """
+
+    def __init__(
+        self,
+        repo: DnsTrustRepository,
+        gateway: GatewayProvider,
+        is_public_resolver: PublicResolverCheck,
+        is_threat_listed: ThreatCheck,
+        plausibility: PlausibilityProvider,
+    ) -> None:
+        self._repo = repo
+        self._gateway = gateway
+        self._is_public_resolver = is_public_resolver
+        self._is_threat_listed = is_threat_listed
+        self._plausibility = plausibility
+
+    async def __call__(self, ip: str, now: float, display_name: str = "") -> TrustedDnsServer:
+        # 1. Kanonisieren -- erst danach steht der Schluessel fest (s. Docstring).
+        kanonisch = canonical_dns_ip(ip)
+        if kanonisch is None:
+            raise DnsTrustInvalidIpError(ip)
+
+        # 2. Duplikat-Schutz auf der KANONISCHEN Form (kein stiller Upsert, S3).
+        if self._repo.get(kanonisch) is not None:
+            raise DnsTrustServerAlreadyExistsError(kanonisch)
+
+        # 3. Kategorie ueber die vorhandene Ableitung (identisch zu SyncDnsTrustServer).
+        gateway_ip = await self._gateway()
+        is_gateway = bool(gateway_ip) and kanonisch == gateway_ip
+        category = categorize_dns_server(
+            kanonisch,
+            is_gateway=is_gateway,
+            is_public_resolver=self._is_public_resolver(kanonisch),
+            is_threat_listed=self._is_threat_listed(kanonisch),
+        )
+
+        # 4. Name: Nutzer-Angabe vor Bestands-Fund, sonst "".
+        indizien = self._plausibility(kanonisch)
+        erkannter_name = indizien.display_name if indizien is not None else ""
+        name = display_name.strip() or erkannter_name
+
+        created = TrustedDnsServer(
+            ip=kanonisch,
+            category=category,
+            first_seen=now,
+            last_seen=now,
+            # Von Hand hinterlegt heisst: der Nutzer erwartet ihn -- direkt TRUSTED
+            # (nicht der default_trust_for-Weg des Sync, der eine Bestaetigung abwartet).
+            trust_state=DnsTrustState.TRUSTED,
+            display_name=name,
+            is_platform_placeholder=is_platform_placeholder(kanonisch),
+            origin=DnsServerOrigin.MANUAL,
         )
         self._repo.upsert(created)
         return created

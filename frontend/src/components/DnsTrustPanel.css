@@ -410,3 +410,47 @@
 .dt-collapsible__head:hover .dt-collapsible__toggle {
   color: var(--color-accent);
 }
+
+/* ── Von Hand festgelegt: Hinweis + Anlege-Formular (S63 L7d) ────────────────── */
+
+/* „noch nicht beobachtet" -- dezent und kursiv wie der „nicht im Bestand"-Hinweis:
+   beides sind ruhige Feststellungen, kein Urteil und keine Warnung. */
+.dt-hint--manual {
+  color: var(--color-text-tert);
+  font-style: italic;
+}
+
+/* Das Hinzufuegen-Formular sitzt am Ende des Von-Hand-Bereichs. Gleiche Metrik wie
+   eine Zeile (dt-row), damit es sich einfuegt statt aufzufallen. */
+.dt-addform {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 12px 14px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* Eingabefelder im Haus-Stil (Muster dm-form__input): flexibel in der Breite, damit
+   IP- und Namensfeld die Zeile teilen und auf schmalen Fenstern umbrechen. */
+.dt-addform__input {
+  flex: 1 1 160px;
+  min-width: 0;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-sizing: border-box;
+}
+
+.dt-addform__input:focus-visible {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-bg);
+}

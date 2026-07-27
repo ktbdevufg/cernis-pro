@@ -2007,6 +2007,10 @@
           "title": "Detected, not yet expected",
           "lead": "Servers this machine actually uses or has seen. Decide whether they belong to your expectation."
         },
+        "manual": {
+          "title": "Added manually",
+          "lead": "DNS servers you entered yourself. They count as expected but have not been observed here yet. As soon as such a server actually shows up, it moves up to the expected servers."
+        },
         "rejected": {
           "title": "Rejected",
           "lead": "Servers you have rejected. You can revoke the decision at any time."
@@ -2033,7 +2037,8 @@
         "rankUp": "Move up",
         "rankDown": "Move down",
         "removeExpected": "Remove from expectation",
-        "reject": "Reject"
+        "reject": "Reject",
+        "addServer": "Add"
       },
       "placeholder": {
         "badge": "non-functional (Windows default)",
@@ -2045,6 +2050,15 @@
         "toggleHide": "Hide",
         "count_one": "(1)",
         "count_other": "({{count}})"
+      },
+      "aktionFehlerBereitsErfasst": "This address is already on record.",
+      "aktionFehlerUngueltig": "That is not a valid IP address.",
+      "manual": {
+        "notObserved": "not observed yet"
+      },
+      "addForm": {
+        "ipPlaceholder": "IP address",
+        "namePlaceholder": "Name (optional)"
       }
     },
     "blocklist": {

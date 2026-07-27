@@ -2007,6 +2007,10 @@
           "title": "Erkannt, noch nicht erwartet",
           "lead": "Server, die dieser Rechner tatsächlich nutzt oder gesehen hat. Entscheiden Sie, ob sie zu Ihrer Erwartung gehören."
         },
+        "manual": {
+          "title": "Von Hand festgelegt",
+          "lead": "DNS-Server, die Sie selbst hinterlegt haben. Sie gelten als erwartet, wurden hier aber noch nicht beobachtet. Sobald ein solcher Server tatsächlich auftaucht, wandert er nach oben zu den erwarteten Servern."
+        },
         "rejected": {
           "title": "Abgelehnt",
           "lead": "Server, die Sie abgelehnt haben. Sie können die Entscheidung jederzeit zurücknehmen."
@@ -2033,7 +2037,8 @@
         "rankUp": "Nach oben",
         "rankDown": "Nach unten",
         "removeExpected": "Aus Erwartung entfernen",
-        "reject": "Ablehnen"
+        "reject": "Ablehnen",
+        "addServer": "Hinzufügen"
       },
       "placeholder": {
         "badge": "ohne Funktion (Windows-Vorgabe)",
@@ -2045,6 +2050,15 @@
         "toggleHide": "Ausblenden",
         "count_one": "(1)",
         "count_other": "({{count}})"
+      },
+      "aktionFehlerBereitsErfasst": "Diese Adresse ist bereits erfasst.",
+      "aktionFehlerUngueltig": "Das ist keine gültige IP-Adresse.",
+      "manual": {
+        "notObserved": "noch nicht beobachtet"
+      },
+      "addForm": {
+        "ipPlaceholder": "IP-Adresse",
+        "namePlaceholder": "Name (optional)"
       }
     },
     "blocklist": {

@@ -18,6 +18,7 @@ from enum import StrEnum
 
 __all__ = [
     "DnsServerCategory",
+    "DnsServerOrigin",
     "DnsTrustState",
     "TrustedDnsServer",
 ]
@@ -56,6 +57,30 @@ class DnsServerCategory(StrEnum):
     THREAT_LISTED = "threat_listed"
 
 
+class DnsServerOrigin(StrEnum):
+    """Herkunft eines erfassten DNS-Servers -- WIE er in den Bestand gekommen ist.
+
+    Rein deskriptiv (Muster ``DnsServerCategory``), KEINE Wertung: die Wertung
+    traegt ``DnsTrustState``, die Rolle ``DnsServerCategory``. Diese Achse
+    beantwortet allein die Frage, woher der Eintrag stammt.
+
+    ``OBSERVED`` ist der Regelfall und der Default: der Server wurde real
+    beobachtet (System-Resolver beim Start, Gateway, Umgehungs-Ziel eines
+    Aufzeichnungs-Ticks). ``MANUAL`` kennzeichnet einen von Hand hinterlegten
+    Server, der (noch) NIE beobachtet wurde -- der Nutzer erwartet ihn, gesehen
+    hat ihn niemand. ``MIGRATED`` stammt aus der Einmal-Uebernahme des
+    entfallenen Einstellungs-Schluessels ``dns_expected_servers`` (S62 L7a).
+
+    Sobald ein ``MANUAL``- oder ``MIGRATED``-Eintrag real beobachtet wird, wird er
+    ``OBSERVED``: die Herkunft "noch nie gesehen" trifft dann nicht mehr zu. Diesen
+    Uebergang leistet der Sync-Use-Case, nicht dieses Modul.
+    """
+
+    OBSERVED = "observed"
+    MANUAL = "manual"
+    MIGRATED = "migrated"
+
+
 @dataclass(frozen=True)
 class TrustedDnsServer:
     """Aggregat: EIN kuratierter DNS-Server samt Kategorie + Vertrauens-Zustand.
@@ -77,6 +102,11 @@ class TrustedDnsServer:
 
     ``expected_rank`` ist die nutzergesetzte erwartete Prioritaet (1..N, kleiner =
     hoeher); ``0`` = kein Rang. Reine Nutzer-Angabe, KEINE Messung.
+
+    ``origin`` haelt fest, WIE der Eintrag in den Bestand kam (beobachtet, von Hand
+    hinterlegt, aus dem Altbestand uebernommen) -- eine dritte, von ``category``
+    (Rolle) und ``trust_state`` (Wertung) unabhaengige Achse. Default ``OBSERVED``:
+    der Regelfall ist die Erfassung aus realer Beobachtung.
     """
 
     ip: str
@@ -88,6 +118,7 @@ class TrustedDnsServer:
     notes: str = ""
     is_platform_placeholder: bool = False
     expected_rank: int = 0
+    origin: DnsServerOrigin = DnsServerOrigin.OBSERVED
 
 
 def trust(server: TrustedDnsServer, now: float) -> TrustedDnsServer:

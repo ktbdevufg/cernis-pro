@@ -164,6 +164,7 @@ from api.dns_bypass import router as dns_bypass_router
 from api.dns_trust import (
     DnsServerPlausibilityOut,
     TrustedDnsServerOut,
+    provide_dns_trust_create,
     provide_dns_trust_decision,
     provide_dns_trust_list,
     provide_dns_trust_rank,
@@ -461,6 +462,7 @@ from application.dns_bypass import (
     StopDnsBypassRecording,
 )
 from application.dns_trust import (
+    AddDnsTrustServer,
     DnsServerPlausibility,
     ListDnsTrustServers,
     SetDnsServerRank,
@@ -5087,8 +5089,19 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     # linter pruefen sie mit) und die api-Runner sie ohne Doppel-Instanziierung abgreifen.
     _list_dns_trust_servers = ListDnsTrustServers(dns_trust_repository(), _dns_trust_plausibility)
     _set_dns_server_trust = SetDnsServerTrust(dns_trust_repository())
+    # Anlege-Use-Case (S63 L7d): DIESELBEN vier Nahtstellen wie _make_sync_dns_trust_server --
+    # die Kategorie-Ableitung eines von Hand hinterlegten Servers ist exakt die des
+    # beobachteten (keine zweite Ableitung).
+    _add_dns_trust_server = AddDnsTrustServer(
+        repo=dns_trust_repository(),
+        gateway=_topology_gateway,
+        is_public_resolver=_dns_trust_is_public_resolver,
+        is_threat_listed=_dns_trust_is_threat_listed,
+        plausibility=_dns_trust_plausibility,
+    )
     app.state.list_dns_trust_servers = _list_dns_trust_servers
     app.state.set_dns_server_trust = _set_dns_server_trust
+    app.state.add_dns_trust_server = _add_dns_trust_server
     app.state.trusted_dns_server_ips = TrustedDnsServerIps(dns_trust_repository())
 
     # ── dns_trust-api verdrahten (ADR 0043, E5; Regel 4/5: Projektion + Naht nur hier) ──
@@ -5108,6 +5121,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 notes=server.notes,
                 is_platform_placeholder=server.is_platform_placeholder,
                 expected_rank=server.expected_rank,
+                origin=server.origin,
                 plausibility=(
                     None
                     if indizien is None
@@ -5142,10 +5156,20 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
         _set_dns_server_rank(ip, rank, time.time())
 
+    async def _dns_trust_create(ip: str, name: str) -> None:
+        # Anlege-Runner (Muster _dns_trust_decision): now am Rand, Use-Case uhrfrei.
+        # ASYNC, weil AddDnsTrustServer die Gateway-Naht awaitet (wie SyncDnsTrustServer).
+        # Eine bereits erfasste bzw. unbrauchbare Adresse wirft im Use-Case
+        # (409 bzw. 422 am Router); hier NICHT fangen (S3).
+        import time
+
+        await _add_dns_trust_server(ip, time.time(), name)
+
     app.include_router(dns_trust_router)
     app.dependency_overrides[provide_dns_trust_list] = lambda: _dns_trust_list
     app.dependency_overrides[provide_dns_trust_decision] = lambda: _dns_trust_decision
     app.dependency_overrides[provide_dns_trust_rank] = lambda: _dns_trust_rank
+    app.dependency_overrides[provide_dns_trust_create] = lambda: _dns_trust_create
 
     # ── Sicherheitsbericht: Fuenf-Quellen-Projektion (Etappe 2b, Regel 5/Composition Root) ──
     # DIESE Naht KENNT alle fuenf Quell-Domaenen (analysis/cve/security/dns_watch/diagnostics)

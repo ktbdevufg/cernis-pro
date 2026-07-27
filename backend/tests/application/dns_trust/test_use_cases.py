@@ -21,9 +21,16 @@ bestehenden application-Tests: kein echtes SQLite/Netz). Kern der Behauptungen:
     host-lokale Waechter bezieht sie hier); die eigentliche Drei-Zustands-Klassifikation
     testet ``domain.dns_trust.bypass_verdict`` bzw. der Recorder-Tick (ADR 0043, E4).
 (6) ``ListDnsTrustServers`` stellt je Server die Plausibilitaet bei (bzw. ``None``).
+(7) ``AddDnsTrustServer`` (S63 L7d) legt einen NIE beobachteten Server von Hand an --
+    direkt ``TRUSTED`` mit Herkunft ``MANUAL``, die Adresse zuvor kanonisiert. Ein
+    Duplikat wirft (kein stiller Upsert ueber die kuratierte Entscheidung), eine
+    unbrauchbare Adresse ebenfalls (das Schluesselfeld bleibt sauber).
+(8) Der Sync-Update-Zweig hebt ``origin`` auf ``OBSERVED``: wird ein von Hand
+    hinterlegter Server real beobachtet, ist er kein Von-Hand-Eintrag mehr.
 
-Der einzige async Use-Case (``SyncDnsTrustServer``, wegen ``GatewayProvider``) wird ueber
-``asyncio.run`` getrieben (Hausmuster der application-Tests).
+Die async Use-Cases (``SyncDnsTrustServer`` und ``AddDnsTrustServer``, beide wegen des
+``GatewayProvider``) werden ueber ``asyncio.run`` getrieben (Hausmuster der
+application-Tests).
 """
 
 import asyncio
@@ -32,7 +39,10 @@ from dataclasses import replace
 import pytest
 
 from application.dns_trust import (
+    AddDnsTrustServer,
     DnsServerPlausibility,
+    DnsTrustInvalidIpError,
+    DnsTrustServerAlreadyExistsError,
     DnsTrustServerNotConfirmedError,
     DnsTrustServerNotFoundError,
     ListDnsTrustServers,
@@ -43,6 +53,7 @@ from application.dns_trust import (
 )
 from domain.dns_trust import (
     DnsServerCategory,
+    DnsServerOrigin,
     DnsTrustState,
     TrustedDnsServer,
 )
@@ -72,16 +83,10 @@ class FakeRepo:
         existing = self._store.get(ip)
         if existing is None:
             return  # definierter No-Op (unbekannte ip)
-        self._store[ip] = TrustedDnsServer(
-            ip=existing.ip,
-            category=existing.category,
-            first_seen=existing.first_seen,
-            last_seen=now,
-            trust_state=state,
-            display_name=existing.display_name,
-            notes=existing.notes,
-            expected_rank=existing.expected_rank,
-        )
+        # Wie das echte Repo: NUR trust_state + last_seen anfassen, alle uebrigen Felder
+        # (inkl. is_platform_placeholder und origin) bleiben unberuehrt -- ``replace``
+        # haelt das automatisch durch, auch wenn das Aggregat weitere Felder bekommt.
+        self._store[ip] = replace(existing, trust_state=state, last_seen=now)
 
     def set_rank(self, ip: str, rank: int, now: float) -> None:
         existing = self._store.get(ip)
@@ -123,6 +128,27 @@ def _sync(
         return gateway
 
     return SyncDnsTrustServer(
+        repo=repo,
+        gateway=gateway_provider,
+        is_public_resolver=lambda ip: public,
+        is_threat_listed=lambda ip: threat,
+        plausibility=_plausibility,
+    )
+
+
+def _add(
+    repo: FakeRepo,
+    *,
+    gateway: str | None = "192.168.1.1",
+    public: bool = False,
+    threat: bool = False,
+) -> AddDnsTrustServer:
+    # Dieselben vier Nahtstellen wie ``_sync`` -- die Kategorie-Ableitung eines von Hand
+    # hinterlegten Servers ist exakt die des beobachteten (keine zweite Ableitung).
+    async def gateway_provider() -> str | None:
+        return gateway
+
+    return AddDnsTrustServer(
         repo=repo,
         gateway=gateway_provider,
         is_public_resolver=lambda ip: public,
@@ -614,3 +640,154 @@ def test_rank_auf_rangierten_aber_nicht_trusted_server_bleibt_erlaubt() -> None:
     repo = FakeRepo([_neutral("10.0.0.9", 1.0, rank=1), _trusted("10.0.0.2", 2.0, rank=2)])
     SetDnsServerRank(repo)("10.0.0.9", 2, now=99.0)  # kein Wurf
     assert _rank_map(repo) == {"10.0.0.2": 1, "10.0.0.9": 2}
+
+
+# ── AddDnsTrustServer: Anlegen von Hand (S63 L7d) ─────────────────────────────
+
+
+def test_add_legt_manuellen_server_trusted_an() -> None:
+    """Von Hand hinterlegt: direkt TRUSTED, Herkunft MANUAL, first_seen == last_seen == now.
+
+    Der Nutzer erklaert "diesen Server erwarte ich", bevor ihn ein Waechter gesehen hat --
+    darum NICHT der ``default_trust_for``-Weg des Sync (der eine Bestaetigung abwartet).
+    """
+    repo = FakeRepo()
+    server = asyncio.run(_add(repo)("192.168.5.5", now=1000.0))
+
+    assert server.trust_state is DnsTrustState.TRUSTED
+    assert server.origin is DnsServerOrigin.MANUAL
+    assert server.first_seen == server.last_seen == 1000.0
+    assert server.expected_rank == 0
+    # Und er liegt wirklich im Bestand (nicht nur zurueckgegeben).
+    assert repo.get("192.168.5.5") == server
+
+
+def test_add_leitet_kategorie_ueber_dieselben_flags_ab() -> None:
+    """Die Kategorie kommt aus der VORHANDENEN Ableitung -- keine zweite Logik.
+
+    Gegenprobe ueber drei Flag-Lagen: privat ohne Treffer -> LOCAL_PRIVATE, als Gateway
+    gemeldet -> GATEWAY, als oeffentlicher Resolver gemeldet -> PUBLIC_RESOLVER.
+    """
+    privat = asyncio.run(_add(FakeRepo())("192.168.5.5", now=1.0))
+    assert privat.category is DnsServerCategory.LOCAL_PRIVATE
+
+    gateway = asyncio.run(_add(FakeRepo(), gateway="192.168.1.1")("192.168.1.1", now=1.0))
+    assert gateway.category is DnsServerCategory.GATEWAY
+
+    oeffentlich = asyncio.run(_add(FakeRepo(), public=True)("9.9.9.9", now=1.0))
+    assert oeffentlich.category is DnsServerCategory.PUBLIC_RESOLVER
+
+
+def test_add_uebernimmt_den_uebergebenen_namen() -> None:
+    """Der mitgeschickte Name hat Vorrang -- auch vor einem Bestands-Treffer."""
+    repo = FakeRepo()
+    server = asyncio.run(_add(repo)("192.168.5.5", now=1.0, display_name="Mein Resolver"))
+    assert server.display_name == "Mein Resolver"
+
+
+def test_add_faellt_ohne_namen_auf_den_bestand_zurueck() -> None:
+    """Ohne Namen greift der best-effort Bestands-Name (die IP KANN ein Geraet sein)."""
+    repo = FakeRepo()
+    server = asyncio.run(_add(repo)("192.168.1.50", now=1.0))
+    assert server.display_name == "Pi-hole"
+
+
+def test_add_ohne_namen_und_ohne_bestand_bleibt_leer() -> None:
+    """Kein Name, kein Bestands-Treffer -> "" (nichts erfinden, S3)."""
+    repo = FakeRepo()
+    server = asyncio.run(_add(repo)("192.168.5.5", now=1.0))
+    assert server.display_name == ""
+
+
+def test_add_auf_bereits_erfasste_ip_wirft() -> None:
+    """Duplikat -> Fehler, KEIN stiller Upsert (S3).
+
+    Der bestehende Eintrag bleibt unangetastet: ein ``upsert`` haette seinen kuratierten
+    ``trust_state`` und sein ``first_seen`` ueberschrieben.
+    """
+    repo = FakeRepo([_neutral("10.0.0.1", 5.0)])
+    with pytest.raises(DnsTrustServerAlreadyExistsError):
+        asyncio.run(_add(repo)("10.0.0.1", now=1000.0))
+
+    unveraendert = repo.get("10.0.0.1")
+    assert unveraendert is not None
+    assert unveraendert.trust_state is DnsTrustState.NEUTRAL
+    assert unveraendert.first_seen == 5.0
+
+
+@pytest.mark.parametrize("kaputt", ["", "   ", "nicht-ip", "1:2", "999.999.999.999", "::::"])
+def test_add_mit_unbrauchbarer_ip_wirft_und_schreibt_nichts(kaputt: str) -> None:
+    """Unbrauchbare Adresse -> Fehler; das Schluesselfeld bleibt sauber (keine tote Zeile)."""
+    repo = FakeRepo()
+    with pytest.raises(DnsTrustInvalidIpError):
+        asyncio.run(_add(repo)(kaputt, now=1.0))
+    assert repo.list_all() == []
+
+
+def test_add_kanonisiert_vor_duplikat_pruefung_und_anlage() -> None:
+    """Die KANONISCHE Form ist der Schluessel -- sonst belegte dieselbe Adresse zwei Zeilen.
+
+    ``::0001`` und ``::1`` sind dieselbe Adresse: die erste Anlage landet unter ``::1``,
+    die zweite (abweichend geschriebene) trifft darum den Duplikat-Schutz.
+    """
+    repo = FakeRepo()
+    server = asyncio.run(_add(repo)("::0001", now=1.0))
+    assert server.ip == "::1"
+    assert repo.get("::1") is not None
+
+    with pytest.raises(DnsTrustServerAlreadyExistsError):
+        asyncio.run(_add(repo)("::0001", now=2.0))
+    assert len(repo.list_all()) == 1
+
+
+def test_add_kennzeichnet_plattform_platzhalter() -> None:
+    """``is_platform_placeholder`` laeuft ueber dieselbe reine Funktion wie im Sync."""
+    repo = FakeRepo()
+    server = asyncio.run(_add(repo)("fec0:0:0:ffff::1", now=1.0))
+    assert server.is_platform_placeholder is True
+
+
+# ── origin-Uebergang: beobachtet schlaegt von Hand (S63 L7d) ──────────────────
+
+
+def test_sync_hebt_manuellen_server_auf_observed() -> None:
+    """Wird ein von Hand hinterlegter Server real beobachtet, ist er nicht mehr MANUAL.
+
+    Die Herkunft "noch nie beobachtet" trifft dann nicht mehr zu -- der Eintrag verlaesst
+    den Von-Hand-Bereich der Oberflaeche. Der kuratierte ``trust_state`` bleibt erhalten.
+    """
+    repo = FakeRepo()
+    asyncio.run(_add(repo)("192.168.5.5", now=1000.0))
+
+    aktualisiert = asyncio.run(_sync(repo)("192.168.5.5", now=2000.0))
+
+    assert aktualisiert.origin is DnsServerOrigin.OBSERVED
+    # trust_state und first_seen bleiben unberuehrt (Bestandsverhalten).
+    assert aktualisiert.trust_state is DnsTrustState.TRUSTED
+    assert aktualisiert.first_seen == 1000.0
+    assert aktualisiert.last_seen == 2000.0
+
+
+def test_sync_hebt_migrierten_server_auf_observed() -> None:
+    """Gleiche Logik fuer den Altbestand: real gesehen = observed."""
+    repo = FakeRepo(
+        [
+            TrustedDnsServer(
+                ip="10.0.0.5",
+                category=DnsServerCategory.LOCAL_PRIVATE,
+                first_seen=1.0,
+                last_seen=1.0,
+                trust_state=DnsTrustState.TRUSTED,
+                origin=DnsServerOrigin.MIGRATED,
+            )
+        ]
+    )
+    aktualisiert = asyncio.run(_sync(repo)("10.0.0.5", now=2000.0))
+    assert aktualisiert.origin is DnsServerOrigin.OBSERVED
+
+
+def test_sync_neuanlage_ist_observed() -> None:
+    """Der Sync legt weiterhin als OBSERVED an (Default, kein manuelles Setzen)."""
+    repo = FakeRepo()
+    server = asyncio.run(_sync(repo)("192.168.1.77", now=1.0))
+    assert server.origin is DnsServerOrigin.OBSERVED

@@ -12,6 +12,11 @@ etwas zu quittieren, das nicht geschieht: eine ``ip`` ohne erfassten Server -> 4
 (Muster ``api/devices.py``), ein ``rank > 0`` fuer einen weder bestaetigten noch bereits
 rangierten Server -> 409 (Muster ``api/outbound_log.py``). Die gueltigen Wege sind
 unveraendert und werden hier weiter mitgeprueft.
+
+Seit S63 L7d kommt ``POST /api/dns-trust`` dazu: ein noch nie beobachteter Server laesst
+sich von Hand hinterlegen (direkt vertraut, Herkunft ``manual``). Auch dieser Weg laeuft
+im Test ueber den ECHTEN Use-Case gegen ein tmp-DB-Repo -- inkl. Kanonisierung der
+Adresse, Duplikat-Schutz (409, kein stiller Upsert) und unbrauchbarer Eingabe (422).
 """
 
 from collections.abc import Iterator
@@ -24,14 +29,16 @@ from fastapi.testclient import TestClient
 from api.dns_trust import (
     DnsServerPlausibilityOut,
     TrustedDnsServerOut,
+    provide_dns_trust_create,
     provide_dns_trust_decision,
     provide_dns_trust_list,
     provide_dns_trust_rank,
 )
 from app import create_app
-from application.dns_trust import SetDnsServerRank, SetDnsServerTrust
+from application.dns_trust import AddDnsTrustServer, SetDnsServerRank, SetDnsServerTrust
 from domain.dns_trust import (
     DnsServerCategory,
+    DnsServerOrigin,
     DnsTrustState,
     TrustedDnsServer,
 )
@@ -77,6 +84,7 @@ def test_get_dns_trust_liefert_200_und_json_form(app: FastAPI) -> None:
             notes="",
             is_platform_placeholder=False,
             expected_rank=1,
+            origin="observed",
             plausibility=DnsServerPlausibilityOut(
                 in_inventory=True,
                 first_seen_days=12,
@@ -95,6 +103,7 @@ def test_get_dns_trust_liefert_200_und_json_form(app: FastAPI) -> None:
             notes="",
             is_platform_placeholder=True,
             expected_rank=0,
+            origin="manual",
             plausibility=None,
         ),
     ]
@@ -117,6 +126,7 @@ def test_get_dns_trust_liefert_200_und_json_form(app: FastAPI) -> None:
             "notes": "",
             "is_platform_placeholder": False,
             "expected_rank": 1,
+            "origin": "observed",
             "plausibility": {
                 "in_inventory": True,
                 "first_seen_days": 12,
@@ -135,6 +145,7 @@ def test_get_dns_trust_liefert_200_und_json_form(app: FastAPI) -> None:
             "notes": "",
             "is_platform_placeholder": True,
             "expected_rank": 0,
+            "origin": "manual",
             "plausibility": None,
         },
     ]
@@ -336,3 +347,127 @@ def test_rank_null_auf_nicht_bestaetigten_server_bleibt_200(
     stored = repo.get(IP_NEUTRAL)
     assert stored is not None
     assert stored.expected_rank == 0
+
+
+# ── POST "": Anlege-Weg von Hand (S63 L7d) ────────────────────────────────────
+
+
+@pytest.fixture
+def create_context(app: FastAPI, tmp_path: Path) -> tuple[FastAPI, SqliteDnsTrustRepository]:
+    """Anlege-Runner wie im Composition Root, gegen echtes tmp-DB-Repo.
+
+    Bewusst der ECHTE Use-Case mit fester ``now`` (Muster ``decision_context``): nur so
+    laeuft der Test ueber dieselbe Naht wie app.py -- inkl. Kanonisierung, Duplikat-Schutz
+    und der beiden Fehlerwuerfe. Die vier Nahtstellen sind hier feste Doubles (kein
+    Gateway, kein oeffentlicher Resolver, keine Bedrohungsliste, kein Bestands-Treffer).
+    """
+    repo = SqliteDnsTrustRepository(tmp_path / "cernis.db")
+    # EIN bereits erfasster Server, an dem der Duplikat-Schutz sichtbar wird.
+    repo.upsert(
+        TrustedDnsServer(
+            ip=IP,
+            category=DnsServerCategory.LOCAL_PRIVATE,
+            first_seen=100.0,
+            last_seen=100.0,
+            trust_state=DnsTrustState.NEUTRAL,
+        )
+    )
+
+    async def _kein_gateway() -> str | None:
+        return None
+
+    add_use_case = AddDnsTrustServer(
+        repo=repo,
+        gateway=_kein_gateway,
+        is_public_resolver=lambda _ip: False,
+        is_threat_listed=lambda _ip: False,
+        plausibility=lambda _ip: None,
+    )
+
+    async def _runner(ip: str, name: str) -> None:
+        await add_use_case(ip, 999.0, name)
+
+    app.dependency_overrides[provide_dns_trust_create] = lambda: _runner
+    return app, repo
+
+
+def test_create_legt_manuellen_server_an(
+    create_context: tuple[FastAPI, SqliteDnsTrustRepository],
+) -> None:
+    """S63 L7d: ein nie beobachteter Server laesst sich von Hand hinterlegen -> 200.
+
+    Er entsteht direkt als ``trusted`` mit Herkunft ``manual`` -- der Nutzer erwartet ihn,
+    gesehen hat ihn niemand. Der mitgeschickte Name wird als ``display_name`` uebernommen.
+    """
+    application, repo = create_context
+    client = TestClient(application)
+    resp = client.post("/api/dns-trust", json={"ip": "192.168.5.5", "name": "Pi-hole"})
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True}
+    stored = repo.get("192.168.5.5")
+    assert stored is not None
+    assert stored.trust_state is DnsTrustState.TRUSTED
+    assert stored.origin is DnsServerOrigin.MANUAL
+    assert stored.display_name == "Pi-hole"
+    assert stored.first_seen == stored.last_seen == 999.0
+
+
+def test_create_ohne_namen_ist_erlaubt(
+    create_context: tuple[FastAPI, SqliteDnsTrustRepository],
+) -> None:
+    """Der Name ist optional (Body-Default ``""``) -> ohne Bestands-Treffer bleibt er leer."""
+    application, repo = create_context
+    client = TestClient(application)
+    resp = client.post("/api/dns-trust", json={"ip": "192.168.5.6"})
+    assert resp.status_code == 200
+    stored = repo.get("192.168.5.6")
+    assert stored is not None
+    assert stored.display_name == ""
+
+
+def test_create_auf_bereits_erfasste_ip_ist_409(
+    create_context: tuple[FastAPI, SqliteDnsTrustRepository],
+) -> None:
+    """Duplikat -> 409, KEIN stiller Upsert (S3).
+
+    Der bestehende Eintrag bleibt vollstaendig unangetastet: ein ``upsert`` haette seinen
+    kuratierten ``trust_state`` (hier NEUTRAL) auf TRUSTED gehoben und ``first_seen``
+    ueberschrieben -- genau die Nutzer-Entscheidung, die das Modell traegt.
+    """
+    application, repo = create_context
+    client = TestClient(application)
+    resp = client.post("/api/dns-trust", json={"ip": IP, "name": "Zweitname"})
+    assert resp.status_code == 409
+    assert "(E-506)" in resp.json()["detail"]
+    stored = repo.get(IP)
+    assert stored is not None
+    assert stored.trust_state is DnsTrustState.NEUTRAL
+    assert stored.first_seen == 100.0
+    assert stored.display_name == ""
+
+
+@pytest.mark.parametrize("kaputt", ["", "   ", "nicht-ip", "1:2", "999.999.999.999"])
+def test_create_mit_unbrauchbarer_ip_ist_422(
+    create_context: tuple[FastAPI, SqliteDnsTrustRepository],
+    kaputt: str,
+) -> None:
+    """Unbrauchbare Adresse -> 422, nichts geschrieben (das Schluesselfeld bleibt sauber)."""
+    application, repo = create_context
+    client = TestClient(application)
+    resp = client.post("/api/dns-trust", json={"ip": kaputt, "name": ""})
+    assert resp.status_code == 422
+    assert repo.list_all() == [repo.get(IP)]
+
+
+def test_create_kanonisiert_die_adresse(
+    create_context: tuple[FastAPI, SqliteDnsTrustRepository],
+) -> None:
+    """Die kanonische Form ist der Schluessel: ``::0001`` landet als ``::1`` im Bestand."""
+    application, repo = create_context
+    client = TestClient(application)
+    resp = client.post("/api/dns-trust", json={"ip": "::0001", "name": ""})
+    assert resp.status_code == 200
+    assert repo.get("::1") is not None
+    # Und die abweichende Schreibweise trifft danach den Duplikat-Schutz.
+    zweite = client.post("/api/dns-trust", json={"ip": "::0001", "name": ""})
+    assert zweite.status_code == 409

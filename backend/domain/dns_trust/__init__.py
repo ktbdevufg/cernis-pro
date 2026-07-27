@@ -14,6 +14,7 @@ nur stdlib (``ipaddress``/``dataclasses``/``enum``).
 from domain.dns_trust.logic import (
     BypassVerdict,
     bypass_verdict,
+    canonical_dns_ip,
     categorize_dns_server,
     default_trust_for,
     is_platform_placeholder,
@@ -21,6 +22,7 @@ from domain.dns_trust.logic import (
 )
 from domain.dns_trust.models import (
     DnsServerCategory,
+    DnsServerOrigin,
     DnsTrustState,
     TrustedDnsServer,
     reject,
@@ -31,9 +33,11 @@ from domain.dns_trust.models import (
 __all__ = [
     "BypassVerdict",
     "DnsServerCategory",
+    "DnsServerOrigin",
     "DnsTrustState",
     "TrustedDnsServer",
     "bypass_verdict",
+    "canonical_dns_ip",
     "categorize_dns_server",
     "default_trust_for",
     "is_platform_placeholder",

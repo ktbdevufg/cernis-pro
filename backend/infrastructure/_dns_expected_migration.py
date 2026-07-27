@@ -183,13 +183,18 @@ def migrate_expected_servers_to_trust(
             kept.append(ip)
             continue
 
+        # origin='migrated' (S63 L7d): diese Zeilen stammen WEDER aus realer Beobachtung
+        # noch aus einer Von-Hand-Eingabe, sondern aus dem uebernommenen Altbestand. Ohne
+        # die Angabe griffe der Spalten-Default 'observed' und behauptete eine Beobachtung,
+        # die nie stattgefunden hat. Sobald der Server real gesehen wird, hebt
+        # SyncDnsTrustServer die Herkunft auf 'observed'.
         conn.execute(
             """
             INSERT INTO dns_trust_servers (
                 ip, category, trust_state, first_seen,
                 last_seen, display_name, notes, is_platform_placeholder,
-                expected_rank
-            ) VALUES (?, ?, 'trusted', ?, ?, '', '', 0, 0)
+                expected_rank, origin
+            ) VALUES (?, ?, 'trusted', ?, ?, '', '', 0, 0, 'migrated')
             """,
             (ip, categorize(ip), now, now),
         )

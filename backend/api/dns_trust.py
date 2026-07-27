@@ -28,6 +28,10 @@ Endpunkte:
   Kategorie + Vertrauens-Zustand + best-effort Bestands-Indizien (Plausibilitaet). Die
   Reihenfolge ist die des Use-Case/Repos: nach ``first_seen`` AUFSTEIGEND -- deterministisch
   (aeltester zuerst), ohne Re-Sortierung im Router.
+* ``POST /api/dns-trust`` -> hinterlegt EINEN Server VON HAND (``AddDnsTrustServer``), auch
+  wenn er nie beobachtet wurde: direkt vertraut, Herkunft "manual". ``{"ok": true}``. Eine
+  bereits erfasste Adresse -> 409 (kein stiller Upsert ueber die kuratierte Entscheidung),
+  eine unbrauchbare Adresse -> 422.
 * ``POST /api/dns-trust/decision`` -> vertraut/lehnt ab/setzt zurueck EINEN Server pro ``ip``
   ueber den injizierten Schreib-Runner (``SetDnsServerTrust``). ``{"ok": true}``. KEIN Loeschen
   hier (Loeschen kommt spaeter in der Wartungsrubrik). Eine ``ip``, zu der kein Server
@@ -41,13 +45,15 @@ Die ``now``-Uhr faellt NICHT im Router, sondern am Rand (Composition Root / Runn
 der Router reicht nur ``ip`` + ``decision`` durch.
 """
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Annotated, Literal, Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from application.dns_trust import (
+    DnsTrustInvalidIpError,
+    DnsTrustServerAlreadyExistsError,
     DnsTrustServerNotConfirmedError,
     DnsTrustServerNotFoundError,
 )
@@ -99,6 +105,9 @@ class TrustedDnsServerOut(BaseModel):
     is_platform_placeholder: bool
     # Nutzergesetzte erwartete Prioritaet (1..N, kleiner = hoeher); 0 = kein Rang.
     expected_rank: int
+    # Herkunft des Eintrags ("observed"/"manual"/"migrated") -- dritte Achse neben Rolle
+    # (category) und Wertung (trust_state). Die Ansicht trennt daran den Von-Hand-Bereich.
+    origin: str
     plausibility: DnsServerPlausibilityOut | None
 
 
@@ -142,6 +151,31 @@ def provide_dns_trust_rank() -> DnsTrustRankRunner:
     raise NotImplementedError("DnsTrustRankRunner wird in app.py verdrahtet")
 
 
+# Anlege-Runner: hinterlegt EINEN von Hand angegebenen Server (ip, name) -> None. Muster
+# des Decision-/Rank-Runners; im Composition Root verdrahtet (now-Uhr dort). Der Use-Case
+# dahinter ist async (Gateway-Naht), der Root-Runner awaited ihn -- der Vertrag bleibt
+# hier darum ein Awaitable-Callable.
+type DnsTrustCreateRunner = Callable[[str, str], Awaitable[None]]
+
+
+def provide_dns_trust_create() -> DnsTrustCreateRunner:
+    raise NotImplementedError("DnsTrustCreateRunner wird in app.py verdrahtet")
+
+
+class CreateDnsServerBody(BaseModel):
+    """POST /api/dns-trust -- EINEN DNS-Server von Hand hinterlegen.
+
+    ``ip`` ist die erwartete Adresse, ``name`` ein optionaler Anzeigename (leer -> der
+    best-effort Name aus dem Geraete-Bestand bzw. ``""``). Die fachliche Pruefung der
+    ``ip`` faellt NICHT hier: sie ist eine Domaenen-Frage (kanonische Form als
+    Primaerschluessel) und wohnt im Use-Case -- der Router bleibt datentyp-frei (Regel 4)
+    und mappt nur den Fehler (unbrauchbare Adresse -> 422).
+    """
+
+    ip: str
+    name: str = ""
+
+
 class RankBody(BaseModel):
     """POST /api/dns-trust/rank -- die erwartete Prioritaet EINER ``ip`` setzen.
 
@@ -177,6 +211,42 @@ def get_dns_trust_servers(
     Reihenfolge: nach ``first_seen`` aufsteigend (Use-Case/Repo-Ordnung, deterministisch).
     """
     return runner()
+
+
+@router.post("")
+async def create_dns_trust_server(
+    body: CreateDnsServerBody,
+    record: Annotated[DnsTrustCreateRunner, Depends(provide_dns_trust_create)],
+) -> dict[str, bool]:
+    """Hinterlegt EINEN DNS-Server von Hand (ueber den Root-Runner) -- auch nie beobachtet.
+
+    Der Weg fuer einen Server, den der Nutzer erwartet, bevor ihn ein Waechter gesehen hat:
+    er wird direkt als vertraut und mit der Herkunft "von Hand" angelegt. Eine bereits
+    erfasste Adresse -> 409 (kein stiller Upsert, der die kuratierte Entscheidung
+    ueberschriebe); eine unbrauchbare Adresse -> 422. Erfolg -> 200 ``{"ok": true}``.
+
+    ``async``, weil der Anlege-Use-Case die Gateway-Naht awaitet (Muster
+    ``SyncDnsTrustServer``); die ``now``-Uhr faellt im Root-Runner, nicht hier.
+    """
+    try:
+        await record(body.ip, body.name)
+    except DnsTrustServerAlreadyExistsError as exc:
+        # E-506 ("Die Eingabe ist ungueltig") -- das Schema ist geschlossen (E-501..E-506,
+        # frontend/src/lib/fehlercodes.js + i18n + Hilfe-Text); ein neuer Code waere eine
+        # Schema-Erweiterung ausserhalb dieses Auftrags. Praezedenz: api/devices.py mappt
+        # "Geraet existiert bereits" (409) und "Ungueltige MAC" (422) auf DENSELBEN Code.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Diese Adresse ist bereits erfasst. (E-506)",
+        ) from exc
+    except DnsTrustInvalidIpError as exc:
+        # 422 als nackte Zahl (Muster api/devices.py): die Starlette-Konstante
+        # HTTP_422_UNPROCESSABLE_ENTITY ist deprecated und warnt bei jedem Aufruf.
+        raise HTTPException(
+            status_code=422,
+            detail="Das ist keine gueltige IP-Adresse. (E-506)",
+        ) from exc
+    return {"ok": True}
 
 
 @router.post("/decision")

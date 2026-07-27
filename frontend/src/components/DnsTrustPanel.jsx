@@ -1,11 +1,16 @@
 // DNS-Vertrauens-Panel (CERNIS PRO 2.0, E6 + D4 E4, Variante H)
 //
 // Die Funktion hinter der Verwaltungs-Kachel „DNS-Server & Vertrauen" (ADR 0043):
-// DREI Bereiche statt Kategorie-Gruppen:
-//   1. „Erwartet — geordnet":  alle trusted-Server, sortiert nach expectedRank
-//      (0 = unrangiert ans Ende), mit Rang-Badge + Hoch/Runter/Entfernen.
+// VIER Bereiche statt Kategorie-Gruppen:
+//   1. „Erwartet — geordnet":  alle trusted-Server, die BEOBACHTET wurden, sortiert
+//      nach expectedRank (0 = unrangiert ans Ende), mit Rang-Badge + Hoch/Runter/
+//      Entfernen.
 //   2. „Erkannt, noch nicht erwartet": alle neutral-Server, mit „Als erwartet".
-//   3. „Abgelehnt": alle rejected-Server, eingeklappt (nur wenn vorhanden).
+//   3. „Von Hand festgelegt" (S63 L7d): alle Server mit origin === "manual" -- vom
+//      Nutzer hinterlegt, aber noch nie beobachtet. Sie sind trusted und werden
+//      darum aus Bereich 1 ausgenommen (sonst erschienen sie doppelt). Am Ende des
+//      Bereichs steht das Hinzufuegen-Formular.
+//   4. „Abgelehnt": alle rejected-Server, eingeklappt (nur wenn vorhanden).
 // Als Entscheidungshilfe zeigt jede Zeile deskriptive Plausibilitaets-Indizien
 // (Bestand, Hersteller, offene Ports); ein Bedrohungslisten-Treffer macht das
 // Erwarten zur warnenden Aktion. Reines Frontend gegen api/dnsTrust.js.
@@ -24,6 +29,7 @@ import { useTranslation } from "react-i18next";
 
 import { ApiError } from "../api/client.js";
 import {
+  createDnsTrustServer,
   fetchDnsTrustServers,
   setDnsTrustDecision,
   setDnsTrustRank,
@@ -43,6 +49,20 @@ function aktionsFehlerSchluessel(ursache) {
   }
   if (ursache instanceof ApiError && ursache.status === 409) {
     return "aktionFehlerNichtBestaetigt";
+  }
+  return "aktionFehler";
+}
+
+// Eigener Mapper fuer den ANLEGE-Weg (S63 L7d): dort bedeutet 409 etwas anderes als
+// bei Entscheidung/Rang (nicht „Server nicht bestaetigt", sondern „Adresse bereits
+// erfasst"), und 422 ist die unbrauchbare Eingabe. Darum ein zweiter Mapper statt
+// einer Erweiterung des ersten -- derselbe Status, andere Aussage.
+function anlegeFehlerSchluessel(ursache) {
+  if (ursache instanceof ApiError && ursache.status === 409) {
+    return "aktionFehlerBereitsErfasst";
+  }
+  if (ursache instanceof ApiError && ursache.status === 422) {
+    return "aktionFehlerUngueltig";
   }
   return "aktionFehler";
 }
@@ -226,6 +246,86 @@ function ErkanntZeile({ server, busy, onEntscheidung }) {
   );
 }
 
+// Bereich „Von Hand festgelegt": eine Zeile fuer einen manuell hinterlegten Server
+// (origin === "manual"). Er ist trusted, wurde aber noch NIE beobachtet -- das sagt
+// der dezente Hinweis. Die Entfernen-Aktion ist bewusst „reset" (der Server bleibt
+// erfasst, verlaesst aber die Erwartung); einen Loesch-Endpunkt gibt es nicht.
+function VonHandZeile({ server, busy, onEntscheidung }) {
+  const { t } = useTranslation();
+
+  return (
+    <div className="dt-row">
+      <ZeilenIdent server={server} />
+      <span className="dt-hint dt-hint--manual">
+        {t("verwaltung.dnsTrust.manual.notObserved")}
+      </span>
+      <div className="dt-row__actions">
+        <button
+          type="button"
+          className="dt-rank-btn dt-rank-btn--remove"
+          onClick={() => onEntscheidung(server.ip, "reset")}
+          disabled={busy}
+          aria-label={t("verwaltung.dnsTrust.actions.removeExpected")}
+          title={t("verwaltung.dnsTrust.actions.removeExpected")}
+        >
+          <X size={15} aria-hidden="true" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Das Hinzufuegen-Formular am Ende des Von-Hand-Bereichs: IP (Pflicht) + Name
+// (optional). Der Absende-Knopf bleibt gesperrt, solange kein IP-Text da ist oder
+// der Aufruf laeuft. Die fachliche Pruefung der Adresse macht das Backend (422) --
+// hier wird NICHT lokal geraten, was eine gueltige IP ist.
+function HinzufuegenFormular({ busy, onAnlegen }) {
+  const { t } = useTranslation();
+  const [ip, setIp] = useState("");
+  const [name, setName] = useState("");
+
+  const absenden = async (ereignis) => {
+    ereignis.preventDefault();
+    const erfolg = await onAnlegen(ip.trim(), name.trim());
+    // Nur bei Erfolg leeren -- sonst bliebe die Eingabe des Nutzers verloren,
+    // waehrend er die Fehlermeldung liest.
+    if (erfolg) {
+      setIp("");
+      setName("");
+    }
+  };
+
+  return (
+    <form className="dt-addform" onSubmit={absenden}>
+      <input
+        type="text"
+        className="dt-addform__input"
+        value={ip}
+        onChange={(ereignis) => setIp(ereignis.target.value)}
+        placeholder={t("verwaltung.dnsTrust.addForm.ipPlaceholder")}
+        aria-label={t("verwaltung.dnsTrust.addForm.ipPlaceholder")}
+        disabled={busy}
+      />
+      <input
+        type="text"
+        className="dt-addform__input"
+        value={name}
+        onChange={(ereignis) => setName(ereignis.target.value)}
+        placeholder={t("verwaltung.dnsTrust.addForm.namePlaceholder")}
+        aria-label={t("verwaltung.dnsTrust.addForm.namePlaceholder")}
+        disabled={busy}
+      />
+      <button
+        type="submit"
+        className="dt-action dt-action--trust"
+        disabled={busy || ip.trim() === ""}
+      >
+        {t("verwaltung.dnsTrust.actions.addServer")}
+      </button>
+    </form>
+  );
+}
+
 // Bereich 3: eine „Abgelehnt"-Zeile (ohne Indizien, nur Ident + Zuruecksetzen).
 function AbgelehntZeile({ server, busy, onEntscheidung }) {
   const { t } = useTranslation();
@@ -255,8 +355,11 @@ export default function DnsTrustPanel() {
   const [fehler, setFehler] = useState(null);
   // IPs mit gerade laufender Entscheidung/Rang-Aktion (Knoepfe der Zeile gesperrt).
   const [busy, setBusy] = useState(new Set());
-  // Bereich 3 („Abgelehnt") ist per Default eingeklappt.
+  // Bereich 4 („Abgelehnt") ist per Default eingeklappt.
   const [abgelehntOffen, setAbgelehntOffen] = useState(false);
+  // Laeuft gerade ein Anlege-Aufruf? (Eigener Zustand: das Formular gehoert zu
+  // keiner IP-Zeile, kann also nicht ueber die busy-Menge gesperrt werden.)
+  const [anlegenLaeuft, setAnlegenLaeuft] = useState(false);
 
   // Server laden. Gemeinsamer Pfad fuer Mount und Reload nach einer Aktion.
   // t/i18n NICHT in den Dependencies.
@@ -324,14 +427,40 @@ export default function DnsTrustPanel() {
     [laden0],
   );
 
-  // Die drei H-Bereiche aus servers ableiten (Dependencies NUR [servers]):
-  //   erwartet:  trusted, sortiert nach expectedRank aufsteigend (0/unrangiert ans
-  //              ENDE), bei Gleichstand nach firstSeen aufsteigend.
+  // Einen Server von Hand hinterlegen (S63 L7d), danach die Liste neu laden. Gibt
+  // true bei Erfolg zurueck, damit das Formular nur dann seine Eingaben leert.
+  // Eigener busy-Zustand: das Formular gehoert zu keiner IP-Zeile.
+  const handleAnlegen = useCallback(
+    async (ip, name) => {
+      setFehler(null);
+      setAnlegenLaeuft(true);
+      try {
+        await createDnsTrustServer(ip, name);
+        await laden0();
+        return true;
+      } catch (ursache) {
+        console.error("DNS-Server anlegen fehlgeschlagen:", ursache);
+        setFehler(anlegeFehlerSchluessel(ursache));
+        return false;
+      } finally {
+        setAnlegenLaeuft(false);
+      }
+    },
+    [laden0],
+  );
+
+  // Die vier Bereiche aus servers ableiten (Dependencies NUR [servers]):
+  //   erwartet:  trusted UND beobachtet (origin !== "manual"), sortiert nach
+  //              expectedRank aufsteigend (0/unrangiert ans ENDE), bei Gleichstand
+  //              nach firstSeen aufsteigend.
   //   erkannt:   neutral (jede Kategorie).
+  //   vonHand:   origin === "manual" -- vom Nutzer hinterlegt, nie beobachtet. Diese
+  //              Server sind trusted und muessen darum aus „erwartet" heraus, sonst
+  //              stuenden sie in beiden Bereichen.
   //   abgelehnt: rejected.
   const bereiche = useMemo(() => {
     const erwartet = servers
-      .filter((server) => server.trustState === "trusted")
+      .filter((server) => server.trustState === "trusted" && server.origin !== "manual")
       .sort((a, b) => {
         const rangA = a.expectedRank > 0 ? a.expectedRank : Number.POSITIVE_INFINITY;
         const rangB = b.expectedRank > 0 ? b.expectedRank : Number.POSITIVE_INFINITY;
@@ -341,8 +470,14 @@ export default function DnsTrustPanel() {
         return (a.firstSeen ?? 0) - (b.firstSeen ?? 0);
       });
     const erkannt = servers.filter((server) => server.trustState === "neutral");
+    // Von Hand: nach firstSeen (Anlagezeitpunkt) aufsteigend -- aeltester zuerst,
+    // wie die uebrigen Bereiche. Ein Rang gilt hier nicht: rangiert wird die
+    // beobachtete Erwartung.
+    const vonHand = servers
+      .filter((server) => server.origin === "manual")
+      .sort((a, b) => (a.firstSeen ?? 0) - (b.firstSeen ?? 0));
     const abgelehnt = servers.filter((server) => server.trustState === "rejected");
-    return { erwartet, erkannt, abgelehnt };
+    return { erwartet, erkannt, vonHand, abgelehnt };
   }, [servers]);
 
   // Gibt es mindestens einen funktionslosen Plattform-Platzhalter? Nur dann erscheint
@@ -380,9 +515,22 @@ export default function DnsTrustPanel() {
         </p>
       ) : null}
 
-      {/* Ehrlicher Leerzustand, wenn (noch) keine Server erkannt wurden. */}
+      {/* Ehrlicher Leerzustand, wenn (noch) keine Server erkannt wurden -- MIT dem
+          Anlege-Formular: gerade dann will der Nutzer den ersten Server von Hand
+          hinterlegen koennen, statt auf eine Beobachtung warten zu muessen. */}
       {servers.length === 0 ? (
-        <p className="dt-empty">{t("verwaltung.dnsTrust.empty")}</p>
+        <>
+          <p className="dt-empty">{t("verwaltung.dnsTrust.empty")}</p>
+          <section className="dt-group" data-ton="neutral">
+            <h3 className="dt-group__title">
+              {t("verwaltung.dnsTrust.groups.manual.title")}
+            </h3>
+            <p className="dt-group__lead">
+              {t("verwaltung.dnsTrust.groups.manual.lead")}
+            </p>
+            <HinzufuegenFormular busy={anlegenLaeuft} onAnlegen={handleAnlegen} />
+          </section>
+        </>
       ) : (
         <>
           {/* Bereich 1: Erwartet — geordnet (alle trusted, Rang-Reihenfolge). */}
@@ -436,7 +584,31 @@ export default function DnsTrustPanel() {
             </section>
           ) : null}
 
-          {/* Bereich 3: Abgelehnt — nur wenn vorhanden, eingeklappt per Default. */}
+          {/* Bereich 3: Von Hand festgelegt (origin === "manual") + Anlege-Formular.
+              Dieser Bereich erscheint IMMER -- auch ohne Eintraege, denn er traegt
+              das Formular. Waere er wie die anderen an Inhalt gebunden, gaebe es
+              keinen Weg, den ersten Server von Hand zu hinterlegen. */}
+          <section className="dt-group" data-ton="neutral">
+            <h3 className="dt-group__title">
+              {t("verwaltung.dnsTrust.groups.manual.title")}
+            </h3>
+            <p className="dt-group__lead">
+              {t("verwaltung.dnsTrust.groups.manual.lead")}
+            </p>
+            <div className="dt-group__rows">
+              {bereiche.vonHand.map((server) => (
+                <VonHandZeile
+                  key={server.ip}
+                  server={server}
+                  busy={busy.has(server.ip)}
+                  onEntscheidung={handleEntscheidung}
+                />
+              ))}
+            </div>
+            <HinzufuegenFormular busy={anlegenLaeuft} onAnlegen={handleAnlegen} />
+          </section>
+
+          {/* Bereich 4: Abgelehnt — nur wenn vorhanden, eingeklappt per Default. */}
           {bereiche.abgelehnt.length > 0 ? (
             <section className="dt-group dt-collapsible" data-ton="danger">
               <button
