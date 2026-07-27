@@ -146,3 +146,11 @@ existiert. Ein spaeterer Mehrbenutzer-Block muss diese Stelle mitbetrachten.
 - **Linux bleibt unveraendert bei CAP_NET_RAW im Paket-Postinstall;** auf
   Nicht-macOS-Plattformen meldet die Einrichtung ehrlich `not_applicable`, statt einen Weg
   anzubieten, den es dort nicht gibt.
+
+## Nachtrag 2026-07-27
+
+Die Aufnahme der beiden Skripte in die Auslieferung ist mit 2.0.5 von der Hauptkonfiguration in
+die plattformspezifische Datei `tauri.macos.conf.json` gewandert. Grund: Die Skripte wurden zuvor
+auch in den Linux- und Windows-Paketen mitgeliefert, wo sie gegenstandslos sind (Finding 18). Am
+Mechanismus selbst aendert sich nichts; die Skripte liegen im macOS-Bundle unveraendert unter
+`Contents/Resources/_up_/scripts/`, und der Laufzeit-Adapter bleibt unberuehrt.

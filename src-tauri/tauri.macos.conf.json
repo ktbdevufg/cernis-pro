@@ -1,0 +1,8 @@
+{
+  "bundle": {
+    "resources": [
+      "../scripts/setup-bpf-access.sh",
+      "../scripts/revoke-bpf-access.sh"
+    ]
+  }
+}
