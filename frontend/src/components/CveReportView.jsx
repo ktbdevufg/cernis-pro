@@ -607,7 +607,11 @@ function Muster({ modus, onModus, deviceRows, serviceRows, fmtPublished, t }) {
                       : "cve-report__zeile"
                   }
                 >
-                  <td>{r.service}</td>
+                  <td>
+                    {r.service === "__service_unknown__"
+                      ? t("report.cve.spalteDienst.ohneDienst")
+                      : r.service}
+                  </td>
                   <td className="cve-report__num cve-report__mono">{r.findingCount}</td>
                   <td className="cve-report__num cve-report__mono">{r.deviceCount}</td>
                   <td>

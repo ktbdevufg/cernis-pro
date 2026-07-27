@@ -40,8 +40,9 @@ CATEGORY_EXPECTED = "erwartungsgemaess"
 CATEGORY_ORDER = (CATEGORY_OPEN, CATEGORY_POSSIBLE_DOH, CATEGORY_EXPECTED)
 _CATEGORY_RANK = {CATEGORY_OPEN: 0, CATEGORY_POSSIBLE_DOH: 1, CATEGORY_EXPECTED: 2}
 
-# Platzhalter fuer einen leeren Programmnamen in der Programm-Verteilung.
-_UNKNOWN_APP = "(ohne)"
+# Maschineller Marker fuer einen leeren Programmnamen in der Programm-Verteilung.
+# BEWUSST kein Anzeigetext (Muster EMPTY_VENDOR_MARKER in inventory_report.py).
+EMPTY_APP_MARKER = "__app_unknown__"
 
 
 # ── Eingabe-Datentraeger (frozen, neutral) ──────────────────────────────────
@@ -108,7 +109,7 @@ class CategoryCount:
 class AppCount:
     """Ein Eintrag der Programm-Verteilung (Programm + Anzahl), neutral.
 
-    ``app_name`` der Programmname (leere Werte als ``_UNKNOWN_APP``), ``count`` die Anzahl
+    ``app_name`` der Programmname (leere Werte als ``EMPTY_APP_MARKER``), ``count`` die Anzahl
     aktiver Zeilen mit diesem Programm.
     """
 
@@ -132,7 +133,7 @@ class DnsWatchReport:
 
     VERTEILUNGEN: ``category_distribution`` ueber AKTIVE Zeilen, IMMER alle drei
     Kategorien in ``CATEGORY_ORDER`` (auch count 0). ``app_distribution`` ueber AKTIVE
-    Zeilen nach Programm (leere ``app_name`` als ``_UNKNOWN_APP``, count desc dann
+    Zeilen nach Programm (leere ``app_name`` als ``EMPTY_APP_MARKER``, count desc dann
     app_name asc).
 
     LISTE: ``contact_rows`` ALLE Zeilen (aktiv UND quittiert), sortiert nach Kategorie-Rang
@@ -172,7 +173,7 @@ def build_dns_watch_report(
          ``doh_active`` ziehen; ``flagged_active`` = open_active + doh_active.
       4. ``category_distribution`` je ``CATEGORY_ORDER`` ein ``CategoryCount`` -- IMMER
          alle drei Kategorien, auch count 0.
-      5. ``app_distribution`` ueber AKTIVE Zeilen nach (app_name oder ``_UNKNOWN_APP``)
+      5. ``app_distribution`` ueber AKTIVE Zeilen nach (app_name oder ``EMPTY_APP_MARKER``)
          gruppiert, sortiert nach (-count, app_name).
       6. ``contact_rows`` = ALLE Zeilen, sortiert nach (Kategorie-Rang, -connection_count,
          remote_ip).
@@ -207,7 +208,7 @@ def build_dns_watch_report(
     # Schritt 5: Programm-Verteilung (aktive Zeilen, leerer app_name als Platzhalter).
     app_zaehler: dict[str, int] = {}
     for row in active:
-        schluessel = row.app_name or _UNKNOWN_APP
+        schluessel = row.app_name or EMPTY_APP_MARKER
         app_zaehler[schluessel] = app_zaehler.get(schluessel, 0) + 1
     app_distribution = [
         AppCount(app_name=programm, count=anzahl) for programm, anzahl in app_zaehler.items()

@@ -16,6 +16,8 @@ nicht-leere Werte.
 from __future__ import annotations
 
 from application.reporting import (
+    EMPTY_COUNTRY_MARKER,
+    EMPTY_OPERATOR_MARKER,
     OutboundContactRow,
     OutboundReportInput,
     build_outbound_report,
@@ -122,7 +124,7 @@ def test_tracker_threat_und_flagged_zaehler_distinct() -> None:
 
 
 def test_country_und_operator_verteilung_gruppierung_platzhalter_sortierung() -> None:
-    """Gruppierung, leere Werte als "(unbekannt)", Sortierung count desc dann label asc."""
+    """Gruppierung, leere Werte als Marker, Sortierung count desc dann label asc."""
     status = OutboundReportInput(recording_label="X", recording_scope="single")
     rows = [
         _row("1.0.0.1", country="DE", operator="DTAG"),
@@ -134,17 +136,17 @@ def test_country_und_operator_verteilung_gruppierung_platzhalter_sortierung() ->
 
     report = build_outbound_report(status, rows)
 
-    # Land: DE=2, US=2, (unbekannt)=1 -> count desc, dann label asc (DE vor US).
+    # Land: DE=2, US=2, Leer-Marker=1 -> count desc, dann label asc (DE vor US).
     assert [(c.country, c.count) for c in report.country_distribution] == [
         ("DE", 2),
         ("US", 2),
-        ("(unbekannt)", 1),
+        (EMPTY_COUNTRY_MARKER, 1),
     ]
-    # Betreiber: DTAG=2, Hetzner=2, (unbekannt)=1 -> count desc, dann label asc.
+    # Betreiber: DTAG=2, Hetzner=2, Leer-Marker=1 -> count desc, dann label asc.
     assert [(o.operator, o.count) for o in report.operator_distribution] == [
         ("DTAG", 2),
         ("Hetzner", 2),
-        ("(unbekannt)", 1),
+        (EMPTY_OPERATOR_MARKER, 1),
     ]
 
 

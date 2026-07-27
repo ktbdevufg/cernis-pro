@@ -404,7 +404,8 @@ export default function OutboundReportView() {
 // IMMER ALLE Eintraege gerendert; am Bildschirm blendet CSS die ueber TOP_VERTEILUNG
 // hinausgehenden Zeilen aus (--ueberzaehlig) und zeigt die "+ X weitere"-Zeile. Im
 // Druck dreht @media print das um: alle sichtbar, "weitere" weg. Balkenbreite relativ
-// zum groessten count ueber ALLE Eintraege. Leerer Label-Wert -> i18n-"(unbekannt)".
+// zum groessten count ueber ALLE Eintraege. Leerer Label-Wert kommt als maschineller
+// Marker herein und wird je Verteilung mit eigenem Wortlaut uebersetzt.
 function Verteilung({ eintraege, modus, onModus, t }) {
   const rest = eintraege.length - TOP_VERTEILUNG;
   const maxCount = eintraege.reduce((acc, e) => Math.max(acc, e.count), 0) || 1;
@@ -447,9 +448,19 @@ function Verteilung({ eintraege, modus, onModus, t }) {
         <>
           <div className="outbound-report__balken-liste">
             {eintraege.map((e, i) => {
+              // Leerer Wert kommt als maschineller Marker herein, nicht als Anzeigetext.
+              // Uebersetzt wird er erst hier, je Verteilung mit eigenem Wortlaut.
+              const roh = modus === "operator" ? e.operator : e.country;
+              const leerMarker =
+                modus === "operator" ? "__operator_unknown__" : "__country_unknown__";
+              const leerKey =
+                modus === "operator"
+                  ? "report.outbound.verteilung.ohneBetreiber"
+                  : "report.outbound.verteilung.ohneLand";
               const label =
-                (modus === "operator" ? e.operator : e.country) ||
-                t("report.outbound.verteilung.unbekannt");
+                roh === leerMarker
+                  ? t(leerKey)
+                  : roh || t("report.outbound.verteilung.unbekannt");
               return (
                 <div
                   key={`vert-${i}`}

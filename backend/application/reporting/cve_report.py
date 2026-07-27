@@ -147,7 +147,8 @@ class DeviceCveRow:
 class ServiceCveRow:
     """Sektion 3 -- eine Zeile je Dienst (Muster nach Dienst, ueber AKTIVE Befunde).
 
-    ``service`` der Dienst-Name (ein leerer Dienst wird als "(ohne)" gefuehrt),
+    ``service`` der Dienst-Name (ein leerer Dienst wird als ``EMPTY_SERVICE_MARKER``
+    gefuehrt -- die Anzeige dazu entsteht erst beim Uebersetzen),
     ``finding_count`` die Anzahl AKTIVER Befunde mit diesem Dienst, ``device_count`` die
     Anzahl betroffener Geraete (distinct ``mac``) mit diesem Dienst. ``highest_severity``
     die hoechste Severity nach Rang, ``highest_cvss`` der hoechste CVSS. ``oldest_published``
@@ -223,8 +224,11 @@ class CveReport:
 
 # ── Reine Funktionen (keine I/O, keine Uhr) ─────────────────────────────────
 
-# Platzhalter fuer einen leeren Dienst in der Muster-nach-Dienst-Aggregation (Sektion 3).
-_EMPTY_SERVICE = "(ohne)"
+# Maschineller Marker fuer einen leeren Dienst in der Muster-nach-Dienst-Aggregation
+# (Sektion 3). BEWUSST kein Anzeigetext: die Beschriftung entsteht erst dort, wo
+# uebersetzt wird (Frontend aus den Sprachdateien, PDF ueber _ui). Muster:
+# EMPTY_VENDOR_MARKER in inventory_report.py.
+EMPTY_SERVICE_MARKER = "__service_unknown__"
 
 
 def _rang(sev: str) -> int:
@@ -268,7 +272,8 @@ def build_cve_report(status: CveMonitorInput, rows: list[CveFindingRow]) -> CveR
       5. ``oldest_published`` (Report) = kleinste nicht-leere ``published`` (String-Min).
       6. ``device_rows`` (Sektion 2) je distinct ``mac`` ueber AKTIVE Zeilen, sortiert
          nach ``(-highest_rang, -highest_cvss, -finding_count, device_label)``.
-      7. ``service_rows`` (Sektion 3) je Dienst-Schluessel (leer -> "(ohne)") ueber
+      7. ``service_rows`` (Sektion 3) je Dienst-Schluessel (leer ->
+         ``EMPTY_SERVICE_MARKER``) ueber
          AKTIVE Zeilen, sortiert nach ``(-highest_rang, -finding_count, service)``.
       8. ``all_rows`` (Sektion 4) = ALLE normalisierten Zeilen (aktiv UND quittiert),
          sortiert nach ``(-rang(severity), -cvss_score, device_label, cve_id)``.
@@ -333,7 +338,7 @@ def build_cve_report(status: CveMonitorInput, rows: list[CveFindingRow]) -> CveR
     # Schritt 7: service_rows (Sektion 3), je Dienst-Schluessel ueber aktive Zeilen.
     service_gruppen: dict[str, list[CveFindingRow]] = {}
     for row in aktive:
-        schluessel = row.service if row.service else _EMPTY_SERVICE
+        schluessel = row.service if row.service else EMPTY_SERVICE_MARKER
         service_gruppen.setdefault(schluessel, []).append(row)
     service_rows = [
         ServiceCveRow(

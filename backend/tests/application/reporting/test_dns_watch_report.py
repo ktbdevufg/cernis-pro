@@ -20,6 +20,7 @@ from application.reporting import (
     CATEGORY_EXPECTED,
     CATEGORY_OPEN,
     CATEGORY_POSSIBLE_DOH,
+    EMPTY_APP_MARKER,
     DnsWatchContactRow,
     DnsWatchReportInput,
     build_dns_watch_report,
@@ -133,7 +134,7 @@ def test_quittierte_zeilen_ausgenommen_aber_in_contact_rows() -> None:
 
 
 def test_app_distribution_gruppierung_platzhalter_sortierung() -> None:
-    """T4: Gruppierung je app_name, leerer app_name als "(ohne)", Sortierung (-count, app_name)."""
+    """T4: Gruppierung je app_name, leerer app_name als Marker, Sortierung (-count, app_name)."""
     status = DnsWatchReportInput(host_scope="local_host", expected_servers=(), doh_providers=())
     rows = [
         _row("1.0.0.1", app_name="firefox"),
@@ -145,11 +146,11 @@ def test_app_distribution_gruppierung_platzhalter_sortierung() -> None:
 
     report = build_dns_watch_report(status, rows)
 
-    # firefox=2, chrome=2, (ohne)=1 -> count desc, bei Gleichstand app_name asc.
+    # firefox=2, chrome=2, Leer-Marker=1 -> count desc, bei Gleichstand app_name asc.
     assert [(a.app_name, a.count) for a in report.app_distribution] == [
         ("chrome", 2),
         ("firefox", 2),
-        ("(ohne)", 1),
+        (EMPTY_APP_MARKER, 1),
     ]
 
 

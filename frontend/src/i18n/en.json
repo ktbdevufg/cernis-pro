@@ -1676,7 +1676,8 @@
         "geraete": "Devices",
         "hoechste": "Highest severity",
         "cvss": "Highest CVSS",
-        "aeltste": "Oldest published"
+        "aeltste": "Oldest published",
+        "ohneDienst": "No service identified"
       },
       "liste": {
         "titel": "Full findings list",
@@ -1745,6 +1746,8 @@
         "land": "Country",
         "betreiber": "Operator",
         "unbekannt": "(unknown)",
+        "ohneLand": "No country identified",
+        "ohneBetreiber": "No operator identified",
         "weitere": "+ {{anzahl}} more",
         "leer": "No entries."
       },
@@ -1831,7 +1834,8 @@
       },
       "spalteApp": {
         "programm": "Program",
-        "kontakte": "Contacts"
+        "kontakte": "Contacts",
+        "ohneProgramm": "No program identified"
       },
       "filter": {
         "alle": "All",

@@ -92,7 +92,7 @@ class OutboundReportInput:
 class CountryCount:
     """Ein Eintrag der Land-Verteilung (Land + Anzahl distinct Gegenstellen), neutral.
 
-    ``country`` das Land (leere Werte als ``_UNKNOWN_LABEL``), ``count`` die Anzahl der
+    ``country`` das Land (leere Werte als ``EMPTY_COUNTRY_MARKER``), ``count`` die Anzahl der
     nicht-lokalen Gegenstellen-Zeilen mit diesem Land.
     """
 
@@ -104,7 +104,7 @@ class CountryCount:
 class OperatorCount:
     """Ein Eintrag der Betreiber-Verteilung (Betreiber + Anzahl distinct Gegenstellen).
 
-    ``operator`` der Betreiber (leere Werte als ``_UNKNOWN_LABEL``), ``count`` die Anzahl
+    ``operator`` der Betreiber (leere Werte als ``EMPTY_OPERATOR_MARKER``), ``count`` die Anzahl
     der nicht-lokalen Gegenstellen-Zeilen mit diesem Betreiber.
     """
 
@@ -130,8 +130,8 @@ class OutboundReport:
     Zeile mit BEIDEN Flags zaehlt nur 1x).
 
     VERTEILUNGEN: ``country_distribution`` ueber NICHT-lokale Zeilen (count desc, dann
-    country asc; leere ``country`` als ``_UNKNOWN_LABEL``), ``operator_distribution``
-    analog ueber ``operator``.
+    country asc; leere ``country`` als ``EMPTY_COUNTRY_MARKER``), ``operator_distribution``
+    analog ueber ``operator`` (leere ``operator`` als ``EMPTY_OPERATOR_MARKER``).
 
     LISTE: ``contact_rows`` ALLE Zeilen, sortiert -- zuerst geflaggte (Threat vor Tracker)
     zuoberst, dann nach ``total_count`` desc, dann ``remote_ip`` asc.
@@ -155,8 +155,11 @@ class OutboundReport:
 
 # ── Reine Funktionen (keine I/O, keine Uhr) ─────────────────────────────────
 
-# Platzhalter fuer einen leeren Gruppierungs-Schluessel (Land/Betreiber) in den Verteilungen.
-_UNKNOWN_LABEL = "(unbekannt)"
+# Maschinelle Marker fuer einen leeren Gruppierungs-Schluessel der beiden Verteilungen.
+# BEWUSST kein Anzeigetext. ZWEI Marker statt einem, weil Land und Betreiber
+# unterschiedliche Texte brauchen (Muster inventory_report.py).
+EMPTY_COUNTRY_MARKER = "__country_unknown__"
+EMPTY_OPERATOR_MARKER = "__operator_unknown__"
 
 
 def build_outbound_report(
@@ -173,8 +176,9 @@ def build_outbound_report(
          ``operators_total`` = distinct nicht-leere ``operator`` ueber nicht_lokal.
       5. ``tracker_contacts``/``threat_contacts``/``flagged_contacts`` ueber nicht_lokal
          (flagged = Tracker ODER Threat, distinct Zeilen -- keine Summe).
-      6. ``country_distribution`` ueber nicht_lokal nach (country oder ``_UNKNOWN_LABEL``)
-         gruppiert, sortiert nach (-count, country); ``operator_distribution`` analog.
+      6. ``country_distribution`` ueber nicht_lokal nach (country oder
+         ``EMPTY_COUNTRY_MARKER``) gruppiert, sortiert nach (-count, country);
+         ``operator_distribution`` analog mit ``EMPTY_OPERATOR_MARKER``.
       7. ``contact_rows`` = ALLE Zeilen, sortiert nach dem Flag-Rang (0 Threat, 1 Tracker,
          2 Rest -- jeweils nur fuer nicht-lokale), dann -total_count, dann remote_ip.
       8. ``recording_label``/``recording_scope`` aus ``status`` durchreichen.
@@ -204,7 +208,7 @@ def build_outbound_report(
     # Schritt 6: Land-Verteilung (nicht-lokal, leere country als Platzhalter).
     country_zaehler: dict[str, int] = {}
     for row in nicht_lokal:
-        schluessel = row.country or _UNKNOWN_LABEL
+        schluessel = row.country or EMPTY_COUNTRY_MARKER
         country_zaehler[schluessel] = country_zaehler.get(schluessel, 0) + 1
     country_distribution = [
         CountryCount(country=land, count=anzahl) for land, anzahl in country_zaehler.items()
@@ -214,7 +218,7 @@ def build_outbound_report(
     # Schritt 6 (analog): Betreiber-Verteilung.
     operator_zaehler: dict[str, int] = {}
     for row in nicht_lokal:
-        schluessel = row.operator or _UNKNOWN_LABEL
+        schluessel = row.operator or EMPTY_OPERATOR_MARKER
         operator_zaehler[schluessel] = operator_zaehler.get(schluessel, 0) + 1
     operator_distribution = [
         OperatorCount(operator=betreiber, count=anzahl)

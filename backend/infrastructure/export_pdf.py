@@ -154,6 +154,23 @@ _UI_STRINGS: dict[str, dict[str, str]] = {
         "de": "Keine Kategorie ermittelt",
         "en": "No category identified",
     },
+    # Anzeige fuer die maschinellen Leer-Marker der CVE-, DNS- und Aussenkontakte-Verteilungen.
+    "cve.ohne_dienst": {
+        "de": "Kein Dienst ermittelt",
+        "en": "No service identified",
+    },
+    "dns.ohne_programm": {
+        "de": "Kein Programm ermittelt",
+        "en": "No program identified",
+    },
+    "out.ohne_land": {
+        "de": "Kein Land ermittelt",
+        "en": "No country identified",
+    },
+    "out.ohne_betreiber": {
+        "de": "Kein Betreiber ermittelt",
+        "en": "No operator identified",
+    },
     # CVE-Bericht
     "cve.kennzahlen": {"de": "CVE-Kennzahlen", "en": "CVE Metrics"},
     "cve.schweregrad": {"de": "Schweregrad-Verteilung", "en": "Severity Distribution"},
@@ -238,11 +255,22 @@ def _ui(key: str, lang: str) -> str:
 _EMPTY_VENDOR_MARKER = "__vendor_unknown__"
 _EMPTY_CATEGORY_MARKER = "__category_unknown__"
 
+# Spiegel der Marker aus cve_report, dns_watch_report und outbound_report. Der Adapter
+# darf application NICHT importieren (import-linter), darum hier als lokale Konstanten.
+_EMPTY_SERVICE_MARKER = "__service_unknown__"
+_EMPTY_APP_MARKER = "__app_unknown__"
+_EMPTY_COUNTRY_MARKER = "__country_unknown__"
+_EMPTY_OPERATOR_MARKER = "__operator_unknown__"
+
 # Marker -> _UI_STRINGS-Schluessel. Trennt die beiden Verteilungen, die
 # unterschiedliche Texte brauchen.
 _MARKER_UI_KEYS = {
     _EMPTY_VENDOR_MARKER: "inv.ohne_hersteller",
     _EMPTY_CATEGORY_MARKER: "inv.ohne_kategorie",
+    _EMPTY_SERVICE_MARKER: "cve.ohne_dienst",
+    _EMPTY_APP_MARKER: "dns.ohne_programm",
+    _EMPTY_COUNTRY_MARKER: "out.ohne_land",
+    _EMPTY_OPERATOR_MARKER: "out.ohne_betreiber",
 }
 
 
@@ -257,6 +285,21 @@ def _resolve_distribution_marker(
     """
     ui_key = _MARKER_UI_KEYS[marker]
     return tuple((_ui(ui_key, lang) if label == marker else label, count) for label, count in rows)
+
+
+def _resolve_first_column_marker(
+    rows: tuple[tuple[str, ...], ...], marker: str, lang: str
+) -> tuple[tuple[str, ...], ...]:
+    """Loest einen Leer-Marker in der ERSTEN Spalte einer Tabellenzeile auf.
+
+    Fuer Zeilen, die ueber _append_table_section laufen (beliebig breit, als
+    tuple[str, ...] deklariert). Der Inventory-Pfad ueber _append_distribution_table
+    behaelt sein eigenes _resolve_distribution_marker -- diese Funktion ersetzt es nicht.
+    Nur die erste Spalte wird geprueft; alle weiteren Spalten und die Reihenfolge
+    bleiben unangetastet.
+    """
+    ui_key = _MARKER_UI_KEYS[marker]
+    return tuple(((_ui(ui_key, lang), *row[1:]) if row[0] == marker else row) for row in rows)
 
 
 # Spaltenueberschriften der vier Tabellen-Rubriken. SPIEGEL der ``*_COLUMNS`` aus
@@ -1633,7 +1676,12 @@ class ReportlabRenderer:
         # Sektion 3 + 4 je auf eigener Seite (grosse Tabellen) -- diese PageBreaks bleiben.
         story.append(PageBreak())
         self._append_table_section(
-            story, styles, _ui("cve.muster", lang), _CVE_SERVICE_COLUMNS, model.service_rows, lang
+            story,
+            styles,
+            _ui("cve.muster", lang),
+            _CVE_SERVICE_COLUMNS,
+            _resolve_first_column_marker(model.service_rows, _EMPTY_SERVICE_MARKER, lang),
+            lang,
         )
 
         story.append(PageBreak())
@@ -1848,7 +1896,7 @@ class ReportlabRenderer:
             styles,
             _ui("out.nach_land", lang),
             _OUTBOUND_COUNTRY_COLUMNS,
-            model.country_rows,
+            _resolve_first_column_marker(model.country_rows, _EMPTY_COUNTRY_MARKER, lang),
             lang,
         )
         story.append(Spacer(1, 6 * mm))
@@ -1857,7 +1905,7 @@ class ReportlabRenderer:
             styles,
             _ui("out.nach_betreiber", lang),
             _OUTBOUND_OPERATOR_COLUMNS,
-            model.operator_rows,
+            _resolve_first_column_marker(model.operator_rows, _EMPTY_OPERATOR_MARKER, lang),
             lang,
         )
 
@@ -2032,7 +2080,12 @@ class ReportlabRenderer:
         )
         story.append(Spacer(1, 6 * mm))
         self._append_table_section(
-            story, styles, _ui("dns.nach_programm", lang), DNS_APP_COLUMNS, model.app_rows, lang
+            story,
+            styles,
+            _ui("dns.nach_programm", lang),
+            DNS_APP_COLUMNS,
+            _resolve_first_column_marker(model.app_rows, _EMPTY_APP_MARKER, lang),
+            lang,
         )
 
         # Die Detail-Liste auf eigener Seite (potentiell lang) -- PageBreak davor.

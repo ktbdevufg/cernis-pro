@@ -803,7 +803,11 @@ function Verteilung({ modus, onModus, categoryDistribution, appDistribution, t }
           <tbody>
             {appDistribution.map((r, i) => (
               <tr key={`app-${i}`} className="dns-report__zeile">
-                <td>{r.appName || "—"}</td>
+                <td>
+                  {r.appName === "__app_unknown__"
+                    ? t("report.dnsWatch.spalteApp.ohneProgramm")
+                    : r.appName || "—"}
+                </td>
                 <td className="dns-report__num dns-report__mono">{r.count}</td>
               </tr>
             ))}

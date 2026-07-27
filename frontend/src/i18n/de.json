@@ -1676,7 +1676,8 @@
         "geraete": "Geräte",
         "hoechste": "Höchste Severity",
         "cvss": "Höchster CVSS",
-        "aeltste": "Älteste Veröffentlichung"
+        "aeltste": "Älteste Veröffentlichung",
+        "ohneDienst": "Kein Dienst ermittelt"
       },
       "liste": {
         "titel": "Vollständige Befundliste",
@@ -1745,6 +1746,8 @@
         "land": "Land",
         "betreiber": "Betreiber",
         "unbekannt": "(unbekannt)",
+        "ohneLand": "Kein Land ermittelt",
+        "ohneBetreiber": "Kein Betreiber ermittelt",
         "weitere": "+ {{anzahl}} weitere",
         "leer": "Keine Einträge."
       },
@@ -1831,7 +1834,8 @@
       },
       "spalteApp": {
         "programm": "Programm",
-        "kontakte": "Kontakte"
+        "kontakte": "Kontakte",
+        "ohneProgramm": "Kein Programm ermittelt"
       },
       "filter": {
         "alle": "Alle",

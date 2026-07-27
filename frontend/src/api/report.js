@@ -487,8 +487,9 @@ function mappeDnsKategorie(e) {
   };
 }
 
-// Ein Programm-Verteilungs-Eintrag -> View-Struktur. appName roh (Leerstring vom
-// Backend als "(ohne)" gefuehrt), count roh durchgereicht.
+// Ein Programm-Verteilungs-Eintrag -> View-Struktur. appName roh durchgereicht; ein
+// leerer Programmname kommt vom Backend als maschineller Marker und wird erst in der
+// Ansicht uebersetzt. count roh durchgereicht.
 function mappeDnsProgramm(e) {
   return {
     appName: e.app_name,
