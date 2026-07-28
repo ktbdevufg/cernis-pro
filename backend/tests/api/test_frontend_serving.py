@@ -76,6 +76,21 @@ def test_unmatched_ws_path_is_404(client: TestClient) -> None:
     assert client.get("/ws/does-not-exist").status_code == 404
 
 
+def test_unmatched_api_path_with_backslash_is_404(client: TestClient) -> None:
+    # Die Ausliefer-Schicht normalisiert den Pfad plattformabhaengig -- unter
+    # Windows mit Rueckstrich. Der Waechter muss unabhaengig vom Trennzeichen
+    # greifen, deshalb gilt dieser Test auf ALLEN Plattformen (kein Skip).
+    response = client.get("/api\\does-not-exist")
+    assert response.status_code == 404
+    assert "CERNIS SPA" not in response.text  # kein index.html-Fallback fuer api/
+
+
+def test_unmatched_ws_path_with_backslash_is_404(client: TestClient) -> None:
+    response = client.get("/ws\\does-not-exist")
+    assert response.status_code == 404
+    assert "CERNIS SPA" not in response.text  # kein index.html-Fallback fuer ws/
+
+
 # ── Sicherheits-Regression: kein Path-Traversal (Finding S6) ──────────────
 
 

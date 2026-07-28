@@ -1735,7 +1735,10 @@ class _SpaStaticFiles(StaticFiles):
     async def get_response(self, path: str, scope: Scope) -> Response:
         # API/WS nicht auf index.html zurueckfallen lassen -> 404 (Sekundaer-
         # Absicherung; echte API-Routen matchen ohnehin vor diesem "/"-Mount).
-        if path.lstrip("/").startswith(("api/", "ws/")):
+        # Das Trennzeichen wird vorab vereinheitlicht, weil der Pfad aus der
+        # Datei-Ausliefer-Schicht plattformabhaengig normalisiert ankommt (unter
+        # Windows mit Rueckstrich) -- ohne das griffe der Vergleich dort nie.
+        if path.replace("\\", "/").lstrip("/").startswith(("api/", "ws/")):
             raise StarletteHTTPException(status_code=404)
         try:
             return await super().get_response(path, scope)
