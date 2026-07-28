@@ -1,7 +1,7 @@
 {
   "name": "cernis-pro",
   "private": true,
-  "version": "2.0.4",
+  "version": "2.0.5",
   "license": "GPL-2.0-only",
   "type": "module",
   "scripts": {
