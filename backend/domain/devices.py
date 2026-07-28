@@ -69,6 +69,26 @@ def normalize_mac(raw: str) -> str:
     return ":".join(upper[i : i + 2] for i in range(0, len(upper), 2))
 
 
+BROADCAST_MAC = "FF:FF:FF:FF:FF:FF"
+
+
+def is_broadcast_mac(raw: str) -> bool:
+    """True, wenn die Adresse die Ethernet-Broadcast-Adresse ist.
+
+    Rein und zeitfrei. Vergleicht die KANONISCHE Form, damit Schreibweise und
+    Trennzeichen keine Rolle spielen (ff-ff-ff-ff-ff-ff trifft ebenso). Eine
+    nicht normalisierbare Eingabe ist keine Broadcast-Adresse und liefert False,
+    statt zu werfen -- die Pflicht-Validierung bleibt bei normalize_mac.
+
+    Fachlich: die Broadcast-Adresse ist kein Geraet, sondern eine Adressierungsform.
+    Sie gehoert nicht in den Geraetebestand.
+    """
+    try:
+        return normalize_mac(raw) == BROADCAST_MAC
+    except ValueError:
+        return False
+
+
 @dataclass(frozen=True)
 class Device:
     """Schlanke Geraete-Stammdaten (ein Aggregat, KEINE IP-History -- die ist getrennt).

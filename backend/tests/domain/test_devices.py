@@ -11,12 +11,14 @@ from datetime import datetime, timedelta
 import pytest
 
 from domain.devices import (
+    BROADCAST_MAC,
     Device,
     DeviceSource,
     IpHistoryEntry,
     ScannedHost,
     TrustState,
     is_archive_candidate,
+    is_broadcast_mac,
     merge_scan,
     normalize_mac,
     register_archive_prompt,
@@ -48,6 +50,33 @@ def test_normalize_mac_without_hex_raises() -> None:
         normalize_mac("")
     with pytest.raises(ValueError):
         normalize_mac(" : : ")
+
+
+# ── is_broadcast_mac ────────────────────────────────────────────────────────
+
+
+def test_is_broadcast_mac_hits_canonical_form() -> None:
+    assert is_broadcast_mac(BROADCAST_MAC) is True
+
+
+def test_is_broadcast_mac_hits_other_notations() -> None:
+    # Vergleich auf der KANONISCHEN Form -> Schreibweise/Trennzeichen egal.
+    assert is_broadcast_mac("ff:ff:ff:ff:ff:ff") is True
+    assert is_broadcast_mac("ff-ff-ff-ff-ff-ff") is True
+    assert is_broadcast_mac("ffffffffffff") is True
+    assert is_broadcast_mac("ffff.ffff.ffff") is True
+
+
+def test_is_broadcast_mac_ordinary_mac_false() -> None:
+    assert is_broadcast_mac(MAC) is False
+    assert is_broadcast_mac("aa-bb-cc-dd-ee-01") is False
+
+
+def test_is_broadcast_mac_unnormalizable_input_false_not_raises() -> None:
+    # Nicht normalisierbar ist keine Broadcast-Adresse -> False statt ValueError;
+    # die Pflicht-Validierung bleibt bei normalize_mac.
+    assert is_broadcast_mac("") is False
+    assert is_broadcast_mac(" : : ") is False
 
 
 # ── Device.__post_init__ ─────────────────────────────────────────────────────

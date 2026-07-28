@@ -23,6 +23,7 @@ from typing import Any
 
 from application.devices.errors import (
     DeviceAlreadyExistsError,
+    DeviceBroadcastMacError,
     DeviceNotFoundError,
     InvalidTrustStateError,
 )
@@ -34,6 +35,7 @@ from domain.devices import (
     IpHistoryEntry,
     ScannedHost,
     TrustState,
+    is_broadcast_mac,
     merge_scan,
     normalize_mac,
     register_archive_prompt,
@@ -200,13 +202,23 @@ class RecordScannedHost:
     Der Use-Case, den spaeter die scanning-Domaene aufruft. Die Merge-Logik liegt
     in ``domain.merge_scan`` (inkl. BUG-2-Fix: ``is_known`` bleibt erhalten); hier
     nur die Orchestrierung.
+
+    Die Broadcast-Adresse wird still uebersprungen -> Rueckgabe ``None``. Der
+    Rueckgabetyp ist deshalb ``Device | None``; ein ``None`` heisst "nicht
+    aufgenommen", nicht "Fehler" (der einzige produktive Aufrufer,
+    ``ws_scan.record_host_best_effort``, verwirft den Rueckgabewert ohnehin).
     """
 
     def __init__(self, repository: DeviceRepository, clock: Clock) -> None:
         self._repository = repository
         self._clock = clock
 
-    def __call__(self, scanned: ScannedHost) -> Device:
+    def __call__(self, scanned: ScannedHost) -> Device | None:
+        # Die Broadcast-Adresse ist kein Geraet, sondern eine Adressierungsform --
+        # sie wird still uebersprungen wie eine leere MAC im Scan-Aufnahmepfad und
+        # NICHT geworfen, weil ein Scan an einem Nicht-Geraet nicht scheitern darf.
+        if is_broadcast_mac(scanned.mac):
+            return None
         now = self._clock.now()
         existing = self._repository.get(scanned.mac)
         merged = merge_scan(existing, scanned, now)
@@ -222,6 +234,10 @@ class RecordScannedHost:
 
 class CreateDevice:
     """Legt ein Geraet von Hand an; bekannte MAC -> ``DeviceAlreadyExistsError``.
+
+    Die Broadcast-Adresse -> ``DeviceBroadcastMacError``: sie ist kein Geraet,
+    sondern eine Adressierungsform, und wird von Hand benannt abgelehnt (keine
+    stille Uebergehung wie im Scan-Pfad -- hier steht ein Mensch dahinter, S3).
 
     Manuelles Anlegen ist KEIN Upsert: existiert die MAC schon, ist das ein
     Konflikt (der Aufrufer soll bearbeiten/wiederherstellen, nicht ueberschreiben).
@@ -247,6 +263,11 @@ class CreateDevice:
         tags: Sequence[str] | None = None,
     ) -> Device:
         norm = normalize_mac(mac)
+        # Die Broadcast-Adresse ist kein Geraet: benannte Ablehnung VOR dem Bau
+        # des Device, kein stiller Verzicht (Finding S3). Der Router bildet das
+        # auf HTTP 422 ab.
+        if is_broadcast_mac(norm):
+            raise DeviceBroadcastMacError(norm)
         if self._repository.get(norm) is not None:
             raise DeviceAlreadyExistsError(norm)
         now = self._clock.now()

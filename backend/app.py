@@ -659,7 +659,7 @@ from domain.blocklist import (
     MatchStrictness,
     domain_suffix_candidates,
 )
-from domain.devices import Device, DeviceSource, normalize_mac
+from domain.devices import Device, DeviceSource, is_broadcast_mac, normalize_mac
 from domain.dns_bypass import AggregatedBypass
 from domain.dns_trust import DnsServerCategory, DnsTrustState, categorize_dns_server
 from domain.dns_watch import doh_providers_or_default
@@ -2215,7 +2215,9 @@ def _register_self_host(repository: SqliteDeviceRepository, clock: SystemClock) 
 
     best-effort: scheitert die Interface-Ermittlung -- oder wirft irgendetwas --,
     wird geloggt und geschluckt (KEIN Startup-Crash). 127.0.0.1 / ``lo`` wird von
-    ``detect_self_host`` strikt ausgeschlossen.
+    ``detect_self_host`` strikt ausgeschlossen. Ebenso ausgeschlossen ist die
+    Ethernet-Broadcast-Adresse: sie ist kein Geraet und wird still uebersprungen
+    (nur geloggt), wie im Scan-Aufnahmepfad.
     """
     try:
         detected = detect_self_host()
@@ -2223,6 +2225,13 @@ def _register_self_host(repository: SqliteDeviceRepository, clock: SystemClock) 
             logger.info("self_host_not_detected")
             return
         mac = normalize_mac(detected.mac)
+        # Die Broadcast-Adresse ist kein Geraet, sondern eine Adressierungsform --
+        # gleiche Behandlung wie im Scan-Aufnahmepfad: still uebersprungen (nur
+        # geloggt), kein Fehler. Faktisch kann das nicht auftreten, bleibt aber
+        # nicht unbehandelt.
+        if is_broadcast_mac(mac):
+            logger.info("self_host_broadcast_mac_skipped", mac=mac)
+            return
         now = clock.now()
         existing = repository.get(mac)
         if existing is None:

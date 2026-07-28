@@ -36,6 +36,20 @@ class DeviceAlreadyExistsError(DevicesApplicationError):
         super().__init__(f"Geraet mit MAC {mac!r} existiert bereits")
 
 
+class DeviceBroadcastMacError(DevicesApplicationError):
+    """Beim manuellen Anlegen wurde die Ethernet-Broadcast-Adresse angegeben.
+
+    Die Broadcast-Adresse ist kein Geraet, sondern eine Adressierungsform -- sie
+    gehoert nicht in den Geraetebestand. Ein Nutzer, der sie von Hand eintraegt,
+    bekommt eine benannte Ablehnung statt eines stillen Verzichts (Finding S3);
+    der Router bildet das auf HTTP 422 ab (ungueltige Eingabe, kein Konflikt).
+    """
+
+    def __init__(self, mac: str) -> None:
+        self.mac = mac
+        super().__init__(f"MAC {mac!r} ist die Broadcast-Adresse und kein Geraet")
+
+
 class InvalidTrustStateError(DevicesApplicationError):
     """Ein uebergebener ``trust_state``-Wert ist keiner der erlaubten Zustaende.
 

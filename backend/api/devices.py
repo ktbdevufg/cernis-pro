@@ -28,6 +28,7 @@ from application.devices import (
     CreateDevice,
     DeleteDevice,
     DeviceAlreadyExistsError,
+    DeviceBroadcastMacError,
     DeviceNotFoundError,
     DismissDeviceFromWatch,
     GetArchivedDevices,
@@ -202,7 +203,7 @@ def create_device(
     body: CreateDeviceBody,
     create_device: Annotated[CreateDevice, Depends(provide_create_device)],
 ) -> dict[str, Any]:
-    """Legt ein Geraet von Hand an; bekannte MAC -> 409, ungueltige MAC -> 422."""
+    """Legt ein Geraet von Hand an; bekannte MAC -> 409, ungueltige/Broadcast-MAC -> 422."""
     try:
         created = create_device(
             body.mac,
@@ -215,6 +216,13 @@ def create_device(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Geraet existiert bereits. (E-506)",
+        ) from exc
+    except DeviceBroadcastMacError as exc:
+        # Kein Konflikt, sondern ungueltige Eingabe -> 422 (bare, wie der uebrige
+        # Router). Die Broadcast-Adresse ist kein Geraet.
+        raise HTTPException(
+            status_code=422,
+            detail="Die Broadcast-Adresse ist kein Geraet. (E-506)",
         ) from exc
     except ValueError as exc:
         # Ungueltige MAC aus normalize_mac im Use-Case. Bare 422 wie der

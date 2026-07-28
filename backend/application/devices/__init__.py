@@ -2,6 +2,7 @@
 
 from application.devices.errors import (
     DeviceAlreadyExistsError,
+    DeviceBroadcastMacError,
     DeviceNotFoundError,
     DevicesApplicationError,
     InvalidTrustStateError,
@@ -29,6 +30,7 @@ __all__ = [
     "CreateDevice",
     "DeleteDevice",
     "DeviceAlreadyExistsError",
+    "DeviceBroadcastMacError",
     "DeviceNotFoundError",
     "DevicesApplicationError",
     "DismissDeviceFromWatch",

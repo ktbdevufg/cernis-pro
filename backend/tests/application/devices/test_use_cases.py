@@ -17,6 +17,7 @@ from application.devices import (
     CreateDevice,
     DeleteDevice,
     DeviceAlreadyExistsError,
+    DeviceBroadcastMacError,
     DeviceNotFoundError,
     DismissDeviceFromWatch,
     GetArchiveCandidates,
@@ -31,6 +32,7 @@ from application.devices import (
     UpdateDeviceMeta,
 )
 from domain.devices import (
+    BROADCAST_MAC,
     Device,
     DeviceSource,
     DeviceStats,
@@ -385,6 +387,7 @@ def test_record_new_host_saves_and_logs_first_ip(repo: FakeDeviceRepository) -> 
     result = RecordScannedHost(repo, FakeClock(NOW))(
         ScannedHost(mac=MAC, ip="10.0.0.1", vendor="V", open_ports=(22,))
     )
+    assert result is not None  # None hiesse "uebersprungen" (Broadcast-Adresse)
     assert result.times_seen == 1
     assert result.is_known is False
     assert result.first_seen == NOW
@@ -419,10 +422,35 @@ def test_record_preserves_is_known_bug2_end_to_end(repo: FakeDeviceRepository) -
     UpdateDeviceMeta(repo)(MAC, is_known=True)  # User markiert als bekannt
     # Re-Scan darf is_known nicht zuruecksetzen:
     result = RecordScannedHost(repo, clock)(ScannedHost(mac=MAC, ip="10.0.0.1"))
+    assert result is not None
     assert result.is_known is True
     dev = repo.get(MAC)
     assert dev is not None
     assert dev.is_known is True
+
+
+def test_record_broadcast_mac_is_skipped_without_entry(repo: FakeDeviceRepository) -> None:
+    # Die Broadcast-Adresse ist kein Geraet: still uebersprungen (Rueckgabe None),
+    # kein Fehler und kein Eintrag -- die gewoehnliche Zeile daneben wird normal
+    # aufgenommen.
+    rec = RecordScannedHost(repo, FakeClock(NOW))
+    assert rec(ScannedHost(mac=BROADCAST_MAC, ip="10.0.0.255")) is None
+    assert repo.get(BROADCAST_MAC) is None
+    assert repo.save_calls == 0
+    assert repo.get_ip_history(BROADCAST_MAC) == []
+
+    result = rec(ScannedHost(mac=MAC, ip="10.0.0.1", vendor="V", open_ports=(22,)))
+    assert result is not None
+    assert result.mac == MAC
+    assert repo.get(MAC) is not None
+    assert repo.save_calls == 1
+    assert [e.ip for e in repo.get_ip_history(MAC)] == ["10.0.0.1"]
+
+
+def test_record_broadcast_mac_skipped_in_other_notation(repo: FakeDeviceRepository) -> None:
+    # Kanonischer Vergleich: auch die Kleinschreibung mit Bindestrichen trifft.
+    assert RecordScannedHost(repo, FakeClock(NOW))(ScannedHost(mac="ff-ff-ff-ff-ff-ff")) is None
+    assert repo.save_calls == 0
 
 
 # ── CreateDevice ─────────────────────────────────────────────────────────────
@@ -458,6 +486,22 @@ def test_create_device_normalizes_mac(repo: FakeDeviceRepository) -> None:
     created = CreateDevice(repo, FakeClock(NOW))("aa-bb-cc-dd-ee-01")
     assert created.mac == MAC
     assert repo.get(MAC) is not None
+
+
+def test_create_device_broadcast_mac_raises_and_saves_nothing(repo: FakeDeviceRepository) -> None:
+    # Von Hand eingetragene Broadcast-Adresse: benannte Ablehnung, kein stiller
+    # Verzicht (S3) -- und kein Schreibvorgang.
+    with pytest.raises(DeviceBroadcastMacError):
+        CreateDevice(repo, FakeClock(NOW))(BROADCAST_MAC, label="x")
+    assert repo.save_calls == 0
+    assert repo.get(BROADCAST_MAC) is None
+
+
+def test_create_device_broadcast_mac_raises_in_other_notation(repo: FakeDeviceRepository) -> None:
+    # Kanonischer Vergleich: die Schreibweise darf die Ablehnung nicht umgehen.
+    with pytest.raises(DeviceBroadcastMacError):
+        CreateDevice(repo, FakeClock(NOW))("ff-ff-ff-ff-ff-ff")
+    assert repo.save_calls == 0
 
 
 # ── ArchiveDevice ────────────────────────────────────────────────────────────
