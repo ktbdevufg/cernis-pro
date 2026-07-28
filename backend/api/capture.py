@@ -231,7 +231,7 @@ def pcap_available(
 
 
 @router.post("/pcap/start")
-def pcap_start(
+async def pcap_start(
     body: StartCaptureBody,
     start_capture: Annotated[StartCaptureRunner, Depends(provide_start_capture)],
     start_capture_uc: Annotated[StartCapture, Depends(provide_start_capture_uc)],
@@ -241,6 +241,16 @@ def pcap_start(
     Der ``start_capture``-Callable (Composition Root) prueft + startet den Loop und
     gibt ``{ok, error}`` zurueck. Bei Erfolg haengt der Rand ``available`` an (wie
     C.0); bei ``ok=False`` -> 403 mit dem Body UNVERAENDERT (KEIN ``available``-Key).
+
+    BEWUSST ``async`` (Muster ``traffic.start_traffic_poll``/``dns_bypass.start_dns_bypass``):
+    der ``start_capture``-Callable ruft ``asyncio.create_task`` -- das braucht einen
+    laufenden Event-Loop. Ein synchroner Endpunkt liefe im Starlette-Threadpool OHNE
+    Loop (``RuntimeError: no running event loop`` -> 500er beim Nutzer). Der
+    ``async``-Endpunkt laeuft im Loop; der Callable selbst bleibt synchron und wird
+    weiterhin OHNE ``await`` gerufen. In der Schleife laufen dadurch nur die beiden
+    billigen Port-Abfragen der ``StartCapture``-Pruefung (``is_available`` = Pfad-Check,
+    ``check_permission`` = konstantes ``None``) und das ``create_task`` selbst -- der
+    Helfer-Spawn passiert erst im Task, blockiert die Schleife also nicht.
     """
     result = start_capture(body.interface or None, body.filter, body.max_packets)
     if not result["ok"]:
