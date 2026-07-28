@@ -25,6 +25,7 @@ Plattform: NUR Linux x64 (der Helfer kapselt die plattformnahe Sniff-Technik).
 """
 
 import asyncio
+import time
 from collections.abc import Callable
 from typing import Any, Protocol
 
@@ -86,7 +87,19 @@ class ScapyLldpSniffer:
         fehlende fuellt die dataclass mit Defaults. Ein kaputtes dict (falscher Typ /
         unbekanntes Feld / fehlende ``source_mac``) ergibt ``None`` + Warn -- ein
         einzelner Murks-Eintrag darf die Liste nicht killen.
+
+        ``last_seen`` stempelt der Helfer (``time.time()``, siehe
+        ``sniff_core._parse_lldp_neighbor``). Fehlt es dennoch -- ein aelterer
+        Helfer, ein von Hand gebautes dict --, greift NICHT stillschweigend der
+        dataclass-Default ``0.0``: der wuerde das Alter zur Unix-Zeit machen und
+        den frischen Nachbarn sofort als abgelaufen zeigen. Statt dieser stillen
+        Luege wird der Vorfall protokolliert und der Empfangszeitpunkt hier
+        nachgetragen -- derselbe ``time.time()``-Zeitstrahl, gegen den der
+        api-Rand das Alter rechnet.
         """
+        if not entry.get("last_seen"):
+            _logger.warning("lldp_neighbor_without_last_seen", source_mac=entry.get("source_mac"))
+            entry = {**entry, "last_seen": time.time()}
         try:
             return LLDPNeighbor(**entry)
         except (TypeError, ValueError) as exc:

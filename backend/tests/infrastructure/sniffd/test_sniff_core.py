@@ -20,12 +20,14 @@ import os
 import socket
 import sys
 import threading
+import time
 from typing import Any
 
 import pytest
 
 from infrastructure.sniffd import _scapy, sniff_core
 from infrastructure.sniffd.sniff_core import (
+    decode_tlv_text,
     export_pcap,
     parse_packet,
     run_lldp_sniff,
@@ -59,6 +61,66 @@ def test_parse_packet_raising_packet_returns_none() -> None:
 def test_parse_packet_none_returns_none() -> None:
     """``None`` als Paket -> ``None`` (kein Crash beim Attribut-Zugriff)."""
     assert parse_packet(None) is None
+
+
+# ── decode_tlv_text: die Bytes->Text-Naht der Nachbar-dicts (scapy-frei) ──────
+
+
+def test_decode_tlv_text_bytes_become_real_text() -> None:
+    """Rohe ``bytes`` vom Draht werden zu ECHTEM Text -- nicht zur bytes-Schreibweise.
+
+    Der gemeldete Mangel: ``str(b'Fritzchen')`` ergibt ``"b'Fritzchen'"`` und dieser
+    Text erreichte unveraendert die Oberflaeche.
+    """
+    assert decode_tlv_text(b"Fritzchen", "system_name") == "Fritzchen"
+    assert decode_tlv_text(b"AVM FRITZ!Box 5590 Fiber 272.08.02", "system_desc") == (
+        "AVM FRITZ!Box 5590 Fiber 272.08.02"
+    )
+    assert decode_tlv_text(b"LAN:1", "port_desc") == "LAN:1"
+    # Die alte, kaputte Form darf NICHT mehr entstehen.
+    assert "b'" not in decode_tlv_text(b"Fritzchen", "system_name")
+
+
+def test_decode_tlv_text_accepts_str_unchanged() -> None:
+    """scapy liefert ``chassis_id`` je nach Subtype schon als ``str`` -- unveraendert durch.
+
+    Ein blindes ``.decode()`` waere an diesem Fall gescheitert (AttributeError).
+    """
+    assert decode_tlv_text("11:22:33:44:55:66", "chassis_id") == "11:22:33:44:55:66"
+
+
+def test_decode_tlv_text_utf8_umlauts() -> None:
+    """IEEE 802.1AB schreibt UTF-8 vor -- Mehrbyte-Zeichen kommen korrekt an."""
+    assert decode_tlv_text("Büro-Süd".encode(), "system_name") == "Büro-Süd"
+
+
+def test_decode_tlv_text_undecodable_neither_crashes_nor_lies() -> None:
+    """DER UNANGENEHME FALL: nicht dekodierbare Bytes -- kein Absturz, keine stille Luege.
+
+    Ein fremdes Geraet darf beliebige Bytes senden. Erwartet wird: kein Crash, kein
+    leerer Wert (das waere die stille Luege "das Geraet hat keinen Namen"), sondern
+    ein als teilweise unlesbar ERKENNBARER Text (U+FFFD) -- und der lesbare Anteil
+    bleibt erhalten.
+    """
+    result = decode_tlv_text(b"Switch\xff\xfeName", "system_name")
+    assert isinstance(result, str)
+    assert result != ""  # keine stille Luege
+    assert "�" in result  # der Vorfall bleibt am Wert sichtbar
+    assert result.startswith("Switch")  # der lesbare Anteil geht nicht verloren
+    assert result.endswith("Name")
+
+
+def test_decode_tlv_text_undecodable_is_logged(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Nicht dekodierbare Bytes werden PROTOKOLLIERT (kein stilles Schlucken)."""
+    seen: list[tuple[str, dict[str, Any]]] = []
+    monkeypatch.setattr(
+        sniff_core._logger,
+        "warning",
+        lambda event, **kw: seen.append((event, kw)),
+    )
+    decode_tlv_text(b"\xff\xfe", "system_desc")
+    assert [e for e, _ in seen] == ["lldp_tlv_undecodable"]
+    assert seen[0][1]["field"] == "system_desc"
 
 
 # ── run_lldp_sniff ohne scapy.contrib (CI-Fall) ───────────────────────────────
@@ -114,6 +176,80 @@ def test_parse_packet_real_tcp_https_summary() -> None:
     assert "timestamp" in summary
     # Fehlende Felder werden weggelassen, nicht None-gefuellt.
     assert "is_ipv6" not in summary
+
+
+@pytest.mark.skipif(
+    not (_scapy.HAS_SCAPY and _scapy.HAS_SCAPY_CONTRIB),
+    reason="scapy.contrib nicht verfuegbar (CI-Fall)",
+)
+def test_parse_lldp_neighbor_real_frame_yields_text_and_timestamp() -> None:
+    """Ein ECHTES, vom Draht dissektiertes LLDP-Frame -> lesbarer Text + ``last_seen``.
+
+    Beide gemeldeten Maengel an einem realen Wert (Form der gemessenen FRITZ!Box):
+    die Text-TLVs kommen als echter Text heraus (nicht als ``"b'Fritzchen'"``), und
+    ``last_seen`` traegt einen Zeitstempel der Wanduhr statt ``0.0``.
+
+    Das Frame wird gebaut, zu Bytes serialisiert und WIEDER dissektiert -- nur so
+    liefert scapy dieselben Feldtypen wie ein echt gesniffter Frame.
+    """
+    from scapy.contrib.lldp import LLDPDUEndOfLLDPDU, LLDPDUTimeToLive
+
+    frame = (
+        _scapy.Ether(src="11:22:33:44:55:66", dst="01:80:c2:00:00:0e", type=0x88CC)
+        / _scapy.LLDPDUChassisID(subtype=4, id=b"\x11\x22\x33\x44\x55\x66")
+        / _scapy.LLDPDUPortID(subtype=5, id=b"LAN:1")
+        / LLDPDUTimeToLive(ttl=120)
+        / _scapy.LLDPDUSystemName(system_name=b"Fritzchen")
+        / _scapy.LLDPDUSystemDescription(description=b"AVM FRITZ!Box 5590 Fiber 272.08.02")
+        / _scapy.LLDPDUPortDescription(description=b"LAN:1")
+        / LLDPDUEndOfLLDPDU()
+    )
+    before = time.time()
+    neighbor = sniff_core._parse_lldp_neighbor(_scapy.Ether(bytes(frame)))
+    after = time.time()
+
+    assert neighbor is not None
+    # Mangel 1: echter Text, keine bytes-Schreibweise.
+    assert neighbor["system_name"] == "Fritzchen"
+    assert neighbor["system_desc"] == "AVM FRITZ!Box 5590 Fiber 272.08.02"
+    assert neighbor["port_desc"] == "LAN:1"
+    assert neighbor["port_id"] == "LAN:1"
+    assert neighbor["chassis_id"] == "11:22:33:44:55:66"
+    assert not any(str(v).startswith("b'") for v in neighbor.values())
+    # Mangel 2: gesetzter Zeitpunkt auf der Wanduhr-Zeitachse.
+    assert before <= neighbor["last_seen"] <= after
+
+
+@pytest.mark.skipif(
+    not (_scapy.HAS_SCAPY and _scapy.HAS_SCAPY_CONTRIB),
+    reason="scapy.contrib nicht verfuegbar (CI-Fall)",
+)
+def test_parse_lldp_neighbor_undecodable_name_does_not_crash() -> None:
+    """DER UNANGENEHME FALL am echten Frame: kaputte Bytes im System-Namen.
+
+    Ein fremdes Geraet sendet einen nicht UTF-8-dekodierbaren System-Namen. Erwartet:
+    kein Absturz, kein leerer Name (stille Luege), sondern ein erkennbar teilweise
+    unlesbarer Text -- und der Rest des Nachbarn bleibt intakt.
+    """
+    from scapy.contrib.lldp import LLDPDUEndOfLLDPDU, LLDPDUTimeToLive
+
+    frame = (
+        _scapy.Ether(src="11:22:33:44:55:66", dst="01:80:c2:00:00:0e", type=0x88CC)
+        / _scapy.LLDPDUChassisID(subtype=4, id=b"\x11\x22\x33\x44\x55\x66")
+        / _scapy.LLDPDUPortID(subtype=5, id=b"LAN:1")
+        / LLDPDUTimeToLive(ttl=120)
+        / _scapy.LLDPDUSystemName(system_name=b"Switch\xff\xfeName")
+        / LLDPDUEndOfLLDPDU()
+    )
+    neighbor = sniff_core._parse_lldp_neighbor(_scapy.Ether(bytes(frame)))
+
+    assert neighbor is not None  # kein Absturz
+    name = neighbor["system_name"]
+    assert isinstance(name, str)
+    assert name != ""  # keine stille Luege
+    assert "�" in name  # der Vorfall bleibt sichtbar
+    assert neighbor["source_mac"] == "11:22:33:44:55:66"  # Rest intakt
+    assert neighbor["last_seen"] > 0.0
 
 
 # ── DNS-Sniff-Klassifikation (start_dns_sniff, nur mit lokal verfuegbarem scapy) ─

@@ -18,7 +18,10 @@ Eventloop) und reicht reine ``dict``s ueber IPC:
   optionaler BPF-Filter); ``on_packet(dict)`` pro Paket, ``on_raw(pkt)`` fuers
   spaetere ``wrpcap``, ``on_finished()`` bei Selbst-Ende (max_packets).
 * ``run_lldp_sniff`` -- blockierender, zeitbegrenzter LLDP/CDP-Sniff -> Nachbar-
-  ``dict``-Liste (dedupliziert per ``source_mac``).
+  ``dict``-Liste (dedupliziert per ``source_mac``). Die Text-TLVs gehen ueber
+  ``decode_tlv_text`` als ECHTER Text (nicht als ``bytes``-Schreibweise) heraus,
+  und jeder Nachbar traegt ein ``last_seen`` aus ``time.time()`` -- dieselbe
+  Wanduhr-Zeitachse wie ``parse_packet``s ``timestamp``.
 * ``export_pcap`` -- gesammelte Rohpakete als ``.pcap`` schreiben (best-effort).
 
 GETEILTES scapy (kein Duplikat): die scapy-Symbole kommen aus
@@ -706,23 +709,72 @@ def start_pcap_sniff(
 # ── LLDP-Kern (einmalig, zeitbegrenzt) -- PORTIERT aus capture/lldp_sniffer.py ─
 
 
+def decode_tlv_text(value: Any, field: str) -> str:
+    """Ein LLDP-/CDP-Text-TLV zu echtem Text -- die Bytes->Text-Naht des Nachbar-dicts.
+
+    scapy liefert fuer diese Felder WECHSELNDE Typen: die reinen Text-TLVs
+    (``system_name``, ``description``, ``port_id``, CDP-``val``) kommen als rohe
+    ``bytes`` vom Draht, waehrend ``chassis_id`` je nach Subtype schon als ``str``
+    aufbereitet ist (Subtype 4 = MAC -> ``"11:22:33:44:55:66"``, Subtype 7 =
+    locally assigned -> ``bytes``). Ein blindes ``str()`` machte aus ``b'Fritzchen'``
+    den sichtbaren Text ``"b'Fritzchen'"`` -- genau der gemeldete Mangel; ein
+    blindes ``.decode()`` wuerde am ``str``-Fall scheitern. Darum hier BEIDE Faelle.
+
+    Kodierung: IEEE 802.1AB schreibt fuer die Text-TLVs (System Name, System
+    Description, Port Description) UTF-8 vor; ``utf-8`` ist also die vertraglich
+    richtige Erwartung, nicht eine Vermutung.
+
+    NICHT DEKODIERBARE WERTE: Ein Geraet im Netz kann beliebige Bytes senden --
+    darauf darf weder ein Absturz noch eine stille Luege folgen. Darum
+    ``errors="replace"``: die kaputten Stellen werden als U+FFFD sichtbar
+    (der Wert bleibt als das erkennbar, was er ist -- teilweise unlesbar), und
+    der Vorfall wird EINMAL mit Feldnamen protokolliert. Ein stilles ``ignore``
+    wuerde die Verstuemmelung verschweigen, ein ``raise`` liesse ein fremdes
+    Geraet die Topologie-Erkennung abschiessen -- beides ist unerwuenscht.
+    """
+    if isinstance(value, bytes):
+        try:
+            return value.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            # Kein stilles Schlucken: der Vorfall wird benannt, der Wert bleibt
+            # als teilweise unlesbar ERKENNBAR (U+FFFD) statt leer/verfaelscht.
+            _logger.warning("lldp_tlv_undecodable", field=field, error=str(exc))
+            return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
 def _parse_lldp_neighbor(pkt: Any) -> dict[str, Any] | None:
-    """LLDP-Paket -> Nachbar-``dict`` (AS-IS ``ScapyLldpSniffer._parse_lldp``)."""
+    """LLDP-Paket -> Nachbar-``dict`` (Text-TLVs ueber ``decode_tlv_text``).
+
+    ``last_seen`` stempelt der Helfer mit ``time.time()`` -- exakt der Weg, den
+    ``parse_packet`` fuer ``PacketSummary.timestamp`` schon geht (dieselbe
+    Wanduhr-Zeitachse, gegen die der api-Rand in ``/lldp/neighbors`` mit
+    ``time.time()`` das Alter rechnet). Ohne diesen Stempel blieb ``last_seen``
+    auf dem dataclass-Default ``0.0``, wodurch das Alter zur Unix-Zeit wurde und
+    jeder frische Nachbar sofort als abgelaufen galt.
+    """
     try:
         neighbor: dict[str, Any] = {
             "source_mac": pkt[_scapy.Ether].src,
             "protocol": "LLDP",
+            "last_seen": time.time(),
         }
         if pkt.haslayer(_scapy.LLDPDUChassisID):
-            neighbor["chassis_id"] = str(pkt[_scapy.LLDPDUChassisID].id)
+            neighbor["chassis_id"] = decode_tlv_text(pkt[_scapy.LLDPDUChassisID].id, "chassis_id")
         if pkt.haslayer(_scapy.LLDPDUPortID):
-            neighbor["port_id"] = str(pkt[_scapy.LLDPDUPortID].id)
+            neighbor["port_id"] = decode_tlv_text(pkt[_scapy.LLDPDUPortID].id, "port_id")
         if pkt.haslayer(_scapy.LLDPDUSystemName):
-            neighbor["system_name"] = str(pkt[_scapy.LLDPDUSystemName].system_name)
+            neighbor["system_name"] = decode_tlv_text(
+                pkt[_scapy.LLDPDUSystemName].system_name, "system_name"
+            )
         if pkt.haslayer(_scapy.LLDPDUSystemDescription):
-            neighbor["system_desc"] = str(pkt[_scapy.LLDPDUSystemDescription].description)[:200]
+            neighbor["system_desc"] = decode_tlv_text(
+                pkt[_scapy.LLDPDUSystemDescription].description, "system_desc"
+            )[:200]
         if pkt.haslayer(_scapy.LLDPDUPortDescription):
-            neighbor["port_desc"] = str(pkt[_scapy.LLDPDUPortDescription].description)
+            neighbor["port_desc"] = decode_tlv_text(
+                pkt[_scapy.LLDPDUPortDescription].description, "port_desc"
+            )
         return neighbor
     except Exception as exc:
         _logger.warning("lldp_parse_failed", error=str(exc))
@@ -730,20 +782,33 @@ def _parse_lldp_neighbor(pkt: Any) -> dict[str, Any] | None:
 
 
 def _parse_cdp_neighbor(pkt: Any) -> dict[str, Any] | None:
-    """CDP-Paket -> Nachbar-``dict`` (AS-IS ``ScapyLldpSniffer._parse_cdp``)."""
+    """CDP-Paket -> Nachbar-``dict`` (Text-Felder ueber ``decode_tlv_text``).
+
+    Wie ``_parse_lldp_neighbor``: die CDP-Textfelder kommen als rohe ``bytes``
+    vom Draht und werden an DIESER Naht zu Text; ``last_seen`` traegt denselben
+    ``time.time()``-Stempel (eine Zeitachse fuer beide Protokolle).
+    """
     try:
         src_mac = pkt[_scapy.Ether].src if pkt.haslayer(_scapy.Ether) else ""
-        neighbor: dict[str, Any] = {"source_mac": src_mac, "protocol": "CDP"}
+        neighbor: dict[str, Any] = {
+            "source_mac": src_mac,
+            "protocol": "CDP",
+            "last_seen": time.time(),
+        }
         if pkt.haslayer(_scapy.CDPMsgDeviceID):
-            name = str(pkt[_scapy.CDPMsgDeviceID].val)
+            name = decode_tlv_text(pkt[_scapy.CDPMsgDeviceID].val, "system_name")
             neighbor["system_name"] = name
             neighbor["chassis_id"] = name
         if pkt.haslayer(_scapy.CDPMsgPortID):
-            neighbor["port_id"] = str(pkt[_scapy.CDPMsgPortID].val)
+            neighbor["port_id"] = decode_tlv_text(pkt[_scapy.CDPMsgPortID].val, "port_id")
         if pkt.haslayer(_scapy.CDPMsgSoftwareVersion):
-            neighbor["system_desc"] = str(pkt[_scapy.CDPMsgSoftwareVersion].val)[:200]
+            neighbor["system_desc"] = decode_tlv_text(
+                pkt[_scapy.CDPMsgSoftwareVersion].val, "system_desc"
+            )[:200]
         if pkt.haslayer(_scapy.CDPMsgPlatform):
-            neighbor["capabilities"] = [str(pkt[_scapy.CDPMsgPlatform].val)]
+            neighbor["capabilities"] = [
+                decode_tlv_text(pkt[_scapy.CDPMsgPlatform].val, "capabilities")
+            ]
         return neighbor
     except Exception as exc:
         _logger.warning("cdp_parse_failed", error=str(exc))

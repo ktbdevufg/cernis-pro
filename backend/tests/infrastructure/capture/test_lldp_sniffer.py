@@ -15,10 +15,12 @@ Async ueber ``asyncio.run`` (kein ``pytest-asyncio``). KEIN echter scapy/Subproz
 """
 
 import asyncio
+import time
 from typing import Any
 
 import pytest
 
+from application.capture import enrich_neighbor
 from domain.capture import LLDPNeighbor
 from infrastructure.capture.lldp_sniffer import ScapyLldpSniffer
 from ports.capture import LldpSnifferPort
@@ -111,3 +113,47 @@ def test_neighbor_from_dict_returns_none_on_bad_type() -> None:
     assert ScapyLldpSniffer._neighbor_from_dict({"unknown": "x"}) is None
     ok = ScapyLldpSniffer._neighbor_from_dict({"source_mac": "aa:bb"})
     assert ok is not None and ok.source_mac == "aa:bb"
+
+
+# ── last_seen: der Zeitpunkt der letzten Sichtung ─────────────────────────────
+
+
+def test_neighbor_from_dict_keeps_helper_last_seen() -> None:
+    """Der vom Helfer gestempelte ``last_seen`` wird unveraendert uebernommen."""
+    stamped = 1_785_263_168.5
+    neighbor = ScapyLldpSniffer._neighbor_from_dict({"source_mac": "aa:bb", "last_seen": stamped})
+    assert neighbor is not None
+    assert neighbor.last_seen == stamped
+
+
+def test_neighbor_from_dict_fills_missing_last_seen() -> None:
+    """Fehlt ``last_seen``, bleibt es NICHT auf ``0.0`` (das waere die stille Luege).
+
+    Der dataclass-Default ``0.0`` machte das Alter zur Unix-Zeit; der Empfangs-
+    zeitpunkt wird an dieser Naht nachgetragen.
+    """
+    before = time.time()
+    neighbor = ScapyLldpSniffer._neighbor_from_dict({"source_mac": "aa:bb"})
+    after = time.time()
+    assert neighbor is not None
+    assert neighbor.last_seen != 0.0
+    assert before <= neighbor.last_seen <= after
+
+
+def test_freshly_captured_neighbor_is_not_expired() -> None:
+    """Ein SOEBEN erfasster Nachbar gilt NICHT als abgelaufen und hat plausibles Alter.
+
+    Das ist der gemeldete Mangel 2 im Ergebnis: ``last_seen = 0.0`` ergab
+    ``age_secs = <Unix-Zeit>`` und ``expired = True`` fuer einen gerade gesehenen
+    Nachbarn. Geprueft wird gegen dieselbe Rechnung, die der api-Rand fahrt.
+    """
+    fake = _FakeLldpClient(
+        [{"source_mac": "aa:bb:cc:dd:ee:ff", "system_name": "Fritzchen", "last_seen": time.time()}]
+    )
+    result = asyncio.run(
+        ScapyLldpSniffer(client_factory=lambda: fake).capture(interface=None, duration=1.0)
+    )
+    assert len(result) == 1
+    age_secs, expired = enrich_neighbor(result[0], time.time())
+    assert not expired
+    assert 0 <= age_secs < 5  # Sekunden, nicht Unix-Zeit
