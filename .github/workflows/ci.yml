@@ -42,6 +42,20 @@ jobs:
       - name: mypy (strict)
         run: uv run mypy
 
+      # ZWEITE PRUEFRICHTUNG -- kein versehentlicher Doppelaufruf:
+      # mypy wertet `sys.platform` STATISCH aus. Der Runner hier ist Linux, also
+      # gilt jeder `if sys.platform == "win32":`-Block als unerreichbar und wird
+      # nie geprueft -- Fehler in den Windows-Zweigen faenden wir erst auf einer
+      # Windows-Maschine. Der zweite Lauf prueft darum ausdruecklich gegen win32.
+      # Eigener Cache-Ordner: ein Plattformwechsel entwertet den Zwischenspeicher,
+      # beide Laeufe wuerden sich sonst gegenseitig die Ergebnisse verwerfen.
+      # `always()`: laeuft auch nach rotem erstem Schritt, damit ein Durchlauf
+      # BEIDE Richtungen zeigt. Ein rotes Ergebnis laesst den Job weiterhin
+      # scheitern -- die Bedingung schluckt den Ausgang nicht.
+      - name: mypy (strict, Zielplattform Windows/win32)
+        if: always()
+        run: uv run mypy --platform win32 --cache-dir "${{ runner.temp }}/mypy_cache_win32"
+
       - name: import-linter (Architektur-Regeln)
         run: PYTHONPATH=backend uv run lint-imports
 

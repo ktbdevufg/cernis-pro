@@ -77,26 +77,38 @@ def _stufen_setzen(
 
     Die Weiche importiert ``ctypes.util``/``winreg`` LOKAL im Windows-Zweig, darum
     werden die Modul-Attribute selbst gepatcht (nicht Namen im Weichen-Modul).
+
+    ``winreg`` steht -- Import UND Zugriff -- im positiven ``sys.platform``-Guard,
+    genau wie im Produktivcode: mypy wertet ``sys.platform`` statisch aus, und der
+    ausgelieferte ``winreg``-Stub stellt seinen GESAMTEN Inhalt unter diese
+    Bedingung. Auf Nicht-Windows existieren ``KEY_WOW64_64KEY``/``KEY_WOW64_32KEY``
+    fuer mypy also nicht. Der ``skipif``-Schutz der Tests wirkt erst zur Laufzeit
+    und erreicht die statische Pruefung nicht -- beides ist noetig, keines ersetzt
+    das andere.
     """
     import ctypes.util
     import os
-    import winreg
 
-    def _open_key(
-        key: object, sub_key: str, reserved: int = 0, access: int = 0, *args: Any
-    ) -> object:
-        # Ein Kontextmanager-faehiges Objekt genuegt -- die Weiche wertet nur aus,
-        # ob das Oeffnen ohne OSError gelingt. Bewusst KEIN echter
-        # ``winreg.OpenKey``-Aufruf: der wuerde die gepatchte Funktion erneut
-        # treffen und endlos rekursieren.
-        if sub_key == _DIENST_PFAD and dienst:
-            return contextlib.nullcontext()
-        if sub_key == _PRODUKT_PFAD:
-            if access & winreg.KEY_WOW64_64KEY and produkt_64:
+    if sys.platform == "win32":
+        import winreg
+
+        def _open_key(
+            key: object, sub_key: str, reserved: int = 0, access: int = 0, *args: Any
+        ) -> object:
+            # Ein Kontextmanager-faehiges Objekt genuegt -- die Weiche wertet nur aus,
+            # ob das Oeffnen ohne OSError gelingt. Bewusst KEIN echter
+            # ``winreg.OpenKey``-Aufruf: der wuerde die gepatchte Funktion erneut
+            # treffen und endlos rekursieren.
+            if sub_key == _DIENST_PFAD and dienst:
                 return contextlib.nullcontext()
-            if access & winreg.KEY_WOW64_32KEY and produkt_32:
-                return contextlib.nullcontext()
-        raise OSError(2, "Das System kann die angegebene Datei nicht finden")
+            if sub_key == _PRODUKT_PFAD:
+                if access & winreg.KEY_WOW64_64KEY and produkt_64:
+                    return contextlib.nullcontext()
+                if access & winreg.KEY_WOW64_32KEY and produkt_32:
+                    return contextlib.nullcontext()
+            raise OSError(2, "Das System kann die angegebene Datei nicht finden")
+
+        monkeypatch.setattr(winreg, "OpenKey", _open_key)
 
     treffer_pfade = set()
     if treiber_drivers:
@@ -110,7 +122,6 @@ def _stufen_setzen(
         teile = tuple(str(pfad).replace("/", "\\").split("\\"))
         return any(teile[-len(t) :] == t for t in treffer_pfade)
 
-    monkeypatch.setattr(winreg, "OpenKey", _open_key)
     monkeypatch.setattr(os.path, "exists", _exists)
     monkeypatch.setattr(
         ctypes.util, "find_library", lambda name: "wpcap.dll" if bibliothek_suche else None

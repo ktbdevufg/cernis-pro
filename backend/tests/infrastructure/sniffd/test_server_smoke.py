@@ -243,7 +243,18 @@ def test_created_address_is_restricted_to_current_user() -> None:
 
 
 def _current_process_sid() -> str:
-    """SID des aktuellen Benutzers -- nur fuer den Windows-Zweig des ACL-Tests."""
-    from infrastructure.sniffd.transport import _current_user_sid
+    """SID des aktuellen Benutzers -- nur fuer den Windows-Zweig des ACL-Tests.
 
-    return _current_user_sid()
+    Import UND Aufruf stehen im positiven ``sys.platform``-Guard, genau wie im
+    Produktivcode: ``_current_user_sid`` ist in ``transport.py`` selbst innerhalb
+    des ``if sys.platform == "win32":``-Blocks definiert. mypy wertet
+    ``sys.platform`` statisch aus und behandelt diesen Block auf Nicht-Windows als
+    unerreichbar -- der Name existiert dort also gar nicht. Der aufrufende Test
+    betritt diesen Zweig zur Laufzeit ohnehin nur auf Windows; der Guard traegt
+    dieselbe Aussage zusaetzlich in die statische Pruefung.
+    """
+    if sys.platform == "win32":
+        from infrastructure.sniffd.transport import _current_user_sid
+
+        return _current_user_sid()
+    raise AssertionError("nur im Windows-Zweig des ACL-Tests aufrufbar")
