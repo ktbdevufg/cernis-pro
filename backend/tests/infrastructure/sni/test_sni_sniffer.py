@@ -15,13 +15,13 @@ KEIN echter scapy/Raw-Socket, KEIN echter Subprozess in diesem Modul.
 """
 
 import os
-import socket
 import time
 
 import pytest
 
 from infrastructure.sni.errors import SniError, SniPermissionError
 from infrastructure.sni.sni_sniffer import ScapySniSniffer, _RawHit, _resolve_app_name
+from infrastructure.sniffd_client.base import sniffd_platform_supported
 
 
 class _FakeChannel:
@@ -224,25 +224,31 @@ def test_stop_idempotent_without_sniff() -> None:
 def test_check_permission_is_optimistic_none() -> None:
     """ETAPPE-2-(B)-Semantik: ``check_permission`` macht KEINE Backend-Raw-Socket-Probe
     mehr (das Backend hat kuenftig kein CAP_NET_RAW -- eine Probe wuerde faelschlich
-    "keine Rechte" melden). Auf tragender Plattform (Linux/macOS, AF_UNIX vorhanden) ist
-    sie optimistisch ``None``; der echte Rechte-Fehler kommt beim ``start()`` ueber die
-    ERROR-Naht des Helfers. Ersetzt den alten Test der AF_PACKET-Probe-Semantik.
-    Auf Windows (kein AF_UNIX) hat der Plattform-Marker Vorrang (``sniffd_unavailable_reason``
-    -> ``WINDOWS_IPC_UNSUPPORTED`` bzw. ``NPCAP_MISSING``) -> nicht ``None``, damit das
-    Frontend die Funktion ehrlich ausgraut (W1) -- plattform-abhaengig, analog zum
-    ``is_available``-Test."""
+    "keine Rechte" melden). Auf tragender Plattform ist sie optimistisch ``None``; der
+    echte Rechte-Fehler kommt beim ``start()`` ueber die ERROR-Naht des Helfers.
+    Ersetzt den alten Test der AF_PACKET-Probe-Semantik.
+
+    Die Plattform-Weiche entscheidet, was "tragend" heisst: Linux/macOS immer, Windows
+    genau dann, wenn Npcap erkannt wird (die IPC-Naht traegt dort seit W2 ueber eine
+    benannte Pipe). Fehlt Npcap, hat der Marker ``NPCAP_MISSING`` Vorrang -> nicht
+    ``None``, damit das Frontend die Funktion ehrlich ausgraut. Der Erwartungswert
+    kommt darum aus ``sniffd_platform_supported()`` selbst und nicht aus einer
+    Annahme ueber die Plattform."""
+    plattform_traegt, _ = sniffd_platform_supported()
     result = ScapySniSniffer(channel_factory=_FakeChannel).check_permission()
-    if hasattr(socket, "AF_UNIX"):
+    if plattform_traegt:
         assert result is None
     else:
-        assert result is not None
+        assert result == "NPCAP_MISSING"
 
 
 def test_is_available_reflects_helper_entry_in_dev() -> None:
-    """In der dev-Umgebung auf tragender Plattform (Linux/macOS, AF_UNIX vorhanden)
-    existiert ``backend/sniffd.py`` -> ``is_available()`` True. Reiner Pfad-
-    Verfuegbarkeits-Check (scapy lebt jetzt im Helfer, ohne Spawn nicht pruefbar).
-    Auf Windows (kein AF_UNIX) meldet die Pruefung ehrlich False, obwohl die Helfer-
-    Binary existiert (W1: Npcap/AF_UNIX-Naht noch nicht tragbar) -- plattform-abhaengig."""
-    expected = hasattr(socket, "AF_UNIX")
+    """In der dev-Umgebung auf tragender Plattform existiert ``backend/sniffd.py``
+    -> ``is_available()`` True. Reiner Pfad-Verfuegbarkeits-Check (scapy lebt jetzt im
+    Helfer, ohne Spawn nicht pruefbar).
+
+    Traegt die Plattform nicht (Windows ohne erkanntes Npcap), meldet die Pruefung
+    ehrlich False, obwohl die Helfer-Binary existiert -- plattform-abhaengig. Der
+    Erwartungswert kommt aus ``sniffd_platform_supported()`` selbst."""
+    expected, _ = sniffd_platform_supported()
     assert ScapySniSniffer(channel_factory=_FakeChannel).is_available() is expected

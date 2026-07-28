@@ -21,7 +21,6 @@ KEIN echter scapy/Raw-Socket/Subprozess in diesem Modul.
 
 import asyncio
 import queue
-import socket
 import threading
 from typing import Any
 
@@ -30,6 +29,7 @@ import pytest
 from domain.capture import PacketSummary
 from infrastructure.capture.errors import CaptureError
 from infrastructure.capture.packet_sniffer import ScapyPacketSniffer
+from infrastructure.sniffd_client.base import sniffd_platform_supported
 from infrastructure.sniffd_client.pcap_client import _STREAM_END
 from ports.capture import PacketSnifferPort
 
@@ -248,9 +248,13 @@ def test_check_permission_is_optimistic_none() -> None:
 
 
 def test_is_available_reflects_helper_entry_in_dev() -> None:
-    # dev-Umgebung mit tragender Plattform (Linux/macOS, AF_UNIX vorhanden):
-    # backend/sniffd.py existiert -> is_available() True. Auf Windows (kein AF_UNIX)
+    # dev-Umgebung mit tragender Plattform: backend/sniffd.py existiert ->
+    # is_available() True. Traegt die Plattform NICHT (Windows ohne erkanntes Npcap),
     # meldet die Verfuegbarkeitspruefung ehrlich False, obwohl die Helfer-Binary
-    # existiert (W1: Npcap/AF_UNIX-Naht noch nicht tragbar) -- deshalb plattform-abhaengig.
-    expected = hasattr(socket, "AF_UNIX")
+    # existiert -- deshalb plattform-abhaengig.
+    #
+    # Der Erwartungswert kommt aus der Weiche selbst statt aus einer AF_UNIX-Annahme:
+    # auf Windows entscheidet seit W2 allein das erkannte Npcap ueber die
+    # Verfuegbarkeit, nicht mehr die (inzwischen portierte) IPC-Naht.
+    expected, _ = sniffd_platform_supported()
     assert ScapyPacketSniffer().is_available() is expected

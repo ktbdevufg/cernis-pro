@@ -174,24 +174,32 @@ def _spawn_command(socket_path: str) -> list[str]:
 def sniffd_platform_supported() -> tuple[bool, str]:
     """``(ok, marker)`` -- traegt die Sniff-Naht auf DIESER Plattform grundsaetzlich?
 
-    ``ok=True, marker=""`` wenn tragbar (Linux/macOS: AF_UNIX vorhanden). Sonst
-    ``ok=False`` mit stabilem Marker-String fuer den API-Layer.
+    ``ok=True, marker=""`` wenn tragbar (Linux/macOS immer; Windows mit erkanntem
+    Npcap). Sonst ``ok=False`` mit stabilem Marker-String fuer den API-Layer.
 
     Windows-Zweig (``sys.platform == "win32"``): Die Sniff-Familie
-    (SNI/pcap/LLDP) braucht Npcap FUER die Rohpaket-Erfassung UND die AF_UNIX-IPC-
-    Naht zum Helfer. Beides ist auf Windows in W1 noch nicht tragbar:
-    * Npcap fehlt -> ``"NPCAP_MISSING"`` (ohne Treiber kein Sniffing).
-    * Npcap da, aber kein AF_UNIX -> ``"WINDOWS_IPC_UNSUPPORTED"``. Auch mit Npcap
-      bleibt die Naht in W1 unnutzbar, weil die AF_UNIX-Helfer-IPC noch NICHT auf
-      Windows Named Pipes portiert ist (das ist Aufgabe W2). Darum sind BEIDE
-      Windows-Faelle ``ok=False``.
+    (SNI/pcap/LLDP) braucht Npcap FUER die Rohpaket-Erfassung. Die IPC-Naht zum
+    Helfer traegt auf Windows seit W2 ueber eine benannte Pipe mit Zugriff nur
+    fuer den eigenen Benutzer (siehe ``transport.py``) -- sie ist damit KEIN
+    Hinderungsgrund mehr. Es bleiben genau ZWEI Faelle:
+    * Npcap erkannt -> ``ok=True``, kein Marker (Funktion verfuegbar).
+    * Npcap fehlt -> ``ok=False, "NPCAP_MISSING"`` (ohne Treiber kein Sniffing);
+      das Frontend graut die Funktion mit dem bestehenden Npcap-Hinweis aus und
+      bietet die Nachinstallation an.
+
+    Einen dritten Fall ("Npcap da, aber Naht nicht portiert") gibt es nicht mehr;
+    der frueher dafuer gefuehrte Marker ist ersatzlos entfallen.
+
+    KEIN stiller Fallback: schlagen ALLE drei Erkennungsstufen fehl, gilt Npcap
+    als nicht vorhanden und das wird ueber ``"NPCAP_MISSING"`` benannt -- nie als
+    vorhanden angenommen.
     """
     # Plattform-Weiche ueber ``sys.platform == "win32"``: DIESEN Guard wertet mypy
     # STATISCH aus (anders als ``hasattr(socket, "AF_UNIX")``). Nur so aktiviert mypy
     # die Windows-``winreg``-Stubs im Windows-Zweig und behandelt ihn auf Linux/macOS
     # als unerreichbar -- die frueheren ``winreg``-``attr-defined``-Fehler auf dem
-    # Linux-Runner entfallen dadurch. Laufzeit-Semantik bleibt identisch: ``win32``
-    # deckt sich mit dem alten ``not hasattr(socket, "AF_UNIX")``-Zweig.
+    # Linux-Runner entfallen dadurch. Der Guard trennt hier die PLATTFORM (welche
+    # Pruefung gilt), nicht mehr die Verfuegbarkeit der IPC-Naht.
     if sys.platform == "win32":
         # Windows: Npcap ueber drei Stufen pruefen (erste positive genuegt).
         # winreg/ctypes.util lokal importieren, damit Linux/macOS sie nie laden.
@@ -220,7 +228,7 @@ def sniffd_platform_supported() -> tuple[bool, str]:
 
         if not npcap:
             return (False, "NPCAP_MISSING")
-        return (False, "WINDOWS_IPC_UNSUPPORTED")
+        return (True, "")
 
     # Linux/macOS: AF_UNIX vorhanden -> Naht grundsaetzlich tragbar.
     return (True, "")
@@ -244,9 +252,9 @@ def helper_entry_exists() -> bool:
     echte Start ueber die ERROR-Naht des Helfers.
 
     ZUERST ``sniffd_platform_supported()``: traegt die Plattform grundsaetzlich nicht
-    (Windows in W1), ist der Helfer trotz existierender Binary NICHT nutzbar -> ``False``
-    (ehrlich statt faelschlich "verfuegbar"). Der Datei-Existenz-Check laeuft nur, wenn
-    die Plattform traegt (Linux/macOS: Verhalten unveraendert, ``ok=True``).
+    (Windows ohne Npcap), ist der Helfer trotz existierender Binary NICHT nutzbar ->
+    ``False`` (ehrlich statt faelschlich "verfuegbar"). Der Datei-Existenz-Check laeuft
+    nur, wenn die Plattform traegt (Linux/macOS immer; Windows mit erkanntem Npcap).
     """
     ok, _ = sniffd_platform_supported()
     if not ok:
