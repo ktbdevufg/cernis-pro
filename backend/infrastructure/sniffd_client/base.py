@@ -64,6 +64,7 @@ from typing import IO, Any
 import structlog
 
 from infrastructure.sniffd.protocol import (
+    MessageType,
     ProtocolError,
     recv_message,
     send_message,
@@ -79,7 +80,21 @@ from infrastructure.sniffd.transport import (
 _logger = structlog.get_logger(__name__)
 
 # Helfer-Binary-/Entry-Name (frozen: neben sys.executable; dev: backend/sniffd.py).
-_HELPER_BINARY_NAME = "cernis-sniffd"
+#
+# EINE Stelle, plattformuebliche Endung: Windows legt die Binary als
+# ``cernis-sniffd.exe`` ab (``build.ps1``), Linux/macOS ohne Endung
+# (``build.sh``/``build-linux.sh``). Der Name wurde frueher OHNE Endung gebildet --
+# im eingefrorenen Windows-Bau zeigte das Spawn-Kommando damit GEMESSEN auf einen
+# Pfad, den es nicht gibt (``...\dist\cernis-sniffd``), waehrend die echte
+# ``cernis-sniffd.exe`` DANEBEN lag. Die Endung haengt hier an genau EINEM Ort,
+# damit sie nicht wieder auseinanderlaufen kann.
+#
+# ``sys.platform``-Guard statt ``os.name``: mypy wertet GENAU DIESEN statisch aus
+# (Projektlinie, wie in ``transport.py``/``sniffd_platform_supported``).
+if sys.platform == "win32":
+    _HELPER_BINARY_NAME = "cernis-sniffd.exe"
+else:
+    _HELPER_BINARY_NAME = "cernis-sniffd"
 
 # Wie lange auf das Auftauchen der Socket-Datei nach dem Spawn gewartet wird (Poll-
 # Loop).
@@ -110,6 +125,30 @@ _START_REPLY_TIMEOUT_SECS = 5.0
 
 # Teardown-Timeouts: dem Subprozess nach terminate kurz Zeit geben, dann kill().
 _TERMINATE_TIMEOUT_SECS = 2.0
+
+# Frist des FREUNDLICHEN Beendens, bevor hart abgeraeumt wird.
+#
+# Der freundliche Weg ist auf ALLEN Plattformen dasselbe Ereignis: das
+# geschlossene Verbindungsende. Der Helfer verlaesst daraufhin seine
+# Kommando-Schleife (``recv_message`` -> ``None``), raeumt seinen Sniff ab und
+# endet von SELBST mit Rueckgabewert 0.
+#
+# GEMESSEN (Windows, Dev-Lauf): vom Schliessen des Kanals bis zum Prozess-Ende
+# vergehen 0.11 s. 3 s decken das mit reichlich Reserve ab -- auch fuer den
+# eingefrorenen Bau, wo der PyInstaller-Bootloader sein Kind noch abwickeln muss.
+#
+# Das ist eine OBERGRENZE, KEINE Wartedauer: ``wait`` kehrt beim tatsaechlichen
+# Prozess-Ende sofort zurueck. Voll ausgeschoepft wird die Frist nur von einem
+# Helfer, der wirklich nicht von selbst geht -- und danach greift das harte
+# Beenden.
+_GRACEFUL_EXIT_TIMEOUT_SECS = 3.0
+
+# Wie lange auf die ``STOPPED``-Quittung gewartet wird, bevor der Kanal faellt
+# (siehe ``_await_stop_ack``). Kurz gehalten: es geht nur darum, dem Helfer das
+# Absetzen einer bereits fertigen Antwort zu ermoeglichen, nicht darum, auf einen
+# langen Sniff-Abbau zu warten -- ``sniffer.stop(join=True)`` laeuft im Helfer vor
+# dem Senden der Quittung. GEMESSEN liegt die Spanne im Millisekundenbereich.
+_STOP_ACK_TIMEOUT_SECS = 2.0
 
 
 def _is_frozen() -> bool:
@@ -240,6 +279,11 @@ class _BaseSubprocessHelper:
         self._reader_stop = threading.Event()
         self._lock = threading.Lock()
         self._drain: threading.Thread | None = None
+        # Wurde ein ``STOP`` abgesetzt, auf dessen Quittung der Abbau kurz warten
+        # soll? (siehe ``_await_stop_ack``)
+        self._stop_sent = False
+        # Vom Reader-Thread gesetzt, sobald die ``STOPPED``-Quittung durch ist.
+        self._stopped_seen = threading.Event()
 
     # -- Spawn/Connect/Send (gemeinsamer Kern) --------------------------------
 
@@ -255,6 +299,10 @@ class _BaseSubprocessHelper:
         """
         # Frischer Reader-Stop-Zustand fuer diesen Lauf.
         self._reader_stop = threading.Event()
+        # Frischer Quittungs-Zustand: aus einem frueheren Lauf darf weder ein
+        # offenes ``STOP`` noch eine gesehene Quittung nachhaengen.
+        self._stop_sent = False
+        self._stopped_seen = threading.Event()
 
         try:
             self._socket_dir = create_address_dir()
@@ -315,6 +363,11 @@ class _BaseSubprocessHelper:
                 send_message(sock, payload)
             except OSError as exc:
                 _logger.debug("sniffd_client_send_failed", error=str(exc))
+                return
+        # Nur ein ERFOLGREICH abgesetztes ``STOP`` begruendet das kurze Warten auf
+        # die Quittung im Abbau (siehe ``_await_stop_ack``).
+        if payload.get("type") == MessageType.STOP:
+            self._stop_sent = True
 
     # -- Drain-Thread fuer die Helfer-Ausgabe ---------------------------------
 
@@ -371,16 +424,26 @@ class _BaseSubprocessHelper:
         sock = self._sock
         if sock is None:
             return
-        while not self._reader_stop.is_set():
-            try:
-                message = recv_message(sock)
-            except (OSError, ProtocolError) as exc:
-                if not self._reader_stop.is_set():
-                    _logger.debug("sniffd_client_read_ended", error=str(exc))
-                return
-            if message is None:
-                return  # sauberes Verbindungsende
-            self._handle_message(message)
+        try:
+            while not self._reader_stop.is_set():
+                try:
+                    message = recv_message(sock)
+                except (OSError, ProtocolError) as exc:
+                    if not self._reader_stop.is_set():
+                        _logger.debug("sniffd_client_read_ended", error=str(exc))
+                    return
+                if message is None:
+                    return  # sauberes Verbindungsende
+                # Die ``STOPPED``-Quittung freigeben, auf die der Abbau kurz
+                # wartet (``_await_stop_ack``) -- VOR der Weitergabe, damit ein
+                # langsamer ``_handle_message`` das Warten nicht verlaengert.
+                if message.get("type") == MessageType.STOPPED:
+                    self._stopped_seen.set()
+                self._handle_message(message)
+        finally:
+            # Endet der Reader aus IRGENDEINEM Grund, wartet niemand mehr auf
+            # eine Quittung, die dann nicht mehr kommen kann.
+            self._stopped_seen.set()
 
     def _handle_message(self, message: dict[str, Any]) -> None:
         """Verarbeitet EINE Helfer-Nachricht (von der Subklasse ueberschrieben)."""
@@ -442,8 +505,129 @@ class _BaseSubprocessHelper:
         reader_alive = reader is not None and reader.is_alive()
         return proc_alive and reader_alive
 
+    def _await_stop_ack(self) -> None:
+        """Wartet kurz, bis der Helfer ein angefordertes ``STOP`` quittiert hat.
+
+        WARUM DAS NOETIG IST (im echten Lauf gemessen): ``stop()`` der Clients
+        sendet ``STOP`` und ruft UNMITTELBAR ``_cleanup``. Der Helfer verarbeitet
+        das ``STOP``, stoppt seinen Sniff und will die Quittung ``STOPPED``
+        zuruecksenden -- traf dabei aber auf einen bereits geschlossenen Kanal.
+        Sein ``sendall`` scheiterte, die Ausnahme schlug bis in seine
+        Hauptfunktion durch und er endete mit Rueckgabewert 1 statt 0
+        (GEMESSEN: ``OSError: Pipe-Schreibvorgang hat 0 Bytes geschrieben``).
+        Der Helfer starb also AM AUFRAEUMEN, obwohl der freundliche Weg gewaehlt
+        war -- das Ende war nur scheinbar sauber.
+
+        Hier wird ihm die kurze Spanne gegeben, seine Quittung noch abzusetzen.
+        Danach faellt der Kanal, was ihn regulaer aus der Kommando-Schleife
+        entlaesst (Rueckgabewert 0).
+
+        Die Quittung wird NICHT erzwungen: sie ist ein Hoeflichkeitsfenster, kein
+        Vertrag. Wer ohne ``STOP`` abraeumt (Fehlerpfade in ``_spawn_connect_send``)
+        oder wessen Helfer schon weg ist, wartet hier nicht -- es gibt dann
+        nichts zu quittieren.
+
+        Kein stiller Fallback: bleibt die Quittung trotz laufendem Helfer aus,
+        wird das benannt (``sniffd_client_stop_ack_timeout``) und der Abbau geht
+        regulaer weiter -- der gestufte Prozess-Abbau faengt den Rest.
+        """
+        if not self._stop_sent:
+            return  # kein STOP angefordert -- es gibt nichts zu quittieren
+        self._stop_sent = False
+
+        proc = self._proc
+        if self._sock is None or proc is None or proc.poll() is not None:
+            return  # kein Kanal bzw. Helfer schon beendet
+
+        # Laeuft ein Reader-Thread, liest DIESER die Quittung -- dann wird auf
+        # sein Ende gewartet (er endet mit dem Verbindungsende bzw. hier mit der
+        # verarbeiteten Quittung). Ohne Reader wird direkt gelesen.
+        reader = self._reader
+        if reader is not None and reader.is_alive():
+            if not self._stopped_seen.wait(timeout=_STOP_ACK_TIMEOUT_SECS):
+                _logger.debug("sniffd_client_stop_ack_timeout", timeout=_STOP_ACK_TIMEOUT_SECS)
+            return
+
+        try:
+            reply = self._recv_reply_with_timeout(_STOP_ACK_TIMEOUT_SECS)
+        except (OSError, ProtocolError, TimeoutError) as exc:
+            _logger.debug("sniffd_client_stop_ack_failed", error=str(exc))
+            return
+        if reply is None:
+            return  # Helfer hat die Verbindung selbst beendet -- auch das ist ein Ende
+
+    def _stop_process(self, proc: "subprocess.Popen[bytes]") -> None:
+        """Beendet den Helfer GESTUFT: erst freundlich, nach Frist hart.
+
+        STUFE 1 -- freundlich. Der Kanal ist zu diesem Zeitpunkt bereits
+        geschlossen (``_cleanup`` schliesst ihn VOR diesem Aufruf). Genau das IST
+        die freundliche Aufforderung: der Helfer sieht das Verbindungsende,
+        verlaesst seine Kommando-Schleife, raeumt seinen Sniff ab (``_teardown``)
+        und endet von selbst mit Rueckgabewert 0. Hier wird ihm dafuer bis
+        ``_GRACEFUL_EXIT_TIMEOUT_SECS`` Zeit gegeben.
+
+        WARUM NICHT ``terminate()`` ALS FREUNDLICHER WEG: auf Windows ist
+        ``Popen.terminate()`` ein ``TerminateProcess`` -- ein hartes Abschiessen
+        OHNE zugestelltes Signal. Der ``SIGTERM``-Handler in ``sniffd/server.py``
+        laeuft dort NIE (GEMESSEN: weder ``sniffd_signal`` noch ``sniffd_shutdown``
+        erscheinen im Helfer-Log, der Rueckgabewert ist 1). Frueher rief
+        ``_cleanup`` ``terminate()`` SOFORT nach dem Schliessen des Kanals -- das
+        harte Beenden gewann damit das Rennen gegen den freundlichen Weg
+        (GEMESSEN: nur-Kanal-schliessen endet nach 0.11 s mit Rueckgabewert 0,
+        Kanal-schliessen-plus-terminate nach 0.00 s mit Rueckgabewert 1). Auf
+        Windows gab es dadurch faktisch NUR den harten Weg.
+
+        STUFE 2 -- hart, erst NACH der Frist. Geht der Helfer nicht von selbst,
+        greift ``terminate()`` (Linux/macOS: ``SIGTERM``, dort loest es den
+        Handler wirklich aus; Windows: ``TerminateProcess``), danach als letztes
+        Mittel ``kill()``. Beides mit eigener Frist, damit der Abbau nicht haengt.
+
+        Linux/macOS bleiben zeichengleich: dieselbe Reihenfolge, dieselben Mittel.
+        Neu ist allein, dass dem Selbst-Ende VOR dem harten Zugriff Zeit bleibt --
+        dort endete der Helfer bisher regelmaessig schon am Verbindungsende, und
+        ``terminate()`` traf einen bereits beendeten Prozess.
+        """
+        if proc.poll() is not None:
+            return  # schon von selbst beendet -- nichts zu tun
+
+        # Stufe 1: freundlich -- auf das Selbst-Ende am Verbindungsende warten.
+        try:
+            proc.wait(timeout=_GRACEFUL_EXIT_TIMEOUT_SECS)
+            _logger.debug("sniffd_client_graceful_exit", returncode=proc.returncode)
+            return
+        except subprocess.TimeoutExpired:
+            # Kein stiller Fallback: dass der freundliche Weg nicht griff, wird
+            # BENANNT, bevor hart abgeraeumt wird.
+            _logger.warning(
+                "sniffd_client_graceful_exit_timeout",
+                timeout=_GRACEFUL_EXIT_TIMEOUT_SECS,
+            )
+
+        # Stufe 2: hart -- terminate, dann als letztes Mittel kill.
+        proc.terminate()
+        try:
+            proc.wait(timeout=_TERMINATE_TIMEOUT_SECS)
+            return
+        except subprocess.TimeoutExpired:
+            _logger.warning("sniffd_client_terminate_timeout")
+
+        proc.kill()
+        try:
+            proc.wait(timeout=_TERMINATE_TIMEOUT_SECS)
+        except subprocess.TimeoutExpired:
+            _logger.warning("sniffd_client_kill_timeout")
+
     def _cleanup(self) -> None:
-        """Raeumt Reader, Socket, Subprozess und Socket-Verzeichnis ab (idempotent)."""
+        """Raeumt Reader, Socket, Subprozess und Socket-Verzeichnis ab (idempotent).
+
+        Reihenfolge tragend: der Kanal wird ZUERST geschlossen -- das ist die
+        freundliche Aufforderung ans Helfer-Ende (siehe ``_stop_process``) --,
+        erst danach greift der gestufte Prozess-Abbau.
+        """
+        # Dem Helfer Gelegenheit geben, ein angefordertes ``STOP`` noch zu
+        # quittieren, BEVOR der Kanal faellt (siehe ``_await_stop_ack``).
+        self._await_stop_ack()
+
         self._reader_stop.set()
 
         sock = self._sock
@@ -461,16 +645,8 @@ class _BaseSubprocessHelper:
 
         proc = self._proc
         self._proc = None
-        if proc is not None and proc.poll() is None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=_TERMINATE_TIMEOUT_SECS)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                try:
-                    proc.wait(timeout=_TERMINATE_TIMEOUT_SECS)
-                except subprocess.TimeoutExpired:
-                    _logger.warning("sniffd_client_kill_timeout")
+        if proc is not None:
+            self._stop_process(proc)
 
         # ERST NACH dem Prozess-Ende joinen: das Ende des Helfers schliesst die
         # Schreibseite der Pipe, der Drain laeuft daraufhin auf EOF und endet von

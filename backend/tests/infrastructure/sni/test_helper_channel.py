@@ -55,12 +55,61 @@ def test_spawn_command_dev_points_at_sniffd_entry(monkeypatch: pytest.MonkeyPatc
 
 
 def test_spawn_command_frozen_points_next_to_executable(monkeypatch: pytest.MonkeyPatch) -> None:
-    """frozen: ``[<exe-dir>/cernis-sniffd, socket]`` -- Binary neben sys.executable."""
+    """frozen: ``[<exe-dir>/cernis-sniffd, adresse]`` -- Binary neben sys.executable.
+
+    Die Aussage bleibt unveraendert scharf: das Kommando zeigt auf GENAU die
+    Helfer-Datei im Verzeichnis von ``sys.executable``, und die Adresse wird
+    unveraendert durchgereicht. Nur der ERWARTETE Pfad wird plattformrichtig
+    gebildet (``Path``) statt als Zeichenkette mit fest verdrahtetem ``/``:
+    ``Path(...).parent / name`` liefert auf Windows ``\\`` als Trenner, worauf
+    der frueher fest erwartete Text ``/opt/cernis/cernis-sniffd`` scheiterte.
+    Der Vergleich laeuft ueber ``Path``-Gleichheit -- das prueft dieselbe
+    Zusammensetzung, nur ohne Annahme ueber das Trennzeichen.
+    """
     monkeypatch.setattr(base, "_is_frozen", lambda: True)
-    monkeypatch.setattr(sys, "executable", "/opt/cernis/cernis-backend")
+    exe = Path("/opt/cernis/cernis-backend")
+    monkeypatch.setattr(sys, "executable", str(exe))
     cmd = _spawn_command("/run/x.sock")
-    assert cmd[0] == "/opt/cernis/cernis-sniffd"
+    assert Path(cmd[0]) == exe.parent / base._HELPER_BINARY_NAME
+    # Die Datei liegt WIRKLICH neben sys.executable (nicht irgendwo darunter).
+    assert Path(cmd[0]).parent == exe.parent
     assert cmd[1] == "/run/x.sock"
+
+
+def test_helper_binary_name_carries_platform_suffix() -> None:
+    """Der Helfer-Name traegt die plattformuebliche Endung -- an genau EINER Stelle.
+
+    Windows legt die Binary als ``cernis-sniffd.exe`` ab (``build.ps1``),
+    Linux/macOS ohne Endung. Frueher bildete ``base.py`` den Namen IMMER ohne
+    Endung -- im eingefrorenen Windows-Bau zeigte das Spawn-Kommando damit auf
+    einen Pfad, den es nicht gibt.
+    """
+    if sys.platform == "win32":
+        assert base._HELPER_BINARY_NAME == "cernis-sniffd.exe"
+    else:
+        assert base._HELPER_BINARY_NAME == "cernis-sniffd"
+
+
+def test_spawn_command_frozen_finds_binary_with_platform_suffix(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Der frozen-Pfad findet eine Datei, die wie im echten Bau abgelegt ist.
+
+    Kern des Befunds: die Ablage (``build.ps1``: ``cernis-sniffd.exe``) und die
+    Suche mussten auseinanderlaufen koennen. Hier wird die Binary GENAU so
+    hingelegt, wie der jeweilige Bau sie ablegt -- und geprueft, dass das
+    Spawn-Kommando sie tatsaechlich trifft.
+    """
+    exe = tmp_path / "cernis-backend"
+    exe.write_bytes(b"")
+    # So legt der Bau die Helfer-Datei ab (Windows mit .exe, sonst ohne).
+    (tmp_path / base._HELPER_BINARY_NAME).write_bytes(b"")
+
+    monkeypatch.setattr(base, "_is_frozen", lambda: True)
+    monkeypatch.setattr(sys, "executable", str(exe))
+
+    cmd = _spawn_command("adresse")
+    assert Path(cmd[0]).exists(), f"frozen-Kommando trifft die abgelegte Binary nicht: {cmd[0]}"
 
 
 def test_poll_hits_empty_without_run() -> None:

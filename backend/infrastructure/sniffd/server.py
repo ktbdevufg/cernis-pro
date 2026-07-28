@@ -439,6 +439,22 @@ def serve(socket_path: str) -> None:
     # (``sniffd.py``) ist das der Fall; ein Thread-Start (z. B. Smoke-Test)
     # ueberspringt die Registrierung still -- dort uebernimmt das
     # Verbindungsende/der Test-Teardown das Aufraeumen.
+    #
+    # WINDOWS -- WAS HIER TRAEGT UND WAS NICHT: ``signal.SIGTERM`` existiert dort
+    # zwar als Konstante, wird aber NIE zugestellt. ``Popen.terminate()`` ist auf
+    # Windows ein ``TerminateProcess``, das den Prozess ohne jede Vorwarnung
+    # abraeumt (GEMESSEN: nach ``terminate()`` erscheint weder ``sniffd_signal``
+    # noch ``sniffd_shutdown`` im Helfer-Log, Rueckgabewert 1). Der Handler wird
+    # dennoch registriert -- er schadet nicht und deckt ``SIGINT`` (Strg-C im
+    # Vordergrund) ab, das Windows sehr wohl zustellt.
+    #
+    # Das TRAGENDE Ende auf Windows ist ein anderes und liegt NICHT im Signal: das
+    # geschlossene Verbindungsende. ``recv_message`` liefert dann ``None``, die
+    # Kommando-Schleife endet, ``_teardown`` stoppt den Sniff und ``serve``
+    # raeumt im ``finally`` die lauschende Stelle ab -- vollstaendig ohne Signal
+    # und mit Rueckgabewert 0. Die Backendseite nutzt genau diesen Weg als
+    # freundliche Aufforderung (siehe ``sniffd_client/base.py._stop_process``);
+    # das Signal ist auf Windows nur die zweite, harte Stufe.
     try:
         signal.signal(signal.SIGTERM, _on_signal)
         signal.signal(signal.SIGINT, _on_signal)
