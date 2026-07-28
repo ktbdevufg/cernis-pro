@@ -13,7 +13,8 @@
 //   Connection: { l4 ("tcp"/"udp"), status (string), local {ip,port}|null,
 //          remote {ip,port}|null, pid, app_name, bytes_sent, bytes_received,
 //          send_rate_bps, recv_rate_bps }
-//   GET /api/traffic/permission: { ok (bool), error (string|null) }
+//   GET /api/traffic/permission: { ok (bool), error (string|null),
+//          state (string|null), cause (string|null) }
 
 import { apiGet, apiPost } from "./client.js";
 
@@ -125,7 +126,21 @@ export const TRAFFIC_PERMISSION_STATE = {
   NOT_APPLICABLE: "not_applicable",
 };
 
-// Ruft GET /api/traffic/permission. { ok, error, state } wird unverändert
+// Ursachen innerhalb von NEEDS_PRIVILEGES, Spiegel von domain.TrafficPermissionCause.
+// Ebenfalls benannte Konstanten, damit die View nicht mit nackten Strings vergleicht.
+//
+// Der Zustand needs_privileges entsteht aus genau zwei Ursachen, die in ok/error/
+// state zusammenfallen, aber verschiedene Erklärungen verlangen: TOOL_MISSING (das
+// Systemwerkzeug ss/iproute2 fehlt — Dauerzustand) gegen MEASUREMENT_FAILED (der
+// laufende Messlauf ist gescheitert — vorübergehend). Ohne dieses Feld müsste die
+// View die Ursache aus dem Freitext von `error` erraten. Bei granted und
+// not_applicable ist `cause` null (keine Ursache).
+export const TRAFFIC_PERMISSION_CAUSE = {
+  TOOL_MISSING: "tool_missing",
+  MEASUREMENT_FAILED: "measurement_failed",
+};
+
+// Ruft GET /api/traffic/permission. { ok, error, state, cause } wird unverändert
 // durchgereicht — der error-Text kommt direkt aus dem Backend (nicht neu
 // erfinden); die View zeigt ihn bei ok===false als ruhigen Hinweis-Streifen.
 export async function fetchTrafficPermission() {
@@ -134,6 +149,7 @@ export async function fetchTrafficPermission() {
     ok: Boolean(backend.ok),
     error: backend.error ?? null,
     state: backend.state ?? null,
+    cause: backend.cause ?? null,
   };
 }
 

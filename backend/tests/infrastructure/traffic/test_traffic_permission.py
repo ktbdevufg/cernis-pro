@@ -15,7 +15,7 @@ import sys
 import pytest
 
 import infrastructure.traffic_permission as tp
-from domain.traffic import TrafficPermissionState
+from domain.traffic import TrafficPermissionCause, TrafficPermissionState
 from infrastructure.traffic_macos import (
     TrafficPermissionAdapter as MacosTrafficPermissionAdapter,
 )
@@ -88,6 +88,8 @@ def test_permission_state_linux_granted_ohne_root(monkeypatch: pytest.MonkeyPatc
 
     assert result.state is TrafficPermissionState.GRANTED
     assert result.reason == ""
+    # Steht die Sicht, gibt es keine Ursache zu benennen (``None`` = keine Ursache).
+    assert result.cause is None
 
 
 def test_permission_state_werkzeug_fehlt_ist_fehler_mit_grund(
@@ -103,6 +105,21 @@ def test_permission_state_werkzeug_fehlt_ist_fehler_mit_grund(
 
     assert result.state is TrafficPermissionState.NEEDS_PRIVILEGES
     assert result.reason.strip() != ""
+
+
+def test_permission_state_werkzeug_fehlt_nennt_ursache(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fehlendes Werkzeug -> Ursache ``TOOL_MISSING`` als MERKMAL, nicht nur als Text.
+
+    Der Zustand allein sagt nur "Quelle nicht nutzbar"; die Ursache trennt das
+    fehlende Paket vom gescheiterten Messlauf. Ohne dieses Merkmal muesste die
+    Oberflaeche sie aus ``reason`` erraten.
+    """
+    monkeypatch.setattr(tp, "_ss_vorhanden", lambda: False)
+
+    result = TrafficPermissionAdapter().permission_state()
+
+    assert result.state is TrafficPermissionState.NEEDS_PRIVILEGES
+    assert result.cause is TrafficPermissionCause.TOOL_MISSING
 
 
 def test_permission_state_linux_nie_not_applicable(monkeypatch: pytest.MonkeyPatch) -> None:

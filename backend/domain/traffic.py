@@ -24,6 +24,8 @@ Dazu der Rechte-Befund der Stufe 2 (``TrafficPermissionState``/
 ``TrafficPermissionResult``): ob die Durchsatz-Messung steht, ob ihr nur die Rechte
 fehlen oder ob die Plattform sie gar nicht anbietet. Diese Dreiteilung ist eine
 fachliche Aussage und lebt darum hier, nicht im api-Rand (Begruendung am Enum).
+``TrafficPermissionCause`` benennt dazu die URSACHE des nicht-nutzbaren Falls
+(Werkzeug fehlt / Messlauf gescheitert) -- ebenfalls als Merkmal, nicht als Text.
 
 DARSTELLUNG bleibt draussen: keine Icons/Emojis, kein Mensch-lesbares Formatieren
 von Raten ("1,2 MB/s") -- das fuehrt api/Frontend. Die Domaene fuehrt nur Zahlen.
@@ -81,6 +83,34 @@ class TrafficPermissionState(StrEnum):
     NOT_APPLICABLE = "not_applicable"
 
 
+class TrafficPermissionCause(StrEnum):
+    """WARUM die Durchsatz-Sicht bei ``NEEDS_PRIVILEGES`` nicht steht -- maschinell.
+
+    ``TOOL_MISSING`` -- das Systemwerkzeug ``ss`` (Paket iproute2) ist auf diesem
+    System nicht auffindbar; die Quelle existiert gar nicht erst.
+    ``MEASUREMENT_FAILED`` -- das Werkzeug ist da und die statische Pruefung meldet
+    nichts, aber der LAUFENDE Messlauf ist gescheitert.
+
+    WARUM EIN EIGENES MERKMAL: ``NEEDS_PRIVILEGES`` wird aus genau diesen zwei
+    Ursachen gesetzt, und sie verlangen verschiedene Erklaerungen -- ein fehlendes
+    Paket ist ein Dauerzustand, ein gescheiterter Messlauf ein voruebergehender.
+    ``ok``/``error``/``state`` fallen fuer beide zusammen; ohne dieses Feld muesste
+    die Oberflaeche die Ursache aus dem Freitext von ``reason`` ERRATEN -- und ein
+    Text ist lokalisierbar, umformulierbar und als Merkmal unbrauchbar. Dieselbe
+    Begruendung, die ``TrafficPermissionState`` selbst traegt, eine Ebene feiner.
+
+    KEIN Rechte-Wert: fehlende Rechte im woertlichen Sinn sind auf Linux keine
+    Ursache mehr (die Capability-Pruefung ist ersatzlos entfallen, siehe
+    ``infrastructure/traffic_permission``) -- darum genau zwei Werte, nicht drei.
+
+    Muster ``StrEnum`` wie ``TrafficPermissionState`` -- der Wire-Wert ist der
+    jeweilige String.
+    """
+
+    TOOL_MISSING = "tool_missing"
+    MEASUREMENT_FAILED = "measurement_failed"
+
+
 @dataclass(frozen=True, slots=True)
 class TrafficPermissionResult:
     """Der Rechte-Befund der Durchsatz-Sicht: Zustand + optionale Begruendung.
@@ -90,12 +120,20 @@ class TrafficPermissionResult:
     fehlt, was trotzdem funktioniert). Bei ``GRANTED`` bleibt ``reason`` leer -- es
     gibt nichts zu erklaeren.
 
+    ``cause`` benennt bei ``NEEDS_PRIVILEGES`` DIESELBE Aussage maschinell auswertbar,
+    die ``reason`` nur als Freitext traegt -- damit die Oberflaeche die Ursache nicht
+    aus einer Zeichenkette lesen muss (Begruendung an ``TrafficPermissionCause``). Bei
+    ``GRANTED`` und ``NOT_APPLICABLE`` gibt es keine Ursache zu benennen: dort bleibt
+    das Feld ``None``. ``None`` heisst "keine Ursache", nicht "unbekannte Ursache" --
+    die Abwesenheit ist ehrlich None, kein Sentinel (wie ``Connection.remote``).
+
     Aufbau wie ``CaptureAccessStatus``: ein Zustand plus ein erklaerender Text, nicht
     ein Text, aus dem der Zustand erst gelesen werden muesste.
     """
 
     state: TrafficPermissionState
     reason: str = ""
+    cause: TrafficPermissionCause | None = None
 
 
 @dataclass(frozen=True)

@@ -21,6 +21,7 @@ from domain.traffic import (
     Connection,
     ConnSample,
     Endpoint,
+    TrafficPermissionCause,
     TrafficPermissionResult,
     TrafficPermissionState,
     make_socket_key,
@@ -80,6 +81,7 @@ class FakeTrafficPermission:
         available: bool = True,
         permission_error: str | None = None,
         state: TrafficPermissionState | None = None,
+        cause: TrafficPermissionCause | None = None,
     ) -> None:
         self._available = available
         self._permission_error = permission_error
@@ -90,6 +92,10 @@ class FakeTrafficPermission:
             if permission_error is None
             else TrafficPermissionState.NEEDS_PRIVILEGES
         )
+        # Ursache bleibt standardmaessig ``None`` ("keine Ursache") -- nur Tests, die
+        # den Ursachen-Durchreichweg pruefen, geben sie ausdruecklich vor (der echte
+        # Adapter setzt sie nur im Fehlzustand).
+        self._cause = cause
 
     def is_available(self) -> bool:
         return self._available
@@ -98,7 +104,11 @@ class FakeTrafficPermission:
         return self._permission_error
 
     def permission_state(self) -> TrafficPermissionResult:
-        return TrafficPermissionResult(state=self._state, reason=self._permission_error or "")
+        return TrafficPermissionResult(
+            state=self._state,
+            reason=self._permission_error or "",
+            cause=self._cause,
+        )
 
 
 def _conn(app_name: str | None, pid: int | None = None, port: int = 443) -> Connection:
@@ -154,14 +164,19 @@ def test_list_app_traffic_provider_called_once() -> None:
 def test_check_permission_available_and_allowed() -> None:
     fake = FakeTrafficPermission(available=True, permission_error=None)
     result = CheckTrafficPermission(fake)()
-    assert result == {"ok": True, "error": "", "state": "granted"}
+    assert result == {"ok": True, "error": "", "state": "granted", "cause": None}
 
 
 def test_check_permission_available_but_denied() -> None:
     msg = "Fuer den Durchsatz aller Apps muss CERNIS PRO als Root gestartet werden."
     fake = FakeTrafficPermission(available=True, permission_error=msg)
     result = CheckTrafficPermission(fake)()
-    assert result == {"ok": False, "error": msg, "state": "needs_privileges"}
+    assert result == {
+        "ok": False,
+        "error": msg,
+        "state": "needs_privileges",
+        "cause": None,
+    }
 
 
 def test_check_permission_not_available() -> None:
@@ -189,7 +204,12 @@ def test_check_permission_platform_limit_is_not_a_rights_problem() -> None:
 
     result = CheckTrafficPermission(fake)()
 
-    assert result == {"ok": False, "error": grund, "state": "not_applicable"}
+    assert result == {
+        "ok": False,
+        "error": grund,
+        "state": "not_applicable",
+        "cause": None,
+    }
     assert result["state"] != "needs_privileges"
 
 
@@ -497,3 +517,86 @@ def test_check_permission_messfehler_ueberschreibt_not_applicable_nicht() -> Non
     result = CheckTrafficPermission(fake)("irgendein Messfehler")
 
     assert result["state"] == str(TrafficPermissionState.NOT_APPLICABLE)
+
+
+# ── Ursachen-Naht: cause trennt die zwei Gruende von needs_privileges ─────────
+
+
+def test_check_permission_messfehler_traegt_ursache_messlauf() -> None:
+    """Gescheiterter Messlauf -> ``cause=measurement_failed`` neben unveraendertem Rest.
+
+    Werkzeug fehlt und Messlauf gescheitert liefern denselben ``state`` und beide
+    ``ok=False`` mit Text -- nur ``cause`` trennt sie. ``ok``/``error``/``state``
+    bleiben dabei in Bedeutung und Schreibweise unveraendert (kein Bruch).
+    """
+    fake = FakeTrafficPermission(available=True, permission_error=None)
+
+    result = CheckTrafficPermission(fake)("ss endete mit Status 2")
+
+    assert result["ok"] is False
+    assert result["error"] == "ss endete mit Status 2"
+    assert result["state"] == str(TrafficPermissionState.NEEDS_PRIVILEGES)
+    assert result["cause"] == str(TrafficPermissionCause.MEASUREMENT_FAILED)
+
+
+def test_check_permission_werkzeug_fehlt_reicht_ursache_durch() -> None:
+    """Ursache des Adapters (``tool_missing``) erscheint unveraendert in der Wire-Form."""
+    grund = "Der Durchsatz je Programm braucht das Werkzeug 'ss' (Paket iproute2)."
+    fake = FakeTrafficPermission(
+        available=True,
+        permission_error=grund,
+        cause=TrafficPermissionCause.TOOL_MISSING,
+    )
+
+    result = CheckTrafficPermission(fake)()
+
+    assert result == {
+        "ok": False,
+        "error": grund,
+        "state": str(TrafficPermissionState.NEEDS_PRIVILEGES),
+        "cause": str(TrafficPermissionCause.TOOL_MISSING),
+    }
+
+
+def test_check_permission_granted_traegt_keine_ursache() -> None:
+    """Steht die Sicht, gibt es keine Ursache: ``cause`` ist ``None``, nicht "unbekannt"."""
+    fake = FakeTrafficPermission(available=True, permission_error=None)
+
+    result = CheckTrafficPermission(fake)()
+
+    assert result["state"] == str(TrafficPermissionState.GRANTED)
+    assert result["cause"] is None
+
+
+def test_check_permission_not_applicable_traegt_keine_ursache() -> None:
+    """Die Plattformgrenze ist keine Ursache im Sinne von ``cause`` -> ``None``.
+
+    ``cause`` beschreibt ausschliesslich, WARUM ``needs_privileges`` gilt; die
+    nicht behebbare Plattformgrenze steckt schon vollstaendig im ``state``.
+    """
+    fake = FakeTrafficPermission(available=False)
+
+    result = CheckTrafficPermission(fake)()
+
+    assert result["state"] == str(TrafficPermissionState.NOT_APPLICABLE)
+    assert result["cause"] is None
+
+
+def test_check_permission_ursachen_sind_maschinell_unterscheidbar() -> None:
+    """Beide Ursachen fallen in ``ok``/``error``-Bedeutung zusammen, in ``cause`` nicht.
+
+    Genau das ist der Zweck des Feldes: ohne es muesste die Oberflaeche die zwei
+    Faelle aus dem Freitext von ``error`` erraten.
+    """
+    werkzeug = CheckTrafficPermission(
+        FakeTrafficPermission(
+            available=True,
+            permission_error="Werkzeug fehlt",
+            cause=TrafficPermissionCause.TOOL_MISSING,
+        )
+    )()
+    messlauf = CheckTrafficPermission(FakeTrafficPermission(available=True))("Messlauf kaputt")
+
+    assert werkzeug["ok"] is False and messlauf["ok"] is False
+    assert werkzeug["state"] == messlauf["state"] == "needs_privileges"
+    assert werkzeug["cause"] != messlauf["cause"]

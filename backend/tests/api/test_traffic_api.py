@@ -133,7 +133,7 @@ def test_permission_endpunkt_liefert_form(app: FastAPI) -> None:
 
     assert antwort.status_code == 200
     daten = antwort.json()
-    assert set(daten) == {"ok", "error", "state"}
+    assert set(daten) == {"ok", "error", "state", "cause"}
 
 
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux-Verhalten")

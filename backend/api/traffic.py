@@ -17,8 +17,9 @@ Raten je Socket nach (``current_rates`` -> ``ListAppTraffic``).
 
 ``POST /api/traffic/poll/start`` + ``/stop`` steuern den Durchsatz-Poller on-demand
 (MANUELL, Muster capture ``/pcap/start``). ``GET /api/traffic/permission`` liefert
-die ``{ok, error}``-Rechte-Naht (``CheckTrafficPermission``): ``ok=false`` + Hinweis,
-wenn der Durchsatz aller Apps erhoehte Rechte braucht.
+die ``{ok, error, state, cause}``-Rechte-Naht (``CheckTrafficPermission``):
+``ok=false`` + Hinweis, wenn der Durchsatz nicht messbar ist, mit ``state`` als
+Zustand und ``cause`` als maschinell auswertbarer Ursache.
 """
 
 from collections.abc import Awaitable, Callable
@@ -165,7 +166,7 @@ def get_traffic_permission(
 ) -> dict[str, Any]:
     """Status der Durchsatz-Sicht (Stufe 2).
 
-    ``{ok, error, state}``-Form: ``ok=true``, wenn der Durchsatz messbar ist, sonst
+    ``{ok, error, state, cause}``-Form: ``ok=true``, wenn der Durchsatz messbar ist, sonst
     ``ok=false`` + Begruendung (Stufe 1, die Verbindungsliste, bleibt in jedem Fall
     nutzbar). Auf Linux ist der Durchsatz OHNE erhoehte Rechte messbar (gemessen:
     ``ss -tin`` liefert die Byte-Zaehler als gewoehnlicher Benutzer) -- ``ok=true``
@@ -179,6 +180,15 @@ def get_traffic_permission(
     Durchsatz messbar. Ohne diese Unterscheidung muesste die Oberflaeche sie aus dem
     Fehlertext erraten. ``ok``/``error`` bleiben in ihrer Bedeutung unveraendert
     (kein Bruch fuer Aufrufer).
+
+    ``cause`` trennt die beiden Ursachen INNERHALB von ``"needs_privileges"``, die
+    in ``ok``/``error``/``state`` zusammenfallen: ``"tool_missing"`` (das
+    Systemwerkzeug ``ss``/iproute2 ist auf diesem System nicht auffindbar -- ein
+    Dauerzustand) gegen ``"measurement_failed"`` (das Werkzeug ist da, aber der
+    laufende Messlauf ist gescheitert -- voruebergehend). Bei ``"granted"`` und
+    ``"not_applicable"`` gibt es keine Ursache zu benennen: dort ist ``cause``
+    ``null``. Additiv ergaenzt, damit die Oberflaeche die Ursache nicht aus dem
+    Freitext von ``error`` erraten muss.
 
     Scheitert die LAUFENDE Messung (``poll_error`` traegt einen Grund), schlaegt das
     auf ``ok=false`` durch, auch wenn die statische Pruefung nichts zu beanstanden

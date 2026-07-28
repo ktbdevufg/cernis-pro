@@ -33,7 +33,11 @@ Bereich, statt eine Halb-Implementierung vorzutaeuschen.
 import shutil
 import sys
 
-from domain.traffic import TrafficPermissionResult, TrafficPermissionState
+from domain.traffic import (
+    TrafficPermissionCause,
+    TrafficPermissionResult,
+    TrafficPermissionState,
+)
 
 # Das Werkzeug, aus dem der Durchsatz stammt (siehe ``traffic_linux._run``). EINE
 # Quelle fuer den Namen, damit Pruefung und Messung nicht auseinanderlaufen koennen.
@@ -95,8 +99,17 @@ class TrafficPermissionAdapter:
         anbieten (siehe ``traffic_macos``) -- dieser Adapter vergibt ihn nie.
         Der Text bleibt derselbe wie in ``check_permission`` -- eine Quelle, zwei
         Sichten auf denselben Befund.
+
+        Der Fehlzustand traegt zusaetzlich die URSACHE ``TOOL_MISSING`` als Merkmal:
+        derselbe Befund, den ``reason`` als Freitext erklaert, noch einmal maschinell
+        auswertbar -- die Oberflaeche soll ihn nicht aus dem Text lesen muessen. Der
+        Zustand und der Grundtext bleiben davon unberuehrt (kein Bruch).
         """
         text = self.check_permission()
         if text is None:
             return TrafficPermissionResult(state=TrafficPermissionState.GRANTED)
-        return TrafficPermissionResult(state=TrafficPermissionState.NEEDS_PRIVILEGES, reason=text)
+        return TrafficPermissionResult(
+            state=TrafficPermissionState.NEEDS_PRIVILEGES,
+            reason=text,
+            cause=TrafficPermissionCause.TOOL_MISSING,
+        )

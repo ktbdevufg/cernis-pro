@@ -29,6 +29,7 @@ import { fetchSniMap, fetchSniStatus } from "../api/sni.js";
 import NpcapDialog from "./NpcapDialog.jsx";
 import { useSni } from "../hooks/useSni.js";
 import {
+  TRAFFIC_PERMISSION_CAUSE,
   TRAFFIC_PERMISSION_STATE,
   fetchPtrNames,
   fetchTraffic,
@@ -1016,21 +1017,32 @@ export default function TrafficView({
     !durchsatzAusblenden &&
     !durchsatzWerteVorhanden;
 
+  // Welcher Hinweistext gilt? Die Plattformgrenze (not_applicable) behält ihren
+  // bisherigen Text; sonst entscheidet die vom Backend gemeldete Ursache, ob das
+  // Werkzeug fehlt oder der Messlauf gescheitert ist. Jeder andere Fall — auch ein
+  // unbekannter oder fehlender Ursachenwert — bleibt beim bisherigen neutralen
+  // Text: die Anzeige darf nie leer sein.
+  const permissionSchluessel = () => {
+    if (durchsatzNichtVerfuegbar) {
+      return "beobachten.traffic.durchsatzNichtMessbar";
+    }
+    if (permission?.cause === TRAFFIC_PERMISSION_CAUSE.TOOL_MISSING) {
+      return "beobachten.traffic.durchsatzWerkzeugFehlt";
+    }
+    if (permission?.cause === TRAFFIC_PERMISSION_CAUSE.MEASUREMENT_FAILED) {
+      return "beobachten.traffic.durchsatzMessungFehlgeschlagen";
+    }
+    return "beobachten.traffic.durchsatzOhneWerte";
+  };
+
   return (
     <div className="traffic">
-      {/* Beide Hinweise kommen aus den Sprachdateien, nie aus dem rohen error-Feld
+      {/* Alle Hinweise kommen aus den Sprachdateien, nie aus dem rohen error-Feld
           des Backends (das ist eine technische Begruendung, kein Oberflaechentext).
           not_applicable = die Plattform bietet die Messung nicht an (macOS);
-          sonst = auf dieser Plattform messbar, aber gerade ohne Werte. */}
-      {zeigePermission && (
-        <PermissionHinweis
-          text={
-            durchsatzNichtVerfuegbar
-              ? t("beobachten.traffic.durchsatzNichtMessbar")
-              : t("beobachten.traffic.durchsatzOhneWerte")
-          }
-        />
-      )}
+          sonst entscheidet die Ursache (Werkzeug fehlt / Messlauf gescheitert),
+          und ohne bekannte Ursache bleibt es beim neutralen Text. */}
+      {zeigePermission && <PermissionHinweis text={t(permissionSchluessel())} />}
       {sniError && <SniHinweis text={sniError} />}
 
       {status === "laedt" && (

@@ -32,6 +32,7 @@ from domain.traffic import (
     AppTraffic,
     Connection,
     ConnSample,
+    TrafficPermissionCause,
     TrafficPermissionState,
     aggregate_by_app,
     compute_rate,
@@ -118,14 +119,15 @@ class CheckTrafficPermission:
     Duenn (Muster der monitoring-Pass-Throughs + capture ``StartCapture``): prueft
     Verfuegbarkeit (Tooling/Plattform da?) und dann die Sicht-Tiefe
     (``check_permission``) ueber den Rechte-Port und gibt die ``{ok, error}``-Form
-    zurueck. Der api-Rand uebersetzt ``ok=False`` spaeter in 403.
+    zurueck, ergaenzt um ``state`` (welcher Zustand) und ``cause`` (warum, bei
+    ``needs_privileges``). Der api-Rand uebersetzt ``ok=False`` spaeter in 403.
     """
 
     def __init__(self, permission: TrafficPermissionPort) -> None:
         self._permission = permission
 
     def __call__(self, mess_fehler: str | None = None) -> dict[str, object]:
-        """``{ok, error, state}`` -- ``ok=True`` bei voller Sicht, sonst Grund + Zustand.
+        """``{ok, error, state, cause}`` -- ``ok=True`` bei voller Sicht, sonst Grund + Zustand.
 
         ``is_available`` False -> Quelle nicht nutzbar (Plattform/Tooling fehlt).
         Sonst der Rechte-Befund ueber ``permission_state``.
@@ -143,14 +145,24 @@ class CheckTrafficPermission:
         oder die Plattform die Messung gar nicht anbietet (nicht behebbar). Die
         Oberflaeche braucht diesen Unterschied, um keinen wirkungslosen Rat zu geben.
 
+        ``cause`` benennt innerhalb von ``needs_privileges`` die URSACHE als Merkmal
+        (``tool_missing`` = das Werkzeug fehlt, ``measurement_failed`` = der laufende
+        Messlauf ist gescheitert). Beide Faelle liefern ``ok=False`` mit Text und
+        demselben ``state``; nur ``cause`` trennt sie, ohne dass die Oberflaeche den
+        Freitext von ``error`` durchsuchen muesste. Bei ``granted`` und
+        ``not_applicable`` gibt es keine Ursache -> ``None`` (in der Wire-Form
+        ``null``): "keine Ursache", nicht "unbekannte Ursache".
+
         ``ok`` und ``error`` bleiben UNVERAENDERT erhalten -- bestehende Aufrufer und
-        der 403-Pfad des Routers arbeiten weiter wie bisher (kein Bruch).
+        der 403-Pfad des Routers arbeiten weiter wie bisher (kein Bruch); ``cause``
+        kommt rein additiv dazu.
         """
         if not self._permission.is_available():
             return {
                 "ok": False,
                 "error": "Per-App-Traffic ist auf dieser Plattform nicht verfuegbar.",
                 "state": str(TrafficPermissionState.NOT_APPLICABLE),
+                "cause": None,
             }
         befund = self._permission.permission_state()
         if befund.state is TrafficPermissionState.GRANTED and mess_fehler:
@@ -161,11 +173,13 @@ class CheckTrafficPermission:
                 "ok": False,
                 "error": mess_fehler,
                 "state": str(TrafficPermissionState.NEEDS_PRIVILEGES),
+                "cause": str(TrafficPermissionCause.MEASUREMENT_FAILED),
             }
         return {
             "ok": befund.state is TrafficPermissionState.GRANTED,
             "error": befund.reason,
             "state": str(befund.state),
+            "cause": str(befund.cause) if befund.cause is not None else None,
         }
 
     def is_available(self) -> bool:
