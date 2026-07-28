@@ -19,30 +19,63 @@
 
 import { ApiError, apiGet, apiPost } from "./client.js";
 
+// Ursachen-Klassen eines gescheiterten SNI-Starts. Sie sind das, woran die
+// Ansicht ihre Anzeige festmacht — NICHT der Anzeigetext, der je nach Sprache und
+// Backend-Version anders lautet.
+//
+// Warum der HTTP-Status und nicht der Text? Der Backend-Rand trennt die Fälle
+// bereits sauber (backend/app.py): ein Rechte-Fehler (SniPermissionError, also
+// fehlendes CAP_NET_RAW) wird auf 403 abgebildet, JEDER andere Start-Fehler
+// (SniError: Helfer-Spawn, Gerät weg, scapy) auf 503. Der Status ist damit die
+// verlässliche, maschinenlesbare Form, in der die Unterscheidung im Frontend
+// ankommt. Der Begründungstext selbst ist Freitext und wird NICHT gedeutet.
+export const SNI_START_URSACHE = {
+  PERMISSION: "permission", // fehlende Rechte -> Einrichtung kann helfen
+  OTHER: "other", // anderer Grund -> Rechte-Knopf würde nichts bewirken
+};
+
 // Startet die SNI-Beobachtung. Body NUR mit interface, wenn gesetzt, sonst leeres
-// Objekt {}. Gibt {ok, error, available} zurück. Bei 403 ist die Fehler-Antwort
-// der Body (fehlende Rechte) — das fangen wir GEZIELT ab (nicht generisch) und
-// geben {ok:false, error} zurück, damit die View den Rechte-Hinweis zeigen kann.
-// Bei jedem anderen Fehler ebenfalls {ok:false, error:<message>}.
+// Objekt {}. Gibt {ok, error, available, ursache, grund} zurück:
+//   ursache — SNI_START_URSACHE.* bei ok=false, sonst null.
+//   grund   — der WÖRTLICHE Begründungstext des Backends oder null. Er wird
+//             unverändert durchgereicht und nirgends gedeutet oder ergänzt.
+// error bleibt unverändert das, was es war (kurze technische Meldung) — damit
+// hängt kein bestehender Aufrufer daran ab.
 export async function startSni(schnittstelle = null) {
   const body = schnittstelle ? { interface: schnittstelle } : {};
   try {
     const antwort = await apiPost("/api/sni/start", body);
+    const ok = Boolean(antwort.ok);
+    const fehlertext = antwort.error ?? null;
     return {
-      ok: Boolean(antwort.ok),
-      error: antwort.error ?? null,
+      ok,
+      error: fehlertext,
       available: antwort.available ?? null,
+      // Ein ok=false MIT 200 kommt aus der Vorprüfung (Npcap/libpcap fehlt) —
+      // das ist kein Rechte-Fall, und der Text ist hier der echte Grund.
+      ursache: ok ? null : SNI_START_URSACHE.OTHER,
+      grund: ok ? null : fehlertext,
     };
   } catch (fehler) {
     if (fehler instanceof ApiError && fehler.status === 403) {
-      // Fehlende Rechte: ehrlich als nicht-ok melden (der Backend-Body trägt den
-      // Grund; der ApiError reicht hier dessen Status/Message bereits durch).
-      return { ok: false, error: fehler.message, available: null };
+      // Fehlende Rechte: ehrlich als nicht-ok melden. Der Backend-Body trägt den
+      // Grund (detail); er wird als grund mitgegeben, nicht gedeutet.
+      return {
+        ok: false,
+        error: fehler.message,
+        available: null,
+        ursache: SNI_START_URSACHE.PERMISSION,
+        grund: fehler.detail ?? null,
+      };
     }
+    // Jeder andere Fehlschlag (503 aus SniError, Netzfehler, kaputte Antwort):
+    // KEIN Rechte-Fall. Ein Rechte-Knopf würde hier nichts bewirken.
     return {
       ok: false,
       error: fehler instanceof Error ? fehler.message : String(fehler),
       available: null,
+      ursache: SNI_START_URSACHE.OTHER,
+      grund: fehler instanceof ApiError ? (fehler.detail ?? null) : null,
     };
   }
 }

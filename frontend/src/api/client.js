@@ -10,11 +10,32 @@
 // Stabile Fehler-Form für alle API-Aufrufe: status (HTTP-Code oder null bei
 // Netz-/Parse-Fehler) plus eine klare message. Aufrufer können auf instanceof
 // ApiError prüfen und status auswerten.
+//
+// detail trägt ZUSÄTZLICH den Begründungstext aus dem Fehler-Body des Backends
+// (FastAPI-Konvention {"detail": "..."}), sofern die Antwort einen mitliefert;
+// sonst null. Rein additiv: message/status bleiben unverändert, bestehende
+// Aufrufer merken davon nichts. Nötig, damit eine Ansicht den ECHTEN Grund
+// eines Fehlschlags im Wortlaut zeigen kann, statt einen zu erfinden.
 export class ApiError extends Error {
-  constructor(message, status = null) {
+  constructor(message, status = null, detail = null) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.detail = detail;
+  }
+}
+
+// Liest den Begründungstext aus einem Fehler-Body. Erwartet die FastAPI-Form
+// {"detail": "..."}; alles andere (kein JSON, kein detail, leerer Text) ergibt
+// null — es wird NICHTS erfunden und nichts gedeutet. Verbraucht den Body-Stream,
+// darum nur im Fehlerfall aufrufen (danach wird die Antwort nicht mehr gelesen).
+async function fehlerDetail(response) {
+  try {
+    const body = await response.json();
+    const detail = body?.detail;
+    return typeof detail === "string" && detail !== "" ? detail : null;
+  } catch {
+    return null;
   }
 }
 
@@ -78,9 +99,12 @@ export async function apiPost(path, body) {
   }
 
   if (!response.ok) {
+    // Den Begründungstext des Backends mitnehmen (detail), damit Aufrufer den
+    // echten Grund zeigen können. Fehlt er, bleibt detail null.
     throw new ApiError(
       `Unerwarteter HTTP-Status ${response.status}`,
       response.status,
+      await fehlerDetail(response),
     );
   }
 

@@ -28,6 +28,13 @@ function getEntry(key) {
       running: false,
       starting: false,
       error: null,
+      // Zusatzangaben des letzten fehlgeschlagenen Starts, unverändert so, wie
+      // der start-Callback sie geliefert hat: ursache = maschinenlesbare
+      // Fehlerklasse, grund = wörtlicher Begründungstext. Beide null, solange
+      // kein Fehlschlag vorliegt oder der Callback sie nicht mitgibt — der Hook
+      // deutet sie NICHT, er reicht sie nur durch.
+      ursache: null,
+      grund: null,
       refCount: 0,
       start: null, // zuletzt registrierter Start-Callback dieses key
       stop: null, // zuletzt registrierter Stop-Callback dieses key
@@ -50,7 +57,7 @@ function notify(key) {
 }
 
 // Der Hook. start/stop/status sind async; status ist optional.
-//   start()  -> {ok, error}        (wie api/sni.js startSni)
+//   start()  -> {ok, error, ursache?, grund?}   (wie api/sni.js startSni)
 //   stop()   -> best-effort
 //   status() -> {running, ...}     (wie fetchSniStatus)
 // Der Hook hängt NICHT an konkreten Feldnamen außer running/ok/error.
@@ -86,13 +93,20 @@ export function useHelperResource(key, { start, stop, status } = {}) {
         const r = e.start ? await e.start() : null;
         if (r && r.ok === false) {
           e.error = r.error ?? "Start fehlgeschlagen";
+          e.ursache = r.ursache ?? null;
+          e.grund = r.grund ?? null;
           e.running = false;
         } else {
           e.running = true;
           e.error = null;
+          e.ursache = null;
+          e.grund = null;
         }
       } catch (fehler) {
         e.error = String(fehler?.message ?? fehler);
+        // Ein geworfener Fehler trägt keine Klassifizierung — nichts behaupten.
+        e.ursache = null;
+        e.grund = null;
         e.running = false;
       } finally {
         e.starting = false;
@@ -119,6 +133,8 @@ export function useHelperResource(key, { start, stop, status } = {}) {
       } finally {
         e.running = false;
         e.error = null;
+        e.ursache = null;
+        e.grund = null;
         notify(key);
       }
     }
@@ -146,6 +162,8 @@ export function useHelperResource(key, { start, stop, status } = {}) {
     running: eintrag.running,
     starting: eintrag.starting,
     error: eintrag.error,
+    ursache: eintrag.ursache,
+    grund: eintrag.grund,
     refCount: eintrag.refCount,
     acquire,
     release,

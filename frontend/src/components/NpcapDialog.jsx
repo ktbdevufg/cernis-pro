@@ -3,14 +3,16 @@
 // Zentrierter Overlay-Dialog (Muster: PortLookupDialog.jsx — gleiche Overlay-/
 // Head-/Body-Struktur, X-Schließen aus lucide-react, Escape + Backdrop-Klick
 // schließen via onClose, nur CSS-Tokens, keine hartkodierten Farben). Erklärt
-// ehrlich, warum die Sniff-Funktion auf Windows ausgegraut ist, und bietet
-// marker-abhängig einen Download-Link.
+// ehrlich, warum die Sniff-Funktion ausgegraut ist, und bietet den Download-Link.
 //
-// Marker (aus dem Backend-permission_error, siehe sniffd_platform_supported):
-//   NPCAP_MISSING           — Npcap fehlt: Text bodyMissing + Download-Button
-//                             (öffnet https://npcap.com).
-//   WINDOWS_IPC_UNSUPPORTED — Npcap da, IPC-Naht noch nicht portiert: Text
-//                             bodyIpc, KEIN Download-Button (nur Schließen).
+// Der Dialog kennt GENAU EINEN Fall (aus dem Backend-permission_error, siehe
+// sniffd_unavailable_reason):
+//   NPCAP_MISSING — Npcap fehlt: Text bodyMissing + Download-Button
+//                   (öffnet https://npcap.com).
+// Einen zweiten Marker gibt es nicht mehr: das Backend liefert bei erkanntem
+// Npcap gar keinen Marker, die Funktion ist dann nutzbar. Es gibt darum auch
+// KEINEN Sonst-Zweig mit abweichendem Text — ein solcher könnte nur eine
+// unwahre Aussage zeigen.
 //
 // Link-Öffnen: wie PortLookupDialog über den Backend-Opener (POST /api/open-url,
 // openUrl aus api/system.js) in den Systembrowser; Fallback window.open, wenn
@@ -18,7 +20,6 @@
 // WebView KEINEN Systembrowser, darum der Backend-Opener.
 //
 // Props:
-//   marker  — "NPCAP_MISSING" | "WINDOWS_IPC_UNSUPPORTED" (steuert Text/Button).
 //   onClose — schließt den Dialog (Aufrufer setzt seinen State zurück).
 
 import { ExternalLink, X } from "lucide-react";
@@ -32,7 +33,7 @@ import "./NpcapDialog.css";
 // bewusstem Klick auf den Download-Button geöffnet.
 const NPCAP_URL = "https://npcap.com";
 
-export default function NpcapDialog({ marker, onClose }) {
+export default function NpcapDialog({ onClose }) {
   const { t } = useTranslation();
 
   // Escape schließt den Dialog (Standard-Overlay-Verhalten wie PortLookupDialog).
@@ -45,15 +46,6 @@ export default function NpcapDialog({ marker, onClose }) {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
-
-  // Nur NPCAP_MISSING trägt den Download-Button. Bei WINDOWS_IPC_UNSUPPORTED
-  // (Npcap vorhanden, IPC-Naht kommt erst in einer künftigen Version) gibt es
-  // nichts herunterzuladen — nur Schließen.
-  const zeigeDownload = marker === "NPCAP_MISSING";
-
-  // Text marker-abhängig: bodyMissing (Npcap fehlt) vs. bodyIpc (Npcap erkannt,
-  // Funktion künftig). Titel ist für beide Fälle gleich.
-  const bodyKey = zeigeDownload ? "npcap.bodyMissing" : "npcap.bodyIpc";
 
   // Öffnet die Npcap-Download-URL beim Klick. Primärweg: Backend-Opener ->
   // Systembrowser (zuverlässig in der Tauri-App); Fallback window.open im
@@ -90,24 +82,24 @@ export default function NpcapDialog({ marker, onClose }) {
         </div>
 
         <div className="npcap-dialog__body">
-          <p className="npcap-dialog__desc">{t(bodyKey)}</p>
+          <p className="npcap-dialog__desc">{t("npcap.bodyMissing")}</p>
 
-          {/* Klar als extern erkennbarer Download-Link — nur wenn Npcap fehlt.
+          {/* Klar als extern erkennbarer Download-Link. Der Dialog wird nur
+              geöffnet, wenn Npcap fehlt — der Link gehört darum unbedingt dazu
+              und hängt an keiner Bedingung mehr.
               Öffnet erst bei bewusstem Klick über den Backend-Opener (WebView
               öffnet target="_blank" nicht selbst) und fällt im Browser-Dev auf
               window.open zurück. */}
-          {zeigeDownload && (
-            <a
-              className="npcap-dialog__download"
-              href={NPCAP_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={handleDownloadClick}
-            >
-              <ExternalLink size={15} aria-hidden="true" />
-              {t("npcap.downloadBtn")}
-            </a>
-          )}
+          <a
+            className="npcap-dialog__download"
+            href={NPCAP_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={handleDownloadClick}
+          >
+            <ExternalLink size={15} aria-hidden="true" />
+            {t("npcap.downloadBtn")}
+          </a>
         </div>
       </div>
     </div>

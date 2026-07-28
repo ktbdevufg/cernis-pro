@@ -266,12 +266,12 @@ function AppListe({
           {t("beobachten.traffic.title")}
         </span>
         <span className="traffic-list__header-right">
-          {/* Trägt der SNI-Status einen Windows-Marker (Npcap fehlt / IPC noch
-              nicht portiert), ist der Sniff auf dieser Plattform grundsätzlich
-              nicht nutzbar: STATT des Start-Toggles ein ehrlicher Ausgrau-Hinweis
-              mit Button, der den NpcapDialog öffnet. Sonst der normale Toggle. */}
+          {/* Trägt der SNI-Status den Windows-Marker (Npcap fehlt), ist der
+              Sniff auf dieser Plattform nicht nutzbar: STATT des Start-Toggles
+              ein ehrlicher Ausgrau-Hinweis mit Button, der den NpcapDialog
+              öffnet. Sonst der normale Toggle. */}
           {istNpcapMarker(npcapMarker) ? (
-            <NpcapAusgrau marker={npcapMarker} onInstall={onNpcapInstall} />
+            <NpcapAusgrau onInstall={onNpcapInstall} />
           ) : (
             // SNI-Toggle LINKS vom Live-Indikator: startet/stoppt die passive
             // SNI-Beobachtung. Aktiv -> stop, sonst -> start. Während des Starts
@@ -701,36 +701,30 @@ function SniHinweis({ text }) {
 }
 
 // Windows-Marker der Sniff-Verfügbarkeit (aus permission_error, siehe Backend
-// sniffd_platform_supported). Trägt permissionError einen davon, ist die Sniff-
-// Familie auf dieser Plattform grundsätzlich nicht nutzbar -> Ausgrau-Hinweis
-// statt Start-Fläche.
-const NPCAP_MARKER = new Set(["NPCAP_MISSING", "WINDOWS_IPC_UNSUPPORTED"]);
+// sniffd_unavailable_reason). Es gibt genau EINEN: fehlt Npcap, ist die Sniff-
+// Familie auf dieser Plattform nicht nutzbar -> Ausgrau-Hinweis statt Start-
+// Fläche. Ist Npcap erkannt, liefert das Backend gar keinen Marker.
+const NPCAP_MARKER = "NPCAP_MISSING";
 
 function istNpcapMarker(marker) {
-  return typeof marker === "string" && NPCAP_MARKER.has(marker);
+  return marker === NPCAP_MARKER;
 }
 
-// Ausgrau-Hinweis (statt der SNI-Start-Fläche): marker-abhängig wie der Dialog.
-// NPCAP_MISSING -> Hinweistext + Button (öffnet NpcapDialog zum Herunterladen).
-// WINDOWS_IPC_UNSUPPORTED -> IPC-Text OHNE Button (Npcap ist da, der Dialog-
-// Aufruf ergäbe keinen Sinn — die Funktion kommt erst in einer künftigen Version).
-function NpcapAusgrau({ marker, onInstall }) {
+// Ausgrau-Hinweis (statt der SNI-Start-Fläche): Hinweistext + Button, der den
+// NpcapDialog zum Herunterladen öffnet. Er erscheint nur bei fehlendem Npcap,
+// darum gibt es hier keine Fallunterscheidung mehr.
+function NpcapAusgrau({ onInstall }) {
   const { t } = useTranslation();
-  const istIpc = marker === "WINDOWS_IPC_UNSUPPORTED";
   return (
     <span className="traffic-list__npcap" role="note">
-      <span className="traffic-list__npcap-hint">
-        {istIpc ? t("npcap.inlineHintIpc") : t("npcap.inlineHint")}
-      </span>
-      {!istIpc && (
-        <button
-          type="button"
-          className="traffic-list__npcap-btn"
-          onClick={onInstall}
-        >
-          {t("npcap.installBtn")}
-        </button>
-      )}
+      <span className="traffic-list__npcap-hint">{t("npcap.inlineHint")}</span>
+      <button
+        type="button"
+        className="traffic-list__npcap-btn"
+        onClick={onInstall}
+      >
+        {t("npcap.installBtn")}
+      </button>
     </span>
   );
 }
@@ -759,12 +753,12 @@ export default function TrafficView({
   // Nachzuschlagende Gegenstelle ({ ip, port }) oder null.
   const [lookupZiel, setLookupZiel] = useState(null);
 
-  // Windows-Marker aus dem SNI-Status (permissionError). Ist er einer der beiden
-  // Npcap-Marker, wird die Sniff-Start-Fläche durch den Ausgrau-Hinweis ersetzt.
+  // Windows-Marker aus dem SNI-Status (permissionError). Trägt er den Npcap-
+  // Marker, wird die Sniff-Start-Fläche durch den Ausgrau-Hinweis ersetzt.
   const [sniPermMarker, setSniPermMarker] = useState(null);
-  // Offener NpcapDialog (Marker-String) oder null. Mount/Unmount wie bei Dialogen
-  // üblich (State im View).
-  const [npcapDialogMarker, setNpcapDialogMarker] = useState(null);
+  // Ob der NpcapDialog offen ist. Mount/Unmount wie bei Dialogen üblich (State
+  // im View). Der Dialog kennt nur EINEN Fall, darum genügt ein Ja/Nein.
+  const [zeigeNpcapDialog, setZeigeNpcapDialog] = useState(false);
 
   // Dezenter Lade-Zustand am Refresh-Button (dreht/disabled), OHNE den
   // "laedt"-Vollzustand auszulösen — die Liste bleibt beim Reload stehen.
@@ -1072,7 +1066,7 @@ export default function TrafficView({
             onSniStart={handleSniStart}
             onSniStop={handleSniStop}
             npcapMarker={sniPermMarker}
-            onNpcapInstall={() => setNpcapDialogMarker(sniPermMarker)}
+            onNpcapInstall={() => setZeigeNpcapDialog(true)}
             durchsatzAusblenden={durchsatzAusblenden}
           />
           {gewaehlteApp &&
@@ -1095,13 +1089,10 @@ export default function TrafficView({
         </div>
       )}
 
-      {/* NpcapDialog: marker-abhängiger Erklär-/Download-Dialog. Mount/Unmount
-          über den State (npcapDialogMarker); onClose setzt ihn zurück. */}
-      {npcapDialogMarker && (
-        <NpcapDialog
-          marker={npcapDialogMarker}
-          onClose={() => setNpcapDialogMarker(null)}
-        />
+      {/* NpcapDialog: Erklär-/Download-Dialog bei fehlendem Npcap. Mount/Unmount
+          über den State (zeigeNpcapDialog); onClose setzt ihn zurück. */}
+      {zeigeNpcapDialog && (
+        <NpcapDialog onClose={() => setZeigeNpcapDialog(false)} />
       )}
     </div>
   );

@@ -2,11 +2,9 @@
   "npcap": {
     "title": "Install Npcap",
     "inlineHint": "This feature requires Npcap. Without Npcap, packet capture is not possible.",
-    "inlineHintIpc": "This feature is not yet available on Windows in this version of CERNIS.",
     "installBtn": "Install Npcap",
     "bodyMissing": "CERNIS uses Npcap for passive capture of SNI, traffic and topology. Npcap is a separate, open-source program by the Nmap developers. You download and install it yourself; CERNIS does not bundle it.",
-    "downloadBtn": "Go to the Npcap download page",
-    "bodyIpc": "Npcap detected. This feature is not yet available on Windows in this version of CERNIS."
+    "downloadBtn": "Go to the Npcap download page"
   },
   "app": {
     "version": "v2.0",
@@ -735,6 +733,7 @@
         "offHinweis": "Real domain names are off. Some trackers stay invisible as a result.",
         "offShow": "Show",
         "startError": "Real domain names can't be shown because CERNIS is missing the required permission. You can grant it now — it takes a moment and can be revoked at any time.",
+        "startErrorOther": "Capturing the real domain names could not be started.",
         "threatOne": "One peer is on a threat list",
         "threatMany": "{{count}} peers are on threat lists",
         "threatDisclaimer": "The classification comes from the selected lists, not from CERNIS.",

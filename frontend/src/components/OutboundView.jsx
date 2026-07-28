@@ -11,7 +11,7 @@
 // dezent, flach, ruhig. Außenkontakte URTEILEN NICHT — KEINE Severity-Farben.
 
 import { Globe, GlobeLock, Flag, Filter } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -22,7 +22,7 @@ import {
 } from "../api/captureAccess.js";
 import { fetchOutboundContacts } from "../api/outbound.js";
 import { matchContacts } from "../api/blocklist.js";
-import { fetchSniMap, fetchSniStatus } from "../api/sni.js";
+import { SNI_START_URSACHE, fetchSniMap, fetchSniStatus } from "../api/sni.js";
 import { fetchSettings, updateSetting } from "../api/settings.js";
 import { useSni } from "../hooks/useSni.js";
 import CaptureAccessDialog from "./CaptureAccessDialog.jsx";
@@ -32,12 +32,43 @@ import OutboundConsentDialog from "./OutboundConsentDialog.jsx";
 import "./OutboundView.css";
 
 // Windows-Marker der Sniff-Verfügbarkeit (aus permission_error, siehe Backend
-// sniffd_platform_supported). Trägt permissionError einen davon, ist die Sniff-
-// Familie auf dieser Plattform grundsätzlich nicht nutzbar -> Ausgrau-Hinweis.
-const NPCAP_MARKER = new Set(["NPCAP_MISSING", "WINDOWS_IPC_UNSUPPORTED"]);
+// sniffd_unavailable_reason). Es gibt genau EINEN: fehlt Npcap, ist die Sniff-
+// Familie auf dieser Plattform nicht nutzbar -> Ausgrau-Hinweis. Ist Npcap
+// erkannt, liefert das Backend gar keinen Marker.
+const NPCAP_MARKER = "NPCAP_MISSING";
 
 function istNpcapMarker(marker) {
-  return typeof marker === "string" && NPCAP_MARKER.has(marker);
+  return marker === NPCAP_MARKER;
+}
+
+// Wählt aus, WIE ein gescheiterter SNI-Start angezeigt wird. Reine Funktion über
+// der Ursachen-Klasse aus api/sni.js (SNI_START_URSACHE) — bewusst ausgelagert,
+// damit die Unterscheidung direkt mit beiden Lagen aufgerufen und belegt werden
+// kann, statt auf ihr Auftreten im Alltag zu warten.
+//
+// Zwei Lagen, mehr gibt es nicht:
+//   PERMISSION — der Start scheiterte an fehlenden Rechten. Unveränderter Text
+//                wie bisher, MIT dem Knopf zur Rechteeinrichtung: er kann hier
+//                tatsächlich etwas ändern.
+//   sonst      — der Start scheiterte aus einem anderen Grund. Neutraler Text,
+//                der genau das sagt, plus der vom Backend gelieferte Grund im
+//                Wortlaut, falls es einen gibt. KEIN Rechte-Knopf: er würde an
+//                einer anderen Ursache nichts bewirken.
+//
+// Der Grund wird unverändert übernommen und NICHT gedeutet. Fehlt er, steht der
+// neutrale Satz allein — kein Platzhalter, kein erfundener Zusatz.
+export function waehleStartfehlerAnzeige(ursache, grund, t) {
+  if (ursache === SNI_START_URSACHE.PERMISSION) {
+    return {
+      text: t("beobachten.outbound.sni.startError"),
+      zeigeRechteKnopf: true,
+    };
+  }
+  const neutral = t("beobachten.outbound.sni.startErrorOther");
+  return {
+    text: grund ? `${neutral} ${grund}` : neutral,
+    zeigeRechteKnopf: false,
+  };
 }
 
 // Reihenfolge/Erlaubte Gruppen der Blocklist-Badges. tracker_ads zuerst (häufiger,
@@ -273,11 +304,18 @@ export default function OutboundView() {
   // Ob der Threat-Filter aktiv ist (nur Gegenstellen auf Threat-Listen zeigen).
   const [threatGefiltert, setThreatGefiltert] = useState(false);
 
-  // Windows-Marker aus dem SNI-Status (permissionError). Ist er einer der beiden
-  // Npcap-Marker, ersetzt der Ausgrau-Block die Startphasen-/Startfehler-Hinweise.
+  // Windows-Marker aus dem SNI-Status (permissionError). Trägt er den Npcap-
+  // Marker, ersetzt der Ausgrau-Block die Startphasen-/Startfehler-Hinweise.
+  // null = noch nicht gelesen (der Status-Abruf läuft), "" / anderer Wert =
+  // kein Marker. Der Unterschied zählt für die Zustimmungsfrage: solange
+  // ungelesen, wird nicht gefragt (siehe verfuegbar).
   const [sniPermMarker, setSniPermMarker] = useState(null);
-  // Offener NpcapDialog (Marker-String) oder null. Mount/Unmount wie bei Dialogen.
-  const [npcapDialogMarker, setNpcapDialogMarker] = useState(null);
+  // Ob der SNI-Status schon gelesen wurde. Erst dann ist sniPermMarker eine
+  // Aussage und nicht bloß "noch unbekannt".
+  const [sniStatusGelesen, setSniStatusGelesen] = useState(false);
+  // Ob der NpcapDialog offen ist. Der Dialog kennt nur EINEN Fall (Npcap fehlt),
+  // darum genügt ein Ja/Nein.
+  const [zeigeNpcapDialog, setZeigeNpcapDialog] = useState(false);
 
   // ── Rechteeinrichtung (Etappe 2) ────────────────────────────────────────────
   // Ob der Erklär-Dialog offen ist, der VOR der Systemabfrage sagt, was
@@ -305,6 +343,8 @@ export default function OutboundView() {
     running: sniAktiv,
     starting: sniStartet,
     error: sniError,
+    ursache: sniUrsache,
+    grund: sniGrund,
     acquire,
     release,
   } = useSni();
@@ -336,8 +376,9 @@ export default function OutboundView() {
 
   // SNI-Block: Einwilligung beim Mount aus den Settings laden. t NICHT im
   // dep-Array (react-i18next-Regel) — leeres dep-Array, einmal beim Mount.
-  // Fehlt der Wert (null), zeigen wir den Einwilligungs-Dialog. Fehler tolerieren:
-  // consent bleibt null, Dialog zeigen ist ok (kein Absturz).
+  // Der GESPEICHERTE Wert wird hier nur GELESEN, nie geschrieben oder verworfen.
+  // Fehler tolerieren: consent bleibt null (kein Absturz). Ob daraufhin gefragt
+  // wird, entscheidet der Effekt darunter — hier wird kein Dialog geöffnet.
   useEffect(() => {
     let abgebrochen = false;
     (async () => {
@@ -346,15 +387,10 @@ export default function OutboundView() {
         if (abgebrochen) {
           return;
         }
-        const wert = settings["outbound_sni_consent"] ?? null;
-        setConsent(wert);
-        if (wert === null) {
-          setZeigeConsentDialog(true);
-        }
+        setConsent(settings["outbound_sni_consent"] ?? null);
       } catch {
         if (!abgebrochen) {
           setConsent(null);
-          setZeigeConsentDialog(true);
         }
       }
     })();
@@ -362,6 +398,28 @@ export default function OutboundView() {
       abgebrochen = true;
     };
   }, []);
+
+  // Ist die Funktion überhaupt nutzbar? Nur dann darf um Zustimmung gebeten
+  // werden. Solange der SNI-Status noch nicht gelesen ist, gilt sie als NICHT
+  // nutzbar — es wird also nicht vorschnell gefragt und auch nichts behauptet.
+  const sniVerfuegbar = sniStatusGelesen && !istNpcapMarker(sniPermMarker);
+
+  // Zustimmung nur erfragen, wenn sie etwas bewirken kann: der Dialog erscheint
+  // ausschließlich, wenn noch keine Antwort gespeichert ist UND die Funktion
+  // anschließend auch stattfinden kann. Fehlt Npcap, bleibt stattdessen der
+  // Ausgrau-Hinweis mit dem Angebot zur Nachinstallation stehen.
+  //
+  // KEINE Sackgasse: dieser Effekt hängt an sniVerfuegbar. Installiert der
+  // Nutzer Npcap nach und wird der Status neu gelesen (beim Schließen des
+  // NpcapDialogs, siehe handleNpcapDialogSchliessen), kippt sniVerfuegbar auf
+  // true, der Effekt läuft erneut und die Frage wird nachgeholt. Eine bereits
+  // gespeicherte Antwort (granted/denied) bleibt dabei unangetastet: bei ihr
+  // ist consent !== null und es wird nicht erneut gefragt.
+  useEffect(() => {
+    if (consent === null && sniVerfuegbar) {
+      setZeigeConsentDialog(true);
+    }
+  }, [consent, sniVerfuegbar]);
 
   // SNI-Lifecycle: bei erteilter Einwilligung den geteilten Sniffer anfordern
   // (acquire) und im Cleanup wieder freigeben (release). acquire/release sind
@@ -377,15 +435,30 @@ export default function OutboundView() {
     };
   }, [consent, acquire, release]);
 
-  // permissionError-Marker beim Mount holen: trägt er einen Windows-Marker, ist
-  // der Sniff auf dieser Plattform grundsätzlich nicht nutzbar -> der Ausgrau-
-  // Block ersetzt die Startphasen-/Startfehler-Hinweise. fetchSniStatus wirft
-  // (kein still-Fallback); tolerant fangen, damit ein Patzer die View nicht kippt.
-  useEffect(() => {
-    fetchSniStatus()
-      .then((s) => setSniPermMarker(s.permissionError ?? null))
-      .catch(() => {});
+  // permissionError-Marker holen: trägt er den Windows-Marker, ist der Sniff auf
+  // dieser Plattform nicht nutzbar -> der Ausgrau-Block ersetzt die Startphasen-/
+  // Startfehler-Hinweise. fetchSniStatus wirft (kein still-Fallback); tolerant
+  // fangen, damit ein Patzer die View nicht kippt.
+  //
+  // Bewusst als eigene Funktion (nicht nur im Mount-Effekt): sie wird ein zweites
+  // Mal gebraucht, wenn der Nutzer den Npcap-Dialog schließt — dann kann Npcap
+  // inzwischen installiert sein, und der Marker fällt weg.
+  //
+  // Bei einem Fehlschlag wird sniPermMarker NICHT verändert (keine Aussage aus
+  // einem missglückten Abruf); sniStatusGelesen bleibt dann ebenfalls, wie es war.
+  const leseSniStatus = useCallback(async () => {
+    try {
+      const s = await fetchSniStatus();
+      setSniPermMarker(s.permissionError ?? null);
+      setSniStatusGelesen(true);
+    } catch {
+      // still: der Ausgrau-Block bleibt aus, die übrigen Hinweise greifen.
+    }
   }, []);
+
+  useEffect(() => {
+    void leseSniStatus();
+  }, [leseSniStatus]);
 
   // SNI-Map-Anreicherung: läuft der Sniffer, einmal die Map remote_ip -> hostname
   // holen (fetchSniMap wirft nie). Läuft er nicht, die Map leeren. Bewusst KEIN
@@ -669,6 +742,16 @@ export default function OutboundView() {
   // „Anzeigen" im Off-Streifen: Einwilligungs-Dialog erneut öffnen.
   const handleHinweisShow = () => setZeigeConsentDialog(true);
 
+  // Npcap-Dialog schließen — und den SNI-Status frisch lesen. Das ist der Weg
+  // aus der Nicht-Verfügbarkeit heraus: hat der Nutzer Npcap zwischenzeitlich
+  // installiert, fällt der Marker weg, sniVerfuegbar kippt auf true und die noch
+  // offene Zustimmungsfrage wird nachgeholt (siehe der Effekt an sniVerfuegbar).
+  // Ist Npcap weiterhin nicht da, bleibt schlicht der Ausgrau-Hinweis stehen.
+  const handleNpcapDialogSchliessen = () => {
+    setZeigeNpcapDialog(false);
+    void leseSniStatus();
+  };
+
   return (
     <div className="outbound">
       {/* Einwilligungs-Dialog (SNI): zentriertes Overlay über der Ansicht. */}
@@ -741,13 +824,10 @@ export default function OutboundView() {
           </div>
         )}
 
-      {/* NpcapDialog: marker-abhängiger Erklär-/Download-Dialog. Mount/Unmount
-          über den State (npcapDialogMarker); onClose setzt ihn zurück. */}
-      {npcapDialogMarker && (
-        <NpcapDialog
-          marker={npcapDialogMarker}
-          onClose={() => setNpcapDialogMarker(null)}
-        />
+      {/* NpcapDialog: Erklär-/Download-Dialog bei fehlendem Npcap. Mount/Unmount
+          über den State (zeigeNpcapDialog); onClose setzt ihn zurück. */}
+      {zeigeNpcapDialog && (
+        <NpcapDialog onClose={handleNpcapDialogSchliessen} />
       )}
 
       {/* Ehrlicher host_scope-Banner: nur bei "local_host". Bei anderem/leerem
@@ -785,8 +865,16 @@ export default function OutboundView() {
       {/* SNI-Hinweisstreifen bei ausgeschalteten echten Domainnamen: nur wenn
           die Einwilligung nicht erteilt ist, der Startwert nicht mehr lädt und
           der Dialog nicht offen ist. Rechts ein „Anzeigen"-Knopf, der den Dialog
-          erneut öffnet. */}
-      {consent !== "granted" && consent !== "loading" && !zeigeConsentDialog && (
+          erneut öffnet.
+
+          Zusätzlich an die Verfügbarkeit gekoppelt: sein Knopf führt in dieselbe
+          Zustimmungsfrage, die ohne nutzbare Funktion nichts bewirken kann. Ist
+          sie nicht verfügbar, steht an dieser Stelle der Ausgrau-Hinweis mit dem
+          Angebot zur Nachinstallation — er benennt, was fehlt. */}
+      {sniVerfuegbar &&
+        consent !== "granted" &&
+        consent !== "loading" &&
+        !zeigeConsentDialog && (
         <div className="outbound__sni-hinweis" role="note">
           <GlobeLock size={16} aria-hidden="true" />
           <span className="outbound__sni-hinweis-text">
@@ -802,30 +890,28 @@ export default function OutboundView() {
         </div>
       )}
 
-      {/* Npcap-Ausgrau-Block: trägt der SNI-Status einen Windows-Marker (Npcap
-          fehlt / IPC noch nicht portiert), ist der Sniff auf dieser Plattform
-          grundsätzlich nicht nutzbar. Dann STATT der Startphasen-/Startfehler-
-          Hinweise ein ehrlicher Ausgrau-Hinweis. Marker-abhängig wie der Dialog:
-          NPCAP_MISSING -> Hinweistext + Button (öffnet NpcapDialog zum Download);
-          WINDOWS_IPC_UNSUPPORTED -> IPC-Text OHNE Button (Npcap ist da, der Dialog-
-          Aufruf ergäbe keinen Sinn). Nur bei erteilter Einwilligung (konsistent
-          mit den SNI-Blöcken). */}
-      {consent === "granted" && istNpcapMarker(sniPermMarker) && (
+      {/* Npcap-Ausgrau-Block: trägt der SNI-Status den Windows-Marker (Npcap
+          fehlt), ist der Sniff auf dieser Plattform nicht nutzbar. Dann STATT
+          der Startphasen-/Startfehler-Hinweise ein ehrlicher Ausgrau-Hinweis mit
+          Button, der den NpcapDialog zum Download öffnet.
+
+          Dieser Streifen ist zugleich der Weg zurück in die Zustimmungsfrage:
+          er erscheint unabhängig vom Consent-Zustand, benennt das fehlende
+          Werkzeug und bleibt sichtbar, bis Npcap da ist. Danach fällt der Marker
+          weg — und die Zustimmungsfrage wird wieder gestellt (siehe den Effekt
+          am consent-/verfügbar-Zustand). */}
+      {istNpcapMarker(sniPermMarker) && (
         <div className="outbound__hinweis" role="note">
           <span className="outbound__hinweis-text">
-            {sniPermMarker === "WINDOWS_IPC_UNSUPPORTED"
-              ? t("npcap.inlineHintIpc")
-              : t("npcap.inlineHint")}
+            {t("npcap.inlineHint")}
           </span>
-          {sniPermMarker !== "WINDOWS_IPC_UNSUPPORTED" && (
-            <button
-              type="button"
-              className="outbound__hinweis-button"
-              onClick={() => setNpcapDialogMarker(sniPermMarker)}
-            >
-              {t("npcap.installBtn")}
-            </button>
-          )}
+          <button
+            type="button"
+            className="outbound__hinweis-button"
+            onClick={() => setZeigeNpcapDialog(true)}
+          >
+            {t("npcap.installBtn")}
+          </button>
         </div>
       )}
 
@@ -851,29 +937,43 @@ export default function OutboundView() {
       {consent === "granted" &&
         !istNpcapMarker(sniPermMarker) &&
         sniError &&
-        !accessBrauchtNeustart && (
-        <div className="outbound__hinweis" role="note">
-          <span className="outbound__hinweis-title">
-            {t("beobachten.traffic.permissionTitle")}
-          </span>
-          <span className="outbound__hinweis-text">
-            {t("beobachten.outbound.sni.startError")}
-          </span>
-          {/* Weg aus dem Fehlzustand heraus (Etappe 2c): der Hinweis benennt nicht
-              nur, dass Rechte fehlen, sondern bietet die Einrichtung direkt an.
-              Ohne diesen Knopf war die Einrichtung nur beim ERSTMALIGEN Zustimmen
-              erreichbar — wer früher zugestimmt hatte, kam nie mehr heran. Gleicher
-              Weg wie bei handleGrant (eine gemeinsame Funktion, keine Kopie). */}
-          <button
-            type="button"
-            className="outbound__hinweis-button"
-            onClick={handleRechteEinrichten}
-            disabled={accessLaeuft}
-          >
-            {t("beobachten.outbound.access.jetztEinrichten")}
-          </button>
-        </div>
-      )}
+        !accessBrauchtNeustart &&
+        (() => {
+          // Die beiden Lagen kommen aus waehleStartfehlerAnzeige — der Streifen
+          // behauptet nichts über die Ursache, er zeigt, was ausgewählt wurde.
+          const anzeige = waehleStartfehlerAnzeige(sniUrsache, sniGrund, t);
+          return (
+            <div className="outbound__hinweis" role="note">
+              {/* Die Überschrift benennt fehlende Rechte — sie gehört daher nur
+                  in den Rechte-Fall. Bei anderer Ursache stünde dort eine
+                  Diagnose, die niemand geprüft hat. */}
+              {anzeige.zeigeRechteKnopf && (
+                <span className="outbound__hinweis-title">
+                  {t("beobachten.traffic.permissionTitle")}
+                </span>
+              )}
+              <span className="outbound__hinweis-text">{anzeige.text}</span>
+              {/* Weg aus dem Fehlzustand heraus (Etappe 2c): der Hinweis benennt
+                  nicht nur, dass Rechte fehlen, sondern bietet die Einrichtung
+                  direkt an. Ohne diesen Knopf war die Einrichtung nur beim
+                  ERSTMALIGEN Zustimmen erreichbar — wer früher zugestimmt hatte,
+                  kam nie mehr heran. Gleicher Weg wie bei handleGrant (eine
+                  gemeinsame Funktion, keine Kopie).
+                  NUR im Rechte-Fall: bei anderer Ursache würde er nichts
+                  bewirken und eine falsche Erwartung wecken. */}
+              {anzeige.zeigeRechteKnopf && (
+                <button
+                  type="button"
+                  className="outbound__hinweis-button"
+                  onClick={handleRechteEinrichten}
+                  disabled={accessLaeuft}
+                >
+                  {t("beobachten.outbound.access.jetztEinrichten")}
+                </button>
+              )}
+            </div>
+          );
+        })()}
 
       {/* Rote-Linie-Hinweis (einmalig, NICHT pro Zeile): nur wenn überhaupt
           Listen-Treffer sichtbar sind. Macht die Quelle der Einordnung explizit —

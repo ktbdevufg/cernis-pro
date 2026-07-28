@@ -2,11 +2,9 @@
   "npcap": {
     "title": "Npcap installieren",
     "inlineHint": "Diese Funktion benötigt Npcap. Ohne Npcap ist keine Paketerfassung möglich.",
-    "inlineHintIpc": "Diese Funktion ist in dieser CERNIS-Version unter Windows noch nicht verfügbar.",
     "installBtn": "Npcap installieren",
     "bodyMissing": "CERNIS nutzt Npcap für passives Mitlesen von SNI, Datenverkehr und Topologie. Npcap ist ein separates, quelloffenes Programm der Nmap-Entwickler. Sie laden und installieren es selbst; CERNIS bündelt es nicht.",
-    "downloadBtn": "Zur Npcap-Download-Seite",
-    "bodyIpc": "Npcap erkannt. Diese Funktion ist in dieser CERNIS-Version unter Windows noch nicht verfügbar."
+    "downloadBtn": "Zur Npcap-Download-Seite"
   },
   "app": {
     "version": "v2.0",
@@ -735,6 +733,7 @@
         "offHinweis": "Echte Domainnamen sind aus. Tracker bleiben dadurch teils unsichtbar.",
         "offShow": "Anzeigen",
         "startError": "Echte Domainnamen können nicht angezeigt werden, weil CERNIS die nötige Berechtigung fehlt. Sie können sie jetzt erteilen — das dauert einen Moment und lässt sich jederzeit widerrufen.",
+        "startErrorOther": "Die Erfassung der echten Domainnamen konnte nicht gestartet werden.",
         "threatOne": "Eine Gegenstelle steht auf einer Bedrohungsliste",
         "threatMany": "{{count}} Gegenstellen stehen auf Bedrohungslisten",
         "threatDisclaimer": "Die Einordnung stammt von den gewählten Listen, nicht von CERNIS.",
