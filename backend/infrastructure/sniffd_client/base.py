@@ -53,11 +53,9 @@ Startausgabe abfliesst; er endet mit EOF der Pipe und wird im ``_cleanup`` gejoi
 
 import contextlib
 import os
-import shutil
 import socket
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 from pathlib import Path
@@ -69,6 +67,13 @@ from infrastructure.sniffd.protocol import (
     ProtocolError,
     recv_message,
     send_message,
+)
+from infrastructure.sniffd.transport import (
+    address_for_dir,
+    address_ready,
+    connect,
+    create_address_dir,
+    remove_address_dir,
 )
 
 _logger = structlog.get_logger(__name__)
@@ -252,10 +257,10 @@ class _BaseSubprocessHelper:
         self._reader_stop = threading.Event()
 
         try:
-            self._socket_dir = tempfile.mkdtemp(prefix="cernis-sniffd-")
+            self._socket_dir = create_address_dir()
         except OSError as exc:
             return f"{label}-Helfer: Socket-Verzeichnis nicht anlegbar: {exc}"
-        socket_path = str(Path(self._socket_dir) / "sniffd.sock")
+        socket_path = address_for_dir(self._socket_dir)
 
         try:
             # stderr in DIESELBE Pipe wie stdout (der Helfer nutzt beide: structlog
@@ -282,8 +287,7 @@ class _BaseSubprocessHelper:
             return f"{label}-Helfer-Socket nicht erreichbar (Timeout){err}"
 
         try:
-            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            sock.connect(socket_path)
+            sock = connect(socket_path)
         except OSError as exc:
             self._cleanup()
             return f"{label}-Helfer-Verbindung fehlgeschlagen: {exc}"
@@ -390,17 +394,16 @@ class _BaseSubprocessHelper:
         Bricht frueh ab, wenn der Subprozess vorzeitig stirbt (dann kommt der Socket
         nie) -- so wird der ehrliche Exit-Hinweis schneller sichtbar.
         """
-        path = Path(socket_path)
         waited = 0.0
         while waited < _SOCKET_WAIT_SECS:
-            if path.exists():
+            if address_ready(socket_path):
                 return True
             proc = self._proc
             if proc is not None and proc.poll() is not None:
                 return False  # Helfer vorzeitig gestorben -- Socket kommt nicht mehr
             time.sleep(_SOCKET_POLL_INTERVAL_SECS)
             waited += _SOCKET_POLL_INTERVAL_SECS
-        return path.exists()
+        return address_ready(socket_path)
 
     def _recv_reply_with_timeout(
         self, timeout: float = _START_REPLY_TIMEOUT_SECS
@@ -491,4 +494,4 @@ class _BaseSubprocessHelper:
         socket_dir = self._socket_dir
         self._socket_dir = None
         if socket_dir is not None:
-            shutil.rmtree(socket_dir, ignore_errors=True)
+            remove_address_dir(socket_dir)

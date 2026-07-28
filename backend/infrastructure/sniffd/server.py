@@ -37,7 +37,6 @@ Signal-Handling: ``SIGTERM``/``SIGINT`` -> ``stop_event`` setzen + Socket
 aufraeumen + ``sys.exit``.
 """
 
-import os
 import signal
 import socket
 import threading
@@ -59,6 +58,13 @@ from infrastructure.sniffd.sniff_core import (
     start_dns_sniff,
     start_pcap_sniff,
     start_raw_sniff,
+)
+from infrastructure.sniffd.transport import (
+    accept_one,
+    bind_listener,
+    close_listener,
+    create_listener,
+    unlink_quietly,
 )
 
 _logger = structlog.get_logger(__name__)
@@ -412,16 +418,6 @@ class _Session:
             self._teardown()
 
 
-def _unlink_quietly(socket_path: str) -> None:
-    """Entfernt die Socket-Datei, falls vorhanden -- ohne Krach bei Abwesenheit."""
-    try:
-        os.unlink(socket_path)
-    except FileNotFoundError:
-        pass
-    except OSError as exc:
-        _logger.warning("sniffd_unlink_failed", path=socket_path, error=str(exc))
-
-
 def serve(socket_path: str) -> None:
     """Bindet einen AF_UNIX-Stream-Socket, bedient EINE Verbindung, raeumt auf.
 
@@ -435,7 +431,7 @@ def serve(socket_path: str) -> None:
 
     def _on_signal(signum: int, _frame: FrameType | None) -> None:
         _logger.info("sniffd_signal", signal=signum)
-        _unlink_quietly(socket_path)
+        unlink_quietly(socket_path)
         raise SystemExit(0)
 
     # Signal-Handler nur registrierbar, wenn ``serve`` im Haupt-Thread laeuft
@@ -449,19 +445,16 @@ def serve(socket_path: str) -> None:
     except ValueError:
         _logger.debug("sniffd_signal_skip_non_main_thread")
 
-    _unlink_quietly(socket_path)
-    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    listener = create_listener(socket_path)
     try:
-        listener.bind(socket_path)
-        listener.listen(1)
+        bind_listener(listener, socket_path)
         _logger.info("sniffd_listening", path=socket_path)
-        conn, _addr = listener.accept()
+        conn = accept_one(listener)
         _logger.info("sniffd_connected")
         try:
             _Session(conn).run()
         finally:
             conn.close()
     finally:
-        listener.close()
-        _unlink_quietly(socket_path)
+        close_listener(listener, socket_path)
         _logger.info("sniffd_shutdown", path=socket_path)
