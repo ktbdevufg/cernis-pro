@@ -370,7 +370,13 @@ function MdnsChips({ services, isNdi }) {
         <span className="scan-table__chip scan-table__chip--ndi">NDI</span>
       )}
       {sichtbar.map((typ) => (
-        <span key={typ} className="scan-table__chip scan-table__chip--mdns">
+        <span
+          key={typ}
+          className="scan-table__chip scan-table__chip--mdns"
+          // Die Kürzung ist eine Anzeigehilfe, kein Informationsverlust: der
+          // vollständige Diensttyp bleibt am selben Chip erreichbar.
+          title={typ}
+        >
           {kuerzeMdnsTyp(typ)}
         </span>
       ))}
@@ -388,17 +394,17 @@ function MdnsChips({ services, isNdi }) {
 
 // Beschriftung eines SSDP-Chips: server, wenn vorhanden, sonst st. Ist beides
 // leer, liefert die Funktion einen leeren String — der Eintrag wird dann NICHT
-// dargestellt (kein Ersatzwert, keine Erfindung).
-function ssdpChipText(dienst) {
+// dargestellt (kein Ersatzwert, keine Erfindung). Exportiert, damit das
+// Detail-Panel dieselbe Regel nutzt statt sie zu kopieren.
+export function ssdpChipText(dienst) {
   return dienst?.server || dienst?.st || "";
 }
 
 // SSDP-/UPnP-Zelle: eigene Komponente statt Wiederverwendung von MdnsChips, weil
 // SSDP andere Felder trägt (server/st/location statt Dienst-Typ). Optik und
-// Kürzungsverhalten folgen MdnsChips: bestehende CSS-Klassen, bis MAX_PORT_CHIPS
-// einzeln, Rest als "+N". Der Einzel-Chip bleibt auf der Basisklasse
-// scan-table__chip — ein eigener Farb-Modifier wäre eine neue Design-Entscheidung
-// und braucht Tokens, die es nicht gibt. Leer -> "—" wie bei mDNS/Ports.
+// Kürzungsverhalten folgen MdnsChips: bis MAX_PORT_CHIPS einzeln, Rest als "+N".
+// SSDP hat eine eigene Farbfamilie (--chip-ssdp-*); der Chip-Text ist server,
+// sonst st. Leer -> "—" wie bei mDNS/Ports.
 function SsdpChips({ services }) {
   const { t } = useTranslation();
   // Einträge ohne jeden Text (weder server noch st) fallen VOR der Begrenzung
@@ -416,7 +422,10 @@ function SsdpChips({ services }) {
           // Kein fachlicher Schlüssel vorhanden: server/st sind pro Gerät nicht
           // garantiert eindeutig. Text + Index hält die Liste stabil.
           key={`${ssdpChipText(dienst)}#${index}`}
-          className="scan-table__chip"
+          className="scan-table__chip scan-table__chip--ssdp"
+          // Gegenstück zum Detail: die Tabelle zeigt nur server/st, die Location
+          // bleibt hier erreichbar. Ohne Location kein leerer Tooltip.
+          title={dienst.location || undefined}
         >
           {ssdpChipText(dienst)}
         </span>

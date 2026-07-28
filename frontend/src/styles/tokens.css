@@ -87,6 +87,10 @@
   --chip-ndi-text: #D9531E;
   --chip-ndi-bg: rgba(255, 107, 53, 0.12);
   --chip-ndi-border: rgba(255, 107, 53, 0.3);
+  /* SSDP-/UPnP-Chips (blau) — eigene Farbfamilie neben mDNS und NDI. */
+  --chip-ssdp-text: #185FA5;
+  --chip-ssdp-bg: rgba(24, 95, 165, 0.08);
+  --chip-ssdp-border: rgba(24, 95, 165, 0.25);
 }
 
 /* Dunkel */
@@ -156,4 +160,8 @@
   --chip-ndi-text: #ff6b35;
   --chip-ndi-bg: rgba(255, 107, 53, 0.15);
   --chip-ndi-border: rgba(255, 107, 53, 0.3);
+  /* SSDP-/UPnP-Chips im Dunkelmodus: helleres Blau, analog zum Hell-Block. */
+  --chip-ssdp-text: #85B7EB;
+  --chip-ssdp-bg: rgba(133, 183, 235, 0.1);
+  --chip-ssdp-border: rgba(133, 183, 235, 0.3);
 }

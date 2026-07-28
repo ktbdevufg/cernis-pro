@@ -282,6 +282,12 @@
   border-color: var(--chip-mdns-border);
 }
 
+.scan-table__chip--ssdp {
+  color: var(--chip-ssdp-text);
+  background: var(--chip-ssdp-bg);
+  border-color: var(--chip-ssdp-border);
+}
+
 /* Geflaggte Ports (Achse B, Variante C): orange „auffällig" / rot „kritisch",
    Token-Farben wie die Achse-B-Pillen (Border + Text voll, bg ~18% Alpha). */
 .scan-table__chip--auffaellig {

@@ -568,6 +568,13 @@
             }
           }
         },
+        "dienste": {
+          "heading": "Angekündigte Dienste",
+          "mdns": "mDNS",
+          "mdnsEmpty": "Keine mDNS-Dienste angekündigt",
+          "ssdp": "SSDP / UPnP",
+          "ssdpEmpty": "Keine SSDP-Dienste angekündigt"
+        },
         "notes": {
           "heading": "Gerätenotizen",
           "label": "Label",

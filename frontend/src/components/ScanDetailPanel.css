@@ -407,6 +407,61 @@
   color: var(--color-text-tert);
 }
 
+/* --- Angekündigte Dienste (mDNS/SSDP) --- */
+.scan-detail__dienste {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.scan-detail__dienste-heading {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-tert);
+}
+
+.scan-detail__dienste-zeile {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.scan-detail__dienste-label {
+  color: var(--color-text-sec);
+}
+
+.scan-detail__chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* Chip-Geometrie eigenständig in dieser Datei (keine Kopplung an ScanTable.css),
+   Farben aus denselben Tokens wie die Tabelle. */
+.scan-detail__chip {
+  padding: 1px 6px;
+  font-size: 11px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.scan-detail__chip--mdns {
+  color: var(--chip-mdns-text);
+  background: var(--chip-mdns-bg);
+  border-color: var(--chip-mdns-border);
+}
+
+.scan-detail__chip--ssdp {
+  color: var(--chip-ssdp-text);
+  background: var(--chip-ssdp-bg);
+  border-color: var(--chip-ssdp-border);
+}
+
 /* --- Gerätenotizen: Formular --- */
 .scan-detail__form {
   display: flex;

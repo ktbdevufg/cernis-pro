@@ -21,6 +21,7 @@ import {
 } from "../api/devices.js";
 import { CODES, mitCode } from "../lib/fehlercodes.js";
 import PortLookupDialog from "./PortLookupDialog.jsx";
+import { ssdpChipText } from "./ScanTable.jsx";
 import "./ScanDetailPanel.css";
 
 // Eine Feld-Zeile: Label links, Wert rechts. mono tönt den Wert monospace.
@@ -46,6 +47,12 @@ export default function ScanDetailPanel({ geraet, onClose, onGespeichert }) {
 
   // Kopf: Gerätename/Hostname, fällt auf IP zurück, wenn kein Hostname.
   const titel = geraet.hostname || geraet.ip;
+
+  // SSDP-Einträge ohne jeden Text (weder server noch st) fallen heraus — sonst
+  // stünde dort ein leerer Chip. Gleiche Regel wie in der Tabelle.
+  const ssdpDarstellbar = (geraet.ssdpServices ?? []).filter((dienst) =>
+    ssdpChipText(dienst),
+  );
 
   // Controlled Notizfelder. tagsWert ist der ROHE kommagetrennte Text (erst beim
   // Speichern in ein Array zerlegt). Initial aus dem gewählten Gerät.
@@ -442,6 +449,64 @@ export default function ScanDetailPanel({ geraet, onClose, onGespeichert }) {
               })}
             </ul>
           )}
+
+          {/* Angekündigte Dienste (mDNS/SSDP). Immer gerendert, auch wenn beide
+              Listen leer sind: der Nutzer soll sehen, dass gefragt wurde und
+              nichts kam. Keine Begrenzung, kein Überzähler — im Detail ist
+              Platz, anders als in der Tabelle. */}
+          <div className="scan-detail__dienste">
+            <h5 className="scan-detail__dienste-heading">
+              {t("beobachten.scan.detail.dienste.heading")}
+            </h5>
+
+            <div className="scan-detail__dienste-zeile">
+              <span className="scan-detail__dienste-label">
+                {t("beobachten.scan.detail.dienste.mdns")}
+              </span>
+              {(geraet.mdnsServices ?? []).length === 0 ? (
+                <p className="scan-detail__empty">
+                  {t("beobachten.scan.detail.dienste.mdnsEmpty")}
+                </p>
+              ) : (
+                <span className="scan-detail__chips">
+                  {geraet.mdnsServices.map((typ) => (
+                    <span
+                      key={typ}
+                      className="scan-detail__chip scan-detail__chip--mdns"
+                    >
+                      {typ}
+                    </span>
+                  ))}
+                </span>
+              )}
+            </div>
+
+            <div className="scan-detail__dienste-zeile">
+              <span className="scan-detail__dienste-label">
+                {t("beobachten.scan.detail.dienste.ssdp")}
+              </span>
+              {ssdpDarstellbar.length === 0 ? (
+                <p className="scan-detail__empty">
+                  {t("beobachten.scan.detail.dienste.ssdpEmpty")}
+                </p>
+              ) : (
+                <span className="scan-detail__chips">
+                  {ssdpDarstellbar.map((dienst, index) => (
+                    <span
+                      // Kein fachlicher Schlüssel vorhanden: server/st sind pro
+                      // Gerät nicht garantiert eindeutig. Text + Index hält die
+                      // Liste stabil (wie in der Tabelle).
+                      key={`${ssdpChipText(dienst)}#${index}`}
+                      className="scan-detail__chip scan-detail__chip--ssdp"
+                      title={dienst.location || undefined}
+                    >
+                      {ssdpChipText(dienst)}
+                    </span>
+                  ))}
+                </span>
+              )}
+            </div>
+          </div>
         </section>
 
         {/* 3. Gerätenotizen */}
