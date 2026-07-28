@@ -64,8 +64,9 @@ function KennzahlKarte({ wert, label, ton }) {
 
 // Eine Umgeher-Zeile: Titel (hostname, sonst remoteIp), darunter klein die IP
 // (nur wenn der Titel der hostname war, sonst stünde sie doppelt) + appName +
-// „×connectionCount" + Kategorie-Label. Rechts die Quittier-Aktion, aber NUR bei
-// category=="offen". Farb-Logik über die Zeilen-Klasse (siehe CSS):
+// „×connectionCount" + Kategorie-Label. Rechts die Quittier-Aktion, für JEDE
+// Kategorie. Farb-Logik über die Zeilen-Klasse (siehe CSS) — sie bleibt davon
+// unberührt, nur „offen" trägt weiterhin Farbe:
 //   offen & nicht quittiert -> Orange-Akzent
 //   offen & quittiert       -> gedämpftes Grün (bekannt, NICHT versteckt)
 //   moegliche_doh           -> neutral
@@ -99,9 +100,13 @@ function UmgeherZeile({ kontakt, onQuittieren }) {
       : "dnswatch-zeile dnswatch-zeile--offen";
   }
 
-  // Quittier-Knopf nur bei offenen Befunden. acknowledged steuert Beschriftung
-  // und Aktion (ack <-> unack). NIE „Erlauben" (CERNIS ist passiv).
-  const istQuittierbar = kontakt.category === "offen";
+  // Quittier-Knopf für JEDE Kategorie. Das Backend nimmt jede Kategorie an und
+  // zählt sie getrennt (quittiert_offen / quittiert_moegliche_doh /
+  // quittiert_erwartungsgemaess), und die Kennzahl-Karte liest diese Zähler schon
+  // — ein Zähler, der nicht befüllbar ist, wäre ein Widerspruch. Mündiger
+  // Anwender: wer einen Befund eingeordnet hat, darf ihn abhaken. acknowledged
+  // steuert Beschriftung und Aktion (ack <-> unack). NIE „Erlauben" (CERNIS ist
+  // passiv) — Quittieren markiert als bekannt und erlaubt nichts.
 
   return (
     <li className={tonKlasse}>
@@ -111,25 +116,23 @@ function UmgeherZeile({ kontakt, onQuittieren }) {
           {subTeile.join(" · ")}
         </span>
       </div>
-      {istQuittierbar && (
-        <div className="dnswatch-zeile__aktion">
-          <button
-            type="button"
-            className="dnswatch-zeile__ack"
-            onClick={() =>
-              onQuittieren(
-                kontakt.remoteIp,
-                kontakt.category,
-                kontakt.acknowledged ? "unack" : "ack",
-              )
-            }
-          >
-            {kontakt.acknowledged
-              ? t("beobachten.dnswatch.unmarkKnown")
-              : t("beobachten.dnswatch.markKnown")}
-          </button>
-        </div>
-      )}
+      <div className="dnswatch-zeile__aktion">
+        <button
+          type="button"
+          className="dnswatch-zeile__ack"
+          onClick={() =>
+            onQuittieren(
+              kontakt.remoteIp,
+              kontakt.category,
+              kontakt.acknowledged ? "unack" : "ack",
+            )
+          }
+        >
+          {kontakt.acknowledged
+            ? t("beobachten.dnswatch.unmarkKnown")
+            : t("beobachten.dnswatch.markKnown")}
+        </button>
+      </div>
     </li>
   );
 }

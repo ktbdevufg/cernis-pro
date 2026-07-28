@@ -267,6 +267,38 @@ def test_quittierte_zaehlen_je_kategorie_getrennt() -> None:
     assert overview.counts["quittiert_erwartungsgemaess"] == 0
 
 
+def test_quittierter_erwartungsgemaesser_befund_landet_im_eigenen_zaehler() -> None:
+    """Auch ``erwartungsgemaess`` ist quittierbar und faellt in seinen eigenen Zaehler.
+
+    Damit ist die Zaehlung fuer ALLE drei Kategorien belegt (``offen`` und
+    ``moegliche_doh`` daneben). Die Oberflaeche bietet den Quittier-Knopf seit S64 L14
+    fuer jede Kategorie an -- ein Zaehler, der nicht befuellbar waere, waere ein
+    Widerspruch. Verlustfrei wie ueberall: der Bestand bleibt die Summe beider Zahlen.
+    """
+    conns = [
+        _conn("192.168.0.1", 53),  # erwartungsgemaess -> quittiert
+        _conn("192.168.0.2", 53),  # erwartungsgemaess -> NICHT quittiert
+    ]
+    overview = _run(
+        _build(
+            conns,
+            expected=["192.168.0.1", "192.168.0.2"],
+            acknowledged={"192.168.0.1:erwartungsgemaess"},
+        )
+    )
+
+    aktiv = overview.counts["erwartungsgemaess"]
+    quittiert = overview.counts["quittiert_erwartungsgemaess"]
+    assert aktiv == 1
+    assert quittiert == 1
+    # Der Bestand je Kategorie ist die Summe beider Zahlen (verlustfrei).
+    assert aktiv + quittiert == 2
+    # Die anderen Kategorien bleiben unberuehrt.
+    assert overview.counts["offen"] == 0
+    assert overview.counts["quittiert_offen"] == 0
+    assert overview.counts["quittiert_moegliche_doh"] == 0
+
+
 # ── (4) Deterministische Reihenfolge ──────────────────────────────────────────
 
 

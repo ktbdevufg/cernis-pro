@@ -192,3 +192,25 @@ def test_invalide_action_ist_422(
     client = TestClient(application)
     resp = client.post("/api/dns-watch/acknowledge", json=_body(action="loeschen"))
     assert resp.status_code == 422
+
+
+@pytest.mark.parametrize("category", ["moegliche_doh", "erwartungsgemaess"])
+def test_ack_nimmt_auch_nicht_offene_kategorie_an(
+    ack_context: tuple[FastAPI, SqliteDnsWatchAcknowledgementRepository],
+    category: str,
+) -> None:
+    """Auch eine NICHT-offene Kategorie laesst sich quittieren -- kategorie-agnostisch.
+
+    Der Body-Vertrag schraenkt ``category`` bewusst nicht ein (freies ``str``), und der
+    Zaehler ``quittiert_<kategorie>`` existiert fuer alle drei Kategorien. Die Oberflaeche
+    bietet den Quittier-Knopf seit S64 L14 fuer jede Kategorie an -- dieser Test haelt den
+    Schreibpfad dafuer fest, damit er nicht unbemerkt auf ``offen`` verengt wird.
+    """
+    application, repo = ack_context
+    client = TestClient(application)
+
+    resp = client.post("/api/dns-watch/acknowledge", json=_body(category=category))
+
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True}
+    assert repo.acknowledged_keys() == {f"{IP}:{category}"}
