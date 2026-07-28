@@ -177,6 +177,13 @@ def sniffd_platform_supported() -> tuple[bool, str]:
     ``ok=True, marker=""`` wenn tragbar (Linux/macOS immer; Windows mit erkanntem
     Npcap). Sonst ``ok=False`` mit stabilem Marker-String fuer den API-Layer.
 
+    ERKENNUNGSSTUFEN (Windows): fuenf Stufen, geordnet von der verlaesslichsten zur
+    schwaechsten Spur; die erste zutreffende genuegt. Die Reihenfolge und die Wahl
+    der Orte sind GEMESSEN begruendet -- jede Stufe traegt unten den Befund, der
+    sie rechtfertigt. Mehrere Stufen sind Absicht, nicht Redundanz: welche Spur
+    eine fremde Maschine bzw. eine aeltere Npcap-Fassung traegt, ist nicht
+    gemessen, darum wird keine bisherige Stufe entfernt.
+
     Windows-Zweig (``sys.platform == "win32"``): Die Sniff-Familie
     (SNI/pcap/LLDP) braucht Npcap FUER die Rohpaket-Erfassung. Die IPC-Naht zum
     Helfer traegt auf Windows seit W2 ueber eine benannte Pipe mit Zugriff nur
@@ -190,8 +197,8 @@ def sniffd_platform_supported() -> tuple[bool, str]:
     Einen dritten Fall ("Npcap da, aber Naht nicht portiert") gibt es nicht mehr;
     der frueher dafuer gefuehrte Marker ist ersatzlos entfallen.
 
-    KEIN stiller Fallback: schlagen ALLE drei Erkennungsstufen fehl, gilt Npcap
-    als nicht vorhanden und das wird ueber ``"NPCAP_MISSING"`` benannt -- nie als
+    KEIN stiller Fallback: schlagen ALLE Erkennungsstufen fehl, gilt Npcap als
+    nicht vorhanden und das wird ueber ``"NPCAP_MISSING"`` benannt -- nie als
     vorhanden angenommen.
     """
     # Plattform-Weiche ueber ``sys.platform == "win32"``: DIESEN Guard wertet mypy
@@ -201,28 +208,105 @@ def sniffd_platform_supported() -> tuple[bool, str]:
     # Linux-Runner entfallen dadurch. Der Guard trennt hier die PLATTFORM (welche
     # Pruefung gilt), nicht mehr die Verfuegbarkeit der IPC-Naht.
     if sys.platform == "win32":
-        # Windows: Npcap ueber drei Stufen pruefen (erste positive genuegt).
+        # Windows: Npcap ueber mehrere Stufen pruefen (erste positive genuegt).
         # winreg/ctypes.util lokal importieren, damit Linux/macOS sie nie laden.
         import ctypes.util
         import winreg
 
+        windir = os.environ.get("WINDIR", "C:\\Windows")
         npcap = False
+
+        # STUFE 1 -- Dienst-/Treibereintrag ``SYSTEM\CurrentControlSet\Services\npcap``.
+        #
+        # WO: der Eintrag, den der Kerneltreiber selbst traegt. WARUM DORT: das ist
+        # die VERLAESSLICHSTE Spur, darum steht sie vorn. GEMESSEN auf dieser
+        # Maschine: vorhanden, ``ImagePath = \SystemRoot\system32\DRIVERS\npcap.sys``,
+        # der Dienst laeuft (``sc query npcap`` -> ``KERNEL_DRIVER``/``RUNNING``). Der
+        # Name ``npcap`` ist Npcap-exklusiv -- WinPcap fuehrte seinen Treiber unter
+        # ``npf``, und dieser Schluessel ist hier GEMESSEN NICHT vorhanden. Der
+        # Eintrag entsteht erst beim Einrichten des Treibers und faellt mit dem
+        # Entfernen wieder weg; er beschreibt damit den tatsaechlich nutzbaren
+        # Zustand und nicht nur zurueckgebliebene Dateien.
+        #
+        # Diese Sicht ist NICHT umgeleitet: ``SYSTEM`` kennt keine 32-Bit-Spiegelung,
+        # ein Sichten-Flag ist hier also gegenstandslos.
         try:
-            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Npcap"):
+            with winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Services\npcap"
+            ):
                 npcap = True
         except OSError:
-            pass  # Registry-Schluessel fehlt -- naechste Stufe pruefen.
+            pass  # Kein Treibereintrag -- naechste Stufe pruefen.
 
+        # STUFE 2 -- Produktschluessel ``SOFTWARE\Npcap`` in BEIDEN Sichten.
+        #
+        # WO: 64-Bit-Sicht (``KEY_WOW64_64KEY``) UND 32-Bit-Sicht
+        # (``KEY_WOW64_32KEY``, physisch ``SOFTWARE\WOW6432Node\Npcap``).
+        # WARUM BEIDE: GEMESSEN liegt der Schluessel dieser Fassung (Npcap 1.88)
+        # AUSSCHLIESSLICH in der 32-Bit-Sicht -- das Einrichtprogramm ist ein
+        # 32-Bit-Programm und wird darum umgeleitet. Die Weiche prueft aus einem
+        # 64-Bit-Python und sah daher bisher (ohne Flag = 64-Bit-Sicht) ins Leere,
+        # obwohl Npcap installiert ist. Die 64-Bit-Sicht bleibt trotzdem stehen: ob
+        # aeltere oder kuenftige Fassungen dort ablegen, ist nicht gemessen, und
+        # eine zusaetzliche Pruefung kostet nichts.
+        # GEMESSENE Werte des Schluessels: ``(default) = C:\Program Files\Npcap``,
+        # ``WinPcapCompatible = 1``, ``AdminOnly = 0``.
         if not npcap:
-            driver = os.path.join(
-                os.environ.get("WINDIR", "C:\\Windows"),
-                "System32",
-                "Npcap",
-                "npcap.sys",
-            )
-            if os.path.exists(driver):
-                npcap = True
+            for sicht in (winreg.KEY_WOW64_64KEY, winreg.KEY_WOW64_32KEY):
+                try:
+                    with winreg.OpenKey(
+                        winreg.HKEY_LOCAL_MACHINE,
+                        r"SOFTWARE\Npcap",
+                        0,
+                        winreg.KEY_READ | sicht,
+                    ):
+                        npcap = True
+                        break
+                except OSError:
+                    continue  # Schluessel in dieser Sicht nicht da -- naechste Sicht.
 
+        # STUFE 3 -- Treiberdatei an BEIDEN bekannten Orten.
+        #
+        # WO: ``System32\drivers\npcap.sys`` (der tatsaechliche Ort) und
+        # ``System32\Npcap\npcap.sys`` (der bisher gepruefte). WARUM BEIDE:
+        # GEMESSEN liegt die Datei hier unter ``System32\drivers\npcap.sys``
+        # (82592 Bytes, Version 1.88) -- genau dorthin zeigt auch der ``ImagePath``
+        # aus Stufe 1. Das Verzeichnis ``System32\Npcap`` existiert zwar, enthaelt
+        # aber NUR ``NpcapHelper.exe``, ``Packet.dll``, ``WlanHelper.exe`` und
+        # ``wpcap.dll`` -- NICHT den Treiber. Der alte Ort bleibt dennoch stehen,
+        # weil nicht gemessen ist, wie aeltere Fassungen ablegen.
+        #
+        # Schwaecher als Stufe 1/2: eine Datei kann nach einem unvollstaendigen
+        # Entfernen zurueckbleiben, ohne dass der Treiber noch eingerichtet ist.
+        if not npcap:
+            for treiber in (
+                os.path.join(windir, "System32", "drivers", "npcap.sys"),
+                os.path.join(windir, "System32", "Npcap", "npcap.sys"),
+            ):
+                if os.path.exists(treiber):
+                    npcap = True
+                    break
+
+        # STUFE 4 -- Npcap-EIGENE Bibliothek unter ``System32\Npcap\wpcap.dll``.
+        #
+        # WO: das Npcap-eigene Unterverzeichnis. WARUM DORT: GEMESSEN liegt die
+        # Bibliothek dort (Version 1.10.6); dieser Pfad gehoert AUSSCHLIESSLICH
+        # Npcap. Das unterscheidet die Stufe von Stufe 5.
+        if not npcap and os.path.exists(os.path.join(windir, "System32", "Npcap", "wpcap.dll")):
+            npcap = True
+
+        # STUFE 5 -- Bibliothekssuche nach ``wpcap`` (SCHWAECHSTE Spur, darum zuletzt).
+        #
+        # WO: der Suchpfad des Laders. WARUM ZULETZT und warum trotzdem behalten:
+        # GEMESSEN loest ``find_library("wpcap")`` hier auf
+        # ``C:\WINDOWS\system32\wpcap.dll`` auf -- und diese Kopie ist KEIN Beleg
+        # fuer Npcap. Sie stammt aus dem WinPcap-Vertraeglichkeitsmodus (der
+        # Schluessel aus Stufe 2 traegt GEMESSEN ``WinPcapCompatible = 1``); eine
+        # reine WinPcap-Installation legt genau dieselbe Datei am selben Ort ab.
+        # Die Stufe kann also auch OHNE funktionierendes Npcap anschlagen und ist
+        # als alleiniges Merkmal untauglich -- sie steht darum ganz hinten, wo sie
+        # nur noch greift, wenn alle belastbaren Spuren fehlen. Entfernt wird sie
+        # nicht: bisher war sie auf dieser Maschine die EINZIGE greifende Stufe.
         if not npcap and ctypes.util.find_library("wpcap") is not None:
             npcap = True
 
