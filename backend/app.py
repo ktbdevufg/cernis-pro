@@ -882,6 +882,7 @@ from modules.devices_db import init_devices_db
 from modules.storage import init_db
 from ports.alerting import AlertNotifierPort, SmtpConfigPort
 from ports.cve import InventoryHost, InventoryPort, LookupCve
+from ports.diagnostics import TraceroutePermissionPort, TracerouteRunner
 from ports.scheduler import JobHandler
 from ports.security import PortQuery
 from ports.settings import SettingsRepository
@@ -4204,14 +4205,35 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # unbekannte Typen schlicht an dig weiter, eine leere Antwort ist kein Fehler).
         return await ResolveDns(DigDnsResolver())(query, types)  # type: ignore[arg-type]
 
+    # PLATTFORMWEICHE traceroute (S66-W-h1, Finding 15/16): Windows hat KEIN
+    # traceroute-Binary -- der Linux-Adapter scheitert dort am shutil.which-Riegel und beide
+    # Naehte (hier und "Route zum Ziel" weiter unten) blieben tot. Der Windows-Zweig misst
+    # nativ ueber iphlpapi (IcmpSendEcho mit gesetzter TTL), erfuellt denselben Port und
+    # braucht keine erhoehten Rechte. Die Weiche steht AUSSCHLIESSLICH hier im Composition
+    # Root (Regel 5) und der plattformeigene Import INNERHALB der Weiche, damit die
+    # statische Pruefung auf Linux nicht ueber das win32-Modul stolpert. Beide Naehte
+    # muessen denselben Adapter waehlen -- eine uebersehene Stelle ergibt genau den
+    # bisherigen Fehlerzustand an der anderen Naht.
+    if sys.platform == "win32":
+        from infrastructure.traceroute_windows import (
+            WindowsTraceroutePermission,
+            WindowsTracerouteRunner,
+        )
+
+        _traceroute_runner: TracerouteRunner = WindowsTracerouteRunner()
+        _traceroute_permission: TraceroutePermissionPort = WindowsTraceroutePermission()
+    else:
+        _traceroute_runner = SystemTracerouteRunner()
+        _traceroute_permission = LinuxTraceroutePermission()
+
     async def _run_traceroute(target: str, privileged: bool) -> Any:
-        return await RunTraceroute(SystemTracerouteRunner())(target, privileged)
+        return await RunTraceroute(_traceroute_runner)(target, privileged)
 
     app.include_router(diagnostics_router)
     app.dependency_overrides[provide_resolve_dns] = lambda: _resolve_dns
     app.dependency_overrides[provide_run_traceroute] = lambda: _run_traceroute
     app.dependency_overrides[provide_check_traceroute_permission] = lambda: (
-        CheckTraceroutePermission(LinuxTraceroutePermission())
+        CheckTraceroutePermission(_traceroute_permission)
     )
 
     # ── diagnostics 1b: Tool-/Paketmanager-Erkennung verdrahten ───────────────────
@@ -7195,7 +7217,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         return {"country": record.country, "asn": record.asn, "asn_org": record.asn_org}
 
     async def _build_route_geo(target: str, privileged: bool) -> Any:
-        return await BuildRouteGeo(RunTraceroute(SystemTracerouteRunner()), _route_geo_lookup)(
+        # ZWEITE traceroute-Naht: bewusst DERSELBE ``_traceroute_runner`` wie oben (die
+        # Plattformweiche faellt genau einmal, im diagnostics-Block). Frueher stand hier
+        # ein zweites ``SystemTracerouteRunner()`` -- genau daran blieb diese Naht auf
+        # Windows haengen, waehrend die andere schon versorgt gewesen waere.
+        return await BuildRouteGeo(RunTraceroute(_traceroute_runner), _route_geo_lookup)(
             target, privileged
         )
 
