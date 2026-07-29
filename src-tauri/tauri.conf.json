@@ -33,7 +33,9 @@
     "windows": {
       "nsis": {
         "installMode": "both",
-        "installerHooks": "nsis-hooks.nsi"
+        "installerHooks": "nsis-hooks.nsi",
+        "languages": ["English", "German"],
+        "displayLanguageSelector": false
       }
     },
     "linux": {

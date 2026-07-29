@@ -31,12 +31,19 @@ $TAURI_SRC    = Join-Path $SCRIPT_DIR "src-tauri"
 # ein Fehler.
 $TRIPLE = if ($env:CERNIS_BUILD_TRIPLE) { $env:CERNIS_BUILD_TRIPLE } else { "x86_64-pc-windows-msvc" }
 
-# Architektur AUS dem Triple ableiten (nicht separat hardkodieren). Aus ARCH
-# folgen zwei Werte: das vcvarsall-Argument (x64/arm64) und das Versions-
-# Suffix (<arch> in 2.0.0+<arch>.<sha>).
+# Architektur AUS dem Triple ableiten (nicht separat hardkodieren). Aus dem
+# Triple folgen DREI Werte, bewusst in getrennten Variablen:
+#   ARCH         -- Anzeige/Architektur-Kuerzel, speist auch VCVARS_ARCH.
+#   VCVARS_ARCH  -- Argument fuer vcvarsall.bat; kennt NUR x64/arm64.
+#   VERSION_ARCH -- Suffix in der Build-Version (2.0.0+<VERSION_ARCH>.<sha>).
+# Zwei getrennte Kuerzel, weil beide Werte verschiedene Fragen beantworten:
+# vcvarsall versteht ausschliesslich "x64"/"arm64", waehrend das Versions-
+# Suffix zusaetzlich die PLATTFORM nennen muss -- sonst ist "2.0.5+x64.<sha>"
+# nicht von einem Linux- oder macOS-Build derselben Architektur unterscheidbar.
+# Darum "winx64"/"winarm64" wie in den Windows-CI-Ablaeufen.
 switch -Wildcard ($TRIPLE) {
-    "x86_64-*" { $ARCH = "x64";   $VCVARS_ARCH = "x64" }
-    "aarch64-*" { $ARCH = "arm64"; $VCVARS_ARCH = "arm64" }
+    "x86_64-*" { $ARCH = "x64";   $VCVARS_ARCH = "x64";   $VERSION_ARCH = "winx64" }
+    "aarch64-*" { $ARCH = "arm64"; $VCVARS_ARCH = "arm64"; $VERSION_ARCH = "winarm64" }
     default {
         Write-Host "FEHLER: Unbekanntes Triple '$TRIPLE' -- kann Architektur nicht ableiten." -ForegroundColor Red
         exit 1
@@ -211,7 +218,8 @@ Write-Host "      OK"
 # ── Schritt 1b: Build-Version erzeugen ──────────────────────
 # config.py liest os.environ NICHT -- es importiert diese Datei. PyInstaller
 # friert sie ein, damit die installierte App die volle Version kennt. Format
-# wie im Linux-Workflow: 2.0.0+<arch>.<sha>, <arch> aus dem Triple abgeleitet.
+# wie im Linux-Workflow: 2.0.0+<VERSION_ARCH>.<sha> (winx64/winarm64), oben aus
+# dem Triple abgeleitet -- NICHT $ARCH, das speist die Compiler-Umgebung.
 # Der v1-Fehler "nur 2.0.0 ohne SHA" entfaellt, weil die Datei jetzt VOR dem
 # PyInstaller-Lauf entsteht.
 Write-Host ""
@@ -225,7 +233,7 @@ Assert-LastExit "git rev-parse"
 $pyprojectPfad = Join-Path $SCRIPT_DIR "pyproject.toml"
 $PRODUCT_VERSION = (Select-String -Path $pyprojectPfad -Pattern '^version = "(.*)"' | Select-Object -First 1).Matches.Groups[1].Value
 if (-not $PRODUCT_VERSION) { throw "Produktversion aus pyproject.toml nicht lesbar" }
-$BUILD_VERSION = "$PRODUCT_VERSION+$ARCH.$SHORT_SHA"
+$BUILD_VERSION = "$PRODUCT_VERSION+$VERSION_ARCH.$SHORT_SHA"
 Write-Host "      Build-Version: $BUILD_VERSION"
 $buildVersionFile = Join-Path $BACKEND_DIR "infrastructure\_build_version.py"
 $buildVersionContent = @"
