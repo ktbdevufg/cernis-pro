@@ -27,20 +27,17 @@ import {
 } from "../api/route.js";
 import "./RouteView.css";
 
-// Leitet die Unicode-Flagge aus einem ISO-3166-1-alpha-2-Ländercode ab (zwei
-// Regional-Indicator-Symbole). KEINE Bild-/npm-Abhängigkeit, kein externes Asset.
-// Ungültiger/leerer Code -> null (kein erfundenes Symbol).
-function flaggeAusCode(code) {
+// Bildet aus einem ISO-3166-1-alpha-2-Ländercode den Pfad zur mitgelieferten
+// Flaggen-SVG unter frontend/public/flags/ (eine Datei je Land, Kleinbuchstaben).
+// Bewusst KEIN Unicode-Flaggenzeichen mehr: die Windows-Emoji-Schrift führt keine
+// Nationalflaggen und zeichnet die beiden Regional-Indicator-Zeichen einzeln als
+// Buchstabenpaar. Die Dateien liegen im Bundle — kein Nachladen aus dem Netz,
+// keine npm-Abhängigkeit. Ungültiger/leerer Code -> null (kein erfundenes Land).
+function flaggenPfadAusCode(code) {
   if (typeof code !== "string" || code.length !== 2 || !/^[A-Za-z]{2}$/.test(code)) {
     return null;
   }
-  const basis = 0x1f1e6; // Regional Indicator Symbol Letter A
-  const grossA = "A".charCodeAt(0);
-  const chars = code
-    .toUpperCase()
-    .split("")
-    .map((ch) => String.fromCodePoint(basis + (ch.charCodeAt(0) - grossA)));
-  return chars.join("");
+  return `/flags/${code.toLowerCase()}.svg`;
 }
 
 // Eine Hop-Zeile. Ein nicht-antwortender Hop (address === null) erscheint als
@@ -49,7 +46,7 @@ function flaggeAusCode(code) {
 function HopZeile({ eintrag, org }) {
   const { t } = useTranslation();
   const luecke = eintrag.address === null;
-  const flagge = flaggeAusCode(eintrag.country);
+  const flaggenPfad = flaggenPfadAusCode(eintrag.country);
 
   return (
     <tr className={luecke ? "route__row route__row--gap" : "route__row"}>
@@ -64,7 +61,21 @@ function HopZeile({ eintrag, org }) {
       <td className="route__country">
         {eintrag.country ? (
           <span>
-            {flagge && <span className="route__flag">{flagge} </span>}
+            {/* Rein schmückend: der Ländercode steht unmittelbar daneben und trägt
+                die Information bereits vorlesbar (leerer alt + aria-hidden).
+                Fehlt die Datei, blendet onError NUR das Bild aus — der Code bleibt
+                sichtbar. Kein stiller Fallback: die Sachinformation bleibt ganz. */}
+            {flaggenPfad && (
+              <img
+                className="route__flag"
+                src={flaggenPfad}
+                alt=""
+                aria-hidden="true"
+                onError={(e) => {
+                  e.currentTarget.style.display = "none";
+                }}
+              />
+            )}
             {eintrag.country}
           </span>
         ) : (
