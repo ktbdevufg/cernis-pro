@@ -252,6 +252,278 @@ def test_parse_lldp_neighbor_undecodable_name_does_not_crash() -> None:
     assert neighbor["last_seen"] > 0.0
 
 
+# ── CDP am ECHTEN 802.3-Rahmen durch die volle Kette (Befund 26) ──────────────
+#
+# Warum echte Rahmen und nicht handgeschriebene Woerterbuecher: die beiden hier
+# geheilten Defekte sassen BEIDE in der scapy-Naht und sind fuer einen Nachbau
+# unsichtbar.
+#
+# 1. CDP liegt als IEEE-802.3-Rahmen mit LAENGENFELD auf dem Draht (gemessen
+#    0x0021), nicht als Ethernet II. scapy dissektiert das als ``Dot3``; ein
+#    ``haslayer(Ether)`` ist dort schlicht falsch (gemessen: 0). Die alte Weiche in
+#    ``_dispatch_neighbor`` verwarf deshalb jeden echten CDP-Rahmen, BEVOR die
+#    Feldauswertung gerufen wurde.
+# 2. ``CDPMsgPortID`` fuehrt ``type``, ``len``, ``iface`` -- ein ``val`` existiert
+#    dort NICHT (``AttributeError: val``), im Unterschied zu den drei anderen
+#    gelesenen CDP-Klassen.
+#
+# Die Rahmen werden gebaut, zu Bytes serialisiert und ueber ``_scapy.Ether(bytes)``
+# WIEDER dissektiert -- genau der Weg eines gesnifften Pakets (und der Beweis, dass
+# scapy dabei selbst zu ``Dot3`` umschaltet). Kein Netz, kein Raw-Socket.
+
+
+def _cdp_frame(src: str, msgs: list[Any]) -> Any:
+    """Ein echter CDP-Rahmen: ``Dot3`` + LLC/SNAP + CDPv2-Kopf, wie auf dem Draht."""
+    frame = (
+        _scapy.Dot3(src=src, dst="01:00:0c:cc:cc:cc")
+        / _scapy.LLC(dsap=0xAA, ssap=0xAA, ctrl=3)
+        / _scapy.SNAP(OUI=0x0C, code=0x2000)
+        / _scapy.CDPv2_HDR(msg=msgs)
+    )
+    # Serialisieren + neu dissektieren: derselbe Weg wie ein gesniffter Rahmen.
+    return _scapy.Ether(bytes(frame))
+
+
+def _lldp_frame(src: str, system_name: bytes = b"Fritzchen") -> Any:
+    """Ein echter LLDP-Rahmen (Ethernet II, EtherType ``0x88cc``), neu dissektiert."""
+    from scapy.contrib.lldp import LLDPDUEndOfLLDPDU, LLDPDUTimeToLive
+
+    frame = (
+        _scapy.Ether(src=src, dst="01:80:c2:00:00:0e", type=0x88CC)
+        / _scapy.LLDPDUChassisID(subtype=4, id=b"\x11\x22\x33\x44\x55\x66")
+        / _scapy.LLDPDUPortID(subtype=5, id=b"LAN:1")
+        / LLDPDUTimeToLive(ttl=120)
+        / _scapy.LLDPDUSystemName(system_name=system_name)
+        / _scapy.LLDPDUSystemDescription(description=b"AVM FRITZ!Box 5590 Fiber 272.08.02")
+        / _scapy.LLDPDUPortDescription(description=b"LAN:1")
+        / LLDPDUEndOfLLDPDU()
+    )
+    return _scapy.Ether(bytes(frame))
+
+
+@pytest.mark.skipif(
+    not (_scapy.HAS_SCAPY and _scapy.HAS_SCAPY_CONTRIB),
+    reason="scapy.contrib nicht verfuegbar (CI-Fall)",
+)
+def test_cdp_802_3_frame_yields_all_four_fields() -> None:
+    """Ein VOLLSTAENDIGER CDP-Rahmen -> Nachbar mit allen vier Textfeldern.
+
+    Der Kern-Nachweis von Befund 26: der Rahmen laeuft durch die ECHTE Kette
+    (``_dispatch_neighbor`` -> ``_parse_cdp_neighbor``) und kommt als vollstaendiger
+    Nachbar heraus. Ohne die Rahmenform-Weiche gibt ``_dispatch_neighbor`` hier
+    ``None`` zurueck; ohne den Feldnamen fehlt ``port_id``.
+    """
+    pkt = _cdp_frame(
+        "11:22:33:44:55:66",
+        [
+            _scapy.CDPMsgDeviceID(val=b"SwitchA"),
+            _scapy.CDPMsgPortID(iface=b"GigabitEthernet0/1"),
+            _scapy.CDPMsgSoftwareVersion(val=b"Cisco IOS 15.2"),
+            _scapy.CDPMsgPlatform(val=b"cisco WS-C2960"),
+        ],
+    )
+    # Die Vorbedingung selbst pruefen: scapy liefert 802.3, NICHT Ethernet II.
+    assert not pkt.haslayer(_scapy.Ether)
+    assert pkt.haslayer(_scapy.Dot3)
+
+    before = time.time()
+    neighbor = sniff_core._dispatch_neighbor(pkt)
+    after = time.time()
+
+    assert neighbor is not None  # der alte Ether-Zweig lieferte hier None
+    assert neighbor["protocol"] == "CDP"
+    assert neighbor["system_name"] == "SwitchA"
+    assert neighbor["chassis_id"] == "SwitchA"
+    assert neighbor["port_id"] == "GigabitEthernet0/1"  # Feld ``iface``, nicht ``val``
+    assert neighbor["system_desc"] == "Cisco IOS 15.2"
+    assert neighbor["capabilities"] == ["cisco WS-C2960"]
+    # Echter Text, keine bytes-Schreibweise -- gleiche Regel wie im LLDP-Pfad.
+    assert not any(str(v).startswith("b'") for v in neighbor.values())
+    assert before <= neighbor["last_seen"] <= after
+
+
+@pytest.mark.skipif(
+    not (_scapy.HAS_SCAPY and _scapy.HAS_SCAPY_CONTRIB),
+    reason="scapy.contrib nicht verfuegbar (CI-Fall)",
+)
+def test_cdp_frame_without_port_id_keeps_the_neighbor() -> None:
+    """Fehlt die Anschlusskennung, bleibt der Nachbar -- nur DIESES Feld fehlt.
+
+    Ein einzelnes fehlendes Feld darf nie den ganzen Eintrag kosten: das Geraet
+    steht im Netz, die Topologie muss es kennen. Der Schluessel wird weggelassen
+    (nicht ``None``-gefuellt) -- konsistent zum LLDP-Pfad bei fehlenden TLVs.
+    """
+    pkt = _cdp_frame(
+        "aa:bb:cc:dd:ee:01",
+        [
+            _scapy.CDPMsgDeviceID(val=b"SwitchB"),
+            _scapy.CDPMsgSoftwareVersion(val=b"Cisco IOS 15.2"),
+            _scapy.CDPMsgPlatform(val=b"cisco WS-C2960"),
+        ],
+    )
+    neighbor = sniff_core._dispatch_neighbor(pkt)
+
+    assert neighbor is not None
+    assert neighbor["system_name"] == "SwitchB"  # Nachbar erhalten
+    assert neighbor["system_desc"] == "Cisco IOS 15.2"
+    assert neighbor["capabilities"] == ["cisco WS-C2960"]
+    assert "port_id" not in neighbor  # nur dieses Feld fehlt
+
+
+@pytest.mark.skipif(
+    not (_scapy.HAS_SCAPY and _scapy.HAS_SCAPY_CONTRIB),
+    reason="scapy.contrib nicht verfuegbar (CI-Fall)",
+)
+def test_cdp_unreadable_single_field_keeps_neighbor_and_names_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ein VORHANDENES, aber unlesbares Feld kostet nur SICH SELBST, nie den Nachbarn.
+
+    Der Auffangblock sitzt pro Feld, nicht um den ganzen Nachbarn -- genau der
+    Unterschied, an dem der alte Code scheiterte: dort riss der Zugriff auf das
+    nicht existierende ``CDPMsgPortID.val`` (``AttributeError``) den KOMPLETTEN
+    Nachbarn mit, obwohl Geraetekennung, Softwarefassung und Plattform einwandfrei
+    lesbar waren.
+
+    Simuliert wird ein unlesbares Feld hier ueber ein ``decode_tlv_text``, das fuer
+    ``port_id`` wirft -- das deckt die Bruchstelle unabhaengig davon ab, welches
+    scapy-Attribut sich in einer kuenftigen Version umbenennt.
+    """
+    events: list[tuple[str, dict[str, Any]]] = []
+
+    def _capture(event: str, **kwargs: Any) -> None:
+        events.append((event, kwargs))
+
+    real_decode = sniff_core.decode_tlv_text
+
+    def _decode_but_break_port_id(value: Any, field: str) -> str:
+        if field == "port_id":
+            raise AttributeError("val")
+        return real_decode(value, field)
+
+    monkeypatch.setattr(sniff_core, "decode_tlv_text", _decode_but_break_port_id)
+    monkeypatch.setattr(sniff_core._logger, "warning", _capture)
+
+    pkt = _cdp_frame(
+        "aa:bb:cc:dd:ee:03",
+        [
+            _scapy.CDPMsgDeviceID(val=b"SwitchC"),
+            _scapy.CDPMsgPortID(iface=b"GigabitEthernet0/1"),
+            _scapy.CDPMsgSoftwareVersion(val=b"Cisco IOS 15.2"),
+            _scapy.CDPMsgPlatform(val=b"cisco WS-C2960"),
+        ],
+    )
+    neighbor = sniff_core._dispatch_neighbor(pkt)
+
+    assert neighbor is not None  # der Nachbar bleibt -- das ist der Kern
+    assert neighbor["system_name"] == "SwitchC"  # die lesbaren Felder bleiben lesbar
+    assert neighbor["system_desc"] == "Cisco IOS 15.2"
+    assert neighbor["capabilities"] == ["cisco WS-C2960"]
+    assert neighbor["source_mac"] == "aa:bb:cc:dd:ee:03"
+    assert "port_id" not in neighbor  # nur das betroffene Feld bleibt leer
+    # Nicht still: protokolliert unter ``cdp_parse_failed`` UND mit Feldnamen.
+    assert any(
+        event == "cdp_parse_failed" and kwargs.get("field") == "port_id" for event, kwargs in events
+    )
+
+
+@pytest.mark.skipif(
+    not (_scapy.HAS_SCAPY and _scapy.HAS_SCAPY_CONTRIB),
+    reason="scapy.contrib nicht verfuegbar (CI-Fall)",
+)
+def test_lldp_frame_still_dispatches_unchanged() -> None:
+    """Der LLDP-Pfad bleibt bitgleich: derselbe Rahmen -> dasselbe Ergebnis.
+
+    LLDP nutzt EtherType ``0x88cc`` (> 1500), bleibt also Ethernet II und ist von
+    der CDP-Heilung nicht betroffen. Geprueft wird das, was die Umstellung haette
+    brechen koennen: die Weiche greift weiterhin, und das Ergebnis aus
+    ``_dispatch_neighbor`` ist identisch zu dem aus ``_parse_lldp_neighbor``.
+    """
+    pkt = _lldp_frame("11:22:33:44:55:66")
+
+    dispatched = sniff_core._dispatch_neighbor(pkt)
+    direct = sniff_core._parse_lldp_neighbor(pkt)
+
+    assert dispatched is not None
+    assert direct is not None
+    assert dispatched["protocol"] == "LLDP"
+    assert dispatched["system_name"] == "Fritzchen"
+    assert dispatched["system_desc"] == "AVM FRITZ!Box 5590 Fiber 272.08.02"
+    assert dispatched["port_id"] == "LAN:1"
+    assert dispatched["port_desc"] == "LAN:1"
+    assert dispatched["chassis_id"] == "11:22:33:44:55:66"
+    # Identisch bis auf den Zeitstempel (zwei Aufrufe, zwei Wanduhr-Werte).
+    assert {k: v for k, v in dispatched.items() if k != "last_seen"} == {
+        k: v for k, v in direct.items() if k != "last_seen"
+    }
+
+
+@pytest.mark.skipif(
+    not (_scapy.HAS_SCAPY and _scapy.HAS_SCAPY_CONTRIB),
+    reason="scapy.contrib nicht verfuegbar (CI-Fall)",
+)
+def test_source_mac_read_from_both_frame_forms() -> None:
+    """Die Absenderadresse kommt aus BEIDEN Rahmenformen -- 802.3 wie Ethernet II.
+
+    Das ist der Grund, warum die Rahmenform an genau EINER Stelle bestimmt wird:
+    ``Dot3`` und ``Ether`` tragen ``src`` unter demselben Namen, also bleibt der
+    Rest des Moduls formunabhaengig. Das Feld ist zugleich der Dedup-Schluessel der
+    Nachbarliste -- eine leere oder erfundene Adresse verschmilzt Geraete.
+    """
+    cdp = sniff_core._dispatch_neighbor(
+        _cdp_frame("aa:bb:cc:dd:ee:01", [_scapy.CDPMsgDeviceID(val=b"SwitchB")])
+    )
+    lldp = sniff_core._dispatch_neighbor(_lldp_frame("11:22:33:44:55:66"))
+
+    assert cdp is not None
+    assert lldp is not None
+    assert cdp["source_mac"] == "aa:bb:cc:dd:ee:01"  # aus Dot3
+    assert lldp["source_mac"] == "11:22:33:44:55:66"  # aus Ether
+
+
+@pytest.mark.skipif(
+    not (_scapy.HAS_SCAPY and _scapy.HAS_SCAPY_CONTRIB),
+    reason="scapy.contrib nicht verfuegbar (CI-Fall)",
+)
+def test_cdp_undecodable_field_keeps_neighbor_and_logs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Kaputte Bytes im CDP-Text -> Ersatzzeichen + Protokoll, NICHT Verwerfen.
+
+    Ein fremdes Geraet darf beliebige Bytes senden. Erwartet ist dieselbe Regel wie
+    im LLDP-Pfad (derselbe Helfer ``decode_tlv_text``, kein Zwilling): der Wert
+    bleibt als teilweise unlesbar ERKENNBAR (U+FFFD), der Vorfall wird mit
+    Feldnamen protokolliert, und der Nachbar bleibt vollstaendig erhalten.
+    """
+    events: list[tuple[str, dict[str, Any]]] = []
+
+    def _capture(event: str, **kwargs: Any) -> None:
+        events.append((event, kwargs))
+
+    monkeypatch.setattr(sniff_core._logger, "warning", _capture)
+
+    pkt = _cdp_frame(
+        "aa:bb:cc:dd:ee:02",
+        [
+            _scapy.CDPMsgDeviceID(val=b"Switch\xff\xfeName"),
+            _scapy.CDPMsgPortID(iface=b"GigabitEthernet0/1"),
+        ],
+    )
+    neighbor = sniff_core._dispatch_neighbor(pkt)
+
+    assert neighbor is not None  # kein Verwerfen des Nachbarn
+    name = neighbor["system_name"]
+    assert name != ""  # keine stille Luege
+    assert "�" in name  # der Vorfall bleibt sichtbar
+    assert neighbor["port_id"] == "GigabitEthernet0/1"  # Rest intakt
+    assert neighbor["source_mac"] == "aa:bb:cc:dd:ee:02"
+    # Nicht still: der Vorfall wird mit Feldnamen protokolliert.
+    assert any(
+        event == "lldp_tlv_undecodable" and kwargs.get("field") == "system_name"
+        for event, kwargs in events
+    )
+
+
 # ── DNS-Sniff-Klassifikation (start_dns_sniff, nur mit lokal verfuegbarem scapy) ─
 
 

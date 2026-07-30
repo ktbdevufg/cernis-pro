@@ -743,6 +743,67 @@ def decode_tlv_text(value: Any, field: str) -> str:
     return str(value)
 
 
+# ── Rahmen-Erkennung: DIE EINE Stelle (Form + Absenderadresse) ────────────────
+
+
+def _link_layer(pkt: Any) -> Any | None:
+    """Die Sicherungsschicht des Rahmens -- ``Ether`` ODER ``Dot3``, sonst ``None``.
+
+    DIE EINE STELLE, an der die Rahmenform bestimmt wird. Ethernet kennt zwei
+    Rahmenformen, und die beiden hier interessanten Protokolle nutzen jeweils eine
+    andere:
+
+    * **Ethernet II** (``Ether``): 2-Byte-Feld = EtherType. LLDP liegt so auf dem
+      Draht (``0x88cc``).
+    * **IEEE 802.3** (``Dot3``): dasselbe 2-Byte-Feld = LAENGE der Nutzlast, der
+      Protokollschluessel wandert in den nachfolgenden LLC/SNAP-Kopf. CDP liegt so
+      auf dem Draht.
+
+    scapy dissektiert die zweite Form als ``Dot3``, NICHT als ``Ether``. Eine
+    Erkennung, die nur ``haslayer(Ether)`` prueft, verwirft jeden echten CDP-Rahmen
+    schon vor dem Parsen -- unabhaengig davon, wie gut die CDP-Felder danach
+    ausgelesen wuerden.
+
+    Beide Rahmenformen tragen Ziel- und Quelladresse an derselben Stelle und unter
+    denselben Feldnamen (``dst``/``src``); nur deshalb kann der Rest des Moduls
+    formunabhaengig bleiben. ``Dot3`` fehlt, wenn scapy nicht geladen ist -- dann
+    zaehlt allein ``Ether``.
+    """
+    if _scapy.Ether is not None and pkt.haslayer(_scapy.Ether):
+        return pkt[_scapy.Ether]
+    if _scapy.Dot3 is not None and pkt.haslayer(_scapy.Dot3):
+        return pkt[_scapy.Dot3]
+    return None
+
+
+def _source_mac(link: Any | None) -> str:
+    """Die Absenderadresse aus der Sicherungsschicht -- ehrlich, ohne Erfindung.
+
+    Zieht aus DERSELBEN Stelle, die ``_link_layer`` bestimmt hat; die
+    Rahmenform ist damit schon geklaert und spielt hier keine Rolle mehr.
+
+    KEIN STILLER FALLBACK: Ist die Adresse nicht lesbar (keine Sicherungsschicht,
+    Feld fehlt, Feld leer, oder das Auslesen wirft), wird sie NICHT erfunden --
+    weder eine Nullen-MAC noch ein Platzhalter. Es bleibt der ehrliche Leerwert,
+    und der Vorfall wird protokolliert, damit der Betreiber ihn sieht statt ihn zu
+    erben. Ein erfundener Wert waere fatal: die Nachbarliste dedupliziert ueber
+    genau dieses Feld -- zwei Geraete mit derselben erfundenen Adresse wuerden zu
+    einem verschmelzen.
+    """
+    if link is None:
+        _logger.warning("neighbor_source_mac_missing", frame_form="none")
+        return ""
+    try:
+        src = getattr(link, "src", None)
+    except Exception as exc:
+        _logger.warning("neighbor_source_mac_unreadable", error=str(exc))
+        return ""
+    if not src:
+        _logger.warning("neighbor_source_mac_missing", frame_form=type(link).__name__)
+        return ""
+    return str(src)
+
+
 def _parse_lldp_neighbor(pkt: Any) -> dict[str, Any] | None:
     """LLDP-Paket -> Nachbar-``dict`` (Text-TLVs ueber ``decode_tlv_text``).
 
@@ -752,10 +813,15 @@ def _parse_lldp_neighbor(pkt: Any) -> dict[str, Any] | None:
     ``time.time()`` das Alter rechnet). Ohne diesen Stempel blieb ``last_seen``
     auf dem dataclass-Default ``0.0``, wodurch das Alter zur Unix-Zeit wurde und
     jeder frische Nachbar sofort als abgelaufen galt.
+
+    Die Absenderadresse laeuft ueber DENSELBEN Helfer wie der CDP-Pfad. Fuer LLDP
+    ist das verhaltensgleich zum vorherigen ``pkt[Ether].src`` (LLDP nutzt
+    EtherType ``0x88cc`` > 1500, ist also zwingend ein ``Ether``-Rahmen) -- es gibt
+    aber nur EINE Stelle, die eine Absenderadresse liest, statt zwei.
     """
     try:
         neighbor: dict[str, Any] = {
-            "source_mac": pkt[_scapy.Ether].src,
+            "source_mac": _source_mac(_link_layer(pkt)),
             "protocol": "LLDP",
             "last_seen": time.time(),
         }
@@ -781,51 +847,98 @@ def _parse_lldp_neighbor(pkt: Any) -> dict[str, Any] | None:
         return None
 
 
-def _parse_cdp_neighbor(pkt: Any) -> dict[str, Any] | None:
+def _cdp_field_text(pkt: Any, layer: Any, attr: str, field: str) -> str | None:
+    """EIN CDP-Feld zu Text -- oder ``None``, wenn genau dieses Feld unlesbar ist.
+
+    Der Auffangblock sitzt hier, um EIN FELD, nicht um den ganzen Nachbarn. Vorher
+    umschloss ein einziges ``try`` die komplette Feldauswertung: ein unlesbares
+    Detail (fehlendes Attribut, kaputte Schicht) liess den GESAMTEN Nachbarn als
+    ``None`` verschwinden -- ein Geraet, das sicher im Netz steht, fiel wegen einer
+    Nebensaechlichkeit aus der Topologie. Jetzt bleibt das betroffene Feld leer,
+    der Nachbar bleibt erhalten, und das Ereignis wird unter ``cdp_parse_failed``
+    MIT Feldnamen protokolliert (kein stilles Schlucken).
+
+    ``None`` heisst "Feld nicht vorhanden oder unlesbar" und wird von der
+    Aufrufstelle als "Schluessel weglassen" behandelt -- konsistent zum
+    LLDP-Pfad, der fehlende TLVs ebenfalls weglaesst statt ``None`` einzutragen.
+    """
+    if layer is None or not pkt.haslayer(layer):
+        return None
+    try:
+        # Bytes->Text ueber DENSELBEN Helfer wie der LLDP-Pfad: kein Zwilling,
+        # gleiche Kodierungsregel, gleiche Ersatzzeichen-Behandlung (U+FFFD).
+        return decode_tlv_text(getattr(pkt[layer], attr), field)
+    except Exception as exc:
+        _logger.warning("cdp_parse_failed", field=field, error=str(exc))
+        return None
+
+
+def _parse_cdp_neighbor(pkt: Any) -> dict[str, Any]:
     """CDP-Paket -> Nachbar-``dict`` (Text-Felder ueber ``decode_tlv_text``).
+
+    Liefert IMMER einen Nachbarn, nie ``None``: seit der Auffangblock pro Feld
+    sitzt (``_cdp_field_text``), gibt es keinen Weg mehr, auf dem ein unlesbares
+    Einzelfeld den ganzen Eintrag verwirft. Der Rueckgabetyp sagt das jetzt auch.
 
     Wie ``_parse_lldp_neighbor``: die CDP-Textfelder kommen als rohe ``bytes``
     vom Draht und werden an DIESER Naht zu Text; ``last_seen`` traegt denselben
     ``time.time()``-Stempel (eine Zeitachse fuer beide Protokolle).
+
+    Die Absenderadresse kommt aus ``_link_layer``/``_source_mac`` -- ein echter
+    CDP-Rahmen ist ein 802.3-Rahmen (``Dot3``) und hat GAR KEINE ``Ether``-Schicht;
+    ein Lesen ueber ``pkt[Ether].src`` liefert dort nichts.
+
+    Achtung Feldnamen: die scapy-Klasse ``CDPMsgPortID`` fuehrt ``type``, ``len``
+    und ``iface`` -- ein ``val`` gibt es dort NICHT (im Gegensatz zu den drei
+    anderen hier gelesenen CDP-Klassen, die von ``CDPMsgGeneric`` erben).
     """
-    try:
-        src_mac = pkt[_scapy.Ether].src if pkt.haslayer(_scapy.Ether) else ""
-        neighbor: dict[str, Any] = {
-            "source_mac": src_mac,
-            "protocol": "CDP",
-            "last_seen": time.time(),
-        }
-        if pkt.haslayer(_scapy.CDPMsgDeviceID):
-            name = decode_tlv_text(pkt[_scapy.CDPMsgDeviceID].val, "system_name")
-            neighbor["system_name"] = name
-            neighbor["chassis_id"] = name
-        if pkt.haslayer(_scapy.CDPMsgPortID):
-            neighbor["port_id"] = decode_tlv_text(pkt[_scapy.CDPMsgPortID].val, "port_id")
-        if pkt.haslayer(_scapy.CDPMsgSoftwareVersion):
-            neighbor["system_desc"] = decode_tlv_text(
-                pkt[_scapy.CDPMsgSoftwareVersion].val, "system_desc"
-            )[:200]
-        if pkt.haslayer(_scapy.CDPMsgPlatform):
-            neighbor["capabilities"] = [
-                decode_tlv_text(pkt[_scapy.CDPMsgPlatform].val, "capabilities")
-            ]
-        return neighbor
-    except Exception as exc:
-        _logger.warning("cdp_parse_failed", error=str(exc))
-        return None
+    neighbor: dict[str, Any] = {
+        "source_mac": _source_mac(_link_layer(pkt)),
+        "protocol": "CDP",
+        "last_seen": time.time(),
+    }
+    name = _cdp_field_text(pkt, _scapy.CDPMsgDeviceID, "val", "system_name")
+    if name is not None:
+        neighbor["system_name"] = name
+        neighbor["chassis_id"] = name
+    port_id = _cdp_field_text(pkt, _scapy.CDPMsgPortID, "iface", "port_id")
+    if port_id is not None:
+        neighbor["port_id"] = port_id
+    system_desc = _cdp_field_text(pkt, _scapy.CDPMsgSoftwareVersion, "val", "system_desc")
+    if system_desc is not None:
+        neighbor["system_desc"] = system_desc[:200]
+    capabilities = _cdp_field_text(pkt, _scapy.CDPMsgPlatform, "val", "capabilities")
+    if capabilities is not None:
+        neighbor["capabilities"] = [capabilities]
+    return neighbor
 
 
 def _dispatch_neighbor(pkt: Any) -> dict[str, Any] | None:
-    """EtherType/MAC-Dispatch (AS-IS ``ScapyLldpSniffer._dispatch``).
+    """Rahmenform-Weiche: LLDP ueber EtherType, CDP ueber die CDP-Schicht.
 
-    LLDP: EtherType ``0x88cc``. CDP: Ziel-MAC ``01:00:0c:cc:cc:cc``. Andere Pakete
-    -> ``None`` (vom BPF-Filter eigentlich schon ausgeschlossen).
+    Die Weiche steht auf ``_link_layer``, nicht mehr auf ``haslayer(Ether)``: CDP
+    liegt als 802.3-Rahmen mit Laengenfeld auf dem Draht und wird von scapy als
+    ``Dot3`` dissektiert. Die alte ``Ether``-Weiche verwarf deshalb JEDEN echten
+    CDP-Rahmen, bevor die Feldauswertung ueberhaupt gerufen wurde.
+
+    * **LLDP** -- EtherType ``0x88cc`` (> 1500, also zwingend Ethernet II /
+      ``Ether``). ``Dot3`` hat kein ``type``-Feld, darum wird der EtherType nur
+      dort gelesen, wo er existiert.
+    * **CDP** -- an der ANWESENHEIT der CDP-Schicht erkannt, nicht an der Ziel-MAC.
+      Das Vorhandensein der von scapy dissektierten CDP-Nachrichten ist der
+      belastbare Beweis; die Multicast-Adresse ist nur eine Begleiterscheinung und
+      als Erkennungsmerkmal schwaecher (der BPF-Filter nutzt sie weiterhin, um den
+      Verkehr auf dem Draht vorzusortieren -- das ist eine andere Ebene).
+
+    Ohne Sicherungsschicht -> ``None`` (wie bisher). Andere Pakete -> ``None``
+    (vom BPF-Filter eigentlich schon ausgeschlossen).
     """
-    if not pkt.haslayer(_scapy.Ether):
+    link = _link_layer(pkt)
+    if link is None:
         return None
-    if pkt[_scapy.Ether].type == 0x88CC:
+    if getattr(link, "type", None) == 0x88CC:
         return _parse_lldp_neighbor(pkt)
-    if pkt[_scapy.Ether].dst.lower() == "01:00:0c:cc:cc:cc":
+    if _scapy.CDPv2_HDR is not None and pkt.haslayer(_scapy.CDPv2_HDR):
         return _parse_cdp_neighbor(pkt)
     return None
 
