@@ -59,6 +59,19 @@ jobs:
       - name: import-linter (Architektur-Regeln)
         run: PYTHONPATH=backend uv run lint-imports
 
+      # NODE IM QUALITY-JOB -- kein Versehen und keine Frontend-Arbeit hier:
+      # Der Naht-Test zur Verkehrs-Rechteanzeige ruft die ECHTE Auswahlfunktion
+      # aus `frontend/src/api/traffic.js` ueber `node` auf, statt sie in Python
+      # nachzubauen. Ohne node auf dem Runner greift sein `skipif` -- der Test
+      # uebersprang sich hier still und die gepruefte Naht war in der CI
+      # ungedeckt. Gleiche Action und gleiche Fassung wie im frontend-Job, damit
+      # beide Jobs nicht auseinanderlaufen. Kein npm-Cache: hier wird nichts
+      # installiert, der Test braucht nur den Interpreter.
+      - name: Node einrichten (LTS 20, fuer den node-gestuetzten Naht-Test)
+        uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+
       - name: pytest
         run: uv run pytest
 
