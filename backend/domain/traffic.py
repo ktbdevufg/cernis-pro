@@ -25,7 +25,8 @@ Dazu der Rechte-Befund der Stufe 2 (``TrafficPermissionState``/
 fehlen oder ob die Plattform sie gar nicht anbietet. Diese Dreiteilung ist eine
 fachliche Aussage und lebt darum hier, nicht im api-Rand (Begruendung am Enum).
 ``TrafficPermissionCause`` benennt dazu die URSACHE des nicht-nutzbaren Falls
-(Werkzeug fehlt / Messlauf gescheitert) -- ebenfalls als Merkmal, nicht als Text.
+(Werkzeug fehlt / Messlauf gescheitert / bewusster Rechte-Verzicht) -- ebenfalls als
+Merkmal, nicht als Text.
 
 DARSTELLUNG bleibt draussen: keine Icons/Emojis, kein Mensch-lesbares Formatieren
 von Raten ("1,2 MB/s") -- das fuehrt api/Frontend. Die Domaene fuehrt nur Zahlen.
@@ -59,9 +60,14 @@ class TrafficPermissionState(StrEnum):
     (Linux mit Root bzw. ``CAP_NET_ADMIN``).
     ``NEEDS_PRIVILEGES`` -- die Plattform KOENNTE es, aber dem laufenden Prozess
     fehlen die Rechte. Der Zustand ist behebbar; der Grund benennt den Weg.
-    ``NOT_APPLICABLE`` -- diese Plattform bietet die Messung ueberhaupt nicht an
-    (macOS: kein ``sock_diag``/``ss``). Ein ehrlicher eigener Zustand, KEIN Fehler
-    und KEIN Rechteproblem -- erhoehte Rechte wuerden daran nichts aendern.
+    ``NOT_APPLICABLE`` -- die Messung steht auf dieser Plattform nicht zur
+    Verfuegung und ist NICHT behebbar. Zwei Auspraegungen, die ``cause`` trennt:
+    die Plattform bietet die Messung ueberhaupt nicht an (macOS: kein
+    ``sock_diag``/``ss`` -- ``cause`` bleibt ``None``), oder sie gaebe die Zahlen nur
+    an dauerhaft privilegierte Programme heraus und CERNIS verzichtet bewusst darauf
+    (Windows -- ``cause=PRIVILEGE_DECLINED``). Ein ehrlicher eigener Zustand, KEIN
+    Fehler; fuer die Oberflaeche gilt in beiden Faellen dasselbe: es gibt nichts
+    einzurichten und nichts zu raten.
 
     WARUM EIN EIGENER ZUSTAND UND KEIN TEXT: Der Unterschied zwischen "die Rechte
     fehlen" und "diese Plattform bietet es nicht" ist eine FACHLICHE Aussage und
@@ -84,24 +90,38 @@ class TrafficPermissionState(StrEnum):
 
 
 class TrafficPermissionCause(StrEnum):
-    """WARUM die Durchsatz-Sicht bei ``NEEDS_PRIVILEGES`` nicht steht -- maschinell.
+    """WARUM die Durchsatz-Sicht nicht steht -- maschinell, unabhaengig vom Zustand.
 
     ``TOOL_MISSING`` -- das Systemwerkzeug ``ss`` (Paket iproute2) ist auf diesem
     System nicht auffindbar; die Quelle existiert gar nicht erst.
     ``MEASUREMENT_FAILED`` -- das Werkzeug ist da und die statische Pruefung meldet
     nichts, aber der LAUFENDE Messlauf ist gescheitert.
+    ``PRIVILEGE_DECLINED`` -- die Messung waere auf dieser Plattform technisch
+    moeglich, das Betriebssystem gibt die Zahlen aber nur an dauerhaft mit erhoehten
+    Rechten laufende Programme heraus, und CERNIS verzichtet bewusst darauf.
 
-    WARUM EIN EIGENES MERKMAL: ``NEEDS_PRIVILEGES`` wird aus genau diesen zwei
-    Ursachen gesetzt, und sie verlangen verschiedene Erklaerungen -- ein fehlendes
-    Paket ist ein Dauerzustand, ein gescheiterter Messlauf ein voruebergehender.
-    ``ok``/``error``/``state`` fallen fuer beide zusammen; ohne dieses Feld muesste
-    die Oberflaeche die Ursache aus dem Freitext von ``reason`` ERRATEN -- und ein
-    Text ist lokalisierbar, umformulierbar und als Merkmal unbrauchbar. Dieselbe
-    Begruendung, die ``TrafficPermissionState`` selbst traegt, eine Ebene feiner.
+    WARUM EIN EIGENES MERKMAL: derselbe Zustand entsteht aus verschiedenen Ursachen,
+    und sie verlangen verschiedene Erklaerungen -- ein fehlendes Paket ist ein
+    Dauerzustand, ein gescheiterter Messlauf ein voruebergehender, ein bewusster
+    Verzicht keines von beidem. ``ok``/``error``/``state`` fallen fuer sie zusammen;
+    ohne dieses Feld muesste die Oberflaeche die Ursache aus dem Freitext von
+    ``reason`` ERRATEN -- und ein Text ist lokalisierbar, umformulierbar und als
+    Merkmal unbrauchbar. Dieselbe Begruendung, die ``TrafficPermissionState`` selbst
+    traegt, eine Ebene feiner.
 
-    KEIN Rechte-Wert: fehlende Rechte im woertlichen Sinn sind auf Linux keine
-    Ursache mehr (die Capability-Pruefung ist ersatzlos entfallen, siehe
-    ``infrastructure/traffic_permission``) -- darum genau zwei Werte, nicht drei.
+    ZUSTANDS-ZUORDNUNG: ``TOOL_MISSING``/``MEASUREMENT_FAILED`` gehoeren zu
+    ``NEEDS_PRIVILEGES`` (die Quelle ist gerade nicht nutzbar, mit Grund).
+    ``PRIVILEGE_DECLINED`` gehoert zu ``NOT_APPLICABLE``: nicht weil die Plattform
+    die Messung nicht kennt, sondern weil sie auf dieser Plattform fuer CERNIS
+    nicht in Frage kommt -- fuer die Oberflaeche ist beides gleichermassen NICHT
+    behebbar, und genau das trennt ``NOT_APPLICABLE`` von ``NEEDS_PRIVILEGES``.
+    ``NOT_APPLICABLE`` ist damit nicht mehr zwingend ursachenlos; ``None`` bleibt
+    dort der Fall der echten Plattformgrenze (macOS kennt kein ``sock_diag``).
+
+    KEIN Wert fuer "Rechte fehlen und koennten erlangt werden": genau das bietet
+    CERNIS nicht an (Karls Entscheidung S57 -- keine Rechteerweiterung, kein
+    Terminal-Befehl im Text, kein Zustimmungsdialog). ``PRIVILEGE_DECLINED`` ist der
+    Verzicht, nicht der Weg dahin.
 
     Muster ``StrEnum`` wie ``TrafficPermissionState`` -- der Wire-Wert ist der
     jeweilige String.
@@ -109,6 +129,7 @@ class TrafficPermissionCause(StrEnum):
 
     TOOL_MISSING = "tool_missing"
     MEASUREMENT_FAILED = "measurement_failed"
+    PRIVILEGE_DECLINED = "privilege_declined"
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,12 +141,14 @@ class TrafficPermissionResult:
     fehlt, was trotzdem funktioniert). Bei ``GRANTED`` bleibt ``reason`` leer -- es
     gibt nichts zu erklaeren.
 
-    ``cause`` benennt bei ``NEEDS_PRIVILEGES`` DIESELBE Aussage maschinell auswertbar,
-    die ``reason`` nur als Freitext traegt -- damit die Oberflaeche die Ursache nicht
-    aus einer Zeichenkette lesen muss (Begruendung an ``TrafficPermissionCause``). Bei
-    ``GRANTED`` und ``NOT_APPLICABLE`` gibt es keine Ursache zu benennen: dort bleibt
-    das Feld ``None``. ``None`` heisst "keine Ursache", nicht "unbekannte Ursache" --
-    die Abwesenheit ist ehrlich None, kein Sentinel (wie ``Connection.remote``).
+    ``cause`` benennt DIESELBE Aussage maschinell auswertbar, die ``reason`` nur als
+    Freitext traegt -- damit die Oberflaeche die Ursache nicht aus einer Zeichenkette
+    lesen muss (Begruendung an ``TrafficPermissionCause``). Bei ``GRANTED`` gibt es
+    keine Ursache zu benennen; bei ``NOT_APPLICABLE`` traegt sie nur, wer sie hat
+    (``PRIVILEGE_DECLINED`` -- der bewusste Verzicht), waehrend die echte
+    Plattformgrenze ohne Ursache bleibt. ``None`` heisst "keine Ursache", nicht
+    "unbekannte Ursache" -- die Abwesenheit ist ehrlich None, kein Sentinel (wie
+    ``Connection.remote``).
 
     Aufbau wie ``CaptureAccessStatus``: ein Zustand plus ein erklaerender Text, nicht
     ein Text, aus dem der Zustand erst gelesen werden muesste.

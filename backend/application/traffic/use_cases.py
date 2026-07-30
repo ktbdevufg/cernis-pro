@@ -129,7 +129,9 @@ class CheckTrafficPermission:
     def __call__(self, mess_fehler: str | None = None) -> dict[str, object]:
         """``{ok, error, state, cause}`` -- ``ok=True`` bei voller Sicht, sonst Grund + Zustand.
 
-        ``is_available`` False -> Quelle nicht nutzbar (Plattform/Tooling fehlt).
+        ``is_available`` False -> Quelle nicht nutzbar (Plattform/Tooling fehlt); der
+        Zustand ist dann ``not_applicable``, Grund und Ursache kommen aber weiterhin
+        vom Adapter (nur ein schweigender Adapter bekommt den neutralen Ersatztext).
         Sonst der Rechte-Befund ueber ``permission_state``.
 
         ``mess_fehler`` ist der Grund eines gescheiterten LAUFENDEN Mess-tick (vom
@@ -145,24 +147,37 @@ class CheckTrafficPermission:
         oder die Plattform die Messung gar nicht anbietet (nicht behebbar). Die
         Oberflaeche braucht diesen Unterschied, um keinen wirkungslosen Rat zu geben.
 
-        ``cause`` benennt innerhalb von ``needs_privileges`` die URSACHE als Merkmal
-        (``tool_missing`` = das Werkzeug fehlt, ``measurement_failed`` = der laufende
-        Messlauf ist gescheitert). Beide Faelle liefern ``ok=False`` mit Text und
-        demselben ``state``; nur ``cause`` trennt sie, ohne dass die Oberflaeche den
-        Freitext von ``error`` durchsuchen muesste. Bei ``granted`` und
-        ``not_applicable`` gibt es keine Ursache -> ``None`` (in der Wire-Form
-        ``null``): "keine Ursache", nicht "unbekannte Ursache".
+        ``cause`` benennt die URSACHE als Merkmal, ueber die Zustaende hinweg:
+        innerhalb von ``needs_privileges`` ``tool_missing`` (das Werkzeug fehlt) gegen
+        ``measurement_failed`` (der laufende Messlauf ist gescheitert), innerhalb von
+        ``not_applicable`` ``privilege_declined`` (die Messung waere moeglich, verlangt
+        aber dauerhaft erhoehte Rechte -- darauf verzichtet CERNIS bewusst) gegen
+        ``null`` (die echte Plattformgrenze, macOS ohne ``sock_diag``). Alle diese
+        Faelle liefern ``ok=False`` mit Text; nur ``cause`` trennt sie, ohne dass die
+        Oberflaeche den Freitext von ``error`` durchsuchen muesste. Bei ``granted``
+        gibt es keine Ursache -> ``None`` (in der Wire-Form ``null``): "keine
+        Ursache", nicht "unbekannte Ursache".
 
         ``ok`` und ``error`` bleiben UNVERAENDERT erhalten -- bestehende Aufrufer und
         der 403-Pfad des Routers arbeiten weiter wie bisher (kein Bruch); ``cause``
         kommt rein additiv dazu.
         """
         if not self._permission.is_available():
+            # Die Quelle ist gar nicht nutzbar. Der Zustand steht damit fest
+            # (NOT_APPLICABLE -- nicht behebbar), die BEGRUENDUNG aber gehoert dem
+            # Adapter: er weiss, warum. Frueher setzte diese Stelle einen festen Text
+            # und cause=None und ueberschrieb damit jede Aussage des Adapters -- die
+            # Oberflaeche konnte den Fall dann nicht mehr von einer echten
+            # Plattformgrenze unterscheiden. Jetzt wird nur ergaenzt, was der Adapter
+            # offen laesst: sein Grundtext gewinnt, und nur wenn er schweigt, traegt
+            # der neutrale Satz. Zustand und ``ok`` bleiben unveraendert.
+            befund = self._permission.permission_state()
             return {
                 "ok": False,
-                "error": "Per-App-Traffic ist auf dieser Plattform nicht verfuegbar.",
+                "error": befund.reason
+                or "Per-App-Traffic ist auf dieser Plattform nicht verfuegbar.",
                 "state": str(TrafficPermissionState.NOT_APPLICABLE),
-                "cause": None,
+                "cause": str(befund.cause) if befund.cause is not None else None,
             }
         befund = self._permission.permission_state()
         if befund.state is TrafficPermissionState.GRANTED and mess_fehler:

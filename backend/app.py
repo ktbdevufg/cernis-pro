@@ -840,11 +840,34 @@ from infrastructure.sni.errors import SniError, SniPermissionError
 from infrastructure.sni.sni_sniffer import ScapySniSniffer
 from infrastructure.system_resolvers import detect_system_resolvers
 
+# Plattform-Weiche fuer die traffic-Domaene, dreifach nach dem Muster der
+# Interface-Discovery-Weiche oben: Abfrage ueber sys.platform (nicht hasattr, damit
+# mypy --strict den Zweig statisch auswertet), plattformeigener Import INNERHALB des
+# Zweigs, und in JEDEM Zweig derselbe gebundene Name -- die Verwendungsstelle weiter
+# unten bleibt dadurch unveraendert.
+#
+# Der win32-Zweig betrifft AUSSCHLIESSLICH den Rechte-Adapter (S67-W-p, Finding 12):
+# Stufe 1 (welches Programm mit welcher Gegenstelle spricht) laeuft auf Windows ueber
+# denselben psutil-Datenadapter wie auf Linux und bleibt unangetastet. Nur die
+# Durchsatz-Auskunft ist auf Windows eine andere: die Messung waere ueber die
+# Ereignisablaufverfolgung technisch moeglich, verlangt aber dauerhaft erhoehte
+# Rechte -- und darauf verzichtet CERNIS bewusst (Karls Entscheidung). Vorher fiel
+# Windows in den else-Zweig und bekam den Linux-Rechte-Adapter, dessen is_available
+# dort False liefert; der Use-Case setzte daraufhin einen Zustand ohne Ursache, und
+# die Oberflaeche zeigte den macOS-Text. Der eigene Adapter sagt stattdessen, was
+# wirklich gilt.
 if sys.platform == "darwin":
     from infrastructure.traffic_macos import (
         PsutilTrafficAdapter as PsutilTrafficAdapter,
     )
     from infrastructure.traffic_macos import (
+        TrafficPermissionAdapter as TrafficPermissionAdapter,
+    )
+elif sys.platform == "win32":
+    from infrastructure.traffic_linux import (
+        PsutilTrafficAdapter as PsutilTrafficAdapter,
+    )
+    from infrastructure.traffic_windows import (
         TrafficPermissionAdapter as TrafficPermissionAdapter,
     )
 else:

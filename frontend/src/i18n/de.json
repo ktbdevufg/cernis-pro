@@ -662,10 +662,11 @@
       "groupLocalHint": "Dienste, die auf Verbindungen warten, und verbindungsloser UDP-Verkehr wie die lokale Gerätesuche. Normales lokales Netzverhalten ohne Gegenstelle.",
       "groupLocalToggleShow": "Anzeigen",
       "groupLocalToggleHide": "Ausblenden",
-      "durchsatzNichtMessbar": "Auf macOS lässt sich nicht messen, wie viele Daten ein einzelnes Programm überträgt — das Betriebssystem stellt dafür im Gegensatz zu Linux oder Windows keine Schnittstelle bereit. Das lässt sich nicht freischalten. Vollständig angezeigt wird dagegen, welches Programm mit welcher Gegenstelle spricht.",
+      "durchsatzNichtMessbar": "Auf macOS lässt sich nicht messen, wie viele Daten ein einzelnes Programm überträgt — das Betriebssystem stellt dafür keine Schnittstelle bereit. Das lässt sich nicht freischalten. Vollständig angezeigt wird dagegen, welches Programm mit welcher Gegenstelle spricht.",
       "durchsatzOhneWerte": "Für die angezeigten Verbindungen liegen gerade keine Durchsatzwerte vor. Angezeigt werden die Verbindungen des eigenen Benutzerkontos.",
       "durchsatzWerkzeugFehlt": "Der Durchsatz je Programm stammt aus dem Systemwerkzeug ss (Paket iproute2). Auf diesem System ist es nicht vorhanden, darum bleiben die Durchsatzwerte leer. Welches Programm mit welcher Gegenstelle spricht, wird vollständig angezeigt.",
-      "durchsatzMessungFehlgeschlagen": "Die letzte Durchsatzmessung ist fehlgeschlagen, darum liegen gerade keine Werte vor. Die Verbindungsliste selbst bleibt vollständig nutzbar."
+      "durchsatzMessungFehlgeschlagen": "Die letzte Durchsatzmessung ist fehlgeschlagen, darum liegen gerade keine Werte vor. Die Verbindungsliste selbst bleibt vollständig nutzbar.",
+      "durchsatzRechteVerzicht": "Welches Programm mit welcher Gegenstelle spricht, wird vollständig angezeigt. Wie viele Daten ein einzelnes Programm dabei überträgt, zeigt CERNIS unter Windows nicht: das Betriebssystem gibt diese Zahlen nur an Programme heraus, die dauerhaft mit erhöhten Rechten laufen. CERNIS verzichtet bewusst darauf."
     },
     "outbound": {
       "hostScopeLocal": "Kontakte dieses Rechners — passiv beobachtet, kein netzweiter Blick.",

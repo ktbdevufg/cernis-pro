@@ -126,19 +126,59 @@ export const TRAFFIC_PERMISSION_STATE = {
   NOT_APPLICABLE: "not_applicable",
 };
 
-// Ursachen innerhalb von NEEDS_PRIVILEGES, Spiegel von domain.TrafficPermissionCause.
+// Ursachen des nicht-nutzbaren Falls, Spiegel von domain.TrafficPermissionCause.
 // Ebenfalls benannte Konstanten, damit die View nicht mit nackten Strings vergleicht.
 //
-// Der Zustand needs_privileges entsteht aus genau zwei Ursachen, die in ok/error/
-// state zusammenfallen, aber verschiedene Erklärungen verlangen: TOOL_MISSING (das
-// Systemwerkzeug ss/iproute2 fehlt — Dauerzustand) gegen MEASUREMENT_FAILED (der
-// laufende Messlauf ist gescheitert — vorübergehend). Ohne dieses Feld müsste die
-// View die Ursache aus dem Freitext von `error` erraten. Bei granted und
-// not_applicable ist `cause` null (keine Ursache).
+// Zwei Ursachen innerhalb von NEEDS_PRIVILEGES, die in ok/error/state zusammenfallen,
+// aber verschiedene Erklärungen verlangen: TOOL_MISSING (das Systemwerkzeug
+// ss/iproute2 fehlt — Dauerzustand) gegen MEASUREMENT_FAILED (der laufende Messlauf
+// ist gescheitert — vorübergehend).
+//
+// Eine dritte innerhalb von NOT_APPLICABLE: PRIVILEGE_DECLINED — die Messung wäre auf
+// dieser Plattform technisch möglich, das System gibt die Zahlen aber nur an dauerhaft
+// mit erhöhten Rechten laufende Programme heraus, und CERNIS verzichtet bewusst
+// darauf (Windows). Ohne diese Ursache wäre der Fall von der echten Plattformgrenze
+// (macOS — cause null) nicht zu unterscheiden, und die View zeigte dort den
+// macOS-Text. Ohne dieses Feld müsste die View die Ursache aus dem Freitext von
+// `error` erraten. Bei granted ist `cause` null (keine Ursache).
 export const TRAFFIC_PERMISSION_CAUSE = {
   TOOL_MISSING: "tool_missing",
   MEASUREMENT_FAILED: "measurement_failed",
+  PRIVILEGE_DECLINED: "privilege_declined",
 };
+
+// Wählt den Sprachschlüssel des Durchsatz-Hinweises aus dem Rechte-Befund.
+//
+// Reine Funktion (Befund rein, Schlüssel raus) und bewusst HIER statt als Closure in
+// der View: sie ist die Stelle, an der aus einer Backend-Auskunft ein angezeigter
+// Satz wird, und genau das muss prüfbar sein, ohne die Komponente zu rendern. Die
+// View ruft sie auf — es gibt nur diese eine Auswahl, keinen Nachbau.
+//
+// REIHENFOLGE: zuerst die URSACHE, dann der Zustand. Das ist der Kern der Sache. Der
+// Zustand not_applicable trägt zwei verschiedene Fälle: die echte Plattformgrenze
+// (macOS — das System kennt die Messung nicht) und den bewussten Verzicht (Windows —
+// das System gäbe die Zahlen her, aber nur an dauerhaft privilegierte Programme).
+// Entschiede der Zustand zuerst, bekäme Windows den macOS-Text — und der behauptet
+// ausgerechnet, unter Windows sei die Messung möglich. Genau dieser Widerspruch
+// stand vorher über der Ansicht.
+//
+// Jeder unbekannte oder fehlende Wert fällt auf den neutralen Text zurück: die
+// Anzeige darf nie leer sein.
+export function trafficPermissionSchluessel(permission) {
+  if (permission?.cause === TRAFFIC_PERMISSION_CAUSE.PRIVILEGE_DECLINED) {
+    return "beobachten.traffic.durchsatzRechteVerzicht";
+  }
+  if (permission?.cause === TRAFFIC_PERMISSION_CAUSE.TOOL_MISSING) {
+    return "beobachten.traffic.durchsatzWerkzeugFehlt";
+  }
+  if (permission?.cause === TRAFFIC_PERMISSION_CAUSE.MEASUREMENT_FAILED) {
+    return "beobachten.traffic.durchsatzMessungFehlgeschlagen";
+  }
+  if (permission?.state === TRAFFIC_PERMISSION_STATE.NOT_APPLICABLE) {
+    return "beobachten.traffic.durchsatzNichtMessbar";
+  }
+  return "beobachten.traffic.durchsatzOhneWerte";
+}
 
 // Ruft GET /api/traffic/permission. { ok, error, state, cause } wird unverändert
 // durchgereicht — der error-Text kommt direkt aus dem Backend (nicht neu

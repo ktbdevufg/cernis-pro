@@ -662,10 +662,11 @@
       "groupLocalHint": "Services waiting for connections, and connectionless UDP traffic such as local device discovery. Normal local network behaviour without a peer.",
       "groupLocalToggleShow": "Show",
       "groupLocalToggleHide": "Hide",
-      "durchsatzNichtMessbar": "On macOS it is not possible to measure how much data an individual program transfers — unlike Linux or Windows, the operating system provides no interface for this. It cannot be unlocked. What is shown in full, however, is which program talks to which peer.",
+      "durchsatzNichtMessbar": "On macOS it is not possible to measure how much data an individual program transfers — the operating system provides no interface for this. It cannot be unlocked. What is shown in full, however, is which program talks to which peer.",
       "durchsatzOhneWerte": "No throughput values are currently available for the connections shown. What is displayed are the connections of your own user account.",
       "durchsatzWerkzeugFehlt": "Per-program throughput comes from the system tool ss (package iproute2). It is not present on this system, so the throughput values stay empty. Which program talks to which peer is shown in full.",
-      "durchsatzMessungFehlgeschlagen": "The last throughput measurement failed, so no values are available right now. The connection list itself remains fully usable."
+      "durchsatzMessungFehlgeschlagen": "The last throughput measurement failed, so no values are available right now. The connection list itself remains fully usable.",
+      "durchsatzRechteVerzicht": "Which program talks to which peer is shown in full. How much data an individual program transfers in the process is not shown by CERNIS on Windows: the operating system releases these figures only to programs that run permanently with elevated privileges. CERNIS deliberately does without that."
     },
     "outbound": {
       "hostScopeLocal": "Contacts of this machine — passively observed, not a network-wide view.",

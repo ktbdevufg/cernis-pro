@@ -175,20 +175,25 @@ def get_traffic_permission(
     ``state`` unterscheidet die beiden Gruende, die in ``ok``/``error`` allein
     zusammenfallen: ``"needs_privileges"`` (die Plattform koennte es, die Quelle ist
     aber gerade nicht nutzbar -- Werkzeug fehlt oder der Messlauf scheitert; mit
-    Grund benannt) gegen ``"not_applicable"`` (die Plattform bietet die Messung gar
-    nicht an, z. B. macOS ohne ``sock_diag`` -- nicht behebbar). ``"granted"`` =
+    Grund benannt) gegen ``"not_applicable"`` (die Messung steht auf dieser Plattform
+    nicht zur Verfuegung und ist nicht behebbar -- macOS ohne ``sock_diag``, oder
+    Windows, wo CERNIS auf den dauerhaft privilegierten Zugang bewusst verzichtet;
+    ``cause`` trennt die beiden). ``"granted"`` =
     Durchsatz messbar. Ohne diese Unterscheidung muesste die Oberflaeche sie aus dem
     Fehlertext erraten. ``ok``/``error`` bleiben in ihrer Bedeutung unveraendert
     (kein Bruch fuer Aufrufer).
 
-    ``cause`` trennt die beiden Ursachen INNERHALB von ``"needs_privileges"``, die
-    in ``ok``/``error``/``state`` zusammenfallen: ``"tool_missing"`` (das
-    Systemwerkzeug ``ss``/iproute2 ist auf diesem System nicht auffindbar -- ein
-    Dauerzustand) gegen ``"measurement_failed"`` (das Werkzeug ist da, aber der
-    laufende Messlauf ist gescheitert -- voruebergehend). Bei ``"granted"`` und
-    ``"not_applicable"`` gibt es keine Ursache zu benennen: dort ist ``cause``
-    ``null``. Additiv ergaenzt, damit die Oberflaeche die Ursache nicht aus dem
-    Freitext von ``error`` erraten muss.
+    ``cause`` trennt die Ursachen, die in ``ok``/``error``/``state`` zusammenfallen.
+    INNERHALB von ``"needs_privileges"``: ``"tool_missing"`` (das Systemwerkzeug
+    ``ss``/iproute2 ist auf diesem System nicht auffindbar -- ein Dauerzustand) gegen
+    ``"measurement_failed"`` (das Werkzeug ist da, aber der laufende Messlauf ist
+    gescheitert -- voruebergehend). INNERHALB von ``"not_applicable"``:
+    ``"privilege_declined"`` (die Messung waere technisch moeglich, das System gibt
+    die Zahlen aber nur an dauerhaft privilegierte Programme heraus -- CERNIS
+    verzichtet bewusst darauf; Windows) gegen ``null`` (die Plattform bietet die
+    Messung gar nicht an -- macOS ohne ``sock_diag``). Bei ``"granted"`` gibt es
+    keine Ursache zu benennen: dort ist ``cause`` ``null``. Additiv ergaenzt, damit
+    die Oberflaeche die Ursache nicht aus dem Freitext von ``error`` erraten muss.
 
     Scheitert die LAUFENDE Messung (``poll_error`` traegt einen Grund), schlaegt das
     auf ``ok=false`` durch, auch wenn die statische Pruefung nichts zu beanstanden

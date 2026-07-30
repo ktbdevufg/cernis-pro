@@ -29,11 +29,11 @@ import { fetchSniMap, fetchSniStatus } from "../api/sni.js";
 import NpcapDialog from "./NpcapDialog.jsx";
 import { useSni } from "../hooks/useSni.js";
 import {
-  TRAFFIC_PERMISSION_CAUSE,
   TRAFFIC_PERMISSION_STATE,
   fetchPtrNames,
   fetchTraffic,
   fetchTrafficPermission,
+  trafficPermissionSchluessel,
 } from "../api/traffic.js";
 import { fetchSettings } from "../api/settings.js";
 import { formatiereDatenrate } from "../lib/datenrate.js";
@@ -983,9 +983,12 @@ export default function TrafficView({
       : apps.find((app) => app.name === gewaehlterName) ?? null;
 
   // Ist die Durchsatz-Messung auf DIESER Plattform gar nicht verfügbar? Nur dann
-  // greift die Ausblenden-Einstellung. Bei needs_privileges (Linux ohne Rechte)
-  // bleibt der Hinweis IMMER stehen: dort ist der Zustand behebbar, und der Weg
-  // dahin darf nicht weggeschaltet werden.
+  // greift die Ausblenden-Einstellung. Bei needs_privileges (Werkzeug fehlt /
+  // Messlauf gescheitert) bleibt der Hinweis IMMER stehen: dort ist der Zustand
+  // behebbar, und der Weg dahin darf nicht weggeschaltet werden. Der Zustand deckt
+  // beide nicht behebbaren Fälle ab — die Plattformgrenze (macOS) wie den bewussten
+  // Rechte-Verzicht (Windows); für das Ausblenden sind sie gleichwertig, welcher
+  // Text dazu erscheint, entscheidet die Ursache.
   const durchsatzNichtVerfuegbar =
     permission !== null &&
     permission.state === TRAFFIC_PERMISSION_STATE.NOT_APPLICABLE;
@@ -1011,32 +1014,15 @@ export default function TrafficView({
     !durchsatzAusblenden &&
     !durchsatzWerteVorhanden;
 
-  // Welcher Hinweistext gilt? Die Plattformgrenze (not_applicable) behält ihren
-  // bisherigen Text; sonst entscheidet die vom Backend gemeldete Ursache, ob das
-  // Werkzeug fehlt oder der Messlauf gescheitert ist. Jeder andere Fall — auch ein
-  // unbekannter oder fehlender Ursachenwert — bleibt beim bisherigen neutralen
-  // Text: die Anzeige darf nie leer sein.
-  const permissionSchluessel = () => {
-    if (durchsatzNichtVerfuegbar) {
-      return "beobachten.traffic.durchsatzNichtMessbar";
-    }
-    if (permission?.cause === TRAFFIC_PERMISSION_CAUSE.TOOL_MISSING) {
-      return "beobachten.traffic.durchsatzWerkzeugFehlt";
-    }
-    if (permission?.cause === TRAFFIC_PERMISSION_CAUSE.MEASUREMENT_FAILED) {
-      return "beobachten.traffic.durchsatzMessungFehlgeschlagen";
-    }
-    return "beobachten.traffic.durchsatzOhneWerte";
-  };
-
   return (
     <div className="traffic">
       {/* Alle Hinweise kommen aus den Sprachdateien, nie aus dem rohen error-Feld
           des Backends (das ist eine technische Begruendung, kein Oberflaechentext).
-          not_applicable = die Plattform bietet die Messung nicht an (macOS);
-          sonst entscheidet die Ursache (Werkzeug fehlt / Messlauf gescheitert),
-          und ohne bekannte Ursache bleibt es beim neutralen Text. */}
-      {zeigePermission && <PermissionHinweis text={t(permissionSchluessel())} />}
+          Welcher Schluessel gilt, entscheidet ``trafficPermissionSchluessel`` —
+          zuerst nach der Ursache, dann nach dem Zustand (Begruendung dort). */}
+      {zeigePermission && (
+        <PermissionHinweis text={t(trafficPermissionSchluessel(permission))} />
+      )}
       {sniError && <SniHinweis text={sniError} />}
 
       {status === "laedt" && (
