@@ -25,6 +25,15 @@ Messung auf einer reguleren Npcap-Installation (1.88): der Produktschluessel lag
 nur in der 32-Bit-Sicht und der Treiber unter ``System32\\drivers``, waehrend die alten
 Stufen die 64-Bit-Sicht bzw. ``System32\\Npcap`` absuchten und darum ins Leere zeigten.
 Hier wird JEDE Stufe EINZELN geprueft -- nur so faellt auf, wenn eine wieder verwaist.
+
+STAND S68 W17: Die fuenfte Stufe (``ctypes.util.find_library("wpcap")``) ist ersatzlos
+ENTFALLEN, es bleiben VIER. Sie wertete nur aus, OB der Lader irgendeine ``wpcap.dll``
+im Suchpfad findet -- ohne Ablageort, ohne Version, ohne Hersteller; eine reine
+WinPcap-Installation legt dieselbe Datei am selben Ort ab. Der Fall, der sie als
+alleinigen Treffer prueft, ist damit weg; an seine Stelle tritt die Umkehrung
+(``test_bibliothek_ohne_npcap_spur_meldet_fehlend``): Bibliothek im Suchpfad, sonst
+keine Spur -> ``NPCAP_MISSING``. Die Nachstellung der Bibliothekssuche bleibt darum im
+Werkzeug, sie belegt jetzt aber die Nicht-Erkennung statt der Erkennung.
 """
 
 import contextlib
@@ -73,10 +82,14 @@ def _stufen_setzen(
       bzw. ``System32\\Npcap``
     * Stufe 4 Npcap-eigene Bibliothek -> ``os.path.exists`` auf
       ``System32\\Npcap\\wpcap.dll``
-    * Stufe 5 Bibliothekssuche        -> ``ctypes.util.find_library``
 
-    Die Weiche importiert ``ctypes.util``/``winreg`` LOKAL im Windows-Zweig, darum
-    werden die Modul-Attribute selbst gepatcht (nicht Namen im Weichen-Modul).
+    ``bibliothek_suche`` ist KEINE Stufe mehr: seit W17 wertet die Weiche
+    ``ctypes.util.find_library("wpcap")`` nicht mehr aus. Die Nachstellung bleibt
+    trotzdem, weil genau dieser Zustand -- Bibliothek im Suchpfad, sonst nichts --
+    die Lage ist, die NICHT mehr als Npcap durchgehen darf.
+
+    Die Weiche importiert ``winreg`` LOKAL im Windows-Zweig, darum werden die
+    Modul-Attribute selbst gepatcht (nicht Namen im Weichen-Modul).
 
     ``winreg`` steht -- Import UND Zugriff -- im positiven ``sys.platform``-Guard,
     genau wie im Produktivcode: mypy wertet ``sys.platform`` statisch aus, und der
@@ -141,7 +154,6 @@ def _stufen_setzen(
         ("3 Treiberdatei System32\\drivers", {"treiber_drivers": True}),
         ("3 Treiberdatei System32\\Npcap", {"treiber_npcap_dir": True}),
         ("4 Bibliothek System32\\Npcap", {"bibliothek_npcap_dir": True}),
-        ("5 Bibliothekssuche", {"bibliothek_suche": True}),
     ],
 )
 def test_npcap_erkannt_macht_nutzbar(
@@ -171,11 +183,35 @@ def test_npcap_erkannt_macht_nutzbar(
 def test_npcap_fehlt_liefert_npcap_marker(monkeypatch: pytest.MonkeyPatch) -> None:
     """Greift KEINE EINZIGE Stufe, wird das benannt -- kein stiller Fallback.
 
-    ``_stufen_setzen`` ohne Argumente stellt alle fuenf Stufen auf Nicht-Treffer.
+    ``_stufen_setzen`` ohne Argumente stellt alle vier Stufen auf Nicht-Treffer.
     Der Marker bleibt der bestehende ``NPCAP_MISSING``; das Frontend graut die
     Funktion damit unveraendert aus und bietet die Nachinstallation an.
     """
     _stufen_setzen(monkeypatch)
+    assert sniffd_platform_supported() == (False, "NPCAP_MISSING")
+    assert sniffd_unavailable_reason() == "NPCAP_MISSING"
+
+
+@_NUR_WINDOWS
+def test_bibliothek_ohne_npcap_spur_meldet_fehlend(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Eine ``wpcap.dll`` im Suchpfad ALLEIN ist KEIN Npcap -- Marker bleibt.
+
+    DIE ABSICHT HINTER W17. Nachgestellt wird genau die Lage einer reinen
+    WinPcap-Installation: ``ctypes.util.find_library("wpcap")`` findet eine
+    Bibliothek, aber es gibt keine einzige Npcap-Spur -- kein Dienstschluessel,
+    kein Produktschluessel (in KEINER der beiden Sichten), keine Treiberdatei (an
+    KEINEM der beiden Orte), kein Npcap-eigener Ordner. Die Weiche muss dann
+    ``(False, "NPCAP_MISSING")`` liefern.
+
+    Bis W17 lieferte sie hier ``(True, "")``: die fuenfte Stufe wertete nur aus,
+    OB der Lader etwas findet -- ohne Ablageort, ohne Version, ohne Hersteller.
+    Genau diese Falschmeldung haelt der Fall fest.
+
+    Die Lage wird ausschliesslich ueber ``monkeypatch`` gestellt. Es wird NICHTS
+    installiert oder entfernt, kein Dienst und keine Registrierung angefasst; das
+    auf dieser Maschine vorhandene Npcap bleibt unberuehrt.
+    """
+    _stufen_setzen(monkeypatch, bibliothek_suche=True)
     assert sniffd_platform_supported() == (False, "NPCAP_MISSING")
     assert sniffd_unavailable_reason() == "NPCAP_MISSING"
 
@@ -234,7 +270,8 @@ def test_kein_dritter_fall_mehr(monkeypatch: pytest.MonkeyPatch, lage: dict[str,
 
     Regressionsschutz gegen die Rueckkehr des entfallenen dritten Falls -- geprueft
     ueber alle Stufen gleichzeitig, ueber die real gemessene Lage dieser Maschine,
-    ueber die schwaechste Stufe allein und ueber die leere Lage.
+    ueber die blosse Bibliothek im Suchpfad (seit W17 keine Stufe mehr) und ueber
+    die leere Lage.
     """
     _stufen_setzen(monkeypatch, **lage)
     ok, marker = sniffd_platform_supported()

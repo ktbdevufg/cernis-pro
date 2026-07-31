@@ -177,12 +177,24 @@ def sniffd_platform_supported() -> tuple[bool, str]:
     ``ok=True, marker=""`` wenn tragbar (Linux/macOS immer; Windows mit erkanntem
     Npcap). Sonst ``ok=False`` mit stabilem Marker-String fuer den API-Layer.
 
-    ERKENNUNGSSTUFEN (Windows): fuenf Stufen, geordnet von der verlaesslichsten zur
+    ERKENNUNGSSTUFEN (Windows): VIER Stufen, geordnet von der verlaesslichsten zur
     schwaechsten Spur; die erste zutreffende genuegt. Die Reihenfolge und die Wahl
     der Orte sind GEMESSEN begruendet -- jede Stufe traegt unten den Befund, der
     sie rechtfertigt. Mehrere Stufen sind Absicht, nicht Redundanz: welche Spur
     eine fremde Maschine bzw. eine aeltere Npcap-Fassung traegt, ist nicht
-    gemessen, darum wird keine bisherige Stufe entfernt.
+    gemessen, darum bleiben alle vier stehen.
+
+    ENTFALLEN (W17) -- die frueher fuenfte Stufe ``ctypes.util.find_library(
+    "wpcap")``: sie wertete nur aus, OB der Lader irgendeine ``wpcap.dll`` im
+    Suchpfad findet -- ohne Ablageort, ohne Version, ohne Hersteller. Eine
+    Bibliothek ohne Herkunftsnachweis belegt kein Npcap: GEMESSEN loeste die
+    Suche hier auf ``C:\\WINDOWS\\system32\\wpcap.dll`` auf, und genau diese Datei
+    legt eine reine WinPcap-Installation am selben Ort ab (Npcap traegt sie im
+    WinPcap-Vertraeglichkeitsmodus, GEMESSEN ``WinPcapCompatible = 1`` am
+    Produktschluessel aus Stufe 2). Die Stufe konnte damit ohne funktionierendes
+    Npcap anschlagen und Npcap faelschlich als vorhanden melden. Die vier
+    verbleibenden Stufen pruefen dagegen jeweils einen Npcap-exklusiven Ort bzw.
+    Namen; GEMESSEN greifen sie auf dieser Maschine alle vier.
 
     Windows-Zweig (``sys.platform == "win32"``): Die Sniff-Familie
     (SNI/pcap/LLDP) braucht Npcap FUER die Rohpaket-Erfassung. Die IPC-Naht zum
@@ -209,8 +221,7 @@ def sniffd_platform_supported() -> tuple[bool, str]:
     # Pruefung gilt), nicht mehr die Verfuegbarkeit der IPC-Naht.
     if sys.platform == "win32":
         # Windows: Npcap ueber mehrere Stufen pruefen (erste positive genuegt).
-        # winreg/ctypes.util lokal importieren, damit Linux/macOS sie nie laden.
-        import ctypes.util
+        # winreg lokal importieren, damit Linux/macOS es nie laden.
         import winreg
 
         windir = os.environ.get("WINDIR", "C:\\Windows")
@@ -287,27 +298,14 @@ def sniffd_platform_supported() -> tuple[bool, str]:
                     npcap = True
                     break
 
-        # STUFE 4 -- Npcap-EIGENE Bibliothek unter ``System32\Npcap\wpcap.dll``.
+        # STUFE 4 -- Npcap-EIGENE Bibliothek unter ``System32\Npcap\wpcap.dll``
+        # (SCHWAECHSTE der vier Stufen, darum zuletzt).
         #
         # WO: das Npcap-eigene Unterverzeichnis. WARUM DORT: GEMESSEN liegt die
         # Bibliothek dort (Version 1.10.6); dieser Pfad gehoert AUSSCHLIESSLICH
-        # Npcap. Das unterscheidet die Stufe von Stufe 5.
+        # Npcap. Der Ablageort ist damit der Herkunftsnachweis -- genau der, den
+        # die entfallene fuenfte Stufe nicht hatte (siehe Funktionskopf).
         if not npcap and os.path.exists(os.path.join(windir, "System32", "Npcap", "wpcap.dll")):
-            npcap = True
-
-        # STUFE 5 -- Bibliothekssuche nach ``wpcap`` (SCHWAECHSTE Spur, darum zuletzt).
-        #
-        # WO: der Suchpfad des Laders. WARUM ZULETZT und warum trotzdem behalten:
-        # GEMESSEN loest ``find_library("wpcap")`` hier auf
-        # ``C:\WINDOWS\system32\wpcap.dll`` auf -- und diese Kopie ist KEIN Beleg
-        # fuer Npcap. Sie stammt aus dem WinPcap-Vertraeglichkeitsmodus (der
-        # Schluessel aus Stufe 2 traegt GEMESSEN ``WinPcapCompatible = 1``); eine
-        # reine WinPcap-Installation legt genau dieselbe Datei am selben Ort ab.
-        # Die Stufe kann also auch OHNE funktionierendes Npcap anschlagen und ist
-        # als alleiniges Merkmal untauglich -- sie steht darum ganz hinten, wo sie
-        # nur noch greift, wenn alle belastbaren Spuren fehlen. Entfernt wird sie
-        # nicht: bisher war sie auf dieser Maschine die EINZIGE greifende Stufe.
-        if not npcap and ctypes.util.find_library("wpcap") is not None:
             npcap = True
 
         if not npcap:
