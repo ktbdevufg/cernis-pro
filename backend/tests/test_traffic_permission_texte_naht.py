@@ -191,25 +191,52 @@ def test_der_macos_text_behauptet_nicht_mehr_windows_koenne_es(sprache: str) -> 
     assert "Windows" not in text, f"Der macOS-Text nennt Windows weiterhin ({sprache}): {text}"
 
 
+# Die Ueberschriften der beiden Sonderfall-Absaetze, je Sprache. Sie sind der
+# Anker der Auswahl: der Test adressiert einen BENANNTEN Abschnitt, keine
+# Wortmenge. Damit ist der Windows-Abschnitt strukturell ausgeschlossen und darf
+# ``macOS`` und ``Schnittstelle`` frei verwenden, wo er sie zur Einordnung braucht.
+_UEBERSCHRIFTEN = {
+    "de": {"macos": "Besonderheit bei macOS", "windows": "Besonderheit bei Windows"},
+    "en": {"macos": "Special case on macOS", "windows": "Special case on Windows"},
+}
+
+
+def _abschnitt(text: str, ueberschrift: str) -> str | None:
+    """Gibt den Absatz zurueck, der mit ``ueberschrift`` beginnt -- sonst ``None``."""
+    for absatz in text.split("\n\n"):
+        if absatz.startswith(ueberschrift):
+            return absatz
+    return None
+
+
 @pytest.mark.parametrize("sprache", ["de", "en"])
 def test_die_hilfe_behauptet_nicht_mehr_windows_koenne_es(sprache: str) -> None:
     """Dieselbe Richtigstellung in der Hilfe-Inhaltsdatei, beide Sprachen.
 
     Der falsche Satz stand ein zweites Mal im Hilfetext -- dieselbe Ursache, dieselbe
-    Wirkung. Geprueft wird der Absatz, der die macOS-Besonderheit erklaert.
+    Wirkung. Geprueft wird der Abschnitt, der die macOS-Besonderheit erklaert; er wird
+    ueber seine UEBERSCHRIFT gewaehlt, nicht ueber vorkommende Woerter. Der Abschnitt
+    zur Windows-Besonderheit ist damit kein Kandidat und bleibt sprachlich frei.
+
+    Beide Ueberschriften werden ausdruecklich eingefordert: verschwindet eine von
+    ihnen, faellt der Test -- er darf nicht mangels Fundstelle still durchlaufen.
     """
     hilfe = json.loads(
         (_FRONTEND / "src" / "lib" / "help_content.json").read_text(encoding="utf-8")
     )
     text = hilfe["help.traffic.uebersicht"][sprache]["lang"]
+    ueberschriften = _UEBERSCHRIFTEN[sprache]
 
-    # Der Absatz, der die macOS-Besonderheit erklaert -- dort stand der falsche Satz.
-    absaetze = [
-        a for a in text.split("\n\n") if "macOS" in a and ("Schnittstelle" in a or "interface" in a)
-    ]
-    assert absaetze, f"macOS-Absatz in der Hilfe nicht gefunden ({sprache})"
+    macos_abschnitt = _abschnitt(text, ueberschriften["macos"])
+    assert macos_abschnitt is not None, (
+        f"Kein Abschnitt mit der Ueberschrift '{ueberschriften['macos']}' in der Hilfe ({sprache})"
+    )
+    assert _abschnitt(text, ueberschriften["windows"]) is not None, (
+        f"Kein Abschnitt mit der Ueberschrift '{ueberschriften['windows']}' "
+        f"in der Hilfe ({sprache})"
+    )
 
-    treffer = [a for a in absaetze if "Windows" in a]
-    assert not treffer, (
-        f"Die Hilfe nennt Windows weiterhin als koennende Plattform ({sprache}): {treffer}"
+    assert "Windows" not in macos_abschnitt, (
+        f"Der macOS-Abschnitt nennt Windows weiterhin als koennende Plattform "
+        f"({sprache}): {macos_abschnitt}"
     )
