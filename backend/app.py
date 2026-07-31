@@ -1754,7 +1754,26 @@ class _SpaStaticFiles(StaticFiles):
     Path-Traversal); unbekannte Nicht-``api/``-/``ws/``-Pfade fallen auf
     ``index.html`` zurueck (fixer Pfad). KEINE Zeile konkateniert user-Input in
     einen Dateipfad -- genau das war die Altcode-Luecke (Finding S6).
+
+    Der Rueckfall gilt NUR fuer Client-Routen, nicht fuer Dateianfragen: Traegt
+    das letzte Pfadsegment eine Endung (Punkt), zielt die Anfrage auf eine Datei
+    und wird bei Nichtvorhandensein ehrlich mit 404 beantwortet.
     """
+
+    @staticmethod
+    def _zielt_auf_datei(path: str) -> bool:
+        """True, wenn das letzte Pfadsegment eine Endung traegt (= Dateianfrage).
+
+        Abgrenzung fuer den SPA-Rueckfall: ``/flags/zz.svg`` ist eine Dateianfrage
+        (404, wenn die Datei fehlt), ``/settings`` eine Client-Route (index.html).
+        Massgeblich ist allein das LETZTE Segment -- ein Punkt weiter vorne im Pfad
+        macht die Anfrage nicht zur Dateianfrage. Das Trennzeichen wird wie beim
+        api/ws-Waechter vorab vereinheitlicht, weil der Pfad aus der
+        Datei-Ausliefer-Schicht plattformabhaengig normalisiert ankommt (unter
+        Windows mit Rueckstrich) -- eine Plattformverzweigung gibt es NICHT.
+        """
+        letztes_segment = path.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+        return "." in letztes_segment
 
     async def get_response(self, path: str, scope: Scope) -> Response:
         # API/WS nicht auf index.html zurueckfallen lassen -> 404 (Sekundaer-
@@ -1767,7 +1786,7 @@ class _SpaStaticFiles(StaticFiles):
         try:
             return await super().get_response(path, scope)
         except StarletteHTTPException as exc:
-            if exc.status_code == 404:
+            if exc.status_code == 404 and not self._zielt_auf_datei(path):
                 # SPA-Client-Route: index.html (fixer Pfad, sicherer StaticFiles-Lookup).
                 return await super().get_response("index.html", scope)
             raise
