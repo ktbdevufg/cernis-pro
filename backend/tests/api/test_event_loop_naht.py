@@ -83,15 +83,24 @@ class _FakePcapClient:
 
 
 @pytest.fixture
-def app_mit_fake_helfer(monkeypatch: pytest.MonkeyPatch) -> Iterator[FastAPI]:
+def app_mit_fake_helfer(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> Iterator[FastAPI]:
     """ECHTE Composition Root; nur der Helfer-Spawn ist gefaelscht.
 
     ``provide_start_capture`` (der Callable mit dem ``create_task``) wird NICHT
     ueberschrieben -- genau darum geht es. Ersetzt wird die Sniffer-KLASSE, die
     ``create_app`` instanziiert, durch dieselbe Klasse mit Fake-Client.
+
+    Der DB-Pfad wird auf ``tmp_path`` umgebogen (Vorbild: ``tmp_db``-Fixture in
+    ``test_app_bootstrap.py``). Der Riegel in ``backend/tests/conftest.py`` schuetzt
+    zwar ohnehin den GANZEN Lauf -- aber eine Fixture, die den Ort nicht selbst
+    festlegt, bleibt eine Fehlerquelle, sobald sie in einen anderen Zusammenhang
+    kopiert wird. Riegel und saubere Fixture sind kein Entweder-oder.
     """
     from infrastructure.capture import ScapyPacketSniffer
 
+    monkeypatch.setattr("modules.db_path.get_db_path", lambda: tmp_path / "cernis.db")
     monkeypatch.setattr(
         app_module,
         "ScapyPacketSniffer",
