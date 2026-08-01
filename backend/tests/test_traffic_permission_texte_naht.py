@@ -21,6 +21,7 @@ Schluessel, den ``de.json`` oder ``en.json`` nicht kennt, ist eine leere Anzeige
 
 import json
 import pathlib
+import re
 import shutil
 import subprocess
 
@@ -239,4 +240,157 @@ def test_die_hilfe_behauptet_nicht_mehr_windows_koenne_es(sprache: str) -> None:
     assert "Windows" not in macos_abschnitt, (
         f"Der macOS-Abschnitt nennt Windows weiterhin als koennende Plattform "
         f"({sprache}): {macos_abschnitt}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Waechter fuer den plattformuebergreifenden Ueberblicksabsatz (S69-L17)
+#
+# DER BEFUND: Der Ueberblicksabsatz behauptete, unter Linux brauche der Durchsatz
+# je Programm erhoehte Rechte. Das ist am Artefakt widerlegt -- der Adapter prueft
+# gar keine Rechte mehr, sondern nur, ob ``ss`` im PATH liegt -- und es widersprach
+# dem Windows-Absatz derselben Datei, der Linux ausdruecklich als Plattform ohne
+# dauerhaft erhoehten Programmteil nennt.
+#
+# ADRESSIERUNG: strukturell, nicht ueber Stichworte oder Position. Der Ueberblick
+# ist der eine Absatz, der BEIDE Plattformnamen traegt und KEINE der beiden
+# Sonderfall-Ueberschriften aus ``_UEBERSCHRIFTEN`` fuehrt. Bleibt kein Kandidat
+# uebrig oder bleiben mehrere uebrig, faellt der Test benannt -- er darf nie
+# mangels Fundstelle still gruen durchlaufen.
+# ---------------------------------------------------------------------------
+
+# Bezeichner der Plattform, um die es geht.
+_LINUX_BEZEICHNER = ("linux",)
+
+# Forderungsausdruecke: "es braucht/verlangt X". Klein geschrieben, verglichen wird
+# gegen den kleingeschriebenen Satz.
+_FORDERUNGS_AUSDRUECKE = (
+    "braucht",
+    "benoetigt",
+    "benötigt",
+    "erfordert",
+    "noetig",
+    "nötig",
+    "muss",
+    "requires",
+    "needs",
+    "must",
+)
+
+# Rechte-Ausdruecke: das X, das angeblich gefordert waere.
+_RECHTE_AUSDRUECKE = (
+    "erhoehte rechte",
+    "erhöhte rechte",
+    "root",
+    "administrator",
+    "elevated privileges",
+)
+
+# Satzgrenze am Satzende, NICHT am Semikolon: der groebere Schnitt fasst mehr Text
+# zu einem Satz zusammen und ist damit die strengere Pruefung.
+_SATZGRENZE = re.compile(r"(?<=[.!?])\s+")
+
+
+def _saetze_mit_falscher_rechte_behauptung(text: str) -> list[str]:
+    """Alle Saetze, die Linux UND eine Forderung UND einen Rechte-Ausdruck tragen.
+
+    Satzweise, damit ein Absatz, der Linux an einer Stelle und Rechte an einer
+    voellig anderen nennt (etwa der Windows-Absatz zur Einordnung), nicht
+    faelschlich anschlaegt.
+    """
+    treffer = []
+    for satz in _SATZGRENZE.split(text):
+        klein = satz.lower()
+        if (
+            any(wort in klein for wort in _LINUX_BEZEICHNER)
+            and any(wort in klein for wort in _FORDERUNGS_AUSDRUECKE)
+            and any(wort in klein for wort in _RECHTE_AUSDRUECKE)
+        ):
+            treffer.append(satz.strip())
+    return treffer
+
+
+def _ueberblicks_absatz(text: str, sprache: str) -> str:
+    """Waehlt den plattformuebergreifenden Ueberblick strukturell aus ``lang``.
+
+    Kandidat ist jeder Absatz, der beide Plattformnamen nennt und KEINE der beiden
+    Sonderfall-Ueberschriften enthaelt. Bewusst ``enthaelt`` statt ``beginnt mit``:
+    verschmilzt der Ueberblick mit einem Sonderfall-Absatz, ist er nicht mehr sauber
+    von ihm getrennt -- dann bleibt kein Kandidat uebrig und der Test faellt, statt
+    einen Mischtext als Ueberblick zu pruefen.
+
+    Vorgeschaltet steht die Forderung, dass beide Sonderfall-Absaetze ueberhaupt als
+    eigene, mit ihrer Ueberschrift BEGINNENDE Absaetze existieren. Genau ein Kandidat
+    muss uebrig bleiben.
+    """
+    absaetze = text.split("\n\n")
+    ueberschriften = _UEBERSCHRIFTEN[sprache]
+
+    for plattform in ("macos", "windows"):
+        assert _abschnitt(text, ueberschriften[plattform]) is not None, (
+            f"Kein eigener Absatz beginnt mit der Ueberschrift "
+            f"'{ueberschriften[plattform]}' in der Hilfe ({sprache}) -- die Abgrenzung "
+            f"des Ueberblicksabsatzes ist damit nicht mehr belastbar."
+        )
+
+    kandidaten = [
+        absatz
+        for absatz in absaetze
+        if "macOS" in absatz
+        and "Windows" in absatz
+        and ueberschriften["macos"] not in absatz
+        and ueberschriften["windows"] not in absatz
+    ]
+
+    assert len(kandidaten) == 1, (
+        f"Der plattformuebergreifende Ueberblicksabsatz ist in der Hilfe ({sprache}) nicht "
+        f"eindeutig adressierbar: {len(kandidaten)} Absaetze nennen macOS und Windows, ohne "
+        f"einen der Sonderfall-Abschnitte zu enthalten (erwartet: genau 1)."
+    )
+    return kandidaten[0]
+
+
+@pytest.mark.parametrize("sprache", ["de", "en"])
+def test_der_hilfe_ueberblick_nennt_linux_und_fordert_dort_keine_rechte(sprache: str) -> None:
+    """Der Ueberblicksabsatz nennt Linux -- und verlangt dort keine erhoehten Rechte.
+
+    Drei Forderungen in einem Test, weil sie denselben Absatz betreffen:
+    er muss eindeutig auffindbar sein, er muss Linux nennen, und er darf nicht
+    behaupten, Linux brauche dafuer erhoehte Rechte.
+    """
+    hilfe = json.loads(
+        (_FRONTEND / "src" / "lib" / "help_content.json").read_text(encoding="utf-8")
+    )
+    text = hilfe["help.traffic.uebersicht"][sprache]["lang"]
+
+    ueberblick = _ueberblicks_absatz(text, sprache)
+
+    assert "Linux" in ueberblick, (
+        f"Der Ueberblicksabsatz der Hilfe nennt Linux nicht mehr ({sprache}): {ueberblick}"
+    )
+
+    treffer = _saetze_mit_falscher_rechte_behauptung(ueberblick)
+    assert not treffer, (
+        f"Der Ueberblicksabsatz der Hilfe behauptet weiterhin, Linux brauche erhoehte "
+        f"Rechte ({sprache}): {treffer}"
+    )
+
+
+@pytest.mark.parametrize("sprache", ["de", "en"])
+def test_kein_absatz_der_hilfe_fordert_fuer_linux_erhoehte_rechte(sprache: str) -> None:
+    """Dieselbe Pruefung auf das GANZE Feld ``lang`` -- gegen Wanderung des Satzes.
+
+    Der Ueberblicks-Waechter oben haengt an der strukturellen Adressierung. Wandert
+    die falsche Behauptung in einen anderen Absatz, greift er nicht mehr. Diese
+    Pruefung kennt keine Absatzgrenzen und faellt ueberall.
+    """
+    hilfe = json.loads(
+        (_FRONTEND / "src" / "lib" / "help_content.json").read_text(encoding="utf-8")
+    )
+    text = hilfe["help.traffic.uebersicht"][sprache]["lang"]
+
+    treffer = _saetze_mit_falscher_rechte_behauptung(text)
+
+    assert not treffer, (
+        f"Ein Satz der Hilfe behauptet, Linux brauche erhoehte Rechte ({sprache}): {treffer}"
     )
