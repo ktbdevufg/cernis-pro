@@ -162,6 +162,7 @@ def test_permission_text_raet_nie_zu_sudo(app: FastAPI) -> None:
         assert verboten not in text
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux-Verhalten")
 def test_permission_meldet_laufenden_messfehler(app: FastAPI) -> None:
     """Ein gescheiterter Messlauf schlaegt auf ok=false durch (keine stille Null)."""
     app.dependency_overrides[provide_poll_error] = lambda: (
