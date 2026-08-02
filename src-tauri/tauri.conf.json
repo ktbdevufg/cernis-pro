@@ -73,7 +73,11 @@
           "libcap"
         ],
         "preInstallScript": "rpm-preinst.sh",
-        "postInstallScript": "rpm-postinst.sh"
+        "postInstallScript": "rpm-postinst.sh",
+        "files": {
+          "/usr/share/licenses/cernis-pro/LICENSE.dependencies": "rpm/LICENSE.dependencies",
+          "/usr/share/licenses/cernis-pro/LICENSES": "rpm/LICENSES"
+        }
       }
     },
     "externalBin": [

@@ -103,6 +103,20 @@ python3 "$SCRIPT_DIR/scripts/gen_debian_copyright.py" "$LIZENZ_JSON" \
 # Kein stiller Fallback: fehlt eine der beiden Dateien, bricht der Bau ab.
 [ -s "$DEB_COPYRIGHT" ] || { echo "FEHLER: $DEB_COPYRIGHT fehlt oder ist leer"; exit 1; }
 [ -s "$DEB_LIZENZTEXTE" ] || { echo "FEHLER: $DEB_LIZENZTEXTE fehlt oder ist leer"; exit 1; }
+
+# Aus DERSELBEN Aufstellung die beiden RPM-ueblichen Beilagen erzeugen. Sie gehen
+# ueber bundle.linux.rpm.files an den von Fedora erwarteten Ort
+# /usr/share/licenses/cernis-pro/ (Makro _defaultlicensedir). Getrenntes
+# Zielverzeichnis src-tauri/rpm/, damit sich deb- und rpm-Beilagen nicht
+# vermischen. Auch hier wird nichts neu erhoben.
+RPM_DEPENDENCIES="$TAURI_SRC/rpm/LICENSE.dependencies"
+RPM_LIZENZTEXTE="$TAURI_SRC/rpm/LICENSES"
+python3 "$SCRIPT_DIR/scripts/gen_rpm_licenses.py" "$LIZENZ_JSON" \
+    --dependencies "$RPM_DEPENDENCIES" \
+    --lizenztexte "$RPM_LIZENZTEXTE"
+# Kein stiller Fallback: fehlt eine der beiden Dateien, bricht der Bau ab.
+[ -s "$RPM_DEPENDENCIES" ] || { echo "FEHLER: $RPM_DEPENDENCIES fehlt oder ist leer"; exit 1; }
+[ -s "$RPM_LIZENZTEXTE" ] || { echo "FEHLER: $RPM_LIZENZTEXTE fehlt oder ist leer"; exit 1; }
 echo "      OK"
 
 echo ""

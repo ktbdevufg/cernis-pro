@@ -942,6 +942,23 @@ def sammle_python(sammler: Sammler, wurzel: Path) -> None:
         if treffer:
             gelockt[_pep503(treffer.group(1))] = treffer.group(2)
 
+    # Existenzforderung, nicht blosse Abfrage: das Lock MUSS produktive Pakete
+    # erklaeren. Es ist der einzige Massstab, an dem sich die Ebene python messen
+    # laesst -- ohne ihn liesse sich eine leere Ebene nicht von einer
+    # vollstaendigen unterscheiden, und der Waechter weiter unten liefe mangels
+    # Vergleichsgroesse still durch. Er wuerde damit genau die Lage decken, gegen
+    # die er steht (Finding S3).
+    if not gelockt:
+        raise SystemExit(
+            "Ebene python: 'uv export --frozen --no-dev' nennt kein einziges "
+            "produktives Paket. Ohne diese Erklaerung gibt es keinen Massstab "
+            "dafuer, was mitgeliefert wird; eine leere Ebene python liesse sich "
+            "dann nicht von einer vollstaendigen unterscheiden. Entweder ist die "
+            "Lock-Datei beschaedigt, oder das Projekt hat keine produktiven "
+            "Abhaengigkeiten mehr -- dann gehoert die Ebene python aus erzeuge "
+            "entfernt."
+        )
+
     sitepackages = finde_sitepackages(wurzel)
     gefunden: set[str] = set()
     for distinfo in sorted(sitepackages.glob("*.dist-info")):
@@ -1002,10 +1019,46 @@ def sammle_python(sammler: Sammler, wurzel: Path) -> None:
             lizenz_id_nur_classifier=nur_classifier,
         )
 
-    # Gelockte, aber auf dieser Plattform nicht installierte Pakete werden nicht
-    # mitgeliefert und daher nicht als Bestandteil gefuehrt. Sie erscheinen im
-    # Bericht als Differenz zwischen 51 gelockten und den installierten Paketen.
-    _ = gefunden
+    # Waechter, gebaut auf dem Vergleich gelockt gegen gefunden -- demselben, den
+    # sammle_npm zwischen package.json und 'npm ls' zieht. Das Lock erklaert
+    # produktive Pakete, unter site-packages traegt aber keines davon eine
+    # dist-info-Metadatei: dann ist das Verzeichnis zwar da, aber leer oder fremd
+    # bestueckt. Ohne diesen Waechter liefe der Sammler still mit null Eintraegen
+    # durch, und die Aufstellung behauptete eine Vollstaendigkeit, die sie nicht
+    # hat. finde_sitepackages faengt nur den Fall ab, dass das Verzeichnis fehlt.
+    if not gefunden:
+        raise SystemExit(
+            f"Ebene python: das Lock erklaert {len(gelockt)} produktive(s) Paket(e) "
+            f"({', '.join(sorted(gelockt))}), unter {sitepackages} traegt aber "
+            "keines davon eine lesbare dist-info-Metadatei. Naechstliegende "
+            "Ursache: die Umgebung ist nicht eingerichtet oder gehoert zu einem "
+            "anderen Projekt. Die Bestandteile werden dennoch mitgeliefert -- die "
+            "Ebene python bliebe leer, und die Aufstellung behauptete eine "
+            "Vollstaendigkeit, die sie nicht hat. Abhilfe: 'uv sync' im "
+            f"Verzeichnis {wurzel} und erneut erzeugen."
+        )
+
+    # TEILWEISE Erhebung: gemeldet, aber nicht abgebrochen -- und ohne Schwelle.
+    # Gemessener Normalfall auf linux-x86_64: 51 gelockte, 48 erhobene Pakete. Die
+    # Luecke von dreien ist kein Ausfall, sondern der Bestand, den das Lock unter
+    # dem Marker sys_platform == 'win32' fuehrt (colorama, pywin32-ctypes,
+    # tzdata); er ist hier nicht installiert und wird hier nicht mitgeliefert. Der
+    # Abstand ist damit eine Eigenschaft des Abhaengigkeitsbestands, keine der
+    # Installation: er verschiebt sich mit jedem Paket, das mit Marker hinzukommt
+    # oder wegfaellt. Eine Schwelle darauf waere entweder so eng, dass sie beim
+    # naechsten markierten Paket im Normalbetrieb falsch anschlaegt -- schlimmer
+    # als kein Waechter --, oder so weit, dass sie nichts mehr faengt. Statt einer
+    # Zahl steht deshalb die NAMENTLICHE Nennung der fehlenden Pakete: sie ist
+    # aussagekraeftiger als jede Quote und laesst den Leser selbst entscheiden.
+    # Die Meldung geht auf die Konsole, nicht in die Datei -- die Aufstellung
+    # fuehrt nur, was mitgeliefert wird.
+    fehlend = sorted(set(gelockt) - gefunden)
+    if fehlend:
+        print(
+            f"Hinweis Ebene python: {len(gefunden)} von {len(gelockt)} gelockten "
+            f"Paketen erhoben. Nicht installiert und daher nicht mitgeliefert: "
+            f"{', '.join(fehlend)}"
+        )
 
 
 def _projektadresse_aus_urls(kopf: email.message.Message) -> str | None:
@@ -1045,16 +1098,26 @@ def _npm_baum(verzeichnis: Path) -> dict[str, Any]:
             "verfaelschen."
         ) from fehler
     # npm meldet bei fehlenden optionalen Peers einen Fehlercode, liefert den Baum
-    # aber trotzdem. Nur ein unlesbarer Baum ist ein echter Fehler.
+    # aber trotzdem -- deshalb wird der Code hier nicht geprueft. Er unterscheidet
+    # nicht zwischen diesem harmlosen Fall und einem fehlenden node_modules, das
+    # denselben Code (ELSPROBLEMS) traegt. Diese Unterscheidung trifft der Waechter
+    # in sammle_npm, der die erklaerten produktiven Abhaengigkeiten gegen das
+    # Ergebnis haelt; ein unlesbarer Baum faellt schon hier.
     return json.loads(ergebnis.stdout) if ergebnis.stdout.strip() else {}
 
 
 def _npm_flach(baum: dict[str, Any]) -> dict[tuple[str, str], dict[str, Any]]:
     """Klopft den npm-Abhaengigkeitsbaum zu einer flachen Zuordnung auseinander.
 
-    Eintraege ohne aufgeloeste Fassung sind unerfuellte optionale Peers -- sie sind
-    nicht installiert und werden nicht ausgeliefert, gehoeren also nicht in die
-    Aufstellung.
+    Eintraege ohne aufgeloeste Fassung werden uebergangen. Dahinter stehen zwei
+    Faelle, die diesem Baum nicht anzusehen sind: ein unerfuellter optionaler Peer
+    -- der ist nicht installiert, wird nicht ausgeliefert und gehoert nicht in die
+    Aufstellung -- oder ein fehlendes beziehungsweise unvollstaendiges
+    ``node_modules``: dann nennt ``npm ls`` die erklaerte Abhaengigkeit ohne
+    Fassung, obwohl sie ausgeliefert wird. Der zweite Fall darf nicht als der erste
+    durchgehen. Unterschieden wird er nicht hier, sondern vom Waechter in
+    :func:`sammle_npm`, der die in der ``package.json`` erklaerten produktiven
+    Abhaengigkeiten gegen das Ergebnis haelt.
     """
     flach: dict[tuple[str, str], dict[str, Any]] = {}
     stapel: list[dict[str, Any]] = [baum]
@@ -1068,12 +1131,68 @@ def _npm_flach(baum: dict[str, Any]) -> dict[tuple[str, str], dict[str, Any]]:
     return flach
 
 
+def _npm_erklaerte_abhaengigkeiten(herkunft: str, verzeichnis: Path) -> dict[str, Any]:
+    """Liest die produktiven Abhaengigkeiten der ``package.json`` eines npm-Ortes.
+
+    Existenzforderung, nicht blosse Abfrage: an beiden Orten, die
+    :func:`sammle_npm` liest, MUSS eine ``package.json`` liegen, und dort MUESSEN
+    produktive Abhaengigkeiten erklaert sein -- beide Orte sind fest verdrahtet,
+    weil beide erklaertermassen Fremdbestandteile mitliefern. Fehlt die Datei, ist
+    sie unlesbar oder nennt sie kein gefuelltes ``dependencies``, faellt das
+    Werkzeug. Ein Waechter, der mangels Fundstelle still durchliefe, waere kein
+    Waechter: er wuerde genau die Lage decken, gegen die er steht (Finding S3).
+
+    Gelesen wird ausschliesslich ``dependencies``. ``devDependencies`` werden nicht
+    ausgeliefert (``npm ls --omit=dev``), und ``optionalDependencies`` duerfen
+    zulaessig unaufgeloest bleiben -- beide taugen nicht als Massstab dafuer, dass
+    etwas mitgeliefert wird.
+    """
+    paketjson = verzeichnis / "package.json"
+    stelle = f"npm-Ort {herkunft} ({paketjson})"
+    if not paketjson.is_file():
+        raise SystemExit(
+            f"{stelle}: keine package.json gefunden. Dieser Ort liefert "
+            "Fremdbestandteile mit; ohne seine package.json laesst sich nicht "
+            "pruefen, ob die Ebene npm vollstaendig ist. Eine ungeprueft "
+            "durchgelassene Ebene waere ein stiller Rueckfall."
+        )
+    roh = lies_text(paketjson)
+    if roh is None:
+        raise SystemExit(f"{stelle}: package.json ist nicht lesbar.")
+    try:
+        angaben = json.loads(roh)
+    except json.JSONDecodeError as fehler:
+        raise SystemExit(f"{stelle}: package.json ist kein gueltiges JSON ({fehler}).") from fehler
+    erklaert = angaben.get("dependencies")
+    if not isinstance(erklaert, dict) or not erklaert:
+        raise SystemExit(
+            f"{stelle}: package.json erklaert keine produktiven Abhaengigkeiten "
+            "(Feld 'dependencies' fehlt, ist leer oder kein Objekt). An diesem Ort "
+            "muessen welche stehen -- er ist als Quelle mitgelieferter "
+            "Fremdbestandteile fest verdrahtet. Entweder ist die Datei beschaedigt, "
+            "oder der Ort ist entfallen und gehoert aus sammle_npm entfernt."
+        )
+    return erklaert
+
+
 def sammle_npm(sammler: Sammler, wurzel: Path) -> None:
     """Produktive Huelle des Frontends plus die Wurzelabhaengigkeit."""
     orte = [("frontend", wurzel / "frontend"), ("wurzel", wurzel)]
     gesehen: set[tuple[str, str]] = set()
     for herkunft, verzeichnis in orte:
+        erklaert = _npm_erklaerte_abhaengigkeiten(herkunft, verzeichnis)
         flach = _npm_flach(_npm_baum(verzeichnis))
+        if not flach:
+            raise SystemExit(
+                f"npm-Ort {herkunft} ({verzeichnis}): die package.json erklaert "
+                f"{len(erklaert)} produktive Abhaengigkeit(en) "
+                f"({', '.join(sorted(erklaert))}), 'npm ls --omit=dev' loest davon "
+                "aber keine einzige zu einer Fassung auf. Naechstliegende Ursache: "
+                "node_modules fehlt oder ist unvollstaendig. Die Bestandteile werden "
+                "dennoch mitgeliefert -- die Ebene npm bliebe leer, und die "
+                "Aufstellung behauptete eine Vollstaendigkeit, die sie nicht hat. "
+                f"Abhilfe: 'npm install' in {verzeichnis} und erneut erzeugen."
+            )
         for (name, fassung), info in sorted(flach.items()):
             if (name, fassung) in gesehen:
                 continue
@@ -1291,8 +1410,40 @@ def sammle_rust(sammler: Sammler, wurzel: Path, rust_ziel: str) -> None:
 
 
 def sammle_daten(sammler: Sammler, wurzel: Path) -> None:
-    """Die Bestaende unter backend/data und frontend/public/flags."""
+    """Die Bestaende unter backend/data und frontend/public/flags.
+
+    Existenzforderung, nicht blosse Abfrage: ``DATENBESTAENDE`` MUSS Bestaende
+    fuehren, und jeder genannte Pfad MUSS vorhanden sein. Diese Ebene laeuft nicht
+    ueber eine Erhebung, sondern ueber eine von Hand gefuehrte Liste -- sie kann
+    nichts auslassen, aber sie kann etwas behaupten. Faellt ein Bestand weg, ohne
+    dass die Liste nachgezogen wird, stuende er weiter mit ``mitgeliefert=true`` in
+    der Aufstellung: keine stille Auslassung, sondern eine stille
+    Falschbehauptung, und nach Finding S3 derselbe Verstoss. Deshalb faellt das
+    Werkzeug hier, statt eine Angabe zu fuehren, die es nicht belegen kann.
+
+    Geprueft wird auf blosse Existenz, nicht auf Dateiart: die Bestaende sind teils
+    Dateien (``oui.json``), teils Verzeichnisse (``frontend/public/flags``).
+    """
+    if not DATENBESTAENDE:
+        raise SystemExit(
+            "Ebene daten: DATENBESTAENDE fuehrt keinen einzigen Bestand. Diese "
+            "Liste ist die einzige Quelle der Ebene; ist sie leer, entsteht "
+            "lautlos eine leere Ebene, ohne dass die Aufstellung den Ausfall "
+            "kenntlich machte. Entweder ist die Liste versehentlich geleert "
+            "worden, oder es werden keine Datenbestaende mehr mitgeliefert -- dann "
+            "gehoert die Ebene daten aus erzeuge entfernt."
+        )
     for bestand in DATENBESTAENDE:
+        bestandspfad = wurzel / str(bestand["pfad"])
+        if not bestandspfad.exists():
+            raise SystemExit(
+                f"Ebene daten: der Bestand {bestand['name']!r} ist unter "
+                f"{bestandspfad} nicht vorhanden. Die Aufstellung wuerde ihn mit "
+                "mitgeliefert=true fuehren und damit behaupten, es werde etwas "
+                "ausgeliefert, das nicht da ist. Entweder fehlt der Bestand im "
+                "Arbeitsbaum, oder er ist entfallen und gehoert aus DATENBESTAENDE "
+                "entfernt."
+            )
         eigene = bestand.get("eigene_lizenzdatei")
         paketdatei: tuple[Path, str] | None = None
         kandidaten: list[Path] = []

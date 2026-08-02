@@ -61,6 +61,11 @@ src-tauri/LICENSE
 # /usr/share/doc/cernis-pro/ und sind reine Bauergebnisse.
 src-tauri/debian/
 
+# Ebenfalls aus Schritt 5: die beiden RPM-Beilagen, aus derselben Aufstellung
+# erzeugt. Sie gehen ueber bundle.linux.rpm.files nach
+# /usr/share/licenses/cernis-pro/ und sind reine Bauergebnisse.
+src-tauri/rpm/
+
 # Claude Code
 .claude/
 
