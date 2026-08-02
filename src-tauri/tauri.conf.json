@@ -75,6 +75,10 @@
     "externalBin": [
       "cernis-backend",
       "cernis-sniffd"
+    ],
+    "resources": [
+      "lizenzaufstellung.json",
+      "LICENSE"
     ]
   }
 }

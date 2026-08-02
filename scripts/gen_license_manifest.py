@@ -4,11 +4,18 @@
 Aufruf::
 
     python scripts/gen_license_manifest.py <ausgabepfad.json>
+    python scripts/gen_license_manifest.py <ausgabepfad.json> --binaerverzeichnis <verz>
 
 Das Werkzeug ist eigenstaendig: es importiert nichts aus ``backend`` und kommt mit
 der Standardbibliothek aus. Es sammelt die Ebenen ``python``, ``npm``, ``rust``,
-``daten`` und ``programme`` und schreibt EINE JSON-Datei. Die Ebene ``nativ`` wird
-im Datenformat vorgesehen, aber hier nicht erhoben (siehe ``EBENE_NATIV_HINWEIS``).
+``daten`` und ``programme`` und schreibt EINE JSON-Datei.
+
+Die Ebene ``nativ`` wird nur erhoben, wenn ``--binaerverzeichnis`` auf ein
+Verzeichnis mit den fertigen PyInstaller-Binaries zeigt. Ohne den Schalter bleibt
+sie ``erhoben=false`` (siehe ``EBENE_NATIV_HINWEIS``) -- das ist das Verhalten aus
+Arbeitspaket P3a und bleibt unveraendert. Der Grund fuer den Schalter: welche
+nativen Bibliotheken mitgeliefert werden, steht erst NACH dem PyInstaller-Lauf
+fest, denn sie stammen aus dessen Abhaengigkeitsanalyse.
 
 Zwei Regeln bestimmen den Aufbau und sind an jeder Sammelstelle einzuhalten:
 
@@ -26,6 +33,11 @@ REGEL 2 -- Kein Ersatztext.
     gilt fuer den Urhebervermerk: die Platzhalter der SPDX-Texte
     (``<year> <copyright holders>``) sind kein Urhebervermerk.
 
+    Auf der Ebene ``nativ`` gilt die Regel unveraendert: findet sich zu einer
+    Bibliothek kein Paket oder zum Paket keine ``copyright``-Datei, bleibt der
+    Eintrag ``nicht_belegt``. Es wird nichts genaehert -- weder ueber eine andere
+    Distribution noch ueber eine gleichnamige Bibliothek anderer Herkunft.
+
 Das Werkzeug faellt kein rechtliches Urteil. Es benennt zu jeder Angabe ihre
 Herkunft und kennzeichnet, was nicht belegt ist.
 """
@@ -36,14 +48,16 @@ import argparse
 import email
 import hashlib
 import json
+import os
 import re
+import struct
 import subprocess
 import sys
 import tomllib
 from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, BinaryIO, Final
 
 # --------------------------------------------------------------------------------
 # Feste Werte des Datenformats
@@ -58,6 +72,12 @@ QUELLE_SPDX_ABLAGE: Final = "spdx_ablage"
 QUELLE_WERK_LIZENZ: Final = "werk_lizenz"
 QUELLE_REGISTERLISTE: Final = "registerliste"
 QUELLE_WERKZEUG_LISTE: Final = "werkzeug_liste"
+#: Die Angabe stammt aus der Paketdatenbank des Systems (Ebene ``nativ``): der
+#: Paketname aus der Datei-zu-Paket-Zuordnung, Bezeichner und Urhebervermerk aus
+#: den ausgewiesenen Feldern ``License:`` und ``Copyright:`` der
+#: ``copyright``-Datei im maschinenlesbaren Format. Der Lizenz-VOLLTEXT traegt
+#: dagegen ``paketdatei``: er ist der Wortlaut jener Datei selbst.
+QUELLE_SYSTEMPAKET: Final = "systempaket"
 QUELLE_NICHT_BELEGT: Final = "nicht_belegt"
 
 ZULAESSIGE_QUELLEN: Final = frozenset(
@@ -68,6 +88,7 @@ ZULAESSIGE_QUELLEN: Final = frozenset(
         QUELLE_WERK_LIZENZ,
         QUELLE_REGISTERLISTE,
         QUELLE_WERKZEUG_LISTE,
+        QUELLE_SYSTEMPAKET,
         QUELLE_NICHT_BELEGT,
     }
 )
@@ -76,9 +97,10 @@ ZULAESSIGE_QUELLEN: Final = frozenset(
 GPL2_ONLY: Final = "GPL-2.0-only"
 
 EBENE_NATIV_HINWEIS: Final = (
-    "In diesem Schritt nicht erhoben. Die nativen Bibliotheken werden erst aus dem "
-    "Bauimage ausgelesen (Arbeitspaket P3b). Die leere Liste bedeutet NICHT, dass "
-    "keine nativen Bestandteile mitgeliefert werden."
+    "Ohne --binaerverzeichnis nicht erhoben. Die nativen Bibliotheken stehen erst "
+    "nach dem PyInstaller-Lauf fest und werden aus den fertigen Binaries gelesen. "
+    "Die leere Liste bedeutet NICHT, dass keine nativen Bestandteile mitgeliefert "
+    "werden."
 )
 
 PLATTFORM: Final = "linux-x86_64"
@@ -1127,6 +1149,350 @@ def sammle_programme(sammler: Sammler) -> None:
 
 
 # --------------------------------------------------------------------------------
+# Ebene nativ: die mitgelieferten nativen Bibliotheken der PyInstaller-Binaries
+# --------------------------------------------------------------------------------
+
+# Der entscheidende Zeitpunkt: welche nativen Bibliotheken mitgeliefert werden,
+# ergibt sich aus der Abhaengigkeitsanalyse von PyInstaller. Sie steht erst fest,
+# wenn die Binaries gebaut sind. Deshalb wird diese Ebene nicht aus dem Quellbaum
+# erhoben, sondern aus dem CArchive der fertigen Binaries -- REIN LESEND. Die
+# Binaries werden dabei nicht entpackt und nicht ausgefuehrt; gelesen werden allein
+# das Inhaltsverzeichnis (TOC) und daraus Dateiname und Groesse.
+
+#: Das Erkennungsmuster ("Cookie") am Ende eines PyInstaller-Binaries. Ihm folgen
+#: Gesamtlaenge des Archivs, Lage und Laenge des Inhaltsverzeichnisses.
+#: Vgl. ``PyInstaller.archive.readers.CArchiveReader``; das Format wird hier
+#: nachgebildet, damit das Werkzeug ohne PyInstaller auskommt (nur stdlib).
+CARCHIVE_MAGIE: Final = b"MEI\014\013\012\013\016"
+CARCHIVE_KOPF_FORMAT: Final = "!8sIIII64s"
+CARCHIVE_EINTRAG_FORMAT: Final = "!IIIIBc"
+CARCHIVE_SUCHBLOCK: Final = 8192
+
+#: Der Typkennbuchstabe der TOC-Eintraege, die eine mitgelieferte Binaerdatei
+#: bezeichnen (``PKG_ITEM_BINARY``). Nur diese kommen als native Bibliothek in
+#: Frage; Quelltext, Datendateien und das Python-Archiv tragen andere Buchstaben.
+CARCHIVE_TYP_BINAER: Final = "b"
+
+#: Eine native Bibliothek traegt eine SONAME-artige Endung. Erweiterungsmodule von
+#: Python-Paketen (``_imaging.cpython-312-x86_64-linux-gnu.so``,
+#: ``_rust.abi3.so``) sind KEINE eigenstaendigen Bibliotheken -- sie sind
+#: Bestandteil ihres Python-Pakets und dort auf der Ebene ``python`` bereits
+#: gefuehrt. Sie hier erneut aufzunehmen hiesse, sie doppelt zu fuehren.
+PYTHON_ERWEITERUNG_MUSTER: Final = re.compile(
+    r"\.(?:cpython-\d+[^.]*|abi\d+|pypy\d+[^.]*)\.so$",
+)
+
+#: Der Ordner, in den ``auditwheel`` die von einem Python-Rad mitgebrachten
+#: Bibliotheken legt. Der Name traegt einen Hash (``libjpeg-8296d2fa.so.62.4.0``),
+#: es gibt also kein Systempaket dazu -- diese Bibliotheken teilen die Lizenz ihres
+#: Python-Pakets (Punkt 1f des Auftrags) und werden diesem zugeordnet.
+RAD_BIBLIOTHEKSORDNER_MUSTER: Final = re.compile(r"^(?P<paket>[A-Za-z0-9_.-]+)\.libs/")
+
+#: Erkennt eine ``copyright``-Datei im maschinenlesbaren Debian-Format (DEP-5).
+#: Nur dort sind ``License:`` und ``Copyright:`` ausgewiesene Felder. In den
+#: Freitext-Fassungen stehen dieselben Woerter mitten im Fliesstext; sie dort als
+#: Bezeichner oder Vermerk zu lesen waere eine Deutung, kein Beleg (Regel 2).
+DEP5_KOPF_MUSTER: Final = re.compile(
+    r"^Format:\s*\S*copyright-format/1\.0/?\s*$",
+    re.MULTILINE,
+)
+
+#: Der Absatz, der fuer das Paket als Ganzes gilt.
+DEP5_ALLE_DATEIEN_MUSTER: Final = re.compile(r"^Files:\s*\*\s*$", re.MULTILINE)
+
+#: Ein DEP-5-Feld: Wert in derselben Zeile, Fortsetzungszeilen eingerueckt.
+DEP5_FELD_MUSTER: Final = r"^{feld}:[ \t]*(?P<wert>.*(?:\n[ \t]+\S.*)*)$"
+
+
+class CArchiveFehler(Exception):
+    """Das Binaerformat war nicht lesbar. Kein stiller Rueckfall -- ein Fehler."""
+
+
+def lies_carchive_verzeichnis(binaer: Path) -> list[tuple[str, str, int]]:
+    """Liest das Inhaltsverzeichnis eines PyInstaller-Binaries, rein lesend.
+
+    Liefert je Eintrag Name, Typkennbuchstaben und die entpackte Groesse in Bytes.
+    Es wird nichts entpackt und nichts ausgefuehrt: die Nutzdaten selbst bleiben
+    ungelesen, gelesen werden nur Kopf und Inhaltsverzeichnis.
+    """
+    kopflaenge = struct.calcsize(CARCHIVE_KOPF_FORMAT)
+    eintragslaenge = struct.calcsize(CARCHIVE_EINTRAG_FORMAT)
+    with binaer.open("rb") as strom:
+        beginn = _finde_carchive_magie(strom)
+        if beginn < 0:
+            raise CArchiveFehler(f"{binaer}: kein PyInstaller-Archiv (Magie nicht gefunden)")
+        strom.seek(beginn)
+        kopf = strom.read(kopflaenge)
+        if len(kopf) != kopflaenge:
+            raise CArchiveFehler(f"{binaer}: Archivkopf unvollstaendig")
+        _, archivlaenge, tabelle_lage, tabelle_laenge, _, _ = struct.unpack(
+            CARCHIVE_KOPF_FORMAT, kopf
+        )
+        archivbeginn = beginn + kopflaenge - archivlaenge
+        strom.seek(archivbeginn + tabelle_lage)
+        rohtabelle = strom.read(tabelle_laenge)
+    if len(rohtabelle) != tabelle_laenge:
+        raise CArchiveFehler(f"{binaer}: Inhaltsverzeichnis unvollstaendig")
+
+    eintraege: list[tuple[str, str, int]] = []
+    stelle = 0
+    while stelle < len(rohtabelle):
+        block = rohtabelle[stelle : stelle + eintragslaenge]
+        if len(block) != eintragslaenge:
+            raise CArchiveFehler(f"{binaer}: abgeschnittener Eintrag im Inhaltsverzeichnis")
+        gesamtlaenge, _, _, entpackte_laenge, _, typ = struct.unpack(CARCHIVE_EINTRAG_FORMAT, block)
+        namenslaenge = gesamtlaenge - eintragslaenge
+        if namenslaenge < 0:
+            raise CArchiveFehler(f"{binaer}: unplausible Eintragslaenge {gesamtlaenge}")
+        stelle += eintragslaenge
+        rohname = rohtabelle[stelle : stelle + namenslaenge]
+        stelle += namenslaenge
+        name = rohname.rstrip(b"\0").decode("utf-8", errors="replace")
+        eintraege.append((name, typ.decode("ascii", errors="replace"), entpackte_laenge))
+    return eintraege
+
+
+def _finde_carchive_magie(strom: BinaryIO) -> int:
+    """Sucht die Erkennungsmarke vom Dateiende her rueckwaerts."""
+    strom.seek(0, os.SEEK_END)
+    ende = strom.tell()
+    while ende >= len(CARCHIVE_MAGIE):
+        anfang = max(ende - CARCHIVE_SUCHBLOCK, 0)
+        laenge = ende - anfang
+        if laenge < len(CARCHIVE_MAGIE):
+            break
+        strom.seek(anfang)
+        block = strom.read(laenge)
+        stelle = block.rfind(CARCHIVE_MAGIE)
+        if stelle != -1:
+            return anfang + stelle
+        ende = anfang + len(CARCHIVE_MAGIE) - 1
+    return -1
+
+
+def ist_native_bibliothek(name: str) -> bool:
+    """Sagt, ob ein TOC-Name eine eigenstaendige native Bibliothek bezeichnet."""
+    if PYTHON_ERWEITERUNG_MUSTER.search(name) is not None:
+        return False
+    dateiname = name.rsplit("/", 1)[-1]
+    return dateiname.endswith(".so") or ".so." in dateiname
+
+
+def _paket_zu_datei(dateiname: str) -> str | None:
+    """Fragt die Paketdatenbank des Systems, welches Paket eine Datei liefert.
+
+    Verwendet ``dpkg-query -S``. Findet sich keine Zuordnung, ist das Ergebnis
+    ``None`` -- es wird nichts geraten (Regel 2).
+    """
+    ergebnis = subprocess.run(
+        ["dpkg-query", "-S", f"*/{dateiname}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if ergebnis.returncode != 0:
+        return None
+    pakete: list[str] = []
+    for zeile in ergebnis.stdout.splitlines():
+        paketteil, trenner, _ = zeile.partition(": ")
+        if not trenner:
+            continue
+        for stueck in paketteil.split(","):
+            paket = stueck.strip().split(":", 1)[0]
+            if paket and paket not in pakete:
+                pakete.append(paket)
+    # Mehrdeutigkeit ist kein Beleg: liefern mehrere Pakete denselben Dateinamen,
+    # laesst sich nicht sagen, aus welchem die eingebettete Fassung stammt.
+    return pakete[0] if len(pakete) == 1 else None
+
+
+def _dep5_feld(absatz: str, feld: str) -> str | None:
+    """Liest ein DEP-5-Feld WORTGETREU, samt eingerueckter Fortsetzungszeilen."""
+    treffer = re.search(DEP5_FELD_MUSTER.format(feld=feld), absatz, re.MULTILINE)
+    if treffer is None:
+        return None
+    zeilen = [zeile.strip() for zeile in treffer.group("wert").splitlines()]
+    wert = "\n".join(zeile for zeile in zeilen if zeile)
+    return wert or None
+
+
+def lies_copyright_angaben(text: str) -> tuple[str | None, str | None]:
+    """Liest Bezeichner und Urhebervermerk aus einer ``copyright``-Datei.
+
+    Beides wird ausschliesslich den ausgewiesenen Feldern des maschinenlesbaren
+    Formats (DEP-5) des Absatzes ``Files: *`` entnommen und WORTGETREU uebernommen.
+    Eine Freitext-Fassung liefert hier nichts: dort ist ``License:`` Teil eines
+    Fliesstextes und ``COPYRIGHT STATEMENTS AND LICENSING TERMS`` eine Ueberschrift.
+    Beides als Angabe zu lesen waere eine Deutung, kein Beleg (Regel 2).
+    """
+    if DEP5_KOPF_MUSTER.search(text) is None:
+        return None, None
+    for absatz in re.split(r"\n[ \t]*\n", text):
+        if DEP5_ALLE_DATEIEN_MUSTER.search(absatz) is None:
+            continue
+        return _dep5_feld(absatz, "License"), _dep5_feld(absatz, "Copyright")
+    return None, None
+
+
+def _binaries_im_verzeichnis(verzeichnis: Path) -> list[Path]:
+    """Die PyInstaller-Binaries eines Verzeichnisses, nach Namen geordnet.
+
+    Genommen wird jede ausfuehrbare Datei, die ein CArchive traegt. Eine
+    ausfuehrbare Datei OHNE Archiv ist kein Fehler -- sie ist schlicht kein
+    PyInstaller-Binary. Enthaelt das Verzeichnis gar keines, ist das ein Fehler:
+    dann ist der Schalter falsch gesetzt, und eine leere Ebene ``nativ`` waere ein
+    stiller Rueckfall.
+    """
+    if not verzeichnis.is_dir():
+        raise SystemExit(f"--binaerverzeichnis: {verzeichnis} ist kein Verzeichnis")
+    gefunden: list[Path] = []
+    for pfad in sorted(verzeichnis.iterdir()):
+        if not pfad.is_file() or not pfad.stat().st_mode & 0o111:
+            continue
+        with pfad.open("rb") as strom:
+            if _finde_carchive_magie(strom) >= 0:
+                gefunden.append(pfad)
+    if not gefunden:
+        raise SystemExit(f"--binaerverzeichnis: {verzeichnis} enthaelt kein PyInstaller-Binary")
+    return gefunden
+
+
+def sammle_nativ(sammler: Sammler, verzeichnis: Path) -> dict[str, Any]:
+    """Erhebt die Ebene ``nativ`` aus den fertigen PyInstaller-Binaries.
+
+    Fuer jede Bibliothek werden Dateiname und Groesse aus dem Archiv genommen. Das
+    liefernde Systempaket kommt aus der Paketdatenbank DIESES Systems, Bezeichner
+    und Urhebervermerk wortgetreu aus dessen ``copyright``-Datei, deren Volltext als
+    Lizenztext gefuehrt wird. Bibliotheken aus dem Ordner eines Python-Rades
+    (``pillow.libs/``) werden ihrem Python-Paket zugeordnet, statt sie doppelt zu
+    fuehren.
+    """
+    binaries = _binaries_im_verzeichnis(verzeichnis)
+    # Dieselbe Bibliothek steckt in beiden Binaries. Sie wird EINMAL gefuehrt und
+    # nennt, in welchen Binaries sie vorkommt.
+    gefunden: dict[str, dict[str, Any]] = {}
+    for binaer in binaries:
+        for name, typ, groesse in lies_carchive_verzeichnis(binaer):
+            if typ != CARCHIVE_TYP_BINAER or not ist_native_bibliothek(name):
+                continue
+            vorhanden = gefunden.get(name)
+            if vorhanden is None:
+                gefunden[name] = {
+                    "archivname": name,
+                    "dateiname": name.rsplit("/", 1)[-1],
+                    "groesse_bytes": groesse,
+                    "binaries": [binaer.name],
+                }
+            elif binaer.name not in vorhanden["binaries"]:
+                vorhanden["binaries"].append(binaer.name)
+
+    eintraege: list[dict[str, Any]] = []
+    paketcache: dict[str, str | None] = {}
+    for name in sorted(gefunden):
+        angaben = gefunden[name]
+        radtreffer = RAD_BIBLIOTHEKSORDNER_MUSTER.match(name)
+        if radtreffer is not None:
+            eintraege.append(_nativ_aus_python_rad(angaben, radtreffer.group("paket")))
+            continue
+        dateiname = str(angaben["dateiname"])
+        if dateiname not in paketcache:
+            paketcache[dateiname] = _paket_zu_datei(dateiname)
+        eintraege.append(_nativ_aus_systempaket(sammler, angaben, paketcache[dateiname]))
+
+    return {
+        "erhoben": True,
+        "hinweis": (
+            "Erhoben aus dem Inhaltsverzeichnis der fertigen PyInstaller-Binaries in "
+            f"{verzeichnis}, rein lesend. Paket, Bezeichner und Urhebervermerk stammen "
+            "aus der Paketdatenbank DIESES Systems -- im Bauimage koennen andere "
+            "Fassungen und damit andere Angaben gelten."
+        ),
+        "quelle_der_binaries": str(verzeichnis),
+        "gelesene_binaries": [binaer.name for binaer in binaries],
+        "eintraege": eintraege,
+    }
+
+
+def _nativ_aus_python_rad(angaben: dict[str, Any], paket: str) -> dict[str, Any]:
+    """Eine Bibliothek aus dem Ordner eines Python-Rades (Punkt 1f).
+
+    Sie wird nicht doppelt gefuehrt: Bezeichner, Text und Vermerk stehen beim
+    Python-Paket auf der Ebene ``python``. Hier steht nur der Verweis darauf.
+    """
+    return {
+        "dateiname": str(angaben["dateiname"]),
+        "archivname": str(angaben["archivname"]),
+        "groesse_bytes": int(angaben["groesse_bytes"]),
+        "binaries": list(angaben["binaries"]),
+        "herkunft": "python_paket",
+        "python_paket": paket,
+        "lieferndes_paket": None,
+        "lieferndes_paket_quelle": QUELLE_NICHT_BELEGT,
+        "lizenz_id": None,
+        "lizenz_id_quelle": QUELLE_NICHT_BELEGT,
+        "urhebervermerk": None,
+        "urhebervermerk_quelle": QUELLE_NICHT_BELEGT,
+        "lizenz_text_ref": None,
+        "lizenz_text_quelle": QUELLE_NICHT_BELEGT,
+        "copyright_datei": None,
+        "hinweis": (
+            f"Vom Python-Paket {paket} mitgebracht. Bezeichner, Lizenztext und "
+            f"Urhebervermerk sind auf der Ebene python beim Paket {paket} gefuehrt "
+            "und werden hier nicht wiederholt."
+        ),
+    }
+
+
+def _nativ_aus_systempaket(
+    sammler: Sammler,
+    angaben: dict[str, Any],
+    paket: str | None,
+) -> dict[str, Any]:
+    """Eine Bibliothek aus einem Systempaket, belegt ueber dessen copyright-Datei."""
+    eintrag: dict[str, Any] = {
+        "dateiname": str(angaben["dateiname"]),
+        "archivname": str(angaben["archivname"]),
+        "groesse_bytes": int(angaben["groesse_bytes"]),
+        "binaries": list(angaben["binaries"]),
+        "herkunft": "systempaket",
+        "python_paket": None,
+        "lieferndes_paket": paket,
+        "lieferndes_paket_quelle": QUELLE_SYSTEMPAKET if paket else QUELLE_NICHT_BELEGT,
+        "lizenz_id": None,
+        "lizenz_id_quelle": QUELLE_NICHT_BELEGT,
+        "urhebervermerk": None,
+        "urhebervermerk_quelle": QUELLE_NICHT_BELEGT,
+        "lizenz_text_ref": None,
+        "lizenz_text_quelle": QUELLE_NICHT_BELEGT,
+        "copyright_datei": None,
+    }
+    if paket is None:
+        # Kein Paket gefunden: nichts belegt, nichts genaehert (Regel 2).
+        return eintrag
+
+    datei = Path("/usr/share/doc") / paket / "copyright"
+    text = lies_text(datei) if datei.is_file() else None
+    if text is None:
+        return eintrag
+
+    eintrag["copyright_datei"] = str(datei)
+    # Der Volltext dieser Datei IST der Lizenztext des Pakets -- Quelle paketdatei,
+    # Fundstelle der Pfad, unter dem er gelesen wurde.
+    schluessel, textquelle = sammler.text_aus_paketdatei(f"nativ/{paket}", datei, text)
+    eintrag["lizenz_text_ref"] = schluessel
+    eintrag["lizenz_text_quelle"] = textquelle
+
+    bezeichner, vermerk = lies_copyright_angaben(text)
+    if bezeichner is not None:
+        eintrag["lizenz_id"] = bezeichner
+        eintrag["lizenz_id_quelle"] = QUELLE_SYSTEMPAKET
+    if vermerk is not None:
+        eintrag["urhebervermerk"] = vermerk
+        eintrag["urhebervermerk_quelle"] = QUELLE_SYSTEMPAKET
+    return eintrag
+
+
+# --------------------------------------------------------------------------------
 # Werk und Zusammenbau
 # --------------------------------------------------------------------------------
 
@@ -1219,9 +1585,10 @@ def pruefe_ergebnis(ergebnis: dict[str, Any]) -> None:
     pruefsummen = [eintrag["sha256"] for eintrag in texte.values()]
     if len(set(pruefsummen)) != len(pruefsummen):
         raise SystemExit("Ein Lizenztext steht mehrfach in lizenztexte")
+    nativ_eintraege = ergebnis["ebene_nativ"]["eintraege"]
     verweise = [
         eintrag["lizenz_text_ref"]
-        for eintrag in ergebnis["bestandteile"]
+        for eintrag in [*ergebnis["bestandteile"], *nativ_eintraege]
         if eintrag["lizenz_text_ref"] is not None
     ]
     werkverweis = ergebnis["werk"]["lizenz_text"]
@@ -1237,15 +1604,55 @@ def pruefe_ergebnis(ergebnis: dict[str, Any]) -> None:
                 raise SystemExit(f"{eintrag['name']}: {feld} ist leer, Quelle aber {quelle!r}")
             if eintrag[feld] == "":
                 raise SystemExit(f"{eintrag['name']}: {feld} ist ein leerer String")
+    pruefe_ebene_nativ(nativ_eintraege)
 
 
-def erzeuge(wurzel: Path) -> dict[str, Any]:
+def pruefe_ebene_nativ(eintraege: Sequence[dict[str, Any]]) -> None:
+    """Prueft die Zusagen der Ebene ``nativ``, allen voran Regel 2.
+
+    Ein leeres Feld muss die Quelle ``nicht_belegt`` tragen, ein belegtes Feld eine
+    zulaessige Quelle. Der Lizenztext darf nur aus der gelesenen ``copyright``-Datei
+    stammen -- eine andere Quelle waere ein Ersatztext.
+    """
+    for eintrag in eintraege:
+        name = eintrag["dateiname"]
+        felder = ("lieferndes_paket", "lizenz_id", "urhebervermerk", "lizenz_text_ref")
+        for feld in felder:
+            quelle = eintrag[f"{feld.removesuffix('_ref')}_quelle"]
+            if quelle not in ZULAESSIGE_QUELLEN:
+                raise SystemExit(f"{name}: unzulaessige Quelle {quelle!r} fuer {feld}")
+            if eintrag[feld] is None and quelle != QUELLE_NICHT_BELEGT:
+                raise SystemExit(f"{name}: {feld} ist leer, Quelle aber {quelle!r}")
+            if eintrag[feld] is not None and quelle == QUELLE_NICHT_BELEGT:
+                raise SystemExit(f"{name}: {feld} ist belegt, Quelle aber nicht_belegt")
+            if eintrag[feld] == "":
+                raise SystemExit(f"{name}: {feld} ist ein leerer String")
+        if eintrag["lizenz_text_ref"] is not None:
+            if eintrag["lizenz_text_quelle"] != QUELLE_PAKETDATEI:
+                raise SystemExit(
+                    f"{name}: Lizenztext stammt aus {eintrag['lizenz_text_quelle']!r} "
+                    "statt aus der gelesenen copyright-Datei"
+                )
+            if not eintrag["copyright_datei"]:
+                raise SystemExit(f"{name}: Lizenztext ohne benannte Fundstelle")
+
+
+def erzeuge(wurzel: Path, binaerverzeichnis: Path | None = None) -> dict[str, Any]:
     sammler = Sammler(wurzel)
     sammle_python(sammler, wurzel)
     sammle_npm(sammler, wurzel)
     sammle_rust(sammler, wurzel)
     sammle_daten(sammler, wurzel)
     sammle_programme(sammler)
+
+    if binaerverzeichnis is None:
+        ebene_nativ: dict[str, Any] = {
+            "erhoben": False,
+            "hinweis": EBENE_NATIV_HINWEIS,
+            "eintraege": [],
+        }
+    else:
+        ebene_nativ = sammle_nativ(sammler, binaerverzeichnis)
 
     ergebnis: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
@@ -1256,11 +1663,7 @@ def erzeuge(wurzel: Path) -> dict[str, Any]:
         "bestandteile": sammler.bestandteile,
         "lizenztexte": sammler.lizenztexte,
         "luecken": sammle_luecken(sammler.bestandteile),
-        "ebene_nativ": {
-            "erhoben": False,
-            "hinweis": EBENE_NATIV_HINWEIS,
-            "eintraege": [],
-        },
+        "ebene_nativ": ebene_nativ,
     }
     pruefe_ergebnis(ergebnis)
     return ergebnis
@@ -1280,10 +1683,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=Path(__file__).resolve().parent.parent,
         help="Repo-Wurzelverzeichnis (Vorgabe: das Verzeichnis ueber scripts/)",
     )
+    zerleger.add_argument(
+        "--binaerverzeichnis",
+        type=Path,
+        default=None,
+        help=(
+            "Verzeichnis mit den fertigen PyInstaller-Binaries. Nur mit diesem "
+            "Schalter wird die Ebene nativ erhoben; ohne ihn bleibt sie "
+            "erhoben=false."
+        ),
+    )
     argumente = zerleger.parse_args(argv)
 
     wurzel = argumente.wurzel.resolve()
-    ergebnis = erzeuge(wurzel)
+    binaerverzeichnis = (
+        argumente.binaerverzeichnis.resolve() if argumente.binaerverzeichnis is not None else None
+    )
+    ergebnis = erzeuge(wurzel, binaerverzeichnis)
     argumente.ausgabe.parent.mkdir(parents=True, exist_ok=True)
     argumente.ausgabe.write_text(
         json.dumps(ergebnis, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
@@ -1303,7 +1719,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"  Lizenztexte abgelegt     {len(ergebnis['lizenztexte']):>4}")
     print(f"  Luecken ohne Lizenztext  {ohne_text:>4}")
     print(f"  Luecken ohne Vermerk     {ohne_vermerk:>4}")
-    print("  Ebene nativ: in diesem Schritt nicht erhoben (P3b)")
+
+    nativ = ergebnis["ebene_nativ"]
+    if not nativ["erhoben"]:
+        print("  Ebene nativ: nicht erhoben (kein --binaerverzeichnis)")
+        return 0
+    eintraege = nativ["eintraege"]
+    aus_rad = [e for e in eintraege if e["herkunft"] == "python_paket"]
+    aus_paket = [e for e in eintraege if e["herkunft"] == "systempaket"]
+    zugeordnet = [e for e in aus_paket if e["lieferndes_paket"] is not None]
+    mit_datei = [e for e in aus_paket if e["copyright_datei"] is not None]
+    unbelegt = [e for e in aus_paket if e["lizenz_text_ref"] is None]
+    print(f"  Ebene nativ            {len(eintraege):>4} Bibliotheken")
+    print(f"    davon aus Python-Paket {len(aus_rad):>4}")
+    print(f"    davon aus Systempaket  {len(aus_paket):>4}")
+    print(f"    Paket zugeordnet       {len(zugeordnet):>4}")
+    print(f"    copyright gelesen      {len(mit_datei):>4}")
+    print(f"    nicht_belegt           {len(unbelegt):>4}")
     return 0
 
 

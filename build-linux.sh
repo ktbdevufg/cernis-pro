@@ -21,7 +21,7 @@ echo " Ziel-Triple: $TRIPLE"
 echo "============================================"
 
 echo ""
-echo "[0/6] System-Abhaengigkeiten pruefen..."
+echo "[0/8] System-Abhaengigkeiten pruefen..."
 MISSING=()
 for cmd in nmap setcap; do
     if command -v "$cmd" &>/dev/null; then echo "      $cmd: OK"; else MISSING+=("$cmd"); fi
@@ -41,14 +41,14 @@ if ! python3 -c "import PyInstaller" &>/dev/null; then
 fi
 
 echo ""
-echo "[1/6] Frontend bauen..."
+echo "[1/8] Frontend bauen..."
 cd "$FRONTEND_DIR"
 npm install --silent
 npm run build
 echo "      OK"
 
 echo ""
-echo "[2/6] Backend-Binary (cernis-backend)..."
+echo "[2/8] Backend-Binary (cernis-backend)..."
 cd "$BACKEND_DIR"
 rm -rf dist/ build/
 pyinstaller cernis_linux.spec --noconfirm
@@ -56,7 +56,7 @@ pyinstaller cernis_linux.spec --noconfirm
 echo "      OK"
 
 echo ""
-echo "[3/6] Sniff-Helfer-Binary (cernis-sniffd)..."
+echo "[3/8] Sniff-Helfer-Binary (cernis-sniffd)..."
 cd "$BACKEND_DIR"
 SNIFFD_BIN="$BACKEND_DIR/dist/cernis-sniffd"
 pyinstaller cernis_sniffd_linux.spec --noconfirm
@@ -64,7 +64,7 @@ pyinstaller cernis_sniffd_linux.spec --noconfirm
 echo "      OK"
 
 echo ""
-echo "[3b] Sniff-Helfer verifizieren (keine Backend-only-Deps)..."
+echo "[4/8] Sniff-Helfer verifizieren (keine Backend-only-Deps)..."
 LEAK=0
 for forbidden in fastapi uvicorn starlette reportlab; do
     if strings "$SNIFFD_BIN" | grep -qi "$forbidden"; then
@@ -74,7 +74,25 @@ done
 [ "$LEAK" -eq 0 ] && echo "      OK - schlank"
 
 echo ""
-echo "[4/6] Binaries fuer Tauri bereitstellen (Triple $TRIPLE)..."
+echo "[5/8] Lizenzaufstellung erzeugen (inkl. nativer Bibliotheken)..."
+# Der Zeitpunkt ist bindend: die mitgelieferten nativen Bibliotheken stammen aus der
+# Abhaengigkeitsanalyse von PyInstaller und stehen erst JETZT fest - nach den
+# Schritten 2/3 und vor dem Tauri-Build. Sie koennen nicht mehr in die Binaries
+# hinein, deshalb geht die Aufstellung ueber bundle.resources ins Paket.
+LIZENZ_JSON="$TAURI_SRC/lizenzaufstellung.json"
+python3 "$SCRIPT_DIR/scripts/gen_license_manifest.py" "$LIZENZ_JSON" \
+    --wurzel "$SCRIPT_DIR" \
+    --binaerverzeichnis "$BACKEND_DIR/dist"
+# Kein stiller Fallback: eine fehlende oder leere Aufstellung bricht den Bau ab.
+[ -s "$LIZENZ_JSON" ] || { echo "FEHLER: $LIZENZ_JSON fehlt oder ist leer"; exit 1; }
+# Die Wurzel-LICENSE kommt ueber dieselbe Ressourcenliste ins Paket. Kopie, das
+# Original bleibt unberuehrt.
+cp "$SCRIPT_DIR/LICENSE" "$TAURI_SRC/LICENSE"
+[ -s "$TAURI_SRC/LICENSE" ] || { echo "FEHLER: $TAURI_SRC/LICENSE fehlt oder ist leer"; exit 1; }
+echo "      OK"
+
+echo ""
+echo "[6/8] Binaries fuer Tauri bereitstellen (Triple $TRIPLE)..."
 cp "$BACKEND_DIR/dist/cernis-backend" "$TAURI_SRC/cernis-backend-$TRIPLE"
 cp "$SNIFFD_BIN" "$TAURI_SRC/cernis-sniffd-$TRIPLE"
 chmod +x "$TAURI_SRC/cernis-backend-$TRIPLE" "$TAURI_SRC/cernis-sniffd-$TRIPLE"
@@ -86,13 +104,13 @@ chmod +x "$TAURI_RELEASE/cernis-backend" "$TAURI_RELEASE/cernis-sniffd"
 echo "      OK"
 
 echo ""
-echo "[5/6] Tauri-Build (deb + rpm)..."
+echo "[7/8] Tauri-Build (deb + rpm)..."
 cd "$SCRIPT_DIR"
 npm install --silent
 npx tauri build --target "$TRIPLE"
 
 echo ""
-echo "[6/6] Pakete einsammeln..."
+echo "[8/8] Pakete einsammeln..."
 VERSION=$(python3 -c "import json; print(json.load(open('$TAURI_SRC/tauri.conf.json'))['version'])")
 DEST="$HOME/Desktop"; mkdir -p "$DEST"
 BUNDLE_DIR="$TAURI_SRC/target/$TRIPLE/release/bundle"
