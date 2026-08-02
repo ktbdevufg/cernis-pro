@@ -313,6 +313,59 @@ foreach ($forbidden in "fastapi", "uvicorn", "starlette", "reportlab") {
 }
 if (-not $leak) { Write-Host "      OK - schlank" }
 
+# ── Schritt 3d: Lizenzaufstellung erzeugen ──────────────────
+# Spiegelbild von build-linux.sh Schritt [5/8]. Der Zeitpunkt ist bindend und
+# derselbe wie dort: NACH den PyInstaller-Laeufen (3/3b) und VOR dem Tauri-
+# Build (5). Die mitgelieferten nativen Bibliotheken stammen aus PyInstallers
+# Abhaengigkeitsanalyse und stehen erst jetzt fest; in die Binaries koennen sie
+# nicht mehr hinein, deshalb geht die Aufstellung ueber bundle.resources ins
+# Paket. src-tauri/tauri.conf.json fuehrt lizenzaufstellung.json und LICENSE
+# dort bereits -- keine Aenderung noetig.
+#
+# Der Schritt traegt 3d und nicht eine eigene Hauptnummer: das Skript nummeriert
+# nachtraeglich eingefuegte Teilschritte seit jeher mit Buchstaben (1b, 3b, 3c).
+# So bleibt die Gesamtzahl 6 richtig und keine der zehn bestehenden Zaehlerzeilen
+# muss angefasst werden -- eine Durchnummerierung auf /7 haette alle zehn
+# geaendert, ohne dass eine davon inhaltlich falsch gewesen waere.
+Write-Host ""
+Write-Host "[3d/6] Lizenzaufstellung erzeugen (inkl. nativer Bibliotheken)..."
+$LIZENZ_JSON = Join-Path $TAURI_SRC "lizenzaufstellung.json"
+# --zielplattform: die Plattform, FUER die gebaut wird. Der Sammler leitet
+# daraus das Rust-Ziel und die Endungen der nativen Bibliotheken ab, statt sie
+# aus der laufenden Maschine zu raten. Aus dem Triple abgeleitet wie ARCH oben,
+# damit ein ARM64-Bau nicht stillschweigend die x64-Aufstellung erzeugt.
+switch -Wildcard ($TRIPLE) {
+    "x86_64-*"  { $ZIELPLATTFORM = "windows-x86_64" }
+    "aarch64-*" { $ZIELPLATTFORM = "windows-aarch64" }
+    default {
+        Write-Host "FEHLER: Unbekanntes Triple '$TRIPLE' -- kann Zielplattform nicht ableiten." -ForegroundColor Red
+        exit 1
+    }
+}
+$ErrorActionPreference = "Continue"
+uv run python (Join-Path $SCRIPT_DIR "scripts\gen_license_manifest.py") $LIZENZ_JSON `
+    --wurzel $SCRIPT_DIR `
+    --binaerverzeichnis (Join-Path $BACKEND_DIR "dist") `
+    --zielplattform $ZIELPLATTFORM
+$ErrorActionPreference = "Stop"
+Assert-LastExit "gen_license_manifest.py"
+# Kein stiller Fallback: eine fehlende oder leere Aufstellung bricht den Bau ab
+# (build-linux.sh Zeile 87). 'Length -gt 0' ist das PowerShell-Gegenstueck zu
+# 'test -s'; Test-Path allein wuerde eine leere Datei durchgehen lassen.
+if (-not (Test-Path $LIZENZ_JSON) -or ((Get-Item $LIZENZ_JSON).Length -eq 0)) {
+    Write-Host "FEHLER: $LIZENZ_JSON fehlt oder ist leer" -ForegroundColor Red
+    exit 1
+}
+# Die Wurzel-LICENSE kommt ueber dieselbe Ressourcenliste ins Paket. Kopie, das
+# Original bleibt unberuehrt (build-linux.sh Zeile 89).
+$LIZENZ_DATEI = Join-Path $TAURI_SRC "LICENSE"
+Copy-Item (Join-Path $SCRIPT_DIR "LICENSE") $LIZENZ_DATEI -Force
+if (-not (Test-Path $LIZENZ_DATEI) -or ((Get-Item $LIZENZ_DATEI).Length -eq 0)) {
+    Write-Host "FEHLER: $LIZENZ_DATEI fehlt oder ist leer" -ForegroundColor Red
+    exit 1
+}
+Write-Host "      OK"
+
 # ── Schritt 4: Binaries fuer Tauri bereitstellen ────────────
 # Tauri externalBin erwartet <name>-<triple>.exe neben src-tauri/; zusaetzlich
 # legen wir sie ins Release-Verzeichnis des Triples (wie build-linux.sh).

@@ -5,17 +5,33 @@ Aufruf::
 
     python scripts/gen_license_manifest.py <ausgabepfad.json>
     python scripts/gen_license_manifest.py <ausgabepfad.json> --binaerverzeichnis <verz>
+    python scripts/gen_license_manifest.py <ausgabepfad.json> --zielplattform windows-x86_64
 
 Das Werkzeug ist eigenstaendig: es importiert nichts aus ``backend`` und kommt mit
 der Standardbibliothek aus. Es sammelt die Ebenen ``python``, ``npm``, ``rust``,
 ``daten`` und ``programme`` und schreibt EINE JSON-Datei.
 
 Die Ebene ``nativ`` wird nur erhoben, wenn ``--binaerverzeichnis`` auf ein
-Verzeichnis mit den fertigen PyInstaller-Binaries zeigt. Ohne den Schalter bleibt
-sie ``erhoben=false`` (siehe ``EBENE_NATIV_HINWEIS``) -- das ist das Verhalten aus
-Arbeitspaket P3a und bleibt unveraendert. Der Grund fuer den Schalter: welche
-nativen Bibliotheken mitgeliefert werden, steht erst NACH dem PyInstaller-Lauf
-fest, denn sie stammen aus dessen Abhaengigkeitsanalyse.
+Verzeichnis mit den fertigen PyInstaller-Binaries zeigt. Der Grund fuer den
+Schalter: welche nativen Bibliotheken mitgeliefert werden, steht erst NACH dem
+PyInstaller-Lauf fest, denn sie stammen aus dessen Abhaengigkeitsanalyse.
+
+Diese Ebene kennt DREI Zustaende, im Feld ``zustand`` unterschieden, damit eine
+Anzeige sie nicht aus leeren Listen erraten muss:
+
+``nicht_angefordert``
+    Es wurde kein ``--binaerverzeichnis`` uebergeben.
+``erhoben``
+    Bibliotheken gefunden und ein Paketverzeichnis vorhanden.
+``kein_paketverzeichnis``
+    Angefordert, aber auf der Zielplattform nicht ermittelbar: dort gibt es keine
+    Datei-zu-Paket-Zuordnung, aus der sich Systempaket und Lizenztext belegen
+    liessen. Das ist der Windows- und macOS-Fall, kein Fehler und kein Abbruch.
+
+Die ZIELplattform kommt aus ``--zielplattform`` und wird nie aus der laufenden
+Maschine geraten. Aus ihr folgen das Rust-Ziel (``cargo tree --target``) und die
+Endungen der nativen Bibliotheken. Ohne den Schalter gilt ``linux-x86_64``: ein
+Aufruf ohne ihn verhaelt sich damit genau wie bisher.
 
 Zwei Regeln bestimmen den Aufbau und sind an jeder Sammelstelle einzuhalten:
 
@@ -50,9 +66,11 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import struct
 import subprocess
 import sys
+import sysconfig
 import tomllib
 from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime
@@ -63,7 +81,21 @@ from typing import Any, BinaryIO, Final
 # Feste Werte des Datenformats
 # --------------------------------------------------------------------------------
 
-SCHEMA_VERSION: Final = "1"
+#: Die Fassung des Datenformats. Sie wird angehoben, sobald eine Anzeige die Datei
+#: nicht mehr wie zuvor lesen kann.
+#:
+#: "1" -> "2": Mit der Zielplattform-Erweiterung hat sich der VERTRAG geaendert,
+#: nicht nur der Inhalt. ``ebene_nativ`` fuehrt das neue Pflichtfeld ``zustand`` mit
+#: drei Werten, und ``erhoben=false`` ist damit nicht mehr eindeutig -- es steht nun
+#: fuer zwei verschiedene Sachverhalte (nicht angefordert / auf der Zielplattform
+#: nicht ermittelbar), die eine Anzeige unterscheiden muss. Dazu kommen
+#: ``zielplattform``, ``quelle_der_binaries`` und ``gelesene_binaries`` in allen drei
+#: Zustaenden. Vor allem aber hat ``plattform`` seine Bedeutung gewechselt: es nennt
+#: nicht mehr die feste Konstante ``linux-x86_64``, sondern die uebergebene
+#: ZIELplattform. Ein Leser, der den alten Wert als gegeben annahm, liest jetzt
+#: still etwas anderes. Das ist keine Ergaenzung, sondern eine Bedeutungsaenderung
+#: an einem bestehenden Feld -- deshalb die volle Nummer und keine Unterfassung.
+SCHEMA_VERSION: Final = "2"
 
 #: Die einzigen zulaessigen Werte der drei Quellenfelder.
 QUELLE_PAKETDATEI: Final = "paketdatei"
@@ -103,8 +135,67 @@ EBENE_NATIV_HINWEIS: Final = (
     "werden."
 )
 
-PLATTFORM: Final = "linux-x86_64"
-RUST_ZIEL: Final = "x86_64-unknown-linux-gnu"
+#: Die drei Zustaende der Ebene ``nativ``. Sie stehen im Feld ``zustand`` und sind
+#: dort unterscheidbar, ohne dass eine Anzeige aus leeren Listen raten muesste.
+NATIV_NICHT_ANGEFORDERT: Final = "nicht_angefordert"
+NATIV_ERHOBEN: Final = "erhoben"
+NATIV_OHNE_PAKETVERZEICHNIS: Final = "kein_paketverzeichnis"
+
+#: Der dritte Zustand: die Erhebung wurde angefordert, aber auf der Zielplattform
+#: gibt es keine Datei-zu-Paket-Zuordnung. Ohne sie fehlt die Quelle, aus der
+#: Systempaket, Bezeichner und Lizenztext hervorgingen. Der Wortlaut beschreibt
+#: ausschliesslich, was dieses Werkzeug auf dieser Plattform ermitteln kann; ueber
+#: die Rechte an den Bibliotheken sagt er nichts.
+EBENE_NATIV_OHNE_PAKETVERZEICHNIS: Final = (
+    "Angefordert, aber auf der Zielplattform {plattform} nicht ermittelbar: dort "
+    "steht keine Datei-zu-Paket-Zuordnung zur Verfuegung, aus der sich das "
+    "liefernde Systempaket und dessen Lizenztext belegen liessen. Die leere Liste "
+    "ist eine Aussage ueber die Ermittelbarkeit auf dieser Plattform, NICHT darueber, "
+    "welche nativen Bestandteile mitgeliefert werden und unter welchen Bedingungen "
+    "sie stehen."
+)
+
+#: Die Zielplattform, fuer die die Aufstellung erzeugt wird. Sie wird NICHT aus der
+#: laufenden Maschine geraten, sondern ueber ``--zielplattform`` uebergeben. Die
+#: Vorgabe ist ``linux-x86_64``: ein Aufruf ohne den Schalter verhaelt sich damit
+#: genau wie bisher, als beide Werte feste Konstanten waren.
+ZIELPLATTFORM_VORGABE: Final = "linux-x86_64"
+
+#: Je Zielplattform das Rust-Ziel (``cargo tree --target``), die Endungen nativer
+#: Bibliotheken (Ebene ``nativ``) und ob es auf dieser Plattform ueberhaupt eine
+#: Datei-zu-Paket-Zuordnung gibt, aus der Systempaket und Lizenztext hervorgehen.
+#:
+#: ``paketverzeichnis``: Der Name des Werkzeugs, das die Paketdatenbank des Systems
+#: befragt. ``None`` heisst: auf dieser Plattform gibt es keine solche Datenbank.
+#: Das ist kein Fehler, sondern eine Eigenschaft der Plattform -- siehe
+#: ``EBENE_NATIV_OHNE_PAKETVERZEICHNIS``.
+ZIELPLATTFORMEN: Final[dict[str, dict[str, Any]]] = {
+    "linux-x86_64": {
+        "rust_ziel": "x86_64-unknown-linux-gnu",
+        "bibliotheksendungen": (".so",),
+        "paketverzeichnis": "dpkg-query",
+    },
+    "windows-x86_64": {
+        "rust_ziel": "x86_64-pc-windows-msvc",
+        "bibliotheksendungen": (".dll", ".pyd"),
+        "paketverzeichnis": None,
+    },
+    "windows-aarch64": {
+        "rust_ziel": "aarch64-pc-windows-msvc",
+        "bibliotheksendungen": (".dll", ".pyd"),
+        "paketverzeichnis": None,
+    },
+    "macos-x86_64": {
+        "rust_ziel": "x86_64-apple-darwin",
+        "bibliotheksendungen": (".dylib",),
+        "paketverzeichnis": None,
+    },
+    "macos-aarch64": {
+        "rust_ziel": "aarch64-apple-darwin",
+        "bibliotheksendungen": (".dylib",),
+        "paketverzeichnis": None,
+    },
+}
 
 # --------------------------------------------------------------------------------
 # Erkennung von Lizenzdateien und Urhebervermerken
@@ -636,6 +727,81 @@ class Sammler:
 
 
 # --------------------------------------------------------------------------------
+# Werkzeuge und Verzeichnisse der laufenden Maschine
+# --------------------------------------------------------------------------------
+
+
+def werkzeugpfad(name: str) -> str:
+    """Sucht ein Werkzeug im PATH und liefert seinen vollstaendigen Pfad.
+
+    Der aufzurufende Dateiname ist plattformabhaengig: unter Windows heisst ``npm``
+    tatsaechlich ``npm.cmd``, und eine ``.cmd`` laesst sich ohne ihre Endung nicht
+    starten. ``shutil.which`` loest das ueber ``PATHEXT`` und liefert den Namen, der
+    sich wirklich ausfuehren laesst -- deshalb wird hier immer der GEFUNDENE Pfad
+    verwendet, nie der blosse Name.
+
+    Fehlt das Werkzeug, ist das ein harter Abbruch. Ohne ``npm`` bliebe die Ebene
+    ``npm`` leer, ohne dass die Datei das kenntlich machte -- genau der stille
+    Rueckfall, den dieses Werkzeug nicht kennen darf.
+    """
+    pfad = shutil.which(name)
+    if pfad is None:
+        raise SystemExit(
+            f"{name} wurde im PATH nicht gefunden. Ohne dieses Werkzeug laesst sich "
+            "die zugehoerige Ebene nicht erheben; eine leere Ebene waere ein stiller "
+            "Rueckfall und ist nicht zulaessig."
+        )
+    return pfad
+
+
+def finde_sitepackages(wurzel: Path) -> Path:
+    """Ermittelt das ``site-packages`` des Repo-venv, ohne ein Layout zu raten.
+
+    Das Layout ist plattformabhaengig: POSIX legt die Pakete unter
+    ``lib/python3.12/site-packages``, Windows unter ``Lib/site-packages``. Beides
+    fest zu verdrahten hiesse raten -- gefragt wird deshalb ``sysconfig``, das die
+    Regel des jeweiligen Laufzeitsystems kennt, und geprueft wird, was wirklich da
+    ist.
+
+    Findet sich kein Verzeichnis, ist das ein harter Abbruch: ein ``glob`` auf ein
+    nicht vorhandenes Verzeichnis liefert lautlos nichts, und die Ebene ``python``
+    bliebe leer, ohne dass die Datei den Ausfall kenntlich machte (Regel 2).
+    """
+    venv = wurzel / ".venv"
+    kandidaten: list[Path] = []
+
+    # Erster Rang: die Regel des laufenden Python fuer ein venv an diesem Ort.
+    for schema in ("venv", "nt_venv", "posix_venv"):
+        if schema not in sysconfig.get_scheme_names():
+            continue
+        try:
+            roh = sysconfig.get_path("purelib", schema, vars={"base": str(venv)})
+        except KeyError:
+            continue
+        pfad = Path(roh)
+        if pfad not in kandidaten:
+            kandidaten.append(pfad)
+
+    # Zweiter Rang: die beiden bekannten Layouts, direkt nachgesehen. Der
+    # Sternchen-Teil deckt eine andere Python-Fassung im venv ab.
+    for gemustert in sorted(venv.glob("lib/python*/site-packages")):
+        if gemustert not in kandidaten:
+            kandidaten.append(gemustert)
+    for fest in (venv / "Lib" / "site-packages", venv / "lib" / "site-packages"):
+        if fest not in kandidaten:
+            kandidaten.append(fest)
+
+    for pfad in kandidaten:
+        if pfad.is_dir():
+            return pfad
+    raise SystemExit(
+        f"Kein site-packages-Verzeichnis unter {venv} gefunden. Ohne die installierten "
+        "Paketmetadaten laesst sich die Ebene python nicht erheben; eine leere Ebene "
+        "waere ein stiller Rueckfall und ist nicht zulaessig."
+    )
+
+
+# --------------------------------------------------------------------------------
 # Ebene python
 # --------------------------------------------------------------------------------
 
@@ -752,7 +918,7 @@ def sammle_python(sammler: Sammler, wurzel: Path) -> None:
     """
     ausgabe = subprocess.run(
         [
-            "uv",
+            werkzeugpfad("uv"),
             "export",
             "--frozen",
             "--no-dev",
@@ -762,6 +928,12 @@ def sammle_python(sammler: Sammler, wurzel: Path) -> None:
         cwd=wurzel,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        # Reiner Maschinentext: Namen und Fassungen gelockter Pakete, aus denen
+        # nur ueber ein ASCII-Muster Name und Version gelesen werden. Ein
+        # Ersatzzeichen kann hier keine Lizenzangabe verfaelschen -- aus dieser
+        # Ausgabe stammt keine.
+        errors="replace",
         check=True,
     ).stdout
     gelockt: dict[str, str] = {}
@@ -770,7 +942,7 @@ def sammle_python(sammler: Sammler, wurzel: Path) -> None:
         if treffer:
             gelockt[_pep503(treffer.group(1))] = treffer.group(2)
 
-    sitepackages = wurzel / ".venv" / "lib" / "python3.12" / "site-packages"
+    sitepackages = finde_sitepackages(wurzel)
     gefunden: set[str] = set()
     for distinfo in sorted(sitepackages.glob("*.dist-info")):
         metadaten = distinfo / "METADATA"
@@ -850,13 +1022,28 @@ def _projektadresse_aus_urls(kopf: email.message.Message) -> str | None:
 
 
 def _npm_baum(verzeichnis: Path) -> dict[str, Any]:
-    ergebnis = subprocess.run(
-        ["npm", "ls", "--omit=dev", "--all", "--json"],
-        cwd=verzeichnis,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        ergebnis = subprocess.run(
+            [werkzeugpfad("npm"), "ls", "--omit=dev", "--all", "--json"],
+            cwd=verzeichnis,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            # KEIN errors="replace": aus diesem Baum stammen die Pfade der Pakete,
+            # unter denen anschliessend die Lizenzdateien gelesen werden. Ein
+            # Ersatzzeichen in einem Pfad liesse die Lizenzdatei stumm ins Leere
+            # laufen, und der Eintrag stuende ohne Text da -- eine verfaelschte
+            # Lizenzangabe. Deshalb strikt und im Zweifel Abbruch.
+            errors="strict",
+            check=False,
+        )
+    except UnicodeDecodeError as fehler:
+        raise SystemExit(
+            f"npm ls in {verzeichnis} lieferte keine gueltige UTF-8-Ausgabe "
+            f"({fehler}). Der Baum nennt die Pfade, unter denen die Lizenzdateien "
+            "gelesen werden -- ein Ersatzzeichen darin wuerde eine Lizenzangabe "
+            "verfaelschen."
+        ) from fehler
     # npm meldet bei fehlenden optionalen Peers einen Fehlercode, liefert den Baum
     # aber trotzdem. Nur ein unlesbarer Baum ist ein echter Fehler.
     return json.loads(ergebnis.stdout) if ergebnis.stdout.strip() else {}
@@ -974,13 +1161,14 @@ def _npm_adresse(angaben: dict[str, Any]) -> str | None:
 # --------------------------------------------------------------------------------
 
 
-def sammle_rust(sammler: Sammler, wurzel: Path) -> None:
-    """Die Crates des Linux-x64-Ziels, Lizenztext aus dem Registry-Cache."""
+def sammle_rust(sammler: Sammler, wurzel: Path, rust_ziel: str) -> None:
+    """Die Crates des angegebenen Rust-Ziels, Lizenztext aus dem Registry-Cache."""
     manifest = wurzel / "src-tauri" / "Cargo.toml"
-    metadaten = json.loads(
-        subprocess.run(
+    cargo = werkzeugpfad("cargo")
+    try:
+        rohmetadaten = subprocess.run(
             [
-                "cargo",
+                cargo,
                 "metadata",
                 "--format-version",
                 "1",
@@ -990,18 +1178,31 @@ def sammle_rust(sammler: Sammler, wurzel: Path) -> None:
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            # KEIN errors="replace": diese Ausgabe fuehrt die Lizenzangaben selbst
+            # -- ``license`` (der Bezeichner), ``authors`` (der Urhebervermerk) und
+            # ``manifest_path`` (das Verzeichnis, aus dem der Lizenztext gelesen
+            # wird). Urhebervermerke tragen regelmaessig Umlaute und Akzente; ein
+            # Ersatzzeichen darin waere ein verfaelschter Vermerk. Deshalb strikt.
+            errors="strict",
             check=True,
         ).stdout
-    )
+    except UnicodeDecodeError as fehler:
+        raise SystemExit(
+            f"cargo metadata lieferte keine gueltige UTF-8-Ausgabe ({fehler}). Die "
+            "Ausgabe fuehrt Bezeichner, Urhebervermerke und Pfade der Lizenzdateien "
+            "-- ein Ersatzzeichen darin wuerde eine Lizenzangabe verfaelschen."
+        ) from fehler
+    metadaten = json.loads(rohmetadaten)
     baum = subprocess.run(
         [
-            "cargo",
+            cargo,
             "tree",
             "--locked",
             "--manifest-path",
             str(manifest),
             "--target",
-            RUST_ZIEL,
+            rust_ziel,
             "--edges",
             "normal,build",
             "--prefix",
@@ -1010,6 +1211,15 @@ def sammle_rust(sammler: Sammler, wurzel: Path) -> None:
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        # Reiner Maschinentext: aus dieser Ausgabe wird ausschliesslich ueber ein
+        # ASCII-Muster (``name vfassung``) gelesen, welche Crates im Ziel liegen.
+        # Bezeichner, Text und Vermerk stammen samtlich aus cargo metadata, nicht
+        # von hier -- ein Ersatzzeichen kann keine Lizenzangabe verfaelschen. Es
+        # koennte allenfalls einen Crate-Namen unlesbar machen; der faellt dann in
+        # sortierter Zuordnung auf und wuerde nicht still falsch zugeordnet, weil
+        # der Name nur mit den Namen aus cargo metadata abgeglichen wird.
+        errors="replace",
         check=True,
     ).stdout
 
@@ -1178,8 +1388,35 @@ CARCHIVE_TYP_BINAER: Final = "b"
 #: ``_rust.abi3.so``) sind KEINE eigenstaendigen Bibliotheken -- sie sind
 #: Bestandteil ihres Python-Pakets und dort auf der Ebene ``python`` bereits
 #: gefuehrt. Sie hier erneut aufzunehmen hiesse, sie doppelt zu fuehren.
+#:
+#: Dieselben Module heissen je nach Plattform anders: unter Linux und macOS
+#: ``.cpython-312-...so`` bzw. ``...dylib``, unter Windows ``.cp312-win_amd64.pyd``
+#: und ``.pyd``. Der Windows-Teil ist mit dem Bibliotheksfilter aus A4 hinzugekommen
+#: -- ohne ihn geriete unter Windows jedes Erweiterungsmodul in die Ebene ``nativ``,
+#: obwohl es auf der Ebene ``python`` bereits steht.
+#:
+#: KEIN ``re.IGNORECASE``: das Flag wirkt auf den GESAMTEN Ausdruck, also auch auf
+#: den ``.so``-Teil. Ein Name auf ``.SO`` waere damit unter Linux ploetzlich
+#: ausgeschlossen, obwohl er es vorher nicht war -- eine Verhaltensaenderung auf
+#: der Zielplattform und ein Widerspruch zu ``ist_native_bibliothek``, die
+#: ausdruecklich zeichengetreu vergleicht. Der ``.so``-Teil bleibt deshalb
+#: zeichengetreu und das Linux-Ergebnis unveraendert.
+#:
+#: Gross- und Kleinschreibung wird ausschliesslich dort beruecksichtigt, wo sie
+#: hingehoert: in den Windows- und macOS-Formen. Windows-Dateisysteme
+#: unterscheiden sie nicht, ``FOO.PYD`` und ``foo.pyd`` bezeichnen dieselbe Datei;
+#: macOS-Dateisysteme sind in der Vorgabe ebenfalls nicht unterscheidend. Die
+#: Buchstabenklassen stehen daher nur in diesen beiden Teilen -- Zeichen fuer
+#: Zeichen ausgeschrieben, statt ueber ein Flag, das den ganzen Ausdruck ergriffe.
 PYTHON_ERWEITERUNG_MUSTER: Final = re.compile(
-    r"\.(?:cpython-\d+[^.]*|abi\d+|pypy\d+[^.]*)\.so$",
+    # Linux: zeichengetreu, unveraendert gegenueber dem Stand vor der
+    # Plattform-Erweiterung.
+    r"\.(?:cpython-\d+[^.]*|abi\d+|pypy\d+[^.]*)\.so$"
+    # macOS: dieselben Kennungen, Endung .dylib in beliebiger Schreibung.
+    r"|\.(?:[cC][pP][yY][tT][hH][oO][nN]-\d+[^.]*|[aA][bB][iI]\d+|[pP][yY][pP][yY]\d+[^.]*)"
+    r"\.[dD][yY][lL][iI][bB]$"
+    # Windows: .cp312-win_amd64.pyd, .pypy311-...pyd und das blosse .pyd.
+    r"|\.(?:[cC][pP]\d+-[^.]*|[pP][yY][pP][yY]\d+[^.]*)?\.?[pP][yY][dD]$",
 )
 
 #: Der Ordner, in den ``auditwheel`` die von einem Python-Rad mitgebrachten
@@ -1270,26 +1507,59 @@ def _finde_carchive_magie(strom: BinaryIO) -> int:
     return -1
 
 
-def ist_native_bibliothek(name: str) -> bool:
-    """Sagt, ob ein TOC-Name eine eigenstaendige native Bibliothek bezeichnet."""
+def ist_native_bibliothek(
+    name: str,
+    endungen: Sequence[str] = (".so",),
+) -> bool:
+    """Sagt, ob ein TOC-Name eine eigenstaendige native Bibliothek bezeichnet.
+
+    Welche Endung eine native Bibliothek traegt, haengt an der ZIELplattform, nicht
+    an der Maschine, auf der dieses Werkzeug laeuft: ``.so`` unter Linux, ``.dylib``
+    unter macOS, ``.dll`` und ``.pyd`` unter Windows. Die Endungen kommen deshalb
+    aus ``ZIELPLATTFORMEN`` und werden hier uebergeben. Die Vorgabe ``(".so",)``
+    haelt das bisherige Verhalten fest.
+
+    Die Form ``libfoo.so.6`` (SONAME mit Fassungsnummer) gibt es nur bei ``.so`` und
+    ``.dylib``; unter Windows steht die Fassung im Dateinamen selbst. Beide Formen
+    werden geprueft, die zweite laeuft unter Windows schlicht ins Leere.
+
+    Verglichen wird zeichengetreu, ohne Angleichung der Gross-/Kleinschreibung: auf
+    einem Dateisystem, das zwischen ``.so`` und ``.SO`` unterscheidet, waere eine
+    unscharfe Pruefung eine Verhaltensaenderung.
+    """
     if PYTHON_ERWEITERUNG_MUSTER.search(name) is not None:
         return False
     dateiname = name.rsplit("/", 1)[-1]
-    return dateiname.endswith(".so") or ".so." in dateiname
+    return any(dateiname.endswith(endung) or f"{endung}." in dateiname for endung in endungen)
 
 
-def _paket_zu_datei(dateiname: str) -> str | None:
+def _paket_zu_datei(dateiname: str, paketverzeichnis: str) -> str | None:
     """Fragt die Paketdatenbank des Systems, welches Paket eine Datei liefert.
 
     Verwendet ``dpkg-query -S``. Findet sich keine Zuordnung, ist das Ergebnis
     ``None`` -- es wird nichts geraten (Regel 2).
     """
-    ergebnis = subprocess.run(
-        ["dpkg-query", "-S", f"*/{dateiname}"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        ergebnis = subprocess.run(
+            [werkzeugpfad(paketverzeichnis), "-S", f"*/{dateiname}"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            # KEIN errors="replace": aus dieser Ausgabe kommt der Paketname, und aus
+            # ihm werden Bezeichner, Urhebervermerk und Lizenztext gelesen
+            # (/usr/share/doc/<paket>/copyright). Ein Ersatzzeichen im Namen fuehrte
+            # auf ein anderes oder auf gar kein Paket -- also auf einen fremden oder
+            # fehlenden Lizenztext. Deshalb strikt.
+            errors="strict",
+            check=False,
+        )
+    except UnicodeDecodeError as fehler:
+        raise SystemExit(
+            f"{paketverzeichnis} lieferte fuer {dateiname} keine gueltige "
+            f"UTF-8-Ausgabe ({fehler}). Aus dem Paketnamen werden Bezeichner, "
+            "Urhebervermerk und Lizenztext gelesen -- ein Ersatzzeichen darin wuerde "
+            "auf ein fremdes Paket und damit auf einen fremden Lizenztext fuehren."
+        ) from fehler
     if ergebnis.returncode != 0:
         return None
     pakete: list[str] = []
@@ -1357,7 +1627,13 @@ def _binaries_im_verzeichnis(verzeichnis: Path) -> list[Path]:
     return gefunden
 
 
-def sammle_nativ(sammler: Sammler, verzeichnis: Path) -> dict[str, Any]:
+def sammle_nativ(
+    sammler: Sammler,
+    verzeichnis: Path,
+    zielplattform: str,
+    endungen: Sequence[str],
+    paketverzeichnis: str | None,
+) -> dict[str, Any]:
     """Erhebt die Ebene ``nativ`` aus den fertigen PyInstaller-Binaries.
 
     Fuer jede Bibliothek werden Dateiname und Groesse aus dem Archiv genommen. Das
@@ -1366,14 +1642,29 @@ def sammle_nativ(sammler: Sammler, verzeichnis: Path) -> dict[str, Any]:
     Lizenztext gefuehrt wird. Bibliotheken aus dem Ordner eines Python-Rades
     (``pillow.libs/``) werden ihrem Python-Paket zugeordnet, statt sie doppelt zu
     fuehren.
+
+    Fehlt der Zielplattform ein Paketverzeichnis, wird die Ebene ausdruecklich als
+    "nicht ermittelbar" gefuehrt (dritter Zustand) statt als leere Erhebung. Das ist
+    kein Fehler: die Quelle, aus der Systempaket und Lizenztext hervorgingen, gibt
+    es dort schlicht nicht.
     """
+    if paketverzeichnis is None:
+        return {
+            "erhoben": False,
+            "zustand": NATIV_OHNE_PAKETVERZEICHNIS,
+            "zielplattform": zielplattform,
+            "hinweis": EBENE_NATIV_OHNE_PAKETVERZEICHNIS.format(plattform=zielplattform),
+            "quelle_der_binaries": str(verzeichnis),
+            "gelesene_binaries": [],
+            "eintraege": [],
+        }
     binaries = _binaries_im_verzeichnis(verzeichnis)
     # Dieselbe Bibliothek steckt in beiden Binaries. Sie wird EINMAL gefuehrt und
     # nennt, in welchen Binaries sie vorkommt.
     gefunden: dict[str, dict[str, Any]] = {}
     for binaer in binaries:
         for name, typ, groesse in lies_carchive_verzeichnis(binaer):
-            if typ != CARCHIVE_TYP_BINAER or not ist_native_bibliothek(name):
+            if typ != CARCHIVE_TYP_BINAER or not ist_native_bibliothek(name, endungen):
                 continue
             vorhanden = gefunden.get(name)
             if vorhanden is None:
@@ -1396,11 +1687,25 @@ def sammle_nativ(sammler: Sammler, verzeichnis: Path) -> dict[str, Any]:
             continue
         dateiname = str(angaben["dateiname"])
         if dateiname not in paketcache:
-            paketcache[dateiname] = _paket_zu_datei(dateiname)
+            paketcache[dateiname] = _paket_zu_datei(dateiname, paketverzeichnis)
         eintraege.append(_nativ_aus_systempaket(sammler, angaben, paketcache[dateiname]))
+
+    # Bibliotheken gefunden UND eine Paketdatenbank vorhanden, aber kein einziger
+    # Eintrag entstanden: das waere eine leere Erhebung trotz vorhandener Quelle --
+    # genau der stille Rueckfall, den diese Ebene nicht kennen darf. Ein Fehler,
+    # kein leiser Rueckfall auf eine leere Liste.
+    if gefunden and not eintraege:
+        raise SystemExit(
+            f"Ebene nativ: in {verzeichnis} wurden {len(gefunden)} native Bibliotheken "
+            f"gefunden und {paketverzeichnis} ist vorhanden, es entstand aber kein "
+            "einziger Eintrag. Eine leere Erhebung bei vorhandener Quelle ist ein "
+            "stiller Rueckfall und nicht zulaessig."
+        )
 
     return {
         "erhoben": True,
+        "zustand": NATIV_ERHOBEN,
+        "zielplattform": zielplattform,
         "hinweis": (
             "Erhoben aus dem Inhaltsverzeichnis der fertigen PyInstaller-Binaries in "
             f"{verzeichnis}, rein lesend. Paket, Bezeichner und Urhebervermerk stammen "
@@ -1637,28 +1942,43 @@ def pruefe_ebene_nativ(eintraege: Sequence[dict[str, Any]]) -> None:
                 raise SystemExit(f"{name}: Lizenztext ohne benannte Fundstelle")
 
 
-def erzeuge(wurzel: Path, binaerverzeichnis: Path | None = None) -> dict[str, Any]:
+def erzeuge(
+    wurzel: Path,
+    binaerverzeichnis: Path | None = None,
+    zielplattform: str = ZIELPLATTFORM_VORGABE,
+) -> dict[str, Any]:
+    merkmale = ZIELPLATTFORMEN[zielplattform]
     sammler = Sammler(wurzel)
     sammle_python(sammler, wurzel)
     sammle_npm(sammler, wurzel)
-    sammle_rust(sammler, wurzel)
+    sammle_rust(sammler, wurzel, str(merkmale["rust_ziel"]))
     sammle_daten(sammler, wurzel)
     sammle_programme(sammler)
 
     if binaerverzeichnis is None:
         ebene_nativ: dict[str, Any] = {
             "erhoben": False,
+            "zustand": NATIV_NICHT_ANGEFORDERT,
+            "zielplattform": zielplattform,
             "hinweis": EBENE_NATIV_HINWEIS,
+            "quelle_der_binaries": None,
+            "gelesene_binaries": [],
             "eintraege": [],
         }
     else:
-        ebene_nativ = sammle_nativ(sammler, binaerverzeichnis)
+        ebene_nativ = sammle_nativ(
+            sammler,
+            binaerverzeichnis,
+            zielplattform,
+            tuple(merkmale["bibliotheksendungen"]),
+            merkmale["paketverzeichnis"],
+        )
 
     ergebnis: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "erzeugt_am": datetime.now(UTC).isoformat(timespec="seconds"),
         "produktversion": lies_produktversion(wurzel),
-        "plattform": PLATTFORM,
+        "plattform": zielplattform,
         "werk": baue_werk(sammler, wurzel),
         "bestandteile": sammler.bestandteile,
         "lizenztexte": sammler.lizenztexte,
@@ -1693,13 +2013,23 @@ def main(argv: Sequence[str] | None = None) -> int:
             "erhoben=false."
         ),
     )
+    zerleger.add_argument(
+        "--zielplattform",
+        choices=sorted(ZIELPLATTFORMEN),
+        default=ZIELPLATTFORM_VORGABE,
+        help=(
+            "Plattform, FUER die gebaut wird -- nicht die, auf der dieses Werkzeug "
+            "laeuft. Daraus folgen das Rust-Ziel und die Endungen der nativen "
+            f"Bibliotheken. Vorgabe: {ZIELPLATTFORM_VORGABE}."
+        ),
+    )
     argumente = zerleger.parse_args(argv)
 
     wurzel = argumente.wurzel.resolve()
     binaerverzeichnis = (
         argumente.binaerverzeichnis.resolve() if argumente.binaerverzeichnis is not None else None
     )
-    ergebnis = erzeuge(wurzel, binaerverzeichnis)
+    ergebnis = erzeuge(wurzel, binaerverzeichnis, argumente.zielplattform)
     argumente.ausgabe.parent.mkdir(parents=True, exist_ok=True)
     argumente.ausgabe.write_text(
         json.dumps(ergebnis, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
@@ -1721,8 +2051,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"  Luecken ohne Vermerk     {ohne_vermerk:>4}")
 
     nativ = ergebnis["ebene_nativ"]
-    if not nativ["erhoben"]:
-        print("  Ebene nativ: nicht erhoben (kein --binaerverzeichnis)")
+    if nativ["zustand"] == NATIV_NICHT_ANGEFORDERT:
+        print("  Ebene nativ: nicht angefordert (kein --binaerverzeichnis)")
+        return 0
+    if nativ["zustand"] == NATIV_OHNE_PAKETVERZEICHNIS:
+        print(
+            f"  Ebene nativ: angefordert, auf {nativ['zielplattform']} nicht "
+            "ermittelbar (kein Paketverzeichnis)"
+        )
         return 0
     eintraege = nativ["eintraege"]
     aus_rad = [e for e in eintraege if e["herkunft"] == "python_paket"]
