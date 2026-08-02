@@ -99,6 +99,9 @@ files = [
     "backend/api",
     "backend/app.py",
     "backend/tests",
+    # Einzeln aufgefuehrt, nicht das ganze Verzeichnis scripts/: darin traegt
+    # fix-openssl-dll-arm64.py Bindestriche und ist damit kein gueltiger Modulname.
+    "scripts/gen_license_manifest.py",
 ]
 
 # Altbestand (modules/) ist bewusst nicht typisiert und nicht Teil der strikten
