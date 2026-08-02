@@ -24,6 +24,7 @@
     ],
     "category": "Utility",
     "copyright": "© 2026 Karl Bach",
+    "license": "GPL-2.0-only",
     "shortDescription": "LAN Scanner & Monitor",
     "longDescription": "CERNIS PRO - Professional LAN Scanner & Monitor",
     "macOS": {

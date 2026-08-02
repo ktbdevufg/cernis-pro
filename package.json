@@ -2,6 +2,7 @@
   "name": "cernis-pro-app",
   "version": "2.0.6",
   "private": true,
+  "license": "GPL-2.0-only",
   "scripts": {
     "build-tauri": "tauri build"
   },
