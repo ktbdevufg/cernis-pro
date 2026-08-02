@@ -116,6 +116,53 @@ for forbidden in fastapi uvicorn starlette reportlab; do
 done
 [ "$LEAK" -eq 0 ] && echo "      OK - schlank"
 
+# ── Schritt 3c: Lizenzaufstellung erzeugen ──────────────────
+# Spiegelbild von build-linux.sh Schritt [5/8] und build.ps1 Schritt [3d/6]. Der
+# Zeitpunkt ist bindend und derselbe wie dort: NACH den PyInstaller-Laeufen (2/3)
+# und VOR dem Tauri-Build (5). Die mitgelieferten nativen Bibliotheken stammen
+# aus PyInstallers Abhaengigkeitsanalyse und stehen erst jetzt fest; in die
+# Binaries koennen sie nicht mehr hinein, deshalb geht die Aufstellung ueber
+# bundle.resources ins Paket. src-tauri/tauri.conf.json fuehrt
+# lizenzaufstellung.json und LICENSE dort bereits -- keine Aenderung noetig.
+#
+# Der Schritt traegt 3c und nicht eine eigene Hauptnummer: dieses Skript
+# nummeriert nachtraeglich eingefuegte Teilschritte seit jeher mit Buchstaben
+# (0b, 3b). So bleibt die Gesamtzahl 7 richtig und keine der zehn bestehenden
+# Zaehlerzeilen muss angefasst werden -- eine Durchnummerierung auf /8 haette
+# alle zehn geaendert, ohne dass eine davon inhaltlich falsch gewesen waere.
+echo ""
+echo "[3c/7] Lizenzaufstellung erzeugen (inkl. nativer Bibliotheken)..."
+LIZENZ_JSON="$TAURI_SRC/lizenzaufstellung.json"
+# --zielplattform: die Plattform, FUER die gebaut wird. Der Sammler leitet daraus
+# das Rust-Ziel und die Endungen der nativen Bibliotheken (.dylib) ab, statt sie
+# aus der laufenden Maschine zu raten. Aus $TRIPLE abgeleitet, damit ein
+# x64-Bau nicht stillschweigend die ARM-Aufstellung erzeugt. Ein unbekanntes
+# Triple ist ein Abbruch, kein Rueckfall auf einen Vorgabewert.
+case "$TRIPLE" in
+    x86_64-*)  ZIELPLATTFORM="macos-x86_64" ;;
+    aarch64-*) ZIELPLATTFORM="macos-aarch64" ;;
+    *)
+        echo "FEHLER: Unbekanntes Triple '$TRIPLE' -- kann Zielplattform nicht ableiten."
+        exit 1
+        ;;
+esac
+python3 "$SCRIPT_DIR/scripts/gen_license_manifest.py" "$LIZENZ_JSON" \
+    --wurzel "$SCRIPT_DIR" \
+    --binaerverzeichnis "$BACKEND_DIR/dist" \
+    --zielplattform "$ZIELPLATTFORM"
+# Kein stiller Fallback: eine fehlende oder leere Aufstellung bricht den Bau ab
+# (build-linux.sh Zeile 87).
+[ -s "$LIZENZ_JSON" ] || { echo "FEHLER: $LIZENZ_JSON fehlt oder ist leer"; exit 1; }
+# Die Wurzel-LICENSE kommt ueber dieselbe Ressourcenliste ins Paket. Kopie, das
+# Original bleibt unberuehrt (build-linux.sh Zeile 89).
+cp "$SCRIPT_DIR/LICENSE" "$TAURI_SRC/LICENSE"
+[ -s "$TAURI_SRC/LICENSE" ] || { echo "FEHLER: $TAURI_SRC/LICENSE fehlt oder ist leer"; exit 1; }
+# Die Debian- und die Fedora-Beilage entstehen hier bewusst NICHT: macOS baut ein
+# .dmg; copyright, 3rd-party-licenses.txt.gz, LICENSE.dependencies und LICENSES
+# gehoeren dort nicht hin. Eine plattformuebliche macOS-Ablage ist ein eigenes
+# Arbeitspaket.
+echo "      OK"
+
 echo ""
 echo "[4/7] Binaries fuer Tauri bereitstellen (Triple $TRIPLE)..."
 cp "$BACKEND_DIR/dist/cernis-backend" "$TAURI_SRC/cernis-backend-$TRIPLE"
