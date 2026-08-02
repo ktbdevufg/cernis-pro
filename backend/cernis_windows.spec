@@ -41,6 +41,18 @@ datas += d; binaries += b; hiddenimports += h
 
 # ── PDF Export ────────────────────────────────────────────────
 d, b, h = collect_all('reportlab')
+# Schriftverzeichnis von reportlab verwerfen: das Produkt setzt ausschliesslich die
+# PDF-Standardschriften (Helvetica, Helvetica-Bold, Helvetica-Oblique), die keine
+# Schriftdatei brauchen. Es gibt im Backend keine Schriftregistrierung, die mit-
+# gelieferten Dateien sind reiner Beifang von collect_all. Beide Pfadtrenner pruefen,
+# weil dieselbe Konstruktion unter Windows gebaut wird. reportlab selbst bleibt voll-
+# staendig erhalten -- gefiltert wird nur das Zielverzeichnis 'reportlab/fonts'.
+d = [
+    (_quelle, _ziel)
+    for _quelle, _ziel in d
+    if _ziel.replace('\\', '/').rstrip('/') != 'reportlab/fonts'
+    and not _ziel.replace('\\', '/').startswith('reportlab/fonts/')
+]
 datas += d; binaries += b; hiddenimports += h
 
 # ── Scapy (needs Npcap at runtime on Windows) ────────────────
