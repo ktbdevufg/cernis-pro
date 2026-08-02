@@ -1577,11 +1577,29 @@ def _paket_zu_datei(dateiname: str, paketverzeichnis: str) -> str | None:
 
 
 def _dep5_feld(absatz: str, feld: str) -> str | None:
-    """Liest ein DEP-5-Feld WORTGETREU, samt eingerueckter Fortsetzungszeilen."""
+    """Liest ein DEP-5-Feld WORTGETREU, samt eingerueckter Fortsetzungszeilen.
+
+    Entfernt wird je Zeile GENAU EIN fuehrendes Leerzeichen -- das
+    Fortsetzungszeichen, das DEP-5 jeder Folgezeile voranstellt. Jede weitere
+    Einrueckung gehoert zum Wert und bleibt stehen: sie taefelt Aufzaehlungen,
+    Jahreszahlen-Spalten und eingerueckte Absaetze. Sie zu entfernen waere ein
+    Umbruch fremden Lizenztextes (Regel 3).
+
+    Ist das erste Zeichen kein Leerzeichen (ein Tabulator, wie ihn etwa
+    ``libssl3t64`` als Fortsetzungszeichen verwendet), bleibt die Zeile
+    unangetastet -- dasselbe tut die Referenzimplementierung ``python3-debian``.
+
+    Leere Zeilen entfallen; sie treten nur als Zeile direkt hinter ``Feld:``
+    auf, wenn der Wert erst in der Folgezeile beginnt, und tragen keinen Inhalt.
+    Die DEP-5-Leerzeile schreibt sich ``.`` und bleibt als solche erhalten.
+    """
     treffer = re.search(DEP5_FELD_MUSTER.format(feld=feld), absatz, re.MULTILINE)
     if treffer is None:
         return None
-    zeilen = [zeile.strip() for zeile in treffer.group("wert").splitlines()]
+    zeilen = [
+        zeile[1:] if zeile.startswith(" ") else zeile
+        for zeile in treffer.group("wert").splitlines()
+    ]
     wert = "\n".join(zeile for zeile in zeilen if zeile)
     return wert or None
 

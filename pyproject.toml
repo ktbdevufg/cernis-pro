@@ -102,6 +102,7 @@ files = [
     # Einzeln aufgefuehrt, nicht das ganze Verzeichnis scripts/: darin traegt
     # fix-openssl-dll-arm64.py Bindestriche und ist damit kein gueltiger Modulname.
     "scripts/gen_license_manifest.py",
+    "scripts/gen_debian_copyright.py",
 ]
 
 # Altbestand (modules/) ist bewusst nicht typisiert und nicht Teil der strikten

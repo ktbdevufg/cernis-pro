@@ -54,7 +54,11 @@
           "libpcap0.8t64 | libpcap0.8"
         ],
         "preInstallScript": "deb-preinst.sh",
-        "postInstallScript": "deb-postinst.sh"
+        "postInstallScript": "deb-postinst.sh",
+        "files": {
+          "/usr/share/doc/cernis-pro/copyright": "debian/copyright",
+          "/usr/share/doc/cernis-pro/3rd-party-licenses.txt.gz": "debian/3rd-party-licenses.txt.gz"
+        }
       },
       "rpm": {
         "depends": [

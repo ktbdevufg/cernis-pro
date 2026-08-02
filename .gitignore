@@ -56,6 +56,11 @@ src-tauri/cernis-sniffd-*
 src-tauri/lizenzaufstellung.json
 src-tauri/LICENSE
 
+# Ebenfalls aus Schritt 5: die beiden Debian-Beilagen, aus derselben Aufstellung
+# erzeugt. Sie gehen ueber bundle.linux.deb.files nach
+# /usr/share/doc/cernis-pro/ und sind reine Bauergebnisse.
+src-tauri/debian/
+
 # Claude Code
 .claude/
 

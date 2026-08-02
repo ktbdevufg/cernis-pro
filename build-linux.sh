@@ -89,6 +89,20 @@ python3 "$SCRIPT_DIR/scripts/gen_license_manifest.py" "$LIZENZ_JSON" \
 # Original bleibt unberuehrt.
 cp "$SCRIPT_DIR/LICENSE" "$TAURI_SRC/LICENSE"
 [ -s "$TAURI_SRC/LICENSE" ] || { echo "FEHLER: $TAURI_SRC/LICENSE fehlt oder ist leer"; exit 1; }
+
+# Aus derselben Aufstellung die beiden Debian-ueblichen Beilagen erzeugen. Sie
+# gehen NICHT ueber bundle.resources (das landet unter /usr/lib/CernisPro/),
+# sondern ueber bundle.linux.deb.files an die von Debian erwarteten Orte unter
+# /usr/share/doc/cernis-pro/. Quelle ist allein die eben geschriebene
+# Aufstellung; es wird nichts neu erhoben.
+DEB_COPYRIGHT="$TAURI_SRC/debian/copyright"
+DEB_LIZENZTEXTE="$TAURI_SRC/debian/3rd-party-licenses.txt.gz"
+python3 "$SCRIPT_DIR/scripts/gen_debian_copyright.py" "$LIZENZ_JSON" \
+    --copyright "$DEB_COPYRIGHT" \
+    --lizenztexte "$DEB_LIZENZTEXTE"
+# Kein stiller Fallback: fehlt eine der beiden Dateien, bricht der Bau ab.
+[ -s "$DEB_COPYRIGHT" ] || { echo "FEHLER: $DEB_COPYRIGHT fehlt oder ist leer"; exit 1; }
+[ -s "$DEB_LIZENZTEXTE" ] || { echo "FEHLER: $DEB_LIZENZTEXTE fehlt oder ist leer"; exit 1; }
 echo "      OK"
 
 echo ""
