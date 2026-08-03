@@ -70,6 +70,69 @@ jobs:
           BUILD_VERSION = "${BUILD_VERSION}"
           EOF
 
+      # Quelltextarchiv NUR im x64-Job -- der Quelltext ist architekturunabhaengig,
+      # ein zweites identisches Archiv aus dem ARM-Job waere Dopplung und wuerde
+      # beim Release-Upload mit demselben Dateinamen kollidieren.
+      #
+      # Platzierung: nach dem Versionsschritt und VOR dem Bau. Grund: das Archiv
+      # entsteht auf dem RUNNER (nicht im Container), wo git nutzbar ist -- der
+      # Schritt Zeile 60 nutzt dort bereits 'git rev-parse'. Ablage in dist-source/
+      # im Repo-Wurzelverzeichnis, bewusst AUSSERHALB von src-tauri/target, damit
+      # der spaetere chown-Schritt und Cargos target-Aufraeumen es nicht beruehren.
+      # Weil der Schritt als Runner-User laeuft, gehoeren die Dateien ihm bereits --
+      # kein chown noetig.
+      #
+      # 'git archive HEAD' liest den COMMIT, nicht das Arbeitsverzeichnis: der
+      # flache Klon (checkout ohne fetch-depth) genuegt, und spaetere Build-
+      # Artefakte im Baum koennen den Inhalt nicht verfaelschen.
+      #
+      # Die Produktfassung stammt aus derselben Quelle wie oben (pyproject.toml),
+      # NICHT aus dem Tag-Namen und nicht aus github.ref -- damit das Archiv auch
+      # bei workflow_dispatch korrekt benannt ist. Sie wird hier neu abgeleitet,
+      # weil PRODUCT_VERSION oben shell-lokal ist und nicht exportiert wird.
+      # Deshalb traegt dieser Schritt auch KEINE if-Bedingung: er laeuft bei jedem
+      # Trigger, damit ein Dispatch-Lauf die Archiverzeugung mitprueft.
+      - name: Quelltextarchiv und Pruefsumme erzeugen
+        run: |
+          set -euo pipefail
+          PRODUCT_VERSION=$(grep -m1 -E '^version = ' pyproject.toml | sed -E 's/^version = "(.*)"/\1/')
+          [ -n "$PRODUCT_VERSION" ] || { echo "FEHLER: Produktversion aus pyproject.toml nicht lesbar"; exit 1; }
+          SHORT_SHA=$(git rev-parse --short=7 HEAD)
+
+          OUT_DIR="dist-source"
+          mkdir -p "$OUT_DIR"
+          ARCHIV="${OUT_DIR}/CernisPro_${PRODUCT_VERSION}_source.tar.gz"
+
+          git archive --format=tar.gz \
+            --prefix="CernisPro-${PRODUCT_VERSION}/" \
+            -o "$ARCHIV" HEAD
+
+          # Abbruch mit benannter Meldung, wenn das Archiv fehlt oder leer ist.
+          # Kein stiller Durchlauf: ein gruener Lauf allein belegt nichts.
+          [ -f "$ARCHIV" ] || { echo "FEHLER: Quelltextarchiv ${ARCHIV} wurde nicht erzeugt"; exit 1; }
+          [ -s "$ARCHIV" ] || { echo "FEHLER: Quelltextarchiv ${ARCHIV} ist leer"; exit 1; }
+
+          # Pruefsummendatei im Format von sha256sum, mit blossem Dateinamen ohne
+          # Pfad -- so traegt 'sha256sum -c' im Verzeichnis der Datei.
+          ( cd "$OUT_DIR" && sha256sum "$(basename "$ARCHIV")" > "$(basename "$ARCHIV").sha256" )
+
+          # Nur echte Dateien zaehlen: tar listet auch Verzeichniseintraege (auf
+          # / endend). Ohne den Filter meldete die Konsole eine zu hohe Zahl, die
+          # nicht mehr mit 'git ls-files' vergleichbar waere.
+          # '|| true' faengt den Exit-Status 1 von grep bei null Treffern ab --
+          # unter 'set -e' braeche der Schritt sonst hier kommentarlos ab, statt
+          # gleich darunter mit der benannten Meldung.
+          ANZAHL=$(tar -tzf "$ARCHIV" | grep -vc '/$' || true)
+          GROESSE=$(wc -c < "$ARCHIV")
+          [ "$ANZAHL" -gt 0 ] || { echo "FEHLER: Quelltextarchiv ${ARCHIV} enthaelt keine Dateien"; exit 1; }
+
+          echo "--- Quelltextarchiv ---"
+          echo "Dateiname:     $(basename "$ARCHIV")"
+          echo "Groesse:       ${GROESSE} Bytes"
+          echo "Eintraege:     ${ANZAHL}"
+          echo "Pruefsumme:    $(cat "${ARCHIV}.sha256")"
+          echo "Commit (kurz): ${SHORT_SHA}"
+
       # Den unveraenderten build-linux.sh IM Container ausfuehren. Das Repo wird
       # nach /build gemountet, die erzeugten Bundles landen so wieder auf dem
       # Host (fuer den Artefakt-Upload sichtbar). '-v /build/.venv' legt ein
@@ -155,6 +218,36 @@ jobs:
             bash -c "chown -R $(id -u):$(id -g) \
               src-tauri/target backend/dist backend/build node_modules 2>/dev/null || true"
 
+      # Pruefsummen der Pakete. Platzierung zwingend NACH dem Bau und NACH dem
+      # chown-Schritt darueber: der Bau laeuft im Container als root, die Bundles
+      # gehoeren danach root. Erst der chown gibt sie an den Runner-User zurueck --
+      # vorher koennte dieser Schritt die .sha256-Dateien nicht neben die Pakete
+      # legen. Laeuft auf dem Runner, nicht im Container.
+      #
+      # KEINE if-Bedingung: die Pruefsummen entstehen bei jedem Trigger, damit ein
+      # Dispatch-Lauf den Schritt mitprueft und nicht erst der Tag-Lauf.
+      #
+      # Format: sha256sum schreibt "Pruefsumme, zwei Leerzeichen, Dateiname". Durch
+      # den Wechsel ins Verzeichnis der Datei steht dort der blosse Dateiname ohne
+      # Pfad -- so traegt 'sha256sum -c datei.sha256' im Zielverzeichnis.
+      - name: Pruefsummen der Pakete erzeugen
+        run: |
+          set -euo pipefail
+          BUNDLE="src-tauri/target/x86_64-unknown-linux-gnu/release/bundle"
+
+          ANZAHL=0
+          while IFS= read -r PAKET; do
+            ( cd "$(dirname "$PAKET")" && sha256sum "$(basename "$PAKET")" > "$(basename "$PAKET").sha256" )
+            echo "$(cat "${PAKET}.sha256")"
+            ANZAHL=$((ANZAHL + 1))
+          done < <(find "$BUNDLE" -type f \( -name '*.deb' -o -name '*.rpm' \) | sort)
+
+          # Abbruch mit benannter Meldung, wenn keine einzige Paketdatei gefunden
+          # wurde. Kein stiller Durchlauf, kein Rueckfall auf eine schwaechere
+          # Pruefung -- ein leerer Fund ist ein Fehler, kein Normalfall.
+          [ "$ANZAHL" -gt 0 ] || { echo "FEHLER: keine deb- oder rpm-Datei unter ${BUNDLE} gefunden"; exit 1; }
+          echo "Pruefsummen erzeugt: ${ANZAHL}"
+
       # Ab hier Fallunterscheidung nach Trigger. Beide Faelle laufen ERST nach
       # Verifikation und chown -- diese beiden Schritte oben sind unveraendert
       # und gelten fuer beide Pfade gleichermassen.
@@ -189,9 +282,22 @@ jobs:
           # Damit erfuellt: das Release bleibt nicht still leer, wenn z.B. die
           # rpm fehlt -- der Schritt schlaegt fehl.
           fail_on_unmatched_files: true
+          # Jedes Muster MUSS im Tag-Lauf treffen, sonst faellt das Release
+          # (fail_on_unmatched_files oben). Die .sha256-Muster treffen, weil der
+          # Schritt "Pruefsummen der Pakete erzeugen" neben JEDER deb/rpm eine
+          # gleichnamige .sha256 anlegt und sonst selbst abbricht -- gibt es ein
+          # Paket, gibt es auch seine Pruefsumme. Die beiden Quelltext-Muster
+          # treffen, weil der Schritt "Quelltextarchiv und Pruefsumme erzeugen"
+          # ohne if-Bedingung in jedem Lauf beide Dateien erzeugt und bei fehlendem
+          # oder leerem Archiv abbricht. Beide Namen sind exakt (kein Glob), die
+          # Fassung stammt aus pyproject.toml -- derselben Quelle wie im Schritt.
           files: |
             src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb
+            src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb.sha256
             src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/rpm/*.rpm
+            src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/rpm/*.rpm.sha256
+            dist-source/*_source.tar.gz
+            dist-source/*_source.tar.gz.sha256
 
       # Fall b) kein v-Tag (workflow_dispatch): BEWUSST
       # KEIN Artefakt-Upload. Ein ~850-MB-Bundle je Push fuellte das 2-GB-Gratis-
@@ -306,6 +412,28 @@ jobs:
             bash -c "chown -R $(id -u):$(id -g) \
               src-tauri/target backend/dist backend/build node_modules 2>/dev/null || true"
 
+      # Wie x64: NACH dem Bau und NACH dem chown, ohne if-Bedingung. Einziger
+      # Unterschied ist das aarch64-Triple im Bundle-Pfad. Ein Quelltextarchiv
+      # entsteht hier bewusst NICHT -- das erzeugt allein der x64-Job, weil der
+      # Quelltext architekturunabhaengig ist.
+      - name: Pruefsummen der Pakete erzeugen
+        run: |
+          set -euo pipefail
+          BUNDLE="src-tauri/target/aarch64-unknown-linux-gnu/release/bundle"
+
+          ANZAHL=0
+          while IFS= read -r PAKET; do
+            ( cd "$(dirname "$PAKET")" && sha256sum "$(basename "$PAKET")" > "$(basename "$PAKET").sha256" )
+            echo "$(cat "${PAKET}.sha256")"
+            ANZAHL=$((ANZAHL + 1))
+          done < <(find "$BUNDLE" -type f \( -name '*.deb' -o -name '*.rpm' \) | sort)
+
+          # Abbruch mit benannter Meldung, wenn keine einzige Paketdatei gefunden
+          # wurde. Kein stiller Durchlauf, kein Rueckfall auf eine schwaechere
+          # Pruefung.
+          [ "$ANZAHL" -gt 0 ] || { echo "FEHLER: keine deb- oder rpm-Datei unter ${BUNDLE} gefunden"; exit 1; }
+          echo "Pruefsummen erzeugt: ${ANZAHL}"
+
       # Fall a) v-Tag: Release-Assets, aber aarch64-Bundle-Pfade.
       - name: Release erstellen und Bundles als Assets anhaengen (nur v-Tags)
         if: startsWith(github.ref, 'refs/tags/v')
@@ -317,9 +445,15 @@ jobs:
           # Gemeinsame Festlegung ALLER Build-Workflows: prerelease true, Freigabe von Hand.
           prerelease: true
           fail_on_unmatched_files: true
+          # Wie x64: die .sha256-Muster treffen, weil der Pruefsummen-Schritt neben
+          # jeder deb/rpm eine gleichnamige .sha256 anlegt und sonst abbricht.
+          # KEIN Quelltextarchiv hier -- das liefert allein der x64-Job, ein
+          # zweites gleichnamiges Asset wuerde beim Upload kollidieren.
           files: |
             src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/deb/*.deb
+            src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/deb/*.deb.sha256
             src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/rpm/*.rpm
+            src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/rpm/*.rpm.sha256
 
       # Fall b) kein v-Tag: BEWUSST KEIN Artefakt-Upload -- gleiche Begruendung
       # wie im x64-Job. Ein ~850-MB-Bundle je Push fuellte das 2-GB-Gratis-

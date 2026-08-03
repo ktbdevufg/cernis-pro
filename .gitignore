@@ -84,3 +84,6 @@ backend/infrastructure/_build_version.py
 
 # Laufzeit-Versionsstempel (beim Start erzeugt)
 backend/data/.version
+
+# Quelltextarchiv aus build-linux.yml
+dist-source/
