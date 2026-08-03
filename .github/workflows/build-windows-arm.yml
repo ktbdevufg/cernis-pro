@@ -59,6 +59,45 @@ jobs:
           CERNIS_BUILD_TRIPLE: aarch64-pc-windows-msvc
         run: .\build.ps1
 
+      # Pruefsummen der Pakete. Wie im x64-Workflow: NACH dem Bau-Schritt und VOR
+      # dem Release-Schritt, ohne if-Bedingung, damit auch ein Dispatch-Lauf den
+      # Schritt mitprueft. Einziger Unterschied ist das Triple
+      # (aarch64-pc-windows-msvc). Nach build.ps1 veraendert kein Schritt die exe
+      # mehr, die Pruefsumme beschreibt also genau die ausgelieferte Datei.
+      #
+      # Format: Get-FileHash liefert GROSSbuchstaben, sha256sum schreibt klein --
+      # darum .ToLower(), dann zwei Leerzeichen und der blosse Dateiname.
+      #
+      # BOM und Zeilenende: [System.IO.File]::WriteAllText mit UTF8Encoding($false)
+      # unterdrueckt die BOM, das Zeilenende steht als explizites "`n" (LF) im
+      # String und wird unveraendert geschrieben. Out-File/Set-Content schieden
+      # aus: CRLF, unter Windows PowerShell zusaetzlich BOM -- damit scheiterte
+      # 'sha256sum -c' auf Linux/macOS.
+      - name: Pruefsummen der Pakete erzeugen
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $bundle = "src-tauri\target\aarch64-pc-windows-msvc\release\bundle\nsis"
+
+          $pakete = @(Get-ChildItem -Path $bundle -Filter *.exe -File -ErrorAction SilentlyContinue | Sort-Object Name)
+
+          foreach ($paket in $pakete) {
+            $hash = (Get-FileHash -Path $paket.FullName -Algorithm SHA256).Hash.ToLower()
+            $zeile = "$hash  $($paket.Name)`n"
+            $ziel = "$($paket.FullName).sha256"
+            [System.IO.File]::WriteAllText($ziel, $zeile, (New-Object System.Text.UTF8Encoding($false)))
+            Write-Host $zeile.TrimEnd("`n")
+          }
+
+          # Abbruch mit benannter Meldung, wenn keine einzige Paketdatei gefunden
+          # wurde. Kein stiller Durchlauf, kein Rueckfall auf eine schwaechere
+          # Pruefung -- ein leerer Fund ist ein Fehler, kein Normalfall.
+          if ($pakete.Count -eq 0) {
+            Write-Error "FEHLER: keine exe-Datei unter $bundle gefunden"
+            exit 1
+          }
+          Write-Host "Pruefsummen erzeugt: $($pakete.Count)"
+
       - name: Release erstellen und Installer als Asset anhaengen (nur v-Tags)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
@@ -69,5 +108,11 @@ jobs:
           # Gemeinsame Festlegung ALLER Build-Workflows: prerelease true, Freigabe von Hand.
           prerelease: true
           fail_on_unmatched_files: true
+          # Jedes Muster MUSS im Tag-Lauf treffen, sonst faellt das Release
+          # (fail_on_unmatched_files oben). Das .sha256-Muster trifft, weil der
+          # Schritt "Pruefsummen der Pakete erzeugen" ohne if-Bedingung neben
+          # JEDER NSIS-exe eine gleichnamige .sha256 anlegt und sonst selbst
+          # abbricht -- gibt es einen Installer, gibt es auch seine Pruefsumme.
           files: |
             src-tauri/target/aarch64-pc-windows-msvc/release/bundle/nsis/*.exe
+            src-tauri/target/aarch64-pc-windows-msvc/release/bundle/nsis/*.exe.sha256

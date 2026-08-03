@@ -163,6 +163,54 @@ jobs:
         shell: pwsh
         run: .\build.ps1
 
+      # Pruefsummen der Pakete. Platzierung NACH dem Bau-Schritt darueber und VOR
+      # dem Release-Schritt: vorher existiert der Installer nicht, nachher waere
+      # er schon hochgeladen. Einen chown-Schritt wie unter Linux gibt es hier
+      # nicht -- kein Container, der Runner-User besitzt die Dateien ohnehin
+      # (siehe Kopfkommentar). Nach build.ps1 veraendert kein Schritt die exe
+      # mehr, die Pruefsumme beschreibt also genau die ausgelieferte Datei.
+      #
+      # KEINE if-Bedingung: die Pruefsummen entstehen bei jedem Trigger, damit
+      # ein Dispatch-Lauf den Schritt mitprueft und nicht erst der Tag-Lauf.
+      #
+      # Format: Get-FileHash liefert die Pruefsumme in GROSSbuchstaben --
+      # sha256sum schreibt klein, darum .ToLower(). Danach zwei Leerzeichen und
+      # der blosse Dateiname ohne Pfad ($_.Name), so traegt 'sha256sum -c' im
+      # Zielverzeichnis.
+      #
+      # BOM und Zeilenende: bewusst [System.IO.File]::WriteAllText mit
+      # UTF8Encoding($false) -- das $false unterdrueckt die BOM. Das Zeilenende
+      # steht als explizites "`n" (LF) im String; WriteAllText schreibt den
+      # String unveraendert, wandelt also NICHT nach CRLF um. Weder Out-File
+      # noch Set-Content taugen hier: die haengen das plattformuebliche CRLF an,
+      # und Windows PowerShell schriebe zusaetzlich eine BOM. Mit BOM oder CRLF
+      # scheitert 'sha256sum -c' auf Linux/macOS. Dasselbe WriteAllText-Muster
+      # nutzt der Schritt "Build-Version erzeugen" oben aus demselben Grund.
+      - name: Pruefsummen der Pakete erzeugen
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $bundle = "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis"
+
+          $pakete = @(Get-ChildItem -Path $bundle -Filter *.exe -File -ErrorAction SilentlyContinue | Sort-Object Name)
+
+          foreach ($paket in $pakete) {
+            $hash = (Get-FileHash -Path $paket.FullName -Algorithm SHA256).Hash.ToLower()
+            $zeile = "$hash  $($paket.Name)`n"
+            $ziel = "$($paket.FullName).sha256"
+            [System.IO.File]::WriteAllText($ziel, $zeile, (New-Object System.Text.UTF8Encoding($false)))
+            Write-Host $zeile.TrimEnd("`n")
+          }
+
+          # Abbruch mit benannter Meldung, wenn keine einzige Paketdatei gefunden
+          # wurde. Kein stiller Durchlauf, kein Rueckfall auf eine schwaechere
+          # Pruefung -- ein leerer Fund ist ein Fehler, kein Normalfall.
+          if ($pakete.Count -eq 0) {
+            Write-Error "FEHLER: keine exe-Datei unter $bundle gefunden"
+            exit 1
+          }
+          Write-Host "Pruefsummen erzeugt: $($pakete.Count)"
+
       # Ab hier Fallunterscheidung nach Trigger -- identische Logik wie im
       # Linux-Workflow, nur mit den Windows-Bundle-Pfaden (NSIS statt deb/rpm).
       # Das Triple ist der build.ps1-Default x86_64-pc-windows-msvc.
@@ -182,8 +230,14 @@ jobs:
           # Gemeinsame Festlegung ALLER Build-Workflows: prerelease true, Freigabe von Hand.
           prerelease: true
           fail_on_unmatched_files: true
+          # Jedes Muster MUSS im Tag-Lauf treffen, sonst faellt das Release
+          # (fail_on_unmatched_files oben). Das .sha256-Muster trifft, weil der
+          # Schritt "Pruefsummen der Pakete erzeugen" ohne if-Bedingung neben
+          # JEDER NSIS-exe eine gleichnamige .sha256 anlegt und sonst selbst
+          # abbricht -- gibt es einen Installer, gibt es auch seine Pruefsumme.
           files: |
             src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe.sha256
 
       # Fall b) kein v-Tag (workflow_dispatch): BEWUSST
       # KEIN Artefakt-Upload. Ein ~850-MB-Bundle je Push fuellte das 2-GB-Gratis-

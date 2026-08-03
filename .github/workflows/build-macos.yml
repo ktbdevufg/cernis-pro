@@ -216,6 +216,47 @@ jobs:
           # nicht immer eindeutig, darum bewusst NICHT abbruchrelevant.
           spctl -a -vvv -t install "$DMG" 2>&1 || true
 
+      # Pruefsummen der Pakete. Platzierung zwingend NACH dem Notarisierungs-
+      # Schritt darueber -- das ist hier der entscheidende Punkt: 'xcrun stapler
+      # staple' HEFTET das Apple-Ticket AN die dmg-Datei (stapler(1): "attaches
+      # tickets ... to app bundles, disk images, and packages"). Der Dateiinhalt
+      # aendert sich dadurch. Eine vor der Notarisierung gebildete Pruefsumme
+      # beschriebe also eine Datei, die so NICHT ausgeliefert wird -- genau im
+      # Tag-Lauf, dem einzigen, der Assets veroeffentlicht. Darum danach.
+      #
+      # KEINE if-Bedingung, obwohl der Notarisierungs-Schritt darueber eine hat:
+      # die Pruefsummen entstehen bei jedem Trigger, damit ein Dispatch-Lauf den
+      # Schritt mitprueft und nicht erst der Tag-Lauf. Beide Faelle stimmen:
+      # im Dispatch-Lauf entfaellt die Notarisierung, die Pruefsumme beschreibt
+      # die ungestapelte dmg; im Tag-Lauf lief sie vorher, die Pruefsumme
+      # beschreibt die gestapelte dmg -- also jeweils die reale Datei.
+      #
+      # Werkzeugwahl shasum statt sha256sum: shasum liegt als /usr/bin/shasum in
+      # jeder macOS-Fassung, sha256sum erst seit macOS 26. macos-latest zeigt
+      # nicht zwingend auf macOS 26 -- shasum ist die belastbare Wahl. Das
+      # Ausgabeformat ist byteweise identisch (gemessen): Pruefsumme, zwei
+      # Leerzeichen, Dateiname, LF. Durch den Wechsel ins Verzeichnis der Datei
+      # steht dort der blosse Dateiname ohne Pfad -- so traegt 'sha256sum -c
+      # datei.sha256' (bzw. 'shasum -a 256 -c') im Zielverzeichnis.
+      - name: Pruefsummen der Pakete erzeugen
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUNDLE="src-tauri/target/aarch64-apple-darwin/release/bundle/dmg"
+
+          ANZAHL=0
+          while IFS= read -r PAKET; do
+            ( cd "$(dirname "$PAKET")" && shasum -a 256 "$(basename "$PAKET")" > "$(basename "$PAKET").sha256" )
+            echo "$(cat "${PAKET}.sha256")"
+            ANZAHL=$((ANZAHL + 1))
+          done < <(find "$BUNDLE" -type f -name '*.dmg' | sort)
+
+          # Abbruch mit benannter Meldung, wenn keine einzige Paketdatei gefunden
+          # wurde. Kein stiller Durchlauf, kein Rueckfall auf eine schwaechere
+          # Pruefung -- ein leerer Fund ist ein Fehler, kein Normalfall.
+          [ "$ANZAHL" -gt 0 ] || { echo "FEHLER: keine dmg-Datei unter ${BUNDLE} gefunden"; exit 1; }
+          echo "Pruefsummen erzeugt: ${ANZAHL}"
+
       # Ab hier Fallunterscheidung nach Trigger -- identische Logik wie im
       # Windows-/Linux-Workflow, nur mit dem macOS-Bundle-Pfad (dmg). Das Triple
       # ist der build.sh-Default aarch64-apple-darwin.
@@ -237,8 +278,14 @@ jobs:
           # Hand (z.B. nach Gatekeeper-Pruefung des dmg auf einem zweiten Mac).
           prerelease: true
           fail_on_unmatched_files: true
+          # Jedes Muster MUSS im Tag-Lauf treffen, sonst faellt das Release
+          # (fail_on_unmatched_files oben). Das .sha256-Muster trifft, weil der
+          # Schritt "Pruefsummen der Pakete erzeugen" ohne if-Bedingung neben
+          # JEDER dmg eine gleichnamige .sha256 anlegt und sonst selbst abbricht
+          # -- gibt es eine dmg, gibt es auch ihre Pruefsumme.
           files: |
             src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+            src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg.sha256
 
       # Fall b) kein v-Tag (workflow_dispatch / temporaerer rewrite/v2-Push):
       # BEWUSST KEIN Artefakt-Upload. Ein grosses dmg je Push fuellte das
