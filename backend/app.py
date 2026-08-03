@@ -184,6 +184,12 @@ from api.fritz import provide_get_fritz_detail
 from api.fritz import router as fritz_router
 from api.interfaces import provide_list_interfaces
 from api.interfaces import router as interfaces_router
+from api.license_manifest import (
+    provide_get_license_manifest,
+    provide_get_license_text,
+    provide_laufende_plattform,
+)
+from api.license_manifest import router as license_manifest_router
 from api.maintenance import (
     provide_delete_selected,
     provide_factory_reset,
@@ -480,6 +486,7 @@ from application.export import (
 )
 from application.fritz_detail import FritzDetailAuthError, GetFritzDetail
 from application.interfaces import ListInterfaces
+from application.license_manifest import GetLicenseManifest, GetLicenseText
 from application.maintenance import DeleteSelectedData, FactoryReset, ResetScanData
 from application.metrics import ExportMetrics
 from application.monitoring import (
@@ -766,6 +773,7 @@ else:
     from infrastructure.interfaces_linux import (
         InterfaceDiscoveryAdapter as InterfaceDiscoveryAdapter,
     )
+from infrastructure.license_manifest import LicenseManifestAdapter
 from infrastructure.logging import configure_logging
 from infrastructure.metrics import SqliteMetricsReader
 from infrastructure.monitoring import (
@@ -4073,6 +4081,38 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.dependency_overrides[provide_list_interfaces] = lambda: ListInterfaces(
         InterfaceDiscoveryAdapter()
     )
+
+    # ── Lizenzaufstellung verdrahten (S73-P5a, zwei lesende Endpunkte) ────────────
+    # GETEILTER Adapter-Singleton (lru_cache, Muster _traffic_adapter): der Adapter
+    # haelt die einmal gelesene Aufstellung in der INSTANZ (Aufgabe 1d). Zwei
+    # Instanzen laesen die 720 kB zweimal von der Platte -- beide Use-Cases muessen
+    # sich darum dieselbe teilen. Der Zustand sitzt bewusst hier im Composition Root
+    # und nicht als Modul-Global im Adapter: so gehoert er einer App-Instanz und ist
+    # im Test kontrollierbar.
+    @lru_cache(maxsize=1)
+    def _license_manifest_adapter() -> LicenseManifestAdapter:
+        return LicenseManifestAdapter()
+
+    # Die laufende Plattform wird HIER ermittelt (Aufgabe 3d) und dem Use-Case
+    # uebergeben -- weder Router noch Use-Case fragen selbst ``sys.platform``. Die
+    # Bezeichner sind die der Aufstellung (Feld ``plattform`` der Ebene ``programme``:
+    # Linux / macOS / Windows), nicht die Python-Kuerzel; die Uebersetzung gehoert an
+    # die Naht zwischen Laufzeit und Fachlichkeit, also hierher.
+    if sys.platform == "win32":
+        _laufende_plattform = "Windows"
+    elif sys.platform == "darwin":
+        _laufende_plattform = "macOS"
+    else:
+        _laufende_plattform = "Linux"
+
+    app.include_router(license_manifest_router)
+    app.dependency_overrides[provide_get_license_manifest] = lambda: GetLicenseManifest(
+        _license_manifest_adapter()
+    )
+    app.dependency_overrides[provide_get_license_text] = lambda: GetLicenseText(
+        _license_manifest_adapter()
+    )
+    app.dependency_overrides[provide_laufende_plattform] = lambda: _laufende_plattform
 
     # ── traffic-Domaene v2 verdrahten (T.3+T.4b-2, Per-App-Netzwerk-Monitoring) ──
     # GETEILTER Adapter-Singleton (lru_cache, Muster run_capture): Poller UND Leser
