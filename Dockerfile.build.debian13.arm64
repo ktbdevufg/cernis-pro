@@ -30,6 +30,10 @@ ENV LC_ALL=C.UTF-8
 #  - Paket-Bundling: file (magic-Erkennung der Bibliotheken),
 #    desktop-file-utils (Validierung der .desktop-Datei, die auch
 #    der rpm-Bundler erzeugt).
+#  - libarchive-tools liefert bsdtar: der Waechter [7b/8] in
+#    build-linux.sh entpackt damit das gebaute .rpm und prueft die
+#    Beilage am Dateibaum. bsdtar entpackt rpm unmittelbar und
+#    braucht dafuer kein zweites Werkzeug.
 # ------------------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
@@ -38,6 +42,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         nmap \
         libcap2-bin \
+        libarchive-tools \
         libpcap0.8-dev \
         libwebkit2gtk-4.1-dev \
         libgtk-3-dev \

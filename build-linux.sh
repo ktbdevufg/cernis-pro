@@ -207,10 +207,56 @@ RPM_ERWARTET=(
     "/usr/share/licenses/cernis-pro/LICENSES:bundle.linux.rpm.files in src-tauri/tauri.conf.json (Quelle: rpm/LICENSES aus Schritt [5/8])"
 )
 
-# Im Paket nachsehen, mit den Werkzeugen der Plattform: dpkg-deb bzw.
-# rpm2cpio+cpio listen den Inhalt samt Groesse, ohne zu installieren. Fehlt das
-# Werkzeug, ist das ein Abbruch und kein Ueberspringen -- eine uebersprungene
-# Pruefung ist genau der stille Rueckfall, den dieses Projekt ausschliesst.
+# Geprueft wird am ENTPACKTEN Paket, nicht an einer Textausgabe. Grund: die
+# Auswertung von "dpkg-deb -c" ueber Spaltennummern hat in Lauf 30843987085
+# falschen Alarm fuer alle vier deb-Beilagen erzeugt, obwohl in Sitzung 72 am
+# gebauten deb belegt war, dass sie ankommen. Ein Dateibaum laesst sich mit
+# test -s eindeutig befragen -- da gibt es keine Spalten, die verrutschen
+# koennen. Vorbild ist der Schritt "Verifikation -- gebundelte libpcap ohne
+# libibverbs" in .github/workflows/build-linux.yml, der genauso arbeitet:
+# mktemp -d, dpkg-deb -x, dann am Baum pruefen.
+#
+# Zur Pfadabbildung: im Paket stehen die Pfade relativ (deb listet sie mit
+# fuehrendem "./"). Beim Entpacken nach $WORK entsteht daraus ein Dateibaum, in
+# dem der erwartete absolute Pfad /usr/lib/... unter $WORK/usr/lib/... liegt.
+# Die Abbildung ist also schlicht "$WORK$pfad" -- der fuehrende Schraegstrich
+# des erwarteten Pfades wird zum Trenner zwischen Wurzel und Baum. Genau
+# deshalb muessen die Eintraege in den ERWARTET-Listen absolut bleiben.
+#
+# Fehlt das Entpackwerkzeug, ist das ein Abbruch und kein Ueberspringen -- eine
+# uebersprungene Pruefung ist genau der stille Rueckfall, den dieses Projekt
+# ausschliesst.
+
+# Die temporaeren Verzeichnisse werden in jedem Fall wieder entfernt, auch bei
+# Abbruch: sonst bleibt bei jedem Fehlschlag ein entpacktes Paket liegen.
+WAECHTER_TMP=""
+waechter_aufraeumen() { [ -n "$WAECHTER_TMP" ] && rm -rf $WAECHTER_TMP; }
+trap waechter_aufraeumen EXIT
+
+# Eine erwartete Datei am entpackten Baum pruefen: Vorhandensein UND nicht leer.
+# test -s ist beides in einem Zug -- eine leere Beilage ist dasselbe wie keine.
+# $1 Wurzel des entpackten Baums, $2 erwarteter absoluter Pfad, $3 Ursache,
+# $4 Erzeugnis (Pfad der Paketdatei), $5 Kennung fuer die Meldung (deb/rpm).
+beilage_pruefen() {
+    local wurzel="$1" pfad="$2" ursache="$3" erzeugnis="$4" art="$5"
+    local ziel="$wurzel$pfad"
+    if [ ! -e "$ziel" ]; then
+        echo "      FEHLER: '$pfad' fehlt im gebauten .$art."
+        echo "        erwarteter Ort:       $pfad (im Paket)"
+        echo "        geprueftes Erzeugnis: $erzeugnis"
+        echo "        naechstliegende Ursache: fehlender oder falscher Eintrag unter $ursache"
+        BEILAGE_FEHLT=1
+    elif [ ! -s "$ziel" ]; then
+        echo "      FEHLER: '$pfad' ist LEER im gebauten .$art (0 Bytes)."
+        echo "        erwarteter Ort:       $pfad (im Paket)"
+        echo "        geprueftes Erzeugnis: $erzeugnis"
+        echo "        naechstliegende Ursache: die Quelldatei war beim Tauri-Bau bereits leer - siehe Schritt [5/8]"
+        BEILAGE_FEHLT=1
+    else
+        echo "      OK - $art: $pfad ($(wc -c < "$ziel" | tr -d ' ') Bytes)"
+    fi
+}
+
 DEB_PAKET=$(find "$BUNDLE_DIR/deb" -name "*.deb" -print -quit 2>/dev/null || true)
 if [ -z "$DEB_PAKET" ]; then
     echo "      FEHLER: kein .deb unter $BUNDLE_DIR/deb gefunden."
@@ -218,28 +264,11 @@ if [ -z "$DEB_PAKET" ]; then
 fi
 command -v dpkg-deb >/dev/null 2>&1 || { echo "      FEHLER: dpkg-deb fehlt - die Beilage im .deb ist nicht pruefbar. Bitte: sudo apt install dpkg"; exit 1; }
 echo "      Geprueft wird: $DEB_PAKET"
-# Format je Zeile: "Rechte Eigner Groesse Datum Zeit ./pfad" -> Groesse in $3,
-# Pfad in $6 (fuehrendes "." abschneiden). Vorhandensein UND Groesse in einem
-# Zug: eine leere Beilage ist dasselbe wie keine.
-DEB_INHALT=$(dpkg-deb -c "$DEB_PAKET" | awk '{ pfad=$6; sub(/^\./, "", pfad); print pfad "\t" $3 }')
+DEB_WORK=$(mktemp -d)
+WAECHTER_TMP="$WAECHTER_TMP $DEB_WORK"
+dpkg-deb -x "$DEB_PAKET" "$DEB_WORK"
 for eintrag in "${DEB_ERWARTET[@]}"; do
-    pfad="${eintrag%%:*}"; ursache="${eintrag#*:}"
-    groesse=$(printf '%s\n' "$DEB_INHALT" | awk -F'\t' -v p="$pfad" '$1==p { print $2; exit }')
-    if [ -z "$groesse" ]; then
-        echo "      FEHLER: '$pfad' fehlt im gebauten .deb."
-        echo "        erwarteter Ort:       $pfad (im Paket)"
-        echo "        geprueftes Erzeugnis: $DEB_PAKET"
-        echo "        naechstliegende Ursache: fehlender oder falscher Eintrag unter $ursache"
-        BEILAGE_FEHLT=1
-    elif [ "$groesse" -eq 0 ]; then
-        echo "      FEHLER: '$pfad' ist LEER im gebauten .deb (0 Bytes)."
-        echo "        erwarteter Ort:       $pfad (im Paket)"
-        echo "        geprueftes Erzeugnis: $DEB_PAKET"
-        echo "        naechstliegende Ursache: die Quelldatei war beim Tauri-Bau bereits leer - siehe Schritt [5/8]"
-        BEILAGE_FEHLT=1
-    else
-        echo "      OK - deb: $pfad ($groesse Bytes)"
-    fi
+    beilage_pruefen "$DEB_WORK" "${eintrag%%:*}" "${eintrag#*:}" "$DEB_PAKET" "deb"
 done
 
 RPM_PAKET=$(find "$BUNDLE_DIR/rpm" -name "*.rpm" -print -quit 2>/dev/null || true)
@@ -247,29 +276,16 @@ if [ -z "$RPM_PAKET" ]; then
     echo "      FEHLER: kein .rpm unter $BUNDLE_DIR/rpm gefunden."
     exit 1
 fi
-command -v rpm >/dev/null 2>&1 || { echo "      FEHLER: rpm fehlt - die Beilage im .rpm ist nicht pruefbar. Bitte: sudo apt install rpm"; exit 1; }
+# bsdtar aus libarchive-tools entpackt rpm unmittelbar und braucht dafuer kein
+# zweites Werkzeug (rpm2cpio benoetigte zusaetzlich cpio, das in Debian nicht
+# zum Grundsystem gehoert).
+command -v bsdtar >/dev/null 2>&1 || { echo "      FEHLER: bsdtar fehlt - die Beilage im .rpm ist nicht pruefbar. Bitte: sudo apt install libarchive-tools"; exit 1; }
 echo "      Geprueft wird: $RPM_PAKET"
-# -qp fragt die PAKETDATEI ab (nicht die installierte Datenbank), --dump liefert
-# je Datei "pfad groesse mtime ..." -- Vorhandensein und Groesse in einem Zug.
-RPM_INHALT=$(rpm -qp --dump "$RPM_PAKET" 2>/dev/null | awk '{ print $1 "\t" $2 }')
+RPM_WORK=$(mktemp -d)
+WAECHTER_TMP="$WAECHTER_TMP $RPM_WORK"
+bsdtar -x -f "$RPM_PAKET" -C "$RPM_WORK"
 for eintrag in "${RPM_ERWARTET[@]}"; do
-    pfad="${eintrag%%:*}"; ursache="${eintrag#*:}"
-    groesse=$(printf '%s\n' "$RPM_INHALT" | awk -F'\t' -v p="$pfad" '$1==p { print $2; exit }')
-    if [ -z "$groesse" ]; then
-        echo "      FEHLER: '$pfad' fehlt im gebauten .rpm."
-        echo "        erwarteter Ort:       $pfad (im Paket)"
-        echo "        geprueftes Erzeugnis: $RPM_PAKET"
-        echo "        naechstliegende Ursache: fehlender oder falscher Eintrag unter $ursache"
-        BEILAGE_FEHLT=1
-    elif [ "$groesse" -eq 0 ]; then
-        echo "      FEHLER: '$pfad' ist LEER im gebauten .rpm (0 Bytes)."
-        echo "        erwarteter Ort:       $pfad (im Paket)"
-        echo "        geprueftes Erzeugnis: $RPM_PAKET"
-        echo "        naechstliegende Ursache: die Quelldatei war beim Tauri-Bau bereits leer - siehe Schritt [5/8]"
-        BEILAGE_FEHLT=1
-    else
-        echo "      OK - rpm: $pfad ($groesse Bytes)"
-    fi
+    beilage_pruefen "$RPM_WORK" "${eintrag%%:*}" "${eintrag#*:}" "$RPM_PAKET" "rpm"
 done
 
 # Fehlt etwas, bricht der Bau ab: kein Warnhinweis, kein Weiterlaufen, kein
