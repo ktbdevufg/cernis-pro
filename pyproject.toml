@@ -58,6 +58,26 @@ dev = [
 # nicht das Projekt selbst bauen.
 package = false
 
+# ── Eigene Werksangaben ───────────────────────────────────────────────────
+# EINZIGE Pflegestelle fuer den Bezugsort des EIGENEN Quelltextes. Der Sammler
+# scripts/gen_license_manifest.py liest den Wert von hier und schreibt ihn in den
+# werk-Eintrag der Lizenzaufstellung; er wird nirgends ein zweites Mal gefuehrt.
+#
+# WARUM HIER und nicht in [project].urls: dieser Wert ist KEINE URL. Das
+# Repository ist privat, cernispro.de existiert nicht. [project].urls ist laut
+# PEP 621 eine URL-Tabelle — ein Satz darin waere eine Falschbelegung, und eine
+# erfundene Adresse ist ausdruecklich unerwuenscht. Ein neuer Schluessel direkt
+# in [project] ist nach PEP 621 ebenfalls unzulaessig (geschlossene Feldliste);
+# [tool.<name>] ist der dafuer vorgesehene Ort.
+#
+# NICHT zu verwechseln mit dem Feld projektadresse der Bestandteile: das ist die
+# Projektseite eines FREMDEN Bestandteils, dies hier der Bezug des eigenen Codes.
+#
+# Sobald der Quelltext unter einer erreichbaren Adresse liegt, wird GENAU DIESE
+# Zeile geaendert — keine weitere Stelle.
+[tool.cernis_pro]
+quelltext_bezug = "Der vollstaendige Quelltext dieses Werks liegt dem jeweiligen Release als Archiv bei."
+
 # ── Ruff (Lint + Format) ──────────────────────────────────────────────────
 # Greift waehrend der Migration nur auf den NEUEN Code unter backend/. Der
 # Altbestand (modules/, main.py, ...) ist ausgeschlossen und wird Stueck fuer

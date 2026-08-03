@@ -110,6 +110,10 @@ QUELLE_WERKZEUG_LISTE: Final = "werkzeug_liste"
 #: ``copyright``-Datei im maschinenlesbaren Format. Der Lizenz-VOLLTEXT traegt
 #: dagegen ``paketdatei``: er ist der Wortlaut jener Datei selbst.
 QUELLE_SYSTEMPAKET: Final = "systempaket"
+#: Die Angabe stammt aus der Projektkonfiguration des EIGENEN Werks, also aus
+#: ``pyproject.toml``. Betrifft ausschliesslich den werk-Eintrag; Bestandteile
+#: tragen diese Quelle nie.
+QUELLE_PROJEKTKONFIGURATION: Final = "projektkonfiguration"
 QUELLE_NICHT_BELEGT: Final = "nicht_belegt"
 
 ZULAESSIGE_QUELLEN: Final = frozenset(
@@ -121,6 +125,7 @@ ZULAESSIGE_QUELLEN: Final = frozenset(
         QUELLE_REGISTERLISTE,
         QUELLE_WERKZEUG_LISTE,
         QUELLE_SYSTEMPAKET,
+        QUELLE_PROJEKTKONFIGURATION,
         QUELLE_NICHT_BELEGT,
     }
 )
@@ -2005,13 +2010,34 @@ def baue_werk(sammler: Sammler, wurzel: Path) -> dict[str, Any]:
         urheber: str | None = ", ".join(autoren)
     else:
         urheber = _werk_urheber_aus_tauri(wurzel)
+
+    bezug, bezug_quelle = _werk_quelltext_bezug(daten)
     return {
         "name": projekt.get("name"),
         "urheber": urheber,
         "lizenz_id": bezeichner,
         "lizenz_text": ref,
         "lizenz_text_quelle": quelle,
+        "quelltext_bezug": bezug,
+        "quelltext_bezug_quelle": bezug_quelle,
     }
+
+
+def _werk_quelltext_bezug(daten: dict[str, Any]) -> tuple[str | None, str]:
+    """Der Bezugsort des EIGENEN Quelltextes aus ``[tool.cernis_pro]``.
+
+    EINZIGE Quelle der Angabe (siehe Kommentar in ``pyproject.toml``). Nicht zu
+    verwechseln mit dem Feld ``projektadresse`` der Bestandteile: das nennt die
+    Projektseite eines FREMDEN Bestandteils, dies hier den Bezug des eigenen Codes.
+
+    Fehlt die Angabe oder ist sie leer, ist der Wert ``None`` und die Quelle
+    ``nicht_belegt`` -- niemals ein geratener Link, niemals eine Adresse aus dem
+    git-remote und kein Ersatztext (Finding S3: kein stiller Rueckfall).
+    """
+    wert = daten.get("tool", {}).get("cernis_pro", {}).get("quelltext_bezug")
+    if not isinstance(wert, str) or not wert.strip():
+        return None, QUELLE_NICHT_BELEGT
+    return wert.strip(), QUELLE_PROJEKTKONFIGURATION
 
 
 def _werk_urheber_aus_tauri(wurzel: Path) -> str | None:

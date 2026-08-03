@@ -358,3 +358,60 @@ def test_die_gehaltene_aufstellung_wird_nicht_mutiert() -> None:
 
     assert "lizenz_id_normalisiert" not in aufstellung["bestandteile"][0]
     assert aufstellung["bestandteile"][0]["lizenz_id"] == "MIT/Apache-2.0"
+
+
+# ── S73-P5b: Der Bezugsort des Quelltextes wird durchgereicht ────────────────
+# Der werk-Eintrag geht als GANZES durch, nicht Feld fuer Feld aufgezaehlt. Diese
+# Tests sichern genau das ab: ein neues Feld der Quelle darf nicht still
+# verschwinden, weder wenn es belegt ist noch wenn es fehlt.
+
+
+def test_quelltext_bezug_erscheint_in_der_antwort() -> None:
+    """Traegt der werk-Eintrag das Feld, steht es unveraendert in der Antwort."""
+    aufstellung = _aufstellung([])
+    aufstellung["werk"]["quelltext_bezug"] = (
+        "Der vollstaendige Quelltext dieses Werks liegt dem jeweiligen Release als Archiv bei."
+    )
+    aufstellung["werk"]["quelltext_bezug_quelle"] = "projektkonfiguration"
+    uc = GetLicenseManifest(FakeManifestPort(aufstellung))
+
+    erg = uc(plattform="macOS")
+
+    assert erg["werk"]["quelltext_bezug"] == (
+        "Der vollstaendige Quelltext dieses Werks liegt dem jeweiligen Release als Archiv bei."
+    )
+    assert erg["werk"]["quelltext_bezug_quelle"] == "projektkonfiguration"
+
+
+def test_fehlender_quelltext_bezug_ist_nicht_belegt_und_kein_leerer_text() -> None:
+    """Fehlt die Angabe, ist der Wert ``None`` und die Quelle ``nicht_belegt``.
+
+    Ausdruecklich KEIN leerer Text: ein "" laese sich in der Anzeige nicht von
+    einer vorhandenen, aber inhaltsleeren Angabe unterscheiden (Finding S3).
+    """
+    aufstellung = _aufstellung([])
+    aufstellung["werk"]["quelltext_bezug"] = None
+    aufstellung["werk"]["quelltext_bezug_quelle"] = "nicht_belegt"
+    uc = GetLicenseManifest(FakeManifestPort(aufstellung))
+
+    erg = uc(plattform="macOS")
+
+    assert erg["werk"]["quelltext_bezug"] is None
+    assert erg["werk"]["quelltext_bezug"] != ""
+    assert erg["werk"]["quelltext_bezug_quelle"] == "nicht_belegt"
+
+
+def test_werk_eintrag_geht_als_ganzes_durch() -> None:
+    """Der Ring zaehlt die Felder des Werks NICHT einzeln auf.
+
+    Der eigentliche Schutz: ein Feld, das dieser Test gar nicht kennt, muss
+    trotzdem ankommen. Sonst verschwindet jede kuenftige Ergaenzung der Quelle
+    still zwischen Sammler und Anzeige.
+    """
+    aufstellung = _aufstellung([])
+    aufstellung["werk"]["ein_kuenftiges_feld"] = "beliebiger Wert"
+    uc = GetLicenseManifest(FakeManifestPort(aufstellung))
+
+    erg = uc(plattform="macOS")
+
+    assert erg["werk"] == aufstellung["werk"]
