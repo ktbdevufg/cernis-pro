@@ -1348,6 +1348,7 @@ def sammle_rust(sammler: Sammler, wurzel: Path, rust_ziel: str) -> None:
     ).stdout
 
     eigenes = {(p["name"], p["version"]) for p in metadaten["packages"] if p.get("source") is None}
+    nach_kennung = {(p["name"], p["version"]): p for p in metadaten["packages"]}
     im_ziel: set[tuple[str, str]] = set()
     for zeile in baum.splitlines():
         treffer = re.match(r"^([A-Za-z0-9_.+-]+) v([^\s]+)", zeile.strip())
@@ -1355,11 +1356,48 @@ def sammle_rust(sammler: Sammler, wurzel: Path, rust_ziel: str) -> None:
             im_ziel.add((treffer.group(1), treffer.group(2)))
     im_ziel -= eigenes
 
-    nach_kennung = {(p["name"], p["version"]): p for p in metadaten["packages"]}
+    # Waechter der Ebene rust, gebaut wie die drei bestehenden Ebenen-Waechter: das
+    # Lock erklaert den Bestand, das Werkzeug loest ihn auf, und der Vergleich
+    # beider Groessen macht eine leere Ebene von einer vollstaendigen
+    # unterscheidbar. Ohne ihn liefe der Sammler mit null rust-Eintraegen still
+    # durch, und die Aufstellung behauptete eine Vollstaendigkeit, die sie nicht hat.
+    #
+    # Die Meldung TRENNT die beiden Ursachen, weil sie zu verschiedenen Abhilfen
+    # fuehren: gab 'cargo metadata' schon keine Fremdpakete her, ist die Erhebung
+    # gar nicht erst gelaufen (Lock leer, Manifest ohne Abhaengigkeiten); nannte
+    # sie welche und liefert erst 'cargo tree --target' nichts, dann lief das
+    # Werkzeug, fand aber fuer DIESES Ziel nichts -- ein falsches oder auf dieser
+    # Plattform leeres Rust-Ziel.
+    fremde = {kennung for kennung in nach_kennung if kennung not in eigenes}
+    if not fremde:
+        raise SystemExit(
+            f"Ebene rust: 'cargo metadata --locked' zu {manifest} nennt kein "
+            "einziges FREMDES Paket -- die Erhebung ist nicht gelaufen, nicht "
+            "bloss ergebnislos geblieben. Ohne diese Erklaerung gibt es keinen "
+            "Massstab dafuer, was mitgeliefert wird; eine leere Ebene rust liesse "
+            "sich dann nicht von einer vollstaendigen unterscheiden. "
+            "Naechstliegende Ursache: Cargo.lock ist beschaedigt oder das Manifest "
+            "fuehrt keine Abhaengigkeiten mehr -- dann gehoert die Ebene rust aus "
+            "erzeuge entfernt."
+        )
+    if not im_ziel:
+        raise SystemExit(
+            f"Ebene rust: 'cargo metadata' nennt {len(fremde)} fremde(s) Paket(e), "
+            f"'cargo tree --target {rust_ziel}' loest davon aber keines zu einer "
+            "Fassung auf. Das Werkzeug lief und fand fuer DIESES Ziel nichts -- "
+            "anders als der Fall, dass gar nichts erhoben wurde. Naechstliegende "
+            f"Ursache: das Rust-Ziel {rust_ziel} ist falsch geschrieben oder auf "
+            "dieser Plattform nicht bestueckt. Die Crates werden dennoch "
+            "mitgeliefert -- die Ebene rust bliebe leer, und die Aufstellung "
+            "behauptete eine Vollstaendigkeit, die sie nicht hat."
+        )
+
+    erhoben = 0
     for kennung in sorted(im_ziel):
         paket = nach_kennung.get(kennung)
         if paket is None:
             continue
+        erhoben += 1
         name, fassung = kennung
         ausdruck = paket.get("license")
         if ausdruck:
@@ -1406,6 +1444,21 @@ def sammle_rust(sammler: Sammler, wurzel: Path, rust_ziel: str) -> None:
             projektadresse=paket.get("repository") or paket.get("homepage"),
             mitgeliefert=True,
             lizenz_text_quelle=textquelle,
+        )
+
+    # Dritter Fall, von den beiden oberen verschieden: das Ziel nennt Crates, aber
+    # keine davon liess sich in den Metadaten wiederfinden -- dann entstand trotz
+    # gelaufener Erhebung kein einziger Eintrag. Dieselbe Bauart wie der
+    # Schluss-Waechter der Ebene nativ ("gefunden und doch keine Eintraege").
+    if not erhoben:
+        raise SystemExit(
+            f"Ebene rust: 'cargo tree --target {rust_ziel}' nennt {len(im_ziel)} "
+            "Crate(s), zu keiner einzigen davon fuehrt 'cargo metadata' aber einen "
+            "Datensatz -- es entstand kein Eintrag. Beide Werkzeuge liefen, ihre "
+            "Ergebnisse passen jedoch nicht zusammen. Naechstliegende Ursache: "
+            "Baum und Metadaten stammen aus verschiedenen Staenden des Manifests "
+            f"{manifest}. Eine leere Ebene rust bei gelaufener Erhebung ist ein "
+            "stiller Rueckfall und nicht zulaessig."
         )
 
 
@@ -1976,6 +2029,124 @@ def _nativ_aus_systempaket(
 # --------------------------------------------------------------------------------
 
 
+#: Die Orte, die die Lizenzangabe des EIGENEN Werks fuehren (Regel L). Je Ort der
+#: Dateipfad relativ zur Wurzel und die ADRESSE des Feldes innerhalb der Datei --
+#: eine Folge von Schluesseln, die von der Wurzel des Dokuments abwaerts gelesen
+#: wird. Der leere Schluessel ``""`` ist echt: so heisst in den beiden Lock-Dateien
+#: der Eintrag des eigenen Wurzelpakets.
+#:
+#: Die Liste ist gemessen, nicht geraten: sie fuehrt genau die sieben Stellen, an
+#: denen heute ``GPL-2.0-only`` steht. Die beiden Lock-Dateien gehoeren dazu,
+#: obwohl npm sie erzeugt: sie fuehren die Angabe eigenstaendig, und ein Lock, das
+#: nach einer Aenderung der package.json nicht neu erzeugt wurde, traegt weiter den
+#: alten Wert -- genau die stille Abweichung, gegen die dieser Waechter steht.
+#:
+#: NACHFUEHREN: kommt ein Manifest hinzu, das die Lizenz des Werks fuehrt, oder
+#: faellt eines weg, ist diese Liste von Hand nachzuziehen.
+WERK_LIZENZ_ORTE: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
+    ("pyproject.toml", ("project", "license")),
+    ("package.json", ("license",)),
+    ("frontend/package.json", ("license",)),
+    ("package-lock.json", ("packages", "", "license")),
+    ("frontend/package-lock.json", ("packages", "", "license")),
+    ("src-tauri/Cargo.toml", ("package", "license")),
+    ("src-tauri/tauri.conf.json", ("bundle", "license")),
+)
+
+
+def _werk_lizenz_an_ort(wurzel: Path, datei: str, adresse: Sequence[str]) -> str:
+    """Liest die Lizenzangabe an EINEM Ort ueber ihre Adresse -- oder faellt.
+
+    Der Waechter prueft ueber die ADRESSIERUNG, wie die bestehenden Ebenen-Waechter
+    es tun: gesucht wird nicht irgendein Vorkommen der Zeichenkette in der Datei,
+    sondern genau EIN Feld an genau EINER Stelle. Findet sich dort kein Wert oder
+    ein Wert der falschen Art, faellt das Werkzeug mit eigener Meldung, statt den
+    Ort zu ueberspringen. Ein uebergangener Ort waere eine ungeprueft
+    durchgelassene Abweichung -- der stille Rueckfall, gegen den Regel L steht
+    (Finding S3).
+
+    Eine fehlende Datei faellt hier ebenso: die sieben Orte sind fest verdrahtet,
+    weil sie erklaertermassen die Lizenz des Werks fuehren.
+    """
+    feldweg = ".".join(a if a else '""' for a in adresse)
+    stelle = f"Werk-Lizenz, Ort {datei} (Feld {feldweg})"
+    pfad = wurzel / datei
+    if not pfad.is_file():
+        raise SystemExit(
+            f"{stelle}: die Datei ist unter {pfad} nicht vorhanden. Dieser Ort "
+            "fuehrt die Lizenzangabe des eigenen Werks; ohne ihn laesst sich nicht "
+            "pruefen, ob alle Orte dieselbe Angabe fuehren. Ein stillschweigend "
+            "uebersprungener Ort waere ein stiller Rueckfall. Entweder fehlt die "
+            "Datei im Arbeitsbaum, oder sie ist entfallen und gehoert aus "
+            "WERK_LIZENZ_ORTE entfernt."
+        )
+    try:
+        if datei.endswith(".toml"):
+            with pfad.open("rb") as strom:
+                dokument: Any = tomllib.load(strom)
+        else:
+            roh = lies_text(pfad)
+            if roh is None:
+                raise SystemExit(f"{stelle}: die Datei ist nicht lesbar.")
+            dokument = json.loads(roh)
+    except (tomllib.TOMLDecodeError, json.JSONDecodeError) as fehler:
+        raise SystemExit(f"{stelle}: die Datei ist nicht auswertbar ({fehler}).") from fehler
+
+    # Die Adressierung selbst: genau EIN Kandidat muss herauskommen. Jeder Schritt
+    # ins Leere ist ein Abbruch mit eigener Meldung, die den erreichten Weg nennt.
+    knoten: Any = dokument
+    for tiefe, schluessel in enumerate(adresse):
+        if not isinstance(knoten, dict) or schluessel not in knoten:
+            erreicht = ".".join(a if a else '""' for a in adresse[:tiefe]) or "<Dokumentwurzel>"
+            fehlend = schluessel if schluessel else '""'
+            raise SystemExit(
+                f"{stelle}: an dieser Adresse steht kein Kandidat -- unter "
+                f"{erreicht} gibt es den Schluessel {fehlend} nicht. "
+                "Der Ort fuehrt die Lizenzangabe des Werks nicht mehr an der "
+                "erwarteten Stelle. Entweder ist die Angabe entfallen, oder sie ist "
+                "umgezogen und WERK_LIZENZ_ORTE gehoert nachgezogen. Geraten wird "
+                "nichts."
+            )
+        knoten = knoten[schluessel]
+    if not isinstance(knoten, str) or not knoten.strip():
+        raise SystemExit(
+            f"{stelle}: an dieser Adresse steht kein einzelner Lizenzbezeichner, "
+            f"sondern {knoten!r}. Ein Waechter, der daraus einen Wert erriete, "
+            "waere kein Beleg."
+        )
+    return knoten.strip()
+
+
+def pruefe_werk_lizenz(wurzel: Path) -> str:
+    """REGEL L: alle Orte des Werks fuehren DIESELBE Lizenzangabe -- oder Abbruch.
+
+    Existenzforderung, nicht blosse Abfrage: jeder der sieben Orte MUSS vorhanden
+    sein und dort MUSS eine Angabe stehen (das prueft :func:`_werk_lizenz_an_ort`).
+    Gehen die Werte auseinander, faellt das Werkzeug -- keine Warnung, kein
+    Weiterlaufen. Eine abweichende Angabe ist keine Kleinigkeit: sie besagt, dass
+    das Werk unter zwei verschiedenen Bedingungen ausgeliefert wird, und welche
+    davon gilt, entschiede dann der Zufall des Leseortes.
+
+    Liefert die uebereinstimmende Angabe zurueck, damit der Aufrufer sie nicht ein
+    zweites Mal von der Platte lesen muss.
+    """
+    gemessen = {
+        datei: _werk_lizenz_an_ort(wurzel, datei, adresse) for datei, adresse in WERK_LIZENZ_ORTE
+    }
+    werte = sorted(set(gemessen.values()))
+    if len(werte) != 1:
+        aufstellung = "; ".join(f"{datei}: {wert!r}" for datei, wert in gemessen.items())
+        raise SystemExit(
+            f"Werk-Lizenz: die {len(WERK_LIZENZ_ORTE)} Orte der Lizenzangabe fuehren "
+            f"{len(werte)} verschiedene Werte ({', '.join(repr(w) for w in werte)}). "
+            f"Im Einzelnen -- {aufstellung}. Regel L fordert an allen Orten dieselbe "
+            "Angabe: gehen sie auseinander, sagt die Auslieferung ueber ihre eigenen "
+            "Bedingungen zweierlei, und welche Angabe gilt, entschiede der Zufall des "
+            "Leseortes. Die abweichenden Orte sind auf den gueltigen Wert zu bringen."
+        )
+    return werte[0]
+
+
 def lies_produktversion(wurzel: Path) -> str:
     with (wurzel / "pyproject.toml").open("rb") as strom:
         daten = tomllib.load(strom)
@@ -1986,13 +2157,17 @@ def lies_produktversion(wurzel: Path) -> str:
 
 
 def baue_werk(sammler: Sammler, wurzel: Path) -> dict[str, Any]:
-    """Das eigene Werk. Der Lizenztext ist die Wurzel-LICENSE, nie die SPDX-Fassung."""
+    """Das eigene Werk. Der Lizenztext ist die Wurzel-LICENSE, nie die SPDX-Fassung.
+
+    Der Bezeichner kommt aus :func:`pruefe_werk_lizenz` und damit erst, NACHDEM alle
+    Orte der Regel L als uebereinstimmend belegt sind. Ihn hier aus der
+    ``pyproject.toml`` allein zu lesen hiesse, einen von sieben Orten willkuerlich
+    zum Massstab zu erheben, waehrend die uebrigen sechs ungeprueft blieben.
+    """
     with (wurzel / "pyproject.toml").open("rb") as strom:
         daten = tomllib.load(strom)
     projekt = daten.get("project", {})
-    bezeichner = projekt.get("license")
-    if isinstance(bezeichner, dict):
-        bezeichner = bezeichner.get("text")
+    bezeichner = pruefe_werk_lizenz(wurzel)
     autoren = [
         str(a["name"]) for a in projekt.get("authors", []) if isinstance(a, dict) and a.get("name")
     ]
@@ -2104,7 +2279,58 @@ def pruefe_ergebnis(ergebnis: dict[str, Any]) -> None:
                 raise SystemExit(f"{eintrag['name']}: {feld} ist leer, Quelle aber {quelle!r}")
             if eintrag[feld] == "":
                 raise SystemExit(f"{eintrag['name']}: {feld} ist ein leerer String")
+    pruefe_ebene_leere(ergebnis["bestandteile"])
     pruefe_ebene_nativ(nativ_eintraege)
+
+
+#: Die Ebenen der Bestandteile, die NICHT leer sein duerfen. Gemessen, nicht
+#: gesetzt: keine der fuenf kann legitim leer sein, und zwar aus je eigenem Grund.
+#:
+#: ``daten`` und ``programme`` laufen ueber die von Hand gefuehrten Listen
+#: ``DATENBESTAENDE`` und ``FREMDPROGRAMME``; beide sind fest verdrahtet und im
+#: Werkzeug selbst gefuellt -- leer koennen sie nur werden, wenn jemand die Liste
+#: leert. ``python``, ``npm`` und ``rust`` laufen ueber eine Erhebung, deren
+#: Massstab (uv-Lock, package.json, Cargo-Metadaten) jeweils erklaertermassen
+#: Bestandteile nennt; ist die Erhebung leer, ist sie ausgefallen.
+#:
+#: Kein Gegenstueck zur Ebene ``nativ``: DIE darf leer sein und erklaert das
+#: ausdruecklich ueber ihr Feld ``zustand``. Genau diese Erklaerung fehlt den fuenf
+#: hier -- sie haben kein Feld, in dem eine zulaessige Leere stuende, und deshalb
+#: ist ihre Leere ein Abbruch. Kaeme je eine Ebene hinzu, die legitim leer sein
+#: kann, gehoerte sie NICHT hierher, sondern brauchte einen ``zustand`` nach dem
+#: Vorbild von ``nativ``.
+PFLICHTEBENEN: Final[tuple[str, ...]] = ("daten", "npm", "programme", "python", "rust")
+
+
+def pruefe_ebene_leere(bestandteile: Sequence[dict[str, Any]]) -> None:
+    """Prueft JEDE Pflichtebene darauf, dass sie Eintraege fuehrt.
+
+    Die abschliessende Ergebnispruefung sah bisher keine Ebene auf Leere durch:
+    verschwand eine still, meldete der Lauf Erfolg. Die Ebenen-Waechter der
+    Sammelstellen greifen frueher, aber jeder nur fuer seine eigene Ebene und nur
+    dort, wo er sitzt -- diese Pruefung steht am Ende ueber ALLEN und faengt auch
+    den Fall, dass eine Ebene aus ``erzeuge`` herausfaellt und ihr Waechter damit
+    gar nicht erst laeuft.
+
+    Die Meldung nennt die betroffene Ebene NAMENTLICH, nicht bloss eine Zahl: eine
+    fehlende Zahl sagt nicht, wonach zu suchen ist.
+    """
+    gezaehlt: dict[str, int] = {}
+    for eintrag in bestandteile:
+        ebene = str(eintrag["ebene"])
+        gezaehlt[ebene] = gezaehlt.get(ebene, 0) + 1
+    leer = [ebene for ebene in PFLICHTEBENEN if not gezaehlt.get(ebene)]
+    if leer:
+        bestand = ", ".join(f"{e}: {gezaehlt.get(e, 0)}" for e in PFLICHTEBENEN)
+        raise SystemExit(
+            f"Leere Ebene(n) in der Aufstellung: {', '.join(leer)}. Bestand je "
+            f"Pflichtebene -- {bestand}. Keine dieser Ebenen darf leer sein: anders "
+            "als die Ebene nativ, die eine zulaessige Leere ueber ihr Feld zustand "
+            "erklaert, fuehren sie kein Feld, in dem eine leere Ebene als solche "
+            "ausgewiesen waere. Eine still verschwundene Ebene liefe sonst als "
+            "Erfolg durch, und die Aufstellung behauptete eine Vollstaendigkeit, "
+            "die sie nicht hat."
+        )
 
 
 def pruefe_ebene_nativ(eintraege: Sequence[dict[str, Any]]) -> None:
