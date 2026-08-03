@@ -133,6 +133,34 @@ done
 # (0b, 3b). So bleibt die Gesamtzahl 7 richtig und keine der zehn bestehenden
 # Zaehlerzeilen muss angefasst werden -- eine Durchnummerierung auf /8 haette
 # alle zehn geaendert, ohne dass eine davon inhaltlich falsch gewesen waere.
+# ── Schritt 3bb: Wurzel-Abhaengigkeiten installieren ────────
+# Die Reihenfolge ist bindend und darf NICHT zurueckgedreht werden: der Sammler
+# in [3c/7] liest die AUFGELOESTEN Wurzel-Abhaengigkeiten ueber
+# 'npm ls --omit=dev' im Wurzelverzeichnis. Ohne node_modules an der Wurzel
+# loest sich keine einzige der erklaerten produktiven Abhaengigkeiten auf, und
+# der npm-Waechter des Sammlers bricht ab.
+#
+# Anlass ist Befund 25, gemessen am Linux-Bau 30842765403 auf GitHub Actions.
+# Dieses Skript war gleichermassen betroffen: das Wurzel-Install stand frueher
+# erst in [5/7], unmittelbar vor dem Tauri-Bau -- also NACH dem Sammler. Auf
+# Maschinen mit einem node_modules aus frueheren Laeufen faellt das nicht auf,
+# auf einer frischen sofort.
+#
+# Das Install steht nur noch HIER, nicht mehr zusaetzlich in [5/7]: zweimal
+# ausgefuehrt kostet es Zeit, ohne etwas zu aendern. Der Tauri-Bau findet die
+# CLI unveraendert vor, denn zwischen hier und [5/7] wird an node_modules
+# nichts angefasst.
+#
+# Der Schritt traegt 3bb und nicht eine eigene Hauptnummer: dieses Skript
+# nummeriert nachtraeglich eingefuegte Teilschritte seit jeher mit Buchstaben
+# (0b, 3b, 3c). So bleibt die Gesamtzahl 7 richtig und keine bestehende
+# Zaehlerzeile muss angefasst werden.
+echo ""
+echo "[3bb/7] Wurzel-Abhaengigkeiten installieren (fuer Sammler und Tauri-CLI)..."
+cd "$SCRIPT_DIR"
+npm install --silent
+echo "      OK"
+
 echo ""
 echo "[3c/7] Lizenzaufstellung erzeugen (inkl. nativer Bibliotheken)..."
 LIZENZ_JSON="$TAURI_SRC/lizenzaufstellung.json"
@@ -180,8 +208,10 @@ echo "      OK"
 
 echo ""
 echo "[5/7] Tauri-Build (.dmg)..."
+# Das Wurzel-npm-Install steht seit Befund 25 in [3bb/7] und NICHT mehr hier:
+# der Sammler in [3c/7] braucht es bereits. Ein zweiter Lauf an dieser Stelle
+# waere wirkungslos, denn zwischendurch wird an node_modules nichts angefasst.
 cd "$SCRIPT_DIR"
-npm install --silent
 npx tauri build --target "$TRIPLE"
 
 echo ""

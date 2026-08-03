@@ -73,6 +73,32 @@ for forbidden in fastapi uvicorn starlette reportlab; do
 done
 [ "$LEAK" -eq 0 ] && echo "      OK - schlank"
 
+# ── Schritt 4b: Wurzel-Abhaengigkeiten installieren ─────────
+# Die Reihenfolge ist bindend und darf NICHT zurueckgedreht werden: der
+# Sammler in [5/8] liest die AUFGELOESTEN Wurzel-Abhaengigkeiten ueber
+# 'npm ls --omit=dev' im Wurzelverzeichnis. Ohne node_modules an der Wurzel
+# loest sich keine einzige der erklaerten produktiven Abhaengigkeiten auf, und
+# der npm-Waechter des Sammlers bricht ab.
+#
+# Anlass ist Befund 25, gemessen am Linux-Bau 30842765403 auf GitHub Actions:
+# das Wurzel-Install stand frueher erst in [7/8], unmittelbar vor dem
+# Tauri-Bau -- also NACH dem Sammler. Auf Maschinen mit einem node_modules aus
+# frueheren Laeufen fiel das nicht auf, im frisch gebauten Container brach der
+# Bau in [5/8] sofort ab.
+#
+# Das Install steht nur noch HIER, nicht mehr zusaetzlich in [7/8]: zweimal
+# ausgefuehrt kostet es Zeit, ohne etwas zu aendern. Der Tauri-Bau findet die
+# CLI unveraendert vor, denn zwischen hier und [7/8] wird an node_modules
+# nichts angefasst.
+#
+# Der Schritt traegt 4b und nicht eine eigene Hauptnummer, damit die Gesamtzahl
+# 8 richtig bleibt und keine der bestehenden Zaehlerzeilen angefasst werden muss.
+echo ""
+echo "[4b/8] Wurzel-Abhaengigkeiten installieren (fuer Sammler und Tauri-CLI)..."
+cd "$SCRIPT_DIR"
+npm install --silent
+echo "      OK"
+
 echo ""
 echo "[5/8] Lizenzaufstellung erzeugen (inkl. nativer Bibliotheken)..."
 # Der Zeitpunkt ist bindend: die mitgelieferten nativen Bibliotheken stammen aus der
@@ -133,8 +159,10 @@ echo "      OK"
 
 echo ""
 echo "[7/8] Tauri-Build (deb + rpm)..."
+# Das Wurzel-npm-Install steht seit Befund 25 in [4b/8] und NICHT mehr hier:
+# der Sammler in [5/8] braucht es bereits. Ein zweiter Lauf an dieser Stelle
+# waere wirkungslos, denn zwischendurch wird an node_modules nichts angefasst.
 cd "$SCRIPT_DIR"
-npm install --silent
 npx tauri build --target "$TRIPLE"
 
 # ── Schritt 7b: Waechter Vorhandensein der Beilage ──────────

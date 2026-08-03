@@ -327,6 +327,42 @@ if (-not $leak) { Write-Host "      OK - schlank" }
 # So bleibt die Gesamtzahl 6 richtig und keine der zehn bestehenden Zaehlerzeilen
 # muss angefasst werden -- eine Durchnummerierung auf /7 haette alle zehn
 # geaendert, ohne dass eine davon inhaltlich falsch gewesen waere.
+# ── Schritt 3cc: Wurzel-Abhaengigkeiten installieren ────────
+# Die Reihenfolge ist bindend und darf NICHT zurueckgedreht werden: der Sammler
+# in [3d/6] liest die AUFGELOESTEN Wurzel-Abhaengigkeiten ueber
+# 'npm ls --omit=dev' im Wurzelverzeichnis. Ohne node_modules an der Wurzel
+# loest sich keine einzige der erklaerten produktiven Abhaengigkeiten auf, und
+# der npm-Waechter des Sammlers bricht ab.
+#
+# Anlass ist Befund 25, gemessen am Linux-Bau 30842765403 auf GitHub Actions.
+# Dieses Skript war gleichermassen betroffen: das Wurzel-Install stand frueher
+# erst in [5/6], unmittelbar vor dem Tauri-Bau -- also NACH dem Sammler. Auf
+# Maschinen mit einem node_modules aus frueheren Laeufen faellt das nicht auf,
+# auf einer frischen sofort.
+#
+# Das Install steht nur noch HIER, nicht mehr zusaetzlich in [5/6]: zweimal
+# ausgefuehrt kostet es Zeit, ohne etwas zu aendern. Der Tauri-Bau findet die
+# CLI unveraendert vor, denn zwischen hier und [5/6] wird an node_modules
+# nichts angefasst.
+#
+# Aufrufform unveraendert uebernommen: npm.cmd (Execution-Policy blockt 'npm')
+# und 'ci' statt 'install' -- installiert exakt das Lockfile, nicht irgendwas
+# Kompatibles.
+#
+# Der Schritt traegt 3cc und nicht eine eigene Hauptnummer: das Skript
+# nummeriert nachtraeglich eingefuegte Teilschritte seit jeher mit Buchstaben
+# (1b, 3b, 3c, 3d). So bleibt die Gesamtzahl 6 richtig und keine bestehende
+# Zaehlerzeile muss angefasst werden.
+Write-Host ""
+Write-Host "[3cc/6] Wurzel-Abhaengigkeiten installieren (npm.cmd ci, fuer Sammler und Tauri-CLI)..."
+Push-Location $SCRIPT_DIR
+$ErrorActionPreference = "Continue"
+npm.cmd ci
+$ErrorActionPreference = "Stop"
+Assert-LastExit "npm ci (tauri)"
+Pop-Location
+Write-Host "      OK"
+
 Write-Host ""
 Write-Host "[3d/6] Lizenzaufstellung erzeugen (inkl. nativer Bibliotheken)..."
 $LIZENZ_JSON = Join-Path $TAURI_SRC "lizenzaufstellung.json"
@@ -381,18 +417,16 @@ Copy-Item $SNIFFD_BIN  (Join-Path $TAURI_RELEASE "cernis-sniffd.exe")  -Force
 Write-Host "      OK"
 
 # ── Schritt 5: Tauri-Build (NSIS-Installer) ─────────────────
-# npm.cmd ci fuer die Tauri-CLI (Lockfile-treu). Tauri via 'npx tauri build
-# --target $TRIPLE' aufrufen -- das Triple kommt vom Skript, so wie build-
-# linux.sh es macht; das Root-Skript build-tauri traegt darum kein --target
-# mehr. npx.cmd (Windows). Der Ziel-Ordner haengt so am Triple und passt zu
-# den Kopier-Pfaden oben.
+# Das 'npm.cmd ci' fuer die Tauri-CLI (Lockfile-treu) steht seit Befund 25 in
+# [3cc/6] und NICHT mehr hier: der Sammler in [3d/6] braucht es bereits. Ein
+# zweiter Lauf an dieser Stelle waere wirkungslos, denn zwischendurch wird an
+# node_modules nichts angefasst. Tauri via 'npx tauri build --target $TRIPLE'
+# aufrufen -- das Triple kommt vom Skript, so wie build-linux.sh es macht; das
+# Root-Skript build-tauri traegt darum kein --target mehr. npx.cmd (Windows).
+# Der Ziel-Ordner haengt so am Triple und passt zu den Kopier-Pfaden oben.
 Write-Host ""
 Write-Host "[5/6] Tauri-Build (NSIS-Installer, Target $TRIPLE)..."
 Push-Location $SCRIPT_DIR
-$ErrorActionPreference = "Continue"
-npm.cmd ci
-$ErrorActionPreference = "Stop"
-Assert-LastExit "npm ci (tauri)"
 $ErrorActionPreference = "Continue"
 npx.cmd tauri build --target $TRIPLE
 $ErrorActionPreference = "Stop"
