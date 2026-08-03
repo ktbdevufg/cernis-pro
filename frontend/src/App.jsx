@@ -10,6 +10,7 @@ import AppHeader from "./components/AppHeader.jsx";
 import TabNav, { REITER } from "./components/TabNav.jsx";
 // Die grossen Views werden erst bei Bedarf geladen (Code-Splitting), damit der
 // Haupt-Chunk klein bleibt. AppHeader/TabNav bleiben statisch (immer sichtbar).
+const AboutView = lazy(() => import("./views/AboutView.jsx"));
 const DevicesView = lazy(() => import("./views/DevicesView.jsx"));
 const ReportingView = lazy(() => import("./views/ReportingView.jsx"));
 const InvestigateView = lazy(() => import("./views/InvestigateView.jsx"));
@@ -57,6 +58,10 @@ export default function App() {
   // Benutzerhandbuch ist ebenfalls ein eigener Modus (kein Reiter) und schließt
   // sich mit den Einstellungen gegenseitig aus: immer nur einer ist offen.
   const [handbuchOffen, setHandbuchOffen] = useState(false);
+  // "Ueber CERNIS PRO" (Lizenzaufstellung) ist der DRITTE eigene Modus (kein
+  // Reiter) und schliesst sich mit Einstellungen und Handbuch gegenseitig aus:
+  // immer nur einer ist offen.
+  const [ueberOffen, setUeberOffen] = useState(false);
   // Wunsch-Funktion im Beobachten-Bereich (z. B. vom Kopfzeilen-Live-Pill). Wird
   // EINMAL als initiale Funktion an ObserveView gereicht; danach von ObserveView
   // quittiert (onFunktionGeoeffnet -> null), damit der Nutzer dort frei navigiert.
@@ -105,6 +110,7 @@ export default function App() {
   const goToLogging = () => {
     setSettingsOffen(false);
     setHandbuchOffen(false);
+    setUeberOffen(false);
     setActiveTab("observe");
     setObserveFunktion("logging");
   };
@@ -112,6 +118,7 @@ export default function App() {
   const goToOutbound = () => {
     setSettingsOffen(false);
     setHandbuchOffen(false);
+    setUeberOffen(false);
     setActiveTab("observe");
     setObserveFunktion("outbound");
   };
@@ -122,6 +129,7 @@ export default function App() {
   const goToDnsWatch = () => {
     setSettingsOffen(false);
     setHandbuchOffen(false);
+    setUeberOffen(false);
     setActiveTab("observe");
     setObserveFunktion("dnswatch");
   };
@@ -131,6 +139,7 @@ export default function App() {
   // Handbuch öffnen und das Sprungziel vormerken (ManualView springt dann dort).
   const openManualAt = (helpId) => {
     setSettingsOffen(false);
+    setUeberOffen(false);
     setHandbuchOffen(true);
     setHandbuchSprung(helpId);
   };
@@ -161,13 +170,20 @@ export default function App() {
         onThemeChange={setTheme}
         onOpenSettings={() => {
           setHandbuchOffen(false);
+          setUeberOffen(false);
           setSettingsOffen(true);
         }}
         onOpenManual={() => {
           setSettingsOffen(false);
+          setUeberOffen(false);
           setHandbuchOffen(true);
           // Menü-Weg: kein Sprung, das Handbuch öffnet oben.
           setHandbuchSprung(null);
+        }}
+        onOpenUeber={() => {
+          setSettingsOffen(false);
+          setHandbuchOffen(false);
+          setUeberOffen(true);
         }}
         onGoToLogging={goToLogging}
         onGoToOutbound={goToOutbound}
@@ -175,13 +191,14 @@ export default function App() {
         onGoHome={() => {
           setSettingsOffen(false);
           setHandbuchOffen(false);
+          setUeberOffen(false);
           setActiveTab("overview");
         }}
       />
-      {/* Einstellungen UND Handbuch sind kein Reiter: bei einem offenen Modus
-          bleibt kein Reiter aktiv markiert, daher blenden wir die Reiterleiste
-          aus. */}
-      {!settingsOffen && !handbuchOffen && (
+      {/* Einstellungen, Handbuch UND "Über CERNIS PRO" sind kein Reiter: bei
+          einem offenen Modus bleibt kein Reiter aktiv markiert, daher blenden
+          wir die Reiterleiste aus. */}
+      {!settingsOffen && !handbuchOffen && !ueberOffen && (
         <TabNav active={activeTab} onChange={setActiveTab} />
       )}
 
@@ -199,6 +216,11 @@ export default function App() {
                 setHandbuchOffen(false);
                 setHandbuchSprung(null);
               }}
+            />
+          ) : ueberOffen ? (
+            <AboutView
+              onClose={() => setUeberOffen(false)}
+              onOpenManual={openManualAt}
             />
           ) : settingsOffen ? (
             <SettingsView

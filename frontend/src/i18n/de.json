@@ -13,6 +13,7 @@
   "header": {
     "manual": "Handbuch",
     "settings": "Einstellungen",
+    "ueber": "Über CERNIS PRO",
     "liveOne": "Live-Monitoring aktiv",
     "liveMany": "{{count}} Monitorings aktiv",
     "liveZurAnsicht": "Zur Logging-Ansicht",
@@ -2485,5 +2486,125 @@
     "E-504": "Der Export ist fehlgeschlagen.",
     "E-505": "Das Gerät wurde nicht gefunden.",
     "E-506": "Die Eingabe ist ungültig."
+  },
+  "lizenzen": {
+    "titel": "Über CERNIS PRO",
+    "laden": "Die Lizenzaufstellung wird geladen …",
+    "nichtBelegt": "nicht belegt",
+    "ja": "ja",
+    "nein": "nein",
+    "fehler": {
+      "keineAufstellung": "Die Lizenzaufstellung wurde im laufenden Betrieb nicht gefunden. Sie wird beim Bau erzeugt und mit der Anwendung ausgeliefert; hier fehlt sie. Der Server nennt die geprüften Pfade:",
+      "allgemein": "Die Lizenzaufstellung konnte nicht geladen werden."
+    },
+    "abschnitt": {
+      "werk": {
+        "titel": "Eigenes Werk",
+        "text": "CERNIS PRO selbst: Urheber, Lizenz und der Ort, an dem der Quelltext bezogen werden kann.",
+        "volltext": "Lizenztext im Wortlaut anzeigen"
+      },
+      "bestandteile": {
+        "titel": "Mitgelieferte Bestandteile",
+        "text": "{{n}} Programmbestandteile werden mit der Anwendung ausgeliefert. Ihre Lizenzen und Urhebervermerke stehen im Lizenz-Browser weiter unten."
+      },
+      "daten": {
+        "titel": "Mitgelieferte Daten",
+        "text": "{{n}} Datenbestände werden mit der Anwendung ausgeliefert, etwa Nachschlagewerke und Kennungslisten.",
+        "keine": "Es werden keine Datenbestände mitgeliefert."
+      },
+      "programme": {
+        "titel": "Vorausgesetzte Programme",
+        "einordnung": "Diese Programme werden NICHT mitgeliefert. CERNIS PRO ruft sie auf, wenn sie auf Ihrem System vorhanden sind; ihre Lizenz gehört zum System des Anwenders und nicht zu dieser Auslieferung. Deshalb tragen sie hier keine Lizenzangabe — das ist keine Lücke. Der Zustand „nicht zutreffend“ bedeutet, dass ein Programm auf dieser Plattform gar nicht in Frage kommt.",
+        "keine": "Es sind keine vorausgesetzten Programme verzeichnet."
+      }
+    },
+    "nativ": {
+      "titel": "Native Ebene (Systembibliotheken)",
+      "zustand": {
+        "nicht_angefordert": "nicht angefordert",
+        "erhoben": "erhoben",
+        "kein_paketverzeichnis": "kein Paketverzeichnis vorhanden"
+      }
+    },
+    "browser": {
+      "titel": "Lizenz-Browser",
+      "text": "Alle Bestandteile im Überblick. Wählen Sie einen Eintrag in der Liste, um rechts seine Angaben und den vollständigen Lizenztext zu sehen. Der Lizenztext wird unverändert gezeigt: nicht gekürzt, nicht umbrochen, nicht übersetzt."
+    },
+    "luecken": {
+      "titel": "Offene Angaben",
+      "text": "Bei {{n}} Bestandteilen konnte eine Angabe nicht aus der Quelle belegt werden. Sie steht hier ausdrücklich als offen, statt still zu fehlen."
+    },
+    "filter": {
+      "lizenz": "Lizenz",
+      "herkunft": "Herkunft",
+      "suche": "Suche",
+      "alle": "Alle",
+      "suchePlatzhalter": "Name oder Fassung",
+      "zaehler": "{{n}} von {{m}}"
+    },
+    "spalte": {
+      "name": "Name",
+      "fassung": "Fassung",
+      "lizenz": "Lizenz",
+      "herkunft": "Herkunft"
+    },
+    "liste": {
+      "keineBestandteile": "Die Aufstellung führt keine Bestandteile.",
+      "keinTreffer": "Kein Bestandteil passt zu Filter und Suche."
+    },
+    "detail": {
+      "schliessen": "Detailspalte schließen",
+      "fassungKurz": "Fassung {{fassung}}",
+      "volltext": "Lizenztext",
+      "textLaedt": "Der Lizenztext wird geladen …",
+      "keinText": "Für diesen Eintrag ist kein Lizenztext hinterlegt.",
+      "textFehler": "Der Lizenztext konnte nicht geladen werden.",
+      "textUnbekannt": "Zu diesem Schlüssel gibt es keinen Lizenztext: {{schluessel}}"
+    },
+    "ebene": {
+      "python": "Python-Paket",
+      "npm": "npm-Paket",
+      "rust": "Rust-Paket",
+      "daten": "Datenbestand",
+      "programme": "Vorausgesetztes Programm",
+      "nativ": "Systembibliothek"
+    },
+    "vorhanden": {
+      "vorhanden": "vorhanden",
+      "fehlt": "fehlt",
+      "nicht_zutreffend": "nicht zutreffend"
+    },
+    "feld": {
+      "name": "Name",
+      "fassung": "Fassung",
+      "urheber": "Urheber",
+      "lizenzId": "Lizenz",
+      "lizenzIdQuelle": "Quelle der Lizenzangabe",
+      "lizenzTextQuelle": "Quelle des Lizenztextes",
+      "lizenz_text": "Lizenztext",
+      "quelltextBezug": "Bezugsort des Quelltextes",
+      "quelltextBezugQuelle": "Quelle des Bezugsorts",
+      "herkunft": "Herkunft",
+      "urhebervermerk": "Urhebervermerk",
+      "urhebervermerkQuelle": "Quelle des Urhebervermerks",
+      "projektadresse": "Projektadresse",
+      "mitgeliefert": "Mitgeliefert",
+      "nurClassifier": "Nur aus Classifier abgeleitet",
+      "npmOrt": "Ort im npm-Baum",
+      "pfad": "Pfad",
+      "lizenzIdFundstelle": "Fundstelle der Lizenzangabe",
+      "zweck": "Zweck",
+      "quelleDerAngabe": "Quelle der Angabe",
+      "lieferndesPaket": "Lieferndes Paket",
+      "fundstelle": "Fundstelle",
+      "plattform": "Plattform",
+      "vorhanden": "Auf diesem System",
+      "produktversion": "Produktversion",
+      "erzeugtAm": "Aufstellung erzeugt am",
+      "zustand": "Zustand",
+      "zielplattform": "Zielplattform",
+      "quelleDerBinaries": "Quelle der Binärdateien",
+      "geleseneBinaries": "Gelesene Binärdateien"
+    }
   }
 }

@@ -13,6 +13,7 @@
   "header": {
     "manual": "Manual",
     "settings": "Settings",
+    "ueber": "About CERNIS PRO",
     "liveOne": "Live monitoring active",
     "liveMany": "{{count}} monitorings active",
     "liveZurAnsicht": "Open logging view",
@@ -2485,5 +2486,125 @@
     "E-504": "The export failed.",
     "E-505": "The device was not found.",
     "E-506": "The input is invalid."
+  },
+  "lizenzen": {
+    "titel": "About CERNIS PRO",
+    "laden": "Loading the licence inventory …",
+    "nichtBelegt": "not documented",
+    "ja": "yes",
+    "nein": "no",
+    "fehler": {
+      "keineAufstellung": "The licence inventory was not found at runtime. It is generated during the build and shipped with the application; here it is missing. The server lists the paths it checked:",
+      "allgemein": "The licence inventory could not be loaded."
+    },
+    "abschnitt": {
+      "werk": {
+        "titel": "This work",
+        "text": "CERNIS PRO itself: author, licence, and where the source code can be obtained.",
+        "volltext": "Show the licence text verbatim"
+      },
+      "bestandteile": {
+        "titel": "Bundled components",
+        "text": "{{n}} software components ship with the application. Their licences and copyright notices are listed in the licence browser below."
+      },
+      "daten": {
+        "titel": "Bundled data",
+        "text": "{{n}} data sets ship with the application, such as reference tables and identifier lists.",
+        "keine": "No data sets are bundled."
+      },
+      "programme": {
+        "titel": "Required external programs",
+        "einordnung": "These programs are NOT bundled. CERNIS PRO calls them if they are present on your system; their licence belongs to the user's system, not to this distribution. That is why no licence is stated here — nothing is missing. The state “not applicable” means the program is not relevant on this platform at all.",
+        "keine": "No required external programs are listed."
+      }
+    },
+    "nativ": {
+      "titel": "Native layer (system libraries)",
+      "zustand": {
+        "nicht_angefordert": "not requested",
+        "erhoben": "collected",
+        "kein_paketverzeichnis": "no package database available"
+      }
+    },
+    "browser": {
+      "titel": "Licence browser",
+      "text": "Every component at a glance. Select an entry on the left to see its details and the full licence text on the right. The licence text is shown unaltered: not shortened, not re-wrapped, not translated."
+    },
+    "luecken": {
+      "titel": "Undocumented details",
+      "text": "For {{n}} components one detail could not be established from the source. It is listed here explicitly instead of quietly missing."
+    },
+    "filter": {
+      "lizenz": "Licence",
+      "herkunft": "Origin",
+      "suche": "Search",
+      "alle": "All",
+      "suchePlatzhalter": "Name or version",
+      "zaehler": "{{n}} of {{m}}"
+    },
+    "spalte": {
+      "name": "Name",
+      "fassung": "Version",
+      "lizenz": "Licence",
+      "herkunft": "Origin"
+    },
+    "liste": {
+      "keineBestandteile": "The inventory lists no components.",
+      "keinTreffer": "No component matches the filters and search."
+    },
+    "detail": {
+      "schliessen": "Close details",
+      "fassungKurz": "Version {{fassung}}",
+      "volltext": "Licence text",
+      "textLaedt": "Loading the licence text …",
+      "keinText": "No licence text is on file for this entry.",
+      "textFehler": "The licence text could not be loaded.",
+      "textUnbekannt": "There is no licence text for this key: {{schluessel}}"
+    },
+    "ebene": {
+      "python": "Python package",
+      "npm": "npm package",
+      "rust": "Rust crate",
+      "daten": "Data set",
+      "programme": "Required program",
+      "nativ": "System library"
+    },
+    "vorhanden": {
+      "vorhanden": "present",
+      "fehlt": "missing",
+      "nicht_zutreffend": "not applicable"
+    },
+    "feld": {
+      "name": "Name",
+      "fassung": "Version",
+      "urheber": "Author",
+      "lizenzId": "Licence",
+      "lizenzIdQuelle": "Source of the licence statement",
+      "lizenzTextQuelle": "Source of the licence text",
+      "lizenz_text": "Licence text",
+      "quelltextBezug": "Where to obtain the source code",
+      "quelltextBezugQuelle": "Source of that information",
+      "herkunft": "Origin",
+      "urhebervermerk": "Copyright notice",
+      "urhebervermerkQuelle": "Source of the copyright notice",
+      "projektadresse": "Project address",
+      "mitgeliefert": "Bundled",
+      "nurClassifier": "Derived from classifier only",
+      "npmOrt": "Location in the npm tree",
+      "pfad": "Path",
+      "lizenzIdFundstelle": "Where the licence was found",
+      "zweck": "Purpose",
+      "quelleDerAngabe": "Source of the statement",
+      "lieferndesPaket": "Providing package",
+      "fundstelle": "Where it was found",
+      "plattform": "Platform",
+      "vorhanden": "On this system",
+      "produktversion": "Product version",
+      "erzeugtAm": "Inventory generated on",
+      "zustand": "State",
+      "zielplattform": "Target platform",
+      "quelleDerBinaries": "Source of the binaries",
+      "geleseneBinaries": "Binaries read"
+    }
   }
 }

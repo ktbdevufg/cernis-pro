@@ -3,7 +3,7 @@
 // Bekommt theme nebst Setter als Props; das Zahnrad meldet sich über
 // onOpenSettings. Die Sprach-Auswahl wohnt jetzt im Einstellungs-Bereich.
 
-import { BookOpen, Settings } from "lucide-react";
+import { BookOpen, Info, Settings } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -14,7 +14,7 @@ import OutboundRecordingPill from "./OutboundRecordingPill.jsx";
 import ThemeToggle from "./ThemeToggle.jsx";
 import "./AppHeader.css";
 
-export default function AppHeader({ theme, onThemeChange, onOpenSettings, onOpenManual, onGoToLogging, onGoToOutbound, onGoToDnsWatch, onGoHome }) {
+export default function AppHeader({ theme, onThemeChange, onOpenSettings, onOpenManual, onOpenUeber, onGoToLogging, onGoToOutbound, onGoToDnsWatch, onGoHome }) {
   const { t } = useTranslation();
 
   // Echte Build-Version vom Backend (bereits Anzeige-Form, z. B. "2.0.0-x64.<sha>").
@@ -83,6 +83,17 @@ export default function AppHeader({ theme, onThemeChange, onOpenSettings, onOpen
         >
           <BookOpen size={16} />
           <span>{t("header.manual")}</span>
+        </button>
+        {/* "Über CERNIS PRO" (Lizenzaufstellung): dritter eigener Modus neben
+            Handbuch und Einstellungen, an derselben Stelle und im selben Stil. */}
+        <button
+          type="button"
+          className="icon-button"
+          onClick={onOpenUeber}
+          aria-label={t("header.ueber")}
+          title={t("header.ueber")}
+        >
+          <Info size={22} />
         </button>
         <button
           type="button"

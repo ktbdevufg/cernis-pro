@@ -1,0 +1,311 @@
+/* Lizenz-Browser: zweispaltiges Master-Detail nach dem Vorbild observe__split.
+   Links die Liste (nimmt den verbleibenden Platz, scrollt intern), rechts die
+   Detailspalte in fester Breite -- sie erscheint nur bei Auswahl.
+   Nur bestehende Design-Tokens (styles/tokens.css), keine neuen Farben. */
+
+.license-browser {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+/* Werkzeugleiste: zwei Filter, Suche, Trefferzaehler. */
+.license-browser__toolbar {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.license-browser__feld {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.license-browser__feld--suche {
+  flex: 1;
+  min-width: 180px;
+}
+
+.license-browser__feld-label {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-tert);
+}
+
+.license-browser__select,
+.license-browser__input {
+  padding: 6px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.license-browser__select:focus-visible,
+.license-browser__input:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.license-browser__count {
+  margin-left: auto;
+  padding-bottom: 7px;
+  font-size: 13px;
+  color: var(--color-text-sec);
+}
+
+/* Vorbild observe__split: Liste flexibel, Detailspalte fest. */
+.license-browser__split {
+  display: flex;
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+}
+
+.license-browser__list {
+  flex: 1;
+  min-width: 0;
+  max-height: 60vh;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+}
+
+.license-browser__leer {
+  margin: 0;
+  padding: 16px;
+  font-size: 13px;
+  color: var(--color-text-sec);
+}
+
+.license-browser__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+/* Kopfzeile bleibt beim Scrollen sichtbar (wie .scan-table__head). */
+.license-browser__head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.license-browser__th {
+  position: sticky;
+  top: 0;
+  padding: 9px 12px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-tert);
+  background: var(--color-bar);
+  border-bottom: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+.license-browser__row {
+  cursor: pointer;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.license-browser__row:hover {
+  background: var(--color-card);
+}
+
+.license-browser__row--aktiv {
+  background: var(--color-accent-bg);
+}
+
+.license-browser__td {
+  padding: 8px 12px;
+  color: var(--color-text);
+  vertical-align: top;
+  word-break: break-word;
+}
+
+/* Feste Schriftbreite fuer Fassung, Lizenzkennung, Pfade -- System-Monospace
+   als Fallback (gleiche Kette wie .scan-table__mono; keine externe Schrift). */
+.license-browser__mono {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+/* --- Detailspalte rechts (Vorbild .scan-detail) --- */
+
+.license-detail {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 420px;
+  width: 420px;
+  min-height: 0;
+  max-height: 60vh;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+  overflow: hidden;
+}
+
+.license-detail__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 14px 12px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bar);
+  flex-shrink: 0;
+}
+
+.license-detail__heading {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.license-detail__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text);
+  word-break: break-word;
+}
+
+.license-detail__subtitle {
+  font-size: 13px;
+  color: var(--color-text-sec);
+}
+
+.license-detail__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  color: var(--color-text-sec);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.license-detail__close:hover {
+  color: var(--color-text);
+  border-color: var(--color-border);
+}
+
+.license-detail__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 14px 16px;
+}
+
+.license-detail__section + .license-detail__section {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+}
+
+.license-detail__section-title {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-tert);
+}
+
+.license-detail__field {
+  display: flex;
+  gap: 10px;
+  padding: 4px 0;
+  font-size: 13px;
+}
+
+.license-detail__field-label {
+  flex: 0 0 130px;
+  color: var(--color-text-tert);
+}
+
+.license-detail__value {
+  flex: 1;
+  min-width: 0;
+  color: var(--color-text);
+  word-break: break-word;
+}
+
+/* Nicht belegte Angabe: ausdrueckliche Aussage, sichtbar zurueckgenommen --
+   aber NIE ein leeres Feld. */
+.license-detail__value--leer {
+  color: var(--color-text-tert);
+  font-style: italic;
+}
+
+.license-detail__hinweis {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--color-text-sec);
+}
+
+.license-detail__fehler {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--sev-high-text);
+  background: var(--sev-high-bg);
+  border: 1px solid var(--sev-high-bd);
+  border-radius: var(--radius-md);
+}
+
+.license-detail__fehler-detail {
+  font-size: 12px;
+  color: var(--color-text-sec);
+  word-break: break-word;
+}
+
+/* Lizenz-Volltext: ZEICHENGLEICH. Feste Schriftbreite, Zeilenumbrueche erhalten
+   (pre-wrap), nichts gekuerzt, nichts nachtraeglich umbrochen. */
+.license-detail__text {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Schmalere Fenster: Detailspalte unter die Liste, volle Breite. */
+@media (max-width: 1100px) {
+  .license-browser__split {
+    flex-direction: column;
+  }
+
+  .license-detail {
+    flex: 1 1 auto;
+    width: 100%;
+  }
+}

@@ -76,7 +76,7 @@ package = false
 # Sobald der Quelltext unter einer erreichbaren Adresse liegt, wird GENAU DIESE
 # Zeile geaendert — keine weitere Stelle.
 [tool.cernis_pro]
-quelltext_bezug = "Der vollstaendige Quelltext dieses Werks liegt dem jeweiligen Release als Archiv bei."
+quelltext_bezug = "Der vollständige Quelltext dieses Werks liegt dem jeweiligen Release als Archiv bei."
 
 # ── Ruff (Lint + Format) ──────────────────────────────────────────────────
 # Greift waehrend der Migration nur auf den NEUEN Code unter backend/. Der
