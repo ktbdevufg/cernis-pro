@@ -4,7 +4,7 @@
 
 - **Datum:** 2026-07-03
 - **Commit-Hash:** `0d4c2e7439a4b434fb6adb976be9e84748a74d36` (Branch `rewrite/v2`)
-- **Auftrag:** `/home/kbach/audit_v2.md` — reiner Lese-/Befund-Auftrag, KEIN Fix.
+- **Auftrag:** Auftragsdatei `audit_v2.md` (außerhalb des Repos) — reiner Lese-/Befund-Auftrag, KEIN Fix.
 - **Bindung an die App:** Der Server bindet laut `backend/serve.py:30-31` an
   `host = "127.0.0.1"`, `port = int(os.environ.get("CERNIS_PORT", "8765"))` — also
   **localhost:8765**, NICHT `0.0.0.0`.

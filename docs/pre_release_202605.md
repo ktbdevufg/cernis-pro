@@ -3,7 +3,7 @@
 **Stand:** 2026-05-27
 **Projekt:** CERNIS PRO (LAN-Scanner Desktop-App)
 **Repository:** `ktbdevufg/cernis-pro` (Branch `dev`)
-**Arbeitsumgebung:** Ubuntu x64 VM `ubultsvm`, `/home/kbach/Dokumente/Github-Repos/Cernis-Pro`
+**Arbeitsumgebung:** Ubuntu x64 VM `ubultsvm`, Repo-Wurzelverzeichnis `<repo>`
 **Status v1.0.0:** Auf 5 Plattformen gebaut (Win ARM64, Win x64, macOS ARM64, Linux deb/AppImage, Fedora RPM)
 **Ziel:** Vollständiger Backend-Rewrite zu v2.0.0 mit Hexagonal-Architektur, Tests, Doku und Security-Audit
 **Begleitdokument:** `vision_features_202605.md` (Produktvision, Qualitätsanspruch, neue Features, Technologie-Entscheidung). Dieses Dokument hier ist der **Plan/Prozess**, das Begleitdokument die **Vision/Features**. Beide gehören ins Projekt-Wissen.

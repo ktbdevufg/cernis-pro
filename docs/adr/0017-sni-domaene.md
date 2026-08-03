@@ -11,7 +11,7 @@ Die Verkehrsliste (traffic) zeigt pro Verbindung eine Gegenstellen-IP und — ü
 
 Der **Server Name Indication** (SNI) im TLS-ClientHello trägt genau diesen echten Namen — und zwar **unverschlüsselt** im Klartext (vor dem verschlüsselten Teil des Handshakes). Er lässt sich **passiv** mitlesen, ohne irgendetwas zu entschlüsseln, und der verursachende Prozess lässt sich über dieselbe Socket→PID-Tabelle zuordnen, die CERNIS für traffic ohnehin nutzt.
 
-Ein **Wegwerf-Spike** (`/home/kbach/spike_sni.py`) hat das empirisch belegt: **60 SNIs erfasst, 93 % einem Prozess zugeordnet, Zuordnungs-Delta median 177 ms**. Der Spike hat zugleich drei Fallen aufgedeckt, die das Design hier auflöst:
+Ein **Wegwerf-Spike** (`spike_sni.py`, außerhalb des Repos) hat das empirisch belegt: **60 SNIs erfasst, 93 % einem Prozess zugeordnet, Zuordnungs-Delta median 177 ms**. Der Spike hat zugleich drei Fallen aufgedeckt, die das Design hier auflöst:
 
 1. **scapy-TLS-Dissektor untauglich.** scapy 2.7 erkennt über `scapy.layers.tls` **0** ClientHellos, obwohl `tcpdump` sie sehr wohl zeigt. Und `bytes(pkt[TCP].payload)` reserialisiert dissektiert — die Bytes weichen vom Draht ab → 0 Treffer. Funktioniert hat **nur** der layer-unabhängige Roh-Zugriff `bytes(pkt[TCP])[dataofs*4:]` plus **manuelles** Byte-Parsing.
 2. **GIL-Aushungern.** Schwere Arbeit (psutil-Namensauflösung) im scapy-prn-Callback hat den libpcap-Lesepfad ausgehungert → „0 TCP-Pakete". Der prn **muss** billig sein; die Socket-Snapshots gehören in einen **eigenen** Thread, die Namensauflösung **nach** den Sniff.
