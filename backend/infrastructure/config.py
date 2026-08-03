@@ -62,11 +62,11 @@ def _lese_build_version() -> str:
     hexagonal erlaubt.
     """
     try:
-        # Die Datei existiert nur im CI-Build (nie committet) -> mypy kennt sie
-        # nicht; der ImportError-Zweig ist der Dev-Normalfall.
-        from infrastructure._build_version import (  # type: ignore[import-not-found]
-            BUILD_VERSION,
-        )
+        # Die Datei entsteht erst beim Bau (nie committet) -> der ImportError-
+        # Zweig ist der Dev-Normalfall. Die mypy-Behandlung ist in pyproject.toml
+        # geregelt (Modul-Abschnitt mit ignore_missing_imports), damit das Gate
+        # mit und ohne vorhandenes Bau-Artefakt gleich ausfaellt.
+        from infrastructure._build_version import BUILD_VERSION
     except ImportError:
         return _lese_produkt_version()
     return str(BUILD_VERSION)

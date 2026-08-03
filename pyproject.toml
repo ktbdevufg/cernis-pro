@@ -152,6 +152,16 @@ ignore_missing_imports = true
 module = ["reportlab.*"]
 ignore_missing_imports = true
 
+# infrastructure._build_version entsteht erst beim Bau (CI erzeugt sie vor PyInstaller)
+# und ist nicht versioniert (.gitignore). Ohne diesen Eintrag faellt das Gate je nach
+# Anwesenheit des Artefakts unterschiedlich aus: fehlt die Datei, braucht der Import eine
+# Unterdrueckung; liegt sie nach einem lokalen Bau vor, meldet mypy genau diese
+# Unterdrueckung als unbenutzt ("unused-ignore"). Der ImportError-Zweig in
+# ``infrastructure.config`` ist der Dev-Normalfall und bleibt davon unberuehrt.
+[[tool.mypy.overrides]]
+module = ["infrastructure._build_version"]
+ignore_missing_imports = true
+
 # ── pytest ────────────────────────────────────────────────────────────────
 # backend/ ist die Import-Wurzel (wie der Altbestand: `import modules.x`).
 [tool.pytest.ini_options]
