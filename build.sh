@@ -122,8 +122,11 @@ done
 # und VOR dem Tauri-Build (5). Die mitgelieferten nativen Bibliotheken stammen
 # aus PyInstallers Abhaengigkeitsanalyse und stehen erst jetzt fest; in die
 # Binaries koennen sie nicht mehr hinein, deshalb geht die Aufstellung ueber
-# bundle.resources ins Paket. src-tauri/tauri.conf.json fuehrt
-# lizenzaufstellung.json und LICENSE dort bereits -- keine Aenderung noetig.
+# bundle.resources ins Paket. Fuer macOS muessen lizenzaufstellung.json und
+# LICENSE dabei in src-tauri/tauri.macos.conf.json stehen: Tauri verschmilzt die
+# plattformspezifische Konfiguration nach RFC 7396, und ein Array ERSETZT den
+# Wert der Grundkonfiguration vollstaendig, statt ihn zu ergaenzen. Die Eintraege
+# in src-tauri/tauri.conf.json allein reichen hier also nicht.
 #
 # Der Schritt traegt 3c und nicht eine eigene Hauptnummer: dieses Skript
 # nummeriert nachtraeglich eingefuegte Teilschritte seit jeher mit Buchstaben
