@@ -400,6 +400,154 @@ Assert-LastExit "tauri build"
 Pop-Location
 Write-Host "      OK"
 
+# ── Schritt 5b: Waechter Vorhandensein der Beilage ──────────
+# Warum ueberhaupt: ein Bau kann mit RC=0 durchlaufen, OHNE dass die Beilage im
+# Erzeugnis ankommt -- auf macOS ist genau das passiert (stille Array-Ersetzung
+# der bundle.resources nach RFC 7396), und gefunden wurde es von Hand, nicht vom
+# Bau. Ein gruener Bau belegt eben nicht seinen Inhalt.
+#
+# Die Stelle ist bindend: NACH Schritt [5/6] und VOR Schritt [6/6]. Der
+# Installer liegt hier fertig vor -- geprueft wird also am ECHTEN Erzeugnis,
+# nicht am Quellverzeichnis und nicht an dem, was der Bau abgelegt zu haben
+# glaubt. Und weil das Einsammeln erst danach kommt, kann ein Installer mit
+# fehlender Beilage nicht als Ergebnis durchgehen.
+#
+# WARUM HIER GESUCHT UND NICHT AN EINEM PFAD GEPRUEFT WIRD: der Ablageort im
+# Installationsverzeichnis ist NICHT belegt. Gemessen ist nur, dass das
+# NSIS-Template die Ressourcen mit  File /a "/oname=<relativer Name>"  unterhalb
+# von $INSTDIR ablegt; welcher relative Name das ist, entsteht erst im
+# kompilierten Bundler und steht weder in src-tauri/tauri.conf.json noch im
+# Klartext in der Tauri-CLI. Einen Pfad zu RATEN waere schlimmer als keine
+# Pruefung: ein falsch geratener Pfad faellt bei jedem korrekten Bau. Darum wird
+# im Installer nach dem DATEINAMEN gesucht, ohne Annahme ueber sein Verzeichnis.
+#
+# 7-Zip ist dafuer Voraussetzung und kein Rueckfall: fehlt es, bricht der Bau ab,
+# statt ersatzweise das Pack-Verzeichnis zu pruefen. Das Pack-Verzeichnis zeigt
+# nur, was hineingehen SOLL -- und genau diese Luecke zwischen "soll" und "kommt
+# an" ist der Grund fuer diesen Waechter.
+#
+# Der Waechter prueft NUR und legt NICHTS nach: ein nachtraegliches Einfuegen in
+# den fertigen Installer waere ein stiller Rueckfall auf ein Erzeugnis, das der
+# Bau so nie hergestellt hat.
+#
+# Der Schritt traegt 5b und nicht eine eigene Hauptnummer: das Skript nummeriert
+# nachtraeglich eingefuegte Teilschritte seit jeher mit Buchstaben (1b, 3b, 3c,
+# 3d). So bleibt die Gesamtzahl 6 richtig und keine bestehende Zaehlerzeile muss
+# angefasst werden.
+Write-Host ""
+Write-Host "[5b/6] Beilage im gebauten Installer pruefen (Waechter)..."
+
+$WAECHTER_NSIS_DIR = Join-Path $TAURI_SRC "target\$TRIPLE\release\bundle\nsis"
+$WAECHTER_INSTALLER = Get-ChildItem -Path $WAECHTER_NSIS_DIR -Filter "*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+if (-not $WAECHTER_INSTALLER) {
+    Write-Host "FEHLER: Kein NSIS-Installer gefunden in $WAECHTER_NSIS_DIR" -ForegroundColor Red
+    Write-Host "  Ohne Erzeugnis ist die Beilage nicht pruefbar." -ForegroundColor Red
+    exit 1
+}
+Write-Host "      Geprueft wird: $($WAECHTER_INSTALLER.FullName)"
+
+# 7-Zip finden. Kein Rueckfall auf eine schwaechere Pruefung: fehlt das
+# Werkzeug, ist der Inhalt des Installers unbekannt, und ein unbekannter Inhalt
+# darf nicht als geprueft durchgehen.
+$SIEBENZIP = $null
+foreach ($kandidat in @(
+    "$env:ProgramFiles\7-Zip\7z.exe",
+    "${env:ProgramFiles(x86)}\7-Zip\7z.exe"
+)) {
+    if ($kandidat -and (Test-Path $kandidat)) { $SIEBENZIP = $kandidat; break }
+}
+if (-not $SIEBENZIP) {
+    $ausPfad = Get-Command 7z.exe -ErrorAction SilentlyContinue
+    if ($ausPfad) { $SIEBENZIP = $ausPfad.Source }
+}
+if (-not $SIEBENZIP) {
+    Write-Host "FEHLER: 7-Zip (7z.exe) nicht gefunden - der Inhalt des NSIS-Installers" -ForegroundColor Red
+    Write-Host "  ist damit nicht pruefbar. 7-Zip ist fuer den Windows-Bau Voraussetzung," -ForegroundColor Red
+    Write-Host "  kein Zubehoer: ohne Inhaltspruefung koennte ein Installer ohne Beilage" -ForegroundColor Red
+    Write-Host "  als Erfolg durchgehen." -ForegroundColor Red
+    Write-Host "  Weg:  winget install 7zip.7zip     (oder https://7-zip.org)" -ForegroundColor Red
+    exit 1
+}
+
+# Inhaltsverzeichnis des Installers auflisten, ohne zu installieren und ohne zu
+# entpacken. '7z l -slt' liefert je Eintrag einen Block mit 'Path = ...' und
+# 'Size = ...' -- daraus bauen wir Name -> groesste gefundene Groesse.
+$ErrorActionPreference = "Continue"
+$archivListe = & $SIEBENZIP l -slt -- $WAECHTER_INSTALLER.FullName 2>&1
+$listeRC = $LASTEXITCODE
+$ErrorActionPreference = "Stop"
+if ($listeRC -ne 0) {
+    Write-Host "FEHLER: 7-Zip konnte den Installer nicht lesen (Exit $listeRC):" -ForegroundColor Red
+    Write-Host ($archivListe -join "`n") -ForegroundColor Red
+    Write-Host "  geprueftes Erzeugnis: $($WAECHTER_INSTALLER.FullName)" -ForegroundColor Red
+    exit 1
+}
+
+# Eintraege einsammeln: Dateiname (ohne Verzeichnis, klein) -> groesste Groesse.
+# Der Dateiname allein ist der Schluessel, weil der Ablageort im Installer nicht
+# belegt ist -- siehe die Begruendung oben.
+$gefunden = @{}
+$aktuellerPfad = $null
+foreach ($zeile in $archivListe) {
+    $text = [string]$zeile
+    if ($text -match '^Path = (.+)$') {
+        $aktuellerPfad = $Matches[1].Trim()
+    }
+    elseif (($text -match '^Size = (\d+)\s*$') -and $aktuellerPfad) {
+        $name = (Split-Path $aktuellerPfad -Leaf).ToLowerInvariant()
+        $groesse = [int64]$Matches[1]
+        if ((-not $gefunden.ContainsKey($name)) -or ($gefunden[$name].Groesse -lt $groesse)) {
+            $gefunden[$name] = @{ Groesse = $groesse; Pfad = $aktuellerPfad }
+        }
+        $aktuellerPfad = $null
+    }
+}
+
+# Jede erwartete Datei EINZELN und namentlich -- eine Sammelmeldung
+# "irgendetwas fehlt" liesse offen, wonach zu suchen waere.
+$beilageFehlt = $false
+foreach ($erwartet in "lizenzaufstellung.json", "LICENSE") {
+    $schluessel = $erwartet.ToLowerInvariant()
+    if (-not $gefunden.ContainsKey($schluessel)) {
+        Write-Host "      FEHLER: '$erwartet' fehlt im gebauten Installer." -ForegroundColor Red
+        Write-Host "        erwarteter Ort:       im Installer, unterhalb des spaeteren"
+        Write-Host "                              Installationsverzeichnisses (`$INSTDIR). Der genaue"
+        Write-Host "                              relative Ablageort ist NICHT belegt, darum wurde"
+        Write-Host "                              nach dem Dateinamen gesucht statt an einem Pfad."
+        Write-Host "        geprueftes Erzeugnis: $($WAECHTER_INSTALLER.FullName)"
+        Write-Host "        naechstliegende Ursache: fehlender oder falscher Eintrag unter"
+        Write-Host "                              bundle.resources in src-tauri/tauri.conf.json."
+        Write-Host "                              Es gibt fuer Windows kein tauri.windows.conf.json;"
+        Write-Host "                              faende sich eines mit eigenem resources-Array, wuerde"
+        Write-Host "                              es den Wert der Grundkonfiguration nach RFC 7396"
+        Write-Host "                              vollstaendig ERSETZEN statt ihn zu ergaenzen."
+        $beilageFehlt = $true
+    }
+    # Vorhandensein allein genuegt nicht: eine leere Beilage ist dasselbe wie
+    # keine.
+    elseif ($gefunden[$schluessel].Groesse -eq 0) {
+        Write-Host "      FEHLER: '$erwartet' ist LEER im gebauten Installer (0 Bytes)." -ForegroundColor Red
+        Write-Host "        gefunden als:         $($gefunden[$schluessel].Pfad)"
+        Write-Host "        geprueftes Erzeugnis: $($WAECHTER_INSTALLER.FullName)"
+        Write-Host "        naechstliegende Ursache: die Quelldatei unter src-tauri/ war beim"
+        Write-Host "                              Tauri-Bau bereits leer -- siehe Schritt [3d/6]."
+        $beilageFehlt = $true
+    }
+    else {
+        Write-Host "      OK - $erwartet ($($gefunden[$schluessel].Groesse) Bytes, als $($gefunden[$schluessel].Pfad))"
+    }
+}
+
+# Fehlt etwas, bricht der Bau ab: kein Warnhinweis, kein Weiterlaufen, kein
+# Einsammeln.
+if ($beilageFehlt) {
+    Write-Host "      Der Bau wird abgebrochen. Es wird NICHTS nachgelegt und NICHTS" -ForegroundColor Red
+    Write-Host "      repariert -- das waere ein stiller Rueckfall auf ein Erzeugnis, das" -ForegroundColor Red
+    Write-Host "      der Bau so nie hergestellt hat." -ForegroundColor Red
+    Write-Host "      Weg: Ursache oben beheben und neu bauen." -ForegroundColor Red
+    exit 1
+}
+
 # ── Schritt 6: Installer einsammeln ─────────────────────────
 # Version aus tauri.conf.json (Quelle der Wahrheit fuer die Produktversion).
 # Kein Installer = FEHLER mit Abbruch -- ein Build ohne Ergebnis ist kein

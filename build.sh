@@ -227,6 +227,69 @@ fi
 AUTHORITY=$(printf '%s' "$SIGN_INFO" | grep "^Authority=" | head -1 | cut -d= -f2-)
 echo "      OK - Identitaet: ${AUTHORITY:-unbekannt} (TeamIdentifier: $TEAM_ID)"
 
+# ── Schritt 6b: Waechter Vorhandensein der Beilage ──────────
+# Warum ueberhaupt: der macOS-Bau lief mit RC=0 durch, OHNE dass
+# lizenzaufstellung.json und LICENSE im .app ankamen. Ursache war die stille
+# Array-Ersetzung durch tauri.macos.conf.json nach RFC 7396 -- gefunden wurde
+# das von Hand, nicht vom Bau. Ein gruener Bau belegt eben nicht seinen Inhalt.
+# Diesen Waechter braucht es, damit der Bau seinen eigenen Inhalt belegt.
+#
+# Die Stelle ist bindend: NACH Schritt [6/7] und VOR Schritt [7/7]. Der Bau ist
+# hier fertig, das .app liegt vor und ist verifiziert -- geprueft wird also am
+# ECHTEN Erzeugnis, nicht am Quellverzeichnis und nicht an dem, was der Bau
+# abgelegt zu haben glaubt. Und weil das Einsammeln erst danach kommt, kann ein
+# Paket mit fehlender Beilage nicht auf dem Schreibtisch landen.
+#
+# Der Waechter prueft NUR und legt NICHTS nach: ein nachtraegliches Einfuegen in
+# das fertige, signierte Bundle bricht die Signatur (in dieser Sitzung gemessen).
+# Eine Reparatur waere hier also nicht bloss ein stiller Rueckfall, sondern
+# wuerde das Erzeugnis aktiv unbrauchbar machen.
+#
+# Der Schritt traegt 6b und nicht eine eigene Hauptnummer: dieses Skript
+# nummeriert nachtraeglich eingefuegte Teilschritte seit jeher mit Buchstaben
+# (0b, 3b, 3c). So bleibt die Gesamtzahl 7 richtig und keine bestehende
+# Zaehlerzeile muss angefasst werden.
+echo ""
+echo "[6b/7] Beilage im gebauten .app pruefen (Waechter)..."
+APP_RESSOURCEN="$APP_PFAD/Contents/Resources"
+echo "      Geprueft wird: $APP_RESSOURCEN"
+BEILAGE_FEHLT=0
+# Jede erwartete Datei EINZELN und namentlich -- eine Sammelmeldung
+# "irgendetwas fehlt" liesse offen, wonach zu suchen waere.
+for beilage in lizenzaufstellung.json LICENSE; do
+    ZIEL="$APP_RESSOURCEN/$beilage"
+    if [ ! -f "$ZIEL" ]; then
+        echo "      FEHLER: '$beilage' fehlt im gebauten Paket."
+        echo "        erwarteter Ort:      $ZIEL"
+        echo "        geprueftes Erzeugnis: $APP_PFAD"
+        echo "        naechstliegende Ursache: '$beilage' fehlt in bundle.resources"
+        echo "        von src-tauri/tauri.macos.conf.json. Tauri verschmilzt die"
+        echo "        plattformspezifische Konfiguration nach RFC 7396; ein Array"
+        echo "        ERSETZT den Wert aus tauri.conf.json vollstaendig, statt ihn"
+        echo "        zu ergaenzen. Der Eintrag in tauri.conf.json allein reicht nicht."
+        BEILAGE_FEHLT=1
+    # Vorhandensein allein genuegt nicht: eine leere Beilage ist dasselbe wie
+    # keine. Darum -s statt nur -f.
+    elif [ ! -s "$ZIEL" ]; then
+        echo "      FEHLER: '$beilage' ist LEER im gebauten Paket (0 Bytes)."
+        echo "        erwarteter Ort:      $ZIEL"
+        echo "        geprueftes Erzeugnis: $APP_PFAD"
+        echo "        naechstliegende Ursache: die Quelldatei unter src-tauri/ war"
+        echo "        beim Tauri-Bau bereits leer -- siehe Schritt [3c/7]."
+        BEILAGE_FEHLT=1
+    else
+        echo "      OK - $beilage ($(wc -c < "$ZIEL" | tr -d ' ') Bytes)"
+    fi
+done
+# Fehlt etwas, bricht der Bau ab: kein Warnhinweis, kein Weiterlaufen, kein
+# Einsammeln.
+if [ "$BEILAGE_FEHLT" -ne 0 ]; then
+    echo "      Der Bau wird abgebrochen. Es wird NICHTS nachgelegt und NICHTS"
+    echo "      repariert: ein Eingriff in das fertige Bundle braeche die Signatur."
+    echo "      Weg: Ursache oben beheben und neu bauen."
+    exit 1
+fi
+
 echo ""
 echo "[7/7] Pakete einsammeln..."
 VERSION=$(python3 -c "import json; print(json.load(open('$TAURI_SRC/tauri.conf.json'))['version'])")
