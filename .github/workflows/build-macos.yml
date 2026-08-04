@@ -155,6 +155,37 @@ jobs:
           # Kontrollausgabe: zeigt die Developer-ID (kein Geheimnis) im Log.
           security find-identity -v -p codesigning "$KEYCHAIN"
 
+      # BEFUND, DER DIESEN SCHRITT NOETIG MACHT: Das ausgelieferte dmg trug
+      # bisher ein Ticket, die .app DARIN nicht. Auf einer Maschine ohne Netz
+      # verweigert macOS deshalb den Start der INSTALLIERTEN Anwendung -- das
+      # dmg-Ticket nuetzt nach dem Kopieren nichts mehr.
+      # Gemessen im tauri-bundler 2.8.1: sind APPLE_API_KEY, APPLE_API_ISSUER
+      # und APPLE_API_KEY_PATH gesetzt, verpackt der Bundler die .app selbst mit
+      # ditto, reicht sie mit 'notarytool submit --wait' ein und fuehrt 'xcrun
+      # stapler staple' darauf aus -- alles VOR dem dmg-Bau. Der Bundler
+      # erwartet den Schluessel als DATEI; darum muss sie existieren, BEVOR
+      # build.sh laeuft.
+      # Dekodierung (base64 --decode) und Ablage im RUNNER_TEMP wortgleich aus
+      # dem bestehenden Notarisierungsschritt uebernommen, plus chmod 600. Der
+      # Schluessel wird nie ausgegeben: 'echo "$MACOS_API_KEY"' schreibt direkt
+      # in die Datei, ins Protokoll gelangt nur der PFAD.
+      # Bedingung identisch zum bestehenden Notarisierungsschritt -- nur v-Tags.
+      - name: Notarisierungs-Schluessel als Datei bereitstellen (nur v-Tags)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          MACOS_API_KEY: ${{ secrets.MACOS_API_KEY }}
+        run: |
+          set -euo pipefail
+          NOTARY_DIR="$RUNNER_TEMP/notary"
+          KEY="$NOTARY_DIR/AuthKey.p8"
+          mkdir -p "$NOTARY_DIR"
+          echo "$MACOS_API_KEY" | base64 --decode > "$KEY"
+          chmod 600 "$KEY"
+          # Pfad (kein Geheimnis) an die folgenden Schritte durchreichen.
+          echo "NOTARY_KEY_PATH=$KEY" >> "$GITHUB_ENV"
+          echo "Schluesseldatei bereitgestellt: $KEY"
+
       # Den unveraenderten build.sh ausfuehren. Er erledigt selbst: nmap-Check,
       # venv-Aktivierung, Frontend-Build, beide PyInstaller-Binaries, Binaries
       # fuer Tauri bereitstellen, Tauri-Build (.dmg) und das Einsammeln.
@@ -162,10 +193,25 @@ jobs:
       # .app UND .dmg; build.sh verifiziert das am Ende selbst (kein adhoc,
       # TeamIdentifier vorhanden). Der Wert muss exakt der Identitaet aus der
       # oben importierten Keychain entsprechen, sonst bricht build.sh ab.
+      #
+      # DIE DREI NOTARISIERUNGSVARIABLEN steuern den Bundler (siehe Schritt
+      # darueber). Bedeutung streng auseinanderhalten:
+      #   APPLE_API_KEY      = die Key-ID (z.B. 'ABCD123456'), NICHT der Inhalt
+      #                        -> Secret MACOS_API_KEY_ID
+      #   APPLE_API_ISSUER   = die Issuer-UUID -> Secret MACOS_API_ISSUER_ID
+      #   APPLE_API_KEY_PATH = Dateipfad zur .p8 aus dem Schritt darueber
+      # Das Secret MACOS_API_KEY (der base64-kodierte Schluesselinhalt) gehoert
+      # hier bewusst NICHT hin -- es geht ausschliesslich in die Datei.
+      # Im Nicht-Tag-Lauf liefert derselbe Bedingungsausdruck wie oben den
+      # leeren String; der Bundler ueberspringt die Notarisierung dann still,
+      # und Dispatch-Laeufe loesen keinen Apple-Roundtrip aus.
       - name: macOS-Build (build.sh -- Frontend + Binaries + Tauri/dmg, signiert)
         shell: bash
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+          APPLE_API_KEY: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.MACOS_API_KEY_ID || '' }}
+          APPLE_API_ISSUER: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.MACOS_API_ISSUER_ID || '' }}
+          APPLE_API_KEY_PATH: ${{ startsWith(github.ref, 'refs/tags/v') && env.NOTARY_KEY_PATH || '' }}
         run: bash build.sh
 
       # Notarisierung -- NUR an v-Tags (siehe Kopfkommentar: langsamer Apple-
@@ -215,6 +261,60 @@ jobs:
           # Zusaetzliche Sichtprueferei fuers Log -- spctl bewertet dmg-Container
           # nicht immer eindeutig, darum bewusst NICHT abbruchrelevant.
           spctl -a -vvv -t install "$DMG" 2>&1 || true
+
+          # GEGENPROBE -- der eigentliche Wert dieses Schnitts: 'stapler
+          # validate' auf das dmg oben sagt NUR, dass der CONTAINER ein Ticket
+          # traegt. Genau das war der Trugschluss, der den Befund verdeckt hat:
+          # die .app IM dmg kann trotzdem ungestapelt sein, und nur sie
+          # ueberlebt das Kopieren nach /Applications. Ohne diese Pruefung
+          # waere derselbe Fehler beim naechsten Mal wieder unsichtbar.
+          # Dazu das dmg READ-ONLY einhaengen (-readonly, -nobrowse: kein
+          # Finder-Fenster im CI), stapler validate auf die .app darin, wieder
+          # aushaengen. Der trap haengt auch im Fehlerfall wieder aus -- sonst
+          # bliebe die Image-Anbindung haengen.
+          MOUNT_DIR="$RUNNER_TEMP/dmg-gegenprobe"
+          mkdir -p "$MOUNT_DIR"
+          trap 'rm -f "$KEY"; hdiutil detach "$MOUNT_DIR" -force >/dev/null 2>&1 || true' EXIT
+          hdiutil attach "$DMG" -readonly -nobrowse -noverify -mountpoint "$MOUNT_DIR"
+
+          APP=$(find "$MOUNT_DIR" -maxdepth 1 -name '*.app' | head -1)
+          if [ -z "$APP" ]; then
+            echo "FEHLER: keine .app im gemounteten dmg gefunden -- die Gegenprobe kann nicht greifen."
+            exit 1
+          fi
+          echo "Gegenprobe auf: $APP"
+
+          if ! xcrun stapler validate "$APP"; then
+            echo "FEHLER: die .app IM dmg traegt KEIN Notarisierungsticket."
+            echo "Das dmg allein reicht nicht: nach dem Kopieren nach /Applications"
+            echo "startet die Anwendung auf einer Maschine ohne Netz nicht."
+            echo "Ursache pruefen: APPLE_API_KEY / APPLE_API_ISSUER / APPLE_API_KEY_PATH"
+            echo "muessen im env-Block des build.sh-Schritts gesetzt sein."
+            exit 1
+          fi
+          echo "Gegenprobe bestanden: .app im dmg traegt ein Ticket."
+
+          hdiutil detach "$MOUNT_DIR"
+          # trap wieder auf das blosse Loeschen des Schluessels zuruecknehmen --
+          # das Image ist ausgehaengt, ein zweites detach waere sinnlos.
+          trap 'rm -f "$KEY"' EXIT
+
+      # Aufraeumen des Schluessels aus dem Bereitstellungsschritt. BEWUSST ein
+      # eigener Schritt mit if always() statt der trap-Technik des
+      # Notarisierungsschritts darueber: dort entsteht der Schluessel INNERHALB
+      # desselben run-Blocks, der ihn nutzt -- ein EXIT-trap deckt seine ganze
+      # Lebensdauer ab. Der Schluessel aus 3.1 dagegen ueberspannt MEHRERE
+      # Schritte (Bereitstellen -> build.sh); ein trap im Bereitstellungsschritt
+      # loeschte ihn sofort beim Ende jenes Schritts, und der Bundler faende ihn
+      # nicht mehr. if always() sorgt dafuer, dass er auch nach einem
+      # gescheiterten Build oder einer gescheiterten Notarisierung verschwindet.
+      - name: Notarisierungs-Schluessel entfernen
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f "$RUNNER_TEMP/notary/AuthKey.p8"
+          echo "Schluesseldatei entfernt (sofern vorhanden)."
 
       # Pruefsummen der Pakete. Platzierung zwingend NACH dem Notarisierungs-
       # Schritt darueber -- das ist hier der entscheidende Punkt: 'xcrun stapler
