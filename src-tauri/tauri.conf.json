@@ -1,6 +1,6 @@
 {
   "productName": "CernisPro",
-  "version": "2.0.7",
+  "version": "2.0.8",
   "identifier": "de.cernis.pro",
   "build": {
     "frontendDist": "../frontend/dist"
