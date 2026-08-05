@@ -46,12 +46,18 @@
           "libssl3t64 | libssl3",
           "libgtk-3-0t64 | libgtk-3-0",
           "libayatana-appindicator3-1",
+          "libfribidi0",
           "libcap2-bin",
+          "iproute2",
+          "iputils-ping",
+          "bind9-dnsutils",
           "nmap",
-          "net-tools",
           "traceroute",
           "psmisc",
           "libpcap0.8t64 | libpcap0.8"
+        ],
+        "recommends": [
+          "samba-common-bin"
         ],
         "preInstallScript": "deb-preinst.sh",
         "postInstallScript": "deb-postinst.sh",
@@ -63,14 +69,20 @@
       "rpm": {
         "depends": [
           "libwebkit2gtk-4.1.so.0()(64bit)",
-          "openssl-libs",
           "libayatana-appindicator3.so.1()(64bit)",
-          "nmap",
-          "net-tools",
-          "traceroute",
+          "libssl.so.3()(64bit)",
+          "libcap.so.2()(64bit)",
+          "libpcap.so.1()(64bit)",
+          "libfribidi.so.0()(64bit)",
           "psmisc",
-          "libpcap",
-          "libcap"
+          "traceroute",
+          "iputils",
+          "bind-utils",
+          "(iproute or iproute2)",
+          "(libcap or libcap-progs)"
+        ],
+        "recommends": [
+          "nmap"
         ],
         "preInstallScript": "rpm-preinst.sh",
         "postInstallScript": "rpm-postinst.sh",
