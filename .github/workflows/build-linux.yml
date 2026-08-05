@@ -253,14 +253,57 @@ jobs:
           [ "$ANZAHL" -gt 0 ] || { echo "FEHLER: keine deb- oder rpm-Datei unter ${BUNDLE} gefunden"; exit 1; }
           echo "Pruefsummen erzeugt: ${ANZAHL}"
 
+      # Pakete aus JEDEM Lauf als Actions-Artefakt ablegen -- auch ohne v-Tag.
+      # Grund: bisher entstanden verteilbare Pakete ausschliesslich als
+      # Release-Anhang an v-Tags. Ein Bau liess sich damit nur pruefen, indem
+      # zuerst getaggt wurde -- die falsche Reihenfolge. Mit diesem Schritt ist
+      # das Paket eines Dispatch-Laufs herunterladbar und pruefbar, BEVOR ein
+      # Tag gesetzt wird.
+      #
+      # Platzierung zwingend NACH dem Pruefsummen-Schritt (sonst fehlten die
+      # .sha256-Dateien) und VOR dem Release-Schritt.
+      #
+      # KEINE if-Bedingung: laeuft bei jedem Trigger. Bei v-Tags entsteht das
+      # Paket damit doppelt (Artefakt + Release-Asset) -- das ist gewollt und
+      # billig: das Artefakt verfaellt nach der Aufbewahrungsfrist, das
+      # Release-Asset bleibt.
+      #
+      # Der Artefaktname traegt die Architektur (x64), damit der parallel
+      # laufende arm64-Job (Name: ...-arm64) ihn nicht ueberschreibt --
+      # gleichnamige Artefakte aus zwei Jobs kollidieren.
+      #
+      # Aufbewahrungsdauer 14 Tage statt der Vorgabe von 90: ein Bundle ist
+      # ~850 MB und zaehlt gegen das 2-GB-Gratis-Storage-Kontingent. Der Zweck
+      # ist die kurzfristige Pruefung eines frischen Baus vor dem Tag, nicht
+      # Archivierung -- die uebernehmen die Release-Assets, die weder gegen das
+      # Kontingent zaehlen noch verfallen. 14 Tage decken eine Pruefrunde samt
+      # Nacharbeit ab und halten das Kontingent frei.
+      #
+      # Die Pfade stammen aus dem Pruefsummen- und Release-Schritt dieses Jobs,
+      # nicht geraten. if-no-files-found: error -- ein leeres Artefakt waere ein
+      # stiller Fehlschlag; hier gilt dieselbe Regel wie bei
+      # fail_on_unmatched_files im Release-Schritt.
+      - name: Pakete als Artefakt ablegen (jeder Lauf)
+        uses: actions/upload-artifact@v4
+        with:
+          name: cernis-pro-linux-x64
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb
+            src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb.sha256
+            src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/rpm/*.rpm
+            src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/rpm/*.rpm.sha256
+
       # Ab hier Fallunterscheidung nach Trigger. Beide Faelle laufen ERST nach
       # Verifikation und chown -- diese beiden Schritte oben sind unveraendert
       # und gelten fuer beide Pfade gleichermassen.
       #
-      # Fall a) v-Tag: NICHT als Actions-Artefakt hochladen (zaehlt gegen das
-      # 500-MB-Gratislimit und verfaellt), sondern als GitHub-Release-Asset
-      # veroeffentlichen. Release-Assets zaehlen nicht gegen das Limit und
-      # verfallen nicht.
+      # Fall a) v-Tag: zusaetzlich zum Artefakt oben als GitHub-Release-Asset
+      # veroeffentlichen. Das Artefakt dient der kurzfristigen Pruefung und
+      # verfaellt nach 14 Tagen; nur das Release-Asset ist die dauerhafte,
+      # verteilbare Fassung -- es zaehlt nicht gegen das Storage-Kontingent und
+      # verfaellt nicht.
       #
       # Werkzeugwahl: softprops/action-gh-release statt handgeschriebener
       # gh-CLI-Aufrufe. Gruende: die Action legt ein fehlendes Release fuer den
@@ -304,14 +347,14 @@ jobs:
             dist-source/*_source.tar.gz
             dist-source/*_source.tar.gz.sha256
 
-      # Fall b) kein v-Tag (workflow_dispatch): BEWUSST
-      # KEIN Artefakt-Upload. Ein ~850-MB-Bundle je Push fuellte das 2-GB-Gratis-
-      # Storage-Kontingent auf. Bei Push-Laeufen ist der erfolgreiche Durchlauf
-      # des Builds (inkl. libpcap-Verifikation oben) selbst der Beweis -- die
-      # fertigen Bundles werden nicht gebraucht. Verteilbare Bundles entstehen
-      # ausschliesslich an v-Tags und werden dort (Fall a oben) als GitHub-
-      # Release-Asset veroeffentlicht: die zaehlen separat gegen das Kontingent
-      # und verfallen nicht.
+      # Fall b) kein v-Tag (workflow_dispatch): kein Release, aber das Paket ist
+      # trotzdem greifbar -- der Artefakt-Schritt oben laeuft ohne if-Bedingung
+      # in jedem Lauf. Frueher stand hier bewusst KEIN Upload (Storage-Kosten);
+      # das machte einen Bau jedoch erst nach dem Tag pruefbar. Aufgeloest wird
+      # der Zielkonflikt nicht durch Verzicht, sondern durch die kurze
+      # Aufbewahrungsfrist von 14 Tagen. Verteilbare, dauerhafte Bundles
+      # entstehen weiterhin ausschliesslich an v-Tags als Release-Asset (Fall a
+      # oben): die zaehlen separat gegen das Kontingent und verfallen nicht.
 
   # Spiegelbild des x64-Jobs fuer aarch64. Laeuft unabhaengig und parallel
   # (keine needs-Abhaengigkeit) auf einem nativen ARM-Runner. Abweichungen zum
@@ -439,6 +482,25 @@ jobs:
           [ "$ANZAHL" -gt 0 ] || { echo "FEHLER: keine deb- oder rpm-Datei unter ${BUNDLE} gefunden"; exit 1; }
           echo "Pruefsummen erzeugt: ${ANZAHL}"
 
+      # Wie im x64-Job, mit denselben Begruendungen (Pruefbarkeit ohne Tag,
+      # Platzierung nach Pruefsumme und vor Release, keine if-Bedingung,
+      # 14 Tage Aufbewahrung wegen Bundle-Groesse und Storage-Kontingent).
+      # Einzige Unterschiede: der Artefaktname traegt arm64 statt x64 -- so
+      # ueberschreiben sich die beiden parallel laufenden Jobs nicht -- und die
+      # Pfade nennen das aarch64-Triple. Ein Quelltextarchiv gehoert auch hier
+      # NICHT dazu: das liefert allein der x64-Job.
+      - name: Pakete als Artefakt ablegen (jeder Lauf)
+        uses: actions/upload-artifact@v4
+        with:
+          name: cernis-pro-linux-arm64
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/deb/*.deb
+            src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/deb/*.deb.sha256
+            src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/rpm/*.rpm
+            src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/rpm/*.rpm.sha256
+
       # Fall a) v-Tag: Release-Assets, aber aarch64-Bundle-Pfade.
       - name: Release erstellen und Bundles als Assets anhaengen (nur v-Tags)
         if: startsWith(github.ref, 'refs/tags/v')
@@ -460,11 +522,7 @@ jobs:
             src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/rpm/*.rpm
             src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/rpm/*.rpm.sha256
 
-      # Fall b) kein v-Tag: BEWUSST KEIN Artefakt-Upload -- gleiche Begruendung
-      # wie im x64-Job. Ein ~850-MB-Bundle je Push fuellte das 2-GB-Gratis-
-      # Storage-Kontingent auf. Bei Push-Laeufen ist der erfolgreiche Durchlauf
-      # des Builds (inkl. libpcap-Verifikation oben) selbst der Beweis -- die
-      # fertigen Bundles werden nicht gebraucht. Verteilbare Bundles entstehen
-      # ausschliesslich an v-Tags und werden dort (Fall a oben) als GitHub-
-      # Release-Asset veroeffentlicht: die zaehlen separat gegen das Kontingent
-      # und verfallen nicht.
+      # Fall b) kein v-Tag: kein Release -- gleiche Lage wie im x64-Job. Das
+      # Paket ist ueber den Artefakt-Schritt oben (ohne if-Bedingung, 14 Tage)
+      # trotzdem herunterladbar. Dauerhafte Bundles entstehen weiterhin nur an
+      # v-Tags als Release-Asset (Fall a oben).
