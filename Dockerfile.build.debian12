@@ -1,16 +1,22 @@
 # ============================================================
-#  CERNIS PRO - Reproduzierbare Build-Werkbank (Linux aarch64)
+#  CERNIS PRO - Reproduzierbare Build-Werkbank (Linux x86_64)
 #  Zweck: Frischer, definierter Container fuer den PyInstaller-
 #         /Tauri-Build. Das Repo wird zur LAUFZEIT als Volume
 #         nach /build gemountet -- KEIN COPY ins Image, damit
 #         die erzeugten deb/rpm auf dem Host sichtbar sind.
-#  Basis: debian:13 (trixie)
+#  Basis: debian:12 (bookworm)
 #  Die Build-Distro muss der Ziel-Distro entsprechen, weil
 #  PyInstaller die System-libpcap bundelt und deren NEEDED-
 #  Abhaengigkeiten unter AT_SECURE (setcap) nicht ueber
 #  LD_LIBRARY_PATH aufloesbar sind.
+#  Bookworm statt Trixie, weil die Rust-Laufzeit auf einer
+#  Trixie-Werkbank GLIBC_2.39 ueber die WEAK-Symbole
+#  pidfd_spawnp/pidfd_getpid fordert und der Loader auf
+#  aelteren Zielen hart abbricht. Bookworm ist der tiefste
+#  moegliche Boden: Debian 11 fuehrt kein
+#  libwebkit2gtk-4.1-dev.
 # ============================================================
-FROM debian:13
+FROM debian:12
 
 # Nicht-interaktive apt-Installationen (kein tzdata-Prompt etc.)
 ENV DEBIAN_FRONTEND=noninteractive
