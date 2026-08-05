@@ -44,13 +44,13 @@ jobs:
       contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       # Toolchain via Setup-Actions statt via Container-Image. Versionen exakt
       # wie in ci.yml und im Linux-Dockerfile (Node 20, uv, Rust stable),
       # damit kein Drift zwischen den Werkbaenken entsteht.
       - name: Node einrichten (LTS 20)
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           node-version: "20"
 
@@ -222,7 +222,7 @@ jobs:
       # Der NSIS-Installer ist der von build.ps1 garantierte Output.
       - name: Release erstellen und Installer als Asset anhaengen (nur v-Tags)
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: CERNIS PRO ${{ github.ref_name }}
           body: "Release ${{ github.ref_name }} -- Release-Notes werden separat gepflegt."

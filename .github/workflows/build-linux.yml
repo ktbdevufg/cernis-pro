@@ -40,7 +40,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       # Das Build-Image aus der repo-eigenen Dockerfile.build.debian12 bauen.
       # Alle Toolchains (Node 20, Rust stable, uv, Python 3.12) und System-Deps
@@ -284,7 +284,7 @@ jobs:
       # stiller Fehlschlag; hier gilt dieselbe Regel wie bei
       # fail_on_unmatched_files im Release-Schritt.
       - name: Pakete als Artefakt ablegen (jeder Lauf)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cernis-pro-linux-x64
           if-no-files-found: error
@@ -319,7 +319,7 @@ jobs:
       # belegt -- die Freigabe erfolgt von Hand.
       - name: Release erstellen und Bundles als Assets anhaengen (nur v-Tags)
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: CERNIS PRO ${{ github.ref_name }}
           body: "Release ${{ github.ref_name }} -- Release-Notes werden separat gepflegt."
@@ -367,7 +367,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       # Image aus der ARM-Werkbank Dockerfile.build.debian12.arm64.
       - name: Build-Image bauen (Debian 12 arm64, Quelle der Wahrheit)
@@ -490,7 +490,7 @@ jobs:
       # Pfade nennen das aarch64-Triple. Ein Quelltextarchiv gehoert auch hier
       # NICHT dazu: das liefert allein der x64-Job.
       - name: Pakete als Artefakt ablegen (jeder Lauf)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cernis-pro-linux-arm64
           if-no-files-found: error
@@ -504,7 +504,7 @@ jobs:
       # Fall a) v-Tag: Release-Assets, aber aarch64-Bundle-Pfade.
       - name: Release erstellen und Bundles als Assets anhaengen (nur v-Tags)
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: CERNIS PRO ${{ github.ref_name }}
           body: "Release ${{ github.ref_name }} -- Release-Notes werden separat gepflegt."
