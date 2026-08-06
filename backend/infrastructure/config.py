@@ -16,7 +16,7 @@ APP_NAME = "cernis-pro"
 # kann (z. B. eingefrorener Build ohne mitgelieferte Quelldatei UND ohne
 # _build_version.py). Beim Versionsbump mitziehen -- im Normalfall greift diese
 # Zahl NIE, weil die Produktversion aus pyproject.toml stammt.
-_FALLBACK_PRODUCT_VERSION = "2.0.8"
+_FALLBACK_PRODUCT_VERSION = "2.1.0"
 
 # ``[project] version = "..."`` in pyproject.toml. Bewusst zeilenweise per Regex
 # statt per TOML-Parser: die Ableitung soll auch dann tragen, wenn tomllib aus
