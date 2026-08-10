@@ -18,6 +18,10 @@ ZENTRALE LEERE-PRUEFUNG
     Die abschliessende Ergebnispruefung sah KEINE Ebene auf Leere durch. Sie
     prueft jetzt jede Pflichtebene und nennt die betroffene NAMENTLICH.
 
+Dazu kommt seit S82-F1 die ZIELPLATTFORM als vierter Waechter: ``--zielplattform``
+hat keinen Vorgabewert mehr. Ein fehlendes Argument ist ein Abbruch statt einer
+Aufstellung, die sich als eine andere Plattform ausweist als die gebaute.
+
 Bauart der Tests: der Sammler ist ein eigenstaendiges Skript unter ``scripts/``
 und kein Paket unterhalb von ``backend/`` -- er wird deshalb ueber seinen Pfad
 geladen, nicht ueber einen Paketimport. Geprueft wird gegen ``tmp_path``; das Repo
@@ -385,3 +389,47 @@ def test_leere_pruefung_haengt_in_der_ergebnispruefung(tmp_path: Path) -> None:
     # Vier der fuenf fehlen; rust ist besetzt und darf nicht gemeldet werden.
     assert "daten" in meldung and "npm" in meldung
     assert "Aufstellung: daten, npm, programme, python" in meldung
+
+
+# ────────────────────────────────────────────────────────────────────────────────
+# Waechter 4 — Zielplattform ohne Vorgabewert
+# ────────────────────────────────────────────────────────────────────────────────
+
+
+def test_zielplattform_kennt_linux_aarch64() -> None:
+    """``linux-aarch64`` ist ein zulaessiger Wert -- und feldgleich zu x86_64.
+
+    Ohne diesen Eintrag liesse sich der ARM64-Linux-Bau ueberhaupt nicht benennen;
+    er fiele auf eine andere Plattform zurueck oder braeche ab. Geprueft wird
+    nicht nur das Vorkommen, sondern der FELDBESTAND: fehlte eines der drei
+    Merkmale, liefe die Erhebung an ihm auf einen KeyError statt auf eine Aussage.
+    """
+    merkmale = sammler_modul.ZIELPLATTFORMEN["linux-aarch64"]
+    assert merkmale["rust_ziel"] == "aarch64-unknown-linux-gnu"
+    assert merkmale["bibliotheksendungen"] == (".so",)
+    assert merkmale["paketverzeichnis"] == "dpkg-query"
+    # Feldgleich zum x86_64-Eintrag: kein Feld erfunden, keines weggelassen.
+    assert set(merkmale) == set(sammler_modul.ZIELPLATTFORMEN["linux-x86_64"])
+
+
+def test_zielplattform_ist_pflicht(tmp_path: Path) -> None:
+    """Ohne ``--zielplattform`` bricht der Aufruf ab, statt eine Vorgabe zu nehmen.
+
+    Das ist der Kern des Waechters: ein Vorgabewert lieferte beim vergessenen
+    Schalter ein falsches, aber plausibles Ergebnis -- die Aufstellung eines
+    anderen Ziels, die sich nicht als solche zu erkennen gibt (Finding S3).
+    """
+    with pytest.raises(SystemExit) as fehler:
+        sammler_modul.main([str(tmp_path / "aufstellung.json")])
+    # argparse beendet einen fehlenden Pflichtschalter mit Code 2, nicht mit 0.
+    assert fehler.value.code == 2
+
+
+def test_zielplattform_hat_keinen_vorgabewert_im_modul() -> None:
+    """Es gibt keine Konstante mehr, aus der still eine Vorgabe kaeme.
+
+    Der Schalter allein reicht nicht: bliebe die alte ``ZIELPLATTFORM_VORGABE``
+    stehen, koennte sie in ``erzeuge`` oder einem spaeteren Aufrufer wieder zum
+    stillen Rueckfall werden.
+    """
+    assert not hasattr(sammler_modul, "ZIELPLATTFORM_VORGABE")

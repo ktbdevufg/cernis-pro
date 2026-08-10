@@ -369,7 +369,8 @@ $LIZENZ_JSON = Join-Path $TAURI_SRC "lizenzaufstellung.json"
 # --zielplattform: die Plattform, FUER die gebaut wird. Der Sammler leitet
 # daraus das Rust-Ziel und die Endungen der nativen Bibliotheken ab, statt sie
 # aus der laufenden Maschine zu raten. Aus dem Triple abgeleitet wie ARCH oben,
-# damit ein ARM64-Bau nicht stillschweigend die x64-Aufstellung erzeugt.
+# damit ein ARM64-Bau nicht stillschweigend die x64-Aufstellung erzeugt. Ein
+# unbekanntes Triple ist ein Abbruch, kein Rueckfall auf einen Vorgabewert.
 switch -Wildcard ($TRIPLE) {
     "x86_64-*"  { $ZIELPLATTFORM = "windows-x86_64" }
     "aarch64-*" { $ZIELPLATTFORM = "windows-aarch64" }

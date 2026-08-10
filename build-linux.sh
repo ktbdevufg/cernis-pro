@@ -106,9 +106,23 @@ echo "[5/8] Lizenzaufstellung erzeugen (inkl. nativer Bibliotheken)..."
 # Schritten 2/3 und vor dem Tauri-Build. Sie koennen nicht mehr in die Binaries
 # hinein, deshalb geht die Aufstellung ueber bundle.resources ins Paket.
 LIZENZ_JSON="$TAURI_SRC/lizenzaufstellung.json"
+# --zielplattform: die Plattform, FUER die gebaut wird. Der Sammler leitet daraus
+# das Rust-Ziel und die Endungen der nativen Bibliotheken (.so) ab, statt sie aus
+# der laufenden Maschine zu raten. Aus $TRIPLE abgeleitet, damit ein ARM64-Bau
+# nicht stillschweigend die x64-Aufstellung erzeugt. Ein unbekanntes Triple ist
+# ein Abbruch, kein Rueckfall auf einen Vorgabewert.
+case "$TRIPLE" in
+    x86_64-*)  ZIELPLATTFORM="linux-x86_64" ;;
+    aarch64-*) ZIELPLATTFORM="linux-aarch64" ;;
+    *)
+        echo "FEHLER: Unbekanntes Triple '$TRIPLE' -- kann Zielplattform nicht ableiten."
+        exit 1
+        ;;
+esac
 python3 "$SCRIPT_DIR/scripts/gen_license_manifest.py" "$LIZENZ_JSON" \
     --wurzel "$SCRIPT_DIR" \
-    --binaerverzeichnis "$BACKEND_DIR/dist"
+    --binaerverzeichnis "$BACKEND_DIR/dist" \
+    --zielplattform "$ZIELPLATTFORM"
 # Kein stiller Fallback: eine fehlende oder leere Aufstellung bricht den Bau ab.
 [ -s "$LIZENZ_JSON" ] || { echo "FEHLER: $LIZENZ_JSON fehlt oder ist leer"; exit 1; }
 # Die Wurzel-LICENSE kommt ueber dieselbe Ressourcenliste ins Paket. Kopie, das

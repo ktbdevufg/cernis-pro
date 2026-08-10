@@ -3,9 +3,12 @@
 
 Aufruf::
 
-    python scripts/gen_license_manifest.py <ausgabepfad.json>
-    python scripts/gen_license_manifest.py <ausgabepfad.json> --binaerverzeichnis <verz>
+    python scripts/gen_license_manifest.py <ausgabepfad.json> --zielplattform linux-x86_64
+    python scripts/gen_license_manifest.py <ausgabepfad.json> --zielplattform linux-aarch64
     python scripts/gen_license_manifest.py <ausgabepfad.json> --zielplattform windows-x86_64
+        --binaerverzeichnis <verz>
+
+``--zielplattform`` ist Pflicht; ``--binaerverzeichnis`` ist zusaetzlich.
 
 Das Werkzeug ist eigenstaendig: es importiert nichts aus ``backend`` und kommt mit
 der Standardbibliothek aus. Es sammelt die Ebenen ``python``, ``npm``, ``rust``,
@@ -30,8 +33,11 @@ Anzeige sie nicht aus leeren Listen erraten muss:
 
 Die ZIELplattform kommt aus ``--zielplattform`` und wird nie aus der laufenden
 Maschine geraten. Aus ihr folgen das Rust-Ziel (``cargo tree --target``) und die
-Endungen der nativen Bibliotheken. Ohne den Schalter gilt ``linux-x86_64``: ein
-Aufruf ohne ihn verhaelt sich damit genau wie bisher.
+Endungen der nativen Bibliotheken. Der Schalter ist PFLICHT und kennt keinen
+Vorgabewert: ein Vorgabewert lieferte bei einem vergessenen Schalter ein
+falsches, aber plausibles Ergebnis -- eine Aufstellung, die sich als eine andere
+Plattform ausweist als die gebaute. Das ist ein stiller Fallback und hier nicht
+zulaessig.
 
 Zwei Regeln bestimmen den Aufbau und sind an jeder Sammelstelle einzuhalten:
 
@@ -160,12 +166,6 @@ EBENE_NATIV_OHNE_PAKETVERZEICHNIS: Final = (
     "sie stehen."
 )
 
-#: Die Zielplattform, fuer die die Aufstellung erzeugt wird. Sie wird NICHT aus der
-#: laufenden Maschine geraten, sondern ueber ``--zielplattform`` uebergeben. Die
-#: Vorgabe ist ``linux-x86_64``: ein Aufruf ohne den Schalter verhaelt sich damit
-#: genau wie bisher, als beide Werte feste Konstanten waren.
-ZIELPLATTFORM_VORGABE: Final = "linux-x86_64"
-
 #: Je Zielplattform das Rust-Ziel (``cargo tree --target``), die Endungen nativer
 #: Bibliotheken (Ebene ``nativ``) und ob es auf dieser Plattform ueberhaupt eine
 #: Datei-zu-Paket-Zuordnung gibt, aus der Systempaket und Lizenztext hervorgehen.
@@ -177,6 +177,11 @@ ZIELPLATTFORM_VORGABE: Final = "linux-x86_64"
 ZIELPLATTFORMEN: Final[dict[str, dict[str, Any]]] = {
     "linux-x86_64": {
         "rust_ziel": "x86_64-unknown-linux-gnu",
+        "bibliotheksendungen": (".so",),
+        "paketverzeichnis": "dpkg-query",
+    },
+    "linux-aarch64": {
+        "rust_ziel": "aarch64-unknown-linux-gnu",
         "bibliotheksendungen": (".so",),
         "paketverzeichnis": "dpkg-query",
     },
@@ -2365,9 +2370,16 @@ def pruefe_ebene_nativ(eintraege: Sequence[dict[str, Any]]) -> None:
 
 def erzeuge(
     wurzel: Path,
-    binaerverzeichnis: Path | None = None,
-    zielplattform: str = ZIELPLATTFORM_VORGABE,
+    binaerverzeichnis: Path | None,
+    zielplattform: str,
 ) -> dict[str, Any]:
+    """Erzeugt die Aufstellung fuer die benannte Zielplattform.
+
+    ``zielplattform`` hat bewusst KEINEN Vorgabewert: eine Vorgabe lieferte beim
+    vergessenen Argument ein falsches, aber plausibles Ergebnis -- die Aufstellung
+    eines anderen Ziels, die sich nicht als solche zu erkennen gibt. Ein stiller
+    Fallback ist hier nicht zulaessig.
+    """
     merkmale = ZIELPLATTFORMEN[zielplattform]
     sammler = Sammler(wurzel)
     sammle_python(sammler, wurzel)
@@ -2434,14 +2446,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             "erhoben=false."
         ),
     )
+    # PFLICHT, ohne Vorgabewert: eine Vorgabe erzeugte beim vergessenen Schalter
+    # die Aufstellung eines ANDEREN Ziels -- falsch, aber plausibel und daher
+    # unauffaellig. Genau das ist ein stiller Fallback. Wer baut, muss sagen,
+    # wofuer.
     zerleger.add_argument(
         "--zielplattform",
         choices=sorted(ZIELPLATTFORMEN),
-        default=ZIELPLATTFORM_VORGABE,
+        required=True,
         help=(
             "Plattform, FUER die gebaut wird -- nicht die, auf der dieses Werkzeug "
             "laeuft. Daraus folgen das Rust-Ziel und die Endungen der nativen "
-            f"Bibliotheken. Vorgabe: {ZIELPLATTFORM_VORGABE}."
+            "Bibliotheken. Pflichtangabe, es gibt keinen Vorgabewert."
         ),
     )
     argumente = zerleger.parse_args(argv)
