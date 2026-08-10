@@ -87,3 +87,5 @@ backend/data/.version
 
 # Quelltextarchiv aus build-linux.yml
 dist-source/
+# Benannte Kopie der Lizenzaufstellung aus den Release-Ablaeufen
+dist-lizenz/

@@ -211,6 +211,91 @@ jobs:
           }
           Write-Host "Pruefsummen erzeugt: $($pakete.Count)"
 
+      # Die Lizenzaufstellung als EIGENSTAENDIGE Beigabe bereitstellen. Sie
+      # entsteht im Bau unter src-tauri/lizenzaufstellung.json und geht ueber
+      # bundle.resources in den NSIS-Installer -- also nur INNERHALB des Pakets.
+      # Das Website-Projekt erzeugt daraus die oeffentliche Lizenzseite und kann
+      # keine exe auspacken; darum hier eine benannte Kopie neben dem Installer.
+      #
+      # NAMENSSCHEMA lizenzaufstellung-<produktversion>-<zielplattform>.json:
+      # Alle vier Workflows erzeugen die Datei unter demselben Namen. Ein
+      # gleichnamiges zweites Asset kollidiert beim Release-Upload -- denselben
+      # Fall beschreibt der ARM-Kommentar zum Quelltextarchiv in build-linux.yml.
+      # Version und Plattform im Namen machen jede Kopie eindeutig.
+      #
+      # BEIDE WERTE STAMMEN AUS DER DATEI SELBST (Felder produktversion und
+      # plattform auf oberster Ebene), nicht aus dem Workflow und nicht aus dem
+      # Tag: so kann der Name nicht vom Inhalt abweichen. Ein aus dem Tag
+      # abgeleiteter Name behauptete eine Fassung, die die Datei gar nicht nennt.
+      #
+      # Kein stiller Ausfall: $ErrorActionPreference = "Stop" plus die
+      # ausdruecklichen Pruefungen -- fehlt die Datei, ist sie leer, kein
+      # gueltiges JSON oder fehlt eines der beiden Felder, bricht der Schritt mit
+      # benannter Meldung ab. Dieselbe Regel wie bei if-no-files-found: error und
+      # fail_on_unmatched_files.
+      #
+      # Werkzeugwahl ConvertFrom-Json statt python3: Linux und macOS lesen die
+      # Felder mit python3, hier ist pwsh die Shell dieses Workflows und
+      # ConvertFrom-Json braucht kein zusaetzliches Werkzeug auf dem PATH. Die
+      # Datei ist rund ein Megabyte -- fuer den Parser unkritisch.
+      - name: Lizenzaufstellung als benannte Kopie bereitstellen
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $quelle = "src-tauri\lizenzaufstellung.json"
+
+          if (-not (Test-Path -Path $quelle -PathType Leaf)) {
+            Write-Error "FEHLER: $quelle wurde nicht erzeugt"; exit 1
+          }
+          if ((Get-Item $quelle).Length -eq 0) {
+            Write-Error "FEHLER: $quelle ist leer"; exit 1
+          }
+
+          $aufstellung = Get-Content -Path $quelle -Raw -Encoding UTF8 | ConvertFrom-Json
+          $produktversion = $aufstellung.produktversion
+          $plattform = $aufstellung.plattform
+          if ([string]::IsNullOrWhiteSpace($produktversion)) {
+            Write-Error "FEHLER: Feld 'produktversion' fehlt oder ist leer in $quelle"; exit 1
+          }
+          if ([string]::IsNullOrWhiteSpace($plattform)) {
+            Write-Error "FEHLER: Feld 'plattform' fehlt oder ist leer in $quelle"; exit 1
+          }
+
+          $outDir = "dist-lizenz"
+          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+          $dateiname = "lizenzaufstellung-$produktversion-$plattform.json"
+          $ziel = Join-Path $outDir $dateiname
+          Copy-Item -Path $quelle -Destination $ziel -Force
+          if ((Get-Item $ziel).Length -eq 0) {
+            Write-Error "FEHLER: Kopie $ziel ist leer"; exit 1
+          }
+
+          Write-Host "--- Lizenzaufstellung ---"
+          Write-Host "Produktversion: $produktversion"
+          Write-Host "Plattform:      $plattform"
+          Write-Host "Dateiname:      $dateiname"
+
+      # NUR die Lizenzaufstellung als Actions-Artefakt -- ausdruecklich NICHT der
+      # Installer. Der Verzicht auf einen Artefakt-Upload in diesem Workflow
+      # (Fall b unten) begruendet sich mit der GROESSE des ~850-MB-Bundles gegen
+      # das 2-GB-Gratis-Storage-Kontingent. Die Aufstellung ist rund ein
+      # Megabyte; auf sie trifft diese Begruendung nicht zu. Sie wird ausserdem
+      # gerade dann gebraucht, wenn KEIN Tag gesetzt ist: das Website-Projekt
+      # soll die Lizenzseite auch aus einem Dispatch-Lauf ziehen koennen.
+      #
+      # Optionen bewusst identisch zur Linux-Seite (if-no-files-found: error,
+      # retention-days: 14, actions/upload-artifact@v7) -- kein Sonderweg und
+      # keine neue Action-Fassung. Der Artefaktname traegt windows-x64, damit er
+      # weder mit den Linux- noch mit dem ARM64-Windows-Artefakt kollidiert.
+      - name: Lizenzaufstellung als Artefakt ablegen (jeder Lauf)
+        uses: actions/upload-artifact@v7
+        with:
+          name: cernis-pro-lizenzaufstellung-windows-x64
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            dist-lizenz/lizenzaufstellung-*.json
+
       # Ab hier Fallunterscheidung nach Trigger -- identische Logik wie im
       # Linux-Workflow, nur mit den Windows-Bundle-Pfaden (NSIS statt deb/rpm).
       # Das Triple ist der build.ps1-Default x86_64-pc-windows-msvc.
@@ -235,14 +320,28 @@ jobs:
           # Schritt "Pruefsummen der Pakete erzeugen" ohne if-Bedingung neben
           # JEDER NSIS-exe eine gleichnamige .sha256 anlegt und sonst selbst
           # abbricht -- gibt es einen Installer, gibt es auch seine Pruefsumme.
+          # Das Lizenz-Muster trifft, weil der Schritt "Lizenzaufstellung als
+          # benannte Kopie bereitstellen" ohne if-Bedingung in jedem Lauf genau
+          # eine solche Datei anlegt und bei fehlender Quelle, leerer Datei oder
+          # fehlendem Feld selbst abbricht. Der Name traegt Version und Plattform
+          # aus der Datei selbst -- deshalb kollidiert die x64-Kopie im selben
+          # Release weder mit der ARM64-Kopie noch mit denen der anderen
+          # Plattformen.
           files: |
             src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
             src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe.sha256
+            dist-lizenz/lizenzaufstellung-*.json
 
       # Fall b) kein v-Tag (workflow_dispatch): BEWUSST
-      # KEIN Artefakt-Upload. Ein ~850-MB-Bundle je Push fuellte das 2-GB-Gratis-
-      # Storage-Kontingent auf. Bei Push-Laeufen ist der erfolgreiche Durchlauf
-      # des Builds selbst der Beweis -- der fertige Installer wird nicht gebraucht.
-      # Verteilbare Installer entstehen ausschliesslich an v-Tags und werden dort
-      # (Fall a oben) als GitHub-Release-Asset veroeffentlicht: die zaehlen separat
-      # gegen das Kontingent und verfallen nicht.
+      # KEIN Artefakt-Upload DES INSTALLERS. Ein ~850-MB-Bundle je Push fuellte
+      # das 2-GB-Gratis-Storage-Kontingent auf. Bei Push-Laeufen ist der
+      # erfolgreiche Durchlauf des Builds selbst der Beweis -- der fertige
+      # Installer wird nicht gebraucht. Verteilbare Installer entstehen
+      # ausschliesslich an v-Tags und werden dort (Fall a oben) als
+      # GitHub-Release-Asset veroeffentlicht: die zaehlen separat gegen das
+      # Kontingent und verfallen nicht.
+      #
+      # ABGRENZUNG: dieser Absatz betrifft AUSSCHLIESSLICH den Installer. Die
+      # rund ein Megabyte grosse Lizenzaufstellung wird sehr wohl in jedem Lauf
+      # als Artefakt abgelegt (eigener Schritt oben) -- auf sie trifft das
+      # Kontingent-Argument nicht zu.

@@ -98,6 +98,87 @@ jobs:
           }
           Write-Host "Pruefsummen erzeugt: $($pakete.Count)"
 
+      # Die Lizenzaufstellung als EIGENSTAENDIGE Beigabe bereitstellen. Sie
+      # entsteht im Bau unter src-tauri/lizenzaufstellung.json und geht ueber
+      # bundle.resources in den NSIS-Installer -- also nur INNERHALB des Pakets.
+      # Das Website-Projekt erzeugt daraus die oeffentliche Lizenzseite und kann
+      # keine exe auspacken; darum hier eine benannte Kopie neben dem Installer.
+      #
+      # NAMENSSCHEMA lizenzaufstellung-<produktversion>-<zielplattform>.json:
+      # Alle vier Workflows erzeugen die Datei unter demselben Namen. Ein
+      # gleichnamiges zweites Asset kollidiert beim Release-Upload -- denselben
+      # Fall beschreibt der ARM-Kommentar zum Quelltextarchiv in build-linux.yml.
+      # Version und Plattform im Namen machen jede Kopie eindeutig; hier traegt
+      # der Sammler windows-aarch64 ein, im x64-Workflow windows-x86_64.
+      #
+      # BEIDE WERTE STAMMEN AUS DER DATEI SELBST (Felder produktversion und
+      # plattform auf oberster Ebene), nicht aus dem Workflow und nicht aus dem
+      # Tag: so kann der Name nicht vom Inhalt abweichen. Ein aus dem Tag
+      # abgeleiteter Name behauptete eine Fassung, die die Datei gar nicht nennt.
+      #
+      # Kein stiller Ausfall: $ErrorActionPreference = "Stop" plus die
+      # ausdruecklichen Pruefungen -- fehlt die Datei, ist sie leer, kein
+      # gueltiges JSON oder fehlt eines der beiden Felder, bricht der Schritt mit
+      # benannter Meldung ab. Gleiche Bauart wie im x64-Workflow.
+      - name: Lizenzaufstellung als benannte Kopie bereitstellen
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $quelle = "src-tauri\lizenzaufstellung.json"
+
+          if (-not (Test-Path -Path $quelle -PathType Leaf)) {
+            Write-Error "FEHLER: $quelle wurde nicht erzeugt"; exit 1
+          }
+          if ((Get-Item $quelle).Length -eq 0) {
+            Write-Error "FEHLER: $quelle ist leer"; exit 1
+          }
+
+          $aufstellung = Get-Content -Path $quelle -Raw -Encoding UTF8 | ConvertFrom-Json
+          $produktversion = $aufstellung.produktversion
+          $plattform = $aufstellung.plattform
+          if ([string]::IsNullOrWhiteSpace($produktversion)) {
+            Write-Error "FEHLER: Feld 'produktversion' fehlt oder ist leer in $quelle"; exit 1
+          }
+          if ([string]::IsNullOrWhiteSpace($plattform)) {
+            Write-Error "FEHLER: Feld 'plattform' fehlt oder ist leer in $quelle"; exit 1
+          }
+
+          $outDir = "dist-lizenz"
+          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+          $dateiname = "lizenzaufstellung-$produktversion-$plattform.json"
+          $ziel = Join-Path $outDir $dateiname
+          Copy-Item -Path $quelle -Destination $ziel -Force
+          if ((Get-Item $ziel).Length -eq 0) {
+            Write-Error "FEHLER: Kopie $ziel ist leer"; exit 1
+          }
+
+          Write-Host "--- Lizenzaufstellung ---"
+          Write-Host "Produktversion: $produktversion"
+          Write-Host "Plattform:      $plattform"
+          Write-Host "Dateiname:      $dateiname"
+
+      # NUR die Lizenzaufstellung als Actions-Artefakt -- ausdruecklich NICHT der
+      # Installer. Dieser Workflow legt sonst bewusst kein Artefakt ab: ein
+      # ~850-MB-Bundle je Lauf fuellte das 2-GB-Gratis-Storage-Kontingent auf
+      # (Begruendung wie im x64-Windows- und im macOS-Workflow). Die Aufstellung
+      # ist rund ein Megabyte; auf sie trifft diese Begruendung nicht zu. Sie
+      # wird gerade dann gebraucht, wenn KEIN Tag gesetzt ist: das
+      # Website-Projekt soll die Lizenzseite auch aus einem Dispatch-Lauf ziehen
+      # koennen.
+      #
+      # Optionen bewusst identisch zur Linux-Seite (if-no-files-found: error,
+      # retention-days: 14, actions/upload-artifact@v7) -- kein Sonderweg und
+      # keine neue Action-Fassung. Der Artefaktname traegt windows-arm64, damit
+      # er nicht mit dem des x64-Windows-Workflows kollidiert.
+      - name: Lizenzaufstellung als Artefakt ablegen (jeder Lauf)
+        uses: actions/upload-artifact@v7
+        with:
+          name: cernis-pro-lizenzaufstellung-windows-arm64
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            dist-lizenz/lizenzaufstellung-*.json
+
       - name: Release erstellen und Installer als Asset anhaengen (nur v-Tags)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v3
@@ -113,6 +194,13 @@ jobs:
           # Schritt "Pruefsummen der Pakete erzeugen" ohne if-Bedingung neben
           # JEDER NSIS-exe eine gleichnamige .sha256 anlegt und sonst selbst
           # abbricht -- gibt es einen Installer, gibt es auch seine Pruefsumme.
+          # Das Lizenz-Muster trifft, weil der Schritt "Lizenzaufstellung als
+          # benannte Kopie bereitstellen" ohne if-Bedingung in jedem Lauf genau
+          # eine solche Datei anlegt und bei fehlender Quelle, leerer Datei oder
+          # fehlendem Feld selbst abbricht. Der Name traegt Version und Plattform
+          # aus der Datei selbst (windows-aarch64) -- deshalb kollidiert er im
+          # selben Release nicht mit der x64-Kopie.
           files: |
             src-tauri/target/aarch64-pc-windows-msvc/release/bundle/nsis/*.exe
             src-tauri/target/aarch64-pc-windows-msvc/release/bundle/nsis/*.exe.sha256
+            dist-lizenz/lizenzaufstellung-*.json

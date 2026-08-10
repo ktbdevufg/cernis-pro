@@ -357,6 +357,75 @@ jobs:
           [ "$ANZAHL" -gt 0 ] || { echo "FEHLER: keine dmg-Datei unter ${BUNDLE} gefunden"; exit 1; }
           echo "Pruefsummen erzeugt: ${ANZAHL}"
 
+      # Die Lizenzaufstellung als EIGENSTAENDIGE Beigabe bereitstellen. Sie
+      # entsteht im Bau unter src-tauri/lizenzaufstellung.json und geht ueber
+      # bundle.resources ins dmg -- also nur INNERHALB des Pakets. Das
+      # Website-Projekt erzeugt daraus die oeffentliche Lizenzseite und kann kein
+      # dmg auspacken; darum hier eine benannte Kopie neben dem Paket.
+      #
+      # NAMENSSCHEMA lizenzaufstellung-<produktversion>-<zielplattform>.json:
+      # Alle vier Workflows erzeugen die Datei unter demselben Namen. Ein
+      # gleichnamiges zweites Asset kollidiert beim Release-Upload -- denselben
+      # Fall beschreibt der ARM-Kommentar zum Quelltextarchiv in build-linux.yml.
+      # Version und Plattform im Namen machen jede Kopie eindeutig.
+      #
+      # BEIDE WERTE STAMMEN AUS DER DATEI SELBST (Felder produktversion und
+      # plattform auf oberster Ebene), nicht aus dem Workflow und nicht aus dem
+      # Tag: so kann der Name nicht vom Inhalt abweichen. Ein aus dem Tag
+      # abgeleiteter Name behauptete eine Fassung, die die Datei gar nicht nennt.
+      #
+      # Kein stiller Ausfall: fehlt die Datei, ist sie leer, kein gueltiges JSON
+      # oder fehlt eines der beiden Felder, bricht der Schritt mit benannter
+      # Meldung ab -- dieselbe Regel wie bei fail_on_unmatched_files.
+      #
+      # python3 statt jq: der Sammler selbst laeuft unter python3, es ist auf
+      # macos-latest vorhanden, und derselbe Einzeiler steht wortgleich im
+      # Linux-Workflow -- kein zweites Werkzeug fuer dieselbe Aufgabe.
+      - name: Lizenzaufstellung als benannte Kopie bereitstellen
+        shell: bash
+        run: |
+          set -euo pipefail
+          QUELLE="src-tauri/lizenzaufstellung.json"
+          [ -f "$QUELLE" ] || { echo "FEHLER: ${QUELLE} wurde nicht erzeugt"; exit 1; }
+          [ -s "$QUELLE" ] || { echo "FEHLER: ${QUELLE} ist leer"; exit 1; }
+
+          PRODUKTVERSION=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("produktversion",""))' "$QUELLE")
+          PLATTFORM=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("plattform",""))' "$QUELLE")
+          [ -n "$PRODUKTVERSION" ] || { echo "FEHLER: Feld 'produktversion' fehlt oder ist leer in ${QUELLE}"; exit 1; }
+          [ -n "$PLATTFORM" ] || { echo "FEHLER: Feld 'plattform' fehlt oder ist leer in ${QUELLE}"; exit 1; }
+
+          OUT_DIR="dist-lizenz"
+          mkdir -p "$OUT_DIR"
+          ZIEL="${OUT_DIR}/lizenzaufstellung-${PRODUKTVERSION}-${PLATTFORM}.json"
+          cp "$QUELLE" "$ZIEL"
+          [ -s "$ZIEL" ] || { echo "FEHLER: Kopie ${ZIEL} ist leer"; exit 1; }
+
+          echo "--- Lizenzaufstellung ---"
+          echo "Produktversion: ${PRODUKTVERSION}"
+          echo "Plattform:      ${PLATTFORM}"
+          echo "Dateiname:      $(basename "$ZIEL")"
+
+      # NUR die Lizenzaufstellung als Actions-Artefakt -- ausdruecklich NICHT das
+      # dmg. Der Verzicht auf einen Artefakt-Upload in diesem Workflow (Fall b
+      # unten) begruendet sich mit der GROESSE des dmg gegen das 2-GB-Gratis-
+      # Storage-Kontingent. Die Aufstellung ist rund ein Megabyte; auf sie trifft
+      # diese Begruendung nicht zu. Sie wird ausserdem gerade dann gebraucht,
+      # wenn KEIN Tag gesetzt ist: das Website-Projekt soll die Lizenzseite auch
+      # aus einem Dispatch-Lauf ziehen koennen, ohne auf ein Release zu warten.
+      #
+      # Optionen bewusst identisch zur Linux-Seite (if-no-files-found: error,
+      # retention-days: 14, actions/upload-artifact@v7) -- kein Sonderweg und
+      # keine neue Action-Fassung. Der Artefaktname traegt macos, damit er nicht
+      # mit den Linux-Artefakten kollidiert.
+      - name: Lizenzaufstellung als Artefakt ablegen (jeder Lauf)
+        uses: actions/upload-artifact@v7
+        with:
+          name: cernis-pro-lizenzaufstellung-macos
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            dist-lizenz/lizenzaufstellung-*.json
+
       # Ab hier Fallunterscheidung nach Trigger -- identische Logik wie im
       # Windows-/Linux-Workflow, nur mit dem macOS-Bundle-Pfad (dmg). Das Triple
       # ist der build.sh-Default aarch64-apple-darwin.
@@ -383,13 +452,27 @@ jobs:
           # Schritt "Pruefsummen der Pakete erzeugen" ohne if-Bedingung neben
           # JEDER dmg eine gleichnamige .sha256 anlegt und sonst selbst abbricht
           # -- gibt es eine dmg, gibt es auch ihre Pruefsumme.
+          # Das Lizenz-Muster trifft, weil der Schritt "Lizenzaufstellung als
+          # benannte Kopie bereitstellen" ohne if-Bedingung in jedem Lauf genau
+          # eine solche Datei anlegt und bei fehlender Quelle, leerer Datei oder
+          # fehlendem Feld selbst abbricht. Der Name traegt Version und Plattform
+          # aus der Datei selbst -- deshalb kollidiert die macOS-Kopie nicht mit
+          # denen der Linux- und Windows-Workflows im selben Release.
           files: |
             src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
             src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg.sha256
+            dist-lizenz/lizenzaufstellung-*.json
 
       # Fall b) kein v-Tag (workflow_dispatch / temporaerer rewrite/v2-Push):
-      # BEWUSST KEIN Artefakt-Upload. Ein grosses dmg je Push fuellte das
+      # BEWUSST KEIN Artefakt-Upload DES DMG. Ein grosses dmg je Push fuellte das
       # 2-GB-Gratis-Storage-Kontingent auf. Bei Push-Laeufen ist der erfolgreiche
       # Durchlauf des Builds selbst der Beweis -- die fertige .dmg wird nicht
       # gebraucht. Verteilbare Pakete entstehen ausschliesslich an v-Tags und
       # werden dort (Fall a oben) als GitHub-Release-Asset veroeffentlicht.
+      #
+      # ABGRENZUNG, damit dieser Absatz nicht zu weit gelesen wird: er betrifft
+      # AUSSCHLIESSLICH das dmg. Die Lizenzaufstellung wird sehr wohl in jedem
+      # Lauf als Artefakt abgelegt (eigener Schritt oben). Sie ist rund ein
+      # Megabyte statt mehrerer hundert -- das Kontingent-Argument trifft auf sie
+      # nicht zu, und sie ist der einzige Weg, an die Lizenzdaten zu kommen, ohne
+      # das dmg auszupacken.
