@@ -259,30 +259,43 @@ jobs:
       # Website-Projekt erzeugt daraus die oeffentliche Lizenzseite und kann kein
       # Paket auspacken; darum hier eine benannte Kopie neben den Paketen.
       #
-      # NAMENSSCHEMA lizenzaufstellung-<produktversion>-<zielplattform>.json:
-      # Alle Jobs erzeugen die Datei unter demselben Namen. Ein gleichnamiges
-      # zweites Asset kollidiert beim Upload -- derselbe Fall, den der
-      # ARM-Kommentar zum Quelltextarchiv oben beschreibt. Version und Plattform
-      # im Namen machen jede Kopie eindeutig.
+      # NAMENSSCHEMA <paketdateiname>.lizenzaufstellung.json: die Beigabe traegt
+      # den Namen des Pakets, neben dem sie liegt -- dieselbe Konvention wie bei
+      # den .sha256-Dateien des Schritts darueber. Der Linux-Bau erzeugt deb UND
+      # rpm; es entstehen daher ZWEI inhaltsgleiche Kopien, je eine neben ihrem
+      # Paket, genau wie bei den Pruefsummen.
       #
-      # BEIDE WERTE STAMMEN AUS DER DATEI SELBST (Felder produktversion und
-      # plattform auf oberster Ebene), nicht aus dem Workflow und nicht aus dem
-      # Tag: so kann der Name nicht vom Inhalt abweichen. Ein aus dem Tag
-      # abgeleiteter Name behauptete eine Fassung, die die Datei gar nicht
-      # nennt.
+      # EINDEUTIGKEIT IM RELEASE folgt damit aus dem Paketnamen: der traegt
+      # Fassung und Architektur bereits und ist je Job verschieden -- ein
+      # gleichnamiges zweites Asset kann nicht entstehen.
       #
-      # Kein stiller Ausfall: fehlt die Datei, ist sie leer, kein gueltiges JSON
-      # oder fehlt eines der beiden Felder, bricht der Schritt mit benannter
-      # Meldung ab -- dieselbe Regel wie bei if-no-files-found: error und
-      # fail_on_unmatched_files.
+      # Die Pakete werden auf DEMSELBEN Weg ermittelt wie im unmittelbar davor
+      # stehenden Pruefsummen-Schritt (gleiches find-Suchmuster, gleiche
+      # Sortierung) -- kein zweites, eigenes Suchmuster, das auseinanderlaufen
+      # koennte.
       #
-      # Platzierung NACH dem chown-Schritt: die Datei entsteht im Container als
-      # root. Gelesen wird sie hier nur, die Kopie legt der Runner-User in einem
-      # eigenen Verzeichnis ausserhalb von src-tauri/target an.
+      # GEGENPROBE PRODUKTVERSION: der Name stammt jetzt vom PAKET, nicht mehr
+      # aus der Datei. Damit Inhalt und Name nicht auseinanderlaufen koennen,
+      # wird die produktversion aus der Aufstellung gelesen und geprueft, dass
+      # diese Zeichenfolge im Paketdateinamen vorkommt. Trifft sie nicht zu,
+      # gehoeren Aufstellung und Paket zu verschiedenen Fassungen -- Abbruch mit
+      # benannter Meldung, die BEIDE Werte nennt. Die plattform wird weiterhin
+      # gelesen und ausgegeben, damit im Bauprotokoll sichtbar bleibt, welche
+      # Aufstellung entstand.
+      #
+      # Kein stiller Ausfall: fehlt die Datei, ist sie leer, kein gueltiges JSON,
+      # fehlt eines der beiden Felder oder findet sich kein Paket, bricht der
+      # Schritt mit benannter Meldung ab -- dieselbe Regel wie bei
+      # if-no-files-found: error und fail_on_unmatched_files.
+      #
+      # Platzierung NACH dem chown-Schritt: die Bundles entstehen im Container
+      # als root; erst der chown erlaubt dem Runner-User, die Kopien neben die
+      # Pakete zu legen.
       - name: Lizenzaufstellung als benannte Kopie bereitstellen
         run: |
           set -euo pipefail
           QUELLE="src-tauri/lizenzaufstellung.json"
+          BUNDLE="src-tauri/target/x86_64-unknown-linux-gnu/release/bundle"
           [ -f "$QUELLE" ] || { echo "FEHLER: ${QUELLE} wurde nicht erzeugt"; exit 1; }
           [ -s "$QUELLE" ] || { echo "FEHLER: ${QUELLE} ist leer"; exit 1; }
 
@@ -291,16 +304,32 @@ jobs:
           [ -n "$PRODUKTVERSION" ] || { echo "FEHLER: Feld 'produktversion' fehlt oder ist leer in ${QUELLE}"; exit 1; }
           [ -n "$PLATTFORM" ] || { echo "FEHLER: Feld 'plattform' fehlt oder ist leer in ${QUELLE}"; exit 1; }
 
-          OUT_DIR="dist-lizenz"
-          mkdir -p "$OUT_DIR"
-          ZIEL="${OUT_DIR}/lizenzaufstellung-${PRODUKTVERSION}-${PLATTFORM}.json"
-          cp "$QUELLE" "$ZIEL"
-          [ -s "$ZIEL" ] || { echo "FEHLER: Kopie ${ZIEL} ist leer"; exit 1; }
-
           echo "--- Lizenzaufstellung ---"
           echo "Produktversion: ${PRODUKTVERSION}"
           echo "Plattform:      ${PLATTFORM}"
-          echo "Dateiname:      $(basename "$ZIEL")"
+
+          ANZAHL=0
+          while IFS= read -r PAKET; do
+            PAKETNAME="$(basename "$PAKET")"
+            case "$PAKETNAME" in
+              *"${PRODUKTVERSION}"*) ;;
+              *)
+                echo "FEHLER: Produktversion '${PRODUKTVERSION}' aus ${QUELLE} kommt im Paketdateinamen '${PAKETNAME}' nicht vor -- Aufstellung und Paket gehoeren zu verschiedenen Fassungen"
+                exit 1
+                ;;
+            esac
+            ZIEL="${PAKET}.lizenzaufstellung.json"
+            cp "$QUELLE" "$ZIEL"
+            [ -s "$ZIEL" ] || { echo "FEHLER: Kopie ${ZIEL} ist leer"; exit 1; }
+            echo "Beigabe: $(basename "$ZIEL")"
+            ANZAHL=$((ANZAHL + 1))
+          done < <(find "$BUNDLE" -type f \( -name '*.deb' -o -name '*.rpm' \) | sort)
+
+          # Abbruch mit benannter Meldung, wenn keine einzige Paketdatei gefunden
+          # wurde -- ohne Paket gibt es keinen Namen fuer die Beigabe. Kein
+          # stiller Durchlauf, kein Rueckfall auf ein schwaecheres Schema.
+          [ "$ANZAHL" -gt 0 ] || { echo "FEHLER: keine deb- oder rpm-Datei unter ${BUNDLE} gefunden"; exit 1; }
+          echo "Lizenzaufstellungen abgelegt: ${ANZAHL}"
 
       # Pakete aus JEDEM Lauf als Actions-Artefakt ablegen -- auch ohne v-Tag.
       # Grund: bisher entstanden verteilbare Pakete ausschliesslich als
@@ -341,9 +370,10 @@ jobs:
           path: |
             src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb
             src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb.sha256
+            src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb.lizenzaufstellung.json
             src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/rpm/*.rpm
             src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/rpm/*.rpm.sha256
-            dist-lizenz/lizenzaufstellung-*.json
+            src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/rpm/*.rpm.lizenzaufstellung.json
 
       # Ab hier Fallunterscheidung nach Trigger. Beide Faelle laufen ERST nach
       # Verifikation und chown -- diese beiden Schritte oben sind unveraendert
@@ -389,20 +419,22 @@ jobs:
           # ohne if-Bedingung in jedem Lauf beide Dateien erzeugt und bei fehlendem
           # oder leerem Archiv abbricht. Beide Namen sind exakt (kein Glob), die
           # Fassung stammt aus pyproject.toml -- derselben Quelle wie im Schritt.
-          # Das Lizenz-Muster trifft, weil der Schritt "Lizenzaufstellung als
-          # benannte Kopie bereitstellen" ohne if-Bedingung in jedem Lauf genau
-          # eine solche Datei anlegt und bei fehlender Quelle, leerer Datei oder
-          # fehlendem Feld selbst abbricht. Der Name traegt Version und Plattform
-          # aus der Datei selbst -- deshalb kollidiert er nicht mit der Kopie des
-          # ARM-Jobs, obwohl beide Jobs dieselbe Quelldatei benennen.
+          # Die Lizenz-Muster treffen aus demselben Grund wie die .sha256-Muster:
+          # der Schritt "Lizenzaufstellung als benannte Kopie bereitstellen" legt
+          # ohne if-Bedingung neben JEDER deb/rpm eine gleichnamige
+          # .lizenzaufstellung.json an und bricht sonst selbst ab -- gibt es ein
+          # Paket, gibt es auch seine Beigabe. Der Name stammt vom Paket; weil
+          # der bereits Fassung und Architektur traegt, kollidiert die Beigabe im
+          # selben Release nicht mit der des ARM-Jobs.
           files: |
             src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb
             src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb.sha256
+            src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb.lizenzaufstellung.json
             src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/rpm/*.rpm
             src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/rpm/*.rpm.sha256
+            src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/rpm/*.rpm.lizenzaufstellung.json
             dist-source/*_source.tar.gz
             dist-source/*_source.tar.gz.sha256
-            dist-lizenz/lizenzaufstellung-*.json
 
       # Fall b) kein v-Tag (workflow_dispatch): kein Release, aber das Paket ist
       # trotzdem greifbar -- der Artefakt-Schritt oben laeuft ohne if-Bedingung
@@ -541,18 +573,20 @@ jobs:
 
       # Wie im x64-Job, mit derselben Begruendung: die Aufstellung geht sonst nur
       # INNERHALB von deb und rpm raus, das Website-Projekt kann kein Paket
-      # auspacken. Der Name traegt Version und Plattform, und beide Werte stammen
-      # aus der Datei selbst -- genau deshalb kollidiert die ARM-Kopie beim
-      # Release-Upload NICHT mit der des x64-Jobs, obwohl beide Jobs dieselbe
-      # Quelldatei src-tauri/lizenzaufstellung.json benennen: der Sammler traegt
-      # hier linux-aarch64 statt linux-x86_64 ein. Ein im Workflow gesetzter oder
-      # aus dem Tag abgeleiteter Name koennte vom Inhalt abweichen; dieser nicht.
-      # Anders als das Quelltextarchiv gehoert die Aufstellung also SEHR WOHL in
-      # beide Jobs -- sie ist architekturabhaengig, der Quelltext ist es nicht.
+      # auspacken. Der Name stammt vom jeweiligen Paket
+      # (<paketdateiname>.lizenzaufstellung.json) -- genau deshalb kollidiert die
+      # ARM-Beigabe beim Release-Upload NICHT mit der des x64-Jobs, obwohl beide
+      # Jobs dieselbe Quelldatei src-tauri/lizenzaufstellung.json kopieren: die
+      # aarch64-Pakete heissen anders als die x86_64-Pakete. Anders als das
+      # Quelltextarchiv gehoert die Aufstellung also SEHR WOHL in beide Jobs --
+      # sie ist architekturabhaengig, der Quelltext ist es nicht.
+      # Einziger Unterschied zum x64-Job ist das aarch64-Triple im Bundle-Pfad;
+      # das Suchmuster stammt wie dort aus dem Pruefsummen-Schritt darueber.
       - name: Lizenzaufstellung als benannte Kopie bereitstellen
         run: |
           set -euo pipefail
           QUELLE="src-tauri/lizenzaufstellung.json"
+          BUNDLE="src-tauri/target/aarch64-unknown-linux-gnu/release/bundle"
           [ -f "$QUELLE" ] || { echo "FEHLER: ${QUELLE} wurde nicht erzeugt"; exit 1; }
           [ -s "$QUELLE" ] || { echo "FEHLER: ${QUELLE} ist leer"; exit 1; }
 
@@ -561,16 +595,31 @@ jobs:
           [ -n "$PRODUKTVERSION" ] || { echo "FEHLER: Feld 'produktversion' fehlt oder ist leer in ${QUELLE}"; exit 1; }
           [ -n "$PLATTFORM" ] || { echo "FEHLER: Feld 'plattform' fehlt oder ist leer in ${QUELLE}"; exit 1; }
 
-          OUT_DIR="dist-lizenz"
-          mkdir -p "$OUT_DIR"
-          ZIEL="${OUT_DIR}/lizenzaufstellung-${PRODUKTVERSION}-${PLATTFORM}.json"
-          cp "$QUELLE" "$ZIEL"
-          [ -s "$ZIEL" ] || { echo "FEHLER: Kopie ${ZIEL} ist leer"; exit 1; }
-
           echo "--- Lizenzaufstellung ---"
           echo "Produktversion: ${PRODUKTVERSION}"
           echo "Plattform:      ${PLATTFORM}"
-          echo "Dateiname:      $(basename "$ZIEL")"
+
+          # Gegenprobe wie im x64-Job: der Name stammt vom Paket, die Fassung aus
+          # der Datei -- passen beide nicht zusammen, ist das ein Abbruch.
+          ANZAHL=0
+          while IFS= read -r PAKET; do
+            PAKETNAME="$(basename "$PAKET")"
+            case "$PAKETNAME" in
+              *"${PRODUKTVERSION}"*) ;;
+              *)
+                echo "FEHLER: Produktversion '${PRODUKTVERSION}' aus ${QUELLE} kommt im Paketdateinamen '${PAKETNAME}' nicht vor -- Aufstellung und Paket gehoeren zu verschiedenen Fassungen"
+                exit 1
+                ;;
+            esac
+            ZIEL="${PAKET}.lizenzaufstellung.json"
+            cp "$QUELLE" "$ZIEL"
+            [ -s "$ZIEL" ] || { echo "FEHLER: Kopie ${ZIEL} ist leer"; exit 1; }
+            echo "Beigabe: $(basename "$ZIEL")"
+            ANZAHL=$((ANZAHL + 1))
+          done < <(find "$BUNDLE" -type f \( -name '*.deb' -o -name '*.rpm' \) | sort)
+
+          [ "$ANZAHL" -gt 0 ] || { echo "FEHLER: keine deb- oder rpm-Datei unter ${BUNDLE} gefunden"; exit 1; }
+          echo "Lizenzaufstellungen abgelegt: ${ANZAHL}"
 
       # Wie im x64-Job, mit denselben Begruendungen (Pruefbarkeit ohne Tag,
       # Platzierung nach Pruefsumme und vor Release, keine if-Bedingung,
@@ -588,9 +637,10 @@ jobs:
           path: |
             src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/deb/*.deb
             src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/deb/*.deb.sha256
+            src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/deb/*.deb.lizenzaufstellung.json
             src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/rpm/*.rpm
             src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/rpm/*.rpm.sha256
-            dist-lizenz/lizenzaufstellung-*.json
+            src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/rpm/*.rpm.lizenzaufstellung.json
 
       # Fall a) v-Tag: Release-Assets, aber aarch64-Bundle-Pfade.
       - name: Release erstellen und Bundles als Assets anhaengen (nur v-Tags)
@@ -608,14 +658,15 @@ jobs:
           # KEIN Quelltextarchiv hier -- das liefert allein der x64-Job, ein
           # zweites gleichnamiges Asset wuerde beim Upload kollidieren.
           # Die Lizenzaufstellung dagegen SCHON: sie ist architekturabhaengig und
-          # traegt die Plattform aus der Datei selbst im Namen (linux-aarch64),
-          # kann also nicht mit der x64-Kopie kollidieren.
+          # traegt den Namen ihres Pakets, der die Architektur bereits enthaelt --
+          # sie kann also nicht mit der x64-Beigabe kollidieren.
           files: |
             src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/deb/*.deb
             src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/deb/*.deb.sha256
+            src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/deb/*.deb.lizenzaufstellung.json
             src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/rpm/*.rpm
             src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/rpm/*.rpm.sha256
-            dist-lizenz/lizenzaufstellung-*.json
+            src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/rpm/*.rpm.lizenzaufstellung.json
 
       # Fall b) kein v-Tag: kein Release -- gleiche Lage wie im x64-Job. Das
       # Paket ist ueber den Artefakt-Schritt oben (ohne if-Bedingung, 14 Tage)

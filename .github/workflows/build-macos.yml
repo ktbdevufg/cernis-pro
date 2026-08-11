@@ -363,20 +363,32 @@ jobs:
       # Website-Projekt erzeugt daraus die oeffentliche Lizenzseite und kann kein
       # dmg auspacken; darum hier eine benannte Kopie neben dem Paket.
       #
-      # NAMENSSCHEMA lizenzaufstellung-<produktversion>-<zielplattform>.json:
-      # Alle vier Workflows erzeugen die Datei unter demselben Namen. Ein
-      # gleichnamiges zweites Asset kollidiert beim Release-Upload -- denselben
-      # Fall beschreibt der ARM-Kommentar zum Quelltextarchiv in build-linux.yml.
-      # Version und Plattform im Namen machen jede Kopie eindeutig.
+      # NAMENSSCHEMA <paketdateiname>.lizenzaufstellung.json: die Beigabe traegt
+      # den Namen des dmg, neben dem sie liegt -- dieselbe Konvention wie bei der
+      # .sha256-Datei des Schritts darueber.
       #
-      # BEIDE WERTE STAMMEN AUS DER DATEI SELBST (Felder produktversion und
-      # plattform auf oberster Ebene), nicht aus dem Workflow und nicht aus dem
-      # Tag: so kann der Name nicht vom Inhalt abweichen. Ein aus dem Tag
-      # abgeleiteter Name behauptete eine Fassung, die die Datei gar nicht nennt.
+      # EINDEUTIGKEIT IM RELEASE folgt damit aus dem Paketnamen: der traegt
+      # Fassung und Plattform bereits und unterscheidet sich von den Paketen der
+      # Linux- und Windows-Workflows -- ein gleichnamiges zweites Asset kann im
+      # selben Release nicht entstehen.
       #
-      # Kein stiller Ausfall: fehlt die Datei, ist sie leer, kein gueltiges JSON
-      # oder fehlt eines der beiden Felder, bricht der Schritt mit benannter
-      # Meldung ab -- dieselbe Regel wie bei fail_on_unmatched_files.
+      # Die Pakete werden auf DEMSELBEN Weg ermittelt wie im unmittelbar davor
+      # stehenden Pruefsummen-Schritt (gleiches find-Suchmuster, gleiche
+      # Sortierung) -- kein zweites, eigenes Suchmuster.
+      #
+      # GEGENPROBE PRODUKTVERSION: der Name stammt jetzt vom PAKET, nicht mehr
+      # aus der Datei. Damit Inhalt und Name nicht auseinanderlaufen koennen,
+      # wird die produktversion aus der Aufstellung gelesen und geprueft, dass
+      # diese Zeichenfolge im Paketdateinamen vorkommt. Trifft sie nicht zu,
+      # gehoeren Aufstellung und Paket zu verschiedenen Fassungen -- Abbruch mit
+      # benannter Meldung, die BEIDE Werte nennt. Die plattform wird weiterhin
+      # gelesen und ausgegeben, damit im Bauprotokoll sichtbar bleibt, welche
+      # Aufstellung entstand.
+      #
+      # Kein stiller Ausfall: fehlt die Datei, ist sie leer, kein gueltiges JSON,
+      # fehlt eines der beiden Felder oder findet sich kein Paket, bricht der
+      # Schritt mit benannter Meldung ab -- dieselbe Regel wie bei
+      # fail_on_unmatched_files.
       #
       # python3 statt jq: der Sammler selbst laeuft unter python3, es ist auf
       # macos-latest vorhanden, und derselbe Einzeiler steht wortgleich im
@@ -386,6 +398,7 @@ jobs:
         run: |
           set -euo pipefail
           QUELLE="src-tauri/lizenzaufstellung.json"
+          BUNDLE="src-tauri/target/aarch64-apple-darwin/release/bundle/dmg"
           [ -f "$QUELLE" ] || { echo "FEHLER: ${QUELLE} wurde nicht erzeugt"; exit 1; }
           [ -s "$QUELLE" ] || { echo "FEHLER: ${QUELLE} ist leer"; exit 1; }
 
@@ -394,16 +407,31 @@ jobs:
           [ -n "$PRODUKTVERSION" ] || { echo "FEHLER: Feld 'produktversion' fehlt oder ist leer in ${QUELLE}"; exit 1; }
           [ -n "$PLATTFORM" ] || { echo "FEHLER: Feld 'plattform' fehlt oder ist leer in ${QUELLE}"; exit 1; }
 
-          OUT_DIR="dist-lizenz"
-          mkdir -p "$OUT_DIR"
-          ZIEL="${OUT_DIR}/lizenzaufstellung-${PRODUKTVERSION}-${PLATTFORM}.json"
-          cp "$QUELLE" "$ZIEL"
-          [ -s "$ZIEL" ] || { echo "FEHLER: Kopie ${ZIEL} ist leer"; exit 1; }
-
           echo "--- Lizenzaufstellung ---"
           echo "Produktversion: ${PRODUKTVERSION}"
           echo "Plattform:      ${PLATTFORM}"
-          echo "Dateiname:      $(basename "$ZIEL")"
+
+          ANZAHL=0
+          while IFS= read -r PAKET; do
+            PAKETNAME="$(basename "$PAKET")"
+            case "$PAKETNAME" in
+              *"${PRODUKTVERSION}"*) ;;
+              *)
+                echo "FEHLER: Produktversion '${PRODUKTVERSION}' aus ${QUELLE} kommt im Paketdateinamen '${PAKETNAME}' nicht vor -- Aufstellung und Paket gehoeren zu verschiedenen Fassungen"
+                exit 1
+                ;;
+            esac
+            ZIEL="${PAKET}.lizenzaufstellung.json"
+            cp "$QUELLE" "$ZIEL"
+            [ -s "$ZIEL" ] || { echo "FEHLER: Kopie ${ZIEL} ist leer"; exit 1; }
+            echo "Beigabe: $(basename "$ZIEL")"
+            ANZAHL=$((ANZAHL + 1))
+          done < <(find "$BUNDLE" -type f -name '*.dmg' | sort)
+
+          # Abbruch mit benannter Meldung, wenn keine einzige Paketdatei gefunden
+          # wurde -- ohne Paket gibt es keinen Namen fuer die Beigabe.
+          [ "$ANZAHL" -gt 0 ] || { echo "FEHLER: keine dmg-Datei unter ${BUNDLE} gefunden"; exit 1; }
+          echo "Lizenzaufstellungen abgelegt: ${ANZAHL}"
 
       # NUR die Lizenzaufstellung als Actions-Artefakt -- ausdruecklich NICHT das
       # dmg. Der Verzicht auf einen Artefakt-Upload in diesem Workflow (Fall b
@@ -417,6 +445,11 @@ jobs:
       # retention-days: 14, actions/upload-artifact@v7) -- kein Sonderweg und
       # keine neue Action-Fassung. Der Artefaktname traegt macos, damit er nicht
       # mit den Linux-Artefakten kollidiert.
+      #
+      # Das Muster nennt das dmg-Bundle-Verzeichnis, weil die Beigabe jetzt NEBEN
+      # dem Paket liegt. Es endet auf .lizenzaufstellung.json und greift damit
+      # ausschliesslich die Aufstellung -- das dmg selbst bleibt trotz gleichen
+      # Verzeichnisses aussen vor, die Groessen-Begruendung oben bleibt gewahrt.
       - name: Lizenzaufstellung als Artefakt ablegen (jeder Lauf)
         uses: actions/upload-artifact@v7
         with:
@@ -424,7 +457,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           path: |
-            dist-lizenz/lizenzaufstellung-*.json
+            src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg.lizenzaufstellung.json
 
       # Ab hier Fallunterscheidung nach Trigger -- identische Logik wie im
       # Windows-/Linux-Workflow, nur mit dem macOS-Bundle-Pfad (dmg). Das Triple
@@ -452,16 +485,17 @@ jobs:
           # Schritt "Pruefsummen der Pakete erzeugen" ohne if-Bedingung neben
           # JEDER dmg eine gleichnamige .sha256 anlegt und sonst selbst abbricht
           # -- gibt es eine dmg, gibt es auch ihre Pruefsumme.
-          # Das Lizenz-Muster trifft, weil der Schritt "Lizenzaufstellung als
-          # benannte Kopie bereitstellen" ohne if-Bedingung in jedem Lauf genau
-          # eine solche Datei anlegt und bei fehlender Quelle, leerer Datei oder
-          # fehlendem Feld selbst abbricht. Der Name traegt Version und Plattform
-          # aus der Datei selbst -- deshalb kollidiert die macOS-Kopie nicht mit
-          # denen der Linux- und Windows-Workflows im selben Release.
+          # Das Lizenz-Muster trifft aus demselben Grund: der Schritt
+          # "Lizenzaufstellung als benannte Kopie bereitstellen" legt ohne
+          # if-Bedingung neben JEDER dmg eine gleichnamige
+          # .lizenzaufstellung.json an und bricht sonst selbst ab. Der Name
+          # stammt vom Paket; weil der bereits Fassung und Plattform traegt,
+          # kollidiert die macOS-Beigabe im selben Release nicht mit denen der
+          # Linux- und Windows-Workflows.
           files: |
             src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
             src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg.sha256
-            dist-lizenz/lizenzaufstellung-*.json
+            src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg.lizenzaufstellung.json
 
       # Fall b) kein v-Tag (workflow_dispatch / temporaerer rewrite/v2-Push):
       # BEWUSST KEIN Artefakt-Upload DES DMG. Ein grosses dmg je Push fuellte das

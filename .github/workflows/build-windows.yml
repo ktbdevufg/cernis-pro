@@ -217,22 +217,33 @@ jobs:
       # Das Website-Projekt erzeugt daraus die oeffentliche Lizenzseite und kann
       # keine exe auspacken; darum hier eine benannte Kopie neben dem Installer.
       #
-      # NAMENSSCHEMA lizenzaufstellung-<produktversion>-<zielplattform>.json:
-      # Alle vier Workflows erzeugen die Datei unter demselben Namen. Ein
-      # gleichnamiges zweites Asset kollidiert beim Release-Upload -- denselben
-      # Fall beschreibt der ARM-Kommentar zum Quelltextarchiv in build-linux.yml.
-      # Version und Plattform im Namen machen jede Kopie eindeutig.
+      # NAMENSSCHEMA <paketdateiname>.lizenzaufstellung.json: die Beigabe traegt
+      # den Namen des Installers, neben dem sie liegt -- dieselbe Konvention wie
+      # bei der .sha256-Datei des Schritts darueber.
       #
-      # BEIDE WERTE STAMMEN AUS DER DATEI SELBST (Felder produktversion und
-      # plattform auf oberster Ebene), nicht aus dem Workflow und nicht aus dem
-      # Tag: so kann der Name nicht vom Inhalt abweichen. Ein aus dem Tag
-      # abgeleiteter Name behauptete eine Fassung, die die Datei gar nicht nennt.
+      # EINDEUTIGKEIT IM RELEASE folgt damit aus dem Paketnamen: der traegt
+      # Fassung und Architektur bereits und unterscheidet sich von den Paketen
+      # der anderen Workflows -- ein gleichnamiges zweites Asset kann im selben
+      # Release nicht entstehen.
+      #
+      # Die Pakete werden auf DEMSELBEN Weg ermittelt wie im unmittelbar davor
+      # stehenden Pruefsummen-Schritt (gleiches Get-ChildItem-Filtermuster,
+      # gleiche Sortierung) -- kein zweites, eigenes Suchmuster.
+      #
+      # GEGENPROBE PRODUKTVERSION: der Name stammt jetzt vom PAKET, nicht mehr
+      # aus der Datei. Damit Inhalt und Name nicht auseinanderlaufen koennen,
+      # wird die produktversion aus der Aufstellung gelesen und geprueft, dass
+      # diese Zeichenfolge im Paketdateinamen vorkommt. Trifft sie nicht zu,
+      # gehoeren Aufstellung und Paket zu verschiedenen Fassungen -- Abbruch mit
+      # benannter Meldung, die BEIDE Werte nennt. Die plattform wird weiterhin
+      # gelesen und ausgegeben, damit im Bauprotokoll sichtbar bleibt, welche
+      # Aufstellung entstand.
       #
       # Kein stiller Ausfall: $ErrorActionPreference = "Stop" plus die
       # ausdruecklichen Pruefungen -- fehlt die Datei, ist sie leer, kein
-      # gueltiges JSON oder fehlt eines der beiden Felder, bricht der Schritt mit
-      # benannter Meldung ab. Dieselbe Regel wie bei if-no-files-found: error und
-      # fail_on_unmatched_files.
+      # gueltiges JSON, fehlt eines der beiden Felder oder findet sich kein
+      # Paket, bricht der Schritt mit benannter Meldung ab. Dieselbe Regel wie
+      # bei if-no-files-found: error und fail_on_unmatched_files.
       #
       # Werkzeugwahl ConvertFrom-Json statt python3: Linux und macOS lesen die
       # Felder mit python3, hier ist pwsh die Shell dieses Workflows und
@@ -243,6 +254,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $quelle = "src-tauri\lizenzaufstellung.json"
+          $bundle = "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis"
 
           if (-not (Test-Path -Path $quelle -PathType Leaf)) {
             Write-Error "FEHLER: $quelle wurde nicht erzeugt"; exit 1
@@ -261,19 +273,32 @@ jobs:
             Write-Error "FEHLER: Feld 'plattform' fehlt oder ist leer in $quelle"; exit 1
           }
 
-          $outDir = "dist-lizenz"
-          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
-          $dateiname = "lizenzaufstellung-$produktversion-$plattform.json"
-          $ziel = Join-Path $outDir $dateiname
-          Copy-Item -Path $quelle -Destination $ziel -Force
-          if ((Get-Item $ziel).Length -eq 0) {
-            Write-Error "FEHLER: Kopie $ziel ist leer"; exit 1
-          }
-
           Write-Host "--- Lizenzaufstellung ---"
           Write-Host "Produktversion: $produktversion"
           Write-Host "Plattform:      $plattform"
-          Write-Host "Dateiname:      $dateiname"
+
+          $pakete = @(Get-ChildItem -Path $bundle -Filter *.exe -File -ErrorAction SilentlyContinue | Sort-Object Name)
+
+          foreach ($paket in $pakete) {
+            if (-not $paket.Name.Contains($produktversion)) {
+              Write-Error "FEHLER: Produktversion '$produktversion' aus $quelle kommt im Paketdateinamen '$($paket.Name)' nicht vor -- Aufstellung und Paket gehoeren zu verschiedenen Fassungen"
+              exit 1
+            }
+            $ziel = "$($paket.FullName).lizenzaufstellung.json"
+            Copy-Item -Path $quelle -Destination $ziel -Force
+            if ((Get-Item $ziel).Length -eq 0) {
+              Write-Error "FEHLER: Kopie $ziel ist leer"; exit 1
+            }
+            Write-Host "Beigabe: $(Split-Path -Leaf $ziel)"
+          }
+
+          # Abbruch mit benannter Meldung, wenn keine einzige Paketdatei gefunden
+          # wurde -- ohne Paket gibt es keinen Namen fuer die Beigabe.
+          if ($pakete.Count -eq 0) {
+            Write-Error "FEHLER: keine exe-Datei unter $bundle gefunden"
+            exit 1
+          }
+          Write-Host "Lizenzaufstellungen abgelegt: $($pakete.Count)"
 
       # NUR die Lizenzaufstellung als Actions-Artefakt -- ausdruecklich NICHT der
       # Installer. Der Verzicht auf einen Artefakt-Upload in diesem Workflow
@@ -287,6 +312,12 @@ jobs:
       # retention-days: 14, actions/upload-artifact@v7) -- kein Sonderweg und
       # keine neue Action-Fassung. Der Artefaktname traegt windows-x64, damit er
       # weder mit den Linux- noch mit dem ARM64-Windows-Artefakt kollidiert.
+      #
+      # Das Muster nennt das nsis-Bundle-Verzeichnis, weil die Beigabe jetzt
+      # NEBEN dem Installer liegt. Es endet auf .lizenzaufstellung.json und
+      # greift damit ausschliesslich die Aufstellung -- der Installer selbst
+      # bleibt trotz gleichen Verzeichnisses aussen vor, die Groessen-Begruendung
+      # oben bleibt gewahrt.
       - name: Lizenzaufstellung als Artefakt ablegen (jeder Lauf)
         uses: actions/upload-artifact@v7
         with:
@@ -294,7 +325,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           path: |
-            dist-lizenz/lizenzaufstellung-*.json
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe.lizenzaufstellung.json
 
       # Ab hier Fallunterscheidung nach Trigger -- identische Logik wie im
       # Linux-Workflow, nur mit den Windows-Bundle-Pfaden (NSIS statt deb/rpm).
@@ -320,17 +351,17 @@ jobs:
           # Schritt "Pruefsummen der Pakete erzeugen" ohne if-Bedingung neben
           # JEDER NSIS-exe eine gleichnamige .sha256 anlegt und sonst selbst
           # abbricht -- gibt es einen Installer, gibt es auch seine Pruefsumme.
-          # Das Lizenz-Muster trifft, weil der Schritt "Lizenzaufstellung als
-          # benannte Kopie bereitstellen" ohne if-Bedingung in jedem Lauf genau
-          # eine solche Datei anlegt und bei fehlender Quelle, leerer Datei oder
-          # fehlendem Feld selbst abbricht. Der Name traegt Version und Plattform
-          # aus der Datei selbst -- deshalb kollidiert die x64-Kopie im selben
-          # Release weder mit der ARM64-Kopie noch mit denen der anderen
-          # Plattformen.
+          # Das Lizenz-Muster trifft aus demselben Grund: der Schritt
+          # "Lizenzaufstellung als benannte Kopie bereitstellen" legt ohne
+          # if-Bedingung neben JEDER NSIS-exe eine gleichnamige
+          # .lizenzaufstellung.json an und bricht sonst selbst ab. Der Name
+          # stammt vom Paket; weil der bereits Fassung und Architektur traegt,
+          # kollidiert die x64-Beigabe im selben Release weder mit der
+          # ARM64-Beigabe noch mit denen der anderen Plattformen.
           files: |
             src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
             src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe.sha256
-            dist-lizenz/lizenzaufstellung-*.json
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe.lizenzaufstellung.json
 
       # Fall b) kein v-Tag (workflow_dispatch): BEWUSST
       # KEIN Artefakt-Upload DES INSTALLERS. Ein ~850-MB-Bundle je Push fuellte
