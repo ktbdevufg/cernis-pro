@@ -202,16 +202,108 @@ jobs:
       #   APPLE_API_KEY_PATH = Dateipfad zur .p8 aus dem Schritt darueber
       # Das Secret MACOS_API_KEY (der base64-kodierte Schluesselinhalt) gehoert
       # hier bewusst NICHT hin -- es geht ausschliesslich in die Datei.
-      # Im Nicht-Tag-Lauf liefert derselbe Bedingungsausdruck wie oben den
-      # leeren String; der Bundler ueberspringt die Notarisierung dann still,
-      # und Dispatch-Laeufe loesen keinen Apple-Roundtrip aus.
-      - name: macOS-Build (build.sh -- Frontend + Binaries + Tauri/dmg, signiert)
+      #
+      # BERICHTIGUNG DER ALTEN AUSSAGE. Hier stand im Wortlaut:
+      #   "Im Nicht-Tag-Lauf liefert derselbe Bedingungsausdruck wie oben den
+      #    leeren String; der Bundler ueberspringt die Notarisierung dann still,
+      #    und Dispatch-Laeufe loesen keinen Apple-Roundtrip aus."
+      # DIESE AUSSAGE IST AM LAUF 31491898078 (workflow_dispatch auf bf4dc14)
+      # WIDERLEGT. Gemessen: der Bundler ruft notarytool auf und faellt an der
+      # leeren Issuer-UUID:
+      #   failed to notarize app: Error: The value '' is invalid for
+      #   '--issuer <issuer>': must be a valid UUID
+      # Ursache im Quelltext (tauri-bundler 2.8.1 und 2.9.4 wortgleich,
+      # src/bundle/macos/sign.rs Zeile 112 bis 117): die Erkennung nutzt
+      # 'var_os("APPLE_API_KEY")' und 'var_os("APPLE_API_ISSUER")'. var_os
+      # prueft VORHANDENSEIN, nicht Inhalt -- eine gesetzte leere Variable ist
+      # Some(""), also fuer den Bundler "vorhanden". Und ein env-Eintrag, dessen
+      # Ausdruck den leeren String liefert, IST gesetzt: das Protokoll des Laufs
+      # listet im env-Block des Schritts "APPLE_API_KEY:", "APPLE_API_ISSUER:"
+      # und "APPLE_API_KEY_PATH:" mit leerem Wert.
+      #
+      # DARAUS FOLGT DIE LOESUNG: Die drei Variablen duerfen im Nicht-Tag-Lauf
+      # nicht bloss leer sein, sie duerfen im env-Block GAR NICHT AUFTAUCHEN.
+      # GitHub Actions kennt keinen bedingten env-SCHLUESSEL (nur bedingte
+      # Werte), darum zwei Schritte mit einander ausschliessenden Bedingungen:
+      # dieser hier fuer v-Tags (env-Block WORTGLEICH wie bisher, nur ohne die
+      # inzwischen unnoetigen Bedingungsausdruecke) und der Schritt darunter fuer
+      # Nicht-Tag-Laeufe, dessen env-Block die drei Variablen nicht nennt. Damit
+      # greift im Nicht-Tag-Lauf der Zweig 'MissingCredentials' des Bundlers
+      # (sign.rs Zeile 156), der laut app.rs Zeile 139 (2.8.1; in 2.9.4 Zeile
+      # 147) mit 'log::warn!("skipping app notarization, {e}")' fortfaehrt --
+      # genau das Verhalten, das der alte Kommentar faelschlich schon fuer
+      # Leerwerte behauptete.
+      #
+      # KEIN STILLER FALLBACK IM TAG-LAUF: Dieser Schritt prueft vor build.sh,
+      # dass alle drei Werte nicht-leer sind, und bricht sonst mit benannter
+      # Meldung ab. Ohne diese Pruefung wuerde ein Tag-Lauf mit fehlendem Secret
+      # jetzt in denselben MissingCredentials-Zweig laufen und still
+      # unnotarisiert durchbauen -- das waere ein Rueckschritt gegenueber dem
+      # bisherigen harten Fehler.
+      - name: macOS-Build bei v-Tags (build.sh, signiert + notarisiert)
+        if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
-          APPLE_API_KEY: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.MACOS_API_KEY_ID || '' }}
-          APPLE_API_ISSUER: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.MACOS_API_ISSUER_ID || '' }}
-          APPLE_API_KEY_PATH: ${{ startsWith(github.ref, 'refs/tags/v') && env.NOTARY_KEY_PATH || '' }}
+          APPLE_API_KEY: ${{ secrets.MACOS_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.MACOS_API_ISSUER_ID }}
+          APPLE_API_KEY_PATH: ${{ env.NOTARY_KEY_PATH }}
+        run: |
+          set -euo pipefail
+          # Harte Vorpruefung statt stillem Rueckfall: fehlt eines der drei
+          # Zugangsdaten, faellt der Tag-Lauf HIER mit benannter Meldung, statt
+          # den Bundler in seinen MissingCredentials-Zweig laufen zu lassen und
+          # ein unnotarisiertes Paket zu veroeffentlichen.
+          fehlt() {
+            echo "FEHLER: $1 ist im v-Tag-Lauf leer oder nicht gesetzt."
+            echo "Ohne alle drei Werte notarisiert der Bundler nicht, sondern"
+            echo "ueberspringt die Notarisierung mit einer blossen Warnung --"
+            echo "das Release-Asset waere dann unnotarisiert. Pruefen: Secrets"
+            echo "MACOS_API_KEY_ID, MACOS_API_ISSUER_ID und der Schritt"
+            echo "'Notarisierungs-Schluessel als Datei bereitstellen'."
+            exit 1
+          }
+          [ -n "${APPLE_API_KEY:-}" ] || fehlt APPLE_API_KEY
+          [ -n "${APPLE_API_ISSUER:-}" ] || fehlt APPLE_API_ISSUER
+          [ -n "${APPLE_API_KEY_PATH:-}" ] || fehlt APPLE_API_KEY_PATH
+          # Zusatzpruefung fuer den gemessenen Fehlerfall: die Issuer-UUID muss
+          # dem UUID-Format entsprechen, sonst bricht notarytool erst mitten im
+          # Bundler ab (Lauf 31491898078). Der Wert selbst wird NICHT ausgegeben.
+          if ! printf '%s' "$APPLE_API_ISSUER" | grep -qiE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'; then
+            echo "FEHLER: APPLE_API_ISSUER ist keine UUID."
+            echo "notarytool verlangt das Issuer-Feld im UUID-Format; ein anderer"
+            echo "Wert laesst den Bundler erst beim Notarisieren fallen."
+            echo "Pruefen: Secret MACOS_API_ISSUER_ID."
+            exit 1
+          fi
+          # Die Schluesseldatei muss existieren und Inhalt haben -- der Bundler
+          # erwartet einen Pfad, nicht den Schluesselinhalt.
+          [ -s "$APPLE_API_KEY_PATH" ] || { echo "FEHLER: Schluesseldatei ${APPLE_API_KEY_PATH} fehlt oder ist leer."; exit 1; }
+          bash build.sh
+
+      # Derselbe Bau OHNE v-Tag. Einziger Unterschied zum Schritt darueber: der
+      # env-Block nennt APPLE_API_KEY, APPLE_API_ISSUER und APPLE_API_KEY_PATH
+      # NICHT -- weder gesetzt noch leer. Genau das ist der Kern der Aenderung
+      # (Begruendung im Kommentarblock des Tag-Schritts): nur eine ABWESENDE
+      # Variable laesst 'var_os' in sign.rs None liefern und fuehrt in den
+      # MissingCredentials-Zweig, der die Notarisierung mit einer Warnung
+      # ueberspringt. Ein Leerwert tat das nachweislich nicht.
+      #
+      # APPLE_SIGNING_IDENTITY bleibt gesetzt und wird gebraucht: build.sh
+      # bricht in Schritt 0 mit exit 1 ab, wenn sie leer ist, und prueft am Ende
+      # gegen eine Ad-hoc-Signatur (siehe Kopfkommentar). Sie WEGZULASSEN waere
+      # kein gangbarer Weg -- gemessen im CLI-Quelltext (tauri-cli 2.10.1,
+      # src/interface/rust.rs Zeile 1450) liest auch sie per 'var_os', ein
+      # Leerwert ergaebe also Some("") und liesse den Bundler mit leerer
+      # Identitaet signieren. Darum: Nicht-Tag-Laeufe signieren echt, wie bisher.
+      #
+      # Kein Notarisierungs-Roundtrip in diesem Zweig -- genau die Absicht des
+      # Kopfkommentars ("NOTARISIERUNG dagegen strikt NUR an v-Tags").
+      - name: macOS-Build ohne v-Tag (build.sh, signiert, ohne Notarisierung)
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        shell: bash
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
         run: bash build.sh
 
       # Notarisierung -- NUR an v-Tags (siehe Kopfkommentar: langsamer Apple-
