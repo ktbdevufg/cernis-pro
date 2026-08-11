@@ -3,7 +3,7 @@
     "title": "Install Npcap",
     "inlineHint": "This feature requires Npcap. Without Npcap, packet capture is not possible.",
     "installBtn": "Install Npcap",
-    "bodyMissing": "CERNIS uses Npcap for passive capture of SNI, traffic and topology. Npcap is a separate, open-source program by the Nmap developers. You download and install it yourself; CERNIS does not bundle it.",
+    "bodyMissing": "CERNIS uses Npcap for passive capture of SNI, traffic and topology. Npcap is a separate program by the Nmap developers; its source code is viewable, but it is not open-source software. The free licence limits the number of installations — the Npcap licence terms are authoritative. You download and install it yourself; CERNIS does not bundle it.",
     "downloadBtn": "Go to the Npcap download page"
   },
   "app": {

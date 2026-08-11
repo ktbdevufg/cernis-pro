@@ -3,7 +3,7 @@
     "title": "Npcap installieren",
     "inlineHint": "Diese Funktion benötigt Npcap. Ohne Npcap ist keine Paketerfassung möglich.",
     "installBtn": "Npcap installieren",
-    "bodyMissing": "CERNIS nutzt Npcap für passives Mitlesen von SNI, Datenverkehr und Topologie. Npcap ist ein separates, quelloffenes Programm der Nmap-Entwickler. Sie laden und installieren es selbst; CERNIS bündelt es nicht.",
+    "bodyMissing": "CERNIS nutzt Npcap für passives Mitlesen von SNI, Datenverkehr und Topologie. Npcap ist ein separates Programm der Nmap-Entwickler; sein Quelltext ist einsehbar, es ist aber keine Open-Source-Software. Die kostenlose Lizenz begrenzt die Zahl der Installationen — maßgeblich sind die Npcap-Lizenzbedingungen. Sie laden und installieren es selbst; CERNIS bündelt es nicht.",
     "downloadBtn": "Zur Npcap-Download-Seite"
   },
   "app": {
