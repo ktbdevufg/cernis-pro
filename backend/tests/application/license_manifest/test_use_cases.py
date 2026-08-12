@@ -11,6 +11,7 @@ Die verwendeten Lizenz-Ausdruecke sind AUSSCHLIESSLICH real in der Aufstellung
 vorkommende Schreibweisen (Aufgabe 4c).
 """
 
+import shutil
 from typing import Any
 
 import pytest
@@ -407,6 +408,10 @@ def test_werk_eintrag_geht_als_ganzes_durch() -> None:
     Der eigentliche Schutz: ein Feld, das dieser Test gar nicht kennt, muss
     trotzdem ankommen. Sonst verschwindet jede kuenftige Ergaenzung der Quelle
     still zwischen Sammler und Anzeige.
+
+    Der Werk-Text der Vorlage traegt hier KEINE aufloesbare Referenz -- die
+    Aufloesung aus Befund 54b greift also nicht und der Eintrag geht wirklich
+    unveraendert durch. Der Fall MIT Referenz steht weiter unten.
     """
     aufstellung = _aufstellung([])
     aufstellung["werk"]["ein_kuenftiges_feld"] = "beliebiger Wert"
@@ -415,3 +420,217 @@ def test_werk_eintrag_geht_als_ganzes_durch() -> None:
     erg = uc(plattform="macOS")
 
     assert erg["werk"] == aufstellung["werk"]
+
+
+# ── Befund 54b, Teil 1: bezugsart und der Vorhandenseins-Befund ohne Suchpfad ─
+
+
+def _programm(name: str, **felder: Any) -> dict[str, Any]:
+    """Ein Eintrag der Ebene ``programme`` mit den gemessenen Pflichtfeldern."""
+    eintrag: dict[str, Any] = {
+        "name": name,
+        "ebene": "programme",
+        "lizenz_id": None,
+        "plattform": "Windows",
+        "bezugsart": "vorausgesetzt",
+    }
+    eintrag.update(felder)
+    return eintrag
+
+
+def test_ohne_naht_steht_nicht_ermittelbar_und_nicht_fehlt() -> None:
+    """Befund 54b: der Zustand ist EIGEN -- kein Rueckfall auf ``fehlt`` (S3).
+
+    Ohne verdrahtete Naht gibt es keine Pruefung, die den Eintrag beantworten
+    koennte. ``fehlt`` waere hier eine Aussage ueber Abwesenheit, die niemand
+    erhoben hat.
+    """
+    uc = GetLicenseManifest(FakeManifestPort(_aufstellung([_programm("Npcap")])))
+
+    erg = uc(plattform="Windows")
+
+    assert erg["bestandteile"][0]["vorhanden"] == "nicht_ermittelbar"
+    assert erg["bestandteile"][0]["vorhanden"] != "fehlt"
+    assert erg["bestandteile"][0]["vorhanden"] != "vorhanden"
+
+
+def test_naht_ohne_aussage_faellt_nicht_auf_fehlt_zurueck() -> None:
+    """Liefert die Naht ``None``, bleibt es ``nicht_ermittelbar``.
+
+    Der Unterschied zu ``False`` ist der ganze Punkt: ``None`` heisst "keine
+    Auskunft", ``False`` heisst "geprueft und nicht da".
+    """
+    uc = GetLicenseManifest(
+        FakeManifestPort(_aufstellung([_programm("Npcap")])),
+        lambda _name: None,
+    )
+
+    assert uc(plattform="Windows")["bestandteile"][0]["vorhanden"] == "nicht_ermittelbar"
+
+
+@pytest.mark.parametrize(("befund", "erwartet"), [(True, "vorhanden"), (False, "fehlt")])
+def test_naht_entscheidet_statt_des_suchpfads(befund: bool, erwartet: str) -> None:
+    """Der Befund kommt AUS DER NAHT, nicht aus ``shutil.which``.
+
+    Der Name ist mit Absicht einer, den ``shutil.which`` garantiert nicht findet:
+    kaeme das Ergebnis von dort, stuende bei ``befund=True`` trotzdem ``fehlt``.
+    """
+    uc = GetLicenseManifest(
+        FakeManifestPort(_aufstellung([_programm("Npcap")])),
+        lambda _name: befund,
+    )
+
+    assert uc(plattform="Windows")["bestandteile"][0]["vorhanden"] == erwartet
+
+
+def test_npcap_wird_nicht_ueber_shutil_which_entschieden(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ausdruecklich (Teil 4): fuer diesen Eintrag wird ``shutil.which`` NIE gerufen.
+
+    Ein ``shutil.which``, das hier liefe, faende den Kerneltreiber nie und
+    meldete auf Windows dauerhaft "fehlt" -- genau Befund 54b. Der Test faengt
+    das nicht am Ergebnis, sondern an der Ausfuehrung: die Funktion wird durch
+    eine ersetzt, die beim Aufruf faellt.
+    """
+
+    def _verboten(_name: str) -> str | None:
+        raise AssertionError("shutil.which darf fuer diesen Eintrag nicht laufen")
+
+    # Der Use-Case ruft ``shutil.which`` ueber das Modul (``import shutil``), nicht
+    # ueber einen eigenen Namen -- ersetzt wird darum die Funktion im stdlib-Modul.
+    monkeypatch.setattr(shutil, "which", _verboten)
+    uc = GetLicenseManifest(
+        FakeManifestPort(_aufstellung([_programm("Npcap")])),
+        lambda _name: True,
+    )
+
+    assert uc(plattform="Windows")["bestandteile"][0]["vorhanden"] == "vorhanden"
+
+
+def test_die_naht_bekommt_den_namen_des_eintrags() -> None:
+    """Die Naht ist namensbasiert -- der Composition Root ordnet daran zu."""
+    gesehen: list[str] = []
+
+    def _pruefung(name: str) -> bool | None:
+        gesehen.append(name)
+        return True
+
+    uc = GetLicenseManifest(FakeManifestPort(_aufstellung([_programm("Npcap")])), _pruefung)
+    uc(plattform="Windows")
+
+    assert gesehen == ["Npcap"]
+
+
+def test_die_naht_gilt_nur_fuer_eintraege_ohne_suchpfad_bezug() -> None:
+    """Ein aufgerufenes Programm laeuft weiter ueber den Suchpfad.
+
+    Die Naht wuerde hier ``True`` sagen -- der Eintrag ist aber ``aufgerufen``
+    und damit eine Datei im PATH. Der frei erfundene Name muss trotzdem ``fehlt``
+    ergeben, sonst haette die Naht die falsche Menge uebernommen.
+    """
+    uc = GetLicenseManifest(
+        FakeManifestPort(
+            _aufstellung(
+                [
+                    _programm(
+                        "gibt-es-ganz-sicher-nicht-xyz",
+                        plattform="Linux",
+                        bezugsart="aufgerufen",
+                    )
+                ]
+            )
+        ),
+        lambda _name: True,
+    )
+
+    assert uc(plattform="Linux")["bestandteile"][0]["vorhanden"] == "fehlt"
+
+
+def test_fremde_plattform_schlaegt_die_naht_gar_nicht_erst_auf() -> None:
+    """Der Plattform-Abgleich steht VOR der Erhebung -- fuer beide Wege gleich."""
+    gesehen: list[str] = []
+
+    def _pruefung(name: str) -> bool | None:
+        gesehen.append(name)
+        return True
+
+    uc = GetLicenseManifest(FakeManifestPort(_aufstellung([_programm("Npcap")])), _pruefung)
+
+    assert uc(plattform="Linux")["bestandteile"][0]["vorhanden"] == "nicht_zutreffend"
+    assert gesehen == []
+
+
+# ── Befund 54b, Teil 2: der Werk-Lizenztext wird aufgeloest ──────────────────
+
+
+def test_werk_lizenztext_traegt_kein_werk_praefix_mehr() -> None:
+    """Teil 4, ausdruecklich: aus der Referenz wird der Volltext.
+
+    Die Aufstellung schreibt in ``werk.lizenz_text`` den SCHLUESSEL
+    ``werk:GPL-2.0-only``; die Ansicht zeigte diese Zeichenkette woertlich im
+    Aufklappblock.
+    """
+    aufstellung = _aufstellung([])
+    aufstellung["werk"]["lizenz_text"] = "werk:GPL-2.0-only"
+    aufstellung["lizenztexte"]["werk:GPL-2.0-only"] = {
+        "text": "GNU GENERAL PUBLIC LICENSE\n                       Version 2, June 1991\n"
+    }
+    uc = GetLicenseManifest(FakeManifestPort(aufstellung))
+
+    erg = uc(plattform="macOS")
+
+    assert not erg["werk"]["lizenz_text"].startswith("werk:")
+    assert erg["werk"]["lizenz_text"].startswith("GNU GENERAL PUBLIC LICENSE")
+
+
+def test_der_aufgeloeste_werk_text_ist_zeichengleich() -> None:
+    """Aufgeloest heisst nachgeschlagen, nicht umgeschrieben (Aufgabe 2c)."""
+    text = "Zeile eins\n\n  eingerueckt\n\tTabulator\nEnde ohne Umbruch"
+    aufstellung = _aufstellung([])
+    aufstellung["werk"]["lizenz_text"] = "werk:GPL-2.0-only"
+    aufstellung["lizenztexte"]["werk:GPL-2.0-only"] = {"text": text}
+    uc = GetLicenseManifest(FakeManifestPort(aufstellung))
+
+    assert uc(plattform="macOS")["werk"]["lizenz_text"] == text
+
+
+def test_die_ebene_lizenztexte_geht_trotz_aufloesung_nicht_hinaus() -> None:
+    """Nur EIN Eintrag wird nachgeschlagen -- die grosse Ebene bleibt drinnen."""
+    aufstellung = _aufstellung([])
+    aufstellung["werk"]["lizenz_text"] = "werk:GPL-2.0-only"
+    aufstellung["lizenztexte"]["werk:GPL-2.0-only"] = {"text": "Werk-Volltext"}
+    uc = GetLicenseManifest(FakeManifestPort(aufstellung))
+
+    erg = uc(plattform="macOS")
+
+    assert "lizenztexte" not in erg
+    assert erg["werk"]["lizenz_text"] == "Werk-Volltext"
+
+
+def test_unaufloesbare_referenz_bleibt_stehen_und_wird_nicht_geleert() -> None:
+    """Kein erfundener Text, keine leere Zeichenkette (Finding S3).
+
+    Bleibt die Referenz unaufloesbar, kommt sie unveraendert an -- die Ansicht
+    erkennt sie am Praefix und zeigt ihren vorhandenen Ersatzhinweis.
+    """
+    aufstellung = _aufstellung([])
+    aufstellung["werk"]["lizenz_text"] = "werk:GPL-2.0-only"
+    uc = GetLicenseManifest(FakeManifestPort(aufstellung))
+
+    erg = uc(plattform="macOS")
+
+    assert erg["werk"]["lizenz_text"] == "werk:GPL-2.0-only"
+    assert erg["werk"]["lizenz_text"] != ""
+
+
+def test_die_aufloesung_mutiert_die_gehaltene_aufstellung_nicht() -> None:
+    """Wie bei den Bestandteilen: der Adapter haelt die Datei, wir kopieren."""
+    aufstellung = _aufstellung([])
+    aufstellung["werk"]["lizenz_text"] = "werk:GPL-2.0-only"
+    aufstellung["lizenztexte"]["werk:GPL-2.0-only"] = {"text": "Werk-Volltext"}
+    uc = GetLicenseManifest(FakeManifestPort(aufstellung))
+
+    uc(plattform="macOS")
+
+    assert aufstellung["werk"]["lizenz_text"] == "werk:GPL-2.0-only"

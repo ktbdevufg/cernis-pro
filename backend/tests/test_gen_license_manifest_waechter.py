@@ -433,3 +433,110 @@ def test_zielplattform_hat_keinen_vorgabewert_im_modul() -> None:
     stillen Rueckfall werden.
     """
     assert not hasattr(sammler_modul, "ZIELPLATTFORM_VORGABE")
+
+
+# ────────────────────────────────────────────────────────────────────────────────
+# Befund 54b — das Feld ``bezugsart`` der Ebene ``programme``
+# ────────────────────────────────────────────────────────────────────────────────
+
+
+def test_jeder_eintrag_der_ebene_traegt_die_bezugsart() -> None:
+    """Ausdruecklich (Teil 4): das Feld liegt bei ALLEN Eintraegen, nicht nur bei Npcap.
+
+    Ein Feld, das nur einer traegt, ist keine Abstufung -- es waere bloss eine
+    Markierung fuer den einen Sonderfall und liesse die uebrigen Eintraege
+    unbeantwortet.
+    """
+    for programm in sammler_modul.FREMDPROGRAMME:
+        assert "bezugsart" in programm, programm["name"]
+        assert programm["bezugsart"] in sammler_modul.ZULAESSIGE_BEZUGSARTEN, programm["name"]
+
+
+def test_alle_drei_abstufungen_kommen_vor() -> None:
+    """Die Dreiteilung ist belegt, nicht bloss vorgesehen.
+
+    Traegt eine Abstufung keinen einzigen Eintrag, waere sie eine Behauptung ueber
+    einen Fall, den es nicht gibt.
+    """
+    vorhandene = {programm["bezugsart"] for programm in sammler_modul.FREMDPROGRAMME}
+    assert vorhandene == sammler_modul.ZULAESSIGE_BEZUGSARTEN
+
+
+def test_npcap_steht_in_der_liste_und_wird_nur_vorausgesetzt() -> None:
+    """Befund 54b: der Eintrag ist da, auf Windows, und wird NIE aufgerufen.
+
+    ``lizenz_id`` taucht hier bewusst nicht auf: die Ebene setzt sie fuer JEDEN
+    Eintrag auf ``None`` (Regel 2), Npcap ist darin kein Sonderfall.
+    """
+    treffer = [p for p in sammler_modul.FREMDPROGRAMME if p["name"] == "Npcap"]
+    assert len(treffer) == 1
+    assert treffer[0]["plattform"] == "Windows"
+    assert treffer[0]["bezugsart"] == sammler_modul.BEZUGSART_VORAUSGESETZT
+
+
+def test_die_ebene_traegt_die_bezugsart_bis_in_die_aufstellung() -> None:
+    """Das Feld ueberlebt den Weg durch ``anfuegen`` -- es ist kein Listen-Detail.
+
+    Gepinnt wird hier die NAHT zwischen der gefuehrten Liste und dem erzeugten
+    Datensatz: ``anfuegen`` nimmt Zusatzfelder ueber ``**zusatz`` und schriebe sie
+    still nicht mit, wenn der Aufruf sie nicht weiterreichte.
+    """
+    sammler = sammler_modul.Sammler(Path("/nicht/vorhanden"))
+    sammler_modul.sammle_programme(sammler)
+
+    assert len(sammler.bestandteile) == len(sammler_modul.FREMDPROGRAMME)
+    for eintrag in sammler.bestandteile:
+        assert eintrag["ebene"] == "programme"
+        assert eintrag["bezugsart"] in sammler_modul.ZULAESSIGE_BEZUGSARTEN
+
+
+def test_unbekannte_bezugsart_ist_ein_abbruch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Kein stiller Vorgabewert: ein unbekannter Wert faellt LAUT (Finding S3).
+
+    Ein Vorgabewert waere hier eine Behauptung -- er ordnete einen neuen Eintrag
+    ungefragt einer der drei Abstufungen zu.
+    """
+    kaputt = (
+        {
+            "name": "erfunden",
+            "paket": "p",
+            "zweck": "z",
+            "fundstelle": "f",
+            "plattform": "Linux",
+            "bezugsart": "gibt-es-nicht",
+        },
+    )
+    monkeypatch.setattr(sammler_modul, "FREMDPROGRAMME", kaputt)
+    sammler = sammler_modul.Sammler(Path("/nicht/vorhanden"))
+
+    with pytest.raises(SystemExit) as fehler:
+        sammler_modul.sammle_programme(sammler)
+
+    assert "gibt-es-nicht" in str(fehler.value)
+    assert "erfunden" in str(fehler.value)
+
+
+def test_fehlende_bezugsart_ist_ebenfalls_ein_abbruch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ein Eintrag OHNE das Feld darf nicht durchrutschen.
+
+    Sonst waere die Zusage "jeder Eintrag traegt die Abstufung" beim naechsten
+    handgefuehrten Zusatz still gebrochen -- die Liste wird von Hand nachgezogen.
+    """
+    ohne = (
+        {"name": "erfunden", "paket": "p", "zweck": "z", "fundstelle": "f", "plattform": "Linux"},
+    )
+    monkeypatch.setattr(sammler_modul, "FREMDPROGRAMME", ohne)
+    sammler = sammler_modul.Sammler(Path("/nicht/vorhanden"))
+
+    with pytest.raises(SystemExit):
+        sammler_modul.sammle_programme(sammler)
+
+
+def test_ein_zusatzfeld_bricht_das_ebenen_pin_nicht() -> None:
+    """Die Entscheidung "Feld statt Ebene" ist hier festgehalten.
+
+    Eine neue EBENE braeche das Pin auf ``PFLICHTEBENEN``; ein neues FELD nicht.
+    Der Test steht bewusst neben jenem Pin, damit beide zusammen gelesen werden.
+    """
+    assert set(sammler_modul.PFLICHTEBENEN) == {"daten", "npm", "programme", "python", "rust"}
+    assert "bezugsart" not in sammler_modul.PFLICHTEBENEN

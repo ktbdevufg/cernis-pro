@@ -4105,9 +4105,35 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     else:
         _laufende_plattform = "Linux"
 
+    # Die plattformeigene Pruefung fuer Eintraege, die NICHT ueber den Suchpfad
+    # auffindbar sind (Befund 54b, Naht ``ProgrammPruefung``). Verdrahtet auf
+    # dieselbe Quelle wie der Npcap-Marker der Sniff-Familie -- genau das Muster der
+    # DNS-Naht aus Befund 52, einschliesslich des lokalen Imports: der
+    # infrastructure-Client bleibt aus dem App-Bau heraus.
+    #
+    # Der Use-Case kennt weder ``sniffd_client`` noch eine Plattform; er reicht nur
+    # den Namen herein. Die Zuordnung Name -> Quelle faellt HIER (Importregel 5).
+    #
+    # Dreiwertig, ohne stillen Rueckfall: ``None`` heisst "keine Aussage" und wird im
+    # Use-Case zu ``nicht_ermittelbar``, nie zu "fehlt". Das betrifft (a) jeden
+    # Namen, fuer den es hier keine Quelle gibt, und (b) Npcap ausserhalb von
+    # Windows -- dort prueft ``sniffd_platform_supported`` gar nicht auf Npcap,
+    # sondern auf die Tragfaehigkeit der Naht, und sein Ergebnis waere zu dieser
+    # Frage keine Auskunft.
+    def _license_programm_pruefung(name: str) -> bool | None:
+        if name != "Npcap":
+            return None
+        if sys.platform != "win32":
+            return None
+        from infrastructure.sniffd_client.base import sniffd_unavailable_reason
+
+        # Derselbe Marker, den SNI und der DNS-Waechter lesen: leer = Npcap erkannt,
+        # ``NPCAP_MISSING`` = alle vier Erkennungsstufen ohne Treffer.
+        return sniffd_unavailable_reason() != "NPCAP_MISSING"
+
     app.include_router(license_manifest_router)
     app.dependency_overrides[provide_get_license_manifest] = lambda: GetLicenseManifest(
-        _license_manifest_adapter()
+        _license_manifest_adapter(), _license_programm_pruefung
     )
     app.dependency_overrides[provide_get_license_text] = lambda: GetLicenseText(
         _license_manifest_adapter()

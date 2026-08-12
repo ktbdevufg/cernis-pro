@@ -136,6 +136,37 @@ ZULAESSIGE_QUELLEN: Final = frozenset(
     }
 )
 
+#: Die drei Abstufungen des Feldes ``bezugsart`` auf der Ebene ``programme``
+#: (Befund 54b). Es trennt, WIE ein Fremdprogramm ins Spiel kommt -- eine
+#: Unterscheidung, die die Ebene bis dahin nicht traf und die ohne sie zu einer
+#: Falschaussage fuehrt: die Ebene heisst "die AUFGERUFENEN Fremdprogramme", und
+#: genau das stimmt fuer Npcap nicht. Npcap ist ein Kerneltreiber ohne
+#: ausfuehrbare Datei; CERNIS PRO ruft ihn nie auf, setzt ihn auf Windows aber
+#: fuer jede Rohpaket-Erfassung voraus.
+#:
+#: WARUM DER NAME ``bezugsart``: das Feld beantwortet die Frage "in welchem Bezug
+#: steht dieses Programm zur Anwendung?" -- nicht "was ist es?" und nicht "wo
+#: kommt es her?" (das sagen bereits ``lieferndes_paket`` und ``plattform``). Der
+#: Bezeichner traegt keine Umlaute, wie fuer Feldnamen im Datenformat ueblich.
+#:
+#: WARUM DREI WERTE UND NICHT ZWEI: ``nmap`` ist GEMESSEN beides -- es wird
+#: aufgerufen (``backend/modules/portscan.py:120,129``) UND ist zugleich
+#: Installationsvoraussetzung des Linux-Pakets (``bundle.linux.deb.depends`` in
+#: ``src-tauri/tauri.conf.json``). Fuenf weitere Eintraege sind es ebenso. Ein
+#: zweiwertiges Feld zwaenge sie in eine der beiden Schubladen und verschwiege
+#: die andere Haelfte.
+BEZUGSART_AUFGERUFEN: Final = "aufgerufen"
+BEZUGSART_VORAUSGESETZT: Final = "vorausgesetzt"
+BEZUGSART_BEIDES: Final = "aufgerufen_und_vorausgesetzt"
+
+ZULAESSIGE_BEZUGSARTEN: Final = frozenset(
+    {
+        BEZUGSART_AUFGERUFEN,
+        BEZUGSART_VORAUSGESETZT,
+        BEZUGSART_BEIDES,
+    }
+)
+
 #: Der Bezeichner, fuer den die SPDX-Fassung nie verwendet wird (Regel 1).
 GPL2_ONLY: Final = "GPL-2.0-only"
 
@@ -360,7 +391,8 @@ def spdx_teilbezeichner(ausdruck: str | None) -> list[str]:
 
 
 # --------------------------------------------------------------------------------
-# Ebene "programme": die aufgerufenen, NICHT mitgelieferten Fremdprogramme
+# Ebene "programme": die vorausgesetzten, NICHT mitgelieferten Fremdprogramme
+# (aufgerufen, nur vorausgesetzt oder beides -- siehe Feld ``bezugsart``)
 # --------------------------------------------------------------------------------
 
 # Diese Liste stammt aus der Messung S71-L1 Block E (Suchbasis: subprocess.run/Popen/
@@ -376,6 +408,14 @@ def spdx_teilbezeichner(ausdruck: str | None) -> list[str]:
 # Paketabhaengigkeiten vorausgesetzt. Deshalb fuehrt diese Ebene weder Lizenztext
 # noch Urhebervermerk: die Lizenz des jeweiligen Systempakets gehoert zur
 # Distribution des Anwenders, nicht zur Auslieferung dieses Produkts.
+#
+# DAS FELD ``bezugsart`` (Befund 54b): jeder Eintrag traegt es, nicht nur der neue.
+# Ein Feld, das nur EIN Eintrag fuehrt, ist keine Abstufung, sondern eine Markierung
+# -- und die Ebene traegt sie ohnehin schon im Namen. Die Werte stehen bei
+# ``BEZUGSART_*``; die Einordnung JE Eintrag steht am Eintrag selbst, weil sie sich
+# aus dessen Fundstelle ergibt: wo ein Prozessstart oder ein ``shutil.which`` steht,
+# ist das Programm aufgerufen; wo nur die Paketvoraussetzung es nennt, ist es
+# vorausgesetzt.
 FREMDPROGRAMME: Final[tuple[dict[str, str], ...]] = (
     {
         "name": "ip",
@@ -387,6 +427,10 @@ FREMDPROGRAMME: Final[tuple[dict[str, str], ...]] = (
             "backend/modules/discovery.py:130; backend/modules/ipv6.py:87"
         ),
         "plattform": "Linux",
+        # Aufgerufen (siehe Fundstelle) UND harte Paketvoraussetzung: das liefernde
+        # Paket ``iproute2`` steht in ``src-tauri/tauri.conf.json`` unter
+        # ``bundle.linux.deb.depends``.
+        "bezugsart": BEZUGSART_BEIDES,
     },
     {
         "name": "ss",
@@ -397,6 +441,9 @@ FREMDPROGRAMME: Final[tuple[dict[str, str], ...]] = (
             "backend/infrastructure/traffic_permission.py:44,64"
         ),
         "plattform": "Linux",
+        # Wie ``ip``: dasselbe liefernde Paket ``iproute2`` steht unter
+        # ``bundle.linux.deb.depends``.
+        "bezugsart": BEZUGSART_BEIDES,
     },
     {
         "name": "arp",
@@ -404,6 +451,9 @@ FREMDPROGRAMME: Final[tuple[dict[str, str], ...]] = (
         "zweck": "ARP-Tabelle (Alt-Pfad)",
         "fundstelle": "backend/modules/discovery.py:110,121",
         "plattform": "Linux/macOS/Windows",
+        # ``net-tools`` steht in keiner Paketvoraussetzung -- der Alt-Pfad wird
+        # gerufen, wenn das Werkzeug da ist, und sonst nicht.
+        "bezugsart": BEZUGSART_AUFGERUFEN,
     },
     {
         "name": "dig",
@@ -414,6 +464,9 @@ FREMDPROGRAMME: Final[tuple[dict[str, str], ...]] = (
             "backend/infrastructure/resolver/dns_ptr.py:49,116,148"
         ),
         "plattform": "Linux",
+        # Aufgerufen UND vorausgesetzt: ``bind9-dnsutils`` steht unter
+        # ``bundle.linux.deb.depends``.
+        "bezugsart": BEZUGSART_BEIDES,
     },
     {
         "name": "traceroute",
@@ -421,6 +474,9 @@ FREMDPROGRAMME: Final[tuple[dict[str, str], ...]] = (
         "zweck": "Routenverfolgung",
         "fundstelle": "backend/infrastructure/diagnostics_linux.py:535,549,302,317",
         "plattform": "Linux",
+        # Aufgerufen UND vorausgesetzt: ``traceroute`` steht unter
+        # ``bundle.linux.deb.depends``.
+        "bezugsart": BEZUGSART_BEIDES,
     },
     {
         "name": "nmap",
@@ -431,6 +487,11 @@ FREMDPROGRAMME: Final[tuple[dict[str, str], ...]] = (
             "backend/modules/portscan.py:120,129,18; backend/app.py:4049"
         ),
         "plattform": "alle",
+        # Der Eintrag, an dem sich die Dreiteilung entscheidet: aufgerufen (siehe
+        # Fundstelle) UND Installationsvoraussetzung -- ``nmap`` steht unter
+        # ``bundle.linux.deb.depends`` (im rpm nur unter ``recommends``, siehe
+        # RELEASE_NOTES_v2.1.0.md).
+        "bezugsart": BEZUGSART_BEIDES,
     },
     {
         "name": "nmblookup",
@@ -438,6 +499,9 @@ FREMDPROGRAMME: Final[tuple[dict[str, str], ...]] = (
         "zweck": "NetBIOS-Name/Workgroup",
         "fundstelle": "backend/modules/resolver.py:31",
         "plattform": "Linux",
+        # ``samba-common-bin`` steht nur unter ``recommends``, nicht unter
+        # ``depends`` -- keine Voraussetzung, nur ein Aufruf.
+        "bezugsart": BEZUGSART_AUFGERUFEN,
     },
     {
         "name": "resolvectl",
@@ -445,6 +509,7 @@ FREMDPROGRAMME: Final[tuple[dict[str, str], ...]] = (
         "zweck": "systemd-resolved-Status",
         "fundstelle": "backend/infrastructure/system_resolvers.py:159,154",
         "plattform": "Linux",
+        "bezugsart": BEZUGSART_AUFGERUFEN,
     },
     {
         "name": "apt, dnf, yum, zypper, pacman",
@@ -452,6 +517,12 @@ FREMDPROGRAMME: Final[tuple[dict[str, str], ...]] = (
         "zweck": "Paketmanager-Erkennung (nur shutil.which, kein Prozessstart)",
         "fundstelle": "backend/infrastructure/diagnostics_linux.py:350,372",
         "plattform": "Linux",
+        # Grenzfall, bewusst ``aufgerufen``: es gibt keinen Prozessstart, nur ein
+        # ``shutil.which``. Die Ebene zaehlt das seit S71-L1 Block E zum Aufruf --
+        # das Programm wird angesprochen, wenn auch nur nachgeschlagen. Eine
+        # Voraussetzung ist es gerade nicht: keiner der Namen steht in einer
+        # Paketliste, und welcher davon vorliegt, entscheidet die Distribution.
+        "bezugsart": BEZUGSART_AUFGERUFEN,
     },
     {
         "name": "netstat",
@@ -459,6 +530,7 @@ FREMDPROGRAMME: Final[tuple[dict[str, str], ...]] = (
         "zweck": "Routentabelle (macOS); Portbelegung (Windows)",
         "fundstelle": ("backend/infrastructure/interfaces_macos.py:212; src-tauri/src/main.rs:166"),
         "plattform": "macOS/Windows",
+        "bezugsart": BEZUGSART_AUFGERUFEN,
     },
     {
         "name": "ifconfig",
@@ -466,6 +538,7 @@ FREMDPROGRAMME: Final[tuple[dict[str, str], ...]] = (
         "zweck": "Schnittstellen",
         "fundstelle": "backend/infrastructure/interfaces_macos.py:213",
         "plattform": "macOS",
+        "bezugsart": BEZUGSART_AUFGERUFEN,
     },
     {
         "name": "ndp",
@@ -473,6 +546,7 @@ FREMDPROGRAMME: Final[tuple[dict[str, str], ...]] = (
         "zweck": "IPv6-Nachbarn",
         "fundstelle": "backend/modules/ipv6.py:73",
         "plattform": "macOS",
+        "bezugsart": BEZUGSART_AUFGERUFEN,
     },
     {
         "name": "osascript",
@@ -484,6 +558,7 @@ FREMDPROGRAMME: Final[tuple[dict[str, str], ...]] = (
             "backend/modules/monitor.py:206"
         ),
         "plattform": "macOS",
+        "bezugsart": BEZUGSART_AUFGERUFEN,
     },
     {
         "name": "dscl",
@@ -491,6 +566,7 @@ FREMDPROGRAMME: Final[tuple[dict[str, str], ...]] = (
         "zweck": "Gruppenmitgliedschaft (BPF-Zugriff)",
         "fundstelle": "backend/infrastructure/capture_access_macos.py:238",
         "plattform": "macOS",
+        "bezugsart": BEZUGSART_AUFGERUFEN,
     },
     {
         "name": "netsh",
@@ -498,6 +574,7 @@ FREMDPROGRAMME: Final[tuple[dict[str, str], ...]] = (
         "zweck": "IPv6-Nachbarn",
         "fundstelle": "backend/modules/ipv6.py:81",
         "plattform": "Windows",
+        "bezugsart": BEZUGSART_AUFGERUFEN,
     },
     {
         "name": "fuser",
@@ -505,6 +582,9 @@ FREMDPROGRAMME: Final[tuple[dict[str, str], ...]] = (
         "zweck": "Port freigeben beim Start",
         "fundstelle": "src-tauri/src/main.rs:157",
         "plattform": "Linux",
+        # Aufgerufen UND vorausgesetzt: ``psmisc`` steht unter
+        # ``bundle.linux.deb.depends``.
+        "bezugsart": BEZUGSART_BEIDES,
     },
     {
         "name": "taskkill",
@@ -512,6 +592,7 @@ FREMDPROGRAMME: Final[tuple[dict[str, str], ...]] = (
         "zweck": "Prozessende erzwingen",
         "fundstelle": "src-tauri/src/main.rs:178,709; src-tauri/nsis-hooks.nsi",
         "plattform": "Windows",
+        "bezugsart": BEZUGSART_AUFGERUFEN,
     },
     {
         "name": "systemd-detect-virt",
@@ -519,6 +600,7 @@ FREMDPROGRAMME: Final[tuple[dict[str, str], ...]] = (
         "zweck": "VM-Erkennung",
         "fundstelle": "src-tauri/src/main.rs:397",
         "plattform": "Linux",
+        "bezugsart": BEZUGSART_AUFGERUFEN,
     },
     {
         "name": "pkg-config",
@@ -526,6 +608,35 @@ FREMDPROGRAMME: Final[tuple[dict[str, str], ...]] = (
         "zweck": "Bibliotheks-Erkennung zur Laufzeit",
         "fundstelle": "src-tauri/src/main.rs:428",
         "plattform": "Linux",
+        "bezugsart": BEZUGSART_AUFGERUFEN,
+    },
+    {
+        # BEFUND 54b: der einzige Eintrag der Ebene, der NIE aufgerufen wird.
+        #
+        # Npcap ist ein Kerneltreiber und bringt keine ausfuehrbare Datei mit, die
+        # sich starten liesse. CERNIS PRO ruft ihn nicht auf -- die Rohpaket-
+        # Erfassung (SNI, Datenverkehr, Topologie, DNS-Waechter) laeuft ueber die
+        # Bibliothek des Treibers und ist auf Windows OHNE ihn schlicht nicht
+        # moeglich. Genau das trennt ``vorausgesetzt`` von ``aufgerufen``.
+        #
+        # WARUM ER TROTZDEM HIERHER GEHOERT: die Ebene fuehrt, was das Produkt
+        # voraussetzt, ohne es mitzuliefern. Npcap fehlte darin bisher, obwohl es
+        # auf Windows die Voraussetzung mit der groessten Wirkung ist -- ohne es
+        # faellt die halbe Erfassungs-Familie aus. Ein Weglassen waere die
+        # unehrlichere Angabe.
+        #
+        # FASSUNG UND LIZENZ SIND NICHT BELEGBAR und werden darum NICHT behauptet:
+        # die Erkennung in ``backend/infrastructure/sniffd_client/base.py:222-313``
+        # liefert vier Stufen lang ein reines Ja/Nein und NIRGENDS eine Fassung.
+        # Npcap ist zudem keine Open-Source-Software (siehe ``npcap.bodyMissing``
+        # in den Sprachdateien); ein SPDX-Bezeichner waere frei erfunden. Nach
+        # Regel 2 bleibt ``lizenz_id`` deshalb leer mit Quelle ``nicht_belegt``.
+        "name": "Npcap",
+        "paket": "Npcap (eigenstaendige Einrichtung von npcap.com)",
+        "zweck": "Rohpaket-Erfassung auf Windows (SNI, Datenverkehr, Topologie, DNS-Waechter)",
+        "fundstelle": "backend/infrastructure/sniffd_client/base.py:222-313",
+        "plattform": "Windows",
+        "bezugsart": BEZUGSART_VORAUSGESETZT,
     },
 )
 
@@ -1547,8 +1658,20 @@ def sammle_daten(sammler: Sammler, wurzel: Path) -> None:
 
 
 def sammle_programme(sammler: Sammler) -> None:
-    """Die aufgerufenen, NICHT mitgelieferten Fremdprogramme (S71-L1 Block E)."""
+    """Die vorausgesetzten, NICHT mitgelieferten Fremdprogramme (S71-L1 Block E).
+
+    JEDER Eintrag traegt ``bezugsart`` (Befund 54b) -- fehlt sie oder traegt sie
+    einen unbekannten Wert, ist das ein Abbruch und kein stiller Rueckfall auf
+    einen Vorgabewert. Ein Vorgabewert waere hier eine Behauptung: er ordnete einen
+    neuen Eintrag ungefragt einer der drei Abstufungen zu.
+    """
     for programm in FREMDPROGRAMME:
+        bezugsart = programm.get("bezugsart")
+        if bezugsart not in ZULAESSIGE_BEZUGSARTEN:
+            raise SystemExit(
+                f"{programm['name']}: unzulaessige bezugsart {bezugsart!r}. "
+                f"Zulaessig: {', '.join(sorted(ZULAESSIGE_BEZUGSARTEN))}"
+            )
         # Diese Programme werden nicht ausgeliefert. Ihre Lizenz gehoert zum
         # Systempaket der jeweiligen Distribution, nicht zu dieser Auslieferung --
         # deshalb bleiben Bezeichner, Text und Vermerk unbelegt (Regel 2).
@@ -1569,6 +1692,7 @@ def sammle_programme(sammler: Sammler) -> None:
             zweck=programm["zweck"],
             fundstelle=programm["fundstelle"],
             plattform=programm["plattform"],
+            bezugsart=bezugsart,
         )
 
 

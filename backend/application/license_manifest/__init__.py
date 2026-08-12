@@ -12,7 +12,11 @@ from application.license_manifest.errors import (
     LicenseTextUnknown,
 )
 from application.license_manifest.normalisierung import normalisiere_lizenz_id
-from application.license_manifest.use_cases import GetLicenseManifest, GetLicenseText
+from application.license_manifest.use_cases import (
+    GetLicenseManifest,
+    GetLicenseText,
+    ProgrammPruefung,
+)
 
 __all__ = [
     "GetLicenseManifest",
@@ -20,5 +24,6 @@ __all__ = [
     "LicenseManifestApplicationError",
     "LicenseManifestUnavailable",
     "LicenseTextUnknown",
+    "ProgrammPruefung",
     "normalisiere_lizenz_id",
 ]
