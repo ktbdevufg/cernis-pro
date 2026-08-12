@@ -271,11 +271,188 @@ beilage_pruefen() {
     fi
 }
 
-DEB_PAKET=$(find "$BUNDLE_DIR/deb" -name "*.deb" -print -quit 2>/dev/null || true)
-if [ -z "$DEB_PAKET" ]; then
-    echo "      FEHLER: kein .deb unter $BUNDLE_DIR/deb gefunden."
-    exit 1
-fi
+# Zweiter, UNABHAENGIGER Waechter: findet die Anwendung die Aufstellung zur
+# LAUFZEIT? Die Beilagenpruefung oben belegt nur die ABLAGE an einem erwarteten
+# Ort -- und diese Erwartung ist im Repo nirgends gemessen, sondern notiert. Ein
+# Paket kann die Datei also mustergueltig an dem Ort tragen, den die Liste nennt,
+# und die Anwendung findet sie trotzdem nicht, weil sie an einer ANDEREN Stelle
+# sucht. Deshalb nimmt dieser Waechter die Erwartungsliste ausdruecklich NICHT
+# zum Massstab, sondern allein die Suchlogik der Anwendung:
+# backend/infrastructure/license_manifest.py, Funktion _kandidaten. Sie leitet
+# alle Kandidaten aus sys.executable ab -- also aus dem Ort des Backend-Binaers
+# im Paket, nicht aus einem konfigurierten Pfad.
+#
+# $1 Wurzel des entpackten Baums, $2 Erzeugnis (Pfad der Paketdatei),
+# $3 Kennung fuer die Meldung (deb/rpm).
+laufzeitfund_pruefen() {
+    local wurzel="$1" erzeugnis="$2" art="$3"
+    local dateiname="lizenzaufstellung.json"
+
+    # Erstens: das Backend-Binaer im Baum. Genau ein Treffer wird erwartet --
+    # null bedeutet, dass das Paket das Backend gar nicht traegt, mehr als einer
+    # macht die Ableitung von sys.executable mehrdeutig. Beides ist ein Abbruch
+    # mit benannter Trefferzahl, kein Ueberspringen.
+    local treffer anzahl
+    treffer=$(find "$wurzel" -name "cernis-backend" -type f)
+    anzahl=$(printf '%s' "$treffer" | grep -c . || true)
+    if [ "$anzahl" -ne 1 ]; then
+        echo "      FEHLER: im gebauten .$art wurden $anzahl Dateien namens 'cernis-backend' gefunden, erwartet ist genau eine."
+        echo "        geprueftes Erzeugnis: $erzeugnis"
+        if [ "$anzahl" -gt 1 ]; then
+            while IFS= read -r fund; do
+                echo "        Treffer: ${fund#"$wurzel"}"
+            done <<< "$treffer"
+        fi
+        echo "        Ohne eindeutiges Backend-Binaer laesst sich sys.executable nicht abbilden"
+        echo "        und damit die Laufzeitsuche nicht nachvollziehen."
+        BEILAGE_FEHLT=1
+        return
+    fi
+
+    # Zweitens: der Installationspfad des Verzeichnisses, in dem das Binaer
+    # liegt -- also der Pfad relativ zur Baumwurzel mit fuehrendem
+    # Schraegstrich. Genau dieses Verzeichnis ist zur Laufzeit
+    # os.path.dirname(sys.executable).
+    local exe_verzeichnis exe_install
+    exe_verzeichnis=$(dirname "$treffer")
+    exe_install="${exe_verzeichnis#"$wurzel"}"
+    echo "      Laufzeit-$art: Backend-Binaer liegt in $exe_install"
+
+    # Drittens: wo liegt die Aufstellung TATSAECHLICH? Das ist die erste Messung
+    # dieses Ortes ueberhaupt -- sie gehoert deshalb auch im Erfolgsfall in die
+    # Ausgabe, nicht nur in eine Fehlermeldung.
+    local aufstellung_roh aufstellung_orte orte_text
+    aufstellung_roh=$(find "$wurzel" -name "$dateiname" -type f | sort)
+    aufstellung_orte=""
+    if [ -n "$aufstellung_roh" ]; then
+        while IFS= read -r fund; do
+            aufstellung_orte+="${fund#"$wurzel"}"$'\n'
+        done <<< "$aufstellung_roh"
+        aufstellung_orte="${aufstellung_orte%$'\n'}"
+    fi
+    if [ -z "$aufstellung_orte" ]; then
+        orte_text="(keine)"
+        echo "      Laufzeit-$art: '$dateiname' liegt nirgends im Paket"
+    else
+        orte_text=$(printf '%s' "$aufstellung_orte" | tr '\n' ' ')
+        while IFS= read -r ort; do
+            echo "      Laufzeit-$art: '$dateiname' liegt unter $ort"
+        done <<< "$aufstellung_orte"
+    fi
+
+    # Viertens: die Kandidaten bilden, exakt wie _kandidaten es tut.
+    # Kandidat 1 ist die macOS-Form <verzeichnis>/../Resources/<datei>; nach
+    # os.path.normpath faellt das ".." mit der letzten Komponente des
+    # Verzeichnisses zusammen, uebrig bleibt <elternverzeichnis>/Resources/<datei>.
+    # Kandidat 2 ist die Form <verzeichnis>/<datei> -- sie deckt Windows ab.
+    # Kandidat 3 ist die Linux-Paketform <verzeichnis>/../lib/CernisPro/<datei>:
+    # das Backend geht ueber externalBin nach /usr/bin, die Aufstellung ueber
+    # bundle.resources nach /usr/lib/CernisPro (Befund 34b, an diesem Paket
+    # gemessen). Auch hier faellt das ".." nach normpath mit der letzten
+    # Komponente des Verzeichnisses zusammen. Der VIERTE Kandidat aus
+    # _kandidaten bleibt hier bewusst AUSSEN VOR: er zeigt auf src-tauri/ unter
+    # der Repo-Wurzel, die aus dem Ort der Python-Datei abgeleitet wird. Auf
+    # einem Zielsystem existiert dieses Verzeichnis nicht -- ein Treffer dort
+    # waere ein Artefakt der Baumaschine und wuerde genau den Fehlschlag
+    # verdecken, den dieser Waechter sucht.
+    local kandidat1 kandidat2 kandidat3
+    kandidat1="$(dirname "$exe_install")/Resources/$dateiname"
+    kandidat2="$exe_install/$dateiname"
+    kandidat3="$(dirname "$exe_install")/lib/CernisPro/$dateiname"
+
+    # Fuenftens: existiert einer der drei Kandidaten im Baum als nicht leere
+    # Datei? Leer zaehlt wie fehlend -- eine leere Aufstellung ist zur Laufzeit
+    # kein lesbares JSON-Objekt. Die Reihenfolge ist dieselbe wie in
+    # _kandidaten; geprueft wird der ERSTE Treffer, denn genau den nimmt auch
+    # die Anwendung.
+    local gefunden=""
+    if [ -s "$wurzel$kandidat1" ]; then
+        gefunden="$kandidat1"
+    elif [ -s "$wurzel$kandidat2" ]; then
+        gefunden="$kandidat2"
+    elif [ -s "$wurzel$kandidat3" ]; then
+        gefunden="$kandidat3"
+    fi
+
+    if [ -n "$gefunden" ]; then
+        echo "      OK - $art: Laufzeitfund unter $gefunden ($(wc -c < "$wurzel$gefunden" | tr -d ' ') Bytes)"
+        return
+    fi
+
+    echo "      FEHLER: die Anwendung findet '$dateiname' im gebauten .$art an KEINEM ihrer Laufzeit-Kandidatenorte."
+    echo "        geprueftes Erzeugnis:     $erzeugnis"
+    echo "        Backend-Binaer liegt in:  $exe_install"
+    echo "        Aufstellung liegt unter:  $orte_text"
+    echo "        gepruefter Kandidat 1:    $kandidat1"
+    echo "        gepruefter Kandidat 2:    $kandidat2"
+    echo "        gepruefter Kandidat 3:    $kandidat3"
+    echo "        naechstliegende Ursache: das Backend wird ueber externalBin ausgeliefert"
+    echo "        und landet damit in einem ANDEREN Verzeichnis als die Eintraege aus"
+    echo "        bundle.resources. Die aus sys.executable abgeleiteten Kandidaten zeigen"
+    echo "        deshalb am Ablageort der Aufstellung vorbei."
+    BEILAGE_FEHLT=1
+}
+
+# Die Produktversion DIESES Laufs -- aus der in Schritt [5/8] erzeugten Aufstellung,
+# nicht aus tauri.conf.json: geprueft werden soll das Erzeugnis, das zu GENAU dieser
+# Aufstellung gehoert. Fehlt das Feld, ist das ein Abbruch und kein Rueckfall.
+PRODUKTVERSION=$(python3 -c "
+import json, sys
+daten = json.load(open(sys.argv[1]))
+wert = daten.get('produktversion')
+if not isinstance(wert, str) or not wert:
+    sys.exit('FEHLER: die erzeugte Aufstellung fuehrt kein Feld produktversion.')
+print(wert)
+" "$LIZENZ_JSON") || exit 1
+echo "      Produktversion dieses Laufs (aus $LIZENZ_JSON): $PRODUKTVERSION"
+
+# Das zu pruefende Paket waehlen -- versionsgenau, nicht "der erste Treffer".
+# Warum: im Bundle-Verzeichnis liegen Altbestaende frueherer Laeufe (gemessen:
+# 2.0.6 neben 2.1.0). "find -print -quit" nahm davon irgendeinen, in undefinierter
+# Reihenfolge -- der Waechter pruefte damit ein Paket, das dieser Bau gar nicht
+# erzeugt hat. Massstab ist die Produktversion aus der in diesem Lauf erzeugten
+# Aufstellung; gewaehlt wird die Paketdatei, deren NAME diese Version traegt.
+# Weder Zeitstempel noch alphabetische Reihenfolge -- beide sind Zufall, kein Beleg.
+# Kein Treffer oder mehr als einer ist ein benannter Abbruch mit Nennung ALLER
+# gefundenen Dateien: ein Rueckfall auf irgendeinen Treffer waere genau der stille
+# Fehlgriff, der hier behoben wird.
+# $1 Verzeichnis, $2 Endung ohne Punkt (deb/rpm). Ergebnis steht in $PAKET_GEWAEHLT.
+PAKET_GEWAEHLT=""
+paket_dieses_baus_waehlen() {
+    local verzeichnis="$1" endung="$2"
+    local alle passende anzahl_alle anzahl_passend
+    PAKET_GEWAEHLT=""
+    alle=$(find "$verzeichnis" -maxdepth 1 -name "*.$endung" -type f 2>/dev/null | sort)
+    anzahl_alle=$(printf '%s' "$alle" | grep -c . || true)
+    if [ "$anzahl_alle" -eq 0 ]; then
+        echo "      FEHLER: kein .$endung unter $verzeichnis gefunden."
+        exit 1
+    fi
+    # Die Version muss als eigenes Namensfeld vorkommen, nicht als Teilzeichenkette:
+    # sonst wuerde "2.1.0" auch in "12.1.05" treffen. Trenner sind '_' (deb:
+    # CernisPro_2.1.0_amd64.deb) und '-' (rpm: CernisPro-2.1.0-1.x86_64.rpm).
+    passende=$(printf '%s\n' "$alle" | grep -E "[_-]${PRODUKTVERSION//./\\.}[_-]" || true)
+    anzahl_passend=$(printf '%s' "$passende" | grep -c . || true)
+    if [ "$anzahl_passend" -ne 1 ]; then
+        if [ "$anzahl_passend" -eq 0 ]; then
+            echo "      FEHLER: unter $verzeichnis traegt KEINE .$endung-Datei die Produktversion $PRODUKTVERSION dieses Laufs."
+        else
+            echo "      FEHLER: unter $verzeichnis tragen $anzahl_passend .$endung-Dateien die Produktversion $PRODUKTVERSION dieses Laufs - die Wahl waere mehrdeutig."
+        fi
+        echo "        Produktversion dieses Laufs: $PRODUKTVERSION (aus $LIZENZ_JSON)"
+        echo "        gefundene .$endung-Dateien ($anzahl_alle):"
+        while IFS= read -r fund; do
+            echo "          $fund"
+        done <<< "$alle"
+        echo "        Es wird KEIN anderes Paket ersatzweise geprueft: der Waechter"
+        echo "        soll das Erzeugnis DIESES Baus belegen, nicht irgendeines."
+        exit 1
+    fi
+    PAKET_GEWAEHLT="$passende"
+}
+
+paket_dieses_baus_waehlen "$BUNDLE_DIR/deb" "deb"
+DEB_PAKET="$PAKET_GEWAEHLT"
 command -v dpkg-deb >/dev/null 2>&1 || { echo "      FEHLER: dpkg-deb fehlt - die Beilage im .deb ist nicht pruefbar. Bitte: sudo apt install dpkg"; exit 1; }
 echo "      Geprueft wird: $DEB_PAKET"
 DEB_WORK=$(mktemp -d)
@@ -284,12 +461,10 @@ dpkg-deb -x "$DEB_PAKET" "$DEB_WORK"
 for eintrag in "${DEB_ERWARTET[@]}"; do
     beilage_pruefen "$DEB_WORK" "${eintrag%%:*}" "${eintrag#*:}" "$DEB_PAKET" "deb"
 done
+laufzeitfund_pruefen "$DEB_WORK" "$DEB_PAKET" "deb"
 
-RPM_PAKET=$(find "$BUNDLE_DIR/rpm" -name "*.rpm" -print -quit 2>/dev/null || true)
-if [ -z "$RPM_PAKET" ]; then
-    echo "      FEHLER: kein .rpm unter $BUNDLE_DIR/rpm gefunden."
-    exit 1
-fi
+paket_dieses_baus_waehlen "$BUNDLE_DIR/rpm" "rpm"
+RPM_PAKET="$PAKET_GEWAEHLT"
 # bsdtar aus libarchive-tools entpackt rpm unmittelbar und braucht dafuer kein
 # zweites Werkzeug (rpm2cpio benoetigte zusaetzlich cpio, das in Debian nicht
 # zum Grundsystem gehoert).
@@ -301,6 +476,7 @@ bsdtar -x -f "$RPM_PAKET" -C "$RPM_WORK"
 for eintrag in "${RPM_ERWARTET[@]}"; do
     beilage_pruefen "$RPM_WORK" "${eintrag%%:*}" "${eintrag#*:}" "$RPM_PAKET" "rpm"
 done
+laufzeitfund_pruefen "$RPM_WORK" "$RPM_PAKET" "rpm"
 
 # Fehlt etwas, bricht der Bau ab: kein Warnhinweis, kein Weiterlaufen, kein
 # Einsammeln.
@@ -316,8 +492,12 @@ echo ""
 echo "[8/8] Pakete einsammeln..."
 VERSION=$(python3 -c "import json; print(json.load(open('$TAURI_SRC/tauri.conf.json'))['version'])")
 DEST="$HOME/Desktop"; mkdir -p "$DEST"
-DEB=$(find "$BUNDLE_DIR/deb" -name "*.deb" -print -quit 2>/dev/null || true)
-[ -n "$DEB" ] && cp "$DEB" "$DEST/cernis-pro_${VERSION}_amd64.deb" && echo "      -> $DEST/cernis-pro_${VERSION}_amd64.deb"
+# Eingesammelt wird GENAU das Paket, das der Waechter in [7b/8] geprueft hat --
+# nicht erneut per "find -print -quit" gesucht. Sonst koennte ein Altbestand aus
+# dem Bundle-Verzeichnis unter dem Dateinamen der NEUEN Version auf dem
+# Schreibtisch landen, und der gruene Waechter haette dafuer gar nicht gegolten.
+cp "$DEB_PAKET" "$DEST/cernis-pro_${VERSION}_amd64.deb"
+echo "      -> $DEST/cernis-pro_${VERSION}_amd64.deb (Quelle: $DEB_PAKET)"
 
 echo ""
 echo "============================================"
