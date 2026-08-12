@@ -286,13 +286,11 @@ fn start_backend() -> Result<Child, BackendStatus> {
 /// Dient beim Timeout der Unterscheidung E-101 (Fremdprozess belegt Port)
 /// vs. E-103 (niemand da / unser Prozess haengt).
 fn port_belegt() -> bool {
-    matches!(
-        std::net::TcpStream::connect_timeout(
-            &format!("127.0.0.1:{}", BACKEND_PORT).parse().unwrap(),
-            Duration::from_millis(500),
-        ),
-        Ok(_)
+    std::net::TcpStream::connect_timeout(
+        &format!("127.0.0.1:{}", BACKEND_PORT).parse().unwrap(),
+        Duration::from_millis(500),
     )
+    .is_ok()
 }
 
 /// Kurz-lockender Exit-Check auf dem geteilten Child. Gibt Some(true) zurueck,
