@@ -91,11 +91,20 @@ if os.path.exists('data/oui.json'):
     datas += [('data/oui.json', 'data')]
 
 # ── Linux: include frontend-dist INSIDE the bundle (_MEIPASS) ─
+# Kein stiller Rueckfall (Befund 62): fehlt das gebaute Frontend, wird NICHT
+# gewarnt und weitergebaut. Ein Binaer ohne Bedienoberflaeche ist kein
+# lieferbares Erzeugnis, und eine Warnung in einem tausendzeiligen Bauprotokoll
+# sieht niemand -- der Bau faellt hier hart.
 frontend_dist = os.path.join('..', 'frontend', 'dist')
-if os.path.exists(frontend_dist):
-    datas += [(frontend_dist, 'frontend-dist')]
-else:
-    print(f"WARNING: frontend dist not found at {os.path.abspath(frontend_dist)}")
+if not os.path.exists(frontend_dist):
+    raise SystemExit(
+        "FEHLER: das gebaute Frontend fehlt -- der Bau wird abgebrochen.\n"
+        f"  gesucht unter: {os.path.abspath(frontend_dist)}\n"
+        "  erzeugt wird dieses Verzeichnis von Schritt [1/8] 'Frontend bauen'\n"
+        "  in build-linux.sh (npm run build im Verzeichnis frontend/).\n"
+        "  Ohne dieses Verzeichnis entstuende ein Binaer OHNE Bedienoberflaeche."
+    )
+datas += [(frontend_dist, 'frontend-dist')]
 
 # ── Handbuch-Inhalte: help_content.json liegt nur in frontend/src/lib (NICHT in
 # frontend/dist), darum eigens als Datenfile unter _MEIPASS/help/ mitgeben. app.py loest
