@@ -23,18 +23,26 @@
 // Abruf, keine Schriftart und kein Bild von aussen. ``projektadresse`` wird als
 // Text gezeigt, bewusst NICHT als Verweis.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { fetchLicenseManifest } from "../api/licenses.js";
 import { FunctionShell } from "../components/AreaShell.jsx";
-import LicenseBrowser from "../components/LicenseBrowser.jsx";
+import LicenseBrowser, {
+  HERKUNFT_GRUPPE_MITGELIEFERT,
+  HERKUNFT_MITGELIEFERT,
+} from "../components/LicenseBrowser.jsx";
 import "./AboutView.css";
 
 // Die Ebenen der mitgelieferten Programmbestandteile (Abschnitt 2). ``daten`` und
 // ``programme`` haben eigene Abschnitte, die native Ebene kommt separat als
 // ``ebene_nativ`` und wird in Abschnitt 2 eingeordnet.
-const EBENEN_BESTANDTEILE = ["python", "npm", "rust"];
+//
+// Die Liste kommt aus dem Lizenz-Browser und wird hier NICHT zweitgeschrieben:
+// der Schalter dieses Abschnitts oeffnet den Browser mit genau dieser Gruppe als
+// Filter (Fund 2, Weg B). Zwei getrennte Listen liefen auseinander, und dann
+// zeigte der Browser eine andere Menge als die Zahl, auf die geklickt wurde.
+const EBENEN_BESTANDTEILE = HERKUNFT_MITGELIEFERT;
 
 // Zeigt einen Wert -- oder die ausdrueckliche Aussage, dass er nicht belegt ist.
 // Leerer String, null und undefined gelten als nicht belegt. Kein Ersatztext.
@@ -57,6 +65,23 @@ function AngabeZeile({ label, wert, t, mono }) {
       <Angabe wert={wert} t={t} mono={mono} />
     </div>
   );
+}
+
+// Die Praefixe, mit denen die Aufstellung ihre Lizenztext-SCHLUESSEL bildet
+// (gemessen: "werk:GPL-2.0-only", "spdx:MIT", "paket:python/anyio"). Sie stehen
+// hier NUR, um eine unaufgeloest durchgereichte Referenz zu ERKENNEN -- nicht, um
+// sie aufzuloesen. Das Aufloesen ist Sache der Anwendungsschicht.
+const TEXT_REFERENZ_PRAEFIXE = ["werk:", "spdx:", "paket:"];
+
+// Ist das, was in werk.lizenz_text steht, wirklich ein Lizenztext -- oder noch die
+// unaufgeloeste Referenz? Zweiteres ist kein Text, sondern ein Schluessel; ihn im
+// Aufklappblock zu zeigen war Befund 54b, Teil 2. Erkennt die Ansicht ihn, greift
+// stattdessen der vorhandene Ersatzhinweis.
+function istWerkLizenztext(wert) {
+  if (typeof wert !== "string" || wert === "") {
+    return false;
+  }
+  return !TEXT_REFERENZ_PRAEFIXE.some((praefix) => wert.startsWith(praefix));
 }
 
 // Abschnitt 1 -- das eigene Werk: Urheber, Lizenz und Bezugsort des Quelltextes.
@@ -89,9 +114,15 @@ function AbschnittWerk({ werk, t }) {
         />
       </div>
 
-      {/* Der Lizenztext des eigenen Werks liegt der Aufstellung direkt bei
-          (Feld lizenz_text) -- zeichengleich, ohne zweiten Abruf. */}
-      {typeof werk?.lizenz_text === "string" && werk.lizenz_text !== "" ? (
+      {/* Der Lizenztext des eigenen Werks: die Aufstellung traegt in lizenz_text
+          nur die REFERENZ (gemessen "werk:GPL-2.0-only"); den Volltext legt der
+          Sammler in der Ebene lizenztexte ab. Aufgeloest wird an der
+          Anwendungsschicht (GetLicenseManifest), damit hier zeichengleich der
+          Text ankommt -- ohne zweiten Abruf und ohne dass die grosse Ebene
+          lizenztexte durchgereicht werden muesste. Bleibt die Referenz
+          unaufloesbar, kommt das Feld unveraendert an; dann greift der
+          Ersatzhinweis unten. */}
+      {istWerkLizenztext(werk?.lizenz_text) ? (
         <details className="about__details">
           <summary className="about__summary">{t("lizenzen.abschnitt.werk.volltext")}</summary>
           <pre className="about__text">{werk.lizenz_text}</pre>
@@ -100,6 +131,63 @@ function AbschnittWerk({ werk, t }) {
         <p className="about__hinweis">{t("lizenzen.detail.keinText")}</p>
       )}
     </section>
+  );
+}
+
+// EIN Eintrag der nativen Ebene, beschriftet -- nach demselben Muster, das der
+// Programm-Abschnitt weiter unten schon nutzt: Name als Kopfzeile, darunter
+// AngabeZeile je Feld (Fund 3). Vorher stand hier das rohe JSON.stringify des
+// ganzen Objekts, also eine Zeile aus 17 Feldern mit Klammern und Anfuehrungs-
+// zeichen -- lesbar allenfalls fuer den, der das Datenformat kennt.
+//
+// WELCHE FELDER: gezeigt wird, was der Anwender fuer die Lizenzfrage braucht --
+// welche Bibliothek (``dateiname``), aus welchem Paket sie stammt
+// (``lieferndes_paket``), unter welcher Lizenz (``lizenz_id``), von wem
+// (``urhebervermerk``), und in welchen der beiden Binaries sie steckt
+// (``binaries``). Das sind genau die Felder, die auch bei den uebrigen Ebenen
+// gezeigt werden.
+//
+// WAS BEWUSST WEGBLEIBT: ``archivname`` (gemessen fast immer gleich
+// ``dateiname``), ``groesse_bytes`` (sagt zur Lizenzlage nichts),
+// ``python_paket`` (in ``lieferndes_paket`` bereits enthalten), die drei
+// ``*_quelle``-Felder und ``copyright_datei`` (Herkunftsnachweis der Angabe, kein
+// Inhalt -- der gehoert in den Lizenz-Browser, nicht in diese Uebersicht), sowie
+// ``lizenz_text_ref``, die nur ein Schluessel ist.
+//
+// Ein Eintrag ist gemessen NIE ein String, sondern immer ein Objekt. Der
+// String-Zweig bleibt als Rueckfall stehen, weil diese Ebene aus dem Bau kommt
+// und ein anders geformter Eintrag hier lieber sichtbar als verschluckt sein
+// soll -- er darf nur nicht mehr der Normalfall sein.
+function NativerEintrag({ eintrag, t }) {
+  if (typeof eintrag === "string") {
+    return <span className="about__mono">{eintrag}</span>;
+  }
+  if (!eintrag || typeof eintrag !== "object") {
+    return <span className="about__wert about__wert--leer">{t("lizenzen.nichtBelegt")}</span>;
+  }
+
+  const binaries = Array.isArray(eintrag.binaries) ? eintrag.binaries.join(", ") : null;
+
+  return (
+    <>
+      <div className="about__programm-kopf">
+        <span className="about__programm-name about__mono">
+          {eintrag.dateiname ?? t("lizenzen.nichtBelegt")}
+        </span>
+      </div>
+      <AngabeZeile
+        label={t("lizenzen.feld.lieferndesPaket")}
+        wert={eintrag.lieferndes_paket}
+        t={t}
+      />
+      <AngabeZeile label={t("lizenzen.feld.lizenzId")} wert={eintrag.lizenz_id} t={t} />
+      <AngabeZeile
+        label={t("lizenzen.feld.urhebervermerk")}
+        wert={eintrag.urhebervermerk}
+        t={t}
+      />
+      <AngabeZeile label={t("lizenzen.feld.binaries")} wert={binaries} t={t} mono />
+    </>
   );
 }
 
@@ -134,12 +222,10 @@ function NativeEbene({ nativ, t }) {
       {/* Statt einer leeren Liste: der Hinweis des Erzeugers im Wortlaut. Er ist
           die Erklaerung -- fehlt er, wird das als nicht belegt gesagt. */}
       {Array.isArray(nativ?.eintraege) && nativ.eintraege.length > 0 ? (
-        <ul className="about__liste">
+        <ul className="about__nativ-liste">
           {nativ.eintraege.map((eintrag, i) => (
-            <li key={i} className="about__listen-eintrag">
-              <span className="about__mono">
-                {typeof eintrag === "string" ? eintrag : JSON.stringify(eintrag)}
-              </span>
+            <li key={i} className="about__nativ-eintrag">
+              <NativerEintrag eintrag={eintrag} t={t} />
             </li>
           ))}
         </ul>
@@ -185,6 +271,18 @@ function AbschnittProgramme({ programme, t }) {
                 </span>
               </div>
               <AngabeZeile label={t("lizenzen.feld.zweck")} wert={teil?.zweck} t={t} />
+              {/* Die Abstufung aus Befund 54b: ohne sie stuende ein Kerneltreiber,
+                  den die Anwendung nie startet, ununterscheidbar neben einem
+                  Werkzeug, das sie wirklich aufruft. */}
+              <AngabeZeile
+                label={t("lizenzen.feld.bezugsart")}
+                wert={
+                  teil?.bezugsart
+                    ? t(`lizenzen.bezugsart.${teil.bezugsart}`, teil.bezugsart)
+                    : null
+                }
+                t={t}
+              />
               <AngabeZeile
                 label={t("lizenzen.feld.lieferndesPaket")}
                 wert={teil?.lieferndes_paket}
@@ -205,6 +303,14 @@ export default function AboutView({ onClose, onOpenManual }) {
   const [aufstellung, setAufstellung] = useState(null);
   const [status, setStatus] = useState("laedt"); // laedt | bereit | fehler
   const [fehler, setFehler] = useState(null);
+  // Die Filtervorwahl fuer den Lizenz-Browser (Fund 2, Weg B). ``stand`` zaehlt
+  // die Klicks: nur so wirkt ein zweiter Klick auf denselben Schalter wieder,
+  // nachdem der Anwender den Filter zwischendurch von Hand geaendert hat.
+  const [browserVorwahl, setBrowserVorwahl] = useState(null);
+  // Der Anker des Browser-Abschnitts -- der Schalter setzt nicht nur den Filter,
+  // er bringt den Browser auch ins Bild. Ein Filter, den man erst suchen muss,
+  // waere nur die halbe Antwort auf die Frage "wo stehen diese Bestandteile?".
+  const browserRef = useRef(null);
 
   // Die Aufstellung EINMAL beim Mount holen. t bewusst NICHT als Dependency
   // (Render-Schleife); der Effekt haengt an nichts und laeuft genau einmal.
@@ -251,6 +357,17 @@ export default function AboutView({ onClose, onOpenManual }) {
     () => bestandteile.filter((teil) => teil?.ebene === "programme"),
     [bestandteile],
   );
+
+  // Fund 2, Weg B: die Zahl in Abschnitt 2 bleibt, was sie ist -- eine Zahl. Der
+  // Schalter daneben oeffnet den Lizenz-Browser mit genau der Menge, aus der sie
+  // entsteht (die Ebenen aus EBENEN_BESTANDTEILE), und bringt ihn ins Bild.
+  const zeigeMitgelieferteImBrowser = () => {
+    setBrowserVorwahl((alt) => ({
+      herkunft: HERKUNFT_GRUPPE_MITGELIEFERT,
+      stand: (alt?.stand ?? 0) + 1,
+    }));
+    browserRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   return (
     <FunctionShell
@@ -318,6 +435,18 @@ export default function AboutView({ onClose, onOpenManual }) {
               <p className="about__section-text">
                 {t("lizenzen.abschnitt.bestandteile.text", { n: mitgelieferte.length })}
               </p>
+              {/* Fund 2, Weg B: der Weg von der Zahl zu den gezaehlten Eintraegen.
+                  Nur zeigen, wenn es ueberhaupt welche gibt -- ein Schalter, der
+                  garantiert eine leere Liste oeffnet, ist eine Sackgasse. */}
+              {mitgelieferte.length > 0 ? (
+                <button
+                  type="button"
+                  className="about__schalter"
+                  onClick={zeigeMitgelieferteImBrowser}
+                >
+                  {t("lizenzen.abschnitt.bestandteile.imBrowserZeigen")}
+                </button>
+              ) : null}
               <NativeEbene nativ={aufstellung?.ebene_nativ} t={t} />
             </section>
 
@@ -351,10 +480,10 @@ export default function AboutView({ onClose, onOpenManual }) {
             <AbschnittProgramme programme={programme} t={t} />
 
             {/* --- Einstieg in den Lizenz-Browser --- */}
-            <section className="about__section">
+            <section className="about__section" ref={browserRef}>
               <h3 className="about__section-title">{t("lizenzen.browser.titel")}</h3>
               <p className="about__section-text">{t("lizenzen.browser.text")}</p>
-              <LicenseBrowser bestandteile={bestandteile} />
+              <LicenseBrowser bestandteile={bestandteile} vorwahl={browserVorwahl} />
             </section>
 
             {/* Offene Angaben der Aufstellung -- benannt, nicht verschwiegen. */}

@@ -25,6 +25,32 @@ import { useTranslation } from "react-i18next";
 import { fetchLicenseText } from "../api/licenses.js";
 import "./LicenseBrowser.css";
 
+// Der Wert des Lizenzfilters, der genau die Eintraege OHNE belegten Bezeichner
+// zeigt (Fund 4). Bis dahin erzeugten sie keine Filteroption -- 20 von 386
+// Bestandteilen waren ueber den Filter unerreichbar, sichtbar nur im Zustand
+// "Alle". Der Wert kann mit keinem normalisierten Bezeichner kollidieren, weil
+// lizenz_id_normalisiert nie leer ist, wenn es belegt ist, und dieser Wert kein
+// gueltiger SPDX-Ausdruck ist.
+export const LIZENZFILTER_NICHT_BELEGT = "__nicht_belegt__";
+
+// Die Ebenen der MITGELIEFERTEN Programmbestandteile. Dieselbe Menge, aus der
+// Abschnitt 2 der Uebersicht seine Zahl bildet -- der Schalter dort waehlt genau
+// sie vor (Fund 2, Weg B). Beide Stellen muessen dieselbe Liste nennen, sonst
+// zeigte der Browser eine andere Menge als die Zahl, auf die geklickt wurde.
+export const HERKUNFT_MITGELIEFERT = ["python", "npm", "rust"];
+
+// Der Wert der Herkunfts-Vorwahl, der diese Gruppe meint. Kein Ebenenname, damit
+// er mit keiner echten Ebene kollidiert. Exportiert, weil der Schalter in
+// AboutView genau ihn als Vorwahl schickt.
+export const HERKUNFT_GRUPPE_MITGELIEFERT = "__mitgeliefert__";
+
+// Traegt ein Bestandteil einen belegten Bezeichner? Leerer String, null und
+// undefined gelten als nicht belegt -- dieselbe Regel wie in ``Wert``.
+function hatLizenzId(teil) {
+  const norm = teil?.lizenz_id_normalisiert;
+  return typeof norm === "string" && norm !== "";
+}
+
 // Stabiler Listen-Schluessel eines Bestandteils. name+fassung+ebene ist innerhalb
 // der Aufstellung eindeutig; der Index sichert den Rest ab.
 function eintragSchluessel(teil, index) {
@@ -234,6 +260,19 @@ function LicenseDetailPanel({ teil, textCache, onTextGeladen, onClose }) {
               />
               <FeldZeile label={t("lizenzen.feld.fundstelle")} wert={teil?.fundstelle} t={t} mono />
               <FeldZeile label={t("lizenzen.feld.plattform")} wert={teil?.plattform} t={t} />
+              {/* Die Abstufung, WIE das Programm ins Spiel kommt (Befund 54b) --
+                  aufgerufen, nur vorausgesetzt, oder beides. Ohne sie laese sich
+                  ein Treiber, der nie gestartet wird, nicht von einem Werkzeug
+                  unterscheiden, das die Anwendung wirklich ruft. */}
+              <FeldZeile
+                label={t("lizenzen.feld.bezugsart")}
+                wert={
+                  teil?.bezugsart
+                    ? t(`lizenzen.bezugsart.${teil.bezugsart}`, teil.bezugsart)
+                    : null
+                }
+                t={t}
+              />
               {/* vorhanden ist eine EIGENE Angabe -- nicht_zutreffend ist kein
                   Fehler, sondern ein benannter Zustand. */}
               <FeldZeile
@@ -288,11 +327,17 @@ function LicenseDetailPanel({ teil, textCache, onTextGeladen, onClose }) {
 
 // Der Browser selbst: Werkzeugleiste (zwei Filter + Suche), links die Liste,
 // rechts die Detailspalte bei Auswahl.
-export default function LicenseBrowser({ bestandteile }) {
+//
+// ``vorwahl`` ist die von aussen gesetzte Filtervorwahl (Fund 2, Weg B): ein
+// Objekt mit einem ``herkunft``-Wert und einem Zaehler ``stand``. Der Zaehler ist
+// noetig, weil ein zweiter Klick auf denselben Schalter dieselbe Vorwahl liefert
+// -- ohne ihn saehe der Effekt keine Aenderung und stellte einen zwischenzeitlich
+// vom Anwender geaenderten Filter nicht wieder her.
+export default function LicenseBrowser({ bestandteile, vorwahl }) {
   const { t } = useTranslation();
 
   const [lizenzFilter, setLizenzFilter] = useState("");   // lizenz_id_normalisiert
-  const [herkunftFilter, setHerkunftFilter] = useState(""); // ebene
+  const [herkunftFilter, setHerkunftFilter] = useState(""); // ebene oder Gruppe
   const [suchbegriff, setSuchbegriff] = useState("");
   const [gewaehlt, setGewaehlt] = useState(null); // Listen-Schluessel oder null
   // Zwischenspeicher der bereits geholten Lizenztexte, nach Schluessel. Ein
@@ -303,6 +348,27 @@ export default function LicenseBrowser({ bestandteile }) {
     () => (Array.isArray(bestandteile) ? bestandteile : []),
     [bestandteile],
   );
+
+  // Vorwahl von aussen uebernehmen (Fund 2, Weg B). Sie setzt AUSSCHLIESSLICH den
+  // Herkunftsfilter und raeumt Lizenzfilter und Suche weg -- sonst zeigte der
+  // Browser eine kleinere Menge als die Zahl, aus der der Schalter kam. Die
+  // Auswahl faellt mit, weil der vorher gewaehlte Eintrag jetzt aus der Liste
+  // fallen kann. Abhaengigkeit ist der Zaehler, nicht der Wert (siehe Kopf).
+  const vorwahlStand = vorwahl?.stand;
+  const vorwahlHerkunft = vorwahl?.herkunft;
+  useEffect(() => {
+    if (vorwahlStand === undefined || vorwahlHerkunft === undefined) {
+      return;
+    }
+    setHerkunftFilter(vorwahlHerkunft);
+    setLizenzFilter("");
+    setSuchbegriff("");
+    setGewaehlt(null);
+    // vorwahlHerkunft bewusst NICHT in den Abhaengigkeiten: der Zaehler ist das
+    // Signal. Bei gleichem Wert und neuem Zaehler soll der Effekt laufen; haenge
+    // er zusaetzlich am Wert, ueberschriebe er beim ersten Rendern nichts, aber
+    // bei jedem Wert-Wechsel doppelt.
+  }, [vorwahlStand]);
 
   // Ein stabiler Schluessel JE Bestandteil, einmal an der ungefilterten Liste
   // vergeben. So bleibt die Auswahl beim Filtern erhalten und die Zuordnung ist
@@ -332,7 +398,7 @@ export default function LicenseBrowser({ bestandteile }) {
         nachNorm.get(norm).add(roh);
       }
     }
-    return [...nachNorm.entries()]
+    const optionen = [...nachNorm.entries()]
       .map(([norm, originale]) => ({
         wert: norm,
         // Beschriftung = Originalwortlaut; fehlt er ganz, ist das nicht belegt.
@@ -340,6 +406,21 @@ export default function LicenseBrowser({ bestandteile }) {
           originale.size > 0 ? [...originale].sort().join(" · ") : t("lizenzen.nichtBelegt"),
       }))
       .sort((a, b) => a.beschriftung.localeCompare(b.beschriftung));
+
+    // FUND 4: die Eintraege OHNE belegten Bezeichner erzeugten bisher keine
+    // Option -- gemessen 20 von 386 (19 vorausgesetzte Programme und die
+    // OUI-Herstellerliste). Sie waren damit nur im Zustand "Alle" zu sehen und
+    // ueber keinen Filterwert gezielt erreichbar. Die Option kommt ans ENDE, nicht
+    // in die alphabetische Sortierung: sie benennt keine Lizenz, sondern deren
+    // Abwesenheit, und gehoert darum nicht zwischen die Bezeichner.
+    const ohne = liste.filter((teil) => !hatLizenzId(teil)).length;
+    if (ohne > 0) {
+      optionen.push({
+        wert: LIZENZFILTER_NICHT_BELEGT,
+        beschriftung: t("lizenzen.filter.ohneLizenzId"),
+      });
+    }
+    return optionen;
   }, [liste, t]);
 
   // Auswahlliste der Herkunft: die vorkommenden Ebenen, in Vorkommensreihenfolge.
@@ -354,15 +435,34 @@ export default function LicenseBrowser({ bestandteile }) {
     return ebenen;
   }, [liste]);
 
+  // Die Gruppen-Option "Mitgelieferte Bestandteile" -- sie fasst mehrere Ebenen
+  // zusammen und ist das Ziel des Schalters aus Abschnitt 2 (Fund 2, Weg B). Sie
+  // erscheint nur, wenn die Aufstellung ueberhaupt eine dieser Ebenen fuehrt;
+  // sonst waere sie eine Option, die garantiert nichts zeigt.
+  const zeigeGruppeMitgeliefert = useMemo(
+    () => herkunftOptionen.some((ebene) => HERKUNFT_MITGELIEFERT.includes(ebene)),
+    [herkunftOptionen],
+  );
+
   // Gefilterte Liste: Lizenzfilter auf lizenz_id_normalisiert, Herkunftsfilter auf
   // ebene, Suche ueber Namen UND Fassung.
   const gefiltert = useMemo(() => {
     const needle = suchbegriff.trim().toLowerCase();
     return liste.filter((teil) => {
-      if (lizenzFilter && teil?.lizenz_id_normalisiert !== lizenzFilter) {
+      if (lizenzFilter === LIZENZFILTER_NICHT_BELEGT) {
+        // Fund 4: genau die Eintraege ohne belegten Bezeichner.
+        if (hatLizenzId(teil)) {
+          return false;
+        }
+      } else if (lizenzFilter && teil?.lizenz_id_normalisiert !== lizenzFilter) {
         return false;
       }
-      if (herkunftFilter && teil?.ebene !== herkunftFilter) {
+      if (herkunftFilter === HERKUNFT_GRUPPE_MITGELIEFERT) {
+        // Die Gruppe deckt mehrere Ebenen ab -- genau die des Abschnitts 2.
+        if (!HERKUNFT_MITGELIEFERT.includes(teil?.ebene)) {
+          return false;
+        }
+      } else if (herkunftFilter && teil?.ebene !== herkunftFilter) {
         return false;
       }
       if (needle) {
@@ -423,6 +523,11 @@ export default function LicenseBrowser({ bestandteile }) {
             onChange={(e) => setHerkunftFilter(e.target.value)}
           >
             <option value="">{t("lizenzen.filter.alle")}</option>
+            {zeigeGruppeMitgeliefert ? (
+              <option value={HERKUNFT_GRUPPE_MITGELIEFERT}>
+                {t("lizenzen.filter.mitgelieferteBestandteile")}
+              </option>
+            ) : null}
             {herkunftOptionen.map((ebene) => (
               <option key={ebene} value={ebene}>
                 {t(`lizenzen.ebene.${ebene}`, ebene)}

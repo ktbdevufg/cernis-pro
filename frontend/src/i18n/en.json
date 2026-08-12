@@ -2507,7 +2507,8 @@
       },
       "bestandteile": {
         "titel": "Bundled components",
-        "text": "{{n}} software components ship with the application. Their licences and copyright notices are listed in the licence browser below."
+        "text": "{{n}} software components ship with the application. Their licences and copyright notices are listed in the licence browser below.",
+        "imBrowserZeigen": "Show in the license browser"
       },
       "daten": {
         "titel": "Bundled data",
@@ -2542,7 +2543,9 @@
       "suche": "Search",
       "alle": "All",
       "suchePlatzhalter": "Name or version",
-      "zaehler": "{{n}} of {{m}}"
+      "zaehler": "{{n}} of {{m}}",
+      "ohneLizenzId": "Without a licence statement",
+      "mitgelieferteBestandteile": "Bundled components"
     },
     "spalte": {
       "name": "Name",
@@ -2574,7 +2577,8 @@
     "vorhanden": {
       "vorhanden": "present",
       "fehlt": "missing",
-      "nicht_zutreffend": "not applicable"
+      "nicht_zutreffend": "not applicable",
+      "nicht_ermittelbar": "cannot be determined"
     },
     "feld": {
       "name": "Name",
@@ -2606,7 +2610,14 @@
       "zustand": "State",
       "zielplattform": "Target platform",
       "quelleDerBinaries": "Source of the binaries",
-      "geleseneBinaries": "Binaries read"
+      "geleseneBinaries": "Binaries read",
+      "bezugsart": "Kind of dependency",
+      "binaries": "Contained in"
+    },
+    "bezugsart": {
+      "aufgerufen": "is called",
+      "vorausgesetzt": "is required, but never called",
+      "aufgerufen_und_vorausgesetzt": "is called and required"
     }
   }
 }

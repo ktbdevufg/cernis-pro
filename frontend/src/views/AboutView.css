@@ -286,6 +286,19 @@
   border-color: var(--color-border);
 }
 
+/* "nicht ermittelbar" ist KEIN Fehler und KEIN "fehlt" (Befund 54b): der Eintrag
+   ist auf dieser Plattform gemeint, es gibt hier nur keine Pruefung, die ihn
+   beantworten koennte. Deshalb neutral wie "nicht zutreffend" und ausdruecklich
+   nicht in der Warnfarbe von "fehlt" -- die Farbe darf keine Aussage machen, die
+   der Text gerade verweigert. Vom neutralen Nachbarn unterscheidet ihn allein die
+   gestrichelte Kante: ungeklaert, nicht abgeschlossen. */
+.about__vorhanden--nicht_ermittelbar {
+  color: var(--color-text-tert);
+  background: var(--color-bar);
+  border-color: var(--color-border);
+  border-style: dashed;
+}
+
 /* --- Native Ebene --- */
 
 .about__nativ {
@@ -297,4 +310,51 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-card);
+}
+
+/* Die Eintraege der nativen Ebene, beschriftet statt als rohes JSON (Fund 3).
+   Dasselbe Kartenmuster wie .about__programm im Abschnitt darunter -- die
+   Uebersicht zeigt beide Listen damit in derselben Form. */
+
+.about__nativ-liste {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.about__nativ-eintrag {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+}
+
+/* Der Weg von einer Zahl zu den gezaehlten Eintraegen (Fund 2, Weg B). Kein
+   neuer Farbwert -- dieselben Tokens wie die uebrigen Bedienelemente. */
+.about__schalter {
+  align-self: flex-start;
+  margin-top: 8px;
+  padding: 6px 12px;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--color-text);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.about__schalter:hover {
+  border-color: var(--color-accent);
+}
+
+.about__schalter:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
 }

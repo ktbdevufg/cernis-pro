@@ -2507,7 +2507,8 @@
       },
       "bestandteile": {
         "titel": "Mitgelieferte Bestandteile",
-        "text": "{{n}} Programmbestandteile werden mit der Anwendung ausgeliefert. Ihre Lizenzen und Urhebervermerke stehen im Lizenz-Browser weiter unten."
+        "text": "{{n}} Programmbestandteile werden mit der Anwendung ausgeliefert. Ihre Lizenzen und Urhebervermerke stehen im Lizenz-Browser weiter unten.",
+        "imBrowserZeigen": "Im Lizenz-Browser anzeigen"
       },
       "daten": {
         "titel": "Mitgelieferte Daten",
@@ -2542,7 +2543,9 @@
       "suche": "Suche",
       "alle": "Alle",
       "suchePlatzhalter": "Name oder Fassung",
-      "zaehler": "{{n}} von {{m}}"
+      "zaehler": "{{n}} von {{m}}",
+      "ohneLizenzId": "Ohne Lizenzangabe",
+      "mitgelieferteBestandteile": "Mitgelieferte Bestandteile"
     },
     "spalte": {
       "name": "Name",
@@ -2574,7 +2577,8 @@
     "vorhanden": {
       "vorhanden": "vorhanden",
       "fehlt": "fehlt",
-      "nicht_zutreffend": "nicht zutreffend"
+      "nicht_zutreffend": "nicht zutreffend",
+      "nicht_ermittelbar": "nicht ermittelbar"
     },
     "feld": {
       "name": "Name",
@@ -2606,7 +2610,14 @@
       "zustand": "Zustand",
       "zielplattform": "Zielplattform",
       "quelleDerBinaries": "Quelle der Binärdateien",
-      "geleseneBinaries": "Gelesene Binärdateien"
+      "geleseneBinaries": "Gelesene Binärdateien",
+      "bezugsart": "Art des Bezugs",
+      "binaries": "Enthalten in"
+    },
+    "bezugsart": {
+      "aufgerufen": "wird aufgerufen",
+      "vorausgesetzt": "wird vorausgesetzt, nicht aufgerufen",
+      "aufgerufen_und_vorausgesetzt": "wird aufgerufen und vorausgesetzt"
     }
   }
 }
