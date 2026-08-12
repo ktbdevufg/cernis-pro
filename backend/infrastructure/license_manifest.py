@@ -14,7 +14,7 @@ Kandidat zu, der dort existiert. Das ist absichtlich robuster als eine Weiche: e
 Bundle, das die Datei an einem der ANDEREN Orte fuehrt, wird trotzdem gefunden, statt
 an einer falsch geratenen Plattform-Annahme zu scheitern.
 
-Abgedeckt sind die drei Bundle-Formen (an den gebauten Paketen abgelesen) und der
+Abgedeckt sind die Bundle-Formen (an den gebauten Paketen abgelesen) und der
 Entwicklungsbetrieb:
 
 * macOS ``.app``: ``sys.executable`` liegt in ``Contents/MacOS/``, die Ressource unter
@@ -27,8 +27,14 @@ Entwicklungsbetrieb:
 * Windows: Tauri legt die Ressourcen NEBEN die exe -- ``<exe-Verzeichnis>``.
 * Linux-Paket: ``/usr/lib/CernisPro`` (dort landet ``bundle.resources``; die
   deb-/rpm-Beilagen unter ``/usr/share/...`` entstehen getrennt aus DERSELBEN Quelle
-  und sind hier nicht gemeint). Der Kandidat leitet sich ebenfalls aus dem
-  exe-Verzeichnis ab, weil die exe dort daneben liegt.
+  und sind hier nicht gemeint). Die exe liegt dort NICHT daneben: sie geht ueber
+  ``externalBin`` nach ``/usr/bin``. AM GEBAUTEN deb UND rpm GEMESSEN (Befund 34b)::
+
+      /usr/bin/cernis-backend
+      /usr/lib/CernisPro/lizenzaufstellung.json
+
+  Der Kandidat ist deshalb ``<exe-Verzeichnis>/../lib/CernisPro`` -- relativ
+  gebildet, damit kein ``/usr``-Praefix festgeschrieben wird.
 * Entwicklung: ``src-tauri/lizenzaufstellung.json`` im Repo -- relativ zu DIESER
   Datei (``backend/infrastructure/``), zwei Ebenen hoch zum Repo-Wurzelverzeichnis.
 
@@ -129,9 +135,18 @@ def _kandidaten() -> list[str]:
     return [
         # macOS .app: Contents/MacOS/<exe> -> Contents/Resources/<datei>
         os.path.normpath(os.path.join(exe_verzeichnis, _MACOS_RESOURCES, _DATEINAME)),
-        # Windows (Ressourcen neben der exe) UND Linux-Paket (/usr/lib/CernisPro,
-        # wo die exe daneben liegt) -- derselbe abgeleitete Pfad deckt beide ab.
+        # Windows: Tauri legt die Ressourcen neben die exe.
         os.path.normpath(os.path.join(exe_verzeichnis, _DATEINAME)),
+        # Linux-Paket, AM GEBAUTEN PAKET GEMESSEN (Befund 34b): die beiden Wege ins
+        # Paket enden in VERSCHIEDENEN Verzeichnissen. Das Backend geht ueber
+        # externalBin und landet unter /usr/bin/cernis-backend; die Aufstellung geht
+        # ueber bundle.resources und landet unter /usr/lib/CernisPro/. Der Kandidat
+        # oben (neben der exe) zeigt deshalb an ihr vorbei. Bewusst RELATIV zum
+        # exe-Verzeichnis gebildet -- <exe-Verzeichnis>/../lib/CernisPro/<datei> --,
+        # damit kein Praefix wie "/usr" festgeschrieben wird und keine
+        # Plattformweiche entsteht: auf Systemen ohne dieses Verzeichnis existiert
+        # der Pfad schlicht nicht und der naechste Kandidat kommt dran.
+        os.path.normpath(os.path.join(exe_verzeichnis, "..", "lib", "CernisPro", _DATEINAME)),
         # Entwicklung: das Repo-Verzeichnis src-tauri/.
         os.path.normpath(os.path.join(_repo_wurzel(), "src-tauri", _DATEINAME)),
     ]

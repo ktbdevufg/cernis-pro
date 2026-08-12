@@ -52,9 +52,9 @@ def _lege_aufstellung_ab(verzeichnis: Path, daten: dict[str, Any] | None = None)
 
 @pytest.fixture
 def leeres_exe_verzeichnis(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    """Setzt ALLE drei Kandidatenquellen auf leere tmp-Verzeichnisse.
+    """Setzt ALLE Kandidatenquellen auf leere tmp-Verzeichnisse.
 
-    ``sys.executable`` deckt die beiden Bundle-Kandidaten ab, ``_repo_wurzel`` den
+    ``sys.executable`` deckt die drei Bundle-Kandidaten ab, ``_repo_wurzel`` den
     Entwicklungs-Kandidaten. Letzterer MUSS mit umgebogen werden: im Entwicklungsbaum
     liegt die echte ``src-tauri/lizenzaufstellung.json``, und ohne die Umbiegung
     faenge jeder Test sie als stillen Rueckfall -- ein Nichtfund waere dann nie
@@ -72,23 +72,28 @@ def leeres_exe_verzeichnis(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> P
     return exe_verzeichnis
 
 
-def test_kandidaten_decken_die_drei_bundle_formen_und_die_entwicklung_ab(
+def test_kandidaten_decken_die_bundle_formen_und_die_entwicklung_ab(
     leeres_exe_verzeichnis: Path,
 ) -> None:
-    """Drei Kandidaten: macOS-Resources, neben der exe, Repo -- alle absolut."""
+    """Vier Kandidaten: macOS-Resources, neben der exe, Linux-lib, Repo -- alle absolut."""
     kandidaten = _kandidaten()
 
-    assert len(kandidaten) == 3
+    assert len(kandidaten) == 4
     assert all(os.path.isabs(pfad) for pfad in kandidaten)
     assert all(pfad.endswith("lizenzaufstellung.json") for pfad in kandidaten)
     # macOS-.app: eine Ebene ueber dem exe-Verzeichnis unter Resources/.
     assert kandidaten[0] == str(
         leeres_exe_verzeichnis.parent / "Resources" / "lizenzaufstellung.json"
     )
-    # Windows/Linux-Paket: neben der exe.
+    # Windows (Ressourcen neben der exe).
     assert kandidaten[1] == str(leeres_exe_verzeichnis / "lizenzaufstellung.json")
+    # Linux-Paket: eine Ebene ueber dem exe-Verzeichnis unter lib/CernisPro/ --
+    # relativ gebildet, ohne festgeschriebenes /usr-Praefix (Befund 34b).
+    assert kandidaten[2] == str(
+        leeres_exe_verzeichnis.parent / "lib" / "CernisPro" / "lizenzaufstellung.json"
+    )
     # Entwicklung: das Repo-Verzeichnis src-tauri/ -- unabhaengig von sys.executable.
-    assert kandidaten[2].endswith(os.path.join("src-tauri", "lizenzaufstellung.json"))
+    assert kandidaten[3].endswith(os.path.join("src-tauri", "lizenzaufstellung.json"))
     # KEIN _up_-Segment: der Eintrag in tauri.conf.json traegt kein fuehrendes "..".
     assert not any("_up_" in pfad for pfad in kandidaten)
 
@@ -115,6 +120,66 @@ def test_findet_die_aufstellung_im_macos_resources_verzeichnis(
     aufstellung = LicenseManifestAdapter().load()
 
     assert aufstellung["produktversion"] == "2.0.6"
+
+
+def test_findet_die_aufstellung_im_linux_paket(leeres_exe_verzeichnis: Path) -> None:
+    """Befund 34b: der IN DIESER SITZUNG AM PAKET GEMESSENE Linux-Fall.
+
+    Das Backend liegt in einem ``bin``-Verzeichnis (im Paket ``/usr/bin``), die
+    Aufstellung im DANEBEN liegenden ``lib/CernisPro`` (im Paket
+    ``/usr/lib/CernisPro``). Neben der exe liegt sie ausdruecklich NICHT -- vor
+    diesem Kandidaten fand die Anwendung sie im Linux-Paket ueberhaupt nicht.
+    """
+    lib_verzeichnis = leeres_exe_verzeichnis.parent / "lib" / "CernisPro"
+    lib_verzeichnis.mkdir(parents=True)
+    _lege_aufstellung_ab(lib_verzeichnis)
+    assert not (leeres_exe_verzeichnis / "lizenzaufstellung.json").exists()
+
+    aufstellung = LicenseManifestAdapter().load()
+
+    assert aufstellung["produktversion"] == "2.0.6"
+
+
+def test_neben_der_exe_geht_dem_linux_kandidaten_vor(leeres_exe_verzeichnis: Path) -> None:
+    """Die REIHENFOLGE ist verbindlich: der neue Kandidat steht an dritter Stelle.
+
+    Liegen beide Dateien, muss die neben der exe gewinnen -- der Linux-Kandidat ist
+    hinter ihr eingehaengt und darf sie nicht verdraengen. Unterschiedliche
+    ``produktversion`` macht sichtbar, welche gelesen wurde.
+    """
+    lib_verzeichnis = leeres_exe_verzeichnis.parent / "lib" / "CernisPro"
+    lib_verzeichnis.mkdir(parents=True)
+    _lege_aufstellung_ab(
+        leeres_exe_verzeichnis, {**_MINIMALE_AUFSTELLUNG, "produktversion": "neben-exe"}
+    )
+    _lege_aufstellung_ab(
+        lib_verzeichnis, {**_MINIMALE_AUFSTELLUNG, "produktversion": "lib-CernisPro"}
+    )
+
+    assert LicenseManifestAdapter().load()["produktversion"] == "neben-exe"
+
+
+def test_linux_kandidat_geht_der_entwicklung_vor(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, leeres_exe_verzeichnis: Path
+) -> None:
+    """Die andere Seite der Reihenfolge: der neue Kandidat steht VOR dem Repo-Pfad.
+
+    Im ausgelieferten Paket soll die MITGELIEFERTE Datei gewinnen, nicht eine im
+    Entwicklungsbaum gefundene.
+    """
+    lib_verzeichnis = leeres_exe_verzeichnis.parent / "lib" / "CernisPro"
+    lib_verzeichnis.mkdir(parents=True)
+    _lege_aufstellung_ab(
+        lib_verzeichnis, {**_MINIMALE_AUFSTELLUNG, "produktversion": "lib-CernisPro"}
+    )
+    repo = tmp_path / "repo" / "src-tauri"
+    repo.mkdir(parents=True)
+    _lege_aufstellung_ab(repo, {**_MINIMALE_AUFSTELLUNG, "produktversion": "entwicklung"})
+    monkeypatch.setattr(
+        "infrastructure.license_manifest._repo_wurzel", lambda: str(tmp_path / "repo")
+    )
+
+    assert LicenseManifestAdapter().load()["produktversion"] == "lib-CernisPro"
 
 
 def test_ohne_datei_benannter_fehler_mit_allen_geprueften_pfaden(
