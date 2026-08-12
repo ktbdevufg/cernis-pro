@@ -45,6 +45,7 @@ from ports.dns_bypass import (
 
 __all__ = [
     "BuildDnsBypass",
+    "DnsBypassPermissionCheck",
     "DnsBypassReport",
     "DnsQueryProvider",
     "ExpectedServersProvider",
@@ -64,6 +65,20 @@ _MAX_SAMPLE_QNAMES = 5
 # Server, ``application.dns_trust.TrustedDnsServerIps``) und die Persistenz liegen im
 # Composition Root -- hier nur die Naht. Sync -- ein lokaler Lese-Snapshot.
 ExpectedServersProvider = Callable[[], Sequence[str]]
+
+# Vorpruefung der Plattform-Verfuegbarkeit VOR dem Start (Befund 52). Liefert einen
+# stabilen Marker-String, wenn die Sniff-Naht auf dieser Plattform grundsaetzlich nicht
+# traegt (Windows ohne erkanntes Npcap -> ``NPCAP_MISSING``), sonst ``None``.
+#
+# WARUM UEBERHAUPT: der DNS-Waechter startete bisher als EINZIGE Ansicht der Sniff-Familie
+# ohne diese Vorpruefung -- er rief die Quelle direkt und zeigte deren Rohtext. Aussenkontakte
+# und Per-App-Verkehr pruefen laengst gegen denselben Marker (``sni_sniffer.check_permission``)
+# und grauen die Funktion ehrlich aus. Diese Naht zieht den DNS-Waechter auf denselben Stand.
+#
+# Sie ist quellen-AGNOSTISCH: der application-Ring nennt weder ``sniffd_client`` noch eine
+# Plattform; die echte Verdrahtung (``sniffd_unavailable_reason``) faellt im Composition Root
+# (Regel 5). ``None`` als Naht heisst "keine Vorpruefung" -- unveraendertes Verhalten.
+DnsBypassPermissionCheck = Callable[[], str | None]
 
 
 class BuildDnsBypass:
@@ -186,6 +201,14 @@ class StartDnsBypassRecording:
     zwar als ``ACTIVE`` in der DB (der Recorder ist aber NICHT aktiv, schreibt also nichts);
     das aufzuraeumen ist Sache eines spaeteren Stop/Cleanup -- hier wird der Fehler nur
     ehrlich gemeldet.
+
+    VORPRUEFUNG (Befund 52): traegt die Plattform die Sniff-Naht grundsaetzlich nicht
+    (``permission_check`` liefert einen Marker), wird der Marker SOFORT als Fehlertext
+    zurueckgegeben -- BEVOR eine Aufzeichnung angelegt oder die Quelle gerufen wird. Das ist
+    dasselbe Vorgehen wie bei SNI (``check_permission`` vor ``start``): kein Datensatz fuer
+    einen Lauf, der gar nicht stattfinden kann, und der Anwender sieht den benannten
+    Ausgrau-Hinweis statt eines Rohtextes aus der Erfassungsschicht. Ohne Naht (``None``)
+    bleibt das Verhalten unveraendert.
     """
 
     def __init__(
@@ -195,12 +218,14 @@ class StartDnsBypassRecording:
         expected_servers_provider: Callable[[], Sequence[str]],
         default_label: str = "DNS-Umgehungs-Aufzeichnung",
         default_purpose: str = "",
+        permission_check: DnsBypassPermissionCheck | None = None,
     ) -> None:
         self._recorder = recorder
         self._recordings = recordings
         self._expected_servers_provider = expected_servers_provider
         self._default_label = default_label
         self._default_purpose = default_purpose
+        self._permission_check = permission_check
 
     def __call__(
         self,
@@ -210,6 +235,13 @@ class StartDnsBypassRecording:
         label: str | None = None,
         purpose: str | None = None,
     ) -> str | None:
+        # VORPRUEFUNG vor allem anderen: traegt die Plattform nicht, entsteht KEINE
+        # Aufzeichnung und die Quelle wird nicht gerufen. Der Marker geht als Fehlertext
+        # heraus -- der Rand reicht ihn unveraendert durch, die Oberflaeche erkennt ihn.
+        if self._permission_check is not None:
+            marker = self._permission_check()
+            if marker:
+                return marker
         # Erwartete-Menge-Momentaufnahme fuer den Domaenen-``start`` (ehrlicher Beleg).
         expected_servers = tuple(self._expected_servers_provider())
         recording = DnsBypassRecording(

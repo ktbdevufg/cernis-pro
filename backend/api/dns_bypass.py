@@ -20,7 +20,8 @@ Endpunkte:
 * ``GET /api/dns-bypass`` -> die verdichtete netzweite Umgehungs-Sicht (je Umgehung ein
   Befund mit best-effort Geraetename + DoH-Bewertung, plus Zaehler und ``recording``).
 * ``GET /api/dns-bypass/status`` -> billiger Status-Poll (laeuft die Aufzeichnung? wie
-  viele Anfragen sind gesammelt?), ohne die teure Verdichtung.
+  viele Anfragen sind gesammelt? traegt die Plattform die Erfassung ueberhaupt?), ohne
+  die teure Verdichtung.
 * ``POST /api/dns-bypass/start`` -> startet die Aufzeichnung ON-DEMAND (Body
   ``{interface?}``). Der Helfer-Start kann legitim scheitern (z. B. keine Rechte): ein
   Fehlertext wird als ``{"ok": false, "error": <text>}`` mit HTTP 200 ehrlich
@@ -92,10 +93,23 @@ class DnsBypassStatusOut(BaseModel):
 
     Bewusst OHNE die teure Verdichtung (``BuildDnsBypass``) -- nur der laufende Zustand
     des Recorders, damit die UI guenstig pollen kann.
+
+    ``permission_error`` traegt denselben stabilen Marker, den ``GET /api/sni/status``
+    schon liefert: ist die Sniff-Naht auf dieser Plattform grundsaetzlich nicht nutzbar,
+    steht hier der Marker-String, sonst ``None``. Die Oberflaeche vergleicht exakt gegen
+    ihn und graut die Funktion aus, STATT den Anwender erst starten zu lassen und ihm
+    danach einen Rohtext der Erfassungsschicht zu zeigen (Befund 52).
+
+    WARUM HIER UND NICHT IN EINEM EIGENEN ENDPUNKT: die Ansicht liest diesen Status
+    ohnehin beim Mount und nach jedem Start/Stop -- der Marker kommt damit genau dann an,
+    wenn er gebraucht wird, ohne einen zweiten Abruf. Das ist zugleich die Bauform, die
+    SNI schon verwendet (Status traegt ``permission_error``); ein eigener Endpunkt waere
+    eine dritte Form fuer denselben Sachverhalt.
     """
 
     recording: bool
     collected_queries: int
+    permission_error: str | None = None
 
 
 # ── injizierte Composition-Root-Runner ────────────────────────────────────────

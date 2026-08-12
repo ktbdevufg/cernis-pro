@@ -5,7 +5,8 @@ Deckt alle vier Endpunkte ueber Fake-Runner (via ``dependency_overrides``, Muste
 NICHT die echten Quellen (kein Sniff, kein asyncio-Loop):
 
 * ``GET /api/dns-bypass``        -> die schon api-projizierte ``DnsBypassOverviewOut``.
-* ``GET /api/dns-bypass/status`` -> die ``DnsBypassStatusOut``-Form.
+* ``GET /api/dns-bypass/status`` -> die ``DnsBypassStatusOut``-Form, inklusive des
+  Plattform-Markers ``permission_error`` (S84-A7, Befund 52).
 * ``POST /api/dns-bypass/start`` -> Fehlertext der Quelle -> ``{"ok": false, "error": ...}``
   (HTTP 200, S3-ehrlich); Erfolg (None) -> ``{"ok": true}``.
 * ``POST /api/dns-bypass/stop``  -> ``{"ok": true}``.
@@ -189,7 +190,12 @@ def test_get_dns_bypass_leere_sicht_ist_ehrlich(app: FastAPI) -> None:
 
 
 def test_status_liefert_form(app: FastAPI) -> None:
-    """``/api/dns-bypass/status`` -> HTTP 200 + ``{recording, collected_queries}``."""
+    """``/api/dns-bypass/status`` -> HTTP 200 + ``{recording, collected_queries,
+    permission_error}``.
+
+    ``permission_error`` ist ``None``, solange die Plattform die Erfassung traegt -- der
+    Normalfall auf Linux/macOS und auf Windows MIT erkanntem Npcap.
+    """
     status = DnsBypassStatusOut(recording=True, collected_queries=42)
     app.dependency_overrides[provide_dns_bypass_status] = lambda: _FakeStatusRunner(status)
 
@@ -197,7 +203,34 @@ def test_status_liefert_form(app: FastAPI) -> None:
         response = client.get("/api/dns-bypass/status")
 
     assert response.status_code == 200
-    assert response.json() == {"recording": True, "collected_queries": 42}
+    assert response.json() == {
+        "recording": True,
+        "collected_queries": 42,
+        "permission_error": None,
+    }
+
+
+def test_status_reicht_den_plattform_marker_durch(app: FastAPI) -> None:
+    """Liegt der Marker an, steht er im Wire-Feld ``permission_error`` (S84-A7, Befund 52).
+
+    Die Ansicht graut die Funktion daran aus, statt den Anwender starten zu lassen und ihm
+    danach den Rohtext der Erfassungsschicht zu zeigen. Der Marker geht UNVERAENDERT durch
+    -- der api-Ring deutet ihn nicht.
+    """
+    status = DnsBypassStatusOut(
+        recording=False, collected_queries=0, permission_error="NPCAP_MISSING"
+    )
+    app.dependency_overrides[provide_dns_bypass_status] = lambda: _FakeStatusRunner(status)
+
+    with TestClient(app) as client:
+        response = client.get("/api/dns-bypass/status")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "recording": False,
+        "collected_queries": 0,
+        "permission_error": "NPCAP_MISSING",
+    }
 
 
 # ── POST start: ehrliche Fehlermeldung statt 500 ───────────────────────────────

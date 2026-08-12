@@ -29,7 +29,23 @@ import {
 } from "../api/dnsBypass.js";
 import { fetchSettings, updateSetting } from "../api/settings.js";
 import DnsBypassConsentDialog from "./DnsBypassConsentDialog.jsx";
+import NpcapDialog from "./NpcapDialog.jsx";
 import "./DnsBypassView.css";
+
+// Marker der Sniff-Verfuegbarkeit aus dem Backend (permission_error, siehe
+// sniffd_unavailable_reason). Es gibt genau EINEN: fehlt Npcap, ist die ganze
+// Sniff-Familie auf dieser Plattform nicht nutzbar -- dann Ausgrau-Hinweis statt
+// Start-Knopf. Ist Npcap erkannt, liefert das Backend gar keinen Marker.
+//
+// Bewusst derselbe Vergleich wie in OutboundView/TrafficView: exakt gegen den
+// Marker-String, nicht gegen Textbestandteile. Der DNS-Waechter war die einzige
+// Ansicht der Familie, die ihn nicht las -- er zeigte deshalb den Rohtext der
+// Erfassungsschicht, wo die anderen beiden die Ursache benennen (Befund 52).
+const NPCAP_MARKER = "NPCAP_MISSING";
+
+function istNpcapMarker(marker) {
+  return marker === NPCAP_MARKER;
+}
 
 // Anzeigereihenfolge der drei Kennzahlen: "Umgeher" zuerst (dort lohnt der Blick),
 // dann "Anfragen gesamt", dann "erwartungsgemaess". key zeigt auf das Feld der
@@ -129,8 +145,16 @@ export default function DnsBypassView() {
 
   // Verdichtete Sicht (findings + Zaehler + recording).
   const [sicht, setSicht] = useState(null);
-  // Billiger Status-Poll (recording + collectedQueries) -- treibt die Steuer-Karte.
-  const [status, setStatus] = useState({ recording: false, collectedQueries: 0 });
+  // Billiger Status-Poll (recording + collectedQueries + permissionError) --
+  // treibt die Steuer-Karte UND die Ausgrau-Entscheidung.
+  const [status, setStatus] = useState({
+    recording: false,
+    collectedQueries: 0,
+    permissionError: null,
+  });
+  // Ob der NpcapDialog offen ist. Der Dialog kennt nur EINEN Fall (Npcap fehlt),
+  // darum genuegt ein Ja/Nein -- Muster OutboundView.
+  const [zeigeNpcapDialog, setZeigeNpcapDialog] = useState(false);
   // Ruhiger Hinweis-Streifen bei Lade-/Steuerfehler (kein Absturz).
   const [ladeFehler, setLadeFehler] = useState(false);
   // Ehrlicher Start-Fehlertext (aus {ok:false, error}) oder null.
@@ -241,6 +265,16 @@ export default function DnsBypassView() {
     try {
       const antwort = await startDnsBypass(null);
       if (antwort && antwort.ok === false) {
+        // Der Marker kann auch HIER herauskommen (die Vorpruefung des Backends
+        // gibt ihn als Fehlertext zurueck). Dann NICHT als Rohtext anzeigen,
+        // sondern in den Ausgrau-Zustand kippen -- derselbe Block, dieselbe
+        // Ursache. Der Statuswert ist die eine Wahrheit, an der die Ansicht
+        // haengt; er wird darum gesetzt, nicht ein zweiter Zustand daneben.
+        if (istNpcapMarker(antwort.error)) {
+          setStartFehler(null);
+          setStatus((s) => ({ ...s, permissionError: antwort.error }));
+          return;
+        }
         setStartFehler(antwort.error ?? t("beobachten.dnsbypass.startFehler"));
         return;
       }
@@ -303,11 +337,28 @@ export default function DnsBypassView() {
   const expectedServers = sicht?.expectedServers ?? [];
   const recording = status.recording;
 
+  // Liegt der Marker an, ist die Erfassung auf dieser Plattform gar nicht
+  // moeglich. Dann ersetzt der Ausgrau-Block die Steuer-Karte -- ein Start-Knopf
+  // waere eine Sackgasse, er koennte nur scheitern.
+  const npcapFehlt = istNpcapMarker(status.permissionError);
+
   // PROMINENTER Leerzustand NUR nach einer Aufzeichnung ohne Befunde: schon
   // geladen, NICHT (mehr) am Aufzeichnen und keine Befunde. Sonst bleibt der
   // Voraussetzungs-Hinweis dezent (siehe unten).
+  //
+  // Bei anliegendem Marker entfaellt er: "Keine Umgehung erfasst" liest sich als
+  // Befund ("es wurde geschaut, es war nichts"), obwohl gar nichts erfasst werden
+  // KONNTE. Der Ausgrau-Block sagt die Wahrheit an seiner Stelle.
   const prominenterLeerzustand =
-    schonGeladen && !recording && findings.length === 0;
+    schonGeladen && !recording && findings.length === 0 && !npcapFehlt;
+
+  // Schliesst den NpcapDialog und liest den Status neu: hat der Nutzer Npcap
+  // inzwischen eingerichtet, faellt der Marker weg und die Ansicht wird nutzbar,
+  // ohne dass er das Programm neu starten muss (Muster OutboundView).
+  const handleNpcapDialogSchliessen = () => {
+    setZeigeNpcapDialog(false);
+    void ladeStatus();
+  };
 
   return (
     <div className="dnsbypass">
@@ -323,7 +374,27 @@ export default function DnsBypassView() {
         </div>
       )}
 
-      {/* ── Steuer-Karte: EINE Aufzeichnung, nur start/stop/status. ── */}
+      {/* Npcap-Ausgrau-Block: traegt der Status den Marker, ist die Erfassung auf
+          dieser Plattform nicht moeglich. Dann STATT der Steuer-Karte ein
+          ehrlicher Hinweis mit dem Knopf zum NpcapDialog -- derselbe Text
+          (npcap.inlineHint) und derselbe Weg, die Aussenkontakte und Per-App-
+          Verkehr schon anbieten. Kein neuer Wortlaut, keine eigene Diagnose. */}
+      {npcapFehlt && (
+        <div className="dnsbypass__hinweis" role="note">
+          <span className="dnsbypass__hinweis-text">{t("npcap.inlineHint")}</span>
+          <button
+            type="button"
+            className="dnsbypass__hinweis-button"
+            onClick={() => setZeigeNpcapDialog(true)}
+          >
+            {t("npcap.installBtn")}
+          </button>
+        </div>
+      )}
+
+      {/* ── Steuer-Karte: EINE Aufzeichnung, nur start/stop/status. Entfaellt bei
+          anliegendem Marker -- der Start koennte dort nur scheitern. ── */}
+      {!npcapFehlt && (
       <div
         className={
           recording
@@ -366,9 +437,13 @@ export default function DnsBypassView() {
           </button>
         )}
       </div>
+      )}
 
-      {/* Ehrlicher Start-Fehlertext (aus {ok:false, error}). Warnton, kein Alarm. */}
-      {startFehler && (
+      {/* Ehrlicher Start-Fehlertext (aus {ok:false, error}). Warnton, kein Alarm.
+          Entfaellt bei anliegendem Marker: dort ERSETZT der Ausgrau-Block ihn --
+          sonst staende der Rohtext der Erfassungsschicht daneben und benannte
+          dieselbe Ursache ein zweites Mal, schlechter. */}
+      {startFehler && !npcapFehlt && (
         <div className="dnsbypass__fehler" role="note">
           {startFehler}
         </div>
@@ -441,6 +516,13 @@ export default function DnsBypassView() {
           onGrant={handleConsentGrant}
           onDeny={handleConsentDeny}
         />
+      )}
+
+      {/* NpcapDialog: Erklaer-/Download-Dialog bei fehlendem Npcap. Beim
+          Schliessen wird der Status neu gelesen -- eine zwischenzeitliche
+          Einrichtung wirkt sofort, ohne Neustart. */}
+      {zeigeNpcapDialog && (
+        <NpcapDialog onClose={handleNpcapDialogSchliessen} />
       )}
     </div>
   );

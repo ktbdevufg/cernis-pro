@@ -43,6 +43,31 @@
   color: var(--color-text-sec);
 }
 
+/* Knopf im Hinweis-Streifen (Npcap-Ausgrau-Block): identisch zu
+   .outbound__hinweis-button -- derselbe Streifen, dieselbe Optik in beiden
+   Ansichten. */
+.dnsbypass__hinweis-button {
+  align-self: flex-start;
+  margin-top: 6px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-accent-strong);
+  background: var(--color-accent-bg);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.dnsbypass__hinweis-button:hover {
+  background: var(--color-accent);
+}
+
+.dnsbypass__hinweis-button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
 /* Steuer-Karte: EINE Aufzeichnung, Status links, Start/Stop-Knopf rechts. */
 .dnsbypass-karte {
   display: flex;

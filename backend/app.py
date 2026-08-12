@@ -4902,6 +4902,19 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             dns_trust_sync=_dns_trust_sync_detected,
         )
 
+    def _dns_bypass_permission_error() -> str | None:
+        # Traegt die Plattform die Sniff-Naht grundsaetzlich? Genau DIE Quelle, aus der
+        # ``SniSniffer.check_permission`` seinen Marker zieht (``NPCAP_MISSING`` auf
+        # Windows ohne erkanntes Npcap, sonst leer). Lokaler Import wie beim
+        # ``DnsHelperClient``: der infrastructure-Client bleibt aus dem App-Bau heraus.
+        #
+        # Der Marker geht UNVERAENDERT hinaus -- die Oberflaeche vergleicht exakt gegen
+        # ihn. Kein Text wird hier gebaut, nichts umformuliert.
+        from infrastructure.sniffd_client.base import sniffd_unavailable_reason
+
+        marker = sniffd_unavailable_reason()
+        return marker or None
+
     async def _dns_bypass_view() -> DnsBypassOverviewOut:
         # (1) PERSISTENTER Stand (Etappe 3): der Bericht der aktiven bzw. juengsten
         # Aufzeichnung aus SQLite -- KEIN RAM-Puffer mehr. ``until`` = jetzt (Detail-Fenster
@@ -4995,6 +5008,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             rec,
             dns_bypass_recording_repository(),
             _dns_trust_expected_servers,
+            # Vorpruefung VOR dem Start (Befund 52, Regel 5: die Naht faellt nur hier).
+            # Dieselbe Quelle, aus der SNI seinen ``permission_error`` zieht -- der
+            # DNS-Waechter war die einzige Ansicht der Sniff-Familie ohne sie.
+            permission_check=_dns_bypass_permission_error,
         )(interface, recording_id=str(uuid4()), now=time.time())
         if err is not None:
             return err
@@ -5016,11 +5033,14 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     def _dns_bypass_status() -> DnsBypassStatusOut:
         # Billiger Poll: der laufende Recorder-Zustand + die Zahl bisher persistierter
-        # DETAIL-Zeilen (aus SQLite statt RAM-Puffer), KEINE Verdichtung.
+        # DETAIL-Zeilen (aus SQLite statt RAM-Puffer), KEINE Verdichtung. Dazu der
+        # Plattform-Marker (Befund 52) -- er kostet nur einen lokalen Check und erspart
+        # der Ansicht einen zweiten Abruf.
         rec = dns_bypass_recorder()
         return DnsBypassStatusOut(
             recording=rec.is_active(),
             collected_queries=dns_bypass_detail_repository().count(),
+            permission_error=_dns_bypass_permission_error(),
         )
 
     app.include_router(dns_bypass_router)

@@ -13,7 +13,7 @@
 //                        doh_source_name,query_count,sample_qnames[]} ],
 //                        expected_servers[], queries_total, bypass_total,
 //                        expected_total, bypass_devices, recording }
-//   GET  "/status" -> { recording, collected_queries }
+//   GET  "/status" -> { recording, collected_queries, permission_error }
 //   POST "/start" Body {interface?} -> {ok:true} | {ok:false, error:<text>}
 //   POST "/stop"   -> {ok:true}
 //
@@ -73,13 +73,19 @@ export async function fetchDnsBypass() {
 }
 
 // GET "/status" -> billiger Status-Poll (laeuft die Aufzeichnung? wie viele
-// Anfragen sind gesammelt?), ohne die teure Verdichtung. collectedQueries faellt
-// auf 0 zurueck, falls das Feld fehlt.
+// Anfragen sind gesammelt? traegt die Plattform die Erfassung?), ohne die teure
+// Verdichtung. collectedQueries faellt auf 0 zurueck, falls das Feld fehlt.
+//
+// permissionError traegt denselben stabilen Marker wie der SNI-Status: liegt er
+// an, ist die Erfassung auf dieser Plattform gar nicht moeglich und die Ansicht
+// graut sie aus, statt den Anwender starten zu lassen. Fehlt das Feld oder ist
+// es leer -> null (ehrlich "kein Hindernis bekannt", nicht "" als Marker).
 export async function fetchDnsBypassStatus() {
   const backend = await apiGet(`${BASIS}/status`);
   return {
     recording: Boolean(backend.recording),
     collectedQueries: backend.collected_queries ?? 0,
+    permissionError: backend.permission_error || null,
   };
 }
 

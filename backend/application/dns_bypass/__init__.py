@@ -20,6 +20,7 @@ from application.dns_bypass.recorder import (
 )
 from application.dns_bypass.use_cases import (
     BuildDnsBypass,
+    DnsBypassPermissionCheck,
     DnsBypassReport,
     DnsQueryProvider,
     ExpectedServersProvider,
@@ -39,6 +40,7 @@ __all__ = [
     "BuildDnsBypass",
     "DnsBypassFinding",
     "DnsBypassOverview",
+    "DnsBypassPermissionCheck",
     "DnsBypassRecorder",
     "DnsBypassReport",
     "DnsQueryProvider",
