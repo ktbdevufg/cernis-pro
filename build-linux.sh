@@ -171,6 +171,63 @@ cp "$SNIFFD_BIN" "$TAURI_RELEASE/cernis-sniffd"
 chmod +x "$TAURI_RELEASE/cernis-backend" "$TAURI_RELEASE/cernis-sniffd"
 echo "      OK"
 
+# ── Schritt 6b: Buendelverzeichnis leeren, BEVOR gebuendelt wird ─
+# Warum: unter BUNDLE_DIR/deb und BUNDLE_DIR/rpm sammeln sich Altbestaende
+# frueherer Laeufe an -- gemessen lagen dort Paketdateien UND aufgebaute
+# Staging-Verzeichnisse der Fassung 2.0.6 vom 2026-08-02 neben denen von 2.1.0.
+# Weder Cargo noch der Buendler raeumen dort auf. Ein leeres Verzeichnis vor dem
+# Bau heisst: was danach drinliegt, hat GENAU dieser Lauf erzeugt.
+#
+# Kein stilles Wegraeumen: jeder entfernte Eintrag wird namentlich genannt, und
+# wenn nichts zu entfernen war, wird auch DAS gesagt. Eine Loeschroutine, die
+# schweigt, ist nicht nachvollziehbar.
+#
+# Riegel: geloescht wird ausschliesslich INNERHALB von BUNDLE_DIR/deb und
+# BUNDLE_DIR/rpm. Ist BUNDLE_DIR leer oder nicht gesetzt, bricht der Schritt ab,
+# statt mit einem leeren Praefix auf die Wurzel loszugehen. Das ist eine
+# Loeschroutine in einem Bauskript -- sie braucht diesen Riegel.
+#
+# Die versionsgenaue Wahl in paket_dieses_baus_waehlen [7b/8] BLEIBT bestehen und
+# wird durch dieses Aufraeumen NICHT ueberfluessig: sie ist die Stelle, die redet,
+# falls die Annahme ueber das Verzeichnis doch einmal nicht stimmt -- etwa wenn
+# der Buendler kuenftig woanders ablegt, dieser Schritt also am falschen Ort
+# raeumt, oder wenn ein Lauf mehrere Fassungen erzeugt. Ein Waechter, der sich
+# auf ein vorher geleertes Verzeichnis VERLAESST, waere genau wieder ein
+# "der erste Treffer wird schon stimmen".
+#
+# Der Schritt traegt 6b und nicht eine eigene Hauptnummer, damit die Gesamtzahl
+# 8 richtig bleibt und keine der bestehenden Zaehlerzeilen angefasst werden muss.
+BUNDLE_DIR="$TAURI_SRC/target/$TRIPLE/release/bundle"
+echo ""
+echo "[6b/8] Buendelverzeichnis leeren (Altbestaende frueherer Laeufe)..."
+if [ -z "${BUNDLE_DIR:-}" ]; then
+    echo "      FEHLER: BUNDLE_DIR ist leer oder nicht gesetzt -- es wird NICHTS geloescht."
+    exit 1
+fi
+for BUENDEL_UNTER in deb rpm; do
+    BUENDEL_ZIEL="$BUNDLE_DIR/$BUENDEL_UNTER"
+    if [ ! -d "$BUENDEL_ZIEL" ]; then
+        echo "      $BUENDEL_UNTER: Verzeichnis existiert noch nicht ($BUENDEL_ZIEL) - nichts zu entfernen."
+        continue
+    fi
+    ENTFERNT=0
+    # -mindepth 1 -maxdepth 1: nur die unmittelbaren Eintraege, und das
+    # Verzeichnis selbst bleibt stehen. Kein Glob, damit auch Eintraege mit
+    # Punkt am Anfang erfasst werden.
+    while IFS= read -r EINTRAG; do
+        [ -n "$EINTRAG" ] || continue
+        echo "      $BUENDEL_UNTER: entferne $EINTRAG"
+        rm -rf "$EINTRAG"
+        ENTFERNT=$((ENTFERNT + 1))
+    done < <(find "$BUENDEL_ZIEL" -mindepth 1 -maxdepth 1 | sort)
+    if [ "$ENTFERNT" -eq 0 ]; then
+        echo "      $BUENDEL_UNTER: nichts zu entfernen - $BUENDEL_ZIEL war bereits leer."
+    else
+        echo "      $BUENDEL_UNTER: $ENTFERNT Eintraege entfernt."
+    fi
+done
+echo "      OK"
+
 echo ""
 echo "[7/8] Tauri-Build (deb + rpm)..."
 # Das Wurzel-npm-Install steht seit Befund 25 in [4b/8] und NICHT mehr hier:
@@ -202,7 +259,8 @@ npx tauri build --target "$TRIPLE"
 # 8 richtig bleibt und keine der bestehenden Zaehlerzeilen angefasst werden muss.
 echo ""
 echo "[7b/8] Beilage in den gebauten Paketen pruefen (Waechter)..."
-BUNDLE_DIR="$TAURI_SRC/target/$TRIPLE/release/bundle"
+# BUNDLE_DIR ist bereits in [6b/8] gesetzt -- eine zweite Zuweisung waere eine
+# zweite Quelle fuer denselben Pfad und koennte auseinanderlaufen.
 BEILAGE_FEHLT=0
 
 # Ein Eintrag je erwarteter Datei, EINZELN und namentlich -- eine Sammelmeldung
@@ -490,7 +548,13 @@ fi
 
 echo ""
 echo "[8/8] Pakete einsammeln..."
-VERSION=$(python3 -c "import json; print(json.load(open('$TAURI_SRC/tauri.conf.json'))['version'])")
+# EINE Versionsquelle im ganzen Skript: die in [7b/8] aus der erzeugten
+# Aufstellung gelesene PRODUKTVERSION. Frueher stand hier eine ZWEITE
+# Leseoperation direkt aus tauri.conf.json. Wichen beide voneinander ab, waere
+# das ein Versionsfehler -- und genau diese Stelle haette ihn stillschweigend
+# ueberdeckt: der Waechter haette das Paket der einen Version geprueft, und auf
+# dem Schreibtisch waere es unter dem Dateinamen der anderen gelandet.
+VERSION="$PRODUKTVERSION"
 DEST="$HOME/Desktop"; mkdir -p "$DEST"
 # Eingesammelt wird GENAU das Paket, das der Waechter in [7b/8] geprueft hat --
 # nicht erneut per "find -print -quit" gesucht. Sonst koennte ein Altbestand aus
