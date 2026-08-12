@@ -1,24 +1,28 @@
 #!/bin/sh
-# Vor dem Auspacken: die drei ausgelieferten Programme geordnet beenden.
+# Vor dem Entfernen: die drei ausgelieferten Programme geordnet beenden.
 #
-# Befund 41: hier stand frueher "killall -9 cernis-backend" gefolgt von einem
-# pauschalen "sleep 1". Das war in drei Punkten falsch:
-#   1. killall trifft ueber den NAMEN. Ein fremder Prozess, der zufaellig
-#      "cernis-backend" heisst, wurde miterschlagen.
-#   2. SIGKILL sofort -- kein geordnetes Beenden, offene Dateien und die
-#      Datenbank blieben in unklarem Zustand.
-#   3. "sleep 1" ist geraten. Ist der Prozess schneller weg, wird gewartet;
-#      braucht er laenger, wird trotzdem weitergemacht.
-# Ersetzt durch _cernis_beende_programme(): Auswahl ueber den exe-Symlink,
-# erst SIGTERM, dann gepolltes Warten auf das ECHTE Ende, SIGKILL nur als
-# letztes Mittel.
+# Befund 57, Linux-Seite: bisher gab es ueberhaupt kein prerm. Wurde das Paket
+# entfernt oder aktualisiert, waehrend CERNIS PRO lief, nahm dpkg den laufenden
+# Programmen die Dateien unter den Fuessen weg. Die Windows-Seite kennt das
+# laengst -- nsis-hooks.nsi beendet ueber NSIS_HOOK_PREUNINSTALL. Linux zog
+# nicht nach.
 #
-# WARUM /bin/sh UND KEIN BASH: das rpm traegt zu diesem Skript kein
-# PREINPROG-Tag (nachgemessen am gebauten Paket), also fuehrt rpm es mit
-# seinem Vorgabe-Interpreter /bin/sh aus. Die Zeile "#!/bin/bash" war dort
-# wirkungslos -- reiner Kommentar. Dieses Skript ist daher streng POSIX.
+# Aufgerufen wird dieses Skript bei JEDER Entfernungsart, also auch beim
+# Upgrade (prerm upgrade <version>). Das ist hier richtig und ausdruecklich
+# gewollt: gerade beim Upgrade darf keine laufende Datei ersetzt werden. Es
+# wird daher NICHT nach dem ersten Argument unterschieden -- anders als im
+# postrm, wo genau diese Unterscheidung den Ausschlag gibt.
+#
+# WARUM /bin/sh: siehe deb-preinst.sh.
 
 set -u
+
+# --- ab hier wortgleich mit deb-preinst.sh / rpm-preinst.sh ---------------
+# Bewusst dupliziert statt ausgelagert: Betreuerskripte werden vom Bundler
+# einzeln und unveraendert als Steuerdatei bzw. Scriptlet eingebettet (am
+# gebauten Altbestand-Paket nachgemessen). Eine gemeinsam eingebundene Datei
+# gaebe es zur Laufzeit des Skripts nicht -- beim prerm ist das Paket im
+# Begriff zu verschwinden, beim preinst ist es noch gar nicht ausgepackt.
 
 # Die drei Programme, die das Paket nach /usr/bin liefert.
 # Reihenfolge ist Absicht, siehe _cernis_beende_programme().
@@ -30,7 +34,7 @@ _CERNIS_BINDIR='/usr/bin'
 # Obergrenze fuer das Warten auf ein geordnetes Ende, in Zehntelsekunden.
 # 100 = 10 Sekunden. Begruendung: das Backend schliesst beim SIGTERM die
 # SQLite-Datenbank und laufende Scans ab; 10 s decken das mit Reserve, ohne
-# eine Paketinstallation spuerbar aufzuhalten.
+# eine Paketentfernung spuerbar aufzuhalten.
 _CERNIS_FRIST_ZEHNTEL=100
 
 # Wahr, wenn die Kennung $1 GERADE JETZT zu ${_CERNIS_BINDIR}/$2 gehoert.
@@ -83,7 +87,7 @@ _cernis_pids_von() {
 #     Sie zuerst zu beenden nimmt dem Backend die Quelle neuer Auftraege --
 #     sonst schickt die noch laufende Oberflaeche waehrend des Herunterfahrens
 #     weitere Anfragen, oder sie meldet dem Benutzer einen Verbindungsabbruch,
-#     den in Wahrheit die Paketinstallation ausgeloest hat.
+#     den in Wahrheit die Paketentfernung ausgeloest hat.
 #   * cernis-backend als naechstes: es steuert den Sniff-Helfer. Beendet man
 #     den Helfer zuerst, laeuft ein noch aktiver Mitschnitt im Backend auf
 #     einen wegbrechenden Helfer und wird als Fehler gemeldet statt als
@@ -157,7 +161,7 @@ _cernis_beende_programme() {
                 # Skript unmittelbar davor, einen fremden Prozessbaum zu
                 # erschlagen, und der Verwalter soll erfahren, dass dieser Fall
                 # auf seiner Maschine wirklich eintritt. Kein Fehler, keine
-                # Abbruchbedingung -- die Installation laeuft weiter, denn unser
+                # Abbruchbedingung -- die Entfernung laeuft weiter, denn unser
                 # Prozess IST beendet, und genau das war das Ziel.
                 echo "CERNIS PRO: PID ${_pid} gehoerte zu ${_programm}, ist aber" \
                      "inzwischen neu vergeben. Es geht kein Signal an diese PID." >&2
@@ -165,6 +169,7 @@ _cernis_beende_programme() {
         done
     done
 }
+# --- Ende des mit den preinst-Skripten wortgleichen Teils ------------------
 
 _cernis_beende_programme
 

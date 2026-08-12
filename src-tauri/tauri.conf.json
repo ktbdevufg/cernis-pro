@@ -61,6 +61,8 @@
         ],
         "preInstallScript": "deb-preinst.sh",
         "postInstallScript": "deb-postinst.sh",
+        "preRemoveScript": "deb-prerm.sh",
+        "postRemoveScript": "deb-postrm.sh",
         "files": {
           "/usr/share/doc/cernis-pro/copyright": "debian/copyright",
           "/usr/share/doc/cernis-pro/3rd-party-licenses.txt.gz": "debian/3rd-party-licenses.txt.gz"
@@ -86,6 +88,8 @@
         ],
         "preInstallScript": "rpm-preinst.sh",
         "postInstallScript": "rpm-postinst.sh",
+        "preRemoveScript": "rpm-prerm.sh",
+        "postRemoveScript": "rpm-postrm.sh",
         "files": {
           "/usr/share/licenses/cernis-pro/LICENSE.dependencies": "rpm/LICENSE.dependencies",
           "/usr/share/licenses/cernis-pro/LICENSES": "rpm/LICENSES"
