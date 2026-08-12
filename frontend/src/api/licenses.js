@@ -31,11 +31,15 @@
 //       tragen (z. B. "paket:python/anyio", "spdx:MIT"). 404 bei unbekanntem
 //       Schluessel, 503 ohne Aufstellung.
 //
-// WARUM DIESE DATEI NICHT apiGet AUS client.js NUTZT: apiGet wirft bei !ok einen
-// ApiError OHNE detail (nur apiPost/liest den Fehler-Body). Die Ansicht muss beim
-// 503 aber den ECHTEN Grund des Servers im Wortlaut zeigen -- die Liste der
-// geprueften Pfade -- statt einen zu erfinden. Darum wird hier dieselbe Fehler-Form
-// (ApiError mit status UND detail) erzeugt; client.js bleibt unangetastet.
+// WARUM DIESE DATEI EINEN EIGENEN GET HAT: historisch, weil ``apiGet`` aus
+// client.js bei !ok einen ApiError OHNE detail warf (nur apiPost las den
+// Fehler-Body). Die Ansicht muss beim 503 aber den ECHTEN Grund des Servers im
+// Wortlaut zeigen -- die Liste der geprueften Pfade -- statt einen zu erfinden.
+// SEIT S84-A7 liest ``apiGet`` das detail selbst; ``holeMitDetail`` unten ist
+// damit fachlich gleichwertig und NICHT mehr noetig. Der Rueckbau auf apiGet
+// waere aber eigener Umfang und bleibt bewusst ungetan -- die Fehler-Form ist
+// identisch (ApiError mit status UND detail), es gibt hier also keinen zweiten
+// Wahrheitsstand, nur einen doppelten Weg.
 //
 // KEIN stiller Leerzustand: ein 503 wird als 503 weitergereicht und NICHT in eine
 // leere Aufstellung verwandelt (Finding S3).

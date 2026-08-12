@@ -6,6 +6,9 @@
     "bodyMissing": "CERNIS uses Npcap for passive capture of SNI, traffic and topology. Npcap is a separate program by the Nmap developers; its source code is viewable, but it is not open-source software. The free licence limits the number of installations — the Npcap licence terms are authoritative. You download and install it yourself; CERNIS does not bundle it.",
     "downloadBtn": "Go to the Npcap download page"
   },
+  "werkzeug": {
+    "nichtVerfuegbar": "A required system program is not available. No reason was provided."
+  },
   "app": {
     "version": "v2.0",
     "laedt": "Loading …"
@@ -1395,7 +1398,6 @@
       "noReply": "no reply",
       "noHops": "No hops found.",
       "error": "The route could not be measured.",
-      "toolMissing": "The program \"traceroute\" is not available on this system.",
       "permissionHint": "A more precise measurement is possible with privileges — it also runs without.",
       "loadOrgs": "Load operator names (internet query)",
       "loadingOrgs": "loading …",

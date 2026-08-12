@@ -31,8 +31,10 @@ import {
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { ApiError } from "../api/client.js";
 import { fetchLookup } from "../api/resolver.js";
 import { CODES, mitCode } from "../lib/fehlercodes.js";
+import { waehleWerkzeugFehlerAnzeige } from "../lib/werkzeugFehler.js";
 import "./LookupPanel.css";
 
 // Eine Feld-Zeile: Label links, Wert rechts mit dezentem Quellen-Badge,
@@ -204,6 +206,14 @@ export default function LookupPanel({ ip, port, onClose }) {
   // (Auflösung nicht erreichbar). Der Header zeigt immer ip:port aus den Props.
   const [status, setStatus] = useState("laedt");
   const [fakten, setFakten] = useState(null);
+  // Was im Fehlerfall angezeigt wird. Früher wurde der Fehler komplett verworfen
+  // (.catch(() => setStatus("fehler"))) — damit fielen beide echten 503er des
+  // Resolvers unter den Tisch: ResolverToolMissing (dig fehlt) und
+  // ResolverDataMissing (Geo/ASN-CSV fehlt). Der Anwender las stattdessen
+  // „Auflösung nicht erreichbar“, was den Grund verfehlt. Jetzt wird der Fehler
+  // ausgewertet: { text } trägt den Wortlaut des Backends, { textKey } einen
+  // i18n-Schlüssel; genau eines von beiden ist gesetzt.
+  const [fehlerAnzeige, setFehlerAnzeige] = useState(null);
 
   // Kurzes visuelles Feedback nach dem Kopieren der IP: das Icon wechselt für
   // ~1.5 s zum Haken. Lokaler State, kein externer Helfer.
@@ -227,6 +237,7 @@ export default function LookupPanel({ ip, port, onClose }) {
     let ignorieren = false;
     setStatus("laedt");
     setFakten(null);
+    setFehlerAnzeige(null);
 
     fetchLookup(ip, port)
       .then((ergebnis) => {
@@ -235,10 +246,22 @@ export default function LookupPanel({ ip, port, onClose }) {
           setStatus("ok");
         }
       })
-      .catch(() => {
-        if (!ignorieren) {
-          setStatus("fehler");
+      .catch((ursache) => {
+        if (ignorieren) {
+          return;
         }
+        // Den Statuscode AUSWERTEN statt ihn wegzuwerfen: bei 503 fehlt ein
+        // Werkzeug oder eine Datendatei — das Backend nennt im detail, welches.
+        // Bei allem anderen bleibt es beim bisherigen Text mit E-204.
+        const istApiFehler = ursache instanceof ApiError;
+        setFehlerAnzeige(
+          waehleWerkzeugFehlerAnzeige(
+            istApiFehler ? ursache.status : null,
+            istApiFehler ? ursache.detail : null,
+            "beobachten.lookup.error",
+          ),
+        );
+        setStatus("fehler");
       });
 
     return () => {
@@ -304,7 +327,16 @@ export default function LookupPanel({ ip, port, onClose }) {
       {status === "fehler" && (
         <div className="lookup__body">
           <p className="lookup__notice">
-            {mitCode(t("beobachten.lookup.error"), CODES.E_204)}
+            {/* Drei Lagen, und nur eine trägt E-204: der Code sagt „Namens-
+                auflösung nicht erreichbar“ — das stimmt beim allgemeinen
+                Fehlschlag, nicht bei einem fehlenden Werkzeug. Der Wortlaut des
+                Backends steht darum ohne Code; der neutrale Rückfalltext
+                ebenfalls, weil auch dort keine Verbindungsstörung feststeht. */}
+            {fehlerAnzeige?.text !== null && fehlerAnzeige?.text !== undefined
+              ? fehlerAnzeige.text
+              : fehlerAnzeige?.textKey === "beobachten.lookup.error"
+                ? mitCode(t("beobachten.lookup.error"), CODES.E_204)
+                : t(fehlerAnzeige?.textKey ?? "beobachten.lookup.error")}
           </p>
         </div>
       )}

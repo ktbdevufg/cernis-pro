@@ -69,9 +69,16 @@ export async function apiGet(path, params) {
   }
 
   if (!response.ok) {
+    // Den Begründungstext des Backends mitnehmen (detail), damit Aufrufer den
+    // echten Grund zeigen können — GENAU WIE apiPost es seit jeher tut. Vorher
+    // blieb der dritte Konstruktor-Parameter hier leer: detail war auf JEDEM
+    // GET-Weg null, und eine Ansicht, die den Grund zeigen wollte, musste ihn
+    // erfinden oder sich (wie api/licenses.js) einen eigenen GET bauen.
+    // Fehlt der Text, bleibt detail null — es wird NICHTS erfunden.
     throw new ApiError(
       `Unerwarteter HTTP-Status ${response.status}`,
       response.status,
+      await fehlerDetail(response),
     );
   }
 

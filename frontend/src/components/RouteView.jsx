@@ -25,6 +25,7 @@ import {
   fetchRouteOrgs,
   fetchTraceroutePermission,
 } from "../api/route.js";
+import { waehleWerkzeugFehlerAnzeige } from "../lib/werkzeugFehler.js";
 import "./RouteView.css";
 
 // Bildet aus einem ISO-3166-1-alpha-2-Ländercode den Pfad zur mitgelieferten
@@ -146,13 +147,21 @@ export default function RouteView() {
       const ergebnis = await fetchRoute(target, false);
       setRoute(ergebnis);
     } catch (ursache) {
-      // traceroute-Binary fehlt -> 503; sonstige API-/Netzfehler ehrlich melden.
-      const istToolFehlt = ursache instanceof ApiError && ursache.status === 503;
+      // Ein 503 heißt: ein Werkzeug oder eine Datendatei fehlt. WELCHES, weiß nur
+      // das Backend — und es sagt es im detail (traceroute, dig, eine Geo/ASN-CSV).
+      // Früher stand hier ein fester Satz über „traceroute“; er war bei jedem
+      // anderen Grund schlicht falsch. Jetzt zeigt die Ansicht den gelieferten
+      // Grund im Wortlaut und fällt ohne ihn auf einen Satz zurück, der kein
+      // Programm behauptet. Sonstige API-/Netzfehler bleiben unverändert.
+      const istApiFehler = ursache instanceof ApiError;
+      const anzeige = waehleWerkzeugFehlerAnzeige(
+        istApiFehler ? ursache.status : null,
+        istApiFehler ? ursache.detail : null,
+        "untersuchen.route.error",
+      );
       setRoute(null);
       setFehler({
-        text: istToolFehlt
-          ? t("untersuchen.route.toolMissing")
-          : t("untersuchen.route.error"),
+        text: anzeige.text !== null ? anzeige.text : t(anzeige.textKey),
       });
     } finally {
       setLaedt(false);
