@@ -390,6 +390,7 @@ fn wait_for_backend(process: &Arc<Mutex<Option<Child>>>) -> BackendStatus {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn detect_vm() -> Option<&'static str> {
     // 1. systemd-detect-virt (most reliable on Linux)
     if let Ok(out) = Command::new("systemd-detect-virt").output() {
@@ -421,25 +422,84 @@ fn detect_vm() -> Option<&'static str> {
     None
 }
 
-fn get_webkit_version() -> (u32, u32) {
-    // Try to read WebKit2GTK version from pkg-config or library
-    if let Ok(out) = Command::new("pkg-config")
+/// Ermittelte WebKit2GTK-Fassung. `None` heisst ausdruecklich "nicht
+/// ermittelbar" -- ein Zahlenwert als Platzhalter fuer "unbekannt" ist
+/// bewusst ausgeschlossen, weil ein solcher Platzhalter (frueher 0.0) sich in
+/// Vergleichen wie eine SEHR ALTE Fassung verhaelt und damit still durch die
+/// Renderpfad-Matrix faellt.
+#[cfg(target_os = "linux")]
+#[derive(Clone, Copy)]
+struct WebkitVersion {
+    major: u32,
+    minor: u32,
+}
+
+#[cfg(target_os = "linux")]
+impl WebkitVersion {
+    /// Darstellung fuers Protokoll: eine ermittelte Fassung sieht nie aus wie
+    /// "nicht ermittelbar" und umgekehrt.
+    fn describe(version: Option<Self>) -> String {
+        match version {
+            Some(v) => format!("{}.{}", v.major, v.minor),
+            None => "nicht-ermittelbar".to_string(),
+        }
+    }
+}
+
+/// Liest die WebKit2GTK-Fassung ueber pkg-config. Quelle ist eine Datei des
+/// ENTWICKLUNGSPAKETS, die auf Anwendersystemen typischerweise fehlt -- ein
+/// Fehlschlag ist hier also der Normalfall, kein Ausnahmefall. Jeder Weg, der
+/// zu keinem Ergebnis fuehrt, protokolliert seinen eigenen, unterscheidbaren
+/// Grund, statt still auf einen Zahlenwert zurueckzufallen.
+#[cfg(target_os = "linux")]
+fn get_webkit_version() -> Option<WebkitVersion> {
+    let out = match Command::new("pkg-config")
         .args(["--modversion", "webkit2gtk-4.1"])
         .output()
     {
-        if out.status.success() {
-            let ver = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            let parts: Vec<&str> = ver.split('.').collect();
-            if parts.len() >= 2 {
-                let major = parts[0].parse().unwrap_or(0);
-                let minor = parts[1].parse().unwrap_or(0);
-                return (major, minor);
-            }
+        Ok(out) => out,
+        Err(e) => {
+            log(&format!(
+                "WebKit-Fassung nicht ermittelbar: pkg-config nicht ausfuehrbar ({e})"
+            ));
+            return None;
         }
+    };
+
+    if !out.status.success() {
+        log(&format!(
+            "WebKit-Fassung nicht ermittelbar: pkg-config meldet Fehler fuer Modul \
+             webkit2gtk-4.1 (Exitcode {}) -- Entwicklungspaket vermutlich nicht installiert",
+            out.status.code().unwrap_or(-1)
+        ));
+        return None;
     }
-    (0, 0)
+
+    let ver = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if ver.is_empty() {
+        log("WebKit-Fassung nicht ermittelbar: pkg-config lieferte Exitcode 0, aber leere Ausgabe");
+        return None;
+    }
+
+    let parts: Vec<&str> = ver.split('.').collect();
+    if parts.len() < 2 {
+        log(&format!(
+            "WebKit-Fassung nicht ermittelbar: Ausgabe \"{ver}\" hat weniger als zwei Punktteile"
+        ));
+        return None;
+    }
+
+    let (Ok(major), Ok(minor)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) else {
+        log(&format!(
+            "WebKit-Fassung nicht ermittelbar: Ausgabe \"{ver}\" enthaelt nicht-numerische Teile"
+        ));
+        return None;
+    };
+
+    Some(WebkitVersion { major, minor })
 }
 
+#[cfg(target_os = "linux")]
 fn get_distro() -> String {
     // Read /etc/os-release for distro identification
     if let Ok(content) = std::fs::read_to_string("/etc/os-release") {
@@ -452,16 +512,40 @@ fn get_distro() -> String {
     "unknown".to_string()
 }
 
+/// Waehlt den Renderpfad. Die Erhebung von Distributions-ID, VM-Art und
+/// WebKit-Fassung ist linuxeigen: /etc/os-release, systemd-detect-virt bzw.
+/// DMI und pkg-config gibt es auf Windows und macOS nicht. Dort wird nichts
+/// erhoben und nichts behauptet -- nur der ausdrueckliche Nutzerwunsch bleibt.
+#[cfg(not(target_os = "linux"))]
+fn configure_rendering() {
+    let need_sw_rendering = if std::env::var("CERNIS_SOFTWARE_RENDER").is_ok() {
+        log("→ CERNIS_SOFTWARE_RENDER gesetzt: erzwinge Software-Rendering");
+        true
+    } else {
+        log("Environment: Erhebung nur unter Linux -- keine Aussage zu distro/vm/webkit");
+        log("→ Hardware-Rendering (Standard)");
+        false
+    };
+
+    if need_sw_rendering {
+        std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        log("  Set WEBKIT_DISABLE_COMPOSITING_MODE=1");
+        log("  Set WEBKIT_DISABLE_DMABUF_RENDERER=1");
+    }
+}
+
+#[cfg(target_os = "linux")]
 fn configure_rendering() {
     let vm = detect_vm();
-    let (wk_major, wk_minor) = get_webkit_version();
+    let webkit = get_webkit_version();
     let distro = get_distro();
 
     log(&format!(
-        "Environment: distro={}, vm={}, webkit={}.{}",
+        "Environment: distro={}, vm={}, webkit={}",
         distro,
         vm.unwrap_or("bare-metal"),
-        wk_major, wk_minor
+        WebkitVersion::describe(webkit)
     ));
 
     // Decision matrix:
@@ -469,15 +553,34 @@ fn configure_rendering() {
     // - Ubuntu + bare-metal: usually fine, but DMABUF can fail on some GPUs
     // - Debian + VM: works fine (older WebKit, different compositor defaults)
     // - Debian + bare-metal: works fine
-    let need_sw_rendering = match (vm, distro.as_str()) {
+    // - VM + Fassung nicht ermittelbar: eigener Zweig, siehe unten.
+    let need_sw_rendering = match (vm, distro.as_str(), webkit) {
         // Ubuntu in a VM with newer WebKit → always disable
-        (Some(_), "ubuntu" | "pop" | "linuxmint") if wk_major >= 2 && wk_minor >= 44 => {
+        (Some(_), "ubuntu" | "pop" | "linuxmint", Some(wk))
+            if wk.major >= 2 && wk.minor >= 44 =>
+        {
             log("→ Ubuntu VM with WebKit >= 2.44: disabling GPU compositing");
             true
         }
         // Any distro with very new WebKit in a VM → cautiously disable
-        (Some(_), _) if wk_major >= 2 && wk_minor >= 46 => {
+        (Some(_), _, Some(wk)) if wk.major >= 2 && wk.minor >= 46 => {
             log("→ VM with WebKit >= 2.46: disabling GPU compositing as precaution");
+            true
+        }
+        // VM, aber die Fassung ist nicht ermittelbar -- der ausdrueckliche
+        // Unbekannt-Zweig. Begruendung: in einer VM ist der bekannte
+        // schlechteste Fall der Ubuntu-VM mit WebKit >= 2.44, und der endet in
+        // Software-Rendering (bestaetigter Schwarzbildschirm sonst). Ohne
+        // Fassung koennen wir diesen Fall nicht ausschliessen; wir waehlen
+        // deshalb denselben Pfad wie der bekannte schlechteste Fall. Das
+        // kostet auf harmlosen VMs GPU-Beschleunigung, riskiert aber nirgends
+        // ein unbedienbares Fenster. Auf Bare-Metal kennt die Matrix keinen
+        // Problemfall -> dort bleibt es beim Standard weiter unten.
+        (Some(vm_art), _, None) => {
+            log(&format!(
+                "→ VM ({vm_art}), WebKit-Fassung nicht ermittelbar: \
+                 Software-Rendering wie im bekannten schlechtesten VM-Fall"
+            ));
             true
         }
         // Bare metal but user explicitly requested software rendering
