@@ -62,8 +62,10 @@ WS-JSON).
 
 import asyncio
 from collections.abc import AsyncIterator
-from ipaddress import ip_address, ip_network
+from ipaddress import ip_network
 from typing import assert_never
+
+import structlog
 
 from domain.scanning import (
     DiscoveredHost,
@@ -87,6 +89,7 @@ from domain.scanning import (
     SsdpService,
     classify_host,
 )
+from domain.scanning.addressing import is_device_address, is_group_mac
 from domain.scanning.interception import CONTROL_ADDRESS_COUNT, pick_control_addresses
 from ports.scanning import (
     ArpTablePort,
@@ -100,6 +103,8 @@ from ports.scanning import (
     SsdpPort,
     VendorLookupPort,
 )
+
+_logger = structlog.get_logger(__name__)
 
 # Port-Timeout je Verbindungsversuch im socket-Modus. ``ScanConfig`` kennt keinen
 # eigenen Wert; der Altcode nutzte den ``scan_ports_socket``-Default (0.5 s).
@@ -178,19 +183,47 @@ _TOP_100_PORTS: tuple[int, ...] = (
 )
 
 
-def _in_any_cidr(ip_str: str, cidrs: tuple[str, ...]) -> bool:
-    """True, wenn ``ip_str`` in einem der ``cidrs`` liegt (``_in_any_net``-Aequivalent).
+def _mergeable(ip_str: str, mac: str, cidrs: tuple[str, ...], source: str) -> bool:
+    """True, wenn der Eintrag als Geraet in die Liste darf (Befund 55).
 
-    Begrenzt den ARP-Merge auf das gescannte Netz -- ein ARP-Cache enthaelt auch
-    Eintraege ausserhalb des Scans (Gateway anderer Interfaces o.ae.). Die CIDRs
-    sind in ``ScanConfig.__post_init__`` bereits validiert; nur die zu pruefende
-    ``ip_str`` kann ungueltig sein (z.B. unsauberer ARP-Output) -> dann False.
+    Fasst die beiden Bedingungen der Merge-Stellen zusammen und protokolliert den
+    Grund, wenn eine davon verletzt ist:
+
+    * Die ADRESSE muss eine echte Host-Adresse in einem der ``cidrs`` sein
+      (``is_device_address``) -- das schliesst neben allem ausserhalb der CIDRs
+      auch Netz-, Broadcast-, Multicast-, Loopback- und link-lokale Adressen aus.
+      Die Begrenzung auf das gescannte Netz ist dabei die alte Aufgabe des
+      frueheren ``_in_any_cidr``: ein ARP-Cache enthaelt auch Eintraege ausserhalb
+      des Scans (Gateway anderer Interfaces o.ae.).
+    * Die MAC darf keine Gruppen-MAC sein (``is_group_mac``) -- eine Broadcast-
+      oder Multicast-MAC kennzeichnet keine Geraeteidentitaet, auch dann nicht,
+      wenn die IP unauffaellig aussieht.
+
+    Ein verworfener Eintrag wird NUR protokolliert: eine Adressierungsform, die
+    nie ein Geraet war, ist kein Befund, den der Anwender wegklicken muesste --
+    darin unterscheidet sich dieser Fall von Befund 53, wo eine echte Beobachtung
+    ueber das Netz des Anwenders entsteht. Deshalb kein Event, kein neues Feld an
+    der Schnittstelle.
     """
-    try:
-        addr = ip_address(ip_str)
-    except ValueError:
+    if not is_device_address(ip_str, cidrs):
+        _logger.debug(
+            "scan.merge.entry_verworfen",
+            ip=ip_str,
+            mac=mac,
+            source=source,
+            grund="keine echte Host-Adresse in den gescannten Netzen",
+        )
         return False
-    return any(addr in ip_network(c, strict=False) for c in cidrs)
+    if is_group_mac(mac):
+        _logger.debug(
+            "scan.merge.entry_verworfen",
+            ip=ip_str,
+            mac=mac,
+            source=source,
+            grund="Gruppen-MAC (Broadcast/Multicast) ist keine Geraeteidentitaet",
+        )
+        return False
+    return True
 
 
 def _group_by_ip[T: (MdnsService, SsdpService)](services: list[T]) -> dict[str, tuple[T, ...]]:
@@ -367,7 +400,7 @@ class RunNetworkScan:
         for fritz_host in await self._fritz_hosts.get_hosts():
             if fritz_host.ip in discovered_ips:
                 continue
-            if not _in_any_cidr(fritz_host.ip, config.cidrs):
+            if not _mergeable(fritz_host.ip, fritz_host.mac, config.cidrs, "fritzbox"):
                 continue
             # rtt_ms=None analog ARP (Entscheidung 4A, S.7b): KEIN Zweit-Ping. Ein
             # von der Box gemeldeter, ping-stiller Host antwortet auch beim zweiten
@@ -403,11 +436,14 @@ class RunNetworkScan:
         # MAC schon -- kein Doppel, kein MAC-Nachtrag (Altcode-treu).
         # ARP-only-Hosts werden angehaengt; die MAC-Gruppierung weiter unten fasst
         # Proxy-ARP-Duplikate (gleiche MAC, mehrere IPs) zu einem Geraet mit
-        # additional_ips zusammen -- daher hier KEIN MAC-Vorfilter.
+        # additional_ips zusammen -- daher hier KEIN Vorfilter auf ECHTE Geraete-MACs.
+        # ``_mergeable`` verwirft nur, was per Definition nie ein Geraet ist
+        # (Befund 55: Netz-/Broadcast-/Multicast-/Loopback-Adresse, Gruppen-MAC) --
+        # eine gewoehnliche MAC bleibt unangetastet, auch mehrfach vorkommend.
         for arp_ip, arp_mac in (await self._arp_table.get_arp_table()).items():
             if arp_ip in discovered_ips:
                 continue
-            if not _in_any_cidr(arp_ip, config.cidrs):
+            if not _mergeable(arp_ip, arp_mac, config.cidrs, "arp"):
                 continue
             # Bewusste Abweichung vom Altcode (Entscheidung 4A): KEIN Zweit-Ping zum
             # RTT-Messen. Ein ARP-only-Host hat per Definition gerade NICHT auf Ping

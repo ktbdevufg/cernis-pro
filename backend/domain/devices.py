@@ -82,6 +82,15 @@ def is_broadcast_mac(raw: str) -> bool:
 
     Fachlich: die Broadcast-Adresse ist kein Geraet, sondern eine Adressierungsform.
     Sie gehoert nicht in den Geraetebestand.
+
+    GEWOLLTE DOPPELUNG (Architektur, kein Versehen): ``domain/scanning/addressing.py``
+    fuehrt mit ``is_group_mac`` ein Gegenstueck fuer dieselbe fachliche Aussage --
+    dort etwas weiter gefasst (jede Gruppen-MAC, nicht nur die Broadcast-MAC). Der
+    independence-Contract des import-linter verbietet Quer-Importe zwischen den
+    Domaenen-Subpaketen, ``domain/scanning`` darf ``domain/devices`` also nicht
+    importieren. Statt die Ringgrenze aufzuweichen, steht die Regel dort ein
+    zweites Mal. Aendert sich die fachliche Auslegung, sind BEIDE Stellen
+    anzufassen.
     """
     try:
         return normalize_mac(raw) == BROADCAST_MAC

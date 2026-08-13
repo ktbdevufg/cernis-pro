@@ -637,8 +637,11 @@ def test_fritz_host_runs_through_enrich() -> None:
 def test_fritz_merged_before_arp_same_ip_only_once() -> None:
     """Liefern Fritz UND ARP dieselbe IP, gewinnt Fritz (laeuft zuerst) -- nur einmal."""
     discovery = _FakeDiscovery({"192.168.1.0/24": []})
+    # Gewoehnliche MACs auf beiden Seiten: der Test prueft die REIHENFOLGE
+    # (Fritz vor ARP), nicht die Eignung -- eine Gruppen-MAC wuerde den Eintrag
+    # seit Befund 55 verwerfen und die Aussage des Tests unterlaufen.
     fritz = _FakeFritzHosts(
-        [DiscoveredHost(ip="192.168.1.50", mac="FF:FF:FF:FF:FF:FF", source="fritzbox")]
+        [DiscoveredHost(ip="192.168.1.50", mac="BA:BB:BB:BB:BB:BB", source="fritzbox")]
     )
     arp = _FakeArpTable({"192.168.1.50": "AA:AA:AA:AA:AA:AA"})  # gleiche IP -> ARP skippt sie
     use_case, _, _ = _make_use_case(discovery=discovery, fritz_hosts=fritz, arp_table=arp)
@@ -656,7 +659,7 @@ def test_fritz_merged_before_arp_same_ip_only_once() -> None:
     assert len(found) == 1
     # Fritz lief zuerst -> die Fritz-Meldung (source/mac) gewinnt, ARP wird verworfen.
     assert found[0].source == "fritzbox"
-    assert found[0].mac == "FF:FF:FF:FF:FF:FF"
+    assert found[0].mac == "BA:BB:BB:BB:BB:BB"
 
 
 def test_fritz_hostfound_is_in_discovery_phase() -> None:
@@ -685,6 +688,146 @@ def test_fritz_hostfound_is_in_discovery_phase() -> None:
         if isinstance(e, PhaseChanged) and e.phase == "discovery" and e.status == "done"
     )
     assert fritz_found_idx < disc_done_idx
+
+
+# ── Befund 55: nur echte Host-Adressen kommen in die Geraeteliste ───────────
+
+
+def _merge_config(*cidrs: str) -> ScanConfig:
+    """Minimal-Config fuer die Merge-Tests: nur Discovery, keine Anreicherung."""
+    return ScanConfig(
+        cidrs=cidrs,
+        port_scan=False,
+        mdns_scan=False,
+        ssdp_scan=False,
+        resolve_hostnames=False,
+    )
+
+
+def test_arp_skips_broadcast_address() -> None:
+    """Die Broadcast-Adresse aus der ARP-Tabelle wird nicht als Geraet gefuehrt."""
+    discovery = _FakeDiscovery({"192.168.1.0/24": []})
+    arp = _FakeArpTable({"192.168.1.255": "DE:AD:BE:EF:00:01"})
+    use_case, _, _ = _make_use_case(discovery=discovery, arp_table=arp)
+
+    events = _run(use_case, _merge_config("192.168.1.0/24"))
+
+    assert [e for e in events if isinstance(e, HostFound)] == []
+
+
+def test_arp_skips_network_address() -> None:
+    """Dasselbe fuer die Netzadresse."""
+    discovery = _FakeDiscovery({"192.168.1.0/24": []})
+    arp = _FakeArpTable({"192.168.1.0": "DE:AD:BE:EF:00:01"})
+    use_case, _, _ = _make_use_case(discovery=discovery, arp_table=arp)
+
+    events = _run(use_case, _merge_config("192.168.1.0/24"))
+
+    assert [e for e in events if isinstance(e, HostFound)] == []
+
+
+def test_fritz_skips_network_and_broadcast_address() -> None:
+    """Der Filter greift auch auf dem Fritz-Weg, nicht nur ueber ARP."""
+    discovery = _FakeDiscovery({"192.168.1.0/24": []})
+    fritz = _FakeFritzHosts(
+        [
+            DiscoveredHost(ip="192.168.1.0", mac="DE:AD:BE:EF:00:01", source="fritzbox"),
+            DiscoveredHost(ip="192.168.1.255", mac="DE:AD:BE:EF:00:02", source="fritzbox"),
+        ]
+    )
+    use_case, _, _ = _make_use_case(discovery=discovery, fritz_hosts=fritz)
+
+    events = _run(use_case, _merge_config("192.168.1.0/24"))
+
+    assert [e for e in events if isinstance(e, HostFound)] == []
+
+
+def test_arp_keeps_ordinary_address_alongside_discarded_ones() -> None:
+    """Der Filter entfernt nicht mehr als er soll -- die gewoehnliche IP kommt durch."""
+    discovery = _FakeDiscovery({"192.168.1.0/24": []})
+    arp = _FakeArpTable(
+        {
+            "192.168.1.0": "DE:AD:BE:EF:00:01",  # Netzadresse -> verworfen
+            "192.168.1.50": "DE:AD:BE:EF:00:02",  # gewoehnlich -> bleibt
+            "192.168.1.255": "DE:AD:BE:EF:00:03",  # Broadcast -> verworfen
+        }
+    )
+    use_case, _, _ = _make_use_case(discovery=discovery, arp_table=arp)
+
+    events = _run(use_case, _merge_config("192.168.1.0/24"))
+
+    found = {f.ip for f in events if isinstance(f, HostFound)}
+    assert found == {"192.168.1.50"}
+
+
+def test_arp_skips_broadcast_mac_at_ordinary_address() -> None:
+    """Broadcast-MAC verwirft den Eintrag, auch wenn die IP unauffaellig ist."""
+    discovery = _FakeDiscovery({"192.168.1.0/24": []})
+    arp = _FakeArpTable({"192.168.1.60": "FF:FF:FF:FF:FF:FF"})
+    use_case, _, _ = _make_use_case(discovery=discovery, arp_table=arp)
+
+    events = _run(use_case, _merge_config("192.168.1.0/24"))
+
+    assert [e for e in events if isinstance(e, HostFound)] == []
+
+
+def test_arp_skips_multicast_mac_at_ordinary_address() -> None:
+    """Multicast-MAC ebenso -- gesetztes I/G-Bit im ersten Oktett."""
+    discovery = _FakeDiscovery({"192.168.1.0/24": []})
+    arp = _FakeArpTable({"192.168.1.61": "01:00:5E:00:00:FB"})
+    use_case, _, _ = _make_use_case(discovery=discovery, arp_table=arp)
+
+    events = _run(use_case, _merge_config("192.168.1.0/24"))
+
+    assert [e for e in events if isinstance(e, HostFound)] == []
+
+
+def test_slash31_and_slash32_are_not_wrongly_emptied() -> None:
+    """Bei /31 und /32 wird NICHT faelschlich alles verworfen (stdlib-Sonderfall)."""
+    discovery = _FakeDiscovery({"10.0.0.0/31": [], "10.9.9.9/32": []})
+    arp = _FakeArpTable(
+        {
+            "10.0.0.0": "DE:AD:BE:EF:00:01",  # im /31 ein regulaerer Host
+            "10.0.0.1": "DE:AD:BE:EF:00:02",  # ebenso
+            "10.9.9.9": "DE:AD:BE:EF:00:03",  # die einzige Adresse des /32
+        }
+    )
+    use_case, _, _ = _make_use_case(discovery=discovery, arp_table=arp)
+
+    events = _run(use_case, _merge_config("10.0.0.0/31", "10.9.9.9/32"))
+
+    found = {f.ip for f in events if isinstance(f, HostFound)}
+    assert found == {"10.0.0.0", "10.0.0.1", "10.9.9.9"}
+
+
+def test_ping_sweep_host_with_empty_mac_still_passes() -> None:
+    """Der Ping-Sweep-Weg bleibt unveraendert -- er laeuft nicht ueber den Filter."""
+    ping_host = DiscoveredHost(ip="192.168.1.5", mac="", rtt_ms=2.0)
+    discovery = _FakeDiscovery({"192.168.1.0/24": [ping_host]})
+    use_case, _, _ = _make_use_case(discovery=discovery)
+
+    events = _run(use_case, _merge_config("192.168.1.0/24"))
+
+    found = [f for f in events if isinstance(f, HostFound)]
+    assert len(found) == 1
+    assert found[0].ip == "192.168.1.5"
+    assert found[0].mac == ""
+
+
+def test_arp_skips_multicast_and_loopback_even_inside_covering_cidrs() -> None:
+    """Ein CIDR, das sie umfasst, macht aus ihnen kein Geraet."""
+    discovery = _FakeDiscovery({"224.0.0.0/24": [], "127.0.0.0/8": []})
+    arp = _FakeArpTable(
+        {
+            "224.0.0.251": "DE:AD:BE:EF:00:01",  # Multicast
+            "127.0.0.1": "DE:AD:BE:EF:00:02",  # Loopback
+        }
+    )
+    use_case, _, _ = _make_use_case(discovery=discovery, arp_table=arp)
+
+    events = _run(use_case, _merge_config("224.0.0.0/24", "127.0.0.0/8"))
+
+    assert [e for e in events if isinstance(e, HostFound)] == []
 
 
 # ── Fehlerpfad: Adapter-Exception propagiert (Durchwerfen an S.6) ───────────
