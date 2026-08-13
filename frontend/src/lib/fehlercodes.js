@@ -46,6 +46,7 @@ export const CODES = Object.freeze({
   E_504: "E-504",
   E_505: "E-505",
   E_506: "E-506",
+  E_507: "E-507",
 });
 
 // Liste aller Codes in fester Reihenfolge (fuer Handbuch/Tabellen-Ausgabe).

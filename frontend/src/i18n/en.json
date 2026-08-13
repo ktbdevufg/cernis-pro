@@ -2487,7 +2487,8 @@
     "E-503": "The action failed.",
     "E-504": "The export failed.",
     "E-505": "The device was not found.",
-    "E-506": "The input is invalid."
+    "E-506": "The input is invalid.",
+    "E-507": "The key file for saved passwords is missing."
   },
   "lizenzen": {
     "titel": "About CERNIS PRO",

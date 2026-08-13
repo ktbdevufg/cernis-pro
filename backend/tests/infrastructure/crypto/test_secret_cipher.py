@@ -9,6 +9,13 @@ Home-Zugriff). Damit laeuft die Suite auf dem Linux-CI deterministisch.
 Der wichtigste Test des Auftrags: ist das Schluesselverzeichnis nicht beschreibbar,
 wirft ``encrypt`` ``KeyAccessError`` und gibt NIEMALS Klartext zurueck
 (``test_encrypt_raises_when_key_dir_unwritable``).
+
+BEFUND 65 -- der Leseversuch darf den Schluessel nicht erzeugen: fehlt die
+Schluesseldatei bei vorhandenem Chiffrat, wirft ``decrypt`` ``KeyMissingError`` und legt
+KEINEN neuen Schluessel an (``test_decrypt_missing_key_file_raises_and_creates_nothing``
+-- der zweite ``assert`` dort ist der Punkt). Die Gegenprobe, dass ``encrypt`` beim
+Erstgebrauch weiterhin erzeugen darf, steht in
+``test_encrypt_still_creates_key_on_first_use``.
 """
 
 import os
@@ -21,6 +28,7 @@ from infrastructure.crypto.secret_cipher import (
     CipherError,
     DecryptionError,
     KeyAccessError,
+    KeyMissingError,
     decrypt,
     default_key_file,
     encrypt,
@@ -88,15 +96,41 @@ def test_decrypt_legacy_b64_prefix_raises() -> None:
 def test_decrypt_corrupt_token_raises_decryption_error() -> None:
     # Ein Wert MIT Praefix, aber kaputtem/fremdem Token -> DecryptionError,
     # NICHT "" (der Altcode verbarg den Fehler durch Rueckgabe von "").
+    #
+    # ANPASSUNG (Befund 65, gleiche Begruendung wie test_decrypt_wrong_key_raises): der
+    # Test rief frueher ``decrypt`` OHNE vorher je verschluesselt zu haben -- es gab also
+    # gar keine Schluesseldatei, und er lief durch deren stille Neuerzeugung. Er belegte
+    # damit "kaputtes Token" nur unter einer Voraussetzung, die es nie geben sollte.
+    # Der ``encrypt``-Aufruf stellt jetzt den Zustand her, den der Test meint: ein
+    # gueltiger Schluessel liegt vor, das TOKEN ist das Kaputte. Der Fall "Key fehlt"
+    # gehoert nicht hierher -- er hat seinen eigenen Test.
+    encrypt("egal")  # legt einen gueltigen Key an
     with pytest.raises(DecryptionError):
         decrypt("enc:vollkommen-kaputtes-token")
 
 
 def test_decrypt_wrong_key_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # Mit einem Key verschluesseln, dann den Key-Ort wechseln (frischer Key) ->
-    # das alte Token laesst sich nicht mehr entschluesseln -> DecryptionError.
+    # FALSCHER Key -- ein ANDERER, VORHANDENER Key, nicht ein fehlender.
+    #
+    # ANPASSUNG (Befund 65, Aufgabe 10): der Test wechselte frueher nur den Key-Ort und
+    # verliess sich darauf, dass ``decrypt`` dort still einen NEUEN Key erzeugt. Er lief
+    # damit durch genau die Neuerzeugung, die dieser Befund abschafft -- er mass "Key
+    # fehlt", nannte sich aber "wrong key". Gemessen (S85-A9, IST-Lauf): am neuen Ort
+    # entstand eine Key-Datei, und der Fehler hiess irrefuehrend "Token ungueltig oder
+    # falscher Schluessel". Nach der Aenderung kaeme dort ``KeyMissingError`` -- er waere
+    # also nur noch aus Versehen gruen bzw. rot.
+    #
+    # Der Test stellt jetzt her, was sein Name sagt: am zweiten Ort liegt ein ECHTER,
+    # gueltiger Fremd-Key (per ``encrypt`` dort erzeugt). Das Token des ersten Orts trifft
+    # damit auf einen vorhandenen, aber falschen Schluessel -> DecryptionError. Der Fall
+    # "Key fehlt" hat seinen eigenen Test (test_decrypt_missing_key_file_*).
     cipher = encrypt("geheim")
-    monkeypatch.setenv("CERNIS_DATA_DIR", str(tmp_path / "anderer_ort"))
+
+    zweiter_ort = tmp_path / "anderer_ort"
+    monkeypatch.setenv("CERNIS_DATA_DIR", str(zweiter_ort))
+    encrypt("egal")  # legt am zweiten Ort einen eigenen, gueltigen Key an
+    assert (zweiter_ort / "secret_cipher.key").exists()
+
     with pytest.raises(DecryptionError):
         decrypt(cipher)
 
@@ -153,6 +187,76 @@ def test_empty_key_file_raises_key_access_error() -> None:
     key_file.write_bytes(b"")
     with pytest.raises(KeyAccessError):
         encrypt("geheim")
+
+
+# ── Befund 65: der LESEVERSUCH darf den Schluessel NICHT erzeugen ────────────
+
+
+def test_decrypt_missing_key_file_raises_and_creates_nothing() -> None:
+    # DER KERN VON BEFUND 65. Verschluesseln, Schluesseldatei loeschen, entschluesseln:
+    #
+    # 1. Der Fehler ist BENANNT (KeyMissingError -- "Datei fehlt"), nicht der bisherige
+    #    irrefuehrende DecryptionError ("Token ungueltig oder falscher Schluessel").
+    # 2. UND -- der eigentliche Punkt -- die Schluesseldatei darf danach NICHT existieren.
+    #    Vorher legte der Lesepfad hier still einen neuen Key an: das vorhandene Chiffrat
+    #    wurde damit dauerhaft unlesbar, und der Vorgang, der den Verlust haette melden
+    #    koennen, vollzog ihn. Der zweite assert ist der Test.
+    key_file = default_key_file()
+    cipher = encrypt("geheim")
+    assert key_file.exists()
+
+    key_file.unlink()
+
+    with pytest.raises(KeyMissingError) as excinfo:
+        decrypt(cipher)
+
+    assert not key_file.exists(), "decrypt hat den Schluessel neu erzeugt -- Verlust vollzogen"
+    # Der erwartete Pfad haengt an der Ausnahme, damit der Rand ihn nennen kann,
+    # ohne den Meldungstext zu parsen.
+    assert excinfo.value.key_file == key_file
+
+
+def test_key_missing_error_is_key_access_error() -> None:
+    # Subtyp-Vertrag: wer breit KeyAccessError/CipherError faengt, sieht den neuen
+    # Fall unveraendert; wer den Verlustfall gesondert behandeln will, faengt den Subtyp.
+    assert issubclass(KeyMissingError, KeyAccessError)
+    assert issubclass(KeyMissingError, CipherError)
+
+
+def test_decrypt_missing_key_does_not_create_the_data_dir() -> None:
+    # Der Lesepfad legt auch das VERZEICHNIS nicht an -- er erzeugt gar nichts.
+    key_file = default_key_file()
+    with pytest.raises(KeyMissingError):
+        decrypt("enc:irgendein-token")
+    assert not key_file.exists()
+    assert not key_file.parent.exists()
+
+
+def test_encrypt_still_creates_key_on_first_use() -> None:
+    # Gegenprobe zu Befund 65 (Aufgabe 8): der SCHREIBweg darf weiterhin erzeugen --
+    # wer verschluesselt, beginnt legitim. Nur der Lesepfad ist eingeschraenkt.
+    key_file = default_key_file()
+    assert not key_file.exists()
+
+    cipher = encrypt("geheim")
+
+    assert key_file.exists(), "encrypt muss beim Erstgebrauch weiterhin einen Key anlegen"
+    assert decrypt(cipher) == "geheim"
+
+
+def test_decrypt_touches_no_key_file_before_prefix_check() -> None:
+    # Aufgabe 3: ein leerer Wert und ein Wert OHNE enc:-Praefix duerfen ueberhaupt nicht
+    # zum Schluesselzugriff fuehren -- die Praefix-Pruefung kommt VOR dem Laden. Sonst
+    # koennte schon ein unsinniger Eingabewert einen Schluessel anlegen (bzw. jetzt: den
+    # Verlustfehler ausloesen, obwohl gar kein Chiffrat im Spiel ist).
+    key_file = default_key_file()
+
+    assert decrypt("") == ""
+    assert not key_file.parent.exists()
+
+    with pytest.raises(DecryptionError):
+        decrypt("plaintext-ohne-praefix")
+    assert not key_file.parent.exists()
 
 
 # ── DER WICHTIGSTE TEST: Verzeichnis nicht beschreibbar -> KeyAccessError ────

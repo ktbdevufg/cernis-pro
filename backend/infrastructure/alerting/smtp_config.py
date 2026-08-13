@@ -26,6 +26,13 @@ Fehlzustand am Port-Vertrag sichtbar wird (der Aufrufer wuerde sonst mit leerem 
 mailen -- genau der stille Fehlschlag, den v2 beseitigt). ``None`` bleibt reserviert fuer
 "nicht konfiguriert"; leeres Passwort fuer "kein Passwort gesetzt"; ein kaputter Cipher
 ist keines von beidem.
+
+FEHLENDE SCHLUESSELDATEI (Befund 65): ``decrypt`` erzeugt auf dem Leseweg keinen
+Schluessel mehr und wirft bei fehlender Datei ``KeyMissingError`` (ein
+``KeyAccessError``-Subtyp, KEIN ``DecryptionError``). Dieser Adapter faengt ihn in einem
+EIGENEN Zweig, nur um den erwarteten Pfad zu loggen, und reicht ihn genauso weiter --
+das Verhalten bleibt: nie ein leeres Passwort. Die HTTP-Umsetzung dieses Verlustfalls
+sitzt am Rand (Handler in ``app.py``), nicht hier.
 """
 
 from typing import Any
@@ -34,7 +41,12 @@ import structlog
 
 from domain.alerting import SmtpConfig
 from domain.settings import Setting
-from infrastructure.crypto.secret_cipher import DecryptionError, decrypt, encrypt
+from infrastructure.crypto.secret_cipher import (
+    DecryptionError,
+    KeyMissingError,
+    decrypt,
+    encrypt,
+)
 from ports.settings import SettingsRepository
 
 _logger = structlog.get_logger(__name__)
@@ -130,6 +142,13 @@ class SettingsSmtpConfigAdapter:
             return ""
         try:
             return decrypt(cipher_str)
+        except KeyMissingError as exc:
+            # Die SCHLUESSELDATEI fehlt, obwohl ein Cipher gespeichert ist -- der
+            # Verlustfall, nicht bloss ein kaputter Cipher. Eigener Zweig, damit der
+            # erwartete Pfad ins Log kommt (der Anwender/Support braucht ihn, um eine
+            # Sicherung zurueckzuspielen). Danach wie unten: weiterreichen, NIE "".
+            _logger.error("smtp_password_key_missing", key_file=str(exc.key_file))
+            raise
         except DecryptionError:
             # KEIN stiller Fallback: der Cipher ist vorhanden, laesst sich aber nicht
             # entschluesseln (kaputt, fremder Schluessel, kein enc:-Praefix). Das ist

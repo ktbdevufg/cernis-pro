@@ -17,6 +17,7 @@ Contract (testet ``main``) bleibt unangetastet:
   success -> 200, sonst 503; nicht konfiguriert (load==None) -> 400.
 """
 
+import re
 from pathlib import Path
 
 import pytest
@@ -48,6 +49,7 @@ from domain.alerting import EmailResult, SmtpConfig
 from domain.settings import Setting, SettingValue
 from infrastructure.alerting import SettingsSmtpConfigAdapter, SqliteAlertRuleRepository
 from infrastructure.config import AppConfig
+from infrastructure.crypto.secret_cipher import default_key_file
 
 # Exakter Redaktions-/Sentinel-String: 8x U+2022 BULLET (A.1-Wortlaut).
 _REDACTED = "•" * 8
@@ -419,3 +421,61 @@ def test_test_alert_503_on_failure(db_path: Path) -> None:
     body = resp.json()
     assert body["success"] is False
     assert body["log"] == ["CONNECTION REFUSED"]
+
+
+# ── Befund 65: fehlende Schluesseldatei endet NICHT mehr als nackter 500 ─────
+
+
+def test_test_alert_missing_key_file_is_503_not_500(db_path: Path) -> None:
+    """Der Verlustfall am RAND: der ``KeyMissingError``-Handler aus app.py greift.
+
+    Gemessen in S85-A8/C3: bis hierher erreichte dieser Fall die Oberflaeche als nackter
+    Internal Server Error. Jetzt: 503 mit einer Meldung, die die fehlende Datei UND den
+    erwarteten Pfad nennt -- seit S85-A10 im entschiedenen Wortlaut (Fassung B) mit dem
+    Code (E-507). Der Test baut die ECHTE App (``create_app``), damit belegt ist, dass der
+    Handler dort tatsaechlich registriert ist -- ein nachgebauter Handler wuerde das
+    gerade nicht zeigen.
+
+    ``raise_server_exceptions=False``: sonst reicht der TestClient eine ungefangene
+    Ausnahme als Python-Exception durch, statt die HTTP-Antwort zu liefern -- und genau
+    die HTTP-Antwort ist hier der Prueffall.
+    """
+    settings = _FakeSettingsRepository()
+    app = _wired_app(db_path, settings_repo=settings)
+
+    # 1. Passwort ueber den echten Schreibweg ablegen -> legt den Key an und verschluesselt.
+    with TestClient(app) as client:
+        put = client.put(
+            "/api/alerts/smtp",
+            json={"host": "mail.bach.world", "to": "admin@x", "password": "geheim"},
+        )
+        assert put.status_code == 200
+    key_file = default_key_file()
+    assert key_file.exists()
+    assert _stored_smtp_password(settings).startswith("enc:")
+
+    # 2. Die Schluesseldatei geht verloren (geloescht/nicht mitgesichert).
+    key_file.unlink()
+
+    # 3. Der Lesepfad trifft darauf: 503 statt 500, mit benannter Ursache.
+    with TestClient(app, raise_server_exceptions=False) as client:
+        resp = client.post("/api/alerts/test")
+
+    assert resp.status_code == 503, "Der Verlustfall darf nicht mehr als 500 enden"
+    detail = resp.json()["detail"]
+    assert str(key_file) in detail, "Die Meldung muss den erwarteten Pfad nennen"
+    # ANGEPASST (S85-A10): Bis hierher pruefte der Test das FEHLEN eines E-Codes -- richtig
+    # genau so lange, wie der Text ein Platzhalter ohne Code war. Karl hat entschieden
+    # (Fassung B, E-507), damit kehrt sich die Erwartung um: der Code MUSS jetzt da sein,
+    # in der Hausform "(E-xxx)" am Ende. Der alte Negativ-Assert waere ab sofort gruen
+    # genau dann, wenn die Entscheidung NICHT umgesetzt ist -- er haette den Fortschritt
+    # blockiert statt ihn zu sichern.
+    assert re.search(r"\(E-507\)", detail), f"Der Code (E-507) fehlt in der Meldung: {detail}"
+    # Und der Wortlaut ist der entschiedene, nicht mehr der Platzhalter.
+    assert "VORLAEUFIG" not in detail, "Der Platzhaltertext steht noch in der Meldung"
+    assert "neu eingegeben werden" in detail, (
+        "Die Meldung muss sagen, was zu tun ist, wenn keine Sicherung vorliegt"
+    )
+
+    # Und der Punkt aus Aufgabe 7 gilt auch am Rand: nichts wurde neu erzeugt.
+    assert not key_file.exists()

@@ -2487,7 +2487,8 @@
     "E-503": "Die Aktion ist fehlgeschlagen.",
     "E-504": "Der Export ist fehlgeschlagen.",
     "E-505": "Das Gerät wurde nicht gefunden.",
-    "E-506": "Die Eingabe ist ungültig."
+    "E-506": "Die Eingabe ist ungültig.",
+    "E-507": "Die Schlüsseldatei für gespeicherte Passwörter fehlt."
   },
   "lizenzen": {
     "titel": "Über CERNIS PRO",

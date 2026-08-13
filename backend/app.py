@@ -728,6 +728,7 @@ from infrastructure.capture import (
 )
 from infrastructure.clock import SystemClock
 from infrastructure.config import APP_NAME, APP_VERSION, AppConfig, display_version
+from infrastructure.crypto import KeyMissingError
 from infrastructure.cve_acknowledgements_db import SqliteCveAcknowledgementRepository
 from infrastructure.cve_checkstate_db import SqliteCveCheckStateRepository
 from infrastructure.cve_findings_db import SqliteCveFindingRepository
@@ -3322,6 +3323,54 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         return JSONResponse(
             status_code=503,
             content={"detail": "Secret-Speicher (OS-Keystore) ist nicht verfuegbar."},
+        )
+
+    @app.exception_handler(KeyMissingError)
+    async def _on_key_missing(_request: Request, _exc: KeyMissingError) -> JSONResponse:
+        # Befund 65: die Schluesseldatei fehlt, obwohl ein Chiffrat gespeichert ist --
+        # der Verlustfall. Bis hierher endete er als nackter 500 (Internal Server Error)
+        # ohne jede Aussage.
+        #
+        # WARUM EIN HANDLER UND KEINE ROUTEN-FASSUNG: der Fehler entsteht in der
+        # Krypto-Schicht und kann JEDEN Pfad treffen, der ein gespeichertes Geheimnis
+        # liest -- heute die SMTP-Wege (GET/PUT /alerts/smtp, POST /alerts/test), morgen
+        # jeden weiteren Nutzer von ``secret_cipher.decrypt``. Ein Handler fasst die
+        # Ursache EINMAL an ihrer Grenze; ein try/except je Route muesste bei jedem neuen
+        # Leser wiederholt werden und waere genau dann vergessen, wenn es darauf ankommt.
+        # Praezedenz im Haus: SecretStoreUnavailableError (oben), SniPermissionError,
+        # RogueDhcpPermissionError -- alle als Handler, aus demselben Grund.
+        #
+        # 500 -> 503: die Anwendung ist intakt, ein benoetigtes Betriebsmittel fehlt.
+        # Derselbe Code wie beim nicht verfuegbaren Secret-Speicher (gleiche Lage).
+        logger.error("secret_cipher_key_missing", key_file=str(_exc.key_file))
+        return JSONResponse(
+            status_code=503,
+            content={
+                # Karl hat entschieden (Befund 65): Wortlaut Fassung B, Code E-507 in der
+                # bestehenden Klasse E-5xx (Aktionen und Daten) -- keine neue Klasse.
+                # Hausform des Anhangs: "Klartext. (E-xxx)" (wie api/dns_trust.py,
+                # api/scanning.py). Der Text sagt dem Anwender nicht nur, DASS etwas fehlt,
+                # sondern was das fuer sein Passwort heisst und wie er es zurueckholt.
+                #
+                # EINSPRACHIG DEUTSCH, dem Bestand folgend: das Backend leitet fuer
+                # Fehlermeldungen KEINE Sprache aus der Anfrage ab -- es gibt weder eine
+                # Accept-Language-Auswertung noch einen Meldungs-Katalog, und JEDER
+                # ``detail``-Text im Haus ist deutsch (Praezedenz direkt oben:
+                # SecretStoreUnavailableError). Das ``lang`` in ``application/reporting``
+                # ist KEIN Gegenbeispiel: es ist ein expliziter Query-Parameter der
+                # Report-Endpunkte (api/report.py) fuer den PDF-INHALT; ein
+                # Exception-Handler bekommt ihn nicht. Die englische Fassung liegt dort,
+                # wo die Sprache umgeschaltet wird -- im Frontend unter
+                # fehlercodes."E-507" in i18n/en.json.
+                "detail": (
+                    "Gespeicherte Passwörter sind zurzeit nicht lesbar, weil die "
+                    f"zugehörige Schlüsseldatei fehlt. Erwarteter Ort: {_exc.key_file}. "
+                    "Die Datei gehört zu Ihren Anwendungsdaten und wird zusammen mit der "
+                    "Datenbank gesichert. Liegt sie in einer Sicherung vor, stellt das "
+                    "Zurückspielen dieser einen Datei das Passwort wieder her. "
+                    "Andernfalls muss das Passwort neu eingegeben werden. (E-507)"
+                )
+            },
         )
 
     # ── cve-Domaene verdrahten (ADR 0037, Regel 5: Quer-Domaenen-Naht nur hier) ──

@@ -15,7 +15,8 @@ Vertrag im Ueberblick
   nicht-leere Wert OHNE ``enc:``-Praefix ist ungueltig und wirft ``DecryptionError``
   (kein Klartext-Durchreichpfad, keine Altbestand-Ausnahme). Ein Wert MIT Praefix,
   der sich nicht entschluesseln laesst, wirft ebenfalls ``DecryptionError`` --
-  ``decrypt`` gibt NIEMALS ``""`` zurueck, um einen Fehler zu verbergen.
+  ``decrypt`` gibt NIEMALS ``""`` zurueck, um einen Fehler zu verbergen. Fehlt die
+  SCHLUESSELDATEI, wirft ``decrypt`` ``KeyMissingError`` und erzeugt NICHTS.
 * ``is_encrypted(value)`` -> ``True`` genau dann, wenn ``value`` das Praefix traegt.
 
 ``cryptography`` ist harte Pflicht (steht in ``pyproject.toml``). Es gibt KEIN
@@ -30,6 +31,19 @@ Benutzer-Datenverzeichnis abgelegt (siehe ``default_key_file`` fuer die kanonisc
 Pfadwahl). Bei JEDEM Zugriff werden auf POSIX die Rechte durchgesetzt: die Datei
 0600, ihr Verzeichnis 0700 (der Altcode setzte sie nur beim Erzeugen). Ein bereits
 vorhandener Schluessel wird wiederverwendet, niemals ueberschrieben.
+
+ERZEUGT WIRD NUR AUF DEM SCHREIBWEG, NIE AUF DEM LESEWEG. ``encrypt`` darf einen
+Schluessel anlegen -- wer verschluesselt, beginnt legitim. ``decrypt`` darf es NICHT:
+der uebergebene Cipher ist selbst der Beweis, dass ein Chiffrat und damit einmal ein
+Schluessel existierte. Fehlt die Datei auf dem Leseweg, ist das der VERLUSTFALL und
+kein Erstgebrauch; ``decrypt`` wirft dann ``KeyMissingError`` mit dem erwarteten Pfad.
+Erzeugte der Leseweg still einen neuen Schluessel, waere das vorhandene Chiffrat
+dauerhaft unlesbar und der Fehlschlag saehe wie ein blosser "falscher Schluessel" aus
+-- der Vorgang, der den Verlust melden koennte, vollzoege ihn. Diesen Schutz hatte der
+Zweig fuer die LEERE Datei bereits; der Zweig fuer die FEHLENDE Datei hat ihn jetzt
+auch. Die Krypto-Schicht braucht dafuer KEIN Wissen ueber Datenbank oder Einstellungen
+(keine neue Abhaengigkeit, Ringgrenze unberuehrt): die Herkunft des Cipher-Arguments
+traegt die Information schon.
 
 Auf Windows sind POSIX-Rechte (``chmod``/``mkdir(mode=...)``) weitgehend
 WIRKUNGSLOS -- NTFS-ACLs richten sich nicht danach. Dieses Modul tut daher NICHT so,
@@ -77,6 +91,25 @@ class KeyAccessError(CipherError):
     Schluesselinhalt und jeden anderen Datei-/OS-Fehler beim Schluesselzugriff ab. Ein
     solcher Fehler ist ein Fehler -- NIE ein stiller Rueckfall auf Klartext.
     """
+
+
+class KeyMissingError(KeyAccessError):
+    """Die Schluesseldatei FEHLT, obwohl ein Chiffrat zu lesen war -- der Verlustfall.
+
+    Abgegrenzt von der Basis ``KeyAccessError`` (Datei da, aber leer/unlesbar/kein
+    Recht): hier ist die Datei schlicht NICHT VORHANDEN. Diese Unterscheidung ist der
+    Punkt -- der Anwender soll erfahren, dass die Datei fehlt und WO sie erwartet wird,
+    nicht nur, dass mit ihr etwas nicht stimmt. Der erwartete Pfad haengt darum als
+    ``key_file`` an der Ausnahme, damit der Rand ihn ohne Text-Parsen nennen kann.
+
+    Subtyp von ``KeyAccessError`` mit Absicht: bestehende Aufrufer, die breit
+    ``KeyAccessError`` (oder ``CipherError``) fangen, verhalten sich unveraendert; wer
+    den Verlustfall gesondert behandeln will, faengt den Subtyp.
+    """
+
+    def __init__(self, key_file: Path) -> None:
+        super().__init__(f"Schluesseldatei fehlt: {key_file}")
+        self.key_file = key_file
 
 
 class DecryptionError(CipherError):
@@ -156,16 +189,22 @@ def _enforce_permissions(key_dir: Path, key_file: Path) -> None:
     os.chmod(key_file, 0o600)
 
 
-def _get_or_create_key(key_file: Path) -> bytes:
-    """Laedt den vorhandenen Schluessel oder erzeugt ihn beim ersten Gebrauch.
+def _access_key(key_file: Path, *, may_create: bool) -> bytes:
+    """Gemeinsamer Schluesselzugriff fuer BEIDE Wege -- Erzeugen nur, wenn erlaubt.
 
-    Wirft ``KeyAccessError`` bei JEDEM Datei-/OS-Problem (kein stiller Fallback). Ein
-    vorhandener Schluessel wird wiederverwendet und NIE ueberschrieben. Rechte werden
-    bei jedem Aufruf durchgesetzt (POSIX).
+    Der einzige Unterschied zwischen Lese- und Schreibweg ist ``may_create``; Rechte-
+    Durchsetzung, Leer-Pruefung und Fehlerbehandlung sind fuer beide dieselben (darum
+    EINE Funktion statt zweier fast gleicher). Wirft ``KeyAccessError`` bei JEDEM Datei-/
+    OS-Problem (kein stiller Fallback), bei fehlender Datei ohne Erzeugungsrecht den
+    Subtyp ``KeyMissingError``. Ein vorhandener Schluessel wird wiederverwendet und NIE
+    ueberschrieben.
     """
     key_dir = key_file.parent
     try:
-        key_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if may_create:
+            # Nur der Schreibweg legt das Verzeichnis an. Der Leseweg darf hier nichts
+            # erzeugen -- auch kein Verzeichnis (siehe unten).
+            key_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
 
         if key_file.exists():
             key = key_file.read_bytes().strip()
@@ -177,7 +216,16 @@ def _get_or_create_key(key_file: Path) -> bytes:
             _enforce_permissions(key_dir, key_file)
             return key
 
-        # Erstgebrauch: neuen Schluessel erzeugen und atomar-genug ablegen.
+        if not may_create:
+            # DER LESEPFAD ERZEUGT NICHTS. Wer hier ankommt, hat ein Chiffrat in der
+            # Hand -- der uebergebene Cipher ist selbst der Beweis, dass einmal ein
+            # Schluessel existierte. Fehlt die Datei jetzt, ist das der Verlustfall und
+            # KEIN Erstgebrauch. Einen neuen Schluessel anzulegen wuerde den Verlust
+            # dauerhaft machen und ihn zugleich als "falscher Schluessel" verkleiden --
+            # der Vorgang, der den Verlust melden soll, vollzoege ihn.
+            raise KeyMissingError(key_file)
+
+        # Erstgebrauch (nur Schreibweg): neuen Schluessel erzeugen und ablegen.
         key = Fernet.generate_key()
         key_file.write_bytes(key)
         _enforce_permissions(key_dir, key_file)
@@ -187,6 +235,16 @@ def _get_or_create_key(key_file: Path) -> bytes:
     except OSError as exc:
         # Verzeichnis nicht anlegbar/beschreibbar, Datei nicht schreib-/lesbar, ...
         raise KeyAccessError(f"Schluesselzugriff fehlgeschlagen: {key_file} ({exc})") from exc
+
+
+def _get_or_create_key(key_file: Path) -> bytes:
+    """SCHREIBweg: laedt den vorhandenen Schluessel oder erzeugt ihn beim Erstgebrauch."""
+    return _access_key(key_file, may_create=True)
+
+
+def _load_key(key_file: Path) -> bytes:
+    """LESEweg: laedt den vorhandenen Schluessel und erzeugt NIEMALS einen neuen."""
+    return _access_key(key_file, may_create=False)
 
 
 def encrypt(plaintext: str) -> str:
@@ -218,6 +276,12 @@ def decrypt(ciphertext: str) -> str:
     Altbestand-Ausnahme). Ein Wert MIT Praefix, der sich nicht entschluesseln laesst
     (kaputtes/fremdes Token, falscher Schluessel), wirft ebenfalls ``DecryptionError``
     -- NIEMALS wird ``""`` zurueckgegeben, um einen Fehler zu verbergen.
+
+    ERZEUGT KEINEN SCHLUESSEL: fehlt die Schluesseldatei, wirft ``decrypt``
+    ``KeyMissingError`` (s. ``_access_key``), statt still einen neuen anzulegen und den
+    Verlust damit zu vollziehen. Auf die Datei wird ueberhaupt erst zugegriffen, NACHDEM
+    der Wert als Cipher erkannt ist -- ein leerer Wert und ein Wert ohne ``enc:``-Praefix
+    kehren vorher um und lassen das Schluesselverzeichnis unberuehrt.
     """
     if not ciphertext:
         return ""
@@ -225,7 +289,7 @@ def decrypt(ciphertext: str) -> str:
     if not is_encrypted(ciphertext):
         raise DecryptionError("Wert traegt kein enc:-Praefix -- kein gueltiger Cipher")
 
-    key = _get_or_create_key(default_key_file())
+    key = _load_key(default_key_file())
     token = ciphertext[len(_PREFIX) :].encode("ascii")
     try:
         return Fernet(key).decrypt(token).decode("utf-8")
