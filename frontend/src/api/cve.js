@@ -15,7 +15,7 @@
 //        action ist "ack" | "unack"; ein anderer Wert -> HTTP 422 (kein stiller
 //        Durchlauf). "ack" blendet aus, "unack" reaktiviert (CveView nutzt beides).
 //   GET  /api/cve/status       -> { hosts_total, hosts_due, hosts_checked,
-//          findings_total, findings_active, sleeping }.
+//          findings_total, findings_active, sleeping, checking }.
 
 import { apiGet, apiPost } from "./client.js";
 
@@ -69,10 +69,15 @@ export async function acknowledgeCve(mac, cveId, port, action) {
   return apiPost("/api/cve/acknowledge", { mac, cve_id: cveId, port, action });
 }
 
-// Schlanker Worker-/Prüf-Status. Macht den Hintergrundprozess sichtbar: prüft
-// gerade / schläft (sleeping), wie viele Hosts gesamt/fällig/geprüft, wie viele
-// Befunde gesamt/aktiv. Fehlende Felder -> null bzw. sleeping -> false (ehrlich:
-// "kein Status bekannt" statt "schläft").
+// Schlanker Abgleich-Status. Macht den Hintergrundprozess sichtbar: wie viele Hosts
+// gesamt/fällig/geprüft, wie viele Befunde gesamt/aktiv. Fehlende Felder -> null bzw.
+// die Flags -> false (ehrlich: "kein Status bekannt" statt "schläft"/"prüft").
+//
+// Zwei getrennte Flags, sie beantworten verschiedene Fragen (siehe backend/api/cve.py):
+//   * sleeping = "ist etwas zu tun?" (Bestandssicht, abgeleitet aus hosts_due == 0).
+//   * checking = "wird gerade etwas getan?" (echter Laufzeitzustand des Abgleichs).
+// checking wird durchgereicht, weil die Ansicht beim letzten Gerät sonst schon
+// "alles abgeglichen" meldet, während der Abgleich noch läuft.
 export async function fetchCveStatus() {
   const s = await apiGet("/api/cve/status");
   return {
@@ -82,6 +87,7 @@ export async function fetchCveStatus() {
     findingsTotal: s?.findings_total ?? null,
     findingsActive: s?.findings_active ?? null,
     sleeping: Boolean(s?.sleeping),
+    checking: Boolean(s?.checking),
   };
 }
 

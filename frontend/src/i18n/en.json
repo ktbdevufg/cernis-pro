@@ -1440,8 +1440,8 @@
         "unknown": "Unknown"
       },
       "status": {
-        "sleeping": "Worker sleeping (no host due)",
-        "checking": "Worker checking … ({{due}} due)",
+        "sleeping": "All devices are up to date",
+        "checking": "Update in progress — {{offen}} of {{gesamt}} devices remaining",
         "hosts": "{{checked}} devices checked · {{total}} currently checkable",
         "active": "{{count}} active findings"
       }

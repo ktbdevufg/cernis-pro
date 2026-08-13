@@ -1,8 +1,9 @@
 // CVE-Abgleich-Ansicht (CERNIS PRO 2.0)
 // Zeigt die aktiven (nicht quittierten) CVE-Befunde des Geräte-Bestands hinter der
-// "CVE-Abgleich"-Kachel unter „Untersuchen" (Etappe 2, ADR 0037). Ein gedrosselter
-// Hintergrund-Worker prüft die gefundenen Geräte nach und nach; Befunde erscheinen
-// also verzögert. Diese Ansicht macht den Bestand + den Worker-Status sichtbar.
+// "CVE-Abgleich"-Kachel unter „Untersuchen" (Etappe 2, ADR 0037). Der Abgleich läuft
+// gedrosselt im Hintergrund und arbeitet die gefundenen Geräte nach und nach ab;
+// Befunde erscheinen also verzögert. Diese Ansicht macht den Bestand + den Stand des
+// Abgleichs sichtbar und lädt nach, solange der Abgleich läuft (S86-A5).
 //
 // Zwei umschaltbare Gruppierungen (Default „nach Schwere"):
 //   * „Nach Schwere": flache, gerätübergreifende Liste, severity-sortiert
@@ -70,6 +71,28 @@ function anzeigeName(befund, nameByMac) {
   }
   return ersterNichtLeer(eintrag.label, eintrag.hostname, eintrag.smbName);
 }
+
+// Läuft der Abgleich gerade bzw. steht noch etwas aus? Genau EINE Ableitung für den
+// Statustext UND das Nachladen — damit beide nie auseinanderlaufen können.
+//
+// Die Oder-Verknüpfung ist bewusst und deckt die zwei verbotenen Fälle ab:
+//   * checking wahr, hostsDue == 0: das letzte Gerät wird gerade behandelt. Ohne den
+//     checking-Teil stünde hier schon der Ruhetext, obwohl der Abgleich noch läuft.
+//   * checking falsch, hostsDue > 0: es ist noch etwas offen (Abgleich zwischen zwei
+//     Geräten oder gedrosselt). Ruhetext wäre gelogen.
+// Umgekehrt gilt der Ruhetext nur, wenn BEIDES verneint ist — deshalb kann der
+// Lauftext nie "noch 0 von N" zeigen: hostsDue == 0 erreicht den Lauftext ausschliesslich
+// zusammen mit checking, und dann ist das Nachladen ohnehin gleich mit einer neuen Zahl da.
+// Unbekannter Status (null) zählt als "läuft nicht": kein erfundener Laufzustand.
+function istAbgleichAktiv(status) {
+  if (status === null) {
+    return false;
+  }
+  return Boolean(status.checking) || (status.hostsDue ?? 0) > 0;
+}
+
+// Abstand des Nachladens, solange ein Abgleich läuft (zehn Sekunden, S86-A5/B3).
+const NACHLADE_ABSTAND_MS = 10_000;
 
 // Severity-Rang für die Sortierung. Höher = gefährlicher = weiter oben. Ein
 // unbekannter/leerer Wert landet als UNKNOWN ganz unten (kein Raten).
@@ -328,9 +351,17 @@ export default function CveView() {
 
   // Aktive Befunde + Status + ausgeblendete Befunde laden. In einem useCallback, damit
   // der Reload nach einer Aktion denselben Pfad nimmt. t/i18n NICHT in den Dependencies.
-  const laden = useCallback(async () => {
-    setLaedt(true);
-    setFehler(false);
+  //
+  // ``still`` = stilles Nachladen (B3): kein Umschalten auf den Ladezustand und —
+  // wichtiger — KEIN Zurücksetzen auf null im Fehlerfall. Ein fehlgeschlagener
+  // Nachladeversuch darf den Anwender nicht aus der gefüllten Ansicht werfen; die
+  // zuletzt gezeigten Daten bleiben einfach stehen und der nächste Tick versucht es
+  // erneut. Nur das laute Laden (Öffnen, ack/unack) räumt bei einem Fehler auf.
+  const laden = useCallback(async (still = false) => {
+    if (!still) {
+      setLaedt(true);
+      setFehler(false);
+    }
     try {
       const [bf, st, hidden] = await Promise.all([
         fetchCveFindings(),
@@ -340,19 +371,48 @@ export default function CveView() {
       setBefunde(bf);
       setStatus(st);
       setAusgeblendete(hidden);
+      setFehler(false);
     } catch {
-      setFehler(true);
-      setBefunde(null);
-      setStatus(null);
-      setAusgeblendete([]);
+      if (!still) {
+        setFehler(true);
+        setBefunde(null);
+        setStatus(null);
+        setAusgeblendete([]);
+      }
     } finally {
-      setLaedt(false);
+      if (!still) {
+        setLaedt(false);
+      }
     }
   }, []);
 
   useEffect(() => {
     laden();
   }, [laden]);
+
+  // Läuft der Abgleich (oder steht noch etwas aus)? Steuert Statustext, Puls und das
+  // Nachladen unten — eine einzige Wahrheit für alle drei.
+  const aktiv = istAbgleichAktiv(status);
+
+  // Nachladen, AUSSCHLIESSLICH solange ein Abgleich läuft (B3). Ist der Ruhezustand
+  // erreicht, läuft ``aktiv`` auf false, der Effekt räumt seinen Zeitgeber ab und legt
+  // keinen neuen an — das Nachladen hört von selbst auf.
+  //
+  // Kein zweiter Zeitgeber: der Effekt hängt NUR an ``aktiv`` (einem Boolean) und an
+  // ``laden`` (stabil, leere Deps). Ein Wechsel der Zahlen (hostsDue 7 -> 6) ändert
+  // ``aktiv`` nicht, der Effekt läuft also nicht neu und der bestehende Zeitgeber bleibt
+  // der einzige. Läuft er doch neu, räumt das Cleanup den alten vorher weg.
+  useEffect(() => {
+    if (!aktiv) {
+      return undefined;
+    }
+    const id = setInterval(() => {
+      // Stilles Nachladen: Fehler werden in ``laden`` geschluckt, der Zeitgeber läuft
+      // weiter. Ein Aussetzer beendet das Nachladen also nicht.
+      laden(true);
+    }, NACHLADE_ABSTAND_MS);
+    return () => clearInterval(id);
+  }, [aktiv, laden]);
 
   // Letzten Scan EINMALIG laden (wie die Beobachten-Ansicht: Historie → jüngste
   // scan_id → Detail) und daraus die MAC→Name-Tabelle bauen. Eigener Effekt mit
@@ -434,11 +494,16 @@ export default function CveView() {
     <div className="cve">
       {status !== null && (
         <div className="cve__status" role="status">
-          <span className={status.sleeping ? "cve__pulse cve__pulse--idle" : "cve__pulse"} />
+          {/* Puls und Text hängen an DERSELBEN Ableitung (istAbgleichAktiv), damit
+              nie ein ruhender Punkt neben einem Lauftext steht (oder umgekehrt). */}
+          <span className={aktiv ? "cve__pulse" : "cve__pulse cve__pulse--idle"} />
           <span className="cve__status-text">
-            {status.sleeping
-              ? t("untersuchen.cve.status.sleeping")
-              : t("untersuchen.cve.status.checking", { due: status.hostsDue ?? 0 })}
+            {aktiv
+              ? t("untersuchen.cve.status.checking", {
+                  offen: status.hostsDue ?? 0,
+                  gesamt: status.hostsTotal ?? 0,
+                })
+              : t("untersuchen.cve.status.sleeping")}
           </span>
           <span className="cve__status-sep">·</span>
           <span className="cve__status-text">

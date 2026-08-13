@@ -1440,8 +1440,8 @@
         "unknown": "Unbekannt"
       },
       "status": {
-        "sleeping": "Worker schläft (kein Host fällig)",
-        "checking": "Worker prüft … ({{due}} fällig)",
+        "sleeping": "Alle Geräte sind abgeglichen",
+        "checking": "Abgleich läuft — noch {{offen}} von {{gesamt}} Geräten",
         "hosts": "{{checked}} Geräte geprüft · {{total}} aktuell prüfbar",
         "active": "{{count}} aktive Befunde"
       }
