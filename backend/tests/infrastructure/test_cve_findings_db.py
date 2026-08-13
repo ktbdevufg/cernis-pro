@@ -3,7 +3,8 @@
 Belegt den Upsert-Round-trip (INSERT neu, UPDATE bekannter behaelt first_seen_ts),
 die Identitaet je (mac, cve_id, port), und die Lese-Views (alle / pro Host) -- sowie
 die MAC-Vereinheitlichung auf Grossschreibung (Finding 8): schreibweisen-unabhaengiges
-Schreiben/Lesen und die kollisionssichere einmalige Bestands-Migration.
+Schreiben/Lesen und die kollisionssichere einmalige Bestands-Migration. Dazu
+``replace_for_host`` (Befund 56): host-lokal, leere Sequenz erlaubt, transaktional.
 Muster der uebrigen infrastructure-Repo-Tests (``tmp_path``-DB).
 """
 
@@ -147,6 +148,75 @@ def _roh_einfuegen(
             ),
         )
     conn.close()
+
+
+# ── replace_for_host: Zustandsanzeige statt Journal (Befund 56) ──────────────
+
+
+def test_replace_for_host_ersetzt_nur_den_genannten_host(
+    repo: SqliteCveFindingRepository,
+) -> None:
+    """Ersetzen ist HOST-LOKAL: der zweite Host bleibt vollstaendig unveraendert."""
+    repo.upsert(_finding(mac=MAC, cve_id="CVE-ALT", port=22))
+    repo.upsert(_finding(mac=OTHER, cve_id="CVE-FREMD", port=443, first=50.0, last=50.0))
+
+    repo.replace_for_host(MAC, [_finding(mac=MAC, cve_id="CVE-NEU", port=80, first=200.0)])
+
+    assert [(r.cve_id, r.port) for r in repo.list_for_host(MAC)] == [("CVE-NEU", 80)]
+    fremd = repo.list_for_host(OTHER)
+    assert len(fremd) == 1
+    assert fremd[0].cve_id == "CVE-FREMD"
+    assert fremd[0].first_seen_ts == 50.0  # unangetastet
+
+
+def test_replace_for_host_leere_sequenz_raeumt_nur_diesen_host(
+    repo: SqliteCveFindingRepository,
+) -> None:
+    """Leere Sequenz = der Host hat danach KEINE Befunde -- und nur er."""
+    repo.upsert(_finding(mac=MAC, cve_id="CVE-1", port=22))
+    repo.upsert(_finding(mac=MAC, cve_id="CVE-2", port=80))
+    repo.upsert(_finding(mac=OTHER, cve_id="CVE-FREMD", port=443))
+
+    repo.replace_for_host(MAC, [])
+
+    assert repo.list_for_host(MAC) == []
+    assert len(repo.list_for_host(OTHER)) == 1
+
+
+def test_replace_for_host_ist_transaktional(repo: SqliteCveFindingRepository) -> None:
+    """Bricht ein INSERT ab, darf auch das DELETE NICHT wirksam werden.
+
+    Zwei Records mit demselben (cve_id, port) verletzen den PRIMARY KEY -- der zweite
+    INSERT wirft. Ohne EINE Transaktionsklammer um DELETE + INSERTs staende der Host
+    danach mit einem halben (oder leeren) Befundstand da; hier bleibt der ALTE Bestand.
+    """
+    repo.upsert(_finding(mac=MAC, cve_id="CVE-ALT", port=22, first=100.0, last=100.0))
+    doppelt = [
+        _finding(mac=MAC, cve_id="CVE-NEU", port=80, first=200.0),
+        _finding(mac=MAC, cve_id="CVE-NEU", port=80, first=300.0),  # PK-Kollision
+    ]
+
+    with pytest.raises(sqlite3.IntegrityError):
+        repo.replace_for_host(MAC, doppelt)
+
+    rows = repo.list_for_host(MAC)
+    assert len(rows) == 1
+    assert rows[0].cve_id == "CVE-ALT"  # alter Bestand steht unveraendert
+    assert rows[0].first_seen_ts == 100.0
+
+
+def test_replace_for_host_ist_schreibweisen_unabhaengig(
+    repo: SqliteCveFindingRepository,
+) -> None:
+    """Kleingeschriebene MAC im Aufruf trifft die (gross gespeicherten) Zeilen (Finding 8)."""
+    repo.upsert(_finding(mac=MAC_UPPER, cve_id="CVE-ALT", port=22))
+
+    repo.replace_for_host(MAC, [_finding(mac=MAC, cve_id="CVE-NEU", port=80)])
+
+    rows = repo.list_all()
+    assert len(rows) == 1  # keine Dublette in zweiter Schreibweise
+    assert rows[0].cve_id == "CVE-NEU"
+    assert rows[0].mac == MAC_UPPER
 
 
 def test_migration_hebt_altbestand_hoch(tmp_path: Path) -> None:

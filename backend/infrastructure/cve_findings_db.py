@@ -5,6 +5,11 @@ Persistiert je (mac, cve_id, port) EINEN Befund. Upsert-Semantik wie die ARP-Bas
 Schluessel -> nur ``last_seen_ts`` + die veraenderlichen NVD-Felder (severity/score/desc/
 url/published) aktualisieren, ``first_seen_ts`` BLEIBT (Basis fuers is_new-Flag).
 
+``replace_for_host`` ist der Schreibpfad des Drip-Worker (Befund 56): er setzt den
+Befundstand EINES Hosts transaktional neu, statt nur zu ergaenzen -- die Liste ist eine
+Zustandsanzeige, kein Journal. ``upsert`` bleibt daneben bestehen (punktuelles
+Auffrischen eines einzelnen Befunds).
+
 Stil EXAKT wie ``analysis_acknowledgements_db.py``/``analysis_host_history_db.py``:
 injizierter ``db_path``, ``_ensure_schema`` im ``__init__``, ``@contextmanager _connect``
 mit Transaktion + garantiertem ``close``, ``CREATE TABLE IF NOT EXISTS``. KEIN
@@ -16,7 +21,7 @@ als ``CveFindingRecord`` zurueck.
 """
 
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -86,6 +91,60 @@ class SqliteCveFindingRepository:
                     _logger.info("cve_findings_mac_migration_done", rows=migrated)
 
     # ── Schreib-Pfad ──────────────────────────────────────────────────────────
+
+    def replace_for_host(self, mac: str, records: Sequence[CveFindingRecord]) -> None:
+        """Ersetzt den gesamten Befundstand EINES Hosts in EINER Transaktion (Befund 56).
+
+        Die CVE-Liste ist eine ZUSTANDSANZEIGE, kein Journal: nach diesem Aufruf traegt
+        die ``mac`` GENAU die uebergebenen Befunde. Was in ``records`` fehlt, ist weg
+        (weggefallener Port, zurueckgezogene CVE) -- anders als ``upsert``, das nur
+        ergaenzt und darum Leichen liegen liess.
+
+        ``DELETE`` + alle ``INSERT`` liegen in DERSELBEN ``_connect``-Klammer, also in
+        EINER SQLite-Transaktion: wirft ein INSERT (z. B. ein Record mit doppeltem
+        (cve_id, port)), rollt ``with conn`` auch das DELETE zurueck -- der alte Bestand
+        des Hosts steht dann unveraendert. Es gibt keinen Zwischenzustand, in dem ein
+        Host seine Befunde verloren, die neuen aber nicht bekommen hat.
+
+        Das ``DELETE`` traegt ein ``WHERE mac = ?`` -- ANDERE Hosts sind nie betroffen
+        (im Unterschied zu ``clear_all``). Leere ``records`` sind gewollt erlaubt: dann
+        bleibt nur das DELETE, der Host hat danach keine Befunde mehr.
+
+        Die MAC wird ueber ``normalize_mac_case`` kanonisiert -- fuer das DELETE-Kriterium
+        UND fuer jede eingefuegte Zeile, dieselbe Stelle wie in ``upsert``/``list_for_host``
+        (Finding 8). Sonst loeschte eine kleingeschriebene MAC nichts und legte Dubletten
+        daneben. Die MAC der Records wird bewusst IGNORIERT und durch die des Aufrufs
+        ersetzt: der Stand gehoert per Definition dem genannten Host.
+        """
+        normalized = normalize_mac_case(mac)
+        with self._connect() as conn:
+            conn.execute("DELETE FROM cve_findings WHERE mac = ?", (normalized,))
+            conn.executemany(
+                """
+                INSERT INTO cve_findings (
+                    mac, cve_id, port, severity, cvss_score, description, url,
+                    published, ip, service, first_seen_ts, last_seen_ts
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        normalized,
+                        record.cve_id,
+                        record.port,
+                        record.severity,
+                        record.cvss_score,
+                        record.description,
+                        record.url,
+                        record.published,
+                        record.ip,
+                        record.service,
+                        record.first_seen_ts,
+                        record.last_seen_ts,
+                    )
+                    for record in records
+                ],
+            )
 
     def upsert(self, record: CveFindingRecord) -> None:
         """Upsert je (mac, cve_id, port): INSERT neu, sonst last_seen + NVD-Felder frisch.

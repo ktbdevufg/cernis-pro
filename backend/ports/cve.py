@@ -6,7 +6,7 @@ Composition Root mit quellen-agnostischen Callables verdrahtet, Muster BuildTopo
 ADR 0035/0036 -- die cve-Domaene/-Ports nennen WEDER ``security`` NOCH ``scanning``/
 ``devices``):
 
-* ``CveFindingRepository``      -- Befund-Persistenz (Upsert + Lese-Views).
+* ``CveFindingRepository``      -- Befund-Persistenz (Upsert/Ersetzen + Lese-Views).
 * ``CveCheckStateRepository``   -- per-Host-Pruefstand (last_checked + Port-Set).
 * ``CveAcknowledgementRepository`` -- append-only ack/unack-Audit (ADR-0031-Muster).
 * ``HostInventoryProvider``     -- liefert den bekannten Geraete-Bestand MIT offenen Ports.
@@ -123,6 +123,24 @@ class CveFindingRepository(Protocol):
     ``sync`` (lokaler SQLite-Zugriff). ``CREATE TABLE IF NOT EXISTS`` im Adapter
     (idempotentes Schema, injizierter db_path -- Muster der uebrigen Repos).
     """
+
+    def replace_for_host(self, mac: str, records: Sequence[CveFindingRecord]) -> None:
+        """Ersetzt den GESAMTEN Befundstand EINES Hosts -- transaktional, alles oder nichts.
+
+        Die CVE-Liste ist eine ZUSTANDSANZEIGE, kein Journal (Befund 56): nach diesem
+        Aufruf hat der Host GENAU die uebergebenen Befunde, nicht mehr. Alle bisherigen
+        Zeilen dieser ``mac`` fallen weg, auch solche, die in ``records`` nicht mehr
+        vorkommen (weggefallener Port, von NVD zurueckgezogene CVE).
+
+        Leere ``records`` bedeutet: der Host hat danach KEINE Befunde mehr -- ein
+        legitimer, ausdruecklich gewollter Zustand (gesehenes Geraet ohne offene Ports).
+
+        Andere Hosts bleiben UNBERUEHRT. Loeschen und Einfuegen liegen in EINER
+        Transaktion: bricht ein INSERT ab, wird auch das DELETE nicht wirksam (nie ein
+        Host mit halbem Befundstand). ``first_seen_ts`` kommt aus den Records -- der
+        Aufrufer (Worker) bewahrt ihn fuer schon bekannte Tripel selbst.
+        """
+        ...
 
     def upsert(self, record: CveFindingRecord) -> None:
         """Legt einen Befund an ODER frischt ihn auf (Identitaet mac+cve_id+port).

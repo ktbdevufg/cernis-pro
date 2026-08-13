@@ -4,12 +4,20 @@ Kennt ``domain/cve`` und ``ports/cve``, NIE ``infrastructure``/``modules`` (impo
 Die Ports kommen per Constructor-Injection herein; die Zeit ist stdlib (``time.time()``,
 Muster ``RunMonitor`` -- ``import time`` ist erlaubt, es ist keine Domaenenlogik).
 
-DRIP-WORKER (ADR 0037): pro ``tick`` wird HOECHSTENS EIN faelliger Host geprueft
-(gedrosselt). Faellig = einer der drei Faelle (``domain.cve.policy.due_reason``: neu /
-Ports geaendert / ueberfaellig). Kein faelliger Host (oder leerer Bestand) -> ``tick``
-kehrt OHNE NVD-Aufruf zurueck (der Worker "schlaeft"). So rattert ein Neustart NICHT
-alles neu durch -- die Faelligkeit haengt am persistierten ``last_checked_ts`` je Host,
-nicht am Prozess-Start (Resume/Idempotenz).
+DRIP-WORKER (ADR 0037): pro ``tick`` wird HOECHSTENS EIN faelliger Host MIT NVD-Aufruf
+geprueft (gedrosselt). Faellig = einer der drei Faelle (``domain.cve.policy.due_reason``:
+neu / Ports geaendert / ueberfaellig). Kein faelliger Host (oder leerer Bestand) ->
+``tick`` kehrt OHNE NVD-Aufruf zurueck (der Worker "schlaeft"). So rattert ein Neustart
+NICHT alles neu durch -- die Faelligkeit haengt am persistierten ``last_checked_ts`` je
+Host, nicht am Prozess-Start (Resume/Idempotenz).
+
+ZUSTANDSANZEIGE, KEIN JOURNAL (Befund 56): der Worker ERSETZT den Befundstand eines
+Geraets (``replace_for_host``), statt ihn nur zu ergaenzen. Betroffen sind ausschliesslich
+Hosts, die der Bestand fuehrt; ein gesehener Host OHNE offene Ports verliert seine
+Befunde vollstaendig (ohne jeden NVD-Aufruf, darum ungedrosselt), ein Host, den der
+Bestand NICHT fuehrt, bleibt unangetastet. Faellt ein QUITTIERTER Befund weg, wird
+vorher ein ``unack`` angehaengt, damit die alte Quittierung beim Wiederauftauchen nicht
+still wieder greift.
 
 LOOP-FORM (testbar, Muster RunMonitor): ``tick()`` ist EINE Iteration (voll mit Fakes
 deterministisch testbar). ``run()`` ist nur der Rahmen ``while self._running: tick();
@@ -18,12 +26,14 @@ sleep(interval)``. ``stop()`` setzt das Flag.
 FEHLERTOLERANZ (S3/streng): ein fehlschlagender Host-Lookup (NVD down) wird GELOGGT und
 killt den Loop NICHT -- der Pruefstand wird in diesem Fall NICHT fortgeschrieben (der
 Host bleibt faellig, naechster Versuch spaeter), und es wird KEIN erfundener Befund
-geschrieben (NVD-Ausfall ist ehrlich: Befunde bleiben unveraendert).
+geschrieben (NVD-Ausfall ist ehrlich: Befunde bleiben unveraendert). Das ist die harte
+Randbedingung des Ersetzen-Pfads: der Lookup steht VOR jedem Schreibzugriff, ein
+NVD-Ausfall loescht NIE Befunde.
 """
 
 import asyncio
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 import structlog
@@ -37,6 +47,7 @@ from ports.cve import (
     CveLookupProvider,
     HostInventoryProvider,
     InventoryHost,
+    LookupCve,
 )
 
 __all__ = [
@@ -60,7 +71,11 @@ DEFAULT_SCAN_INTERVAL_SECONDS: int = 20
 
 
 class RunCveMonitor:
-    """Gedrosselter CVE-Drip-Worker: prueft pro ``tick`` hoechstens EINEN faelligen Host.
+    """Gedrosselter CVE-Drip-Worker: pro ``tick`` hoechstens EIN Host MIT NVD-Aufruf.
+
+    Er ERSETZT den Befundstand des behandelten Hosts (Zustandsanzeige, kein Journal --
+    Befund 56). Faellige Hosts OHNE offene Ports werden rein lokal abgeglichen (Befunde
+    auf leer) und sind darum NICHT gedrosselt: sie erzeugen keinen Netzverkehr.
 
     ``refresh_interval_provider`` liefert das Auffrisch-Intervall (Sekunden) bei JEDER
     ``tick`` frisch -- so wirkt eine geaenderte ``cve_refresh_interval_hours``-Setting
@@ -73,6 +88,7 @@ class RunCveMonitor:
         lookup: CveLookupProvider,
         findings: CveFindingRepository,
         checkstate: CveCheckStateRepository,
+        acknowledgements: CveAcknowledgementRepository,
         refresh_interval_provider: Callable[[], float],
         interval: int = DEFAULT_SCAN_INTERVAL_SECONDS,
         now_provider: Callable[[], float] = time.time,
@@ -81,49 +97,84 @@ class RunCveMonitor:
         self._lookup = lookup
         self._findings = findings
         self._checkstate = checkstate
+        self._acknowledgements = acknowledgements
         self._refresh_interval_provider = refresh_interval_provider
         self._interval = interval
         self._now = now_provider
         self._running = False
 
-    def _first_due_host(
+    def _due_hosts(
         self, now: float, refresh_interval: float
-    ) -> tuple[InventoryHost, DueReason] | None:
-        """Findet den ERSTEN faelligen Host im Bestand (oder ``None``, wenn keiner faellig).
+    ) -> tuple[list[InventoryHost], tuple[InventoryHost, DueReason] | None]:
+        """Teilt die faelligen Hosts in "portlos" und "hoechstens EINER mit Ports" (ADR 0037).
+
+        Die Drosselung gilt fuer NETZVERKEHR: portlose Hosts brauchen keinen NVD-Aufruf,
+        ihr Abgleich ist rein lokal (Befunde auf leer, Pruefstand fortschreiben) -- darum
+        werden ALLE faelligen portlosen Hosts im selben Tick abgearbeitet, waehrend nur
+        EIN faelliger Host MIT Ports geprueft wird.
 
         Reihenfolge = Bestands-Reihenfolge des Providers (deterministisch). Der erste
-        Host, dessen ``due_reason`` != NOT_DUE ist, wird geprueft -- ein faelliger Host
-        pro Tick (Drosselung).
+        faellige Host mit Ports gewinnt; die uebrigen kommen in den naechsten Ticks dran.
         """
+        portless: list[InventoryHost] = []
+        with_ports: tuple[InventoryHost, DueReason] | None = None
         for host in self._inventory.list_hosts():
             current_ports = frozenset(p.port for p in host.ports)
-            if not current_ports:
-                # Ein Host OHNE offene Ports hat nichts zu pruefen -- ueberspringen
-                # (kein NVD-Aufruf, kein Pruefstand noetig).
-                continue
             state = self._checkstate.get(host.mac)
             reason = due_reason(state, current_ports, now, refresh_interval)
-            if reason is not DueReason.NOT_DUE:
-                return host, reason
-        return None
+            if reason is DueReason.NOT_DUE:
+                continue
+            if not current_ports:
+                # Gesehener Host OHNE offene Ports (Befund 56): NICHT mehr stillschweigend
+                # uebersprungen -- er hat fachlich KEINE Befunde mehr und wird ohne jeden
+                # NVD-Aufruf abgeglichen. Weil kein Netzverkehr entsteht, greift die
+                # Drosselung hier nicht (kein `break`, alle werden gesammelt).
+                portless.append(host)
+            elif with_ports is None:
+                with_ports = (host, reason)
+        return portless, with_ports
 
     async def tick(self) -> None:
-        """Eine Iteration: hoechstens EINEN faelligen Host pruefen (gedrosselt, best-effort)."""
+        """Eine Iteration: alle portlosen faelligen Hosts + hoechstens EINEN mit NVD-Aufruf."""
         now = self._now()
         refresh_interval = self._refresh_interval_provider()
-        due = self._first_due_host(now, refresh_interval)
-        if due is None:
-            # Kein faelliger Host / leerer Bestand -> schlafen, KEIN NVD-Aufruf.
+        portless, with_ports = self._due_hosts(now, refresh_interval)
+        for host in portless:
+            self._clear_host(host, now)
+        if with_ports is None:
+            # Kein faelliger Host mit Ports / leerer Bestand -> KEIN NVD-Aufruf.
             return
-        host, reason = due
+        host, reason = with_ports
         await self._check_host(host, reason, now)
 
+    def _clear_host(self, host: InventoryHost, now: float) -> None:
+        """Gleicht einen gesehenen Host OHNE offene Ports ab: leere Befundmenge, kein Lookup.
+
+        Befund 56: ohne offene Ports gibt es fachlich nichts zu finden, also traegt der
+        Host danach KEINEN Befund mehr. Rein lokal -- kein NVD-Aufruf, kein Netzverkehr.
+
+        Der Pruefstand wird mit dem LEEREN Port-Set fortgeschrieben. Damit ist derselbe
+        Host im naechsten Tick NOT_DUE (``state`` vorhanden, ``checked_ports`` gleich leer,
+        innerhalb des Auffrisch-Intervalls) -- der Fall wird nicht zur Dauerbeschaeftigung.
+        """
+        removed = self._findings.list_for_host(host.mac)
+        # Reihenfolge wie in ``_check_host``: unack VOR dem Ersetzen (siehe dort).
+        self._unack_removed(removed)
+        self._findings.replace_for_host(host.mac, [])
+        self._checkstate.record(host.mac, frozenset(), now)
+        _logger.info("cve_host_cleared_no_ports", mac=host.mac, removed=len(removed))
+
     async def _check_host(self, host: InventoryHost, reason: DueReason, now: float) -> None:
-        """Prueft EINEN Host: NVD-Lookup -> Upsert je Befund -> Pruefstand fortschreiben.
+        """Prueft EINEN Host: NVD-Lookup -> Befundstand ERSETZEN -> Pruefstand fortschreiben.
 
         Streng fehlertolerant: schlaegt der Lookup fehl, wird das GELOGGT, der Pruefstand
         NICHT fortgeschrieben (Host bleibt faellig) und KEIN Befund veraendert (ehrlicher
         NVD-Ausfall, S3). Ein einzelner Host-Fehler killt den Loop NIE.
+
+        Der Lookup steht BEWUSST vor jedem Schreibzugriff (Befund 56): erst wenn eine
+        vollstaendige, frische Befundmenge vorliegt, wird der alte Stand ersetzt. Ein
+        NVD-Ausfall darf niemals Befunde loeschen -- ein veralteter Bestand ist harmlos,
+        ein leergeraeumter verschweigt echte Schwachstellen.
         """
         try:
             found = await self._lookup.lookup(host.ports)
@@ -133,25 +184,52 @@ class RunCveMonitor:
             _logger.warning("cve_host_lookup_failed", mac=host.mac, error=str(exc))
             return
 
+        # Neue Befundmenge des Hosts bilden. ``first_seen_ts`` wird je Tripel bewahrt
+        # (``_find_existing`` liest den alten Stand) -- ein bleibender Befund darf durch
+        # das Ersetzen NICHT wieder als "neu" auffloppen.
+        #
+        # ENTDOPPLUNG je (cve_id, port), ERSTER Treffer gewinnt (B1): ``cve_findings``
+        # traegt den PRIMARY KEY (mac, cve_id, port) und verlangt damit Eindeutigkeit.
+        # ``replace_for_host`` fuegt mit BLANKEM INSERT ein (kein ON CONFLICT wie
+        # ``upsert``) -- meldet der Lookup dasselbe Paar zweimal, wirft SQLite, die
+        # Transaktion rollt zurueck und die Ausnahme ENTKAEME dem Schreibpfad: das
+        # ``try`` in ``_check_host`` umschliesst nur den Lookup, nicht das Schreiben.
+        # Der Adapter darf streng bleiben, weil genau diese Stelle die Zusicherung gibt.
+        # Die uebrige Reihenfolge des Lookups bleibt erhalten (dict haelt sie).
+        unique: dict[tuple[str, int], LookupCve] = {}
         for cve in found:
-            existing = self._find_existing(host.mac, cve.cve_id, cve.port)
-            first_seen = existing.first_seen_ts if existing is not None else now
-            self._findings.upsert(
-                CveFindingRecord(
-                    mac=host.mac,
-                    cve_id=cve.cve_id,
-                    port=cve.port,
-                    severity=cve.severity,
-                    cvss_score=cve.cvss_score,
-                    description=cve.description,
-                    url=cve.url,
-                    published=cve.published,
-                    ip=host.ip,
-                    service=cve.service,
-                    first_seen_ts=first_seen,
-                    last_seen_ts=now,
-                )
+            unique.setdefault((cve.cve_id, cve.port), cve)
+        records = [
+            CveFindingRecord(
+                mac=host.mac,
+                cve_id=cve.cve_id,
+                port=cve.port,
+                severity=cve.severity,
+                cvss_score=cve.cvss_score,
+                description=cve.description,
+                url=cve.url,
+                published=cve.published,
+                ip=host.ip,
+                service=cve.service,
+                first_seen_ts=self._first_seen_for(host.mac, cve.cve_id, cve.port, now),
+                last_seen_ts=now,
             )
+            for cve in unique.values()
+        ]
+
+        # Quittierungen der WEGFALLENDEN Tripel aufheben (Befund 56/B4), BEVOR ersetzt
+        # wird -- die Reihenfolge ist tragend: bricht der Vorgang zwischen unack und
+        # Ersetzen ab, ist ein noch vorhandener Befund SICHTBAR statt versteckt. Das ist
+        # der harmlosere der zwei moeglichen Fehler.
+        keeping = {(r.cve_id, r.port) for r in records}
+        self._unack_removed(
+            [r for r in self._findings.list_for_host(host.mac) if (r.cve_id, r.port) not in keeping]
+        )
+
+        # Der Befundstand des Hosts wird ERSETZT, nicht ergaenzt: was NVD diesmal nicht
+        # mehr meldet (weggefallener Port, zurueckgezogene CVE), verschwindet. Die Liste
+        # ist eine Zustandsanzeige, kein Journal.
+        self._findings.replace_for_host(host.mac, records)
 
         # Pruefstand erst NACH erfolgreichem Lookup fortschreiben -- so bleibt ein Host
         # bei NVD-Ausfall faellig (oben: early return) und wird beim naechsten Mal erneut
@@ -166,8 +244,32 @@ class RunCveMonitor:
             findings=len(found),
         )
 
+    def _unack_removed(self, removed: Sequence[CveFindingRecord]) -> None:
+        """Haengt fuer jeden wegfallenden, effektiv QUITTIERTEN Befund ein ``unack`` an.
+
+        Das Quittierungs-Log ist append-only (ADR 0031) und wird NIE geloescht -- ohne
+        diesen Gegen-Eintrag griffe eine alte Quittierung still wieder, wenn dasselbe
+        Tripel spaeter erneut auftaucht: der Befund waere sofort wieder versteckt, ohne
+        dass ihn je jemand fuer diesen neuen Vorfall quittiert hat.
+
+        Nicht-quittierte Tripel bekommen NICHTS -- ein ``unack`` auf etwas Unquittiertes
+        waere reines Log-Rauschen.
+        """
+        if not removed:
+            return
+        acked = self._acknowledgements.acknowledged_keys()
+        for record in removed:
+            key = (record.mac, record.cve_id, record.port)
+            if key in acked:
+                self._acknowledgements.record(record.mac, record.cve_id, record.port, "unack")
+
+    def _first_seen_for(self, mac: str, cve_id: str, port: int, now: float) -> float:
+        """``first_seen_ts`` eines Tripels: der alte Wert, wenn es ihn schon gab, sonst ``now``."""
+        existing = self._find_existing(mac, cve_id, port)
+        return existing.first_seen_ts if existing is not None else now
+
     def _find_existing(self, mac: str, cve_id: str, port: int) -> CveFindingRecord | None:
-        """Sucht einen bestehenden Befund (fuer die first_seen-Bewahrung beim Upsert)."""
+        """Sucht einen bestehenden Befund (fuer die first_seen-Bewahrung beim Ersetzen)."""
         for record in self._findings.list_for_host(mac):
             if record.cve_id == cve_id and record.port == port:
                 return record

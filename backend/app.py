@@ -3476,6 +3476,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             lookup=cve_lookup_provider,
             findings=cve_finding_repository(),
             checkstate=cve_checkstate_repository(),
+            # Das ack-Log gehoert in den Worker (Befund 56): faellt ein QUITTIERTER Befund
+            # beim Ersetzen weg, haengt er ein ``unack`` an -- sonst griffe die alte
+            # Quittierung beim Wiederauftauchen still wieder. Ueber den PORT injiziert,
+            # der application-Ring kennt infrastructure nicht.
+            acknowledgements=cve_acknowledgement_repository(),
             refresh_interval_provider=_cve_refresh_interval_seconds,
             interval=interval,
         )
