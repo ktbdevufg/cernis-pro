@@ -1432,14 +1432,27 @@ function SchwellwertFeld({ eingabe, setThresholdFeld }) {
               />
               {t("beobachten.logging.schwellwertDesktop")}
             </label>
-            <label className="logging__radio">
+            {/* E-Mail bleibt SICHTBAR, aber gesperrt (Befund 66). Es gibt keine
+                Oberflaeche, ueber die sich SMTP einrichten liesse; ein gesetzter Haken
+                liefe im Backend in den cfg-is-None-Zweig: ein Protokolleintrag, sonst
+                nichts. Entfernen waere schlechter als Sperren -- die Spalte
+                threshold_notify_email bleibt bestehen, und ein entferntes Bedienelement
+                wuerde bereits gespeicherte true-Werte unsichtbar weiterfuehren. Beim Bau
+                der SMTP-Ansicht in v3 ist das ein Rueckbau von wenigen Zeilen.
+                disabled sperrt fuer Maus UND Hilfsmittel (kein rein optisches Ausgrauen);
+                der Grund steht als Erklaerzeile daneben, Vorlage LoggingSeriesView. */}
+            <label className="logging__radio logging__radio--gesperrt">
               <input
                 type="checkbox"
                 checked={thr.notifyEmail}
+                disabled
                 onChange={(e) => setThresholdFeld("notifyEmail", e.target.checked)}
               />
               {t("beobachten.logging.schwellwertEmail")}
             </label>
+            <span className="logging-feld__hinweis" role="note">
+              {t("beobachten.logging.schwellwertEmailNichtVerfuegbar")}
+            </span>
           </div>
         </div>
       )}

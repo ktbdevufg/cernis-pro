@@ -956,6 +956,7 @@
       "schwellwertEmpfindlichkeitHinweis": "Alert only after N consecutive measurements.",
       "schwellwertDesktop": "Desktop notification",
       "schwellwertEmail": "Email",
+      "schwellwertEmailNichtVerfuegbar": "Email notification is not yet available in this release.",
       "schwellwertKarte": {
         "latency": "Alert: latency > {{limit}} ms ({{n}}×)",
         "unreachable": "Alert: outage ({{n}}×)"

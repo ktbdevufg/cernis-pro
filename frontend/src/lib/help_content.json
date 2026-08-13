@@ -295,12 +295,12 @@
     "de": {
       "titel": "Schwellwert-Alarme",
       "kurz": "Eine Aufzeichnung kann Sie alarmieren, wenn ein Ziel ueber mehrere Messungen hinweg zu langsam wird oder ausfaellt. Damit Sie kein Dauerfeuer bekommen, muss die Bedingung mehrfach hintereinander zutreffen.",
-      "lang": "Ein Schwellwert-Alarm macht aus einer reinen Aufzeichnung eine aktive Wache. Sie legen eine Bedingung fest - zum Beispiel 'Antwortzeit ueber 100 Millisekunden' oder 'Ziel nicht erreichbar' - und CERNIS PRO meldet sich, wenn diese Bedingung eintritt.\n\nDamit ein einzelner Ausreisser nicht sofort Alarm ausloest, muss die Bedingung mehrere Messungen hintereinander zutreffen (standardmaessig dreimal). Erst dann gilt der Alarm als echt. Beruhigt sich das Ziel wieder, wird der Alarm zurueckgesetzt. Dieses Verhalten verhindert nerviges Dauerfeuer.\n\nDie Benachrichtigung kann als Desktop-Hinweis und - falls eingerichtet - per E-Mail erfolgen. Schwellwert-Alarme sind Teil des Erweitert-Modus."
+      "lang": "Ein Schwellwert-Alarm macht aus einer reinen Aufzeichnung eine aktive Wache. Sie legen eine Bedingung fest - zum Beispiel 'Antwortzeit ueber 100 Millisekunden' oder 'Ziel nicht erreichbar' - und CERNIS PRO meldet sich, wenn diese Bedingung eintritt.\n\nDamit ein einzelner Ausreisser nicht sofort Alarm ausloest, muss die Bedingung mehrere Messungen hintereinander zutreffen (standardmaessig dreimal). Erst dann gilt der Alarm als echt. Beruhigt sich das Ziel wieder, wird der Alarm zurueckgesetzt. Dieses Verhalten verhindert nerviges Dauerfeuer.\n\nDie Benachrichtigung erfolgt als Desktop-Hinweis; E-Mail ist in dieser Programmversion noch nicht verfuegbar. Schwellwert-Alarme sind Teil des Erweitert-Modus."
     },
     "en": {
       "titel": "Threshold alarms",
       "kurz": "A recording can alert you when a target becomes too slow or goes down across several measurements. To avoid constant noise, the condition must be met several times in a row.",
-      "lang": "A threshold alarm turns a pure recording into an active watch. You define a condition - for example 'response time above 100 milliseconds' or 'target unreachable' - and CERNIS PRO notifies you when that condition occurs.\n\nSo that a single outlier does not immediately trigger an alarm, the condition must hold for several consecutive measurements (three by default). Only then is the alarm considered real. If the target calms down again, the alarm is reset. This behavior prevents annoying constant noise.\n\nNotification can be a desktop hint and - if configured - by email. Threshold alarms are part of advanced mode."
+      "lang": "A threshold alarm turns a pure recording into an active watch. You define a condition - for example 'response time above 100 milliseconds' or 'target unreachable' - and CERNIS PRO notifies you when that condition occurs.\n\nSo that a single outlier does not immediately trigger an alarm, the condition must hold for several consecutive measurements (three by default). Only then is the alarm considered real. If the target calms down again, the alarm is reset. This behavior prevents annoying constant noise.\n\nNotification is a desktop hint; email is not yet available in this release. Threshold alarms are part of advanced mode."
     }
   },
   "help.monitor.recurring": {
@@ -543,14 +543,14 @@
     "status": "final",
     "kategorie": "Einstellungen",
     "de": {
-      "titel": "Benachrichtigungen (Desktop und E-Mail)",
-      "kurz": "CERNIS PRO kann Sie bei bestimmten Ereignissen benachrichtigen - als Desktop-Hinweis und, wenn eingerichtet, per E-Mail. Die E-Mail-Zugangsdaten werden sicher abgelegt.",
-      "lang": "Damit Sie nicht staendig auf den Bildschirm schauen muessen, kann CERNIS PRO Sie bei bestimmten Ereignissen aktiv benachrichtigen - zum Beispiel wenn ein ueberwachtes Ziel ausfaellt oder ein Schwellwert verletzt wird.\n\nEs gibt zwei Wege: einen dezenten Hinweis direkt auf dem Desktop und, falls Sie es einrichten, eine E-Mail. Fuer den E-Mail-Versand hinterlegen Sie einmalig die Zugangsdaten Ihres Postausgangs-Servers. Diese werden sicher im Schluesselspeicher Ihres Betriebssystems abgelegt, nicht im Klartext.\n\nIst kein E-Mail-Versand eingerichtet, entfaellt dieser Weg einfach - es entsteht kein Fehler und keine Sackgasse."
+      "titel": "Benachrichtigungen (Desktop)",
+      "kurz": "CERNIS PRO kann Sie bei bestimmten Ereignissen benachrichtigen - in dieser Programmversion als Desktop-Hinweis. E-Mail-Benachrichtigung folgt spaeter.",
+      "lang": "Damit Sie nicht staendig auf den Bildschirm schauen muessen, kann CERNIS PRO Sie bei bestimmten Ereignissen aktiv benachrichtigen - zum Beispiel wenn ein ueberwachtes Ziel ausfaellt oder ein Schwellwert verletzt wird.\n\nIn dieser Programmversion geschieht das als dezenter Hinweis direkt auf dem Desktop. Eine Benachrichtigung per E-Mail ist vorbereitet, aber noch nicht einrichtbar; das Bedienelement dafuer ist sichtbar und gesperrt. Der E-Mail-Versand folgt in einer spaeteren Programmversion."
     },
     "en": {
-      "titel": "Notifications (desktop and email)",
-      "kurz": "CERNIS PRO can notify you of certain events - as a desktop hint and, if configured, by email. The email credentials are stored securely.",
-      "lang": "So that you do not have to keep watching the screen, CERNIS PRO can actively notify you of certain events - for example when a monitored target goes down or a threshold is violated.\n\nThere are two ways: a discreet hint directly on the desktop and, if you set it up, an email. For sending email you store your outgoing mail server's credentials once. These are kept securely in your operating system's key store, not in plain text.\n\nIf no email sending is configured, that path simply falls away - no error and no dead end arises."
+      "titel": "Notifications (desktop)",
+      "kurz": "CERNIS PRO can notify you of certain events - in this release as a desktop hint. Email notification will follow.",
+      "lang": "So that you do not have to keep watching the screen, CERNIS PRO can actively notify you of certain events - for example when a monitored target goes down or a threshold is violated.\n\nIn this release that happens as a discreet hint directly on the desktop. Notification by email is prepared but cannot be configured yet; its control is visible and disabled. Email delivery will follow in a later release."
     }
   },
   "help.interfaces.uebersicht": {

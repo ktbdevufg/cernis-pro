@@ -956,6 +956,7 @@
       "schwellwertEmpfindlichkeitHinweis": "Alarm erst nach N Messungen in Folge.",
       "schwellwertDesktop": "Desktop-Benachrichtigung",
       "schwellwertEmail": "E-Mail",
+      "schwellwertEmailNichtVerfuegbar": "E-Mail-Benachrichtigung ist in dieser Programmversion noch nicht verfügbar.",
       "schwellwertKarte": {
         "latency": "Alarm: Latenz > {{limit}} ms ({{n}}×)",
         "unreachable": "Alarm: Ausfall ({{n}}×)"

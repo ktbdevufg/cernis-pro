@@ -359,6 +359,17 @@
   accent-color: var(--color-accent);
 }
 
+/* E-Mail ist gesperrt (Befund 66): sichtbar, aber nicht bedienbar. Ausgegraut wie der
+   Bestand (LoggingSeriesView), der Grund steht als Erklaerzeile daneben. */
+.logging__radio--gesperrt {
+  color: var(--color-text-tert);
+  cursor: default;
+}
+
+.logging__radio--gesperrt input:disabled {
+  cursor: default;
+}
+
 /* ── Abschluss-/Allgemeine Knoepfe ─────────────────────────────────────────── */
 
 .logging__abschluss {
