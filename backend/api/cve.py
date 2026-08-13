@@ -99,6 +99,11 @@ def _finding_to_dict(f: ActiveFinding) -> dict[str, object]:
 
 def _status_to_dict(s: MonitorStatus) -> dict[str, object]:
     # sleeping: der Worker schlaeft (kein NVD-Aufruf), wenn aktuell KEIN Host faellig ist.
+    # ABGELEITET aus hosts_due -- bleibt unveraendert erhalten (das Frontend haengt daran).
+    # checking (S86-A4/B2) ist das ZUSAETZLICHE, rein additive Feld: der ECHTE, beobachtete
+    # Laufzeitzustand des Worker (behandelt er gerade einen Host?). Beide stehen bewusst
+    # nebeneinander -- sie beantworten verschiedene Fragen: "ist etwas zu tun?" (sleeping,
+    # Bestandssicht) gegen "wird gerade etwas getan?" (checking, Worker-Sicht).
     return {
         "hosts_total": s.hosts_total,
         "hosts_due": s.hosts_due,
@@ -106,6 +111,7 @@ def _status_to_dict(s: MonitorStatus) -> dict[str, object]:
         "findings_total": s.findings_total,
         "findings_active": s.findings_active,
         "sleeping": s.hosts_due == 0,
+        "checking": s.checking,
     }
 
 

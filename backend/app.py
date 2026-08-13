@@ -699,7 +699,7 @@ from domain.outbound_log import (
 )
 from domain.process import classify_kind
 from domain.resolver_names import known_resolver_name
-from domain.scanning import EnrichedHost, HostEnriched, ScanConfig
+from domain.scanning import EnrichedHost, HostEnriched, ScanCompleted, ScanConfig
 from domain.scheduler.models import DailyWindow
 from domain.security import CredentialKandidat, DefaultCredsEintrag
 from infrastructure._dns_expected_migration import migrate_expected_servers_to_trust
@@ -956,6 +956,35 @@ _scheduled_scan_bausteine: Callable[[], tuple[Any, Any, Any]] | None = None
 # unabhaengiger Belang (sie muss auch dann laufen, wenn der Scan spaeter scheitert).
 _scheduled_scan_zeitbuchung: Callable[[], RecordScheduleRun] | None = None
 
+# Weck-Naht des Scan-Endes (S86-A4/B1): ein QUELLEN-AGNOSTISCHES Callable () -> None,
+# das der Composition Root im Lifespan auf ``RunCveMonitor.wake`` bindet. Der Scan stoesst
+# damit den CVE-Worker an, ohne dass application/scanning je application/cve importierte --
+# die Naht laeuft ausschliesslich hier (Regel 5), genau wie die uebrigen Quer-Naehte.
+# Modul-global (Muster _scheduled_scan_bausteine), weil BEIDE Konsumenten des Ereignis-
+# stroms sie brauchen und _scheduled_scan als Modul-Level-Callback kein app-Objekt kennt.
+# ``None`` = nicht verdrahtet (vor create_app / ohne bootstrap) -> es wird nicht geweckt.
+_cve_monitor_wecken: Callable[[], None] | None = None
+
+
+def wecke_cve_monitor_best_effort() -> None:
+    """Stoesst den CVE-Worker nach einem abgeschlossenen Scan an (best-effort, B1).
+
+    Der Scan WECKT nur -- er erhoeht die NVD-Last nicht: der Worker bleibt gedrosselt
+    (hoechstens ein Host mit Lookup je Tick), er merkt die geaenderte Lage bloss sofort,
+    statt bis zu einem vollen Intervall zu verschlafen.
+
+    Streng best-effort: ist die Naht nicht verdrahtet, passiert nichts; wirft sie, wird
+    das GELOGGT und verschluckt -- ein Fehlschlag beim Wecken darf einen Scan NIEMALS
+    scheitern lassen (der Scan ist der Zweck, das Wecken ein Nebeneffekt). Mit Warn-Log
+    ist es kein stiller S3-Fallback.
+    """
+    if _cve_monitor_wecken is None:
+        return
+    try:
+        _cve_monitor_wecken()
+    except Exception as exc:
+        logger.warning("cve_monitor_wecken_fehlgeschlagen", error=str(exc))
+
 
 async def _scheduled_scan(cidr: str, profile_id: str, schedule_id: int) -> None:
     # E1: der geplante Scan nimmt DENSELBEN Pfad wie der manuelle -- voller
@@ -990,6 +1019,14 @@ async def _scheduled_scan(cidr: str, profile_id: str, schedule_id: int) -> None:
                 record_host_best_effort(record_host, event.host)
                 record_seen_best_effort(record_seen, event.host)
                 angereichert += 1
+            elif isinstance(event, ScanCompleted):
+                # Scan-Ende -> CVE-Worker wecken (B1). Der Scan-Record ist zu diesem
+                # Zeitpunkt bereits geschrieben (ScanCompleted ist die LETZTE Anweisung
+                # des Use-Case, die Persistenz laeuft eine Zeile davor) -- der geweckte
+                # Worker sieht also den neuen Bestand. Dieselbe Behandlung wie im
+                # WS-Handler; wer nur einen der beiden anfasst, laesst den geplanten
+                # Scan aussen vor. Best-effort (die Funktion verschluckt + loggt).
+                wecke_cve_monitor_best_effort()
         logger.info("scheduled_scan_done", cidr=cidr, hosts=angereichert)
     except Exception as exc:
         # Ein geplanter Scan darf den Scheduler NICHT reissen: Fehler loggen,
@@ -2340,6 +2377,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        # Die Weck-Naht (S86-A4/B1) ist modul-global (s. dort): sie wird unten an den
+        # gestarteten CVE-Worker gebunden und beim Teardown wieder geloest.
+        global _cve_monitor_wecken
         logger.info("startup", service=APP_NAME, version=APP_VERSION)
         # Bootstrap nur, wenn app.py der produktive Owner ist (P2.3). Default aus
         # -> kein echter DB-/Monitor-/Scheduler-Start in Tests oder bei
@@ -2412,6 +2452,14 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             run_cve_monitor_uc = _build_run_cve_monitor()
             _app.state.run_cve_monitor = run_cve_monitor_uc
             _app.state.cve_monitor_task = asyncio.create_task(run_cve_monitor_uc.run())
+            # Weck-Naht (S86-A4/B1) an den gerade gebauten Worker binden: ab hier stoesst
+            # ein abgeschlossener Scan (beide Wege -- WS-Handler und _scheduled_scan) den
+            # Worker an, statt ihn bis zu einem vollen Intervall verschlafen zu lassen.
+            # Die Drosselung bleibt unberuehrt (tick prueft weiter hoechstens EINEN Host
+            # mit Lookup) -- geweckt wird nur der Schlaf, nicht die NVD-Last. global wie
+            # die uebrigen Modul-Level-Naehte, weil _scheduled_scan kein app-Objekt kennt
+            # (die global-Erklaerung steht am Anfang von lifespan).
+            _cve_monitor_wecken = run_cve_monitor_uc.wake
             # ── Aussenkontakte-Recorder (E3b) ─────────────────────────────────
             # Snapshot-Worker (Muster cve_monitor_task): tickt bis stop(); schreibt aber
             # nur, wenn ueber den (in E4 kommenden) REST-Weg eine Aufzeichnung ACTIVE
@@ -2466,6 +2514,12 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             _app.state.cve_monitor_task.cancel()
             with suppress(asyncio.CancelledError):
                 await _app.state.cve_monitor_task
+            # Weck-Naht (B1) wieder loesen: der Worker ist gestoppt, ein spaeterer
+            # Weckruf haette keinen Empfaenger mehr. Wichtig, weil die Naht MODUL-global
+            # ist -- ohne dieses Zuruecksetzen zeigte sie ueber das Ende dieser App
+            # hinaus auf einen toten Worker (mehrere App-Instanzen im selben Prozess,
+            # wie im Test). Das Aufraeumen spiegelt die Bindung oben.
+            _cve_monitor_wecken = None
             # Aussenkontakte-Recorder (E3b): selber Teardown wie der cve_monitor_task
             # (stop-Flag + cancel + awaiten, CancelledError unterdruecken). Laeuft immer
             # (im bootstrap-Block gestartet).
@@ -2834,6 +2888,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             # Origin-Guard (F-01): dieselbe Allowlist wie HTTP/CORS -- der WS-Handshake
             # prueft die Origin VOR accept() und schliesst boese Browser-Tabs aus.
             cfg.cors_allow_origins,
+            # Scan-Ende-Naht (S86-A4/B1): weckt den CVE-Worker, sobald ein Scan durch
+            # ist. Die Modul-Funktion (nicht die Naht selbst) wird uebergeben, damit
+            # die Bindung SPAET aufgeloest wird -- ``_cve_monitor_wecken`` entsteht
+            # erst im Lifespan, dieser Aufruf laeuft schon in create_app.
+            wecke_cve_monitor_best_effort,
         ),
     )
 
@@ -3493,12 +3552,26 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.dependency_overrides[provide_get_acknowledged_findings] = lambda: GetAcknowledgedFindings(
         cve_finding_repository(), cve_acknowledgement_repository()
     )
+
+    # Laufzeitzustands-Naht des Status (S86-A4/B2): liefert dem Lese-Use-Case den ECHTEN
+    # Zustand des Worker als blankes Callable () -> bool. Der Worker liegt unter
+    # ``app.state.run_cve_monitor`` -- den DARF nur der Composition Root kennen; der
+    # application-Ring bekommt ausschliesslich dieses Callable (kein Import, kein
+    # app.state). Ausfallsicher: kein Worker verdrahtet (vor dem Lifespan, ohne
+    # bootstrap_on_startup, nach einem Teardown) -> ``False``, also "es laeuft kein
+    # Abgleich" statt eines Fehlers. ``getattr`` mit Default statt hasattr-Pruefung,
+    # weil app.state die Attribute erst im Lifespan bekommt.
+    def _cve_monitor_checking() -> bool:
+        worker = getattr(app.state, "run_cve_monitor", None)
+        return bool(worker is not None and worker.is_checking)
+
     app.dependency_overrides[provide_get_cve_status] = lambda: GetCveMonitorStatus(
         cve_inventory,
         cve_checkstate_repository(),
         cve_finding_repository(),
         cve_acknowledgement_repository(),
         refresh_interval_provider=_cve_refresh_interval_seconds,
+        checking_provider=_cve_monitor_checking,
     )
 
     # Acknowledge-Schreibnaht (ADR 0037, Muster _acknowledge): Pass-Through an record(...).

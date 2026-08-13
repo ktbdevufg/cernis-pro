@@ -9,7 +9,7 @@ Fehlerpfad (NmapScanError/FritzAuthError -> error-Frame statt Abbruch).
 der Test darf das ebenfalls -- er ist kein Ring-Modul.
 """
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from typing import Any
 
 import pytest
@@ -211,12 +211,14 @@ def _client(
     get_device: _FakeGetDevice | None = None,
     is_known: _FakeIsKnown | None = None,
     severity: _FakeSeverity | None = None,
+    scan_finished_hook: Callable[[], None] | None = None,
 ) -> TestClient:
     record = recorder or _FakeRecordScannedHost()
     record_seen = seen_recorder or _FakeRecordSeen()
     device_reader = get_device or _FakeGetDevice()
     known_reader = is_known or _FakeIsKnown()
     severity_reader = severity or _FakeSeverity()
+    hook = scan_finished_hook if scan_finished_hook is not None else (lambda: None)
     app = FastAPI()
     app.add_api_websocket_route(
         "/ws/scan",
@@ -231,6 +233,10 @@ def _client(
             # (-> is_origin_allowed None == True), diese Tests connecten also ohne Origin
             # und laufen unveraendert durch. Leere Allowlist genuegt.
             [],
+            # Scan-Ende-Naht (S86-A4/B1): Default ein stiller No-Op -- die bestehenden
+            # Tests interessieren sich nicht dafuer; die B1-Tests reichen ein eigenes
+            # Callable herein.
+            hook,
         ),
     )
     return TestClient(app)
@@ -1090,3 +1096,63 @@ def test_host_detail_new_ports_read_from_prestate_before_devices_upsert() -> Non
     assert get_device.asked == ["AA:BB:CC:DD:EE:75"]
     # Der devices-Upsert lief trotzdem (mit dem neuen Portstand) -- Vorzustand davor gelesen.
     assert recorder.recorded[0].open_ports == (22, 3389)
+
+
+# ── Scan-Ende weckt den CVE-Worker (S86-A4/B1) ────────────────────────────────
+
+
+def test_scan_complete_stoesst_die_weck_naht_an() -> None:
+    """Ein ScanCompleted ruft die verdrahtete Scan-Ende-Naht -- genau einmal.
+
+    Gegen den ECHTEN Weg durch ``make_ws_scan``, nicht gegen eine Nachbildung: das
+    Callable, das app.py auf ``RunCveMonitor.wake`` bindet, wird hier an derselben
+    Stelle eingehaengt und beobachtet.
+    """
+    host = EnrichedHost(ip="10.0.0.9", mac="AA:BB:CC:DD:EE:90", category="server")
+    geweckt: list[int] = []
+    events: list[ScanEvent] = [HostEnriched(host=host), ScanCompleted(total_found=1)]
+    client = _client(events, scan_finished_hook=lambda: geweckt.append(1))
+    with client.websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "10.0.0.0/24"})
+        frames = [ws.receive_json() for _ in range(2)]
+
+    assert [f["type"] for f in frames] == ["host_detail", "scan_complete"]
+    assert geweckt == [1]  # genau EIN Weckruf, am Scan-Ende
+
+
+def test_ohne_scan_ende_wird_nicht_geweckt() -> None:
+    """Kein ScanCompleted (abgebrochener Strom) -> kein Weckruf. Die Naht haengt am Ende."""
+    host = EnrichedHost(ip="10.0.0.10", mac="AA:BB:CC:DD:EE:91", category="server")
+    geweckt: list[int] = []
+    client = _client([HostEnriched(host=host)], scan_finished_hook=lambda: geweckt.append(1))
+    with client.websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "10.0.0.0/24"})
+        ws.receive_json()  # host_detail
+
+    assert geweckt == []
+
+
+def test_weck_fehler_laesst_den_scan_unversehrt(monkeypatch: pytest.MonkeyPatch) -> None:
+    """TEST 10: wirft die Weck-Naht, laeuft der Scan unversehrt durch -- Fehler GELOGGT.
+
+    Der Weckruf ist ein Nebeneffekt; der Scan ist der Zweck. Ein kaputter Worker darf
+    das ``scan_complete`` des Clients nicht verschlucken.
+    """
+    logged: list[tuple[str, dict[str, Any]]] = []
+    monkeypatch.setattr(ws_scan.logger, "warning", lambda event, **kw: logged.append((event, kw)))
+
+    def kaputt() -> None:
+        raise RuntimeError("worker weg")
+
+    host = EnrichedHost(ip="10.0.0.11", mac="AA:BB:CC:DD:EE:92", category="server")
+    events: list[ScanEvent] = [HostEnriched(host=host), ScanCompleted(total_found=1)]
+    with _client(events, scan_finished_hook=kaputt).websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "10.0.0.0/24"})
+        frames = [ws.receive_json() for _ in range(2)]
+
+    # Der Scan ist vollstaendig durchgelaufen -- beide Frames kommen an.
+    assert [f["type"] for f in frames] == ["host_detail", "scan_complete"]
+    assert frames[1]["total_found"] == 1
+    # Und der Fehlschlag ist GELOGGT (stiller Fang waere S3).
+    assert len(logged) == 1
+    assert logged[0][0] == "scan_finished_hook_failed"

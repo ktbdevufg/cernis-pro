@@ -116,6 +116,13 @@ IsKnownFactory = Callable[[], Any]
 # einmal geholt.
 AxisBFactory = Callable[[], Any]
 
+# Weck-Naht des Scan-Endes (S86-A4/B1): ein QUELLEN-AGNOSTISCHES Callable () -> None,
+# das app.py auf ``RunCveMonitor.wake`` bindet. Anders als die uebrigen Naehte ist das
+# KEINE Factory, sondern das Callable selbst -- es gibt nichts pro Verbindung zu bauen,
+# und der Aufruf soll spaet an die dann verdrahtete Naht binden. Der Handler nennt die
+# cve-Domaene damit nirgends beim Namen: er meldet nur "ein Scan ist fertig".
+ScanFinishedHook = Callable[[], None]
+
 
 def _project(host: EnrichedHost) -> ScannedHost:
     """Projiziert einen scanning-``EnrichedHost`` auf einen devices-``ScannedHost``.
@@ -323,6 +330,7 @@ def make_ws_scan(
     is_known_factory: IsKnownFactory,
     axis_b_factory: AxisBFactory,
     allowed_origins: list[str],
+    scan_finished_hook: ScanFinishedHook,
 ) -> Callable[[WebSocket], Awaitable[None]]:
     """Baut den ``/ws/scan``-Handler mit injizierter ``RunNetworkScan``-Factory.
 
@@ -365,6 +373,13 @@ def make_ws_scan(
     ``allowed_origins`` ist die CORS-Allowlist (``cfg.cors_allow_origins``, injiziert in
     app.py -- EINE Quelle der Wahrheit): der Origin-Guard (F-01) prueft die ``Origin`` des
     Handshakes VOR ``accept()`` und schliesst boese Browser-Tabs aus.
+
+    ``scan_finished_hook`` wird bei ``ScanCompleted`` EINMAL gerufen (S86-A4/B1) -- die
+    quellen-agnostische Naht, ueber die app.py den CVE-Worker weckt. Der Handler weiss
+    NICHTS von der cve-Domaene; er meldet nur, dass ein Scan durch ist. Best-effort: das
+    Callable faengt seine Fehler selbst (app.wecke_cve_monitor_best_effort), und der
+    Aufruf ist hier zusaetzlich abgesichert -- ein Fehlschlag beim Wecken darf den Scan
+    nicht faellen.
     """
 
     async def ws_scan(websocket: WebSocket) -> None:
@@ -476,6 +491,14 @@ def make_ws_scan(
                     # Anreicherung -- keine kuratierten Felder, kein verlaessliches
                     # is_known; erst host_detail traegt die Baseline).
                     await websocket.send_json(_event_to_frame(event))
+                    if isinstance(event, ScanCompleted):
+                        # Scan-Ende -> Weck-Naht anstossen (B1). NACH dem Frame: der
+                        # Client soll sein scan_complete auf jeden Fall bekommen, das
+                        # Wecken ist ein Nebeneffekt. Der Scan-Record ist zu diesem
+                        # Zeitpunkt bereits geschrieben (ScanCompleted ist die LETZTE
+                        # Anweisung des Use-Case, die Persistenz laeuft eine Zeile
+                        # davor) -- der geweckte Worker sieht also den neuen Bestand.
+                        _wecken_best_effort(scan_finished_hook)
         except _ADAPTER_ERRORS as exc:
             await websocket.send_json({"type": "error", "message": str(exc)})
 
@@ -522,6 +545,21 @@ def record_seen_best_effort(record_seen: Any, host: EnrichedHost) -> None:
         record_seen(host.mac)
     except Exception as exc:
         logger.warning("record_seen_host_failed", ip=host.ip, mac=host.mac, error=str(exc))
+
+
+def _wecken_best_effort(hook: ScanFinishedHook) -> None:
+    """Stoesst die Scan-Ende-Naht an (S86-A4/B1) -- ein Fehlschlag reisst den Scan NICHT.
+
+    Zweite Absicherung neben der in ``app.wecke_cve_monitor_best_effort``: die Naht wird
+    im Test auch direkt mit rohen Callables bestueckt, und ein Weckruf ist unter allen
+    Umstaenden nachrangig gegenueber dem Scan. Ein Fehler wird gefangen + geloggt (kein
+    stiller S3-Fallback), der Scan laeuft weiter -- gleiche Linie wie
+    ``record_host_best_effort``/``record_seen_best_effort``.
+    """
+    try:
+        hook()
+    except Exception as exc:
+        logger.warning("scan_finished_hook_failed", error=str(exc))
 
 
 def _is_known_safe(is_known: Any, mac: str) -> bool:

@@ -181,3 +181,39 @@ def test_status(context: Context) -> None:
     assert data["hosts_total"] == 1
     assert data["hosts_due"] == 1  # der Bestands-Host ist neu -> faellig
     assert data["sleeping"] is False
+
+
+def test_status_traegt_checking_zusaetzlich_zu_sleeping(context: Context) -> None:
+    """S86-A4/B2: ``checking`` kommt HINZU -- ``sleeping`` bleibt unveraendert erhalten.
+
+    Ohne verdrahteten Worker (Default des Use-Case) lautet die Antwort "kein Abgleich".
+    Die Aenderung ist rein additiv: das Frontend haengt an ``sleeping``, das weiterhin
+    aus ``hosts_due == 0`` abgeleitet wird.
+    """
+    client, _ = context
+    data = client.get("/api/cve/status").json()
+    assert data["checking"] is False
+    assert data["sleeping"] is False  # unveraendert: ein Host ist faellig
+
+
+def test_status_checking_meldet_laufenden_abgleich(tmp_path: Path) -> None:
+    """Der Rand gibt den ECHTEN Worker-Zustand aus (nicht aus hosts_due abgeleitet).
+
+    Gegenprobe zum Feld oben: derselbe Bestand, aber ein Worker, der gerade prueft ->
+    ``checking`` true, waehrend ``sleeping`` weiter allein an ``hosts_due`` haengt.
+    """
+    db = tmp_path / "cernis.db"
+    findings = SqliteCveFindingRepository(db)
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[provide_get_cve_status] = lambda: GetCveMonitorStatus(
+        _FakeInventory(),
+        SqliteCveCheckStateRepository(db),
+        findings,
+        SqliteCveAcknowledgementRepository(db, SystemClock()),
+        refresh_interval_provider=lambda: 24 * 3600.0,
+        now_provider=lambda: NOW,
+        checking_provider=lambda: True,
+    )
+    data = TestClient(app).get("/api/cve/status").json()
+    assert data["checking"] is True

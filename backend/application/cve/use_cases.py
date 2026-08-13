@@ -21,7 +21,17 @@ still wieder greift.
 
 LOOP-FORM (testbar, Muster RunMonitor): ``tick()`` ist EINE Iteration (voll mit Fakes
 deterministisch testbar). ``run()`` ist nur der Rahmen ``while self._running: tick();
-sleep(interval)``. ``stop()`` setzt das Flag.
+schlafen(interval)``. ``stop()`` setzt das Flag.
+
+ANSTOSS VON AUSSEN (Befund 56/S86-A4): ``wake()`` beendet den Schlaf zwischen zwei Ticks
+vorzeitig. Das aendert NICHTS an der Drosselung -- pro ``tick`` bleibt es bei HOECHSTENS
+EINEM Host mit NVD-Aufruf; ein Weckruf verkuerzt nur die Wartezeit, bis der Worker eine
+geaenderte Lage ueberhaupt bemerkt. Die Zahl der NVD-Aufrufe je Zeit steigt dadurch nicht
+ueber das, was die Drosselung ohnehin erlaubt: die Gegenseite (NVD) begrenzt, nicht wir.
+
+LAUFZEITZUSTAND (S86-A4/B2): ``is_checking`` sagt, ob GERADE ein Host behandelt wird --
+beobachtet, nicht abgeleitet. Er wird per ``try/finally`` zurueckgesetzt, also auch dann,
+wenn die Behandlung mit einer Ausnahme endet.
 
 FEHLERTOLERANZ (S3/streng): ein fehlschlagender Host-Lookup (NVD down) wird GELOGGT und
 killt den Loop NICHT -- der Pruefstand wird in diesem Fall NICHT fortgeschrieben (der
@@ -102,6 +112,23 @@ class RunCveMonitor:
         self._interval = interval
         self._now = now_provider
         self._running = False
+        # Weck-Signal (S86-A4/B1). BEWUSST ``asyncio.Event`` und nicht etwa das Canceln
+        # des Schlaf-Tasks oder eine Queue:
+        #   * Ein ``Event`` ist HAFTEND -- ``set()`` waehrend eines laufenden Ticks bleibt
+        #     gesetzt; der DARAUF folgende ``wait()`` kehrt sofort zurueck. So geht KEIN
+        #     Weckruf verloren, egal wann er eintrifft (das ist der Unterschied zum
+        #     Cancel-Ansatz, der nur einen gerade wartenden Schlaf trifft).
+        #   * Es ist ENTPRELLEND -- mehrfaches ``set()`` zwischen zwei Ticks ist von
+        #     einmaligem nicht zu unterscheiden (kein Zaehler), also fuehrt ein Sturm von
+        #     Weckrufen zu genau EINEM zusaetzlichen Tick, nicht zu vielen.
+        # Lazy erzeugt, damit der Use-Case wie bisher OHNE laufenden
+        # Event-Loop konstruierbar bleibt (der Composition Root baut ihn im Lifespan,
+        # Tests bauen ihn synchron); ein ``asyncio.Event`` bindet sich beim ersten
+        # Warten an den Loop, in dem der Worker laeuft.
+        self._wake: asyncio.Event | None = None
+        # Echter Laufzeitzustand (S86-A4/B2): gesetzt, solange ein Host behandelt wird --
+        # beide Wege (mit NVD-Aufruf und der lookup-freie portlose Weg).
+        self._checking = False
 
     def _due_hosts(
         self, now: float, refresh_interval: float
@@ -134,18 +161,39 @@ class RunCveMonitor:
                 with_ports = (host, reason)
         return portless, with_ports
 
+    @property
+    def is_checking(self) -> bool:
+        """Laeuft GERADE ein Abgleich? -- beobachteter Zustand, keine Ableitung (B2).
+
+        ``True`` genau solange ein Host behandelt wird (der Weg MIT NVD-Aufruf ebenso wie
+        der lookup-freie portlose Weg), sonst ``False``. Anders als das abgeleitete
+        ``sleeping`` am API-Rand (``hosts_due == 0``) sagt dieser Wert etwas ueber den
+        Worker selbst aus, nicht ueber den Bestand.
+        """
+        return self._checking
+
     async def tick(self) -> None:
         """Eine Iteration: alle portlosen faelligen Hosts + hoechstens EINEN mit NVD-Aufruf."""
         now = self._now()
         refresh_interval = self._refresh_interval_provider()
         portless, with_ports = self._due_hosts(now, refresh_interval)
         for host in portless:
-            self._clear_host(host, now)
+            # ``try/finally`` (B2): der Zustand faellt auch dann zurueck, wenn die
+            # Behandlung wirft -- KEINE Zuweisung am Blockende, die ein Wurf ueberspraenge.
+            self._checking = True
+            try:
+                self._clear_host(host, now)
+            finally:
+                self._checking = False
         if with_ports is None:
             # Kein faelliger Host mit Ports / leerer Bestand -> KEIN NVD-Aufruf.
             return
         host, reason = with_ports
-        await self._check_host(host, reason, now)
+        self._checking = True
+        try:
+            await self._check_host(host, reason, now)
+        finally:
+            self._checking = False
 
     def _clear_host(self, host: InventoryHost, now: float) -> None:
         """Gleicht einen gesehenen Host OHNE offene Ports ab: leere Befundmenge, kein Lookup.
@@ -275,12 +323,58 @@ class RunCveMonitor:
                 return record
         return None
 
+    def wake(self) -> None:
+        """Weckt den Worker: der naechste Schlaf endet sofort (S86-A4/B1).
+
+        Quellen-agnostisch und synchron -- der Composition Root reicht das als blankes
+        Callable an die Scan-Naehte weiter; die scanning-Seite kennt die cve-Seite nicht.
+
+        Trifft der Weckruf ein, waehrend gerade ein Tick laeuft, geht er NICHT verloren:
+        das ``Event`` bleibt gesetzt, bis der Schlaf es liest und zuruecksetzt. Mehrfaches
+        Wecken zwischen zwei Ticks wirkt wie einmaliges (das ``Event`` zaehlt nicht).
+
+        Vor dem ersten Schlaf (Worker noch nicht gestartet) wird das ``Event`` hier
+        angelegt: ``asyncio.Event()`` braucht seit Python 3.10 keinen laufenden Loop mehr,
+        der Aufruf ist also auch aus synchronem Kontext sicher.
+        """
+        if self._wake is None:
+            self._wake = asyncio.Event()
+        self._wake.set()
+
+    async def _schlafen(self) -> None:
+        """Wartet bis zum Intervall ODER bis zum Wecken -- was frueher eintritt.
+
+        ``wait_for`` mit ``TimeoutError`` als Normalfall: keine Weckung im Intervall ->
+        regulaerer Ablauf. Ein bereits gesetztes Signal wird VOR dem Warten gelesen (der
+        waehrend des Ticks eingegangene Weckruf) und in JEDEM Weckfall danach
+        zurueckgesetzt -- so loest ein Weckruf genau EINEN zusaetzlichen Durchlauf aus
+        und der Loop rattert danach nicht dauerhaft weiter.
+        """
+        if self._wake is None:
+            self._wake = asyncio.Event()
+        if self._wake.is_set():
+            # Waehrend des Ticks geweckt -> sofort weiterticken, ohne zu warten.
+            self._wake.clear()
+            return
+        try:
+            await asyncio.wait_for(self._wake.wait(), timeout=self._interval)
+        except TimeoutError:
+            # Regulaerer Ablauf des Intervalls -- kein Fehler, der Normalfall.
+            return
+        # Geweckt: das Signal ist verbraucht, der naechste Schlaf wartet wieder regulaer.
+        self._wake.clear()
+
     async def run(self) -> None:
-        """Endlos-Rahmen: tickt bis ``stop()``. Die Logik sitzt in ``tick``."""
+        """Endlos-Rahmen: tickt bis ``stop()``. Die Logik sitzt in ``tick``.
+
+        Der Schlaf zwischen zwei Ticks endet nach dem Intervall ODER beim Wecken (B1) --
+        die Drosselung bleibt davon unberuehrt, ``tick`` prueft weiterhin hoechstens EINEN
+        Host mit NVD-Aufruf.
+        """
         self._running = True
         while self._running:
             await self.tick()
-            await asyncio.sleep(self._interval)
+            await self._schlafen()
 
     def stop(self) -> None:
         """Setzt das Loop-Flag (Abbruch nach der laufenden Iteration)."""
@@ -422,9 +516,21 @@ class GetAcknowledgedFindings:
 class MonitorStatus:
     """Schlanker Pruef-/Worker-Status (rohe Zahlen, der api-Rand baut die Wire-Form).
 
-    ``hosts_total`` = bekannte Hosts MIT offenen Ports im Bestand; ``hosts_due`` = davon
-    aktuell faellig (Faelle 1-3); ``hosts_checked`` = Hosts mit Pruefstand; ``findings_total``
-    = alle persistierten Befunde; ``findings_active`` = davon nicht quittiert.
+    ``hosts_total`` = bekannte Hosts im Bestand; ``hosts_due`` = davon aktuell faellig
+    (Faelle 1-3); ``hosts_checked`` = Hosts mit Pruefstand; ``findings_total`` = alle
+    persistierten Befunde; ``findings_active`` = davon nicht quittiert.
+
+    ``checking`` (S86-A4/B2) ist der ECHTE Laufzeitzustand des Worker: laeuft gerade ein
+    Abgleich? Beobachtet, nicht abgeleitet -- im Gegensatz zum ``sleeping`` am API-Rand,
+    das nach wie vor aus ``hosts_due == 0`` gebildet wird.
+
+    Die Frage "wie viele Hosts stehen noch aus" beantwortet ``hosts_due`` -- NACH B3
+    richtig: es zaehlt nun genau die Menge, die der Worker auch abarbeitet (portlose
+    Hosts eingeschlossen). Darum bekommt sie KEIN eigenes zweites Feld.
+
+    ``hosts_total`` zaehlt seit B3 ALLE bekannten Hosts, auch portlose: der Worker
+    behandelt sie ebenfalls (lookup-frei), und eine Zahl, die weniger anzeigt als
+    tatsaechlich passiert, waere eine Luege ueber das Verhalten.
     """
 
     hosts_total: int
@@ -432,6 +538,7 @@ class MonitorStatus:
     hosts_checked: int
     findings_total: int
     findings_active: int
+    checking: bool = False
 
 
 class GetCveMonitorStatus:
@@ -439,6 +546,20 @@ class GetCveMonitorStatus:
 
     Liest den Bestand + Pruefstaende + Befunde und leitet die Zahlen ab. KEIN NVD-Aufruf
     (rein lokal). ``hosts_due`` nutzt dieselbe Faelligkeits-Logik wie der Worker.
+
+    B3: gezaehlt wird ueber den GANZEN Bestand, portlose Hosts eingeschlossen -- kein
+    ``if h.ports``-Vorfilter mehr. Seit S86-A2 sind gesehene Hosts OHNE offene Ports
+    ebenfalls faellig und werden (lookup-frei) abgearbeitet; ein Vorfilter hier haette
+    die Faelligkeit an einer ZWEITEN Stelle anders ausgedrueckt als im Worker. Ohne ihn
+    fragen beide Stellen exakt dasselbe -- ``domain.cve.policy.due_reason`` ist die EINE
+    gemeinsame Quelle der Faelligkeitsentscheidung; ein eigener Helfer waere nur eine
+    weitere Huelle um eine bereits geteilte reine Funktion.
+
+    ``checking_provider`` (B2) liefert den ECHTEN Laufzeitzustand des Worker. Als
+    Callable hereingereicht (Verdrahtung im Composition Root), NICHT als Import auf den
+    Worker und nicht ueber ``app.state`` -- der application-Ring kennt weder das eine
+    noch das andere. Default ``lambda: False``: ohne verdrahteten Worker lautet die
+    Antwort schlicht "es laeuft kein Abgleich", statt zu werfen.
     """
 
     def __init__(
@@ -449,6 +570,7 @@ class GetCveMonitorStatus:
         acknowledgements: CveAcknowledgementRepository,
         refresh_interval_provider: Callable[[], float],
         now_provider: Callable[[], float] = time.time,
+        checking_provider: Callable[[], bool] = lambda: False,
     ) -> None:
         self._inventory = inventory
         self._checkstate = checkstate
@@ -456,11 +578,12 @@ class GetCveMonitorStatus:
         self._acknowledgements = acknowledgements
         self._refresh_interval_provider = refresh_interval_provider
         self._now = now_provider
+        self._checking_provider = checking_provider
 
     def __call__(self) -> MonitorStatus:
         now = self._now()
         refresh_interval = self._refresh_interval_provider()
-        hosts = [h for h in self._inventory.list_hosts() if h.ports]
+        hosts = list(self._inventory.list_hosts())
         due = 0
         for host in hosts:
             current_ports = frozenset(p.port for p in host.ports)
@@ -476,4 +599,19 @@ class GetCveMonitorStatus:
             hosts_checked=len(self._checkstate.all_states()),
             findings_total=len(all_findings),
             findings_active=active,
+            checking=self._checking_safe(),
         )
+
+    def _checking_safe(self) -> bool:
+        """Fragt den Laufzeitzustand ausfallsicher ab -- ohne Worker: "kein Abgleich".
+
+        Der Statusendpunkt ist ein reiner Lesepfad; er darf an einer fehlenden oder
+        kaputten Worker-Naht NICHT scheitern. Ein Fehlschlag wird GELOGGT (kein stiller
+        Fallback, S3) und als ``False`` beantwortet -- die ehrlichere der beiden
+        Aussagen, denn ein nicht erreichbarer Worker prueft gerade sicher nichts.
+        """
+        try:
+            return bool(self._checking_provider())
+        except Exception as exc:
+            _logger.warning("cve_status_checking_unavailable", error=str(exc))
+            return False

@@ -104,3 +104,89 @@ def test_scheduled_scan_ohne_naht_ist_lauter_noop(
     monkeypatch.setattr(app_module, "_scheduled_scan_bausteine", None)
     # Kein Wurf; der Fall wird als Verdrahtungsfehler geloggt.
     asyncio.run(app_module._scheduled_scan("192.168.1.0/24", "standard", 1))
+
+
+# ── Scan-Ende weckt den CVE-Worker (S86-A4/B1) ────────────────────────────────
+
+
+def test_scheduled_scan_weckt_den_cve_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+    """TEST 9: auch der GEPLANTE Scan stoesst den Worker an -- ueber den verdrahteten Weg.
+
+    Gegen die echte Modul-Naht ``app._cve_monitor_wecken`` (die app.py im Lifespan auf
+    ``RunCveMonitor.wake`` bindet), nicht gegen eine Nachbildung. Wer nur ws_scan.py
+    anfasst, laesst genau diesen Weg aussen vor.
+    """
+    hosts = [_enriched("10.0.0.1", "AA:BB:CC:00:00:01")]
+    monkeypatch.setattr(
+        app_module,
+        "_scheduled_scan_bausteine",
+        lambda: (_FakeRunScan(hosts), lambda s: None, lambda m: None),
+    )
+    geweckt: list[int] = []
+    monkeypatch.setattr(app_module, "_cve_monitor_wecken", lambda: geweckt.append(1))
+
+    asyncio.run(app_module._scheduled_scan("192.168.1.0/24", "standard", 1))
+
+    assert geweckt == [1]  # genau EIN Weckruf, am Scan-Ende
+
+
+def test_scheduled_scan_ohne_weck_naht_laeuft_durch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Nicht verdrahtete Weck-Naht (vor create_app/ohne bootstrap): kein Wurf, kein Wecken."""
+    hosts = [_enriched("10.0.0.1", "AA:BB:CC:00:00:01")]
+    aufrufe: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        app_module,
+        "_scheduled_scan_bausteine",
+        lambda: (
+            _FakeRunScan(hosts),
+            lambda s: aufrufe.append(("host", s.mac)),
+            lambda m: None,
+        ),
+    )
+    monkeypatch.setattr(app_module, "_cve_monitor_wecken", None)
+
+    asyncio.run(app_module._scheduled_scan("192.168.1.0/24", "standard", 1))
+
+    assert aufrufe == [("host", "AA:BB:CC:00:00:01")]  # Scan lief vollstaendig
+
+
+def test_scheduled_scan_weck_fehler_reisst_den_scan_nicht(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """TEST 10 (geplanter Weg): eine werfende Weck-Naht laesst den Scan unversehrt.
+
+    Wichtig: der Weckruf liegt INNERHALB des scan-eigenen try/except. Ohne das eigene
+    best-effort-Fangen wuerde der Fehler dort als "scheduled_scan_failed" landen -- der
+    Scan waere abgebrochen statt durchgelaufen. Darum wird hier geprueft, dass die
+    Nachbearbeitung des LETZTEN Hosts vollstaendig ist und der Fehler als Weck-Fehler
+    (nicht als Scan-Fehler) geloggt wurde.
+    """
+    logged: list[tuple[str, dict[str, Any]]] = []
+    monkeypatch.setattr(
+        app_module.logger, "warning", lambda event, **kw: logged.append((event, kw))
+    )
+    hosts = [_enriched("10.0.0.1", "AA:BB:CC:00:00:01")]
+    aufrufe: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        app_module,
+        "_scheduled_scan_bausteine",
+        lambda: (
+            _FakeRunScan(hosts),
+            lambda s: aufrufe.append(("host", s.mac)),
+            lambda m: aufrufe.append(("seen", m)),
+        ),
+    )
+
+    def kaputt() -> None:
+        raise RuntimeError("worker weg")
+
+    monkeypatch.setattr(app_module, "_cve_monitor_wecken", kaputt)
+
+    asyncio.run(app_module._scheduled_scan("192.168.1.0/24", "standard", 1))
+
+    # Der Scan ist vollstaendig durchgelaufen (beide Nachbearbeitungen liefen).
+    assert aufrufe == [("host", "AA:BB:CC:00:00:01"), ("seen", "AA:BB:CC:00:00:01")]
+    # Geloggt als WECK-Fehler, NICHT als scheduled_scan_failed.
+    marker = [name for name, _ in logged]
+    assert "cve_monitor_wecken_fehlgeschlagen" in marker
+    assert "scheduled_scan_failed" not in marker
