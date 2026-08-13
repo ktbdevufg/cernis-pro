@@ -72,9 +72,11 @@ from domain.scanning import (
     EnrichedHost,
     HostEnriched,
     HostFound,
+    Info,
     MdnsService,
     PhaseChanged,
     PortInfo,
+    PortInterception,
     Progress,
     ScanCompleted,
     ScanConfig,
@@ -85,6 +87,7 @@ from domain.scanning import (
     SsdpService,
     classify_host,
 )
+from domain.scanning.interception import CONTROL_ADDRESS_COUNT, pick_control_addresses
 from ports.scanning import (
     ArpTablePort,
     FritzHostsPort,
@@ -447,6 +450,20 @@ class RunNetworkScan:
         mdns_by_ip = _group_by_ip(await mdns_task) if mdns_task is not None else {}
         ssdp_by_ip = _group_by_ip(await ssdp_task) if ssdp_task is not None else {}
 
+        # ── Gegenprobe: lokal abgefangene Ports (Befund 53) ──────────────────
+        # EINMAL je Scan, nicht je Geraet: der Abfaenger sitzt auf der MESSENDEN
+        # Maschine und ist keine Eigenschaft eines einzelnen Ziels. Laeuft VOR der
+        # Enrich-Phase, damit ihr Ergebnis schon beim ersten Host greift. Ohne
+        # Portscan gibt es nichts zu bereinigen -- dann auch keine Messung.
+        interception = (
+            await self._probe_interception(config, frozenset(discovered_ips))
+            if config.port_scan
+            else PortInterception(checked=False, reason="Portscan ist abgeschaltet.")
+        )
+        if config.port_scan and not interception.checked:
+            # Protokolleintrag: "nicht geprueft" wird BENANNT, nicht verschwiegen.
+            yield Info(message=f"Gegenprobe auf abgefangene Ports: {interception.reason}")
+
         # ── Enrich ────────────────────────────────────────────────────────────
         yield PhaseChanged(phase="enrich", status="running", total=len(discovered))
         enriched_hosts: list[EnrichedHost] = []
@@ -458,6 +475,7 @@ class RunNetworkScan:
                 mdns_by_ip.get(host.ip, ()),
                 ssdp_by_ip.get(host.ip, ()),
                 mac_extra.get(host.mac.lower(), ()) if host.mac else (),
+                interception,
             )
             enriched_hosts.append(enriched)
             yield HostEnriched(host=enriched)
@@ -468,8 +486,83 @@ class RunNetworkScan:
         enriched_hosts = await self._ipv6.enrich(enriched_hosts)
 
         # ── Persistenz + Abschluss ───────────────────────────────────────────
-        self._scan_history.save(cidr_display, enriched_hosts)
+        # ``interception`` geht MIT in den Record: die Information, welche Ports
+        # als abgefangen erkannt wurden und auf wie vielen Kontroll-Adressen
+        # geprueft wurde, wird nicht weggeworfen, sondern ist ueber die
+        # History-Schnittstelle abrufbar.
+        self._scan_history.save(cidr_display, enriched_hosts, interception)
         yield ScanCompleted(total_found=len(discovered))
+
+    async def _probe_interception(
+        self, config: ScanConfig, discovered_ips: frozenset[str]
+    ) -> PortInterception:
+        """Faehrt die EINE Gegenprobe je Scan gegen lokal abgefangene Ports (Befund 53).
+
+        Misst dieselbe Portliste mit denselben Parametern wie der regulaere Scan,
+        aber gegen Adressen, an denen kein Geraet geantwortet hat. Ein Port, der
+        dort trotzdem antwortet, kann nicht dem Ziel gehoeren -- er wird lokal
+        abgefangen.
+
+        Als abgefangen gilt ein Port NUR, wenn er auf ALLEN Kontroll-Adressen
+        antwortet (Schnittmenge, nicht Vereinigung): so kippt ein einzelnes
+        ping-stilles Geraet, das an einer der Kontroll-Adressen doch Dienste
+        anbietet, das Ergebnis nicht.
+
+        Laeuft die Probe nicht (zu wenige geeignete Adressen) oder faellt sie mit
+        einer Ausnahme aus, kommt ``checked=False`` mit Grund zurueck -- der
+        Aufrufer filtert dann NICHT. Kein stiller Rueckfall auf weniger Adressen
+        und keine stille Nicht-Pruefung (ADR 0001).
+        """
+        control_ips = pick_control_addresses(config.cidrs, discovered_ips)
+        if len(control_ips) < CONTROL_ADDRESS_COUNT:
+            return PortInterception(
+                checked=False,
+                reason=(
+                    f"Nur {len(control_ips)} von {CONTROL_ADDRESS_COUNT} geeigneten "
+                    "Kontroll-Adressen im gescannten Netz -- Gegenprobe nicht gefahren, "
+                    "es wurde nicht gefiltert."
+                ),
+            )
+
+        ports = config.custom_ports or _TOP_100_PORTS
+        try:
+            # Dieselbe Portliste, derselbe Modus, dieselbe Zeitgrenze und dieselbe
+            # Nebenlaeufigkeit wie im regulaeren Scan -- sonst waere das Ergebnis
+            # nicht vergleichbar (ein knapperes Timeout wuerde die Gegenprobe
+            # leerlaufen lassen und den Abfaenger verstecken).
+            results = [
+                await self._port_scanner.scan(
+                    control_ip,
+                    ports,
+                    config.port_mode,
+                    _PORT_TIMEOUT,
+                    config.max_concurrent_ports,
+                )
+                for control_ip in control_ips
+            ]
+        except Exception as exc:
+            # Die Gegenprobe ist eine ZUSATZ-Messung: ihr Ausfall darf den Scan
+            # nicht abbrechen (anders als der regulaere Portscan, dessen
+            # Adapter-Exception bewusst durchpropagiert). Aber er darf auch nicht
+            # still zu "nichts gefunden" werden -- daher checked=False mit Grund.
+            return PortInterception(
+                checked=False,
+                reason=(
+                    f"Gegenprobe fehlgeschlagen ({type(exc).__name__}: {exc}) "
+                    "-- es wurde nicht gefiltert."
+                ),
+            )
+
+        # Schnittmenge ueber ALLE Kontroll-Adressen.
+        answering: set[int] = {info.port for info in results[0]}
+        for result in results[1:]:
+            answering &= {info.port for info in result}
+
+        return PortInterception(
+            checked=True,
+            control_ips=control_ips,
+            intercepted_ports=tuple(sorted(answering)),
+        )
 
     async def _enrich_host(
         self,
@@ -478,12 +571,16 @@ class RunNetworkScan:
         mdns_services: tuple[MdnsService, ...],
         ssdp_services: tuple[SsdpService, ...],
         additional_ips: tuple[str, ...],
+        interception: PortInterception,
     ) -> EnrichedHost:
         """Reichert einen einzelnen Host an (Hostname/SMB/Ports/Dienste/Klassifikation).
 
         ``mdns_services``/``ssdp_services`` sind die dem Host (per IP) zugeordneten
         Dienste -- leer, wenn keine fuer diese IP gefunden wurden. ``additional_ips``
         sind die weiteren IPs derselben MAC (MAC-Gruppierung) -- leer im Normalfall.
+        ``interception`` ist das Ergebnis der EINEN Gegenprobe dieses Scans; seine
+        ``intercepted_ports`` werden hier aus der Portliste entfernt, bevor
+        klassifiziert wird.
         """
         vendor = self._vendor_lookup.lookup(host.mac) if host.mac else ""
 
@@ -504,7 +601,16 @@ class RunNetworkScan:
                 _PORT_TIMEOUT,
                 config.max_concurrent_ports,
             )
-            ports = tuple(scanned)
+            # Lokal abgefangene Ports fliegen HIER raus -- vor classify_host, damit
+            # die Betriebssystem-Erkennung die bereinigte Liste sieht und kein
+            # zweiter Griff noetig ist. Ein abgefangener Port ist keine Eigenschaft
+            # des Geraets; er darf weder in der Scan-Tabelle noch im
+            # Sicherheitsbericht, der Gesundheitsnote oder dem CVE-Abgleich landen
+            # -- alle vier lesen ``EnrichedHost.ports``, also reicht dieser Schnitt.
+            # Lief die Gegenprobe nicht (``checked=False``), ist
+            # ``intercepted_ports`` leer und es wird nichts entfernt.
+            intercepted = set(interception.intercepted_ports)
+            ports = tuple(info for info in scanned if info.port not in intercepted)
 
         # Fingerprinting bekommt die mDNS-Dienste (altcode-treu: _ipp/_googlecast etc.
         # fliessen in die Klassifikation ein). ``is_ndi`` aus den mDNS-Diensten.

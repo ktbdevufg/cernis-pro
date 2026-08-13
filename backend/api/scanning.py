@@ -10,7 +10,8 @@ genau wie der devices-/settings-Router das haelt).
 Endpunkte (Shapes am S.1-Characterization-Contract):
 
 * ``GET /api/history``       -> Liste der Scans (id/scanned_at/cidr/host_count).
-* ``GET /api/history/{id}``  -> ein Scan mit vollen Hosts; unbekannte ID -> 404.
+* ``GET /api/history/{id}``  -> ein Scan mit vollen Hosts + ``interception``
+  (Gegenprobe auf lokal abgefangene Ports, Befund 53); unbekannte ID -> 404.
 * ``GET /api/vendor/{mac}``  -> ``{"mac": ..., "vendor": ...}``.
 * ``GET /api/arp``           -> roher ARP-Cache als ``{ip: mac}`` (S.7a).
 
@@ -85,6 +86,19 @@ def _ssdp_to_dict(svc: Any) -> dict[str, Any]:
     return {"server": svc.server, "st": svc.st, "location": svc.location, "ip": svc.ip}
 
 
+def _interception_to_dict(interception: Any) -> dict[str, Any]:
+    # interception ist ein domain.PortInterception (Befund 53). ``checked``
+    # unterscheidet "geprueft, nichts gefunden" (True + leere Portliste) von
+    # "nicht geprueft" (False + ``reason``) -- der Client darf beides NICHT
+    # gleich behandeln, deshalb wandern beide Felder mit hinaus.
+    return {
+        "checked": interception.checked,
+        "control_ips": list(interception.control_ips),
+        "intercepted_ports": list(interception.intercepted_ports),
+        "reason": interception.reason,
+    }
+
+
 def _host_to_dict(host: Any) -> dict[str, Any]:
     # host ist ein domain.EnrichedHost; verschachtelte Domaenen-Objekte werden
     # ebenfalls per Attribut-Zugriff serialisiert (kein domain-Import, tuple->list).
@@ -146,6 +160,10 @@ def get_history_detail(
         "cidr": record.cidr,
         "host_count": record.host_count,
         "hosts": [_host_to_dict(h) for h in record.hosts],
+        # Ergebnis der Gegenprobe auf lokal abgefangene Ports (Befund 53) -- am
+        # Scan, nicht am Host. Die ANZEIGE folgt in einem eigenen Auftrag; hier
+        # wird der Wert nur abrufbar gemacht.
+        "interception": _interception_to_dict(record.interception),
     }
 
 

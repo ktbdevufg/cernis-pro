@@ -4,10 +4,14 @@ Basiert auf der Persistenz-Logik aus ``modules/storage.py`` (``save_scan`` /
 ``get_scan_history`` / ``get_scan_by_id``), mit den bewussten v2-Schnitten und im
 Stil von ``SqliteDeviceRepository``:
 
-* Schema EXAKT wie der Bestand: Tabelle ``scan_history`` mit
+* Schema wie der Bestand: Tabelle ``scan_history`` mit
   ``id / scanned_at / cidr / host_count / result_json`` -- erfuellt den
   S.1-Round-trip-Contract (``save`` + ``list`` ohne Blob + ``get`` mit Hosts,
-  unbekannte ID -> ``None``).
+  unbekannte ID -> ``None``). Dazu die additive v2-Spalte ``interception_json``
+  (Befund 53): das Ergebnis der EINEN Gegenprobe je Scan. Sie haengt am SCAN,
+  nicht am Host -- ein lokal abgefangener Port ist eine Eigenschaft der
+  messenden Maschine, nicht eines Ziels. NULL (Altbestand) liest sich als
+  "nicht geprueft", was fuer die damaligen Scans genau stimmt.
 * ``list`` selektiert bewusst NUR ``id, cidr, host_count`` (nicht ``result_json``)
   -- der Host-Blob kommt erst per ``get(scan_id)`` (Charakterisierung S.1:
   ``get_scan_history`` ohne ``result_json``).
@@ -41,11 +45,13 @@ from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 
-from domain.scanning import EnrichedHost, ScanRecord, ScanSummary
+from domain.scanning import EnrichedHost, PortInterception, ScanRecord, ScanSummary
 from infrastructure.scanning._serialization import (
     CorruptScanError,
     dict_to_host,
+    dict_to_interception,
     host_to_dict,
+    interception_to_dict,
 )
 from ports.devices import Clock
 
@@ -90,17 +96,36 @@ class SqliteScanHistoryRepository:
                 );
                 """
             )
+            # SCHEMA-GUARD (additive Migration, Hausmuster wie devices/rtt_history):
+            # eine vor der Gegenproben-Etappe (Befund 53) angelegte Tabelle bekommt
+            # die Spalte per ALTER nachgeruestet. Kein NOT NULL/DEFAULT: bestehende
+            # Zeilen behalten NULL, und NULL liest sich als "nicht geprueft"
+            # (``dict_to_interception(None)``) -- was fuer einen Altbestands-Scan
+            # genau stimmt, denn damals gab es die Gegenprobe noch nicht.
+            cols = {row["name"] for row in conn.execute("PRAGMA table_info(scan_history)")}
+            if "interception_json" not in cols:
+                conn.execute("ALTER TABLE scan_history ADD COLUMN interception_json TEXT")
 
-    def save(self, cidr: str, hosts: Sequence[EnrichedHost]) -> None:
+    def save(
+        self,
+        cidr: str,
+        hosts: Sequence[EnrichedHost],
+        interception: PortInterception,
+    ) -> None:
         payload = json.dumps([host_to_dict(h) for h in hosts])
+        # Gegenproben-Ergebnis (Befund 53) in eigener Spalte -- NICHT im Host-Blob:
+        # es haengt am Scan, nicht am Host, und bleibt so lesbar, ohne den ganzen
+        # Blob zu deserialisieren.
+        interception_payload = json.dumps(interception_to_dict(interception))
         # scanned_at explizit aus der Clock (timezone-aware UTC) als ISO-8601-String
         # MIT Zonen-Offset (+00:00) -- nicht mehr ueber den Schema-Default datetime('now').
         scanned_at = self._clock.now().isoformat()
         with self._connect() as conn:
             conn.execute(
-                "INSERT INTO scan_history (cidr, host_count, result_json, scanned_at) "
-                "VALUES (?, ?, ?, ?)",
-                (cidr, len(hosts), payload, scanned_at),
+                "INSERT INTO scan_history "
+                "(cidr, host_count, result_json, scanned_at, interception_json) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (cidr, len(hosts), payload, scanned_at, interception_payload),
             )
 
     def clear_all(self) -> None:
@@ -132,7 +157,7 @@ class SqliteScanHistoryRepository:
     def get(self, scan_id: int) -> ScanRecord | None:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT id, cidr, host_count, scanned_at, result_json "
+                "SELECT id, cidr, host_count, scanned_at, result_json, interception_json "
                 "FROM scan_history WHERE id = ?",
                 (scan_id,),
             ).fetchone()
@@ -146,10 +171,19 @@ class SqliteScanHistoryRepository:
         if not isinstance(decoded, list):
             raise CorruptScanError(scan_id, raw)
         hosts = tuple(dict_to_host(scan_id, item) for item in decoded)
+        # Gegenproben-Ergebnis: NULL/leer (Altbestand vor Befund 53) -> der
+        # Domaenen-Default ``checked=False`` = "nicht geprueft". Kaputtes JSON ist
+        # dagegen ein Fehler MIT scan_id-Bezug, kein stiller Rueckfall.
+        raw_interception = row["interception_json"]
+        try:
+            decoded_interception = json.loads(raw_interception) if raw_interception else None
+        except json.JSONDecodeError as exc:
+            raise CorruptScanError(scan_id, raw_interception) from exc
         return ScanRecord(
             scan_id=row["id"],
             cidr=row["cidr"],
             hosts=hosts,
             host_count=row["host_count"],
             scanned_at=row["scanned_at"] or "",
+            interception=dict_to_interception(scan_id, decoded_interception),
         )

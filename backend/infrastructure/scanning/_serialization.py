@@ -22,6 +22,7 @@ from domain.scanning import (
     EnrichedHost,
     MdnsService,
     PortInfo,
+    PortInterception,
     SsdpService,
 )
 
@@ -46,6 +47,36 @@ class CorruptScanError(Exception):
 def host_to_dict(host: EnrichedHost) -> dict[str, Any]:
     """EnrichedHost -> JSON-taugliches dict (tuples werden zu Listen)."""
     return asdict(host)
+
+
+def interception_to_dict(interception: PortInterception) -> dict[str, Any]:
+    """PortInterception -> JSON-taugliches dict (tuples werden zu Listen)."""
+    return asdict(interception)
+
+
+def dict_to_interception(scan_id: int, data: Any) -> PortInterception:
+    """JSON-dict -> PortInterception; ein leeres/fehlendes Feld heisst "nicht geprueft".
+
+    ``None`` (Spalte NULL) und ``{}`` sind der Altbestand-Fall: ein vor dieser
+    Etappe gespeicherter Scan wurde nicht gegengeprueft. Das ist KEIN Fehler,
+    sondern genau der Zustand, den ``checked=False`` benennt -- der Default des
+    Domaenenmodells trifft ihn ohne Sonderbehandlung.
+
+    Ein vorhandener, aber formfremder Wert (kein Objekt) ist dagegen ein echter
+    Defekt und wird als ``CorruptScanError`` gemeldet -- kein stiller Rueckfall
+    auf "nicht geprueft", weil das einen kaputten Datensatz als harmlosen
+    Normalfall tarnen wuerde (Finding S3).
+    """
+    if data is None:
+        return PortInterception()
+    if not isinstance(data, dict):
+        raise CorruptScanError(scan_id, json.dumps(data))
+    return PortInterception(
+        checked=bool(data.get("checked", False)),
+        control_ips=tuple(str(ip) for ip in data.get("control_ips", ())),
+        intercepted_ports=tuple(int(p) for p in data.get("intercepted_ports", ())),
+        reason=str(data.get("reason", "")),
+    )
 
 
 def _str_pairs(scan_id: int, raw: Any) -> tuple[tuple[str, str], ...]:

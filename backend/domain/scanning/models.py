@@ -10,7 +10,7 @@ kein Netzwerk-I/O.
 """
 
 import ipaddress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -67,6 +67,39 @@ class PortInfo:
     port: int
     state: str
     service: str = ""
+
+
+@dataclass(frozen=True)
+class PortInterception:
+    """Ergebnis der EINEN Gegenprobe je Scan gegen lokal abgefangene Ports.
+
+    Fachliche Lage (Befund 53): Auf der messenden Maschine kann ein
+    Sicherheitsprogramm bestimmte Ports LOKAL abfangen. Der Verbindungsaufbau
+    gelingt dann gegen JEDE Adresse -- auch gegen eine, an der kein Geraet
+    existiert. Ein so gemessener Port ist keine Eigenschaft des entfernten
+    Geraets, sondern des messenden Rechners; er darf nicht als offener Port
+    fortgeschrieben und nicht sicherheitsbewertet werden.
+
+    ``checked`` trennt die beiden Zustaende, die nach aussen NICHT dasselbe sind:
+
+    * ``checked=True``  -- die Gegenprobe lief. ``intercepted_ports`` ist dann
+      das Ergebnis; leer heisst "geprueft, nichts gefunden".
+    * ``checked=False`` -- die Gegenprobe lief NICHT (zu wenige geeignete
+      Kontroll-Adressen, oder sie ist mit einer Ausnahme ausgefallen). Es wurde
+      NICHT gefiltert. ``reason`` benennt den Grund im Klartext. KEIN stiller
+      Rueckfall auf weniger Adressen oder auf gar keine Pruefung -- ein "wir
+      haben nicht geprueft" muss vom "wir haben geprueft und nichts gefunden"
+      unterscheidbar bleiben (ADR 0001: keine stillen Fallbacks).
+
+    ``control_ips`` sind die tatsaechlich gemessenen Kontroll-Adressen (leer,
+    wenn nicht geprueft wurde); ihre Anzahl macht nachvollziehbar, auf wie
+    vielen Adressen der Befund beruht.
+    """
+
+    checked: bool = False
+    control_ips: tuple[str, ...] = ()
+    intercepted_ports: tuple[int, ...] = ()
+    reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -169,3 +202,9 @@ class ScanRecord:
     hosts: tuple[EnrichedHost, ...]
     host_count: int = 0
     scanned_at: str = ""
+    # Ergebnis der Gegenprobe gegen lokal abgefangene Ports (Befund 53). Sitzt am
+    # RECORD, nicht am Host: der Abfaenger ist eine Eigenschaft des messenden
+    # Rechners, nicht eines einzelnen Ziels -- die Gegenprobe laeuft EINMAL je
+    # Scan. Der Default (``checked=False``) gilt fuer Altbestand aus der Zeit vor
+    # dieser Etappe: dort wurde nicht geprueft, und genau das sagt der Wert aus.
+    interception: PortInterception = field(default_factory=PortInterception)

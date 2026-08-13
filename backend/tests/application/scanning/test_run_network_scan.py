@@ -28,9 +28,11 @@ from domain.scanning import (
     EnrichedHost,
     HostEnriched,
     HostFound,
+    Info,
     MdnsService,
     PhaseChanged,
     PortInfo,
+    PortInterception,
     ScanCompleted,
     ScanConfig,
     ScanEvent,
@@ -65,11 +67,48 @@ class _FakeDiscovery:
 class _FakePortScanner:
     def __init__(self, ports_per_ip: dict[str, list[PortInfo]] | None = None) -> None:
         self._ports = ports_per_ip or {}
+        # Jede gescannte IP in Aufrufreihenfolge -- belegt, wie oft und wogegen
+        # gemessen wurde (Gegenprobe: EINMAL je Scan, nicht je Geraet).
+        self.scanned_ips: list[str] = []
 
     async def scan(
         self, ip: str, ports: Sequence[int], mode: str, timeout: float, max_concurrent: int
     ) -> list[PortInfo]:
+        self.scanned_ips.append(ip)
         return self._ports.get(ip, [])
+
+
+class _InterceptingPortScanner:
+    """Simuliert einen LOKALEN Abfaenger: bestimmte Ports antworten auf JEDER Adresse.
+
+    ``intercepted_on`` sind die Adressen, auf denen die ``intercepted``-Ports
+    zusaetzlich antworten -- ``None`` heisst "auf allen" (der echte Abfaenger-Fall).
+    Damit laesst sich auch der Teilfall bauen, in dem ein Port nur auf ZWEI der
+    drei Kontroll-Adressen antwortet (dann ist es kein Abfaenger, sondern ein
+    ping-stilles Geraet, und es darf NICHT gefiltert werden).
+    """
+
+    def __init__(
+        self,
+        *,
+        real_ports: dict[str, list[PortInfo]] | None = None,
+        intercepted: Sequence[PortInfo] = (),
+        intercepted_on: set[str] | None = None,
+    ) -> None:
+        self._real = real_ports or {}
+        self._intercepted = list(intercepted)
+        self._intercepted_on = intercepted_on
+        self.scanned_ips: list[str] = []
+
+    async def scan(
+        self, ip: str, ports: Sequence[int], mode: str, timeout: float, max_concurrent: int
+    ) -> list[PortInfo]:
+        self.scanned_ips.append(ip)
+        result = list(self._real.get(ip, []))
+        if self._intercepted_on is None or ip in self._intercepted_on:
+            known = {info.port for info in result}
+            result.extend(info for info in self._intercepted if info.port not in known)
+        return result
 
 
 class _RaisingPortScanner:
@@ -150,13 +189,19 @@ class _FakeFritzHosts:
 class _FakeScanHistory:
     def __init__(self) -> None:
         self.saved: tuple[str, tuple[EnrichedHost, ...]] | None = None
+        # Das Gegenproben-Ergebnis, mit dem ``save`` gerufen wurde (Befund 53).
+        self.saved_interception: PortInterception | None = None
 
-    def save(self, cidr: str, hosts: Sequence[EnrichedHost]) -> None:
+    def save(
+        self, cidr: str, hosts: Sequence[EnrichedHost], interception: PortInterception
+    ) -> None:
         self.saved = (cidr, tuple(hosts))
+        self.saved_interception = interception
 
     def clear_all(self) -> None:
         """Verwirft den zuletzt gespeicherten Scan (No-op-Vertrag fuer den Fake)."""
         self.saved = None
+        self.saved_interception = None
 
     # list/get gehoeren zum Port-Protocol; der Use-Case ruft sie nicht, aber der
     # Fake muss den Vertrag strukturell vollstaendig erfuellen (mypy).
@@ -230,6 +275,11 @@ def test_full_run_event_sequence_and_save() -> None:
         "Progress",  # discovery tick
         "HostFound",
         "PhaseChanged",  # discovery done
+        # Gegenprobe auf abgefangene Ports (Befund 53): das /30 hat nach Abzug des
+        # gefundenen Hosts nur EINE freie Adresse -- zu wenig fuer die drei
+        # Kontroll-Adressen. Der "nicht geprueft"-Zustand wird BENANNT, daher
+        # dieser Info-Eintrag im Strom (statt stiller Nicht-Pruefung).
+        "Info",
         "PhaseChanged",  # enrich running
         "HostEnriched",
         "Progress",  # enrich
@@ -243,9 +293,10 @@ def test_full_run_event_sequence_and_save() -> None:
     assert events[3].vendor == "ACME"
     assert events[3].is_unknown is True
     assert events[4] == PhaseChanged(phase="discovery", status="done", alive_count=1)
-    assert events[5] == PhaseChanged(phase="enrich", status="running", total=1)
+    assert isinstance(events[5], Info)  # Gegenprobe: "nicht geprueft" (siehe oben)
+    assert events[6] == PhaseChanged(phase="enrich", status="running", total=1)
 
-    host_enriched = events[6]
+    host_enriched = events[7]
     assert isinstance(host_enriched, HostEnriched)
     assert host_enriched.host.ip == "192.168.1.2"
     assert host_enriched.host.ports == (PortInfo(port=22, state="open", service="ssh"),)
@@ -701,6 +752,282 @@ def test_multiple_cidrs_aggregated() -> None:
     assert events[-1] == ScanCompleted(total_found=2)
     assert history.saved is not None
     assert history.saved[0] == "10.0.0.0/30,10.0.1.0/30"
+
+
+# ── Gegenprobe: lokal abgefangene Ports (Befund 53) ─────────────────────────
+#
+# Testnetz durchgehend 192.168.1.0/29 mit den Geraeten .2 und .4. Die Auswahl
+# (``pick_control_addresses``) liefert dort die drei Kontroll-Adressen .1, .3, .5
+# -- gleichmaessig gestreut ueber die verbleibenden Kandidaten .1/.3/.5/.6.
+
+_CONTROL_IPS = ("192.168.1.1", "192.168.1.3", "192.168.1.5")
+
+
+def _interception_config(cidr: str = "192.168.1.0/29") -> ScanConfig:
+    """Scan-Config mit Portscan an, alles andere aus (nur die Gegenprobe im Blick)."""
+    return ScanConfig(
+        cidrs=(cidr,),
+        port_scan=True,
+        mdns_scan=False,
+        ssdp_scan=False,
+        resolve_hostnames=False,
+    )
+
+
+def _open_ports_by_ip(events: list[ScanEvent]) -> dict[str, set[int]]:
+    """Offene Port-Nummern je enriched Host."""
+    return {
+        e.host.ip: {p.port for p in e.host.ports} for e in events if isinstance(e, HostEnriched)
+    }
+
+
+def test_port_answering_on_all_three_controls_is_removed_from_every_host() -> None:
+    """Test 1: Ein auf ALLEN drei Kontroll-Adressen antwortender Port verschwindet ueberall."""
+    hosts = [
+        DiscoveredHost(ip="192.168.1.2", mac="AA:BB:CC:DD:EE:01", rtt_ms=1.0),
+        DiscoveredHost(ip="192.168.1.4", mac="AA:BB:CC:DD:EE:02", rtt_ms=2.0),
+    ]
+    discovery = _FakeDiscovery({"192.168.1.0/29": hosts})
+    scanner = _InterceptingPortScanner(
+        real_ports={
+            "192.168.1.2": [PortInfo(port=22, state="open", service="ssh")],
+            "192.168.1.4": [PortInfo(port=80, state="open", service="http")],
+        },
+        # Port 25 wird lokal abgefangen -> antwortet auf JEDER Adresse.
+        intercepted=[PortInfo(port=25, state="open", service="smtp")],
+    )
+    use_case, _, history = _make_use_case(discovery=discovery, port_scanner=scanner)
+
+    events = _run(use_case, _interception_config())
+    open_ports = _open_ports_by_ip(events)
+
+    # Der abgefangene Port 25 ist bei BEIDEN Geraeten weg; die echten bleiben.
+    assert open_ports == {"192.168.1.2": {22}, "192.168.1.4": {80}}
+
+    # Am Ergebnis steht, was erkannt wurde und worauf geprueft wurde.
+    assert history.saved_interception is not None
+    assert history.saved_interception.checked is True
+    assert history.saved_interception.intercepted_ports == (25,)
+    assert history.saved_interception.control_ips == _CONTROL_IPS
+
+
+def test_port_answering_on_only_two_controls_stays() -> None:
+    """Test 2: Antwortet ein Port nur auf ZWEI der drei Kontroll-Adressen, bleibt er stehen.
+
+    Fachlich: ein ping-stilles Geraet auf einer Kontroll-Adresse darf den Befund
+    nicht kippen. Nur "auf ALLEN drei" gilt als abgefangen.
+    """
+    host = DiscoveredHost(ip="192.168.1.2", mac="AA:BB:CC:DD:EE:01", rtt_ms=1.0)
+    discovery = _FakeDiscovery({"192.168.1.0/29": [host]})
+    scanner = _InterceptingPortScanner(
+        real_ports={"192.168.1.2": [PortInfo(port=22, state="open", service="ssh")]},
+        intercepted=[PortInfo(port=25, state="open", service="smtp")],
+        # Nur zwei der drei Kontroll-Adressen antworten auf 25.
+        intercepted_on={"192.168.1.1", "192.168.1.3", "192.168.1.2"},
+    )
+    use_case, _, history = _make_use_case(discovery=discovery, port_scanner=scanner)
+
+    events = _run(use_case, _interception_config())
+
+    # Port 25 bleibt beim Geraet stehen -- keine Mehrheitsregel, nur Einstimmigkeit.
+    assert _open_ports_by_ip(events) == {"192.168.1.2": {22, 25}}
+    assert history.saved_interception is not None
+    assert history.saved_interception.checked is True
+    assert history.saved_interception.intercepted_ports == ()
+
+
+def test_ports_answering_on_no_control_are_untouched() -> None:
+    """Test 3: Ports, die auf keiner Kontroll-Adresse antworten, bleiben unberuehrt."""
+    host = DiscoveredHost(ip="192.168.1.2", mac="AA:BB:CC:DD:EE:01", rtt_ms=1.0)
+    discovery = _FakeDiscovery({"192.168.1.0/29": [host]})
+    # Kontroll-Adressen liefern NICHTS (kein Abfaenger) -- der Normalfall.
+    scanner = _FakePortScanner(
+        {
+            "192.168.1.2": [
+                PortInfo(port=22, state="open", service="ssh"),
+                PortInfo(port=443, state="open", service="https"),
+            ]
+        }
+    )
+    use_case, _, history = _make_use_case(discovery=discovery, port_scanner=scanner)
+
+    events = _run(use_case, _interception_config())
+
+    assert _open_ports_by_ip(events) == {"192.168.1.2": {22, 443}}
+    # "Geprueft, nichts gefunden" -- ausdruecklich checked=True mit leerer Liste.
+    assert history.saved_interception is not None
+    assert history.saved_interception.checked is True
+    assert history.saved_interception.intercepted_ports == ()
+
+
+def test_too_few_control_addresses_means_not_checked_and_no_filtering() -> None:
+    """Test 4: Ohne drei geeignete Adressen wird NICHT gefiltert -- Zustand "nicht geprueft".
+
+    /30 hat genau zwei Host-Adressen; eine davon ist das gefundene Geraet, es
+    bleibt eine einzige Kandidatin -- zu wenig. Kein stiller Rueckfall auf eine
+    oder zwei Adressen, und der Unterschied zu "geprueft, nichts gefunden" muss
+    am Ergebnis ablesbar sein.
+    """
+    host = DiscoveredHost(ip="192.168.1.1", mac="AA:BB:CC:DD:EE:01", rtt_ms=1.0)
+    discovery = _FakeDiscovery({"192.168.1.0/30": [host]})
+    scanner = _InterceptingPortScanner(
+        real_ports={"192.168.1.1": [PortInfo(port=22, state="open", service="ssh")]},
+        intercepted=[PortInfo(port=25, state="open", service="smtp")],
+    )
+    use_case, _, history = _make_use_case(discovery=discovery, port_scanner=scanner)
+
+    events = _run(use_case, _interception_config("192.168.1.0/30"))
+
+    # Es wurde NICHT gefiltert: Port 25 steht trotz "antwortet ueberall" noch da.
+    assert _open_ports_by_ip(events) == {"192.168.1.1": {22, 25}}
+
+    saved = history.saved_interception
+    assert saved is not None
+    # "nicht geprueft" -- unterscheidbar von "geprueft, nichts gefunden" (Test 3):
+    # dort checked=True, hier checked=False MIT Grund.
+    assert saved.checked is False
+    assert saved.intercepted_ports == ()
+    assert saved.control_ips == ()
+    assert saved.reason != ""
+
+    # Und es wird benannt: ein Info-Protokolleintrag im Ereignisstrom.
+    infos = [e.message for e in events if isinstance(e, Info)]
+    assert len(infos) == 1
+    assert "Gegenprobe" in infos[0]
+
+
+def test_os_detection_sees_the_cleaned_port_list() -> None:
+    """Test 5: Die Betriebssystem-Erkennung sieht die BEREINIGTE Portliste.
+
+    Konstruktion: 22 + 9100 klassifiziert als Drucker (9100 = Jetdirect schlaegt
+    durch). Wird 9100 lokal abgefangen und bleibt nur 22 (SSH) uebrig, muss der
+    Host als Linux-Server herauskommen -- die Bereinigung greift also VOR
+    ``classify_host``, und zwar sowohl fuer ``os_guess`` als auch ``category``.
+    """
+    host = DiscoveredHost(ip="192.168.1.2", mac="AA:BB:CC:DD:EE:01", rtt_ms=1.0)
+
+    # Referenzmessung OHNE Abfaenger: 22 + 9100 -> Drucker.
+    plain = _FakePortScanner(
+        {
+            "192.168.1.2": [
+                PortInfo(port=22, state="open", service="ssh"),
+                PortInfo(port=9100, state="open", service="jetdirect"),
+            ]
+        }
+    )
+    use_case, _, _ = _make_use_case(
+        discovery=_FakeDiscovery({"192.168.1.0/29": [host]}), port_scanner=plain
+    )
+    reference = [e for e in _run(use_case, _interception_config()) if isinstance(e, HostEnriched)]
+    assert reference[0].host.os_guess == "Printer"
+    assert reference[0].host.category == "printer"
+
+    # Jetzt derselbe Host, aber 9100 wird lokal abgefangen.
+    scanner = _InterceptingPortScanner(
+        real_ports={"192.168.1.2": [PortInfo(port=22, state="open", service="ssh")]},
+        intercepted=[PortInfo(port=9100, state="open", service="jetdirect")],
+    )
+    use_case2, _, _ = _make_use_case(
+        discovery=_FakeDiscovery({"192.168.1.0/29": [host]}), port_scanner=scanner
+    )
+    events = _run(use_case2, _interception_config())
+
+    enriched = [e for e in events if isinstance(e, HostEnriched)]
+    assert len(enriched) == 1
+    assert {p.port for p in enriched[0].host.ports} == {22}
+    # Ohne den abgefangenen 9100 faellt die Klassifikation anders aus.
+    assert enriched[0].host.os_guess == "Linux"
+    assert enriched[0].host.category == "server"
+
+
+def test_interception_result_reaches_the_saved_scan_record() -> None:
+    """Test 6: Die erkannten Ports stehen am Ergebnis und ueberleben den Weg in den Record."""
+    host = DiscoveredHost(ip="192.168.1.2", mac="AA:BB:CC:DD:EE:01", rtt_ms=1.0)
+    discovery = _FakeDiscovery({"192.168.1.0/29": [host]})
+    scanner = _InterceptingPortScanner(
+        real_ports={"192.168.1.2": [PortInfo(port=22, state="open", service="ssh")]},
+        intercepted=[
+            PortInfo(port=25, state="open", service="smtp"),
+            PortInfo(port=143, state="open", service="imap"),
+        ],
+    )
+    use_case, _, history = _make_use_case(discovery=discovery, port_scanner=scanner)
+
+    _run(use_case, _interception_config())
+
+    saved = history.saved_interception
+    assert saved is not None
+    # Beide erkannten Ports, sortiert, und die Zahl der geprueften Adressen.
+    assert saved.intercepted_ports == (25, 143)
+    assert len(saved.control_ips) == 3
+    assert saved.checked is True
+
+
+def test_interception_failure_does_not_break_the_scan_and_does_not_filter() -> None:
+    """Test 7: Faellt die Gegenprobe mit einer Ausnahme aus, laeuft der Scan weiter.
+
+    Es wird NICHT gefiltert, und der Zustand ist derselbe "nicht geprueft" wie in
+    Test 4 -- nur mit anderem Grund.
+    """
+
+    class _FailOnControlScanner:
+        """Wirft NUR fuer die Kontroll-Adressen; die Geraete-Scans laufen normal."""
+
+        def __init__(self) -> None:
+            self.scanned_ips: list[str] = []
+
+        async def scan(
+            self, ip: str, ports: Sequence[int], mode: str, timeout: float, max_concurrent: int
+        ) -> list[PortInfo]:
+            self.scanned_ips.append(ip)
+            if ip in _CONTROL_IPS:
+                raise _FakeNmapError("Gegenprobe kaputt")
+            return [PortInfo(port=25, state="open", service="smtp")]
+
+    host = DiscoveredHost(ip="192.168.1.2", mac="AA:BB:CC:DD:EE:01", rtt_ms=1.0)
+    discovery = _FakeDiscovery({"192.168.1.0/29": [host]})
+    use_case, _, history = _make_use_case(discovery=discovery, port_scanner=_FailOnControlScanner())
+
+    events = _run(use_case, _interception_config())
+
+    # Der Scan lief VOLLSTAENDIG durch -- bis ScanCompleted, inkl. save.
+    assert events[-1] == ScanCompleted(total_found=1)
+    assert history.saved is not None
+
+    # Es wurde NICHT gefiltert: Port 25 steht beim Geraet.
+    assert _open_ports_by_ip(events) == {"192.168.1.2": {25}}
+
+    saved = history.saved_interception
+    assert saved is not None
+    assert saved.checked is False  # derselbe Zustand wie Test 4
+    assert saved.intercepted_ports == ()
+    assert "_FakeNmapError" in saved.reason
+
+    infos = [e.message for e in events if isinstance(e, Info)]
+    assert len(infos) == 1
+    assert "Gegenprobe" in infos[0]
+
+
+def test_interception_probe_runs_once_per_scan_not_per_host() -> None:
+    """Test 8: Die Gegenprobe laeuft EINMAL je Scan -- belegt ueber die Attrappen-Aufrufe."""
+    hosts = [
+        DiscoveredHost(ip="192.168.1.2", mac="AA:BB:CC:DD:EE:01", rtt_ms=1.0),
+        DiscoveredHost(ip="192.168.1.4", mac="AA:BB:CC:DD:EE:02", rtt_ms=2.0),
+    ]
+    discovery = _FakeDiscovery({"192.168.1.0/29": hosts})
+    scanner = _FakePortScanner()
+    use_case, _, _ = _make_use_case(discovery=discovery, port_scanner=scanner)
+
+    _run(use_case, _interception_config())
+
+    # Genau drei Kontroll-Messungen (eine je Kontroll-Adresse) fuer den ganzen
+    # Scan -- NICHT drei je Geraet. Bei zwei Geraeten waeren das sonst sechs.
+    control_calls = [ip for ip in scanner.scanned_ips if ip in _CONTROL_IPS]
+    assert control_calls == list(_CONTROL_IPS)
+
+    # Insgesamt: 3 Kontroll-Messungen + 2 Geraete-Messungen.
+    assert len(scanner.scanned_ips) == 5
+    assert scanner.scanned_ips[:3] == list(_CONTROL_IPS)  # Gegenprobe VOR dem Enrich
 
 
 # ── MAC-Gruppierung: eine MAC = ein Geraet (Proxy-ARP/Spoofing) ─────────────

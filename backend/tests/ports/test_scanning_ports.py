@@ -34,6 +34,7 @@ from domain.scanning import (
     EnrichedHost,
     MdnsService,
     PortInfo,
+    PortInterception,
     ScanRecord,
     ScanSummary,
     SsdpService,
@@ -113,7 +114,9 @@ class _FakeArpTable:
 
 
 class _FakeScanHistory:
-    def save(self, cidr: str, hosts: Sequence[EnrichedHost]) -> None:
+    def save(
+        self, cidr: str, hosts: Sequence[EnrichedHost], interception: PortInterception
+    ) -> None:
         return None
 
     def list(self, limit: int) -> list[ScanSummary]:
@@ -207,7 +210,7 @@ def test_ipv6_enrich_preserves_hosts() -> None:
 
 def test_scan_history_roundtrip_shape() -> None:
     repo: ScanHistoryRepository = _FakeScanHistory()
-    repo.save("10.0.0.0/24", ())
+    repo.save("10.0.0.0/24", (), PortInterception())
     summaries = repo.list(20)
     assert summaries[0].cidr == "10.0.0.0/24"
     assert isinstance(repo.get(1), ScanRecord)

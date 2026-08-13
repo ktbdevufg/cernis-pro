@@ -24,7 +24,7 @@ from api.scanning import (
 )
 from app import create_app
 from application.scanning import GetArpTable, GetScanDetail, GetScanHistory, LookupVendor
-from domain.scanning import EnrichedHost, PortInfo
+from domain.scanning import EnrichedHost, PortInfo, PortInterception
 from infrastructure.clock import SystemClock
 from infrastructure.config import AppConfig
 from infrastructure.scanning.scan_history import SqliteScanHistoryRepository
@@ -71,7 +71,11 @@ def client(repo: SqliteScanHistoryRepository) -> Iterator[TestClient]:
 def test_history_lists_entries_without_blob(
     client: TestClient, repo: SqliteScanHistoryRepository
 ) -> None:
-    repo.save("192.168.1.0/24", (EnrichedHost(ip="192.168.1.2", mac="AA:BB:CC:DD:EE:01"),))
+    repo.save(
+        "192.168.1.0/24",
+        (EnrichedHost(ip="192.168.1.2", mac="AA:BB:CC:DD:EE:01"),),
+        PortInterception(),
+    )
     body = client.get("/api/history").json()
     assert len(body) == 1
     entry = body[0]
@@ -99,7 +103,7 @@ def test_history_detail_roundtrips_hosts(
         category="server",
         source="arp",  # nicht-Default -> beweist source-Durchstich ueber REST (S.7f)
     )
-    repo.save("10.0.0.0/24", (host,))
+    repo.save("10.0.0.0/24", (host,), PortInterception())
     scan_id = repo.list(20)[0].scan_id
 
     body = client.get(f"/api/history/{scan_id}").json()
@@ -120,6 +124,49 @@ def test_history_detail_roundtrips_hosts(
 
 def test_history_detail_unknown_returns_404(client: TestClient) -> None:
     assert client.get("/api/history/9999").status_code == 404
+
+
+def test_history_detail_exposes_interception(
+    client: TestClient, repo: SqliteScanHistoryRepository
+) -> None:
+    """Das Gegenproben-Ergebnis (Befund 53) ist ueber die REST-Schnittstelle abrufbar."""
+    repo.save(
+        "10.0.0.0/24",
+        (),
+        PortInterception(
+            checked=True,
+            control_ips=("10.0.0.1", "10.0.0.85", "10.0.0.170"),
+            intercepted_ports=(25, 143),
+        ),
+    )
+    scan_id = repo.list(20)[0].scan_id
+
+    got = client.get(f"/api/history/{scan_id}").json()["interception"]
+    assert got == {
+        "checked": True,
+        "control_ips": ["10.0.0.1", "10.0.0.85", "10.0.0.170"],
+        "intercepted_ports": [25, 143],
+        "reason": "",
+    }
+
+
+def test_history_detail_distinguishes_not_checked_from_nothing_found(
+    client: TestClient, repo: SqliteScanHistoryRepository
+) -> None:
+    """Ueber die Schnittstelle bleibt "nicht geprueft" von "nichts gefunden" trennbar."""
+    repo.save("10.0.0.0/24", (), PortInterception(checked=False, reason="Zu wenige Adressen."))
+    not_checked_id = repo.list(20)[0].scan_id
+    repo.save("10.0.1.0/24", (), PortInterception(checked=True, control_ips=("10.0.1.1",)))
+    checked_id = repo.list(20)[0].scan_id
+
+    not_checked = client.get(f"/api/history/{not_checked_id}").json()["interception"]
+    checked = client.get(f"/api/history/{checked_id}").json()["interception"]
+
+    # Beide melden eine leere Portliste -- der Unterschied steckt in ``checked``.
+    assert not_checked["intercepted_ports"] == checked["intercepted_ports"] == []
+    assert not_checked["checked"] is False
+    assert not_checked["reason"] == "Zu wenige Adressen."
+    assert checked["checked"] is True
 
 
 # ── /api/vendor/{mac} ────────────────────────────────────────────────────────

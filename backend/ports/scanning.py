@@ -38,6 +38,7 @@ from domain.scanning import (
     EnrichedHost,
     MdnsService,
     PortInfo,
+    PortInterception,
     ScanRecord,
     ScanSummary,
     SsdpService,
@@ -212,8 +213,20 @@ class ScanHistoryRepository(Protocol):
     (S.4), nicht in der Domaene. ``save`` nimmt die fertigen Domaenen-Objekte.
     """
 
-    def save(self, cidr: str, hosts: Sequence[EnrichedHost]) -> None:
-        """Legt einen Scan-Eintrag an (``cidr`` + die gefundenen Hosts)."""
+    def save(
+        self,
+        cidr: str,
+        hosts: Sequence[EnrichedHost],
+        interception: PortInterception,
+    ) -> None:
+        """Legt einen Scan-Eintrag an (``cidr`` + Hosts + Gegenproben-Ergebnis).
+
+        ``interception`` ist das Ergebnis der EINEN Gegenprobe dieses Scans
+        (Befund 53) -- es haengt am Scan, nicht am einzelnen Host, weil der
+        lokale Abfaenger eine Eigenschaft der messenden Maschine ist. Der
+        Adapter muss auch den ``checked=False``-Zustand ("nicht geprueft")
+        speichern; er ist NICHT dasselbe wie "geprueft, nichts gefunden".
+        """
         ...
 
     def list(self, limit: int) -> list[ScanSummary]:
