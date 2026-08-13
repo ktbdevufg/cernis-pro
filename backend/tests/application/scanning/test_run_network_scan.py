@@ -303,7 +303,8 @@ def test_full_run_event_sequence_and_save() -> None:
     # SSH allein -> classify_host: Linux-Server (verhaltensgleich Altcode).
     assert host_enriched.host.category == "server"
     assert host_enriched.host.os_guess == "Linux"
-    assert events[-1] == ScanCompleted(total_found=1)
+    assert isinstance(events[-1], ScanCompleted)
+    assert events[-1].total_found == 1
 
     # IPv6-enrich + ScanHistory.save am Ende aufgerufen.
     assert ipv6.called_with is not None
@@ -477,7 +478,8 @@ def test_arp_host_runs_through_enrich() -> None:
     assert history.saved is not None
     assert history.saved[1][0].ip == "10.0.0.7"
     assert ipv6.called_with is not None and ipv6.called_with[0].ip == "10.0.0.7"
-    assert events[-1] == ScanCompleted(total_found=1)
+    assert isinstance(events[-1], ScanCompleted)
+    assert events[-1].total_found == 1
 
 
 def test_arp_skips_host_outside_scanned_cidrs() -> None:
@@ -865,7 +867,8 @@ def test_no_alive_hosts() -> None:
 
     assert not [e for e in events if isinstance(e, HostFound)]
     assert not [e for e in events if isinstance(e, HostEnriched)]
-    assert events[-1] == ScanCompleted(total_found=0)
+    assert isinstance(events[-1], ScanCompleted)
+    assert events[-1].total_found == 0
     # save wird trotzdem aufgerufen (leerer Scan ist ein gueltiger Scan).
     assert history.saved is not None
     assert history.saved[1] == ()
@@ -892,7 +895,8 @@ def test_multiple_cidrs_aggregated() -> None:
     found = [e for e in events if isinstance(e, HostFound)]
     assert {f.ip for f in found} == {"10.0.0.1", "10.0.1.1"}
     assert events[0] == ScanStarted(cidr="10.0.0.0/30,10.0.1.0/30", total_hosts=4)
-    assert events[-1] == ScanCompleted(total_found=2)
+    assert isinstance(events[-1], ScanCompleted)
+    assert events[-1].total_found == 2
     assert history.saved is not None
     assert history.saved[0] == "10.0.0.0/30,10.0.1.0/30"
 
@@ -1106,6 +1110,45 @@ def test_interception_result_reaches_the_saved_scan_record() -> None:
     assert saved.checked is True
 
 
+def test_interception_result_also_travels_on_the_completion_event() -> None:
+    """S86-A11/B1: Das Gegenproben-Ergebnis reist AUSSERDEM im Abschluss-Ereignis.
+
+    Der Live-Weg braucht den Hinweis zu genau DIESEM Lauf; der Record-Weg (Test 6)
+    bleibt daneben unveraendert bestehen.
+    """
+    host = DiscoveredHost(ip="192.168.1.2", mac="AA:BB:CC:DD:EE:01", rtt_ms=1.0)
+    discovery = _FakeDiscovery({"192.168.1.0/29": [host]})
+    scanner = _InterceptingPortScanner(
+        real_ports={"192.168.1.2": [PortInfo(port=22, state="open", service="ssh")]},
+        intercepted=[PortInfo(port=25, state="open", service="smtp")],
+    )
+    use_case, _, history = _make_use_case(discovery=discovery, port_scanner=scanner)
+
+    events = _run(use_case, _interception_config())
+
+    completed = events[-1]
+    assert isinstance(completed, ScanCompleted)
+    assert completed.total_found == 1  # unveraendert
+    assert completed.interception.checked is True
+    assert completed.interception.intercepted_ports == (25,)
+    # Ereignis und Record tragen DASSELBE Ergebnis -- eine Messung, zwei Wege.
+    assert completed.interception == history.saved_interception
+
+
+def test_completion_event_without_findings_carries_an_empty_list() -> None:
+    """Geprueft und nichts gefunden: ``checked`` true, ``intercepted_ports`` leer."""
+    host = DiscoveredHost(ip="192.168.1.2", mac="AA:BB:CC:DD:EE:01", rtt_ms=1.0)
+    discovery = _FakeDiscovery({"192.168.1.0/29": [host]})
+    use_case, _, _ = _make_use_case(discovery=discovery, port_scanner=_FakePortScanner())
+
+    events = _run(use_case, _interception_config())
+
+    completed = events[-1]
+    assert isinstance(completed, ScanCompleted)
+    assert completed.interception.checked is True
+    assert completed.interception.intercepted_ports == ()
+
+
 def test_interception_failure_does_not_break_the_scan_and_does_not_filter() -> None:
     """Test 7: Faellt die Gegenprobe mit einer Ausnahme aus, laeuft der Scan weiter.
 
@@ -1134,7 +1177,11 @@ def test_interception_failure_does_not_break_the_scan_and_does_not_filter() -> N
     events = _run(use_case, _interception_config())
 
     # Der Scan lief VOLLSTAENDIG durch -- bis ScanCompleted, inkl. save.
-    assert events[-1] == ScanCompleted(total_found=1)
+    assert isinstance(events[-1], ScanCompleted)
+    assert events[-1].total_found == 1
+    # Auch das Abschluss-Ereignis traegt den "nicht geprueft"-Zustand -- der
+    # Live-Weg darf ihn nicht als "geprueft, nichts gefunden" missdeuten.
+    assert events[-1].interception.checked is False
     assert history.saved is not None
 
     # Es wurde NICHT gefiltert: Port 25 steht beim Geraet.
@@ -1256,7 +1303,8 @@ def test_proxy_arp_macs_collapse_to_one_host_with_additional_ips() -> None:
         if isinstance(e, PhaseChanged) and e.phase == "discovery" and e.status == "done"
     )
     assert disc_done.alive_count == 1
-    assert events[-1] == ScanCompleted(total_found=1)
+    assert isinstance(events[-1], ScanCompleted)
+    assert events[-1].total_found == 1
 
     # Der gespeicherte Scan enthaelt genau den einen primaeren Host.
     assert history.saved is not None

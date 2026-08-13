@@ -122,6 +122,11 @@ function ScanInhalt() {
   const [scanError, setScanError] = useState(null);
   // Metadaten des zuletzt geladenen/abgeschlossenen Scans oder null.
   const [letzterScan, setLetzterScan] = useState(null);
+  // Lokal abgefangene Ports des ZULETZT abgeschlossenen Scans (Befund 53):
+  // Array der Portnummern, leer = kein Hinweis. Kommt aus dem scan_complete-
+  // Frame des Live-Stroms, NICHT aus der History — der Hinweis gehört zu dem
+  // Ergebnis, das der Anwender gerade vor sich hat.
+  const [abgefangenePorts, setAbgefangenePorts] = useState([]);
   // Gewähltes Gerät über seinen stabilen Schlüssel (MAC oder, ohne MAC, IP);
   // null = keins. Der Schlüssel deckt auch Hosts ohne MAC kollisionsfrei ab.
   const [gewaehlterSchluessel, setGewaehlterSchluessel] = useState(null);
@@ -311,6 +316,10 @@ function ScanInhalt() {
     setScanError(null);
     setFortschritt(null);
     setPhase(null);
+    // Der Hinweis auf abgefangene Ports gehört zum jeweiligen Lauf: beim Start
+    // eines neuen Scans verschwindet er. Ein Hinweis aus einem alten Lauf wäre
+    // schlimmer als keiner.
+    setAbgefangenePorts([]);
     setScanLaeuft(true);
 
     streamRef.current = starteScanStream({
@@ -356,11 +365,20 @@ function ScanInhalt() {
       },
       onStarted: () => {},
       onInfo: () => {},
-      onComplete: () => {
+      onComplete: (frame) => {
         setScanLaeuft(false);
         setFortschritt(null);
         setPhase(null);
         streamRef.current = null;
+        // Lokal abgefangene Ports aus dem Abschluss-Frame übernehmen (Befund 53).
+        // Nur echte Zahlen; ein fehlendes/unerwartetes Feld ergibt schlicht eine
+        // leere Liste und damit keinen Hinweis. Der Fall "nicht geprüft"
+        // (checked === false) bekommt bewusst KEINE eigene Anzeige — er steht
+        // bereits als Info-Zeile im Strom.
+        const roh = frame?.interception?.intercepted_ports;
+        setAbgefangenePorts(
+          Array.isArray(roh) ? roh.filter((p) => Number.isFinite(p)) : [],
+        );
         setLetzterScan({
           scannedAt: new Date().toISOString(),
           cidr: zielCidr,
@@ -561,6 +579,28 @@ function ScanInhalt() {
             when: new Date(letzterScan.scannedAt).toLocaleString(),
           })}
         </span>
+      )}
+
+      {/* Hinweis auf lokal abgefangene Ports (Befund 53): EINMAL je Scan, am
+          Ergebnis, sobald mindestens ein Port erkannt wurde — nicht je Gerät.
+          Derselbe ruhige Hinweis-Streifen wie der Scan-Fehlerpfad (neutraler
+          Ton, role="note"): es ist ein Hinweis, keine Warnung. Beim Start des
+          nächsten Scans ist die Liste wieder leer und der Streifen verschwindet.
+          count steuert die i18next-Pluralform (Bestandsmuster _one/_other),
+          anzahl füllt den Platzhalter im Text. */}
+      {abgefangenePorts.length > 0 && (
+        <div className="observe__hinweis" role="note">
+          <span className="observe__hinweis-title">
+            {t("beobachten.traffic.permissionTitle")}
+          </span>
+          <span className="observe__hinweis-text">
+            {t("beobachten.scan.interceptedPorts", {
+              count: abgefangenePorts.length,
+              anzahl: abgefangenePorts.length,
+              ports: abgefangenePorts.join(", "),
+            })}
+          </span>
+        </div>
       )}
 
       {zeigeLeer ? (

@@ -109,6 +109,9 @@ export function starteScanStream({
         break;
       case "scan_complete":
         // Einmal-Scan: nach complete selbst schließen, keine Callbacks mehr.
+        // Der Frame trägt seit S86-A11 zusätzlich frame.interception (Befund 53):
+        // { checked, intercepted_ports, reason }. Er wird ROH durchgereicht — die
+        // Ansicht entscheidet, was sie daraus zeigt.
         fertig = true;
         onComplete?.(frame);
         socket.close();

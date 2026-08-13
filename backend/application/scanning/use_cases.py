@@ -527,7 +527,10 @@ class RunNetworkScan:
         # geprueft wurde, wird nicht weggeworfen, sondern ist ueber die
         # History-Schnittstelle abrufbar.
         self._scan_history.save(cidr_display, enriched_hosts, interception)
-        yield ScanCompleted(total_found=len(discovered))
+        # ``interception`` reist AUSSERDEM im Abschluss-Ereignis mit: der Live-Weg
+        # soll den Hinweis zu genau DIESEM Lauf zeigen koennen, ohne ihn ueber die
+        # History nachzuschlagen (zweite Anfrage, koennte einen anderen Scan treffen).
+        yield ScanCompleted(total_found=len(discovered), interception=interception)
 
     async def _probe_interception(
         self, config: ScanConfig, discovered_ips: frozenset[str]

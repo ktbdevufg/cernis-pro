@@ -503,6 +503,8 @@
       "ifaceLabel": "Netzwerk-Schnittstelle",
       "cidrLabel": "Zu scannendes Netz (CIDR)",
       "cidrMissing": "Kein Netz angegeben.",
+      "interceptedPorts_one": "Ein Port wird auf diesem Rechner lokal abgefangen und deshalb nicht als Geräteeigenschaft gewertet: {{ports}}. Ursache ist meist ein Sicherheitsprogramm mit Mailschutz.",
+      "interceptedPorts_other": "{{anzahl}} Ports werden auf diesem Rechner lokal abgefangen und deshalb nicht als Geräteeigenschaft gewertet: {{ports}}. Ursache ist meist ein Sicherheitsprogramm mit Mailschutz.",
       "detail": {
         "close": "Schließen",
         "identity": {

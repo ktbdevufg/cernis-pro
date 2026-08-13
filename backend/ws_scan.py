@@ -184,8 +184,26 @@ def _event_to_frame(event: ScanEvent) -> dict[str, Any]:
             return _host_detail_frame(host)
         case Info(message=message):
             return {"type": "info", "message": message}
-        case ScanCompleted(total_found=total_found):
-            return {"type": "scan_complete", "total_found": total_found}
+        case ScanCompleted(total_found=total_found, interception=interception):
+            # ADDITIV: ``total_found`` bleibt unveraendert, bestehende Leser des
+            # Frames (u. a. der Agent-Scan-Client, der nur ``type`` auswertet)
+            # brechen nicht. ``intercepted_ports`` ist im Fall "geprueft, nichts
+            # gefunden" eine LEERE Liste -- ``checked`` trennt das vom Fall
+            # "nicht geprueft" (ADR 0001: kein stiller Fallback).
+            #
+            # ``control_ips`` wandern BEWUSST NICHT in den Live-Frame: sie sind
+            # Diagnose, keine Anwenderinformation, und die Scan-Ansicht ist der
+            # einzige Leser dieses Frames. Wer sie braucht, findet sie am
+            # gespeicherten Scan-Record (GET /api/history/{id}).
+            return {
+                "type": "scan_complete",
+                "total_found": total_found,
+                "interception": {
+                    "checked": interception.checked,
+                    "intercepted_ports": list(interception.intercepted_ports),
+                    "reason": interception.reason,
+                },
+            }
         case ScanError(message=message):
             return {"type": "error", "message": message}
         case _:

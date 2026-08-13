@@ -25,6 +25,7 @@ from domain.scanning import (
     HostFound,
     PhaseChanged,
     PortInfo,
+    PortInterception,
     Progress,
     ScanCompleted,
     ScanEvent,
@@ -305,7 +306,14 @@ def test_full_frame_sequence_matches_s1_contract() -> None:
         "status": "done",
         "alive_count": 1,
     }
-    assert frames[8] == {"type": "scan_complete", "total_found": 1}
+    # scan_complete traegt seit S86-A11 zusaetzlich das Gegenproben-Ergebnis
+    # (Befund 53). Ein ``ScanCompleted`` ohne explizite Gegenprobe faellt auf den
+    # Default zurueck: nicht geprueft, leere Portliste.
+    assert frames[8] == {
+        "type": "scan_complete",
+        "total_found": 1,
+        "interception": {"checked": False, "intercepted_ports": [], "reason": ""},
+    }
 
 
 def test_host_detail_frame_has_29_keys_incl_axis_b() -> None:
@@ -1156,3 +1164,97 @@ def test_weck_fehler_laesst_den_scan_unversehrt(monkeypatch: pytest.MonkeyPatch)
     # Und der Fehlschlag ist GELOGGT (stiller Fang waere S3).
     assert len(logged) == 1
     assert logged[0][0] == "scan_finished_hook_failed"
+
+
+# ── Gegenprobe reist im scan_complete-Frame mit (Befund 53, S86-A11/B1) ───────
+
+
+def test_scan_complete_traegt_die_abgefangenen_ports() -> None:
+    """Das Gegenproben-Ergebnis erreicht den ``scan_complete``-Frame.
+
+    Der Live-Weg traegt den Hinweis zu GENAU DIESEM Lauf; ein Nachschlag ueber die
+    History waere eine zweite Anfrage und koennte einen anderen Scan treffen.
+    """
+    events: list[ScanEvent] = [
+        ScanCompleted(
+            total_found=3,
+            interception=PortInterception(
+                checked=True,
+                control_ips=("10.0.0.251", "10.0.0.252"),
+                intercepted_ports=(25, 110, 143),
+            ),
+        )
+    ]
+    with _client(events).websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "10.0.0.0/24"})
+        frame = ws.receive_json()
+
+    assert frame["type"] == "scan_complete"
+    # total_found bleibt unveraendert -- die Erweiterung ist rein additiv.
+    assert frame["total_found"] == 3
+    assert frame["interception"]["checked"] is True
+    assert frame["interception"]["intercepted_ports"] == [25, 110, 143]
+    # Die Kontroll-Adressen sind Diagnose, keine Anwenderinformation -- sie
+    # wandern NICHT in den Live-Frame (nur an den gespeicherten Scan-Record).
+    assert "control_ips" not in frame["interception"]
+
+
+def test_scan_complete_ohne_befund_traegt_eine_leere_liste() -> None:
+    """Geprueft und nichts gefunden: ``checked`` true, ``intercepted_ports`` LEER.
+
+    Kein fehlendes Feld und kein null -- der Leser muss diesen Fall nicht raten.
+    """
+    events: list[ScanEvent] = [
+        ScanCompleted(
+            total_found=1,
+            interception=PortInterception(checked=True, control_ips=("10.0.0.251",)),
+        )
+    ]
+    with _client(events).websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "10.0.0.0/24"})
+        frame = ws.receive_json()
+
+    assert frame["interception"] == {
+        "checked": True,
+        "intercepted_ports": [],
+        "reason": "",
+    }
+
+
+def test_scan_complete_nicht_geprueft_bleibt_unterscheidbar() -> None:
+    """Nicht geprueft ist NICHT dasselbe wie geprueft-und-nichts-gefunden.
+
+    ``checked=False`` plus ``reason`` im Klartext (ADR 0001: kein stiller Fallback).
+    """
+    events: list[ScanEvent] = [
+        ScanCompleted(
+            total_found=1,
+            interception=PortInterception(checked=False, reason="Zu wenige Kontroll-Adressen."),
+        )
+    ]
+    with _client(events).websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "10.0.0.0/24"})
+        frame = ws.receive_json()
+
+    assert frame["interception"]["checked"] is False
+    assert frame["interception"]["intercepted_ports"] == []
+    assert frame["interception"]["reason"] == "Zu wenige Kontroll-Adressen."
+
+
+def test_bestehende_leser_von_scan_completed_brechen_nicht() -> None:
+    """Ein ``ScanCompleted`` OHNE Gegenprobe bleibt baubar und lesbar.
+
+    Das Feld ist additiv mit Default -- Erzeuger, die es nicht setzen (u. a. der
+    Fake im Test des geplanten Scans), bleiben gueltig; die Weck-Naht am Scan-Ende
+    laeuft unveraendert.
+    """
+    geweckt: list[int] = []
+    events: list[ScanEvent] = [ScanCompleted(total_found=2)]
+    client = _client(events, scan_finished_hook=lambda: geweckt.append(1))
+    with client.websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "10.0.0.0/24"})
+        frame = ws.receive_json()
+
+    assert frame["total_found"] == 2
+    assert frame["interception"] == {"checked": False, "intercepted_ports": [], "reason": ""}
+    assert geweckt == [1]

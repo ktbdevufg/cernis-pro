@@ -503,6 +503,8 @@
       "ifaceLabel": "Network interface",
       "cidrLabel": "Network to scan (CIDR)",
       "cidrMissing": "No network specified.",
+      "interceptedPorts_one": "One port is intercepted locally on this computer and is therefore not counted as a device property: {{ports}}. This is usually caused by security software with email protection.",
+      "interceptedPorts_other": "{{anzahl}} ports are intercepted locally on this computer and are therefore not counted as device properties: {{ports}}. This is usually caused by security software with email protection.",
       "detail": {
         "close": "Close",
         "identity": {
