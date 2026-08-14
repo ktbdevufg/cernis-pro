@@ -2475,6 +2475,7 @@
     "E-102": "Der Hintergrunddienst ist abgestürzt.",
     "E-103": "Der Start hat zu lange gedauert (Zeitüberschreitung).",
     "E-104": "Eine benötigte Komponente fehlt.",
+    "E-105": "Die Datenbank stammt aus einer neueren Programmversion.",
     "E-201": "Die Scan-Verbindung wurde unterbrochen.",
     "E-202": "Die Verbindung zum Monitoring/Logging ist getrennt.",
     "E-203": "Der Verkehr (Traffic) ist nicht erreichbar.",

@@ -26,6 +26,7 @@ export const CODES = Object.freeze({
   E_102: "E-102",
   E_103: "E-103",
   E_104: "E-104",
+  E_105: "E-105",
   // E-2xx Laufzeit-Verbindung
   E_201: "E-201",
   E_202: "E-202",

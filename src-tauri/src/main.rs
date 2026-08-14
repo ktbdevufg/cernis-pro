@@ -59,6 +59,14 @@ static ABBRUCH_ANGEFORDERT: AtomicBool = AtomicBool::new(false);
 // der den Child hinter dem Mutex ganz regulaer erreicht --, gab es keinen
 // Leser mehr; ein nur noch beschriebener Zustand ist toter Zustand.
 
+/// Rueckgabewert, mit dem sich das Backend selbst beendet, wenn es den Start
+/// wegen eines unbrauchbaren Datenbank-Schemas VERWEIGERT (Datenbank aus einer
+/// neueren Programmfassung oder gescheiterte Migration). Die Quelle des Wertes
+/// ist backend/serve.py, Konstante EXIT_SCHEMA_UNBRAUCHBAR -- beide Seiten
+/// muessen denselben Wert tragen. Ein eigener Wert (nicht 1) trennt diesen
+/// geordneten Abbruch vom gewoehnlichen Absturz (E-102).
+const BACKEND_EXIT_SCHEMA_UNBRAUCHBAR: i32 = 105;
+
 /// Ergebnis des Backend-Starts: entweder bereit oder ein kategorisierter
 /// Fehlercode (E-1xx), den der Ladebildschirm menschenlesbar anzeigt.
 enum BackendStatus {
@@ -71,6 +79,9 @@ enum BackendStatus {
     Error103,
     /// Backend-Binary nicht gefunden.
     Error104,
+    /// Backend hat den Start wegen unbrauchbaren Datenbank-Schemas verweigert
+    /// (Rueckgabewert BACKEND_EXIT_SCHEMA_UNBRAUCHBAR).
+    Error105,
 }
 
 impl BackendStatus {
@@ -82,6 +93,7 @@ impl BackendStatus {
             BackendStatus::Error102 => "E-102",
             BackendStatus::Error103 => "E-103",
             BackendStatus::Error104 => "E-104",
+            BackendStatus::Error105 => "E-105",
         }
     }
 
@@ -424,20 +436,39 @@ fn port_belegt() -> bool {
     .is_ok()
 }
 
-/// Kurz-lockender Exit-Check auf dem geteilten Child. Gibt Some(true) zurueck,
-/// wenn der Prozess beendet ist, Some(false) wenn er laeuft, None wenn kein
-/// Child (mehr) vorhanden ist. Der Lock wird nur fuer die Dauer des try_wait
+/// Lage des Backend-Kindes beim Exit-Check.
+#[derive(PartialEq)]
+enum Kindlage {
+    /// Der Prozess laeuft noch.
+    Laeuft,
+    /// Der Prozess ist beendet. Traegt seinen Rueckgabewert, soweit einer
+    /// vorliegt (None z. B. bei Beendigung durch ein Signal). Der Wert wird
+    /// gebraucht, um die Startverweigerung wegen des Datenbank-Schemas
+    /// (BACKEND_EXIT_SCHEMA_UNBRAUCHBAR -> E-105) vom gewoehnlichen
+    /// vorzeitigen Abbruch (E-102) zu unterscheiden.
+    Beendet(Option<i32>),
+}
+
+impl Kindlage {
+    fn ist_beendet(&self) -> bool {
+        matches!(self, Kindlage::Beendet(_))
+    }
+}
+
+/// Kurz-lockender Exit-Check auf dem geteilten Child. Gibt Some(Beendet(code))
+/// zurueck, wenn der Prozess beendet ist, Some(Laeuft) wenn er laeuft, None wenn
+/// kein Child (mehr) vorhanden ist. Der Lock wird nur fuer die Dauer des try_wait
 /// gehalten — nie ueber Netzwerk-Wartezeiten —, damit ein paralleles
 /// kill_backend_tree beim Fenster-Schliessen nicht blockiert (kein Deadlock).
-fn child_exited(process: &Arc<Mutex<Option<Child>>>) -> Option<bool> {
+fn child_exited(process: &Arc<Mutex<Option<Child>>>) -> Option<Kindlage> {
     let mut guard = process.lock().ok()?;
     let child = guard.as_mut()?;
     match child.try_wait() {
-        Ok(Some(_)) => Some(true),
-        Ok(None) => Some(false),
+        Ok(Some(status)) => Some(Kindlage::Beendet(status.code())),
+        Ok(None) => Some(Kindlage::Laeuft),
         Err(e) => {
             log(&format!("WARN: Could not check process status: {}", e));
-            Some(false)
+            Some(Kindlage::Laeuft)
         }
     }
 }
@@ -456,7 +487,20 @@ fn wait_for_backend(process: &Arc<Mutex<Option<Child>>>) -> BackendStatus {
         attempts += 1;
 
         // Check if process is still alive (kurzer Lock)
-        if child_exited(process) == Some(true) {
+        if let Some(Kindlage::Beendet(code)) = child_exited(process) {
+            // Der Rueckgabewert entscheidet, WELCHER Fehler es ist: hat das
+            // Backend den Start selbst wegen des Datenbank-Schemas verweigert
+            // (serve.py, EXIT_SCHEMA_UNBRAUCHBAR), ist das E-105 und kein
+            // Absturz. Alles andere bleibt der bisherige Fall E-102.
+            if code == Some(BACKEND_EXIT_SCHEMA_UNBRAUCHBAR) {
+                log(&format!(
+                    "ERROR: Backend verweigert den Start wegen des Datenbank-Schemas \
+                     (Rueckgabewert {})",
+                    BACKEND_EXIT_SCHEMA_UNBRAUCHBAR
+                ));
+                log(&format!("Check {} for details", log_path()));
+                return BackendStatus::Error105;
+            }
             log("ERROR: Backend process exited prematurely");
             log(&format!("Check {} for details", log_path()));
             // Backend-Prozess vorzeitig beendet -> E-102.
@@ -468,7 +512,7 @@ fn wait_for_backend(process: &Arc<Mutex<Option<Child>>>) -> BackendStatus {
             Ok(r) if r.status() == 200 => {
                 // Verify our process survived (not a stale leftover answering)
                 thread::sleep(Duration::from_millis(500));
-                if child_exited(process) == Some(true) {
+                if child_exited(process).is_some_and(|lage| lage.ist_beendet()) {
                     log("ERROR: Backend died right after responding (port conflict?)");
                     // Sauberer 200 kam von einem Fremdprozess, unser Backend
                     // ist danach gestorben -> Port belegt -> E-101.
@@ -510,7 +554,7 @@ fn wait_for_backend(process: &Arc<Mutex<Option<Child>>>) -> BackendStatus {
     // Timeout-Klassifikation: Lebt unser eigener Prozess noch, haengt also unser
     // Backend beim Start -> E-103. Ist unser Prozess weg/nie gestartet, aber der
     // Port ist dennoch belegt, haelt ihn ein Fremdprozess -> E-101.
-    let eigener_prozess_lebt = child_exited(process) == Some(false);
+    let eigener_prozess_lebt = child_exited(process) == Some(Kindlage::Laeuft);
 
     if !eigener_prozess_lebt && port_belegt() {
         log("Timeout: Port belegt, aber unser Prozess laeuft nicht -> E-101 (Fremdprozess)");
@@ -1085,7 +1129,8 @@ fn kill_backend_tree(process: &Arc<Mutex<Option<Child>>>) {
                 //
                 // DAS IST KEIN THEORETISCHER FALL, es ist GEMESSEN: stirbt das
                 // Backend beim Start vorzeitig, holt es der `try_wait` in
-                // `child_exited` waehrend `wait_for_backend` ab (E-102, der
+                // `child_exited` waehrend `wait_for_backend` ab (E-102 bzw.
+                // E-105 bei verweigertem Start wegen des Datenbank-Schemas; der
                 // Splash zeigt den Fehler und der Wrapper laeuft weiter).
                 // Schliesst der Anwender das Fenster erst Sekunden spaeter,
                 // gingen die beiden SIGTERM unten an eine laengst freigegebene

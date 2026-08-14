@@ -2475,6 +2475,7 @@
     "E-102": "The background service has crashed.",
     "E-103": "Startup took too long (timeout).",
     "E-104": "A required component is missing.",
+    "E-105": "The database was created by a newer program version.",
     "E-201": "The scan connection was interrupted.",
     "E-202": "The connection to monitoring/logging was lost.",
     "E-203": "Traffic is not reachable.",
