@@ -732,6 +732,7 @@ from infrastructure.crypto import KeyMissingError
 from infrastructure.cve_acknowledgements_db import SqliteCveAcknowledgementRepository
 from infrastructure.cve_checkstate_db import SqliteCveCheckStateRepository
 from infrastructure.cve_findings_db import SqliteCveFindingRepository
+from infrastructure.db_schema import schema_aufbauen, schema_pruefen
 from infrastructure.device_repository import SqliteDeviceRepository
 from infrastructure.diagnostics_linux import (
     DiagnosticsToolMissing,
@@ -929,7 +930,17 @@ logger = structlog.get_logger()
 
 
 def _check_version_upgrade() -> None:
-    """Schreibt die Version-Markierung; Settings bleiben ueber Upgrades erhalten (wie main.py)."""
+    """Schreibt die Version-Markierung; Settings bleiben ueber Upgrades erhalten (wie main.py).
+
+    ABGRENZUNG ZUM SCHEMASTAND (S88-P1a): die Datei ``.version`` bleibt bestehen und
+    wird weiter geschrieben, aber sie ist NICHT die Quelle des Schemastands. Die
+    PROGRAMM-Fassung und der SCHEMA-Stand sind zwei verschiedene Dinge: zwei
+    Programmfassungen koennen dasselbe Schema tragen, und eine Datenbank kann von
+    einem Programm stammen, dessen Fassungsnummer nichts ueber ihren inneren Aufbau
+    verraet. Den Schemastand traegt seit 2.1.2 ``PRAGMA user_version`` in der
+    Datenbank selbst (siehe ``infrastructure.db_schema``); ``.version`` bleibt die
+    Programmspur -- eine Datei neben der Datenbank, fachlich nicht ausgewertet.
+    """
     from modules.db_path import DATA_DIR
 
     version_file = Path(DATA_DIR) / ".version"
@@ -939,8 +950,42 @@ def _check_version_upgrade() -> None:
         old_version = ""
     if old_version != APP_VERSION:
         if old_version:
-            logger.info("version_upgrade", old=old_version, new=APP_VERSION)
+            # Der Protokollname hiess frueher ``version_upgrade`` und behauptete damit
+            # eine Richtung, die er nicht kannte: dieselbe Zeile entstand auch beim
+            # RUECKSCHRITT auf eine aeltere Fassung (etwa nach einem zurueckgenommenen
+            # Update). ``version_changed`` benennt nur die Tatsache der Aenderung; die
+            # Richtung steht als eigenes Feld daneben, aus dem Vergleich der beiden
+            # Fassungen ERMITTELT statt vom Namen unterstellt. Der Vergleich laeuft
+            # ueber die Zahlengruppen (2.1.10 ist neuer als 2.1.9, textlich waere es
+            # aelter); ist eine der beiden Angaben nicht so lesbar, heisst die
+            # Richtung ehrlich "unbekannt" statt geraten (Finding S3).
+            logger.info(
+                "version_changed",
+                old=old_version,
+                new=APP_VERSION,
+                direction=_version_direction(old_version, APP_VERSION),
+            )
         version_file.write_text(APP_VERSION)
+
+
+def _version_tuple(version: str) -> tuple[int, ...] | None:
+    """Zerlegt ``2.1.2`` in ``(2, 1, 2)``; ``None``, wenn nicht rein numerisch."""
+    teile = version.split(".")
+    if not teile or not all(t.isdigit() for t in teile):
+        return None
+    return tuple(int(t) for t in teile)
+
+
+def _version_direction(old: str, new: str) -> str:
+    """Benennt die Richtung eines Fassungswechsels: ``upgrade``/``downgrade``/``unknown``."""
+    alt, neu = _version_tuple(old), _version_tuple(new)
+    if alt is None or neu is None:
+        return "unknown"
+    if neu > alt:
+        return "upgrade"
+    if neu < alt:
+        return "downgrade"
+    return "unchanged"
 
 
 # Fabrik-Naht des geplanten Scans (E1): liefert (RunNetworkScan, RecordScannedHost,
@@ -2375,6 +2420,31 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     cfg = config or AppConfig()
     configure_logging(level=cfg.log_level, json_logs=cfg.log_json)
 
+    # ── Schemanaht, erste Haelfte: die ENTSCHEIDUNG (S88-P1a) ─────────────────────
+    # Zweite Haelfte ist ``schema_aufbauen`` ganz am Ende dieser Funktion, direkt vor
+    # ``return app`` -- dort laufen die Aufbauschritte und dort wird ``user_version``
+    # als letzte Handlung gesetzt. Die Zweiteilung ist eine ENTSCHEIDUNG, kein
+    # Versehen: die Fassungspruefung ist eine Entscheidung UEBER die Datenbank, der
+    # Aufbau eine Handlung AN ihr. Nur die Entscheidung muss frueh fallen.
+    #
+    # Warum genau hier: dies ist die erste datenbankberuehrende Handlung im Koerper
+    # von create_app. Die frueheste Repository-Nutzung steht weiter unten
+    # (``default_creds_list_repository().ensure_seeded()``), gefolgt von fuenf
+    # weiteren im Koerper -- alle liegen NACH dieser Zeile. Damit ist zugesichert,
+    # dass eine zu neue Datenbank (Fall D, SchemaTooNewError) verweigert wird, BEVOR
+    # irgendein Repository sie beruehrt hat. Fall C (Sicherung + Migration) wird
+    # ebenfalls hier vollstaendig erledigt: eine Migration darf nicht zwischen halb
+    # gebauten Repositories liegen.
+    #
+    # Der Aufruf haengt bewusst NICHT an ``cfg.bootstrap_on_startup``: sechs
+    # Repositories entstehen auch ohne diesen Schalter (gemessen, s. o.), also darf
+    # die Fassungspruefung nicht dahinter liegen -- sonst liefe der Schalter-lose Weg
+    # ungeprueft auf eine womoeglich zu neue Datei.
+    from modules.db_path import get_db_path
+
+    _schema_db_pfad = get_db_path()
+    _vorgefundene_schema_fassung = schema_pruefen(_schema_db_pfad)
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # Die Weck-Naht (S86-A4/B1) ist modul-global (s. dort): sie wird unten an den
@@ -2386,8 +2456,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # versehentlichem Doppelstart.
         if cfg.bootstrap_on_startup:
             _check_version_upgrade()
-            init_db()
-            init_devices_db()
+            # init_db()/init_devices_db() liefen frueher HIER; sie sind nach S88-P1a
+            # Aufbauschritte der Schemanaht (schema_aufbauen am Ende von create_app)
+            # und duerfen nicht doppelt laufen. Dasselbe gilt fuer init_alerts_db()
+            # weiter unten.
             # Eigenen Host EINMALIG in den Bestand aufnehmen (ADR self-host): ein
             # aktiver Scan findet den eigenen Rechner nicht -> die eigene IP bliebe
             # im DNS-Umgehungs-Bericht unaufgeloest. Upsert ueber die device-Naht
@@ -2486,7 +2558,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             # bootstrap-Pfad, nie beim Import/Test ohne bootstrap_on_startup).
             _seed_blocklist_defaults()
             _ensure_blocklist_refresh_job()
-            init_alerts_db()
+            # init_alerts_db() lief frueher HIER; es ist nach S88-P1a ein Aufbauschritt
+            # der Schemanaht (schema_aufbauen am Ende von create_app) und darf nicht
+            # doppelt laufen -- wie init_db()/init_devices_db() weiter oben.
             # agent (A.4+5): KEIN init_agents_db mehr -- das v2-SqliteAgentRepository
             # legt die remote_agents-Tabelle beim Bau selbst an (_ensure_schema),
             # Muster wie die schedule/sla-Repos. Der letzte modules.agent-Bootstrap-
@@ -8068,6 +8142,86 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         logger.info("frontend_serving_enabled", directory=str(frontend_dir))
     else:
         logger.info("frontend_serving_disabled")
+
+    # ── Schemanaht, zweite Haelfte: die HANDLUNG (S88-P1a) ────────────────────────
+    # Erste Haelfte ist ``schema_pruefen`` ganz am Anfang dieser Funktion -- dort faellt
+    # die Entscheidung (Fall D verweigert, Fall C sichert und migriert), hier laufen
+    # die Aufbauschritte und hier wird ``user_version`` als letzte Handlung gesetzt.
+    # Die Zweiteilung ist eine ENTSCHEIDUNG, kein Versehen: die Entscheidung muss
+    # frueh fallen, der Aufbau kann erst hier laufen -- die 34 Factory-Funktionen sind
+    # lokale Funktionen von create_app und existieren erst ab dieser Stelle
+    # vollzaehlig (die letzte, ``usage_stats_repository``, entsteht weiter oben).
+    #
+    # Der Block steht am Ende von create_app, aber VOR ``return app`` und AUSSERHALB
+    # des Lifespan. Er haengt NICHT an ``cfg.bootstrap_on_startup`` -- ebenso wenig wie
+    # die Pruefung am Anfang, aus demselben Grund: sechs Repositories entstehen auch
+    # ohne diesen Schalter, also darf die Fassungspflege nicht dahinter liegen.
+    #
+    # REIHENFOLGE -- nachgemessen, nicht geschaetzt: sie bildet GENAU das heutige
+    # Startverhalten nach (Messung an einer leeren Wegwerf-Datenbank, instrumentierte
+    # sqlite3-Verbindung, Auslieferungsweg ``app:app`` mit bootstrap_on_startup=true).
+    # Entscheidend ist der devices-Block: ``init_devices_db`` laeuft VOR
+    # ``device_repository`` -- auf leerer Datenbank gewinnt damit der Altcode-CREATE
+    # mit 14 Spalten, und die sechs v2-Spalten kommen per additivem ALTER nach (20
+    # Spalten). Eine andere Folge erzeugte ein anderes Spaltenbild.
+    #
+    # Die Gliederung spiegelt die drei heutigen Entstehungszeitpunkte:
+    #   1. Koerper von create_app (6 Repos) -- entstanden schon bisher ohne Schalter,
+    #   2. Lifespan-Bootstrap (3 Altcode-Initialisierer + 15 Repos),
+    #   3. bisher erst bei Gebrauch (13 Repos) -- sie ziehen die restlichen Tabellen
+    #      nach, damit eine frische Datenbank alle 38 Tabellen traegt statt 24.
+    # ``_bauen`` verwirft den Rueckgabewert der Factory: die Aufbauschritte sind
+    # ``Callable[[], None]`` -- gebraucht wird allein der Seiteneffekt (der
+    # Konstruktor legt ueber ``_ensure_schema`` sein Stueck Schema an).
+    def _bauen(fabrik: Callable[[], object]) -> Callable[[], None]:
+        def schritt() -> None:
+            fabrik()
+
+        return schritt
+
+    _schema_aufbauschritte: list[Callable[[], None]] = [
+        # 1. bisher im Koerper von create_app
+        _bauen(default_creds_list_repository),
+        _bauen(logging_task_repository),
+        _bauen(blocklist_source_repository),
+        _bauen(blocklist_entry_repository),
+        _bauen(dns_trust_repository),
+        _bauen(logging_rtt_repository),
+        # 2. bisher im Lifespan-Bootstrap -- init_db/init_devices_db ZUERST (s. o.)
+        init_db,
+        init_devices_db,
+        _bauen(device_repository),
+        _bauen(repository),
+        _bauen(rtt_history_repository),
+        _bauen(monitor_event_repository),
+        _bauen(alert_rule_repository),
+        _bauen(logging_event_repository),
+        _bauen(schedule_repository),
+        _bauen(cve_finding_repository),
+        _bauen(cve_checkstate_repository),
+        _bauen(cve_acknowledgement_repository),
+        _bauen(outbound_recording_repository),
+        _bauen(outbound_detail_repository),
+        _bauen(outbound_aggregate_repository),
+        _bauen(scheduled_job_repository),
+        init_alerts_db,
+        _bauen(scan_history_repository),
+        # 3. bisher erst bei Gebrauch
+        _bauen(sla_sample_repository),
+        _bauen(arp_guard_repository),
+        _bauen(default_creds_history_repository),
+        _bauen(agent_repository),
+        _bauen(rogue_dhcp_repository),
+        _bauen(dns_watch_acknowledgement_repository),
+        _bauen(dns_bypass_recording_repository),
+        _bauen(dns_bypass_detail_repository),
+        _bauen(dns_bypass_aggregate_repository),
+        _bauen(analysis_rule_repository),
+        _bauen(host_history_repository),
+        _bauen(acknowledgement_repository),
+        _bauen(usage_stats_repository),
+    ]
+    schema_aufbauen(_schema_db_pfad, _vorgefundene_schema_fassung, _schema_aufbauschritte)
 
     return app
 

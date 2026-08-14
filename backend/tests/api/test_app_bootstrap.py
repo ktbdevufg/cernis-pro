@@ -141,11 +141,19 @@ def test_app_lifespan_startup_runs_v2_monitoring(bootstrap_calls: list[str], tmp
 
     # Die noch-Altcode-Schritte in erwarteter Reihenfolge (monitoring-Schritte sind
     # KEINE modul-globalen Funktionen mehr -> hier nicht im Spy-Log).
+    #
+    # S88-P1a-ABWEICHUNG: ``init_db``/``init_devices_db``/``init_alerts_db`` laufen
+    # NICHT mehr im Lifespan, sondern als Aufbauschritte der Schemanaht im KOERPER von
+    # create_app -- also schon VOR dem Lifespan-Start und unabhaengig von
+    # ``bootstrap_on_startup``. Darum stehen sie im Spy-Log VOR
+    # ``_check_version_upgrade``, das als einziger der vier im Lifespan geblieben ist.
+    # Die Reihenfolge init_db -> init_devices_db -> init_alerts_db ist dabei
+    # unveraendert (sie bestimmt das devices-Spaltenbild, s. ``db_schema``).
     assert startup == [
-        "_check_version_upgrade",
         "init_db",
         "init_devices_db",
         "init_alerts_db",
+        "_check_version_upgrade",
     ]
 
 
