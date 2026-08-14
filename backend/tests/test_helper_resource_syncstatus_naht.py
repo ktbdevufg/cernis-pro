@@ -51,10 +51,23 @@ import pytest
 
 _FRONTEND = pathlib.Path(__file__).resolve().parents[2] / "frontend"
 _HOOK_JS = _FRONTEND / "src" / "hooks" / "useHelperResource.js"
+_NODE_MODULES = _FRONTEND / "node_modules"
 
+# ``esbuild`` MITGEPRUEFT (Muster ``test_netz_aufraeumen_texte_naht.py``): das
+# Skript unten importiert es, und der quality-Job der CI richtet zwar node ein,
+# installiert aber die Frontend-Abhaengigkeiten nicht -- dort fiel der Test mit
+# ERR_MODULE_NOT_FOUND, statt sich zu ueberspringen. ``react-dom`` steht hier
+# nicht in der Bedingung: React wird gestubbt, nicht gerendert.
 pytestmark = pytest.mark.skipif(
-    shutil.which("node") is None or not _HOOK_JS.is_file(),
-    reason="node oder frontend/src/hooks/useHelperResource.js nicht vorhanden",
+    shutil.which("node") is None
+    or not _HOOK_JS.is_file()
+    or not (_NODE_MODULES / "esbuild").is_dir(),
+    reason=(
+        "Die node-Messung an useHelperResource.js faellt aus: node, "
+        "frontend/src/hooks/useHelperResource.js oder frontend/node_modules/esbuild "
+        "fehlt. Sie laeuft lokal mit installierten Frontend-Abhaengigkeiten "
+        "(frontend: npm ci); die Naht ist hier ungedeckt, nicht in Ordnung befunden."
+    ),
 )
 
 # Buendelt das ECHTE Hook-Modul mit React-Stub und faehrt die drei Faelle durch.
