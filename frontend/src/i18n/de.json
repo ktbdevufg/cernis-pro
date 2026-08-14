@@ -658,6 +658,9 @@
       "sniActive": "SNI aktiv",
       "sniHint": "Zeigt die echten von Apps angefragten Domainnamen (statt nur des Hosters). Erfordert erhöhte Rechte.",
       "sniPermission": "SNI-Beobachtung braucht erhöhte Rechte.",
+      "sniStoppedPollFailed": "Aufzeichnung beendet — Datenquelle antwortet nicht. Erneut starten.",
+      "sniStoppedHelperDead": "Aufzeichnung beendet — Mitschnitt-Helfer beendet. Erneut starten.",
+      "sniStoppedUnbekannt": "Aufzeichnung beendet. Erneut starten.",
       "stateLabel": {
         "established": "aktiv",
         "other": "Zustand unklar",
@@ -2636,5 +2639,11 @@
       "vorausgesetzt": "wird vorausgesetzt, nicht aufgerufen",
       "aufgerufen_und_vorausgesetzt": "wird aufgerufen und vorausgesetzt"
     }
+  },
+  "zeitplan": {
+    "_hinweis": "HINTERLEGT, NOCH NICHT ANGESCHLOSSEN (S88-P5): Diese Texte gehoeren zum Zeitplan-Ausgang (GET /api/schedules, Spalten last_result/last_error). Es gibt noch KEINE Zeitplan-Ansicht im Frontend; sie warten auf sie und sind nicht tot. Dieser Schluessel wird nie angezeigt.",
+    "letzterLaufOk": "{{zeit}} — erfolgreich",
+    "letzterLaufFehlgeschlagen": "{{zeit}} — fehlgeschlagen ({{grund}})",
+    "letzterLaufNie": "noch nicht gelaufen"
   }
 }

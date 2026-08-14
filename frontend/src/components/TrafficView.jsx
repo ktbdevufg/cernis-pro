@@ -25,7 +25,11 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { fetchSniMap, fetchSniStatus } from "../api/sni.js";
+import {
+  fetchSniMap,
+  fetchSniStatus,
+  sniStoppedSchluessel,
+} from "../api/sni.js";
 import NpcapDialog from "./NpcapDialog.jsx";
 import { useSni } from "../hooks/useSni.js";
 import {
@@ -756,6 +760,11 @@ export default function TrafficView({
   // Windows-Marker aus dem SNI-Status (permissionError). Trägt er den Npcap-
   // Marker, wird die Sniff-Start-Fläche durch den Ausgrau-Hinweis ersetzt.
   const [sniPermMarker, setSniPermMarker] = useState(null);
+  // Marker eines SELBST-Abbruchs aus dem SNI-Status (stoppedReason). Anders als
+  // sniPermMarker sperrt er nichts: er sagt nur, dass eine frühere Aufzeichnung
+  // von sich aus geendet hat. Der Wortlaut kommt über sniStoppedSchluessel aus
+  // den Sprachdateien, der Marker selbst wird hier nicht gedeutet.
+  const [sniStopMarker, setSniStopMarker] = useState(null);
   // Ob der NpcapDialog offen ist. Mount/Unmount wie bei Dialogen üblich (State
   // im View). Der Dialog kennt nur EINEN Fall, darum genügt ein Ja/Nein.
   const [zeigeNpcapDialog, setZeigeNpcapDialog] = useState(false);
@@ -896,6 +905,33 @@ export default function TrafficView({
     ladeLaeuft.current = false;
   }, [reichereTrafficAn]);
 
+  // Externen Ist-Zustand übernehmen: läuft SNI schon von einer anderen Ansicht,
+  // erkennt TrafficView das und schaltet aktiv (ohne neu zu starten).
+  // Zusätzlich den permissionError-Marker holen: trägt er einen Windows-Marker,
+  // ist der Sniff auf dieser Plattform grundsätzlich nicht nutzbar -> die Start-
+  // Fläche wird ausgegraut. fetchSniStatus wirft (kein still-Fallback); ein Patzer
+  // hier darf die View nicht kippen, daher tolerant (kein Marker = kein Hinweis).
+  //
+  // Aus derselben Antwort kommt stoppedReason: hat die Beobachtung sich selbst
+  // beendet, steht der Marker dort. Er gilt NUR, solange nichts läuft — meldet
+  // das Backend running=true, ist der Abbruch überholt und wird nicht gezeigt.
+  //
+  // Bewusst EINE Funktion für BEIDE Aufrufer (Betreten der Ansicht + Auto-
+  // Refresh): der Status wird auf genau einem Weg geholt und übernommen, damit
+  // die zweite Stelle keine zweite Bauart wird. Stabil (useCallback []): die
+  // Setter sind stabil, syncStatus kommt aus dem Hook — so erzeugt sie weder das
+  // Betretens-Laden neu noch das Auto-Refresh-Intervall.
+  const uebernehmeSniStatus = useCallback(() => {
+    syncStatus();
+    fetchSniStatus()
+      .then((s) => {
+        setSniPermMarker(s.permissionError ?? null);
+        setSniStopMarker(s.running ? null : (s.stoppedReason ?? null));
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Initiales Laden (mit Voll-"laedt"-Zustand).
   useEffect(() => {
     ladeTraffic(true);
@@ -904,21 +940,40 @@ export default function TrafficView({
   // Auto-Refresh-Intervall (Teil C): nur bei refreshInterval > 0. Ruft still
   // ladeTraffic() (kein "laedt"-Wechsel, Auswahl bleibt). Bei Änderung des
   // Intervalls / Unmount altes Intervall sauber clearen.
+  //
+  // Zusätzlich reist der SNI-Status am selben Takt mit (S88-P6, Karls Weg 2):
+  // bricht die Aufzeichnung während des Zuschauens ab, stand der Schalter bisher
+  // bis zum nächsten Betreten der Ansicht auf "aktiv", obwohl nichts mehr lief.
+  // Dieselbe Funktion wie beim Betreten, KEIN eigener Timer und KEINE eigene
+  // Frequenz — der vorhandene Auto-Refresh trägt es mit. Der Aufruf ist
+  // best-effort und wird nicht awaitet: uebernehmeSniStatus fängt seinen
+  // Fehlschlag selbst ab (.catch), er kann daher weder den Auto-Refresh noch die
+  // Traffic-Anzeige reißen.
+  //
+  // BENANNTER RESTFALL (Karls Entscheidung Weg 2, kein eigener Timer): ist der
+  // Auto-Refresh ausgeschaltet (refreshInterval <= 0), erscheint der Hinweis auf
+  // den Selbst-Abbruch weiterhin erst beim nächsten Betreten der Ansicht. Das ist
+  // so entschieden und kein Versehen — ein eigenes Intervall nur für den Status
+  // wäre eine zweite Bauart mit eigener Frequenz.
   useEffect(() => {
     if (!refreshInterval || refreshInterval <= 0) {
       return undefined;
     }
     const id = setInterval(() => {
       ladeTraffic(false);
+      uebernehmeSniStatus();
     }, refreshInterval * 1000);
     return () => clearInterval(id);
-  }, [refreshInterval, ladeTraffic]);
+  }, [refreshInterval, ladeTraffic, uebernehmeSniStatus]);
 
   // SNI-Start: meldet Bedarf am geteilten Hook an (acquire — start + starting/
   // error-Handling macht der Hook selbst) und stößt danach einen Reload an, damit
   // die SNI-Namen sofort einreichern. starting/error kommen reaktiv über
   // sniStartet/sniError aus dem Hook.
   const handleSniStart = useCallback(async () => {
+    // Der Hinweis auf den früheren Selbst-Abbruch gilt der VORHERIGEN Aufzeichnung.
+    // Sobald eine neue startet, ist er erledigt und verschwindet.
+    setSniStopMarker(null);
     await acquire();
     sniAktivRef.current = true; // VOR dem Reload, damit er anreichert.
     ladeTraffic(false);
@@ -934,19 +989,12 @@ export default function TrafficView({
     ladeTraffic(false);
   }, [release, ladeTraffic]);
 
-  // Externen Ist-Zustand übernehmen: läuft SNI schon von einer anderen Ansicht,
-  // erkennt TrafficView das beim Mount und schaltet aktiv (ohne neu zu starten).
-  // Zusätzlich den permissionError-Marker holen: trägt er einen Windows-Marker,
-  // ist der Sniff auf dieser Plattform grundsätzlich nicht nutzbar -> die Start-
-  // Fläche wird ausgegraut. fetchSniStatus wirft (kein still-Fallback); ein Patzer
-  // hier darf die View nicht kippen, daher tolerant (kein Marker = kein Hinweis).
+  // Beim Betreten der Ansicht einmal den Ist-Zustand holen. Denselben Weg fährt
+  // der Auto-Refresh (siehe uebernehmeSniStatus weiter oben) — eine Bauart, zwei
+  // Aufrufer.
   useEffect(() => {
-    syncStatus();
-    fetchSniStatus()
-      .then((s) => setSniPermMarker(s.permissionError ?? null))
-      .catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    uebernehmeSniStatus();
+  }, [uebernehmeSniStatus]);
 
   // Darstellungs-Einstellung einmal beim Mount lesen. Fehler tolerant: bleibt der
   // Default true (sichtbar) — im Zweifel zeigen und einordnen, nicht verschweigen.
@@ -1024,6 +1072,12 @@ export default function TrafficView({
         <PermissionHinweis text={t(trafficPermissionSchluessel(permission))} />
       )}
       {sniError && <SniHinweis text={sniError} />}
+      {/* Selbst-Abbruch der vorherigen Aufzeichnung: derselbe ruhige Hinweis wie
+          sniError (keine neue Bauform), Wortlaut aus den Sprachdateien. Er gilt
+          nur, solange nichts läuft — startet eine neue Aufzeichnung, ist er weg. */}
+      {!sniAktiv && sniStoppedSchluessel(sniStopMarker) && (
+        <SniHinweis text={t(sniStoppedSchluessel(sniStopMarker))} />
+      )}
 
       {status === "laedt" && (
         <p className="traffic-state-notice">

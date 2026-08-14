@@ -10,7 +10,8 @@
 //   POST /api/sni/start  (Body optional {"interface":"..."})
 //        -> {ok, error, available} | 403 {ok, error}
 //   POST /api/sni/stop    -> {ok: true}
-//   GET  /api/sni/status  -> {running, count, available, permission_error}
+//   GET  /api/sni/status  -> {running, count, available, permission_error,
+//                             stopped_reason}
 //   GET  /api/sni/observed
 //        -> [{hostname, remote_ip, remote_port, app_name, pid, delta_ms, age_secs}]
 //
@@ -92,7 +93,14 @@ export async function stopSni() {
 }
 
 // Liest GET /api/sni/status. Reicht running/count/available durch und benennt
-// permission_error -> permissionError um (camelCase nach Frontend-Konvention).
+// permission_error -> permissionError sowie stopped_reason -> stoppedReason um
+// (camelCase nach Frontend-Konvention).
+//
+// stoppedReason traegt einen STABILEN Marker des Backends, wenn die Beobachtung
+// sich SELBST beendet hat (SNI_POLL_FAILED, SNI_HELPER_DEAD); null heisst: kein
+// Selbst-Abbruch. Der Marker wird hier NICHT gedeutet und NICHT in Text
+// uebersetzt -- exakt das Muster von permission_error/NPCAP_MISSING: das Backend
+// benennt die Lage, den Wortlaut besitzt das Frontend (i18n).
 export async function fetchSniStatus() {
   const backend = await apiGet("/api/sni/status");
   return {
@@ -100,7 +108,36 @@ export async function fetchSniStatus() {
     count: backend.count ?? 0,
     available: backend.available ?? null,
     permissionError: backend.permission_error ?? null,
+    stoppedReason: backend.stopped_reason ?? null,
   };
+}
+
+// Marker des Selbst-Abbruchs (aus stopped_reason, siehe Backend
+// infrastructure/sni/sni_sniffer.py). Zwei Lagen, in denen die Beobachtung von
+// selbst aufhoert: die Datenquelle antwortet beim Abholen nicht mehr, oder der
+// Mitschnitt-Helfer ist beendet. Läuft die Beobachtung, liefert das Backend
+// keinen Marker (null).
+export const SNI_STOPPED_MARKER = {
+  POLL_FAILED: "SNI_POLL_FAILED",
+  HELPER_DEAD: "SNI_HELPER_DEAD",
+};
+
+// Marker -> i18n-Schlüssel des Anzeigetexts.
+const SNI_STOPPED_SCHLUESSEL = {
+  [SNI_STOPPED_MARKER.POLL_FAILED]: "beobachten.traffic.sniStoppedPollFailed",
+  [SNI_STOPPED_MARKER.HELPER_DEAD]: "beobachten.traffic.sniStoppedHelperDead",
+};
+
+// Reine, testbare Auswahl: Marker -> i18n-Schlüssel. null/leer -> null (nichts
+// anzuzeigen, kein Selbst-Abbruch). Ein UNBEKANNTER Marker fällt auf den
+// neutralen Text zurück statt auf einen leeren Kasten: dass die Aufzeichnung
+// beendet ist, stimmt in jeder dieser Lagen — nur der Grund ist dann nicht
+// benennbar. Muster wie trafficPermissionSchluessel in api/traffic.js.
+export function sniStoppedSchluessel(marker) {
+  if (!marker) {
+    return null;
+  }
+  return SNI_STOPPED_SCHLUESSEL[marker] ?? "beobachten.traffic.sniStoppedUnbekannt";
 }
 
 // Reine, testbare Funktion: übersetzt die observed-Liste in eine Map
@@ -137,4 +174,10 @@ export async function fetchSniMap() {
   }
 }
 
-export default { startSni, stopSni, fetchSniStatus, fetchSniMap };
+export default {
+  startSni,
+  stopSni,
+  fetchSniStatus,
+  fetchSniMap,
+  sniStoppedSchluessel,
+};

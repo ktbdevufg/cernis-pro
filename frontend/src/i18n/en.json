@@ -658,6 +658,9 @@
       "sniActive": "SNI active",
       "sniHint": "Shows the real domain names apps request (instead of just the host). Requires elevated privileges.",
       "sniPermission": "SNI observation requires elevated privileges.",
+      "sniStoppedPollFailed": "Capture stopped — data source not responding. Start again.",
+      "sniStoppedHelperDead": "Capture stopped — capture helper ended. Start again.",
+      "sniStoppedUnbekannt": "Capture stopped. Start again.",
       "stateLabel": {
         "established": "active",
         "other": "status unclear",
@@ -2636,5 +2639,11 @@
       "vorausgesetzt": "is required, but never called",
       "aufgerufen_und_vorausgesetzt": "is called and required"
     }
+  },
+  "zeitplan": {
+    "_hinweis": "STORED, NOT YET WIRED (S88-P5): these texts belong to the schedule outcome (GET /api/schedules, columns last_result/last_error). There is no schedule view in the frontend yet; they are waiting for it, they are not dead. This key is never displayed.",
+    "letzterLaufOk": "{{time}} — succeeded",
+    "letzterLaufFehlgeschlagen": "{{time}} — failed ({{reason}})",
+    "letzterLaufNie": "not run yet"
   }
 }

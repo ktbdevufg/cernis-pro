@@ -140,8 +140,27 @@ export function useHelperResource(key, { start, stop, status } = {}) {
     }
   }, [key]);
 
-  // Optionaler externer Ist-Zustand: übernimmt ein laufendes Backend, falls der
-  // Eintrag es noch nicht weiß. Reines Beiwerk — wirft nie.
+  // Optionaler externer Ist-Zustand: der Eintrag folgt dem gemeldeten Zustand in
+  // BEIDE Richtungen. Reines Beiwerk — wirft nie.
+  //
+  // WARUM zweiseitig: früher wurde nur running=true übernommen. Beendete der
+  // Sniffer sich selbst, blieb das unsichtbar — der Eintrag hielt weiter true,
+  // der Schalter stand auf "aktiv", und der Stop-Hinweis der Ansicht war unter
+  // !running maskiert (S88-P5/P6, Befund 30). Meldet das Backend running=false,
+  // während der Eintrag true hält, wird jetzt abgeschaltet, spiegelbildlich zum
+  // true-Weg.
+  //
+  // BEI ABRUFSFEHLER wird bewusst NICHTS geschrieben, der letzte Wert bleibt
+  // stehen (Linie der Vorlage DnsBypassView.ladeStatus): ein Aussetzer der
+  // Abfrage darf eine laufende Aufzeichnung nicht als beendet ausgeben.
+  //
+  // BENANNTER RESTFALL (hier nicht behoben): running=false meldet das Backend
+  // auch, wenn nie gestartet wurde oder der Anwender selbst gestoppt hat — der
+  // Abschaltweg unterscheidet das nicht. Gegen ihn arbeitet der acquire-else-
+  // Zweig weiter oben, der running=true OHNE Backend-Rückfrage setzt. Für den
+  // heutigen einzigen Aufrufer (TrafficView) ist das kein Bruch, weil jedem
+  // acquire ein echter Backend-Start vorausgeht. Ein künftiger dritter Nutzer
+  // dieses Hooks muss das wissen, bevor er sich darauf verlässt.
   const syncStatus = useCallback(async () => {
     if (!status) {
       return;
@@ -151,6 +170,9 @@ export function useHelperResource(key, { start, stop, status } = {}) {
       const e = getEntry(key);
       if (s && s.running === true && !e.running) {
         e.running = true;
+        notify(key);
+      } else if (s && s.running === false && e.running) {
+        e.running = false;
         notify(key);
       }
     } catch {
