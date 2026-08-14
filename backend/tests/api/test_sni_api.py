@@ -26,7 +26,7 @@ from infrastructure.sni.errors import SniError, SniPermissionError
 
 
 class _FakeSniSniffer:
-    """SniSnifferPort-Fake: available/permission/observed + running-Schalter."""
+    """SniSnifferPort-Fake: available/permission/observed/stopped + running-Schalter."""
 
     def __init__(
         self,
@@ -35,11 +35,13 @@ class _FakeSniSniffer:
         permission: str | None = None,
         observed: list[ObservedSni] | None = None,
         running: bool = False,
+        stopped: str | None = None,
     ) -> None:
         self._available = available
         self._permission = permission
         self._observed = observed or []
         self._running = running
+        self._stopped = stopped
         self.start_interfaces: list[str | None] = []
 
     def start(self, interface: str | None) -> None:
@@ -57,6 +59,9 @@ class _FakeSniSniffer:
 
     def check_permission(self) -> str | None:
         return self._permission
+
+    def stopped_reason(self) -> str | None:
+        return self._stopped
 
     def is_available(self) -> bool:
         return self._available
@@ -190,6 +195,8 @@ def test_sni_status_shape() -> None:
         "count": 1,
         "available": True,
         "permission_error": "needs root",
+        # S88-P4/Befund 30: kein Selbst-Abbruch -> null (die Aufzeichnung laeuft).
+        "stopped_reason": None,
     }
 
 
@@ -242,3 +249,26 @@ def test_sni_observed_wire_form() -> None:
     assert second["app_name"] is None
     assert second["pid"] is None
     assert second["delta_ms"] is None
+
+
+# ── Befund 30: der Abbruchgrund erreicht die vorhandene Statusnaht ───────────
+
+
+def test_sni_status_traegt_den_abbruchgrund() -> None:
+    """Der Marker reist ueber DENSELBEN Weg wie ``permission_error`` (StartSniCapture).
+
+    ``running=false`` UND ein gesetzter ``stopped_reason`` ist die bis S88-P4 fehlende
+    Aussage: der Mitschnitt ist ABGEBROCHEN, nicht "nie gestartet".
+    """
+    client = _build_client(_FakeSniSniffer(running=False, stopped="SNI_HELPER_DEAD"))
+
+    body = client.get("/api/sni/status").json()
+
+    assert body["stopped_reason"] == "SNI_HELPER_DEAD"
+    assert body["running"] is False
+
+
+def test_sni_status_abbruchgrund_null_ohne_abbruch() -> None:
+    client = _build_client(_FakeSniSniffer(running=True))
+
+    assert client.get("/api/sni/status").json()["stopped_reason"] is None

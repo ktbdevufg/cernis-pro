@@ -517,6 +517,7 @@ from application.monitoring import (
     LoggingTaskNotFound,
     ManageSchedules,
     PauseLoggingTask,
+    RecordScheduleResult,
     RecordScheduleRun,
     ResumeActiveLoggingTasks,
     ResumeLoggingTask,
@@ -1010,6 +1011,12 @@ _scheduled_scan_bausteine: Callable[[], tuple[Any, Any, Any]] | None = None
 # unabhaengiger Belang (sie muss auch dann laufen, wenn der Scan spaeter scheitert).
 _scheduled_scan_zeitbuchung: Callable[[], RecordScheduleRun] | None = None
 
+# Dritte Fabrik-Naht (S88-P4): der Use-Case, der den AUSGANG des Laufs festhaelt.
+# Bewusst getrennt von der Zeitbuchung oben -- die beiden schreiben zu verschiedenen
+# Zeitpunkten (Ausloesung vor dem Scan, Ausgang danach) und beantworten verschiedene
+# Fragen. ``None`` = nicht verdrahtet (vor create_app) -> es wird nichts gebucht.
+_scheduled_scan_ergebnisbuchung: Callable[[], RecordScheduleResult] | None = None
+
 # Weck-Naht des Scan-Endes (S86-A4/B1): ein QUELLEN-AGNOSTISCHES Callable () -> None,
 # das der Composition Root im Lifespan auf ``RunCveMonitor.wake`` bindet. Der Scan stoesst
 # damit den CVE-Worker an, ohne dass application/scanning je application/cve importierte --
@@ -1040,6 +1047,24 @@ def wecke_cve_monitor_best_effort() -> None:
         logger.warning("cve_monitor_wecken_fehlgeschlagen", error=str(exc))
 
 
+def _buche_scan_erfolg(schedule_id: int) -> None:
+    """Bucht den geglueckten Ausgang eines geplanten Scans (S88-P4, best-effort).
+
+    Nicht verdrahtet (vor create_app) -> es passiert nichts. Der Use-Case selbst wirft
+    nie (er loggt), der Scan kann daran also nicht scheitern.
+    """
+    if _scheduled_scan_ergebnisbuchung is None:
+        return
+    _scheduled_scan_ergebnisbuchung().erfolg(schedule_id)
+
+
+def _buche_scan_fehlschlag(schedule_id: int, fehler: str) -> None:
+    """Bucht den gescheiterten Ausgang eines geplanten Scans samt Wortlaut (S88-P4)."""
+    if _scheduled_scan_ergebnisbuchung is None:
+        return
+    _scheduled_scan_ergebnisbuchung().fehlschlag(schedule_id, fehler)
+
+
 async def _scheduled_scan(cidr: str, profile_id: str, schedule_id: int) -> None:
     # E1: der geplante Scan nimmt DENSELBEN Pfad wie der manuelle -- voller
     # RunNetworkScan (Enrich, Hostnamen, Historie ueber den scan_history-Port des
@@ -1058,8 +1083,12 @@ async def _scheduled_scan(cidr: str, profile_id: str, schedule_id: int) -> None:
         _scheduled_scan_zeitbuchung()(schedule_id)
     if _scheduled_scan_bausteine is None:
         # Vor create_app kann kein Scheduler feuern; falls doch, ist das ein
-        # Verdrahtungsfehler -- laut loggen, den Scheduler NICHT reissen.
+        # Verdrahtungsfehler -- laut loggen, den Scheduler NICHT reissen. Der Ausgang
+        # wird trotzdem gebucht (S88-P4): ein Lauf, der wegen fehlender Verdrahtung
+        # nicht stattfand, ist fuer den Anwender ein Fehlschlag wie jeder andere --
+        # ohne diese Buchung saehe die Zeile aus wie ein geglueckter Lauf.
         logger.error("scheduled_scan_unverdrahtet", cidr=cidr)
+        _buche_scan_fehlschlag(schedule_id, "scheduled_scan_unverdrahtet")
         return
     try:
         run_scan, record_host, record_seen = _scheduled_scan_bausteine()
@@ -1082,10 +1111,18 @@ async def _scheduled_scan(cidr: str, profile_id: str, schedule_id: int) -> None:
                 # Scan aussen vor. Best-effort (die Funktion verschluckt + loggt).
                 wecke_cve_monitor_best_effort()
         logger.info("scheduled_scan_done", cidr=cidr, hosts=angereichert)
+        # S88-P4: der geglueckte Ausgang wird gebucht. Er raeumt zugleich den Wortlaut
+        # eines frueheren Fehlschlags weg -- ein alter Fehlertext neben einem frischen
+        # Erfolg waere irrefuehrender als gar keiner.
+        _buche_scan_erfolg(schedule_id)
     except Exception as exc:
         # Ein geplanter Scan darf den Scheduler NICHT reissen: Fehler loggen,
         # nicht werfen (best-effort-Linie des WS-Handlers).
         logger.warning("scheduled_scan_failed", cidr=cidr, error=str(exc))
+        # S88-P4: der Fehlschlag erreicht jetzt auch den Anwender. Zuvor endete er hier
+        # im Log, und die Zeile in ``scan_schedules`` war von einem geglueckten Lauf
+        # nicht zu unterscheiden (``last_run`` wird vor dem Scan gebucht).
+        _buche_scan_fehlschlag(schedule_id, str(exc))
 
 
 # ── FritzBox-Hosts: Verdrahtungs-Wrapper (best-effort, S.7c) ──────────────────
@@ -2913,6 +2950,15 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     global _scheduled_scan_zeitbuchung
     _scheduled_scan_zeitbuchung = _scheduled_scan_zeitbuchung_impl
 
+    # Ergebnisbuchungs-Naht (S88-P4) -- dasselbe Muster, eigene Naht: sie braucht nur das
+    # Repository (weder Job-Engine noch Uhr; der Ausgang traegt keinen Zeitstempel, der
+    # steht schon in last_run).
+    def _scheduled_scan_ergebnisbuchung_impl() -> RecordScheduleResult:
+        return RecordScheduleResult(schedule_repository())
+
+    global _scheduled_scan_ergebnisbuchung
+    _scheduled_scan_ergebnisbuchung = _scheduled_scan_ergebnisbuchung_impl
+
     # Baseline-Anreicherung des host_detail-Frames (ADR 0019): zwei zusaetzliche
     # Lese-Pfade, die der WS-Handler pro angereichertem Host konsultiert.
     # get_device liefert die kuratierten devices-Felder (label/tags/notes) -- gleicher
@@ -3666,6 +3712,16 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         worker = getattr(app.state, "run_cve_monitor", None)
         return bool(worker is not None and worker.is_checking)
 
+    # Fehlerzustands-Naht des Status (S88-P4): dieselbe Linie wie ``_cve_monitor_checking``
+    # -- ein blankes Callable ueber den Worker an ``app.state``, kein Import und kein
+    # app.state im application-Ring. Kein Worker verdrahtet -> ``(None, 0)``, also "kein
+    # gemerkter Fehler" statt eines Fehlers im Lesepfad.
+    def _cve_monitor_error() -> tuple[str | None, int]:
+        worker = getattr(app.state, "run_cve_monitor", None)
+        if worker is None:
+            return None, 0
+        return worker.last_error(), worker.consecutive_failures()
+
     app.dependency_overrides[provide_get_cve_status] = lambda: GetCveMonitorStatus(
         cve_inventory,
         cve_checkstate_repository(),
@@ -3673,6 +3729,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         cve_acknowledgement_repository(),
         refresh_interval_provider=_cve_refresh_interval_seconds,
         checking_provider=_cve_monitor_checking,
+        error_provider=_cve_monitor_error,
     )
 
     # Acknowledge-Schreibnaht (ADR 0037, Muster _acknowledge): Pass-Through an record(...).

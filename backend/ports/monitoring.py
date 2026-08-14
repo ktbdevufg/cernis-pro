@@ -342,7 +342,7 @@ class MonitorTargetSource(Protocol):
 class ScheduleRepository(Protocol):
     """REINE Persistenz der ``scan_schedules``-Tabelle (keine Job-Engine).
 
-    Gibt rohe ``dict``-Zeilen heraus (alle neun Spalten), KEIN Domaenen-Modell:
+    Gibt rohe ``dict``-Zeilen heraus (alle Spalten), KEIN Domaenen-Modell:
     die CRUD-Response ist ein 1:1-Tabellen-Dump fuer ``/api/schedules`` ohne
     Domaenen-Sicht/Auswahl -- ein ``dataclass`` waere hier verhaltensloser
     Persistenz-Ballast (anders als ``ScanSummary``, das eine bewusste Teil-Sicht
@@ -355,7 +355,8 @@ class ScheduleRepository(Protocol):
 
         Leere Tabelle -> ``[]``, niemals ``None``. Form wie Altcode
         ``get_schedules()`` (neun Spalten: id/name/cidr/profile_id/schedule/
-        enabled/last_run/next_run/created_at).
+        enabled/last_run/next_run/created_at) plus die zwei additiven Ergebnis-
+        Spalten ``last_result``/``last_error`` (S88-P4).
         """
         ...
 
@@ -404,6 +405,26 @@ class ScheduleRepository(Protocol):
         REIN Persistenz: beruehrt weder Job-Engine noch die uebrigen Spalten.
         Idempotent gegenueber einer fehlenden ``id`` (UPDATE trifft 0 Zeilen,
         kein Fehler -- Muster ``delete``).
+        """
+        ...
+
+    def set_run_result(self, schedule_id: int, result: str, error: str | None) -> None:
+        """Haelt den AUSGANG des letzten Laufs fest (S88-P4).
+
+        ``result`` ist ``'ok'`` oder ``'failed'``; ``error`` traegt im Fehlerfall den
+        Wortlaut und ist bei Erfolg ``None``. BEIDE Werte werden immer geschrieben --
+        ein geglueckter Lauf raeumt den Wortlaut des vorigen Fehlschlags weg, damit
+        nicht ein alter Fehlertext neben einem frischen Erfolg stehenbleibt.
+
+        Steht NEBEN ``set_run_times``, nicht an dessen Stelle: der Ausloesezeitpunkt
+        (``last_run``) ist eine eigene Aussage und wird VOR dem Lauf gebucht, der
+        Ausgang erst danach. Vor S88-P4 gab es die zweite Aussage nicht -- ein
+        gescheiterter geplanter Scan war von einem geglueckten in der Tabelle nicht zu
+        unterscheiden.
+
+        REIN Persistenz: bewertet nichts (welcher Ausgang vorliegt, entscheidet der
+        Aufrufer) und beruehrt weder Job-Engine noch die uebrigen Spalten. Idempotent
+        gegenueber einer fehlenden ``id`` (UPDATE trifft 0 Zeilen, kein Fehler).
         """
         ...
 

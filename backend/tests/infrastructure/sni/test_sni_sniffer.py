@@ -19,9 +19,23 @@ import time
 
 import pytest
 
+from infrastructure.sni import sni_sniffer as sni_sniffer_modul
 from infrastructure.sni.errors import SniError, SniPermissionError
 from infrastructure.sni.sni_sniffer import ScapySniSniffer, _RawHit, _resolve_app_name
 from infrastructure.sniffd_client.base import sniffd_platform_supported
+
+
+class _Genug(BaseException):
+    """Reissleine der Tests: beendet eine Poll-Schleife, die von SELBST nicht aufgibt.
+
+    Sie ist das Gegenstueck zur Abbruch-Behauptung: wo der Poller nach der Schwelle
+    aufhoeren SOLL, prueft der Test den ``stopped_reason``; wo er WEITERLAUFEN soll,
+    braucht der Test einen eigenen Ausgang -- sonst liefe er endlos.
+
+    Bewusst von ``BaseException`` und nicht von ``Exception``: der Poller faengt
+    ``Exception`` (das ist ja gerade sein Zweck) und wuerde die Reissleine sonst als
+    weiteren Poll-Fehlschlag zaehlen -- der Test wuerde messen, was er selbst erzeugt hat.
+    """
 
 
 class _FakeChannel:
@@ -252,3 +266,155 @@ def test_is_available_reflects_helper_entry_in_dev() -> None:
     Erwartungswert kommt aus ``sniffd_platform_supported()`` selbst."""
     expected, _ = sniffd_platform_supported()
     assert ScapySniSniffer(channel_factory=_FakeChannel).is_available() is expected
+
+
+# ── Befund 30: der Poller hoert auf ───────────────────────────────────────────
+# Bis S88-P4 liefen BEIDE Poll-Schleifen ohne jede Abbruchbedingung: kein Zaehler,
+# keine Obergrenze, kein Rueckzug -- der einzige Ausgang war ``_stop_poll`` ueber
+# ``stop()``. Scheiterte der Poll dauerhaft, warnte er alle 0,5 s ins Log und lief
+# endlos weiter; starb der Helfer, wusste ``is_running()`` es zwar, aber kein Code
+# verband dieses Wissen mit ``_stop_poll``. Beide Abbrueche werden hier ERZWUNGEN
+# (nicht angenommen): die Schleifen laufen direkt im Test-Thread, mit auf 0 gesetzten
+# Intervallen -- so kostet der Nachweis der Schwelle keine Wartezeit.
+
+
+class _ToterChannel(_FakeChannel):
+    """Channel, dessen Helfer NACH dem Start stirbt (``is_running()`` faellt auf False).
+
+    Bildet den echten Fall nach: Subprozess weg oder Reader-Thread tot
+    (``sniffd_client/base.is_running``) -- der Adapter erfaehrt es ueber genau diese
+    Naht, die er bis S88-P4 nicht ausgewertet hat.
+    """
+
+    def sterben(self) -> None:
+        self._running = False
+
+
+def _laufender_sniffer(channel: _FakeChannel) -> ScapySniSniffer:
+    """Sniffer mit gestartetem Channel, aber OHNE aufgespannte Poller-Threads.
+
+    Der Channel wird direkt gesetzt statt ueber ``start()``: die Poll-Schleifen sollen
+    im Test-Thread laufen (deterministisch), nicht nebenher in zwei Daemon-Threads.
+    """
+    sniffer = ScapySniSniffer(channel_factory=lambda: channel)
+    channel.start(None)
+    sniffer._channel = channel
+    return sniffer
+
+
+def test_socket_poller_endet_nach_der_fehlerschwelle(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Dauerhaft scheiternder Poll -> die Aufzeichnung endet nach der Schwelle."""
+    monkeypatch.setattr(sni_sniffer_modul, "_POLL_INTERVAL_SECS", 0)
+
+    def _wirft() -> dict[tuple[str, int], int | None]:
+        raise RuntimeError("psutil weg")
+
+    monkeypatch.setattr(sni_sniffer_modul, "_snapshot_sockets", _wirft)
+    fake = _FakeChannel()
+    sniffer = _laufender_sniffer(fake)
+
+    sniffer._poll_loop()
+
+    assert sniffer.stopped_reason() == "SNI_POLL_FAILED"
+    assert sniffer.is_running() is False
+    assert fake.stop_calls == 1
+    # Genau bis zur Schwelle gepollt, nicht weiter -- und nicht frueher aufgegeben.
+    assert len(sniffer._snapshots) == sni_sniffer_modul._MAX_POLL_FAILURES
+
+
+def test_socket_poller_haelt_einen_einzelnen_aussetzer_aus(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ein EINZELNER Fehlschlag loest die Schwelle NICHT aus (der Zaehler zaehlt in Folge).
+
+    Genau dafuer steht die Schwelle bei 10 und nicht bei 1: ein vereinzelt scheiterndes
+    ``psutil.net_connections`` (ein Prozess verschwindet mitten im Lesen) ist folgenlos.
+    """
+    monkeypatch.setattr(sni_sniffer_modul, "_POLL_INTERVAL_SECS", 0)
+    aufrufe = {"n": 0}
+
+    def _erst_fehler_dann_gut() -> dict[tuple[str, int], int | None]:
+        aufrufe["n"] += 1
+        if aufrufe["n"] == 1:
+            raise RuntimeError("einmaliger Aussetzer")
+        if aufrufe["n"] > 5:
+            # Der Test beendet die Schleife regulaer, sonst liefe sie endlos weiter --
+            # und genau das ist die Behauptung: sie gibt NICHT von selbst auf.
+            raise _Genug
+        return {}
+
+    monkeypatch.setattr(sni_sniffer_modul, "_snapshot_sockets", _erst_fehler_dann_gut)
+    sniffer = _laufender_sniffer(_FakeChannel())
+
+    with pytest.raises(_Genug):
+        sniffer._poll_loop()
+
+    assert sniffer.stopped_reason() is None
+
+
+def test_socket_poller_endet_bei_totem_helfer(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Der KERN des Befunds: ``is_running()`` kennt den toten Helfer -- jetzt wird er
+    auch mit ``_stop_poll`` verbunden."""
+    monkeypatch.setattr(sni_sniffer_modul, "_POLL_INTERVAL_SECS", 0)
+    fake = _ToterChannel()
+    sniffer = _laufender_sniffer(fake)
+    fake.sterben()
+
+    sniffer._poll_loop()
+
+    assert sniffer.stopped_reason() == "SNI_HELPER_DEAD"
+    assert sniffer.is_running() is False
+
+
+def test_hit_poller_endet_nach_der_fehlerschwelle(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sni_sniffer_modul, "_HIT_POLL_INTERVAL_SECS", 0)
+    fake = _FakeChannel()
+    sniffer = _laufender_sniffer(fake)
+    aufrufe = {"n": 0}
+
+    def _wirft() -> list[dict[str, object]]:
+        aufrufe["n"] += 1
+        raise RuntimeError("Kanal kaputt")
+
+    fake.poll_hits = _wirft  # type: ignore[method-assign]
+
+    sniffer._hit_poll_loop()
+
+    assert sniffer.stopped_reason() == "SNI_POLL_FAILED"
+    assert aufrufe["n"] == sni_sniffer_modul._MAX_POLL_FAILURES
+    assert sniffer.is_running() is False
+
+
+def test_hit_poller_endet_bei_totem_helfer(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sni_sniffer_modul, "_HIT_POLL_INTERVAL_SECS", 0)
+    fake = _ToterChannel()
+    sniffer = _laufender_sniffer(fake)
+    fake.sterben()
+
+    sniffer._hit_poll_loop()
+
+    assert sniffer.stopped_reason() == "SNI_HELPER_DEAD"
+
+
+def test_stopped_reason_anfangs_none_und_start_raeumt_ihn_weg() -> None:
+    """Kein Selbst-Abbruch -> ``None``; ein neuer Lauf traegt den alten Grund nicht mit."""
+    fake = _FakeChannel()
+    sniffer = ScapySniSniffer(channel_factory=lambda: fake)
+    assert sniffer.stopped_reason() is None
+
+    sniffer._stopped_reason = "SNI_HELPER_DEAD"
+    sniffer.start(None)
+    try:
+        assert sniffer.stopped_reason() is None
+    finally:
+        sniffer.stop()
+
+
+def test_stop_durch_den_anwender_setzt_keinen_grund() -> None:
+    """``stop()`` ist KEIN Selbst-Abbruch -- der Anwender hat es so gewollt."""
+    fake = _FakeChannel()
+    sniffer = ScapySniSniffer(channel_factory=lambda: fake)
+    sniffer.start(None)
+    sniffer.stop()
+
+    assert sniffer.stopped_reason() is None

@@ -150,6 +150,11 @@ class RunMonitor:
         # target_id -> letzter bekannter alive-Zustand (None = noch nie gemessen).
         self._status: dict[str, bool] = {}
         self._running = False
+        # Fehlerzustand des Loop (S88-P4, Muster ``RunThroughputPoll._last_error``):
+        # Wortlaut der letzten gescheiterten Mess-Runde + Zahl der AUFEINANDERFOLGENDEN
+        # Fehlschlaege. Eine gelungene Runde setzt beides zurueck.
+        self._last_error: str | None = None
+        self._consecutive_failures = 0
 
     async def tick(self) -> None:
         """Eine Mess-Runde ueber alle (frisch geladenen) Targets."""
@@ -208,11 +213,64 @@ class RunMonitor:
         await self._logging_sink.record(target, sample, event, sink_now)
 
     async def run(self) -> None:
-        """Endlos-Rahmen: tickt bis ``stop()``. Trivial -- die Logik sitzt in ``tick``."""
+        """Endlos-Rahmen: tickt bis ``stop()``. Trivial -- die Logik sitzt in ``tick``.
+
+        SCHUTZ UM DEN TICK (S88-P4): dieser Arbeiter hatte die groesste ungeschuetzte
+        Flaeche -- ``target_source.load``, ``pinger.ping``, ``rtt_history.save``,
+        ``event_repo.save`` und ``broadcaster.broadcast`` lagen samtlich ohne ``try``
+        im Pfad (nur ``notifier``/``alert_raiser``/``logging_sink`` fangen in ihren
+        Adaptern selbst). Ein Fehler dort riss den Live-Loop still: die Ausnahme lag
+        danach unbeachtet im Task-Objekt an ``app.state``, das Frontend sah nur eine
+        Status-Map, die nicht mehr weiterlief. Der Grund wird jetzt gemerkt und die
+        Schleife laeuft weiter; ``CancelledError`` bleibt unangetastet (Teardown-Signal,
+        kein Fehler). Muster ``RunThroughputPoll.run``.
+
+        Der Schutz sitzt bewusst im run-Rumpf jedes Arbeiters und NICHT in einer
+        gemeinsamen Basisklasse: die fuenf so abgesicherten Arbeiter liegen in vier
+        verschiedenen application-Subpaketen (cve, outbound_log, scheduler, monitoring);
+        eine gemeinsame Basis waere ein Quer-Import zwischen ihnen oder eine neue Schicht
+        unterhalb von ``application/``.
+
+        Die ``_status``-Map wird bei einem Fehlschlag NICHT geleert: anders als beim
+        Durchsatz-Poller (wo veraltete Raten als aktuelle Messung weiterlebten) ist die
+        letzte bekannte Erreichbarkeit eine gueltige Aussage ueber die letzte gelungene
+        Runde -- und ``prev`` traegt die Flankenerkennung der naechsten Runde. Ein Leeren
+        wuerde jedes Target beim naechsten Erfolg als frischen Uebergang melden.
+        """
         self._running = True
         while self._running:
-            await self.tick()
+            try:
+                await self.tick()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # Grund wird gemerkt, nicht verschluckt (S3)
+                self._note_failure(exc)
+            else:
+                self._note_success()
             await asyncio.sleep(self._interval)
+
+    def _note_failure(self, exc: Exception) -> None:
+        """Merkt den Wortlaut der gescheiterten Runde und zaehlt die Fehlschlag-Serie hoch."""
+        self._last_error = str(exc)
+        self._consecutive_failures += 1
+        _logger.warning(
+            "monitor_tick_failed",
+            error=self._last_error,
+            consecutive_failures=self._consecutive_failures,
+        )
+
+    def _note_success(self) -> None:
+        """Setzt Wortlaut und Zaehler nach einer gelungenen Runde zurueck."""
+        self._last_error = None
+        self._consecutive_failures = 0
+
+    def last_error(self) -> str | None:
+        """Wortlaut der letzten gescheiterten Mess-Runde, sonst ``None`` (S88-P4)."""
+        return self._last_error
+
+    def consecutive_failures(self) -> int:
+        """Zahl der AUFEINANDERFOLGENDEN gescheiterten Runden (0 = letzte Runde gelang)."""
+        return self._consecutive_failures
 
     def stop(self) -> None:
         """Beendet den ``run``-Loop nach der laufenden Iteration (Flag, kein Cancel)."""
@@ -587,6 +645,61 @@ class RecordScheduleRun:
         # leer, kein erfundener Wert).
         next_run = self._job_scheduler.next_run_time(schedule_id)
         _write_run_times(self._repository, schedule_id, last_run=last_run, next_run=next_run)
+
+
+# Die beiden Ausgaenge eines geplanten Laufs, wie sie in ``scan_schedules.last_result``
+# landen (S88-P4). Benannte Konstanten statt Literale an drei Stellen -- der Wert ist ein
+# STABILER MARKER fuer die Anzeige, kein Anzeigetext: der Wortlaut fuer den Anwender
+# entsteht am Frontend-Rand (Muster ``NPCAP_MISSING``).
+SCHEDULE_RESULT_OK = "ok"
+SCHEDULE_RESULT_FAILED = "failed"
+
+
+class RecordScheduleResult:
+    """Haelt den AUSGANG eines geplanten Scans fest (S88-P4).
+
+    Gegenstueck zu ``RecordScheduleRun``: jener bucht den Ausloesezeitpunkt VOR dem
+    Scan, dieser den Ausgang DANACH. Beide bleiben getrennt, weil sie verschiedene
+    Aussagen sind und zu verschiedenen Zeiten entstehen -- ``last_run`` beantwortet
+    "wann wurde ausgeloest", ``last_result``/``last_error`` beantworten "wie ging es
+    aus". Vor S88-P4 gab es nur die erste, und ein gescheiterter Lauf sah in der
+    Tabelle exakt aus wie ein geglueckter.
+
+    RING-ZUORDNUNG wie bei ``RecordScheduleRun``: der Ausloeser (``app.py``) lebt im
+    Composition Root, die Schreiblogik ueber dem Port hier im application-Ring.
+
+    BEST-EFFORT: Ein Fehler beim Schreiben des Ausgangs darf den geplanten Scan
+    NIEMALS reissen -- ``__call__`` wirft nicht, es loggt.
+    """
+
+    def __init__(self, repository: ScheduleRepository) -> None:
+        self._repository = repository
+
+    def erfolg(self, schedule_id: int) -> None:
+        """Bucht einen geglueckten Lauf (``'ok'``, Fehlerwortlaut wird geleert)."""
+        self._schreiben(schedule_id, SCHEDULE_RESULT_OK, None)
+
+    def fehlschlag(self, schedule_id: int, error: str) -> None:
+        """Bucht einen gescheiterten Lauf (``'failed'`` + Wortlaut)."""
+        self._schreiben(schedule_id, SCHEDULE_RESULT_FAILED, error)
+
+    def _schreiben(self, schedule_id: int, result: str, error: str | None) -> None:
+        """Schreibt den Ausgang BEST-EFFORT (Linie ``_write_run_times``).
+
+        Der Ausgang ist eine ANZEIGE-Information -- sein Schreiben darf den Vorgang,
+        an dem es haengt, nicht reissen. Ein Persistenz-Fehler wird GELOGGT und
+        geschluckt, nicht geworfen. Das ist KEIN stiller Fallback (S3): es wird nichts
+        erfunden, der Fehlschlag steht im Log, und die Spalte behaelt ihren alten Wert.
+        """
+        try:
+            self._repository.set_run_result(schedule_id, result, error)
+        except Exception as exc:
+            _logger.warning(
+                "schedule_run_result_not_written",
+                schedule_id=schedule_id,
+                result=result,
+                error=str(exc),
+            )
 
 
 # ── SLA-Lese-Use-Cases (M.7) ────────────────────────────────────────────────
@@ -1392,6 +1505,11 @@ class RunLoggingRetention:
         self._enforce = enforce
         self._interval = interval
         self._running = False
+        # Fehlerzustand des Loop (S88-P4, Muster ``RunThroughputPoll._last_error``):
+        # Wortlaut des letzten gescheiterten Durchlaufs + Zahl der AUFEINANDERFOLGENDEN
+        # Fehlschlaege. Ein gelungener Durchlauf setzt beides zurueck.
+        self._last_error: str | None = None
+        self._consecutive_failures = 0
 
     async def tick(self) -> None:
         """Ein Retention-Lauf: now-basierte Cutoffs rechnen, ``enforce.run`` rufen."""
@@ -1412,11 +1530,60 @@ class RunLoggingRetention:
             _logger.warning("logging_retention_run_failed", error=str(exc))
 
     async def run(self) -> None:
-        """Endlos-Rahmen: tickt bis ``stop()``. Trivial -- die Logik sitzt in ``tick``."""
+        """Endlos-Rahmen: tickt bis ``stop()``. Trivial -- die Logik sitzt in ``tick``.
+
+        SCHUTZ UM DEN DURCHLAUF (S88-P4): ``tick`` faengt seinen ganzen Rumpf schon selbst
+        -- der Schutz hier liegt eine Ebene HOEHER. Er deckt ab, was ausserhalb von
+        ``tick`` liegen kann (heute nur das ``sleep``, kuenftig alles, was im run-Rumpf
+        dazukommt) und macht den Fehlerzustand ueberhaupt erst abfragbar: bis dahin
+        verschwand ein gescheiterter Retention-Lauf ausschliesslich ins Log.
+        Doppelt gefangen ist hier kein Mangel. ``CancelledError`` bleibt unangetastet
+        (Teardown-Signal, kein Fehler).
+
+        Der Schutz sitzt bewusst im run-Rumpf jedes Arbeiters und NICHT in einer
+        gemeinsamen Basisklasse: die fuenf so abgesicherten Arbeiter liegen in vier
+        verschiedenen application-Subpaketen (cve, outbound_log, scheduler, monitoring);
+        eine gemeinsame Basis waere ein Quer-Import zwischen ihnen oder eine neue Schicht
+        unterhalb von ``application/``.
+        """
         self._running = True
         while self._running:
-            await self.tick()
+            try:
+                await self.tick()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # Grund wird gemerkt, nicht verschluckt (S3)
+                self._note_failure(exc)
+            else:
+                self._note_success()
             await asyncio.sleep(self._interval)
+
+    def _note_failure(self, exc: Exception) -> None:
+        """Merkt den Wortlaut des gescheiterten Durchlaufs und zaehlt die Serie hoch."""
+        self._last_error = str(exc)
+        self._consecutive_failures += 1
+        _logger.warning(
+            "logging_retention_run_loop_failed",
+            error=self._last_error,
+            consecutive_failures=self._consecutive_failures,
+        )
+
+    def _note_success(self) -> None:
+        """Setzt Wortlaut und Zaehler nach einem gelungenen Durchlauf zurueck."""
+        self._last_error = None
+        self._consecutive_failures = 0
+
+    def last_error(self) -> str | None:
+        """Wortlaut des letzten gescheiterten Durchlaufs, sonst ``None`` (S88-P4).
+
+        Bezieht sich auf den run-Rumpf, NICHT auf ``tick``: ``tick`` faengt seine Fehler
+        selbst und meldet sie nur ins Log (best-effort, unveraendert).
+        """
+        return self._last_error
+
+    def consecutive_failures(self) -> int:
+        """Zahl der AUFEINANDERFOLGENDEN gescheiterten Durchlaeufe (0 = letzter gelang)."""
+        return self._consecutive_failures
 
     def stop(self) -> None:
         """Beendet den ``run``-Loop nach der laufenden Iteration (Flag, kein Cancel)."""

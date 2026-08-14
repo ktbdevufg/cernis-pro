@@ -112,6 +112,11 @@ def _status_to_dict(s: MonitorStatus) -> dict[str, object]:
         "findings_active": s.findings_active,
         "sleeping": s.hosts_due == 0,
         "checking": s.checking,
+        # last_error/consecutive_failures (S88-P4): der Fehlerzustand des Worker. Rein
+        # additiv neben checking -- ein gescheiterter tick ist weder "schlaeft" noch
+        # "prueft gerade", sondern eine dritte, bis dahin unsichtbare Lage.
+        "last_error": s.last_error,
+        "consecutive_failures": s.consecutive_failures,
     }
 
 

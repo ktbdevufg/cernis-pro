@@ -30,6 +30,7 @@ import pytest
 from application.monitoring import (
     GetSchedules,
     ManageSchedules,
+    RecordScheduleResult,
     RecordScheduleRun,
     UpdateSchedule,
 )
@@ -47,6 +48,8 @@ class _FakeRepo:
         self._next_id = 1
         # Aufzeichnung der Zeit-Schreibaufrufe (Finding 3): (id, last_run, next_run).
         self.run_time_calls: list[tuple[int, str | None, str | None]] = []
+        # Aufzeichnung der Ergebnis-Schreibaufrufe (S88-P4): (id, result, error).
+        self.run_result_calls: list[tuple[int, str, str | None]] = []
 
     def list(self) -> list[dict[str, Any]]:
         return list(self.rows)
@@ -65,6 +68,8 @@ class _FakeRepo:
                 "last_run": None,
                 "next_run": None,
                 "created_at": "2026-06-03 00:00:00",
+                "last_result": None,
+                "last_error": None,
             }
         )
         return sid
@@ -91,6 +96,15 @@ class _FakeRepo:
             if row["id"] == schedule_id:
                 row["last_run"] = last_run
                 row["next_run"] = next_run
+
+    def set_run_result(self, schedule_id: int, result: str, error: str | None) -> None:
+        # Wie der SQLite-Adapter: BEIDE Spalten werden gesetzt -- ein Erfolg raeumt den
+        # Wortlaut des vorigen Fehlschlags weg. Zusaetzlich aufgezeichnet.
+        self.run_result_calls.append((schedule_id, result, error))
+        for row in self.rows:
+            if row["id"] == schedule_id:
+                row["last_result"] = result
+                row["last_error"] = error
 
     def delete(self, schedule_id: int) -> None:
         self.rows = [r for r in self.rows if r["id"] != schedule_id]
@@ -475,3 +489,67 @@ def test_add_wirft_nie_bei_persistenz_fehler_der_zeiten() -> None:
 
     assert sid == 1
     assert jobs.registered == [sid]
+
+
+# ── RecordScheduleResult (S88-P4): der Ausgang des geplanten Laufs ────────────
+# Gegenstueck zu RecordScheduleRun: jener bucht den Ausloesezeitpunkt VOR dem Scan,
+# dieser den Ausgang DANACH. Ohne ihn war ein gescheiterter geplanter Scan von einem
+# geglueckten nicht zu unterscheiden -- der Fehler endete in ``scheduled_scan_failed``
+# im Log, und die Zeile sah unveraendert aus.
+
+
+class _KaputtesErgebnisRepo(_FakeRepo):
+    """Repo, dessen ``set_run_result`` wirft -- fuer den best-effort-Nachweis."""
+
+    def set_run_result(self, schedule_id: int, result: str, error: str | None) -> None:
+        raise sqlite3.OperationalError("database is locked")
+
+
+def test_record_schedule_result_bucht_erfolg() -> None:
+    repo = _FakeRepo()
+    sid = repo.add("A", "10.0.0.0/24", "p", "interval:2m")
+
+    RecordScheduleResult(repo).erfolg(sid)
+
+    row = repo.list()[0]
+    assert row["last_result"] == "ok"
+    assert row["last_error"] is None
+    assert repo.run_result_calls == [(sid, "ok", None)]
+
+
+def test_record_schedule_result_bucht_fehlschlag_mit_wortlaut() -> None:
+    repo = _FakeRepo()
+    sid = repo.add("A", "10.0.0.0/24", "p", "interval:2m")
+
+    RecordScheduleResult(repo).fehlschlag(sid, "nmap nicht gefunden")
+
+    row = repo.list()[0]
+    assert row["last_result"] == "failed"
+    assert row["last_error"] == "nmap nicht gefunden"
+
+
+def test_record_schedule_result_erfolg_und_fehlschlag_sind_unterscheidbar() -> None:
+    """4.5 auf der Use-Case-Ebene: beide Ausgaenge, klar auseinanderzuhalten."""
+    repo = _FakeRepo()
+    geglueckt = repo.add("A", "10.0.0.0/24", "p", "interval:2m")
+    gescheitert = repo.add("B", "10.0.0.0/24", "p", "interval:2m")
+    uc = RecordScheduleResult(repo)
+
+    uc.erfolg(geglueckt)
+    uc.fehlschlag(gescheitert, "Netz nicht erreichbar")
+
+    zeilen = {r["id"]: r for r in repo.list()}
+    assert zeilen[geglueckt]["last_result"] == "ok"
+    assert zeilen[gescheitert]["last_result"] == "failed"
+    assert zeilen[gescheitert]["last_error"] == "Netz nicht erreichbar"
+
+
+def test_record_schedule_result_wirft_nie_bei_persistenz_fehler() -> None:
+    """Best-effort wie ``RecordScheduleRun``: der Ausgang ist eine Anzeige-Information
+    und darf den Lauf, an dem er haengt, nicht reissen."""
+    repo = _KaputtesErgebnisRepo()
+    sid = repo.add("A", "10.0.0.0/24", "p", "interval:2m")
+
+    RecordScheduleResult(repo).fehlschlag(sid, "irgendwas")  # kein Wurf
+
+    assert repo.list()[0]["last_result"] is None  # nichts halb geschrieben

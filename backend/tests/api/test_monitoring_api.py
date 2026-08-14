@@ -309,7 +309,12 @@ def test_schedule_add_empty_body_uses_defaults(db_path: Path) -> None:
     assert resp.json()["ok"] is True
 
 
-def test_schedule_add_then_listed_with_nine_columns(db_path: Path) -> None:
+def test_schedule_add_then_listed_with_all_columns(db_path: Path) -> None:
+    """Die Liste traegt die neun Altcode-Spalten PLUS die zwei Ergebnis-Spalten (S88-P4).
+
+    Die beiden neuen reisen ueber die vorhandene Zeitplan-Naht ``GET /api/schedules``,
+    die den Zeilen-dump 1:1 durchreicht -- kein neuer Endpunkt, keine Projektion.
+    """
     with TestClient(_wired_app(db_path)) as client:
         client.post("/api/schedules", json={"name": "X", "cidr": "10.0.0.0/24"})
         rows = client.get("/api/schedules").json()
@@ -324,6 +329,8 @@ def test_schedule_add_then_listed_with_nine_columns(db_path: Path) -> None:
         "last_run",
         "next_run",
         "created_at",
+        "last_result",
+        "last_error",
     }
 
 

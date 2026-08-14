@@ -103,6 +103,16 @@ class StartSniCapture:
         """Rechte-Begruendung oder ``None`` (fuer den status-Endpunkt ``permission_error``)."""
         return self._sniffer.check_permission()
 
+    def stopped_reason(self) -> str | None:
+        """Grund des Selbst-Abbruchs oder ``None`` (fuer den status-Endpunkt, Befund 30).
+
+        EXAKT die Linie von ``check_permission``: ein duenner Pass-Through ueber den Port,
+        der einen stabilen Marker (keinen Anzeigetext) an den status-Endpunkt reicht. Der
+        Weg ist bewusst derselbe -- beide beantworten "warum geht der Mitschnitt gerade
+        nicht?", nur an verschiedenen Stellen seines Lebens (vorher / mittendrin).
+        """
+        return self._sniffer.stopped_reason()
+
 
 class GetObservedSni:
     """Liest die aktuelle Momentaufnahme der erfassten SNIs (Pass-Through ueber den Port).

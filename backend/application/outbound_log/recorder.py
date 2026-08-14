@@ -83,6 +83,11 @@ class RunOutboundRecorder:
         self._interval_provider = interval_provider
         self._now = now_provider
         self._running = False
+        # Fehlerzustand des Loop (S88-P4, Muster ``RunThroughputPoll._last_error``):
+        # Wortlaut des letzten gescheiterten Durchlaufs + Zahl der AUFEINANDERFOLGENDEN
+        # Fehlschlaege. Ein gelungener Durchlauf setzt beides zurueck.
+        self._last_error: str | None = None
+        self._consecutive_failures = 0
 
     def _active_recording(self, now: float) -> OutboundRecording | None:
         """Erste host-weit AKTIVE Aufzeichnung zum Zeitpunkt ``now`` (oder ``None``).
@@ -161,12 +166,70 @@ class RunOutboundRecorder:
         return DEFAULT_INTERVAL_S
 
     async def run(self) -> None:
-        """Endlos-Rahmen: tickt bis ``stop()``. Die Logik sitzt in ``tick``."""
+        """Endlos-Rahmen: tickt bis ``stop()``. Die Logik sitzt in ``tick``.
+
+        SCHUTZ UM DEN DURCHLAUF (S88-P4): ``tick`` faengt seinen ganzen Rumpf schon selbst
+        -- der Schutz hier liegt eine Ebene HOEHER und deckt das ab, was im run-Rumpf
+        AUSSERHALB von ``tick`` steht: ``_active_recording`` (Repo-Zugriff) und
+        ``_current_interval`` (fremdes Callable ``interval_provider``). Genau dort riss
+        der Task bisher, und die Ausnahme lag danach unbeachtet im Task-Objekt.
+        Doppelt gefangen ist hier kein Mangel, sondern zwei verschiedene Flaechen.
+        ``CancelledError`` bleibt unangetastet (Teardown-Signal, kein Fehler).
+
+        Der Schutz sitzt bewusst im run-Rumpf jedes Arbeiters und NICHT in einer
+        gemeinsamen Basisklasse: die fuenf so abgesicherten Arbeiter liegen in vier
+        verschiedenen application-Subpaketen (cve, outbound_log, scheduler, monitoring);
+        eine gemeinsame Basis waere ein Quer-Import zwischen ihnen oder eine neue Schicht
+        unterhalb von ``application/``.
+
+        Schlaegt der Rumpf fehl, wird mit dem Intervall des Ruhefalls weitergeschlafen
+        (``_current_interval(None)``): das Intervall der aktiven Aufzeichnung ist gerade
+        nicht ermittelbar, und ein enger Wiederholtakt auf eine kaputte Naht waere Last
+        ohne Gewinn. Ueber ``_current_interval`` und nicht ueber die blanke Konstante,
+        damit ein gesetzter ``interval_provider`` (Test/Override) auch im Fehlerfall gilt
+        -- sonst haette der Fehlerpfad einen anderen Takt als der Normalfall.
+        """
         self._running = True
         while self._running:
-            await self.tick()
-            rec = self._active_recording(self._now())
-            await asyncio.sleep(self._current_interval(rec))
+            try:
+                await self.tick()
+                rec = self._active_recording(self._now())
+                interval = self._current_interval(rec)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # Grund wird gemerkt, nicht verschluckt (S3)
+                self._note_failure(exc)
+                interval = self._current_interval(None)
+            else:
+                self._note_success()
+            await asyncio.sleep(interval)
+
+    def _note_failure(self, exc: Exception) -> None:
+        """Merkt den Wortlaut des gescheiterten Durchlaufs und zaehlt die Serie hoch."""
+        self._last_error = str(exc)
+        self._consecutive_failures += 1
+        _logger.warning(
+            "outbound_recorder_run_failed",
+            error=self._last_error,
+            consecutive_failures=self._consecutive_failures,
+        )
+
+    def _note_success(self) -> None:
+        """Setzt Wortlaut und Zaehler nach einem gelungenen Durchlauf zurueck."""
+        self._last_error = None
+        self._consecutive_failures = 0
+
+    def last_error(self) -> str | None:
+        """Wortlaut des letzten gescheiterten Durchlaufs, sonst ``None`` (S88-P4).
+
+        Bezieht sich auf den run-Rumpf, NICHT auf ``tick``: ``tick`` faengt seine Fehler
+        selbst und meldet sie nur ins Log (best-effort, unveraendert).
+        """
+        return self._last_error
+
+    def consecutive_failures(self) -> int:
+        """Zahl der AUFEINANDERFOLGENDEN gescheiterten Durchlaeufe (0 = letzter gelang)."""
+        return self._consecutive_failures
 
     def stop(self) -> None:
         """Setzt das Loop-Flag (Abbruch nach der laufenden Iteration)."""

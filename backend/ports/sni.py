@@ -94,6 +94,22 @@ class SniSnifferPort(Protocol):
         """
         ...
 
+    def stopped_reason(self) -> str | None:
+        """Grund, aus dem die Aufzeichnung von SELBST endete, oder ``None`` (Befund 30).
+
+        ``None`` heisst: kein Selbst-Abbruch -- die Aufzeichnung laeuft, hat nie
+        gelaufen, oder sie wurde ueber ``stop()`` beendet. Sonst ein STABILER MARKER
+        (kein Anzeigetext, kein zu parsender Satz) nach dem Muster von
+        ``check_permission``: das Backend benennt die Lage, der Wortlaut fuer den
+        Anwender entsteht am Frontend-Rand.
+
+        Der Adapter beendet die Aufzeichnung von sich aus, wenn der Poll dauerhaft
+        scheitert oder der Helfer-Prozess gestorben ist -- ohne diese Naht liefe sie
+        endlos ins Leere und meldete nach aussen weiter "laeuft". Schnelle lokale
+        Zustandsabfrage, daher synchron.
+        """
+        ...
+
     def is_available(self) -> bool:
         """``True``, wenn die Sniff-Backend-Bibliothek (libpcap/scapy) verfuegbar ist.
 

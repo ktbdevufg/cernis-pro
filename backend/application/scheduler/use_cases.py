@@ -83,6 +83,11 @@ class RunScheduler:
         self._interval = interval
         self._now = now_provider
         self._running = False
+        # Fehlerzustand des Loop (S88-P4, Muster ``RunThroughputPoll._last_error``):
+        # Wortlaut des letzten gescheiterten tick + Zahl der AUFEINANDERFOLGENDEN
+        # Fehlschlaege. Ein gelungener tick setzt beides zurueck.
+        self._last_error: str | None = None
+        self._consecutive_failures = 0
 
     async def tick(self) -> None:
         """Eine Iteration: abgelaufene Jobs stilllegen, faellige aktive Jobs ausfuehren."""
@@ -117,11 +122,61 @@ class RunScheduler:
             )
 
     async def run(self) -> None:
-        """Endlos-Rahmen: tickt bis ``stop()``. Die Logik sitzt in ``tick``."""
+        """Endlos-Rahmen: tickt bis ``stop()``. Die Logik sitzt in ``tick``.
+
+        SCHUTZ UM DEN TICK (S88-P4): bis dahin lag das ``try`` allein in ``_dispatch``
+        um ``handler.run()``. Alles davor -- ``repository.list_active()``,
+        ``update_state`` fuer abgelaufene Jobs, die Fenster-Rechnung -- lag ungeschuetzt:
+        ein Repository-Fehler riss den Worker, und die Ausnahme lag danach unbeachtet im
+        Task-Objekt an ``app.state``. Der Grund wird jetzt gemerkt und die Schleife laeuft
+        weiter; ``CancelledError`` bleibt unangetastet (Teardown-Signal, kein Fehler).
+        Muster ``RunThroughputPoll.run``.
+
+        Der Schutz sitzt bewusst im run-Rumpf jedes Arbeiters und NICHT in einer
+        gemeinsamen Basisklasse: die fuenf so abgesicherten Arbeiter liegen in vier
+        verschiedenen application-Subpaketen (cve, outbound_log, scheduler, monitoring);
+        eine gemeinsame Basis waere ein Quer-Import zwischen ihnen oder eine neue Schicht
+        unterhalb von ``application/``.
+        """
         self._running = True
         while self._running:
-            await self.tick()
+            try:
+                await self.tick()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # Grund wird gemerkt, nicht verschluckt (S3)
+                self._note_failure(exc)
+            else:
+                self._note_success()
             await asyncio.sleep(self._interval)
+
+    def _note_failure(self, exc: Exception) -> None:
+        """Merkt den Wortlaut des gescheiterten tick und zaehlt die Fehlschlag-Serie hoch."""
+        self._last_error = str(exc)
+        self._consecutive_failures += 1
+        _logger.warning(
+            "scheduler_tick_failed",
+            error=self._last_error,
+            consecutive_failures=self._consecutive_failures,
+        )
+
+    def _note_success(self) -> None:
+        """Setzt Wortlaut und Zaehler nach einem gelungenen tick zurueck."""
+        self._last_error = None
+        self._consecutive_failures = 0
+
+    def last_error(self) -> str | None:
+        """Wortlaut des letzten gescheiterten tick, sonst ``None`` (S88-P4).
+
+        Bezieht sich auf den tick als Ganzes. Ein einzelner fehlschlagender Handler wird
+        weiterhin in ``_dispatch`` gefangen und erscheint hier NICHT -- er ist der Fehler
+        eines Jobs, nicht des Wecker-Laufs.
+        """
+        return self._last_error
+
+    def consecutive_failures(self) -> int:
+        """Zahl der AUFEINANDERFOLGENDEN gescheiterten ticks (0 = letzter tick gelang)."""
+        return self._consecutive_failures
 
     def stop(self) -> None:
         """Setzt das Loop-Flag (Abbruch nach der laufenden Iteration)."""

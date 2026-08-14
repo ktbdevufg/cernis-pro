@@ -62,6 +62,29 @@ _HIT_POLL_INTERVAL_SECS = 0.25
 _MAX_HITS = 5000
 _MAX_SNAPSHOTS = 600  # ~5 min bei 0.5 s-Intervall -- deckt jeden Hit-Zeitpunkt ab
 
+# Zahl der AUFEINANDERFOLGENDEN gescheiterten Polls, nach der die Aufzeichnung endet
+# (Befund 30). 10 ist bewusst gewaehlt und nicht 2 oder 3:
+#
+#   * Ein EINZELNER Aussetzer darf sie niemals ausloesen. ``psutil.net_connections``
+#     scheitert gelegentlich vereinzelt (ein Prozess verschwindet mitten im Lesen von
+#     /proc), und ein solcher Aussetzer ist folgenlos -- der naechste Poll gelingt.
+#   * Der Zaehler zaehlt nur IN FOLGE: ein gelungener Poll setzt ihn zurueck. Eine Serie
+#     von 10 bedeutet also nicht "10 Fehler insgesamt", sondern "seit 10 Versuchen
+#     gelingt gar nichts mehr" -- das ist kein Aussetzer, das ist ein Dauerzustand.
+#   * In Zeit gerechnet ist die Schwelle kurz genug, um nicht endlos ins Leere zu laufen:
+#     10 x 0,5 s = 5 s beim Socket-Poller, 10 x 0,25 s = 2,5 s beim Hit-Poller.
+#
+# Beide Poller teilen die Schwelle: sie beantworten dieselbe Frage ("laeuft die Quelle
+# noch?"), nur an verschiedenen Quellen.
+_MAX_POLL_FAILURES = 10
+
+# Gruende, aus denen die Aufzeichnung von SELBST endet -- als stabile MARKER, nicht als
+# Anzeigetext (exakt das Muster von ``NPCAP_MISSING``, s. ``check_permission``): das
+# Backend benennt die LAGE, das Frontend besitzt den Wortlaut und uebersetzt ihn. So
+# steht kein deutscher oder englischer Satz in der infrastructure-Schicht.
+_STOPPED_POLL_FAILED = "SNI_POLL_FAILED"
+_STOPPED_HELPER_DEAD = "SNI_HELPER_DEAD"
+
 
 # ── psutil-Naht (UNVERAENDERT: net_connections + defensiver Name) ─────────────
 
@@ -148,23 +171,49 @@ class ScapySniSniffer:
         self._snapshots: deque[tuple[float, dict[tuple[str, int], int | None]]] = deque(
             maxlen=_MAX_SNAPSHOTS
         )
+        # Grund, aus dem die Aufzeichnung von SELBST geendet hat (Befund 30). ``None``
+        # heisst: kein Selbst-Abbruch -- entweder laeuft sie noch, oder der Anwender hat
+        # ``stop()`` gerufen. Der Wert ueberlebt das Ende des Poller-Threads bewusst: er
+        # ist genau dann zu lesen, wenn nichts mehr laeuft (``stopped_reason``).
+        self._stopped_reason: str | None = None
 
     # -- Poller (eigene daemon-Threads -- entkoppelt) --------------------------
 
     def _poll_loop(self) -> None:
-        """Pollt die Socket-Tabelle periodisch (UNVERAENDERT, billig, entkoppelt).
+        """Pollt die Socket-Tabelle periodisch (billig, entkoppelt).
 
         Legt nur leichte ``(monotonic_ts, table)``-Snapshots ab (kein Name -- der kommt
-        in ``observed()``). Laeuft, bis ``_stop_poll`` gesetzt ist. Ein psutil-Fehler
-        killt den Poller nicht (leerer Snapshot statt Crash).
+        in ``observed()``). Laeuft, bis ``_stop_poll`` gesetzt ist. Ein EINZELNER
+        psutil-Fehler killt den Poller nicht (leerer Snapshot statt Crash).
+
+        ABBRUCH (Befund 30): Zuvor lief diese Schleife bei dauerhaft scheiterndem Poll
+        endlos weiter -- alle 0,5 s eine Warnung, ein leerer Snapshot, kein Rueckzug,
+        und der Anwender sah eine "laufende" Aufzeichnung, die nichts mehr erfasste.
+        Jetzt endet die Aufzeichnung nach ``_MAX_POLL_FAILURES`` Fehlschlaegen IN FOLGE
+        (ein gelungener Poll setzt den Zaehler zurueck), und der Grund bleibt als
+        ``stopped_reason`` lesbar.
+
+        ZWEITER ABBRUCHGRUND (Befund 30, Kern): der tote Helfer. ``is_running()`` kennt
+        den Zustand des Helfer-Subprozesses laengst -- bis dahin verband ihn nur nichts
+        mit ``_stop_poll``. Stirbt der Helfer, kommen ohnehin keine Hits mehr; die
+        Aufzeichnung weiterlaufen zu lassen waere eine Luege ueber ihren Zustand.
         """
+        failures = 0
         while not self._stop_poll.is_set():
+            if not self.is_running():
+                self._selbst_beenden(_STOPPED_HELPER_DEAD)
+                return
             ts = time.monotonic()
             try:
                 self._snapshots.append((ts, _snapshot_sockets()))
+                failures = 0
             except Exception as exc:
-                _logger.warning("sni_poll_failed", error=str(exc))
+                failures += 1
+                _logger.warning("sni_poll_failed", error=str(exc), failures=failures)
                 self._snapshots.append((ts, {}))
+                if failures >= _MAX_POLL_FAILURES:
+                    self._selbst_beenden(_STOPPED_POLL_FAILED)
+                    return
             self._stop_poll.wait(_POLL_INTERVAL_SECS)
 
     def _hit_poll_loop(self) -> None:
@@ -175,19 +224,71 @@ class ScapySniSniffer:
         jedem rohen Hit-dict einen ``_RawHit`` -- damit ist ``observed()`` voellig
         unveraendert. Ein kaputtes/unvollstaendiges Hit-dict wird still uebersprungen
         (defensiv, kein Crash). Laeuft, bis ``_stop_poll`` gesetzt ist.
+
+        ABBRUCH (Befund 30): dieselben zwei Bedingungen wie im Socket-Poller --
+        ``_MAX_POLL_FAILURES`` Fehlschlaege IN FOLGE oder ein toter Helfer beenden die
+        Aufzeichnung, statt sie ins Leere weiterlaufen zu lassen. Hier wiegt der tote
+        Helfer noch schwerer als drueben: DIESE Schleife zieht die Hits vom Helfer: ist
+        er tot, kommt garantiert nichts mehr.
         """
         channel = self._channel
         if channel is None:
             return
+        failures = 0
         while not self._stop_poll.is_set():
+            if not self.is_running():
+                self._selbst_beenden(_STOPPED_HELPER_DEAD)
+                return
             try:
                 for hit in channel.poll_hits():
                     raw = self._raw_hit_from_dict(hit)
                     if raw is not None:
                         self._raw_hits.append(raw)
+                failures = 0
             except Exception as exc:
-                _logger.warning("sni_hit_poll_failed", error=str(exc))
+                failures += 1
+                _logger.warning("sni_hit_poll_failed", error=str(exc), failures=failures)
+                if failures >= _MAX_POLL_FAILURES:
+                    self._selbst_beenden(_STOPPED_POLL_FAILED)
+                    return
             self._stop_poll.wait(_HIT_POLL_INTERVAL_SECS)
+
+    def _selbst_beenden(self, grund: str) -> None:
+        """Beendet die Aufzeichnung von SELBST und haelt den Grund fest (Befund 30).
+
+        Wird AUS EINEM POLLER-THREAD heraus gerufen und darf darum NICHT ``stop()``
+        rufen: das joint die Poller-Threads, und ein Thread, der auf sich selbst wartet,
+        haengt bis zum Timeout. Stattdessen genau die drei Handlungen, die von innen
+        sicher sind: Grund merken, ``_stop_poll`` setzen (der jeweils ANDERE Poller
+        beendet sich daran von allein) und den Helfer-Channel anhalten.
+
+        Der Channel-Zeiger wird zuvor auf ``None`` gesetzt, damit ``is_running()`` sofort
+        ``False`` meldet -- die Aufzeichnung ist zu Ende, sobald der Entschluss gefallen
+        ist, nicht erst wenn der Helfer das quittiert hat. Ein bereits toter Helfer laesst
+        ``channel.stop()`` moeglicherweise werfen; das wird gefangen und geloggt, es ist
+        beim Aufraeumen kein neuer Fehler.
+        """
+        _logger.warning("sni_aufzeichnung_selbst_beendet", grund=grund)
+        self._stopped_reason = grund
+        self._stop_poll.set()
+        channel = self._channel
+        self._channel = None
+        if channel is None:
+            return
+        try:
+            channel.stop()
+        except Exception as exc:
+            _logger.warning("sni_stop_failed", error=str(exc))
+
+    def stopped_reason(self) -> str | None:
+        """Marker des Grundes, aus dem die Aufzeichnung von SELBST endete (Befund 30).
+
+        ``None`` = kein Selbst-Abbruch: die Aufzeichnung laeuft, hat nie gelaufen, oder
+        der Anwender hat sie ueber ``stop()`` beendet. Sonst einer der stabilen Marker
+        (``SNI_POLL_FAILED``/``SNI_HELPER_DEAD``) -- der Wortlaut fuer den Anwender
+        entsteht am Frontend-Rand, exakt wie bei ``NPCAP_MISSING``.
+        """
+        return self._stopped_reason
 
     @staticmethod
     def _raw_hit_from_dict(hit: dict[str, object]) -> _RawHit | None:
@@ -225,6 +326,8 @@ class ScapySniSniffer:
         self._raw_hits = deque(maxlen=_MAX_HITS)
         self._snapshots = deque(maxlen=_MAX_SNAPSHOTS)
         self._stop_poll = threading.Event()
+        # Ein neuer Lauf traegt den Abbruchgrund des vorigen nicht mit (Befund 30).
+        self._stopped_reason = None
 
         channel = self._channel_factory()
         error = channel.start(interface)

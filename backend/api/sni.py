@@ -12,7 +12,8 @@ Endpunkte (Router prefix ``/api``, tags ``["sni"]``):
 * ``POST /api/sni/start``    -> startet den Mitschnitt MANUELL. ok=false -> 403
   (Muster ``pcap/start``); Erfolg -> ``{ok, error, available}``.
 * ``POST /api/sni/stop``     -> stoppt; idempotent ``{ok: True}``.
-* ``GET  /api/sni/status``   -> ``{running, count, available, permission_error}``.
+* ``GET  /api/sni/status``   -> ``{running, count, available, permission_error,
+  stopped_reason}``.
 * ``GET  /api/sni/observed`` -> Liste der erfassten + zugeordneten SNIs als Wire-dicts
   ``[{hostname, remote_ip, remote_port, app_name|null, pid|null, delta_ms|null, age_secs}]``.
 
@@ -149,17 +150,24 @@ def sni_status(
     get_observed: Annotated[GetObservedSni, Depends(provide_get_observed_sni)],
     start_sni_uc: Annotated[StartSniCapture, Depends(provide_start_sni_uc)],
 ) -> dict[str, Any]:
-    """Aktueller Status: ``{running, count, available, permission_error}``.
+    """Aktueller Status: ``{running, count, available, permission_error, stopped_reason}``.
 
     ``count`` ist die Anzahl der bisher erfassten SNIs (Laenge der Momentaufnahme).
     ``available``/``permission_error`` kommen aus ``StartSniCapture`` (scapy da? +
     Rechte-Begruendung oder ``null``).
+
+    ``stopped_reason`` (Befund 30) kommt ueber DENSELBEN Weg wie ``permission_error``
+    (``StartSniCapture`` -> Port) und traegt den stabilen Marker, falls die Aufzeichnung
+    von SELBST endete -- sonst ``null``. Zusammen mit ``running`` ergibt das die bis
+    dahin fehlende Aussage: ``running=false`` UND ein gesetzter ``stopped_reason``
+    heisst "der Mitschnitt ist abgebrochen", nicht "er wurde nie gestartet".
     """
     return {
         "running": running_provider(),
         "count": len(get_observed()),
         "available": start_sni_uc.is_available(),
         "permission_error": start_sni_uc.check_permission(),
+        "stopped_reason": start_sni_uc.stopped_reason(),
     }
 
 

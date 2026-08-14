@@ -7,14 +7,21 @@ orchestriert Repo + ``ScanJobScheduler``. Im Stil von
 garantiertem close, ``_ensure_schema`` im Konstruktor, injizierter DB-Pfad. KEIN
 ``modules``-Import (eigenes Schema).
 
-Schema EXAKT wie der Altcode (``_init_schedule_db``): die NEUN Spalten
-``id / name / cidr / profile_id / schedule / enabled (DEFAULT 1) / last_run /
-next_run / created_at``. KEIN Migrations-Guard noetig (anders als ``rtt_history``,
-dem die ``alive``-Spalte fehlte): die Altcode-Tabelle hat exakt dieselben Spalten,
-ein ``CREATE TABLE IF NOT EXISTS`` auf eine vorhandene Alt-Tabelle ist deckungs-
-gleich -- kein Schema-Drift.
+Schema: die NEUN Altcode-Spalten (``_init_schedule_db``) ``id / name / cidr /
+profile_id / schedule / enabled (DEFAULT 1) / last_run / next_run / created_at``
+plus die ZWEI additiven Ergebnis-Spalten ``last_result / last_error`` (S88-P4). Fuer
+die neun genuegt weiterhin das reine ``CREATE TABLE IF NOT EXISTS`` (die Altcode-
+Tabelle ist deckungsgleich, kein Schema-Drift); die zwei neuen kommen ueber einen
+additiven ``ALTER TABLE ... ADD COLUMN``-Guard nach, weil ein ``CREATE IF NOT EXISTS``
+auf eine bestehende Tabelle ein No-Op ist (Muster ``SqliteLoggingTaskRepository``).
 
-``list`` gibt rohe ``dict``-Zeilen (alle neun Spalten) -- KEIN Domaenen-Modell, die
+``last_result`` traegt den AUSGANG des letzten Laufs (``'ok'``/``'failed'``/``NULL``),
+``last_error`` den Wortlaut im Fehlerfall. Sie stehen NEBEN ``last_run``, nicht an
+dessen Stelle: ``last_run`` sagt, WANN ausgeloest wurde (es wird vor dem Scan
+gebucht), die beiden neuen sagen, WIE es ausging. Vor S88-P4 war ein gescheiterter
+Lauf von einem geglueckten in der Tabelle nicht zu unterscheiden.
+
+``list`` gibt rohe ``dict``-Zeilen (alle elf Spalten) -- KEIN Domaenen-Modell, die
 CRUD-Response ist ein 1:1-Tabellen-Dump (siehe Port-Docstring). ``add`` speichert
 den ``schedule``-String UNGEPARST (das Parsen + Job-Registrieren macht der Use-Case
 ueber den ``ScanJobScheduler``); so landet auch ein unparsbarer String in der
@@ -62,8 +69,11 @@ class SqliteScheduleRepository:
             conn.close()
 
     def _ensure_schema(self) -> None:
-        # Schema exakt wie der Altcode (_init_schedule_db) -- deckungsgleich, daher
-        # reines CREATE IF NOT EXISTS, kein ALTER-Guard.
+        # Schema wie der Altcode (_init_schedule_db) plus die beiden ADDITIVEN Spalten
+        # des Laufergebnisses (S88-P4). Fuer die neun Alt-Spalten genuegt weiterhin das
+        # reine CREATE IF NOT EXISTS; die beiden neuen brauchen den ALTER-Guard, weil ein
+        # CREATE IF NOT EXISTS auf eine BESTEHENDE Tabelle ein No-Op ist und die Spalten
+        # dort sonst nie entstuenden (Muster SqliteLoggingTaskRepository).
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:
             conn.execute(
@@ -80,10 +90,30 @@ class SqliteScheduleRepository:
                     -- Sicherheitsnetz-Default; der Wert wird in add() explizit aus
                     -- der Clock gesetzt (ISO-8601 UTC mit +00:00), nicht ueber diesen
                     -- Default (UTC ohne Zonen-Kennzeichnung).
-                    created_at  TEXT DEFAULT (datetime('now'))
+                    created_at  TEXT DEFAULT (datetime('now')),
+                    -- Ausgang des letzten Laufs: 'ok' | 'failed' | NULL (noch nie
+                    -- gelaufen). KEIN NOT NULL: SQLite verbietet ADD COLUMN NOT NULL
+                    -- ohne Default, und ein Default waere hier eine Luege -- eine
+                    -- Bestandszeile hat keinen bekannten Ausgang, sie hat gar keinen.
+                    last_result TEXT,
+                    -- Wortlaut des Fehlers, falls last_result 'failed' ist; sonst NULL.
+                    last_error  TEXT
                 )
                 """
             )
+            # ADDITIVER GUARD (S88-P4): eine vor dieser Fassung angelegte Tabelle bekommt
+            # die beiden Spalten hier nachgeruestet -- ohne Default, also NULL. Genau
+            # deshalb genuegt der Guard und es braucht KEINE Erhoehung von
+            # SCHEMA_VERSION: die Aenderung ist rein additiv und idempotent, sie laeuft
+            # damit ueber Fall A der Schemanaht (``schema_aufbauen`` fuehrt die
+            # Aufbauschritte in ALLEN Faellen aus). Ein gezaehlter Stand ist erst noetig,
+            # wenn eine Aenderung NICHT idempotent nachzuziehen ist (Spalte umbenennen,
+            # Tabelle umbauen, Daten umschreiben) -- dann faende sie in MIGRATIONEN statt.
+            cols = {row["name"] for row in conn.execute("PRAGMA table_info(scan_schedules)")}
+            if "last_result" not in cols:
+                conn.execute("ALTER TABLE scan_schedules ADD COLUMN last_result TEXT")
+            if "last_error" not in cols:
+                conn.execute("ALTER TABLE scan_schedules ADD COLUMN last_error TEXT")
 
     def list(self) -> list[dict[str, Any]]:
         with self._connect() as conn:
@@ -136,6 +166,18 @@ class SqliteScheduleRepository:
             conn.execute(
                 "UPDATE scan_schedules SET last_run=?, next_run=? WHERE id=?",
                 (last_run, next_run, schedule_id),
+            )
+
+    def set_run_result(self, schedule_id: int, result: str, error: str | None) -> None:
+        # Der einzige Schreibpfad der beiden Ergebnis-Spalten (S88-P4). BEIDE Werte
+        # werden immer gesetzt: ein geglueckter Lauf schreibt ('ok', NULL) und raeumt
+        # damit den Wortlaut des vorigen Fehlschlags weg -- ein alter Fehlertext neben
+        # einem frischen Erfolg waere schlimmer als gar keiner. Das Repo bewertet nichts;
+        # welcher Ausgang vorliegt, entscheidet der Aufrufer.
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE scan_schedules SET last_result=?, last_error=? WHERE id=?",
+                (result, error, schedule_id),
             )
 
     def delete(self, schedule_id: int) -> None:

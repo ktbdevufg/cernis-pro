@@ -137,6 +137,8 @@ class _FakeScheduleRepo:
                 "last_run": None,
                 "next_run": None,
                 "created_at": "2026-06-03 00:00:00",
+                "last_result": None,
+                "last_error": None,
             }
         )
         return sid
@@ -160,6 +162,13 @@ class _FakeScheduleRepo:
             if row["id"] == schedule_id:
                 row["last_run"] = last_run
                 row["next_run"] = next_run
+
+    def set_run_result(self, schedule_id: int, result: str, error: str | None) -> None:
+        """Setzt BEIDE Ergebnis-Spalten, wie der Vertrag es fordert (S88-P4)."""
+        for row in self.rows:
+            if row["id"] == schedule_id:
+                row["last_result"] = result
+                row["last_error"] = error
 
     def delete(self, schedule_id: int) -> None:
         self.rows = [r for r in self.rows if r["id"] != schedule_id]

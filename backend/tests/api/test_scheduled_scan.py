@@ -254,3 +254,116 @@ def test_geplanter_scan_meldet_das_zu_grosse_netz_NUR_ins_protokoll(
     # diagnostizierbar, aber eben nur fuer den, der ins Protokoll sieht.
     assert "Network too large" in treffer[0]["error"]
     assert treffer[0]["cidr"] == "10.0.0.0/8"
+
+
+# ── S88-P4: der geplante Scan meldet seinen Ausgang ──────────────────────────
+# Vor S88-P4 endete ein gescheiterter geplanter Scan in ``scheduled_scan_failed`` im
+# Log -- ohne jeden Nutzerkanal. Und weil ``last_run`` VOR dem Scan und AUSSERHALB des
+# try gebucht wird, war die Zeile danach von der eines geglueckten Laufs nicht zu
+# unterscheiden. Diese Tests fahren gegen die ECHTE Modul-Naht
+# ``app._scheduled_scan_ergebnisbuchung``, nicht gegen eine Nachbildung.
+
+
+class _BuchendesErgebnis:
+    """Nimmt die Ergebnisbuchungen entgegen (Stelle des echten RecordScheduleResult)."""
+
+    def __init__(self) -> None:
+        self.buchungen: list[tuple[str, int, str | None]] = []
+
+    def erfolg(self, schedule_id: int) -> None:
+        self.buchungen.append(("ok", schedule_id, None))
+
+    def fehlschlag(self, schedule_id: int, error: str) -> None:
+        self.buchungen.append(("failed", schedule_id, error))
+
+
+def test_geglueckter_scan_bucht_ok(monkeypatch: pytest.MonkeyPatch) -> None:
+    buchung = _BuchendesErgebnis()
+    monkeypatch.setattr(app_module, "_scheduled_scan_ergebnisbuchung", lambda: buchung)
+    monkeypatch.setattr(
+        app_module,
+        "_scheduled_scan_bausteine",
+        lambda: (
+            _FakeRunScan([_enriched("10.0.0.1", "AA:BB:CC:00:00:01")]),
+            lambda s: None,
+            lambda m: None,
+        ),
+    )
+
+    asyncio.run(app_module._scheduled_scan("192.168.1.0/24", "standard", 7))
+
+    assert buchung.buchungen == [("ok", 7, None)]
+
+
+def test_gescheiterter_scan_bucht_failed_mit_wortlaut(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _KaputterScan:
+        async def run(self, config: Any) -> Any:
+            raise RuntimeError("nmap nicht gefunden")
+            yield  # pragma: no cover -- macht die Methode zum Async-Generator
+
+    buchung = _BuchendesErgebnis()
+    monkeypatch.setattr(app_module, "_scheduled_scan_ergebnisbuchung", lambda: buchung)
+    monkeypatch.setattr(
+        app_module,
+        "_scheduled_scan_bausteine",
+        lambda: (_KaputterScan(), lambda s: None, lambda m: None),
+    )
+
+    asyncio.run(app_module._scheduled_scan("192.168.1.0/24", "standard", 7))
+
+    assert buchung.buchungen == [("failed", 7, "nmap nicht gefunden")]
+
+
+def test_beide_ausgaenge_sind_unterscheidbar(monkeypatch: pytest.MonkeyPatch) -> None:
+    """4.5: derselbe Zeitplan, zwei Laeufe -- der Ausgang unterscheidet sie."""
+
+    class _ZweiterLaufKaputt:
+        def __init__(self) -> None:
+            self.laeufe = 0
+
+        async def run(self, config: Any) -> Any:
+            self.laeufe += 1
+            if self.laeufe == 2:
+                raise RuntimeError("Netz nicht erreichbar")
+            yield ScanCompleted(total_found=0)
+
+    scan = _ZweiterLaufKaputt()
+    buchung = _BuchendesErgebnis()
+    monkeypatch.setattr(app_module, "_scheduled_scan_ergebnisbuchung", lambda: buchung)
+    monkeypatch.setattr(
+        app_module,
+        "_scheduled_scan_bausteine",
+        lambda: (scan, lambda s: None, lambda m: None),
+    )
+
+    asyncio.run(app_module._scheduled_scan("192.168.1.0/24", "standard", 7))
+    asyncio.run(app_module._scheduled_scan("192.168.1.0/24", "standard", 7))
+
+    assert buchung.buchungen == [
+        ("ok", 7, None),
+        ("failed", 7, "Netz nicht erreichbar"),
+    ]
+
+
+def test_unverdrahteter_scan_bucht_failed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ein Lauf, der wegen fehlender Verdrahtung nicht stattfand, ist ein Fehlschlag --
+    ohne diese Buchung saehe die Zeile aus wie ein geglueckter Lauf."""
+    buchung = _BuchendesErgebnis()
+    monkeypatch.setattr(app_module, "_scheduled_scan_ergebnisbuchung", lambda: buchung)
+    monkeypatch.setattr(app_module, "_scheduled_scan_bausteine", None)
+
+    asyncio.run(app_module._scheduled_scan("192.168.1.0/24", "standard", 7))
+
+    assert buchung.buchungen == [("failed", 7, "scheduled_scan_unverdrahtet")]
+
+
+def test_ohne_verdrahtete_buchungsnaht_kein_wurf(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Vor create_app ist die Naht None -- der Scan laeuft trotzdem durch (best-effort)."""
+    monkeypatch.setattr(app_module, "_scheduled_scan_ergebnisbuchung", None)
+    monkeypatch.setattr(
+        app_module,
+        "_scheduled_scan_bausteine",
+        lambda: (_FakeRunScan([]), lambda s: None, lambda m: None),
+    )
+
+    asyncio.run(app_module._scheduled_scan("192.168.1.0/24", "standard", 7))

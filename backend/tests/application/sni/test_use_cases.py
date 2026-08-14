@@ -19,10 +19,12 @@ class FakeSniSniffer:
         available: bool = True,
         permission: str | None = None,
         observed: list[ObservedSni] | None = None,
+        stopped: str | None = None,
     ) -> None:
         self._available = available
         self._permission = permission
         self._observed = observed or []
+        self._stopped = stopped
         self._running = False
         self.start_calls: list[str | None] = []
         self.stop_calls = 0
@@ -43,6 +45,9 @@ class FakeSniSniffer:
 
     def check_permission(self) -> str | None:
         return self._permission
+
+    def stopped_reason(self) -> str | None:
+        return self._stopped
 
     def is_available(self) -> bool:
         return self._available

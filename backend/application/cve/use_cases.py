@@ -129,6 +129,12 @@ class RunCveMonitor:
         # Echter Laufzeitzustand (S86-A4/B2): gesetzt, solange ein Host behandelt wird --
         # beide Wege (mit NVD-Aufruf und der lookup-freie portlose Weg).
         self._checking = False
+        # Fehlerzustand des Loop (S88-P4, Muster ``RunThroughputPoll._last_error``):
+        # Wortlaut des letzten gescheiterten tick + Zahl der AUFEINANDERFOLGENDEN
+        # Fehlschlaege. Ein gelungener tick setzt beides zurueck -- so unterscheidet die
+        # Statusnaht einen einmaligen Aussetzer von einem dauerhaft blinden Worker.
+        self._last_error: str | None = None
+        self._consecutive_failures = 0
 
     def _due_hosts(
         self, now: float, refresh_interval: float
@@ -370,11 +376,60 @@ class RunCveMonitor:
         Der Schlaf zwischen zwei Ticks endet nach dem Intervall ODER beim Wecken (B1) --
         die Drosselung bleibt davon unberuehrt, ``tick`` prueft weiterhin hoechstens EINEN
         Host mit NVD-Aufruf.
+
+        SCHUTZ UM DEN TICK (S88-P4): ein werfender ``tick`` beendet den Worker NICHT mehr
+        still. Bis dahin lag nur der NVD-Lookup in einem ``try`` -- die drei Schreibpfade
+        (``_unack_removed``/``replace_for_host``/``checkstate.record``) und der ganze
+        ``_clear_host``-Weg lagen ausserhalb, ein Repository-Fehler dort riss den Task,
+        und die Ausnahme lag danach unbeachtet im Task-Objekt an ``app.state``. Der Grund
+        wird jetzt gemerkt (``last_error``/``consecutive_failures``) und die Schleife
+        laeuft weiter; ``CancelledError`` bleibt unangetastet -- er ist das Abbruchsignal
+        des Teardown, kein Fehler. Muster ``RunThroughputPoll.run``.
+
+        Der Schutz sitzt bewusst HIER im run-Rumpf jedes Arbeiters und NICHT in einer
+        gemeinsamen Basisklasse: die fuenf so abgesicherten Arbeiter liegen in vier
+        verschiedenen application-Subpaketen (cve, outbound_log, scheduler, monitoring);
+        eine gemeinsame Basis waere ein Quer-Import zwischen ihnen oder eine neue Schicht
+        unterhalb von ``application/`` -- beides mehr Naht als die drei Zeilen wert sind.
         """
         self._running = True
         while self._running:
-            await self.tick()
+            try:
+                await self.tick()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # Grund wird gemerkt, nicht verschluckt (S3)
+                self._note_failure(exc)
+            else:
+                # Der Reset steht im ``else`` und nicht am Ende von ``tick``: ``tick``
+                # kehrt bei "kein faelliger Host" frueh zurueck, ein Reset am Rumpfende
+                # wuerde in genau diesem Fall uebersprungen -- und ein schlafender Worker
+                # traege dann ewig den Wortlaut eines laengst ueberstandenen Fehlers.
+                self._note_success()
             await self._schlafen()
+
+    def _note_failure(self, exc: Exception) -> None:
+        """Merkt den Wortlaut des gescheiterten tick und zaehlt die Fehlschlag-Serie hoch."""
+        self._last_error = str(exc)
+        self._consecutive_failures += 1
+        _logger.warning(
+            "cve_monitor_tick_failed",
+            error=self._last_error,
+            consecutive_failures=self._consecutive_failures,
+        )
+
+    def _note_success(self) -> None:
+        """Setzt Wortlaut und Zaehler nach einem gelungenen tick zurueck."""
+        self._last_error = None
+        self._consecutive_failures = 0
+
+    def last_error(self) -> str | None:
+        """Wortlaut des letzten gescheiterten tick, sonst ``None`` (S88-P4)."""
+        return self._last_error
+
+    def consecutive_failures(self) -> int:
+        """Zahl der AUFEINANDERFOLGENDEN gescheiterten ticks (0 = letzter tick gelang)."""
+        return self._consecutive_failures
 
     def stop(self) -> None:
         """Setzt das Loop-Flag (Abbruch nach der laufenden Iteration)."""
@@ -531,6 +586,13 @@ class MonitorStatus:
     ``hosts_total`` zaehlt seit B3 ALLE bekannten Hosts, auch portlose: der Worker
     behandelt sie ebenfalls (lookup-frei), und eine Zahl, die weniger anzeigt als
     tatsaechlich passiert, waere eine Luege ueber das Verhalten.
+
+    ``last_error``/``consecutive_failures`` (S88-P4) tragen den Fehlerzustand des Worker
+    nach aussen: den Wortlaut des letzten gescheiterten tick und die Laenge der laufenden
+    Fehlschlag-Serie. Beide reisen ueber DIESE bestehende Naht -- ``checking`` liegt hier
+    schon, der Fehlerzustand gehoert daneben. ``None``/``0`` heisst "der letzte tick
+    gelang" (und ebenso: es ist kein Worker verdrahtet -- der Statusendpunkt ist ein
+    reiner Lesepfad und darf daran nicht scheitern, s. ``_error_safe``).
     """
 
     hosts_total: int
@@ -539,6 +601,8 @@ class MonitorStatus:
     findings_total: int
     findings_active: int
     checking: bool = False
+    last_error: str | None = None
+    consecutive_failures: int = 0
 
 
 class GetCveMonitorStatus:
@@ -560,6 +624,10 @@ class GetCveMonitorStatus:
     Worker und nicht ueber ``app.state`` -- der application-Ring kennt weder das eine
     noch das andere. Default ``lambda: False``: ohne verdrahteten Worker lautet die
     Antwort schlicht "es laeuft kein Abgleich", statt zu werfen.
+
+    ``error_provider`` (S88-P4) liefert nach demselben Muster den Fehlerzustand des
+    Worker als ``(Wortlaut, Zahl der Fehlschlaege in Folge)``. Default
+    ``lambda: (None, 0)`` -- ohne verdrahteten Worker gibt es keinen gemerkten Fehler.
     """
 
     def __init__(
@@ -571,6 +639,7 @@ class GetCveMonitorStatus:
         refresh_interval_provider: Callable[[], float],
         now_provider: Callable[[], float] = time.time,
         checking_provider: Callable[[], bool] = lambda: False,
+        error_provider: Callable[[], tuple[str | None, int]] = lambda: (None, 0),
     ) -> None:
         self._inventory = inventory
         self._checkstate = checkstate
@@ -579,6 +648,7 @@ class GetCveMonitorStatus:
         self._refresh_interval_provider = refresh_interval_provider
         self._now = now_provider
         self._checking_provider = checking_provider
+        self._error_provider = error_provider
 
     def __call__(self) -> MonitorStatus:
         now = self._now()
@@ -593,6 +663,7 @@ class GetCveMonitorStatus:
         all_findings = self._findings.list_all()
         acked = self._acknowledgements.acknowledged_keys()
         active = sum(1 for r in all_findings if (r.mac, r.cve_id, r.port) not in acked)
+        last_error, consecutive_failures = self._error_safe()
         return MonitorStatus(
             hosts_total=len(hosts),
             hosts_due=due,
@@ -600,6 +671,8 @@ class GetCveMonitorStatus:
             findings_total=len(all_findings),
             findings_active=active,
             checking=self._checking_safe(),
+            last_error=last_error,
+            consecutive_failures=consecutive_failures,
         )
 
     def _checking_safe(self) -> bool:
@@ -615,3 +688,17 @@ class GetCveMonitorStatus:
         except Exception as exc:
             _logger.warning("cve_status_checking_unavailable", error=str(exc))
             return False
+
+    def _error_safe(self) -> tuple[str | None, int]:
+        """Fragt den Fehlerzustand ausfallsicher ab -- ohne Worker: "kein Fehler gemerkt".
+
+        Dieselbe Linie wie ``_checking_safe``: der Statusendpunkt ist ein reiner Lesepfad
+        und darf an einer fehlenden oder kaputten Worker-Naht nicht scheitern. Ein
+        Fehlschlag wird GELOGGT (kein stiller Fallback, S3).
+        """
+        try:
+            wortlaut, fehlschlaege = self._error_provider()
+        except Exception as exc:
+            _logger.warning("cve_status_error_unavailable", error=str(exc))
+            return None, 0
+        return (str(wortlaut) if wortlaut is not None else None), int(fehlschlaege)
