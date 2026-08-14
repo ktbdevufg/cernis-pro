@@ -177,6 +177,30 @@ export async function answerArchivePrompt(mac, archive) {
   return mappeDevice(antwort);
 }
 
+// Lädt die Netzgruppen des aktiven Bestands (GET /api/devices/netz-gruppen).
+// Eine Gruppe ist das /24 der zuletzt bekannten IP; Geräte ohne brauchbare IP
+// bilden die Gruppe mit der Kennung "ohne-ip" (das Frontend übersetzt sie, das
+// Backend schickt sie unverändert). Reine Rechnung — nichts ist gespeichert,
+// jede Abfrage sieht den aktuellen Stand. Leerer Bestand -> [].
+export async function fetchNetzGruppen() {
+  const antwort = await apiGet("/api/devices/netz-gruppen");
+  return (antwort ?? []).map((wire) => ({
+    netz: wire.netz,
+    anzahl: wire.anzahl ?? 0,
+    macs: wire.macs ?? [],
+  }));
+}
+
+// Entfernt eine MENGE von Geräten samt aller MAC-gebundenen Nebendaten
+// (POST /api/devices/remove-many). Bewusst EIN Aufruf und keine Schleife über
+// DELETE /api/devices/{mac}: nur eine Transaktion im Backend hält Gerät und
+// Nebendaten zusammen. Gibt die Zahl der tatsächlich entfernten Geräte zurück.
+// Der ApiError wird unverändert weitergereicht (der Aufrufer zeigt E-502).
+export async function removeManyDevices(macs) {
+  const antwort = await apiPost("/api/devices/remove-many", { macs });
+  return antwort?.entfernt ?? 0;
+}
+
 export default {
   updateDeviceMeta,
   setTrustState,
@@ -189,4 +213,6 @@ export default {
   restoreDevice,
   fetchArchiveCandidates,
   answerArchivePrompt,
+  fetchNetzGruppen,
+  removeManyDevices,
 };

@@ -2331,7 +2331,18 @@
       "fehlerMacUngueltig": "The MAC address is invalid. Please use the format AA:BB:CC:DD:EE:FF.",
       "fehlerAnlegen": "The device could not be added.",
       "laedt": "Loading …",
-      "ladeFehler": "The devices could not be loaded."
+      "ladeFehler": "The devices could not be loaded.",
+      "aufraeumen": {
+        "knopf": "Clean up by network",
+        "titelAuswahl": "Which devices should be removed?",
+        "ohneIp": "Without known IP",
+        "hinweis": "The assignment comes from a device's last known IP. If a device has since been seen in a different network, it appears there.",
+        "vorschauPosten": "Devices in network {{netz}} ({{anzahl}})",
+        "weiter": "Continue",
+        "nichtsGewaehlt": "Please select at least one group.",
+        "leer": "There are no devices that could be cleaned up.",
+        "ladeFehler": "The network groups could not be loaded."
+      }
     },
     "nachfrage": {
       "titel": "Devices not seen in a while",

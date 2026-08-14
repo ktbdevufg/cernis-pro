@@ -2331,7 +2331,18 @@
       "fehlerMacUngueltig": "Die MAC-Adresse ist ungültig. Bitte im Format AA:BB:CC:DD:EE:FF eingeben.",
       "fehlerAnlegen": "Das Gerät konnte nicht angelegt werden.",
       "laedt": "Lädt …",
-      "ladeFehler": "Die Geräte konnten nicht geladen werden."
+      "ladeFehler": "Die Geräte konnten nicht geladen werden.",
+      "aufraeumen": {
+        "knopf": "Nach Netz aufräumen",
+        "titelAuswahl": "Welche Geräte sollen entfernt werden?",
+        "ohneIp": "Ohne bekannte IP",
+        "hinweis": "Die Zuordnung stammt aus der zuletzt bekannten IP eines Geräts. Wurde ein Gerät inzwischen in einem anderen Netz gesehen, erscheint es dort.",
+        "vorschauPosten": "Geräte im Netz {{netz}} ({{anzahl}})",
+        "weiter": "Weiter",
+        "nichtsGewaehlt": "Wählen Sie mindestens eine Gruppe aus.",
+        "leer": "Es sind keine Geräte im Bestand, die sich aufräumen ließen.",
+        "ladeFehler": "Die Netzgruppen konnten nicht geladen werden."
+      }
     },
     "nachfrage": {
       "titel": "Lange nicht gesehene Geräte",

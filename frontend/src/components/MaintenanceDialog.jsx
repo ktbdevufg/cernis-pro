@@ -10,7 +10,10 @@
 //   FENSTER 1b — Baukasten: gruppierte Ankreuz-Liste (nur für „Scan-Daten").
 //   FENSTER 2  — bestätigen: Auflistung der effektiv gewählten Posten, optionales
 //                Secrets-Kästchen (nur Werkszustand), roter Schluss-Hinweis,
-//                „Zurück" + „Endgültig löschen".
+//                „Zurück" + „Endgültig löschen". Seit S88-P3 in der eigenen
+//                Komponente ConfirmDeleteDialog.jsx, die auch die Geräteverwaltung
+//                benutzt (Aufräumen nach Netz) — dieselben Texte, dieselben
+//                CSS-Klassen aus MaintenanceDialog.css, nur hinter Props.
 //
 // Wurzel-Sperrlogik (§13): In der Gruppe „Scan & Analyse" ist scan_history die
 // WURZEL. Ist sie angehakt, werden die vier abgeleiteten Posten (cve, arp_guard,
@@ -26,7 +29,7 @@ import { X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { CODES, mitCode } from "../lib/fehlercodes.js";
+import ConfirmDeleteDialog from "./ConfirmDeleteDialog.jsx";
 import "./MaintenanceDialog.css";
 
 // Die Fenster/Stufen als Konstanten — vermeidet Tippfehler-Strings im JSX.
@@ -391,61 +394,28 @@ export default function MaintenanceDialog({ onSchliessen, onBestaetigt }) {
           </div>
         ) : zeigeBestaetigung ? (
           // ── FENSTER 2 — bestätigen ─────────────────────────────────────────
-          <div className="maint-dialog__body">
-            <p className="maint-confirm__lead">
-              {t("settings.wartung.confirm.lead")}
-            </p>
-            <ul className="maint-confirm__list">
-              {loeschPunkte.map((punkt) => (
-                <li key={punkt} className="maint-confirm__item">
-                  {punkt}
-                </li>
-              ))}
-            </ul>
-
-            {/* Secrets-Kästchen NUR bei Werkszustand. */}
-            {stufe === STUFE_FACTORY ? (
-              <label className="maint-confirm__secrets">
-                <input
-                  type="checkbox"
-                  className="maint-confirm__checkbox"
-                  checked={secretsEntfernen}
-                  onChange={(e) => setSecretsEntfernen(e.target.checked)}
-                  disabled={laeuft}
-                />
-                <span>{t("settings.wartung.confirm.includeSecrets")}</span>
-              </label>
-            ) : null}
-
-            <div className="maint-confirm__warn" role="alert">
-              {t("settings.wartung.confirm.warning")}
-            </div>
-
-            {fehler ? (
-              <span className="maint-dialog__error">
-                {mitCode(t("settings.wartung.confirm.error"), CODES.E_502)}
-              </span>
-            ) : null}
-
-            <div className="maint-dialog__actions">
-              <button
-                type="button"
-                className="maint-button"
-                onClick={zurueck}
-                disabled={laeuft}
-              >
-                {t("settings.wartung.confirm.back")}
-              </button>
-              <button
-                type="button"
-                className="maint-button maint-button--danger"
-                onClick={bestaetigen}
-                disabled={laeuft}
-              >
-                {t("settings.wartung.confirm.delete")}
-              </button>
-            </div>
-          </div>
+          // Seit S88-P3 die herausgezogene ConfirmDeleteDialog-Komponente: gleiches
+          // Markup, gleiche Klassen, gleiche Texte wie zuvor an dieser Stelle. Sie
+          // wird auch von der Geräteverwaltung benutzt (Aufräumen nach Netz) —
+          // darum trägt sie keinerlei Wissen über ihre Aufrufer, alles reist als
+          // Prop herein. Das Secrets-Kästchen gibt es weiterhin NUR beim
+          // Werkszustand; die Bedingung steht jetzt hier, wo sie hingehört.
+          <ConfirmDeleteDialog
+            posten={loeschPunkte}
+            kaestchen={
+              stufe === STUFE_FACTORY
+                ? {
+                    text: t("settings.wartung.confirm.includeSecrets"),
+                    checked: secretsEntfernen,
+                    onChange: setSecretsEntfernen,
+                  }
+                : null
+            }
+            fehler={fehler}
+            laeuft={laeuft}
+            onZurueck={zurueck}
+            onBestaetigen={bestaetigen}
+          />
         ) : null}
       </div>
     </div>

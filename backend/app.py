@@ -127,12 +127,14 @@ from api.devices import (
     provide_create_device,
     provide_delete_device,
     provide_dismiss_device_from_watch,
+    provide_entferne_geraete_menge,
     provide_get_archive_candidates,
     provide_get_archived_devices,
     provide_get_device,
     provide_get_device_stats,
     provide_get_devices,
     provide_get_unclassified_devices,
+    provide_gruppiere_nach_netz,
     provide_record_scanned_host,
     provide_restore_device,
     provide_update_device_meta,
@@ -487,7 +489,13 @@ from application.export import (
 from application.fritz_detail import FritzDetailAuthError, GetFritzDetail
 from application.interfaces import ListInterfaces
 from application.license_manifest import GetLicenseManifest, GetLicenseText
-from application.maintenance import DeleteSelectedData, FactoryReset, ResetScanData
+from application.maintenance import (
+    DeleteSelectedData,
+    EntferneGeraeteMenge,
+    FactoryReset,
+    GruppiereGeraeteNachNetz,
+    ResetScanData,
+)
 from application.metrics import ExportMetrics
 from application.monitoring import (
     AddMonitorTarget,
@@ -733,6 +741,7 @@ from infrastructure.cve_acknowledgements_db import SqliteCveAcknowledgementRepos
 from infrastructure.cve_checkstate_db import SqliteCveCheckStateRepository
 from infrastructure.cve_findings_db import SqliteCveFindingRepository
 from infrastructure.db_schema import schema_aufbauen, schema_pruefen
+from infrastructure.device_purge import SqliteDevicePurgeRepository
 from infrastructure.device_repository import SqliteDeviceRepository
 from infrastructure.diagnostics_linux import (
     DiagnosticsToolMissing,
@@ -2770,6 +2779,24 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     )
     app.dependency_overrides[provide_answer_archive_prompt] = lambda: AnswerArchivePrompt(
         device_repository()
+    )
+
+    # Aufraeumen nach Netz (S88-P3): Gruppierung + Mengen-Loeschung. Die Gruppierung
+    # laeuft ueber das vorhandene device_repository (reine Rechnung ueber last_ip,
+    # nichts gespeichert). Die Loeschung braucht einen EIGENEN Adapter mit EIGENER
+    # Connection -- nur so liegen die acht Tabellen in EINER Transaktion; die
+    # uebrigen Repos koennen ausschliesslich tabellenweites clear_all.
+    @lru_cache(maxsize=1)
+    def device_purge_repository() -> SqliteDevicePurgeRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteDevicePurgeRepository(get_db_path())
+
+    app.dependency_overrides[provide_gruppiere_nach_netz] = lambda: GruppiereGeraeteNachNetz(
+        device_repository()
+    )
+    app.dependency_overrides[provide_entferne_geraete_menge] = lambda: EntferneGeraeteMenge(
+        device_purge_repository()
     )
 
     # Nachfrage-Kandidaten: die Tage-Schwelle wird LIVE aus dem Setting gelesen und

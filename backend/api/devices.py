@@ -41,6 +41,7 @@ from application.devices import (
     RestoreDevice,
     UpdateDeviceMeta,
 )
+from application.maintenance import EntferneGeraeteMenge, GruppiereGeraeteNachNetz
 
 router = APIRouter(prefix="/api/devices", tags=["devices"])
 
@@ -108,6 +109,14 @@ def provide_answer_archive_prompt() -> AnswerArchivePrompt:
     raise NotImplementedError("AnswerArchivePrompt wird in app.py verdrahtet")
 
 
+def provide_gruppiere_nach_netz() -> GruppiereGeraeteNachNetz:
+    raise NotImplementedError("GruppiereGeraeteNachNetz wird in app.py verdrahtet")
+
+
+def provide_entferne_geraete_menge() -> EntferneGeraeteMenge:
+    raise NotImplementedError("EntferneGeraeteMenge wird in app.py verdrahtet")
+
+
 class DeviceMetaBody(BaseModel):
     """Partielles Update der User-Metadaten -- alle Felder optional (None = nicht aendern)."""
 
@@ -144,6 +153,19 @@ class ArchivePromptBody(BaseModel):
     """Body von POST /{mac}/archive-prompt: ``archive`` -> Ja (True) / Nein (False)."""
 
     archive: bool
+
+
+class EntferneMengeBody(BaseModel):
+    """Body von POST /remove-many: ``macs`` als Liste roher MAC-Strings.
+
+    Bauform gemessen am Bestand (Auftrag 1.4): ``DeleteSelectedBody`` in
+    ``api/maintenance.py`` fuehrt genauso EIN Listenfeld roher Strings, das der
+    Use-Case autoritativ auswertet -- der Router validiert den Inhalt NICHT.
+    Hier ist das ebenso richtig: die Schreibweise/Gueltigkeit einer MAC ist eine
+    Frage des Loeschwegs, nicht des HTTP-Rands.
+    """
+
+    macs: list[str]
 
 
 def _device_to_dict(device: Any) -> dict[str, Any]:
@@ -266,6 +288,44 @@ def archive_candidates(
     """
     candidates = get_archive_candidates()
     return [_device_to_dict(device) for device in candidates]
+
+
+# /netz-gruppen VOR /{mac} deklarieren, sonst faengt der Pfad-Parameter
+# "netz-gruppen" als MAC (Bestandsmuster /stats, /archived, /unclassified).
+@router.get("/netz-gruppen")
+def netz_gruppen(
+    gruppiere: Annotated[GruppiereGeraeteNachNetz, Depends(provide_gruppiere_nach_netz)],
+) -> list[dict[str, Any]]:
+    """Die Netzgruppen des aktiven Bestands: je Gruppe Netzangabe, Anzahl und MACs.
+
+    Reine Rechnung ueber die vorhandene ``last_ip`` -- nichts wird gespeichert
+    (Auftrag 2.4). Archivierte Geraete sind wie in der aktiven Liste aussen vor.
+    Leerer Bestand -> ``[]``.
+    """
+    return [
+        {"netz": gruppe.netz, "anzahl": gruppe.anzahl, "macs": list(gruppe.macs)}
+        for gruppe in gruppiere()
+    ]
+
+
+# /remove-many VOR /{mac} deklarieren (s. o.). Bewusst POST und nicht DELETE: ein
+# DELETE mit Body ist zwar nicht verboten, wird aber von Zwischenschichten
+# uneinheitlich behandelt -- und der Bestand fuehrt jede Mengen-Loeschung
+# ebenfalls als POST (``/api/maintenance/reset-selected``).
+@router.post("/remove-many")
+def remove_many_devices(
+    body: EntferneMengeBody,
+    entferne: Annotated[EntferneGeraeteMenge, Depends(provide_entferne_geraete_menge)],
+) -> dict[str, Any]:
+    """Loescht eine MENGE von Geraeten samt aller MAC-gebundenen Nebendaten.
+
+    Idempotent wie ``DELETE /{mac}``: unbekannte oder ungueltige MACs sind KEIN
+    Fehler, sie raeumen nur nichts ab (Begruendung im Use-Case). Eine leere Liste
+    loescht nichts und ist ebenfalls kein Fehler. ``entfernt`` meldet, wie viele
+    Geraete tatsaechlich weg sind.
+    """
+    entfernt = entferne(body.macs)
+    return {"ok": True, "entfernt": entfernt}
 
 
 @router.get("/{mac}")

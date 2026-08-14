@@ -45,6 +45,41 @@
   color: var(--color-text-sec);
 }
 
+/* Kopfzeile einer Sektion: Überschrift links, Aktion rechts (S88-P3). Die
+   Überschrift behält ihre Optik — die Zeile ordnet nur an. */
+.dm-section__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* Aktions-Knopf in der Sektions-Kopfzeile. Bewusst dieselbe Optik wie
+   .dm-row-action (Zeilen-Aktion) — es ist dieselbe Art Knopf, nur eine Ebene
+   höher; ein eigener Stil wäre eine Unterscheidung ohne Bedeutung. */
+.dm-section__action {
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--color-text-sec);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.dm-section__action:hover:not(:disabled) {
+  color: var(--color-accent);
+  border-color: var(--color-accent-border);
+  background: var(--color-accent-bg);
+}
+
+.dm-section__action:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .dm-empty {
   margin: 0;
   font-size: 13px;

@@ -20,10 +20,13 @@ import {
   createDevice,
   fetchArchivedDevices,
   fetchDevices,
+  fetchNetzGruppen,
+  removeManyDevices,
   restoreDevice,
   tagsAusText,
 } from "../api/devices.js";
 import { ApiError } from "../api/client.js";
+import NetzAufraeumenDialog from "./NetzAufraeumenDialog.jsx";
 import "./DeviceManagementPanel.css";
 
 // Anzeige-Name eines Geräts: label -> hostname -> mac (kein erfundener Wert,
@@ -317,6 +320,10 @@ export default function DeviceManagementPanel() {
   // Anlege-Zustand: läuft die Aktion + die ruhige Fehlermeldung (null = keine).
   const [legtAn, setLegtAn] = useState(false);
   const [anlegeFehler, setAnlegeFehler] = useState(null);
+  // Aufräumen nach Netz: die geladenen Gruppen (null = Dialog zu). Die Gruppen
+  // werden beim Öffnen frisch geholt — sie sind eine Rechnung über den aktuellen
+  // Bestand, kein gespeicherter Zustand, und dürfen daher nicht veralten.
+  const [netzGruppen, setNetzGruppen] = useState(null);
 
   // Aktive + archivierte Geräte laden. Gemeinsamer Pfad für Mount und Reload
   // nach jeder Aktion. t/i18n NICHT in den Dependencies.
@@ -414,6 +421,31 @@ export default function DeviceManagementPanel() {
     [ladeListen, t],
   );
 
+  // Aufräumen-Dialog öffnen: die Netzgruppen frisch laden. Schlägt das fehl,
+  // bleibt der Dialog zu und die Liste zeigt den ruhigen Ladefehler — ein Dialog
+  // mit leerer Auswahl wäre irreführend (er sähe aus wie „nichts aufzuräumen").
+  const handleAufraeumenOeffnen = useCallback(async () => {
+    try {
+      setNetzGruppen(await fetchNetzGruppen());
+    } catch (ursache) {
+      console.error("Netzgruppen laden fehlgeschlagen:", ursache);
+      setFehler("ladeFehler");
+    }
+  }, []);
+
+  // Die gewählten Geräte entfernen. Der Fehler wird bewusst WEITERGEWORFEN: der
+  // Dialog fängt ihn und zeigt seine Fehlerzeile mit E-502 — derselbe Weg, den
+  // der Wartungsdialog führt. Bei Erfolg schließt der Dialog und die Listen
+  // werden neu geladen (kein stiller Zustand).
+  const handleAufraeumenBestaetigt = useCallback(
+    async (macs) => {
+      await removeManyDevices(macs);
+      setNetzGruppen(null);
+      await ladeListen();
+    },
+    [ladeListen],
+  );
+
   if (laden && devices.length === 0 && archived.length === 0) {
     return (
       <div className="dm-panel">
@@ -433,15 +465,33 @@ export default function DeviceManagementPanel() {
   return (
     <div className="dm-panel">
       <section className="dm-section">
-        <h3 className="dm-section__title">
-          {t("geraete.verwaltung.titelAktiv")}
-        </h3>
+        {/* Kopfzeile: Überschrift links, Aufräumen-Knopf rechts darüber (3.1). */}
+        <div className="dm-section__head">
+          <h3 className="dm-section__title">
+            {t("geraete.verwaltung.titelAktiv")}
+          </h3>
+          <button
+            type="button"
+            className="dm-section__action"
+            onClick={handleAufraeumenOeffnen}
+          >
+            {t("geraete.verwaltung.aufraeumen.knopf")}
+          </button>
+        </div>
         <AktiveTabelle
           devices={devices}
           onArchivieren={handleArchivieren}
           busyMacs={beschaeftigt}
         />
       </section>
+
+      {netzGruppen !== null ? (
+        <NetzAufraeumenDialog
+          gruppen={netzGruppen}
+          onSchliessen={() => setNetzGruppen(null)}
+          onBestaetigt={handleAufraeumenBestaetigt}
+        />
+      ) : null}
 
       <section className="dm-section">
         <h3 className="dm-section__title">
