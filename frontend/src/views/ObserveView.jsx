@@ -38,6 +38,7 @@ import {
 import { starteScanStream } from "../api/scanStream.js";
 import { fetchSettings, updateSetting } from "../api/settings.js";
 import { CODES, mitCode } from "../lib/fehlercodes.js";
+import { waehleScanFehlerAnzeige } from "../lib/scanFehler.js";
 import { CardGrid, FunctionShell } from "../components/AreaShell.jsx";
 import ArchivePromptDialog from "../components/ArchivePromptDialog.jsx";
 import ColumnManager from "../components/ColumnManager.jsx";
@@ -112,7 +113,10 @@ const ScanSweep = memo(function ScanSweep() {
 // (host_detail gewinnt über host_found). Notizfelder (label/tags/notes) bleiben
 // bewusst Platzhalter (eigener Folgeschnitt mit PUT /api/devices/{mac}).
 function ScanInhalt() {
-  const { t } = useTranslation();
+  // i18n mit destrukturiert (Muster LoggingPanel.jsx:219): die Adressanzahl im
+  // Abweisungstext für ein zu großes Netz wird sprachabhängig mit
+  // Tausendertrennung formatiert (DE 8.192, EN 8,192).
+  const { t, i18n } = useTranslation();
 
   // Map-artig nach mac gemergte Geräteliste (Render-Quelle der Tabelle).
   const [geraete, setGeraete] = useState([]);
@@ -388,10 +392,22 @@ function ScanInhalt() {
         // try/catch — stört den Scan-Abschluss nicht).
         pruefeNachfrage();
       },
-      onError: (msg) => {
+      onError: (msg, frame) => {
+        // Ein zu großes Netz (frame.grund === "netzZuGross") bekommt den
+        // ÜBERSETZTEN Abweisungstext samt der gemessenen Adressanzahl; jeder
+        // andere Fehler bleibt beim bisherigen Weg (Text des Backends). Die
+        // Entscheidung trifft die reine Funktion in lib/scanFehler.js.
+        const anzeige = waehleScanFehlerAnzeige(msg, frame, (n) =>
+          Number(n).toLocaleString(i18n.language),
+        );
+        const text = anzeige.textKey
+          ? t(anzeige.textKey, anzeige.werte)
+          : (anzeige.text ?? t("beobachten.scan.scanError"));
         // Scan-Kontext: der Fehler kommt aus dem Scan-Stream (Verbindung/Backend),
-        // daher E-201 (Scan-Verbindung) statt eines generischen Aktionscodes.
-        setScanError(mitCode(msg ?? t("beobachten.scan.scanError"), CODES.E_201));
+        // daher E-201 (Scan-Verbindung) statt eines generischen Aktionscodes. Das
+        // gilt AUCH für das zu große Netz: es ist keine Störung, sondern eine
+        // abgelehnte Eingabe — ein eigener Code wäre hier falsch.
+        setScanError(mitCode(text, CODES.E_201));
         setScanLaeuft(false);
         setFortschritt(null);
         setPhase(null);

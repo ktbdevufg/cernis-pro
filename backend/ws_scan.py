@@ -59,6 +59,7 @@ from domain.scanning import (
     HostEnriched,
     HostFound,
     Info,
+    NetzZuGrossError,
     PhaseChanged,
     Progress,
     ScanCompleted,
@@ -413,6 +414,34 @@ def make_ws_scan(
         try:
             raw = await websocket.receive_json()
             config = _build_config(raw)
+        except NetzZuGrossError as exc:
+            # Das zu grosse Netz ist eine ABGELEHNTE EINGABE, keine Stoerung -- der
+            # Anwender soll erfahren, WIE VIELE Adressen er angegeben hat und wo die
+            # Grenze liegt. Dafuer traegt das Frame zwei ADDITIVE Felder neben dem
+            # bisherigen ``message``:
+            #
+            #   ``grund``  -- der maschinenlesbare Wert, an dem das Frontend den
+            #                 uebersetzten Text waehlt (Muster DnsTrustPanel.jsx:46ff:
+            #                 Signal auswerten, KEIN Text-Parsen).
+            #   ``anzahl`` -- die gemessene Gesamtzahl als ZAHL, direkt aus dem
+            #                 Attribut der Ausnahme (Muster KeyMissingError.key_file,
+            #                 Befund 65).
+            #
+            # ``message`` bleibt daneben bestehen und ist AUSDRUECKLICH NICHT DER
+            # ANWENDERTEXT: es ist der englische Entwicklertext aus der sprachfreien
+            # Domaene. Er steht hier allein fuer die Vertraeglichkeit -- jeder
+            # Verbraucher, der ``grund`` nicht kennt (cernis_cli.py:102,
+            # infrastructure/agent/scan_client.py:56), zeigt bzw. behandelt weiterhin
+            # ``message`` und bricht nicht. Wer ihn fuer uebersetzt haelt, irrt.
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "message": str(exc),
+                    "grund": "netzZuGross",
+                    "anzahl": exc.anzahl,
+                }
+            )
+            return
         except ValueError as exc:
             await websocket.send_json({"type": "error", "message": str(exc)})
             return

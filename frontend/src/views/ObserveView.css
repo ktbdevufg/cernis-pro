@@ -119,8 +119,15 @@
   color: var(--color-text-tert);
 }
 
+/* Fließtext mit erhaltenen Absätzen: der Abweisungstext für ein zu großes Netz
+   (i18n beobachten.scan.netzZuGross) besteht aus ZWEI Absätzen, getrennt durch
+   \n\n. Ohne pre-line kollabierte der Umbruch und beide Absätze klebten in einer
+   Zeile zusammen. pre-line statt pre-wrap (Muster AboutView.css:142): die
+   Absatzumbrüche bleiben, der Fließtext bricht ansonsten normal um. Einzeilige
+   Hinweise sind davon unberührt. */
 .observe__hinweis-text {
   color: var(--color-text-sec);
+  white-space: pre-line;
 }
 
 /* Dezente Anzeige des zuletzt geladenen/abgeschlossenen Scans. */

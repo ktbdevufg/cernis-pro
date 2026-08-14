@@ -18,10 +18,12 @@ from domain.scanning.events import (
     ScanStarted,
 )
 from domain.scanning.models import (
+    MAX_SCAN_ADRESSEN,
     DiscoveredHost,
     EnrichedHost,
     HostClassification,
     MdnsService,
+    NetzZuGrossError,
     PortInfo,
     PortInterception,
     ScanConfig,
@@ -31,6 +33,7 @@ from domain.scanning.models import (
 )
 
 __all__ = [
+    "MAX_SCAN_ADRESSEN",
     "DiscoveredHost",
     "DiscoveryEvent",
     "DiscoveryHostFound",
@@ -41,6 +44,7 @@ __all__ = [
     "HostFound",
     "Info",
     "MdnsService",
+    "NetzZuGrossError",
     "PhaseChanged",
     "PortInfo",
     "PortInterception",

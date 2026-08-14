@@ -587,6 +587,76 @@ def test_invalid_cidr_yields_error_frame() -> None:
     assert "Invalid CIDR" in frame["message"]
 
 
+# ── Netzgroessen-Obergrenze -> error-Frame mit Grund + Zahl (S88-P2) ────────
+
+
+def test_zu_grosses_netz_liefert_error_frame_mit_grund_und_anzahl() -> None:
+    """3.1: Die Pruefung sitzt in ScanConfig und greift damit auf dem WS-Weg.
+
+    Das Frame traegt neben ``message`` die beiden maschinenlesbaren Felder, an denen
+    das Frontend den UEBERSETZTEN Text waehlt: ``grund`` und ``anzahl``.
+    """
+    with _client([]).websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "10.0.0.0/16"})
+        frame = ws.receive_json()
+    assert frame["type"] == "error"
+    assert frame["grund"] == "netzZuGross"
+    assert frame["anzahl"] == 65536
+
+
+def test_zu_grosses_netz_ueber_die_summe_mehrerer_cidrs() -> None:
+    """3.1 + 1.3: Der WS-Weg splittet an Kommata; gezaehlt wird die SUMME.
+
+    Drei Netze, jedes einzeln erlaubt (2048/2048/256), zusammen 4352 -- der Scan
+    wird abgelehnt. Damit ist belegt, dass die Grenze sich nicht durch Aufteilen in
+    mehrere Einzelnetze umgehen laesst.
+    """
+    with _client([]).websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "10.0.0.0/21,10.1.0.0/21,10.2.0.0/24"})
+        frame = ws.receive_json()
+    assert frame["type"] == "error"
+    assert frame["grund"] == "netzZuGross"
+    assert frame["anzahl"] == 4352
+
+
+def test_zu_grosses_netz_traegt_weiterhin_ein_message_feld() -> None:
+    """Vertraeglichkeit: wer ``grund`` nicht kennt, zeigt weiterhin ``message``.
+
+    Die Bestands-Verbraucher des error-Frames (cernis_cli.py:102 und
+    infrastructure/agent/scan_client.py:56) lesen ausschliesslich ``type`` und
+    ``message``; die neuen Felder sind fuer sie unsichtbar (additiv, wie schon
+    ``interception`` am scan_complete-Frame). ``message`` ist dabei ENGLISCHER
+    ENTWICKLERTEXT, NICHT der Anwendertext -- der entsteht erst im Frontend.
+    """
+    with _client([]).websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "10.0.0.0/16"})
+        frame = ws.receive_json()
+    assert isinstance(frame["message"], str)
+    assert "Network too large" in frame["message"]
+
+
+def test_netz_genau_auf_der_grenze_startet_den_scan() -> None:
+    """4.1 auf dem WS-Weg: ein /20 (genau 4096) wird NICHT abgewiesen.
+
+    Der Fake liefert ein ``ScanStarted``; kaeme die Config nicht durch, waere das
+    erste Frame stattdessen ein ``error`` (der Handler kehrt dann VOR dem Scan um).
+    """
+    events: list[ScanEvent] = [ScanStarted(cidr="10.0.0.0/20", total_hosts=2)]
+    with _client(events).websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "10.0.0.0/20"})
+        frame = ws.receive_json()
+    assert frame["type"] == "scan_started"
+
+
+def test_uebliches_heimnetz_wird_auf_dem_ws_weg_nicht_abgewiesen() -> None:
+    """4.6 auf dem WS-Weg: der Normalfall /24 bleibt unberuehrt."""
+    events: list[ScanEvent] = [ScanStarted(cidr="192.168.1.0/24", total_hosts=2)]
+    with _client(events).websocket_connect("/ws/scan") as ws:
+        ws.send_json({"cidr": "192.168.1.0/24"})
+        frame = ws.receive_json()
+    assert frame["type"] == "scan_started"
+
+
 # ── Adapter-Exceptions -> error-Frame statt Abbruch (S.6-Merkposten 2) ──────
 
 

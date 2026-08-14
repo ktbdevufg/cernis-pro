@@ -491,6 +491,7 @@
       "morePortsTitle_other": "{{count}} weitere Ports",
       "scanning": "Scan läuft …",
       "scanError": "Scan fehlgeschlagen",
+      "netzZuGross": "Dieses Netz ist zu groß für diese Version von CERNIS PRO. Sie haben {{anzahl}} Adressen angegeben; geprüft werden bis zu 4.096 — das entspricht sechzehn üblichen Heimnetzen.\n\nDer Grund ist die Laufzeit: Ein Scan dauert mit jeder Adresse länger, und bei sehr großen Netzen kann ein Scan sich über Stunden ziehen, ohne dass Sie zwischendurch ein brauchbares Ergebnis sehen. CERNIS PRO ist für kleine Netze in Wohnung, Praxis und Büro entwickelt.",
       "scanPhasePing": "Hosts suchen",
       "scanPhasePorts": "Ports prüfen",
       "scanPhaseMdns": "Dienste erfassen",

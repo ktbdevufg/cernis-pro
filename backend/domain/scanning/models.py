@@ -12,6 +12,44 @@ kein Netzwerk-I/O.
 import ipaddress
 from dataclasses import dataclass, field
 
+# Obergrenze der Adressen, die EIN Scan umfassen darf -- Karls Beschluss aus
+# Sitzung 86. Begruendung: die LAUFZEIT. Ein Scan dauert mit jeder Adresse
+# laenger; jenseits dieser Grenze zieht er sich ueber Stunden, ohne dass der
+# Anwender zwischendurch ein brauchbares Ergebnis sieht. 4096 ist genau ein /20
+# -- sechzehn uebliche Heimnetze (/24), und damit reichlich Luft fuer die
+# Zielgruppe (Wohnung, Praxis, Buero).
+#
+# Gerechnet wird ueber die SUMME aller angegebenen Netze, nicht je Netz (siehe
+# die Pruefung in ``ScanConfig.__post_init__``).
+MAX_SCAN_ADRESSEN = 4096
+
+
+class NetzZuGrossError(ValueError):
+    """Die Summe der angegebenen Netze ueberschreitet ``MAX_SCAN_ADRESSEN``.
+
+    Die gemessene Gesamtzahl haengt als ``anzahl`` an der Ausnahme, damit der Rand
+    sie ohne Text-Parsen nennen kann -- dasselbe Muster wie
+    ``infrastructure.crypto.KeyMissingError``, die den erwarteten Pfad als
+    ``key_file`` traegt (Befund 65, Sitzung 85). Einen Text zu erzeugen, nur um
+    ihn am Rand wieder zu zerlegen, waere keine Naht, sondern eine Umgehung --
+    und sie braeche beim ersten Wortlautwechsel.
+
+    Subtyp von ``ValueError`` mit Absicht (wie ``KeyMissingError`` Subtyp von
+    ``KeyAccessError`` ist): die Formatpruefung nebenan wirft ebenfalls
+    ``ValueError``, und jeder bestehende ``except ValueError`` am Rand faengt
+    diese Ausnahme unveraendert weiter. Ein Pfad, der sie nicht gesondert
+    behandelt, zeigt dann den Entwicklertext aus ``args`` -- nie einen Absturz.
+
+    Der Text dieser Ausnahme ist ENGLISCHER ENTWICKLERTEXT, kein Anwendertext:
+    die Domaene ist sprachfrei (ADR 0002) und traegt keine Anzeigetexte. Die
+    uebersetzte Fassung waehlt das Frontend anhand des maschinenlesbaren Grundes.
+    """
+
+    def __init__(self, anzahl: int, maximum: int = MAX_SCAN_ADRESSEN) -> None:
+        self.anzahl = anzahl
+        self.maximum = maximum
+        super().__init__(f"Network too large: {anzahl} addresses (max {maximum})")
+
 
 @dataclass(frozen=True)
 class ScanConfig:
@@ -33,12 +71,33 @@ class ScanConfig:
     def __post_init__(self) -> None:
         if not self.cidrs:
             raise ValueError("ScanConfig braucht mindestens ein CIDR")
+        # Die Groessenpruefung laeuft in DERSELBEN Schleife, die die CIDRs ohnehin
+        # parst -- kein zweiter Parse-Durchgang. Gezaehlt wird ueber
+        # ``num_addresses`` (eine reine Rechnung aus Praefixlaenge), NICHT ueber
+        # ``hosts()``: das Netz wird nie materialisiert, ein /8 kostet damit
+        # keinen nennenswerten Speicher.
+        adressen_gesamt = 0
         for cidr in self.cidrs:
             # Reine Formatpruefung (stdlib, kein I/O); deckt den "Invalid CIDR"-Fall ab.
             try:
-                ipaddress.ip_network(cidr, strict=False)
+                netz = ipaddress.ip_network(cidr, strict=False)
             except ValueError as exc:
                 raise ValueError(f"Invalid CIDR: {cidr}") from exc
+            # SUMME ueber alle angegebenen Netze, nicht je Netz: eine Grenze je
+            # Netz liesse sich mit zwanzig Einzelnetzen umgehen, und die Laufzeit
+            # haengt an der GESAMTZAHL der Adressen, nicht an der groessten
+            # Einzelangabe.
+            #
+            # Ueberlappende Netze werden bewusst NICHT entdoppelt: ein Netz zaehlt
+            # so oft, wie es angegeben ist. Eine Entdopplung waere eine Rechnung,
+            # die der Anwender nicht nachvollziehen kann (er sieht seine Eingabe,
+            # nicht die Schnittmenge), und sie verschoebe die Grenze unsichtbar.
+            adressen_gesamt += netz.num_addresses
+        if adressen_gesamt > MAX_SCAN_ADRESSEN:
+            # Derselbe Ausnahme-TYP wie die Formatpruefung (``ValueError``), damit
+            # der belegte Weg bis zur Oberflaeche traegt: ws_scan.py faengt
+            # ``ValueError`` und sendet einen ``error``-Frame.
+            raise NetzZuGrossError(adressen_gesamt)
         if self.ping_timeout <= 0:
             raise ValueError("ping_timeout muss > 0 sein")
         if self.mdns_duration <= 0:

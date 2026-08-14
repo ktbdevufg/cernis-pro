@@ -190,3 +190,67 @@ def test_scheduled_scan_weck_fehler_reisst_den_scan_nicht(
     marker = [name for name, _ in logged]
     assert "cve_monitor_wecken_fehlgeschlagen" in marker
     assert "scheduled_scan_failed" not in marker
+
+
+# ── Netzgroessen-Obergrenze auf dem GEPLANTEN Weg (S88-P2, Aufgabe 3) ─────────
+
+
+def test_geplanter_scan_wird_von_der_netzgroessen_schranke_abgewiesen(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """3.1: Die Schranke sitzt in ScanConfig und greift damit AUCH hier.
+
+    Belegt statt behauptet: der geplante Scan baut seine ``ScanConfig`` in app.py
+    selbst (``ScanConfig(cidrs=(cidr,))``). Eine Pruefung allein in ws_scan.py waere
+    hier umgangen -- diese sitzt in der Domaene und greift auf beiden Wegen. Der
+    Use-Case wird folglich NIE aufgerufen: die Config kommt gar nicht erst zustande.
+    """
+    fake_scan = _FakeRunScan([_enriched("10.0.0.1", "AA:BB:CC:00:00:01")])
+    monkeypatch.setattr(
+        app_module,
+        "_scheduled_scan_bausteine",
+        lambda: (fake_scan, lambda s: None, lambda m: None),
+    )
+
+    asyncio.run(app_module._scheduled_scan("10.0.0.0/8", "standard", 1))
+
+    # Der Scan lief NICHT an -- die Config-Konstruktion warf davor.
+    assert fake_scan.configs == []
+
+
+def test_geplanter_scan_meldet_das_zu_grosse_netz_NUR_ins_protokoll(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """3.2 (Messung, KEINE Behebung): der Fehler erreicht NIEMANDEN ausser dem Log.
+
+    Gemessen, nicht vermutet: ``_scheduled_scan`` faengt in app.py jede Exception und
+    loggt sie als ``scheduled_scan_failed`` -- best-effort, damit ein geplanter Lauf
+    den Scheduler nicht reisst. Fuer die Netzgroessen-Schranke heisst das: der Anwender
+    erfaehrt NICHTS. Es gibt auf diesem Weg keinen Nutzerkanal (kein WS-Frame, keine
+    Benachrichtigung, kein Zustandsfeld am Schedule).
+
+    Das ist der GEMESSENE Ist-Zustand, nicht der Sollzustand. Ihn zu beheben waere ein
+    eigener Auftrag (ein Nutzerkanal fuer gescheiterte geplante Scans) und ist hier
+    ausdruecklich NICHT geschehen. Dieser Test haelt den Ist-Zustand fest, damit die
+    Luecke sichtbar bleibt und eine spaetere Behebung ihn bewusst umschreiben muss.
+    """
+    logged: list[tuple[str, dict[str, Any]]] = []
+    monkeypatch.setattr(
+        app_module.logger, "warning", lambda event, **kw: logged.append((event, kw))
+    )
+    monkeypatch.setattr(
+        app_module,
+        "_scheduled_scan_bausteine",
+        lambda: (_FakeRunScan([]), lambda s: None, lambda m: None),
+    )
+
+    # Kein Wurf nach aussen: der Scheduler laeuft weiter.
+    asyncio.run(app_module._scheduled_scan("10.0.0.0/8", "standard", 1))
+
+    # Der EINZIGE Empfaenger ist das Protokoll.
+    treffer = [kw for name, kw in logged if name == "scheduled_scan_failed"]
+    assert len(treffer) == 1
+    # Der Log-Eintrag traegt den Entwicklertext der Domaene -- er ist damit
+    # diagnostizierbar, aber eben nur fuer den, der ins Protokoll sieht.
+    assert "Network too large" in treffer[0]["error"]
+    assert treffer[0]["cidr"] == "10.0.0.0/8"

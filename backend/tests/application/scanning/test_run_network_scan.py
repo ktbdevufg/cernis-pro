@@ -818,7 +818,10 @@ def test_ping_sweep_host_with_empty_mac_still_passes() -> None:
 
 def test_arp_skips_multicast_and_loopback_even_inside_covering_cidrs() -> None:
     """Ein CIDR, das sie umfasst, macht aus ihnen kein Geraet."""
-    discovery = _FakeDiscovery({"224.0.0.0/24": [], "127.0.0.0/8": []})
+    # 127.0.0.0/24 statt /8: die Aussage haengt daran, dass das CIDR die geprueften
+    # Adressen UMFASST (127.0.0.1 liegt in beiden), nicht an seiner Groesse. Ein /8
+    # liegt seit der Netzgroessen-Schranke (S88-P2) ueber der Obergrenze.
+    discovery = _FakeDiscovery({"224.0.0.0/24": [], "127.0.0.0/24": []})
     arp = _FakeArpTable(
         {
             "224.0.0.251": "DE:AD:BE:EF:00:01",  # Multicast
@@ -827,7 +830,7 @@ def test_arp_skips_multicast_and_loopback_even_inside_covering_cidrs() -> None:
     )
     use_case, _, _ = _make_use_case(discovery=discovery, arp_table=arp)
 
-    events = _run(use_case, _merge_config("224.0.0.0/24", "127.0.0.0/8"))
+    events = _run(use_case, _merge_config("224.0.0.0/24", "127.0.0.0/24"))
 
     assert [e for e in events if isinstance(e, HostFound)] == []
 
@@ -1277,11 +1280,15 @@ def test_proxy_arp_macs_collapse_to_one_host_with_additional_ips() -> None:
         DiscoveredHost(ip="172.18.2.1", mac="AA:BB:CC:DD:EE:01", rtt_ms=700.0),
         DiscoveredHost(ip="172.18.2.2", mac="AA:BB:CC:DD:EE:01", rtt_ms=90.0),
     ]
-    discovery = _FakeDiscovery({"172.18.0.0/16": hosts})
+    # /20 statt /16: die drei IPs (172.18.0.1, 172.18.2.1, 172.18.2.2) liegen
+    # saemtlich in 172.18.0.0/20 -- die Aussage des Tests (gleiche MAC auf mehreren
+    # IPs faellt zu EINEM Host zusammen) bleibt unberuehrt. Ein /16 liegt seit der
+    # Netzgroessen-Schranke (S88-P2) ueber der Obergrenze, ein /20 genau darauf.
+    discovery = _FakeDiscovery({"172.18.0.0/20": hosts})
     use_case, _, history = _make_use_case(discovery=discovery)
 
     config = ScanConfig(
-        cidrs=("172.18.0.0/16",),
+        cidrs=("172.18.0.0/20",),
         port_scan=False,
         mdns_scan=False,
         ssdp_scan=False,

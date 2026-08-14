@@ -40,12 +40,17 @@ export function starteScanStream({
   // kein doppeltes onError aus einem nachgelagerten onclose.
   let fertig = false;
 
-  const meldeFehler = (nachricht) => {
+  // Meldet einen Fehler an die Ansicht. `nachricht` ist der Text des Backends
+  // (bzw. ein lokaler Transport-Text); `frame` ist das ROHE error-Frame, sofern
+  // eines vorlag — die Ansicht liest daraus die maschinenlesbaren Zusatzfelder
+  // (`grund`, `anzahl`) und wählt daran einen übersetzten Text. Fehlt das Frame
+  // (Transportfehler ohne Frame), bleibt es null und die Ansicht zeigt `nachricht`.
+  const meldeFehler = (nachricht, frame = null) => {
     if (fertig) {
       return;
     }
     fertig = true;
-    onError?.(nachricht);
+    onError?.(nachricht, frame);
   };
 
   let socket;
@@ -117,8 +122,11 @@ export function starteScanStream({
         socket.close();
         break;
       case "error":
-        // meldeFehler setzt fertig; danach den Socket schließen.
-        meldeFehler(frame.message);
+        // meldeFehler setzt fertig; danach den Socket schließen. Das ROHE Frame
+        // geht mit — es trägt seit S88-P2 im Fall des zu großen Netzes zusätzlich
+        // { grund: "netzZuGross", anzahl: <Zahl> }. Wie bei scan_complete wird es
+        // unverändert durchgereicht; die Ansicht entscheidet, was sie daraus zeigt.
+        meldeFehler(frame.message, frame);
         socket.close();
         break;
       default:
