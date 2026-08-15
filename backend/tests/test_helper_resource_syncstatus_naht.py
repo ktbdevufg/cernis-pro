@@ -53,11 +53,13 @@ from tests import naht_frontend
 _FRONTEND = pathlib.Path(__file__).resolve().parents[2] / "frontend"
 _HOOK_JS = _FRONTEND / "src" / "hooks" / "useHelperResource.js"
 
-# Gemeinsame Bedingung (S89-A1): lokal ueberspringen, in der CI fallen -- siehe
-# ``tests/naht_frontend.py``. ``esbuild`` MITGEPRUEFT: das Skript unten importiert
-# es. ``react-dom`` steht hier nicht in der Liste: React wird gestubbt, nicht
-# gerendert. Der quality-Job der CI installiert die Frontend-Abhaengigkeiten
-# ausdruecklich (``npm ci`` in ``frontend``), damit diese Naht dort wirklich laeuft.
+# Gemeinsame Bedingung (S89-A1/A5): siehe ``tests/naht_frontend.py``. ``_HOOK_JS`` ist
+# die Einstiegsquelle, ``esbuild`` MITGEPRUEFT: das Skript unten importiert es.
+# ``react-dom`` steht hier nicht in der Liste: React wird gestubbt, nicht gerendert --
+# und ``react`` selbst ebenso wenig, weil der Stub-Plugin es abfaengt, es wird nie aus
+# ``node_modules`` aufgeloest (gemessen in S89-A4). Der quality-Job der CI installiert
+# die Frontend-Abhaengigkeiten ausdruecklich (``npm ci`` in ``frontend``), damit diese
+# Naht dort wirklich laeuft.
 #
 # ``scope="module"`` ist hier PFLICHT, kein Geschmack: die Messung unten steckt in
 # einer Fixture mit Modul-Scope, und pytest faehrt weitere Scopes zuerst. Bei

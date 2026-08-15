@@ -39,12 +39,16 @@ _FRONTEND = pathlib.Path(__file__).resolve().parents[2] / "frontend"
 _I18N = _FRONTEND / "src" / "i18n"
 _CONFIRM = _FRONTEND / "src" / "components" / "ConfirmDeleteDialog.jsx"
 
-# Gemeinsame Bedingung (S89-A1): lokal ueberspringen, in der CI fallen -- siehe
-# ``tests/naht_frontend.py``. Hier wird wirklich gerendert, darum ist die Liste die
-# laengste: genannt ist JEDES Paket, das das Skript unten mit blossem Namen importiert
-# (``esbuild``, ``react-dom``, ``react``, ``i18next``, ``react-i18next``). Der Bestand
-# nannte nur die ersten zwei -- fehlte eines der uebrigen, fiel der Test mit
+# Gemeinsame Bedingung (S89-A1/A5): siehe ``tests/naht_frontend.py``. Hier wird
+# wirklich gerendert, darum ist die Paketliste die laengste: genannt ist JEDES Paket,
+# das das Skript unten mit blossem Namen importiert und das dabei wirklich aufgeloest
+# wird (``esbuild``, ``react-dom``, ``react``, ``i18next``, ``react-i18next``). Der
+# Bestand nannte nur die ersten zwei -- fehlte eines der uebrigen, fiel der Test mit
 # ERR_MODULE_NOT_FOUND, statt sich zu ueberspringen.
+# ``dateien`` traegt nur den Einstieg ``ConfirmDeleteDialog.jsx``. ``lib/fehlercodes.js``,
+# das ``bundle: true`` ueber dessen Import mitzieht, steht bewusst nicht hier:
+# transitive Quellen gehoeren in keine Liste, ihr Fehlen ist der laute esbuild-Fehler
+# (S89-A5).
 _riegel = naht_frontend.riegel(
     dateien=(_CONFIRM,),
     pakete=("esbuild", "react-dom", "react", "i18next", "react-i18next"),

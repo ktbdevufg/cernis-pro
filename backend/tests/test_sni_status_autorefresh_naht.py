@@ -44,13 +44,31 @@ from tests import naht_frontend
 _FRONTEND = pathlib.Path(__file__).resolve().parents[2] / "frontend"
 _VIEW_JSX = _FRONTEND / "src" / "components" / "TrafficView.jsx"
 
-# Gemeinsame Bedingung (S89-A1): lokal ueberspringen, in der CI fallen -- siehe
-# ``tests/naht_frontend.py``. HIER SASS DIE FEHLSTELLE: die alte Bedingung fragte nur
-# nach node und der Quelldatei, das Buendel-Skript unten importiert aber ``esbuild``.
-# In der CI fiel der Test darum mit ERR_MODULE_NOT_FOUND (Lauf 31816836761). ``react``
-# und ``react-dom`` stehen nicht in der Liste: der Buendel-Lauf fuehrt sie als
-# ``external``, sie werden nie aufgeloest.
-_riegel = naht_frontend.riegel(dateien=(_VIEW_JSX,), pakete=("esbuild",))
+# Gemeinsame Bedingung (S89-A1/A5): siehe ``tests/naht_frontend.py``. HIER SASS DIE
+# FEHLSTELLE: die alte Bedingung fragte nur nach node und der Quelldatei, das
+# Buendel-Skript unten importiert aber ``esbuild``. In der CI fiel der Test darum mit
+# ERR_MODULE_NOT_FOUND (Lauf 31816836761).
+#
+# ``dateien`` traegt NUR den Einstieg ``TrafficView.jsx`` -- die Datei, um deren Naht
+# es hier geht. Die sechzehn Quellen, die ``bundle: true`` ueber den Importgraphen
+# mitzieht, stehen bewusst NICHT hier: sie waeren ein zweites, veraltendes Abbild des
+# Graphen, und ihr Fehlen ist kein Umgebungsmangel, sondern gehoert als lauter
+# esbuild-Fehler in den Test (S89-A5, Deklarations-Trennlinie).
+#
+# ``react``, ``react-dom``, ``react-i18next`` und ``lucide-react`` stehen nicht bei
+# ``pakete``: der Buendel-Lauf fuehrt sie als ``external``, sie werden nie aufgeloest.
+# Die drei ``@tauri-apps``-Pakete dagegen sind NICHT extern -- sie reisen ueber
+# ``api/system.js`` und ``api/settings.js`` mit und werden wirklich aufgeloest
+# (gemessen in S89-A4). Sie sind Kategorie Umgebung und bleiben darum deklariert.
+_riegel = naht_frontend.riegel(
+    dateien=(_VIEW_JSX,),
+    pakete=(
+        "esbuild",
+        "@tauri-apps/api",
+        "@tauri-apps/plugin-dialog",
+        "@tauri-apps/plugin-fs",
+    ),
+)
 
 # Der Name der EINEN Status-Funktion, die beide Aufrufer teilen.
 _STATUS_FUNKTION = "uebernehmeSniStatus"

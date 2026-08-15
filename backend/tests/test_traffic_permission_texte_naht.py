@@ -33,8 +33,11 @@ _FRONTEND = pathlib.Path(__file__).resolve().parents[2] / "frontend"
 _TRAFFIC_JS = _FRONTEND / "src" / "api" / "traffic.js"
 _I18N = _FRONTEND / "src" / "i18n"
 
-# Gemeinsame Bedingung (S89-A1): lokal ueberspringen, in der CI fallen -- siehe
-# ``tests/naht_frontend.py``. Kein Buendeln hier, darum keine node_modules-Pakete.
+# Gemeinsame Bedingung (S89-A1/A5): siehe ``tests/naht_frontend.py``. Kein Buendeln
+# hier, darum keine node_modules-Pakete. ``dateien`` traegt nur ``traffic.js`` -- die
+# Einstiegsquelle, die das Skript unten selbst faehrt. ``api/client.js``, das node
+# ueber deren Import mitzieht, steht bewusst nicht hier: transitive Quellen gehoeren
+# in keine Liste, ihr Fehlen ist der laute node-Fehler (S89-A5).
 _riegel = naht_frontend.riegel(dateien=(_TRAFFIC_JS,))
 
 

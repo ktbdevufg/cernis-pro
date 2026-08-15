@@ -35,9 +35,11 @@ _WERKZEUG_JS = _FRONTEND / "src" / "lib" / "werkzeugFehler.js"
 _CLIENT_JS = _FRONTEND / "src" / "api" / "client.js"
 _I18N = _FRONTEND / "src" / "i18n"
 
-# Gemeinsame Bedingung (S89-A1): lokal ueberspringen, in der CI fallen -- siehe
-# ``tests/naht_frontend.py``. Kein Buendeln hier, darum keine node_modules-Pakete.
-# ``client.js`` steht mit in der Liste: die Tests weiter unten fahren auch es ueber node.
+# Gemeinsame Bedingung (S89-A1/A5): siehe ``tests/naht_frontend.py``. Kein Buendeln
+# hier, darum keine node_modules-Pakete. Beide Dateien sind Einstiegsquellen dieser
+# Naht und stehen darum zu Recht in ``dateien``: ``werkzeugFehler.js`` faehrt
+# ``_anzeige`` ueber node, ``client.js`` fahren die beiden apiGet-Tests am Ende der
+# Datei selbst (nachgeprueft in S89-A5, Zeilen 224 und 258).
 _riegel = naht_frontend.riegel(dateien=(_WERKZEUG_JS, _CLIENT_JS))
 
 # Der ansichts-eigene Schluessel fuer "irgendein anderer Fehler". Er bleibt je Ansicht

@@ -41,8 +41,10 @@ _I18N = _FRONTEND / "src" / "i18n"
 
 _HILFE_SCHLUESSEL = "help.allgemein.fehlercodes"
 
-# Gemeinsame Bedingung (S89-A1): lokal ueberspringen, in der CI fallen -- siehe
-# ``tests/naht_frontend.py``. Kein Buendeln hier, darum keine node_modules-Pakete.
+# Gemeinsame Bedingung (S89-A1/A5): siehe ``tests/naht_frontend.py``. Kein Buendeln
+# hier, darum keine node_modules-Pakete. ``fehlercodes.js`` ist die Einstiegsquelle,
+# die ``_codes_aus_dem_modul`` unten selbst ueber node faehrt; sie hat keine eigenen
+# Importe, also zieht dieser Lauf nichts Transitives nach.
 _riegel = naht_frontend.riegel(dateien=(_FEHLERCODES_JS,))
 
 

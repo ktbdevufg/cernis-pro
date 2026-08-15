@@ -222,9 +222,13 @@ def test_die_cap_net_raw_naht_ist_unveraendert() -> None:
 
 # ── Frontend: die Ansicht liest den Marker und unterdrueckt den Leer-Kasten ───
 
-# Gemeinsame Bedingung (S89-A1): lokal ueberspringen, in der CI fallen. Der Dekorator
+# Gemeinsame Bedingung (S89-A1/A5): siehe ``tests/naht_frontend.py``. Der Dekorator
 # statt eines Modul-Riegels, weil die Backend-Tests oben ohne node laufen duerfen.
-# ``_API_JS`` steht mit in der Liste: die Mapper-Tests unten importieren es ueber node.
+# ``dateien`` traegt die beiden Einstiegsquellen dieser Naht: ``_VIEW_JSX`` wird als
+# Text gelesen, ``_API_JS`` von den Mapper-Tests ueber node gefahren.
+# ``api/client.js``, das node ueber den Import von ``dnsBypass.js`` mitzieht, steht
+# bewusst nicht hier: transitive Quellen gehoeren in keine Liste, ihr Fehlen ist der
+# laute node-Fehler (S89-A5).
 _nur_mit_frontend = naht_frontend.nur_mit_frontend(dateien=(_VIEW_JSX, _API_JS))
 
 

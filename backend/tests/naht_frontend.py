@@ -1,4 +1,4 @@
-"""Gemeinsamer Riegel der node-gestuetzten Naht-Tests (S89-A1).
+"""Gemeinsamer Riegel der node-gestuetzten Naht-Tests (S89-A1/A5).
 
 WARUM AN EINER STELLE: neun Testdateien messen Frontend-Nahtstellen, indem sie die
 ECHTEN Frontend-Quellen ueber ``node`` fahren -- teils uebersetzt und gebuendelt mit
@@ -8,18 +8,38 @@ fragte nach ``node`` und der Quelldatei, importierte im Skript aber ``esbuild`` 
 CI fiel der Test mit ``ERR_MODULE_NOT_FOUND``, statt sich zu ueberspringen (CI-Lauf
 31816836761). Die Bedingung steht darum ab hier EINMAL.
 
-DIE REGEL (Karls Vorgabe S89-A1, B3):
+ZWEI URSACHEN, ZWEI ANTWORTEN (Karls Vorgabe S89-A5). Frueher behandelte der Riegel
+alles Fehlende gleich. Das vermengte zwei Lagen, die verschieden gehoeren:
 
-* Ohne gesetzte Umgebungsvariable ``CI`` -- also auf einer Entwicklermaschine -- darf
-  sich der Test ueberspringen, wenn node oder die gebrauchten Frontend-Teile fehlen.
-  Niemand muss ``npm ci`` fahren, nur um das Backend zu testen.
-* MIT gesetzter ``CI`` ueberspringt sich nie etwas. Fehlt dort etwas, ist das ein
-  Fehler des Ablaufs und faellt mit benannter Meldung auf. Ein stiller Uebersprung in
-  der CI hiesse: die Naht gilt als geprueft, obwohl sie ungedeckt ist -- genau der
-  Zustand, den dieser Riegel beendet.
+* KATEGORIE UMGEBUNG -- ``node`` im PATH und die Pakete aus ``frontend/node_modules``.
+  Sie fehlen genau dann, wenn ``npm ci`` nicht gelaufen ist. Ohne gesetzte ``CI``
+  -- also auf einer Entwicklermaschine -- darf sich der Test darum ueberspringen;
+  niemand muss ``npm ci`` fahren, nur um das Backend zu testen. MIT gesetzter ``CI``
+  ueberspringt sich nichts: dort ist es ein Fehler des Ablaufs und faellt mit
+  benannter Meldung auf. Ein stiller Uebersprung in der CI hiesse: die Naht gilt als
+  geprueft, obwohl sie ungedeckt ist -- genau der Zustand, den dieser Riegel beendet.
+  Die CI installiert die Abhaengigkeiten im quality-Job (``npm ci`` in ``frontend``,
+  siehe ``.github/workflows/ci.yml``); der Riegel darf dort also fordern.
+* KATEGORIE QUELLE -- die Einstiegsquellen unter ``frontend/src``, die der Test selbst
+  faehrt oder als Text liest. Fehlt eine, ist nicht die Umgebung unvollstaendig,
+  sondern das Repo beschaedigt oder die Naht verschoben. Das FAELLT IMMER, in beiden
+  Modi, mit eigener Meldung ohne ``npm ci``-Bezug: ein Waechter, der seinen Gegenstand
+  nicht findet, faellt mit benannter Meldung und laeuft nie still durch (Regel S69-C).
+  Ein Uebersprung waere der Rueckfall auf die schwaechere Pruefung (S73-D).
 
-Die CI installiert die Frontend-Abhaengigkeiten im quality-Job (``npm ci`` in
-``frontend``, siehe ``.github/workflows/ci.yml``); der Riegel darf dort also fordern.
+REIHENFOLGE: die Quelldateien werden ZUERST geprueft. Fehlen Quelle und Umgebung
+zugleich, gewinnt der Quellen-Fehlschlag -- er darf nicht von einem
+Umgebungs-Uebersprung maskiert werden.
+
+DEKLARATIONS-TRENNLINIE, verbindlich fuer jeden kuenftigen Naht-Test:
+
+* ``pakete``: nur Namen unter ``frontend/node_modules``, die WIRKLICH aufgeloest
+  werden. Als ``external`` gefuehrte, nie aufgeloeste Pakete gehoeren NICHT hinein.
+* ``dateien``: nur Einstiegsquellen, die der Test selbst faehrt oder liest.
+* Transitive Quelldateien, die ``esbuild`` oder ``node`` ueber den Importgraphen
+  ziehen, gehoeren in KEINE der beiden Listen. Dort ist der laute node- oder
+  esbuild-Fehler die richtige Antwort; eine Liste bildete den Importgraphen ein
+  zweites Mal ab und veraltete.
 
 ZWEI FASSUNGEN, EINE BEDINGUNG: ``riegel()`` gilt fuer eine ganze Testdatei,
 ``nur_mit_frontend()`` fuer einzelne Tests einer Datei, die daneben auch reine
@@ -45,8 +65,17 @@ _F = TypeVar("_F", bound=Callable[..., Any])
 _Scope = Literal["session", "package", "module", "class", "function"]
 
 
-def _fehlende_teile(dateien: tuple[pathlib.Path, ...], pakete: tuple[str, ...]) -> list[str]:
-    """Nennt alles, was fuer die Messung fehlt -- als Liste, nicht als blosses Ja/Nein.
+def _fehlende_quellen(dateien: tuple[pathlib.Path, ...]) -> list[str]:
+    """Die Einstiegsquellen, die der Test fahren oder lesen will und die nicht da sind.
+
+    Kategorie QUELLE: ihr Fehlen ist kein Umgebungsmangel, sondern ein beschaedigtes
+    Repo oder eine verschobene Naht.
+    """
+    return [str(datei) for datei in dateien if not datei.is_file()]
+
+
+def _fehlende_umgebung(pakete: tuple[str, ...]) -> list[str]:
+    """Nennt alles, was an der UMGEBUNG fehlt -- als Liste, nicht als blosses Ja/Nein.
 
     Die Namen wandern in die Meldung: in der CI soll dort stehen, WAS fehlt, nicht
     nur, dass etwas fehlt.
@@ -54,7 +83,6 @@ def _fehlende_teile(dateien: tuple[pathlib.Path, ...], pakete: tuple[str, ...]) 
     fehlt: list[str] = []
     if shutil.which("node") is None:
         fehlt.append("node (Interpreter nicht im PATH)")
-    fehlt += [str(datei) for datei in dateien if not datei.is_file()]
     fehlt += [
         f"frontend/node_modules/{paket}" for paket in pakete if not (NODE_MODULES / paket).is_dir()
     ]
@@ -62,8 +90,25 @@ def _fehlende_teile(dateien: tuple[pathlib.Path, ...], pakete: tuple[str, ...]) 
 
 
 def _pruefe(dateien: tuple[pathlib.Path, ...], pakete: tuple[str, ...]) -> None:
-    """DIE eine Entscheidung: laufen, ueberspringen (ohne CI) oder fallen (mit CI)."""
-    fehlt = _fehlende_teile(dateien, pakete)
+    """DIE eine Entscheidung, zweigeteilt nach Ursache (S89-A5).
+
+    Erst die Quellen: fehlt eine, faellt der Test in BEIDEN Modi -- ein Waechter ohne
+    Gegenstand laeuft nie still durch (S69-C). Das steht bewusst VOR der
+    Umgebungs-Pruefung: fehlen beide zugleich, darf der Quellen-Fehlschlag nicht von
+    einem Umgebungs-Uebersprung maskiert werden.
+
+    Dann die Umgebung: ohne ``CI`` ueberspringen, mit ``CI`` fallen -- unveraendert.
+    """
+    fehlende_quellen = _fehlende_quellen(dateien)
+    if fehlende_quellen:
+        pytest.fail(
+            "Die Naht-Quelldatei fehlt -- das Ziel dieser Naht wurde geloescht, verschoben "
+            "oder umbenannt. Der Test muss der Naht folgen. Fehlt: "
+            f"{', '.join(fehlende_quellen)}.",
+            pytrace=False,
+        )
+
+    fehlt = _fehlende_umgebung(pakete)
     if not fehlt:
         return
 
@@ -89,9 +134,14 @@ def riegel(
 ) -> Any:
     """Baut den autouse-Riegel fuer eine GANZE Testdatei.
 
-    ``dateien``: Frontend-Quellen, die die Messung braucht.
-    ``pakete``: Namen unter ``frontend/node_modules``, die das node-Skript importiert
-    (etwa ``esbuild``, ``react-dom``). Wer nichts buendelt, nennt hier nichts.
+    ``dateien``: NUR die Einstiegsquellen, die dieser Test selbst faehrt oder als Text
+    liest. Fehlt eine, faellt der Test in beiden Modi (Kategorie QUELLE, siehe
+    Modulkopf). Transitive Importe gehoeren NICHT hierher -- dort ist der laute
+    node-/esbuild-Fehler die richtige Antwort.
+    ``pakete``: Namen unter ``frontend/node_modules``, die das node-Skript wirklich
+    aufloest (etwa ``esbuild``, ``react-dom``). Als ``external`` gefuehrte Pakete
+    gehoeren nicht hinein, sie werden nie aufgeloest. Wer nichts buendelt, nennt hier
+    nichts.
     ``scope``: normalerweise ``"function"``. Faehrt die Testdatei ihre node-Messung
     aber in einer eigenen Fixture mit weiterem Scope (etwa ``scope="module"``), MUSS
     der Riegel denselben Scope tragen -- sonst laeuft die Messung VOR ihm: pytest
