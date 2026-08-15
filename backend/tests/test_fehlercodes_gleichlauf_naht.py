@@ -28,10 +28,11 @@ haengt am Backend, das die Codes als Text-Anhang ``(E-xxx)`` fuehrt (kein eigene
 import json
 import pathlib
 import re
-import shutil
 import subprocess
 
 import pytest
+
+from tests import naht_frontend
 
 _FRONTEND = pathlib.Path(__file__).resolve().parents[2] / "frontend"
 _FEHLERCODES_JS = _FRONTEND / "src" / "lib" / "fehlercodes.js"
@@ -40,10 +41,9 @@ _I18N = _FRONTEND / "src" / "i18n"
 
 _HILFE_SCHLUESSEL = "help.allgemein.fehlercodes"
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("node") is None or not _FEHLERCODES_JS.is_file(),
-    reason="node oder frontend/src/lib/fehlercodes.js nicht vorhanden",
-)
+# Gemeinsame Bedingung (S89-A1): lokal ueberspringen, in der CI fallen -- siehe
+# ``tests/naht_frontend.py``. Kein Buendeln hier, darum keine node_modules-Pakete.
+_riegel = naht_frontend.riegel(dateien=(_FEHLERCODES_JS,))
 
 
 def _codes_aus_dem_modul() -> list[str]:

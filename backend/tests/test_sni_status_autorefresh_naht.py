@@ -37,18 +37,20 @@ Muster und Begruendung wie ``backend/tests/test_netz_aufraeumen_texte_naht.py``.
 import json
 import pathlib
 import re
-import shutil
 import subprocess
 
-import pytest
+from tests import naht_frontend
 
 _FRONTEND = pathlib.Path(__file__).resolve().parents[2] / "frontend"
 _VIEW_JSX = _FRONTEND / "src" / "components" / "TrafficView.jsx"
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("node") is None or not _VIEW_JSX.is_file(),
-    reason="node oder frontend/src/components/TrafficView.jsx nicht vorhanden",
-)
+# Gemeinsame Bedingung (S89-A1): lokal ueberspringen, in der CI fallen -- siehe
+# ``tests/naht_frontend.py``. HIER SASS DIE FEHLSTELLE: die alte Bedingung fragte nur
+# nach node und der Quelldatei, das Buendel-Skript unten importiert aber ``esbuild``.
+# In der CI fiel der Test darum mit ERR_MODULE_NOT_FOUND (Lauf 31816836761). ``react``
+# und ``react-dom`` stehen nicht in der Liste: der Buendel-Lauf fuehrt sie als
+# ``external``, sie werden nie aufgeloest.
+_riegel = naht_frontend.riegel(dateien=(_VIEW_JSX,), pakete=("esbuild",))
 
 # Der Name der EINEN Status-Funktion, die beide Aufrufer teilen.
 _STATUS_FUNKTION = "uebernehmeSniStatus"

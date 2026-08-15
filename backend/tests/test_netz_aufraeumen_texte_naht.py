@@ -29,22 +29,25 @@ Python nachzubauen (kein zweiter Wahrheitsstand).
 import json
 import pathlib
 import re
-import shutil
 import subprocess
 
 import pytest
 
+from tests import naht_frontend
+
 _FRONTEND = pathlib.Path(__file__).resolve().parents[2] / "frontend"
 _I18N = _FRONTEND / "src" / "i18n"
 _CONFIRM = _FRONTEND / "src" / "components" / "ConfirmDeleteDialog.jsx"
-_NODE_MODULES = _FRONTEND / "node_modules"
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("node") is None
-    or not _CONFIRM.is_file()
-    or not (_NODE_MODULES / "esbuild").is_dir()
-    or not (_NODE_MODULES / "react-dom").is_dir(),
-    reason="node, esbuild/react-dom (node_modules) oder ConfirmDeleteDialog.jsx fehlt",
+# Gemeinsame Bedingung (S89-A1): lokal ueberspringen, in der CI fallen -- siehe
+# ``tests/naht_frontend.py``. Hier wird wirklich gerendert, darum ist die Liste die
+# laengste: genannt ist JEDES Paket, das das Skript unten mit blossem Namen importiert
+# (``esbuild``, ``react-dom``, ``react``, ``i18next``, ``react-i18next``). Der Bestand
+# nannte nur die ersten zwei -- fehlte eines der uebrigen, fiel der Test mit
+# ERR_MODULE_NOT_FOUND, statt sich zu ueberspringen.
+_riegel = naht_frontend.riegel(
+    dateien=(_CONFIRM,),
+    pakete=("esbuild", "react-dom", "react", "i18next", "react-i18next"),
 )
 
 # Der i18n-Zweig der neuen Bedientexte.

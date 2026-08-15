@@ -23,22 +23,22 @@ auf -- kein Nachbau der Logik in Python, kein zweiter Wahrheitsstand. Muster:
 
 import json
 import pathlib
-import shutil
 import subprocess
 
 import pytest
 
 from infrastructure.resolver.errors import ResolverDataMissing, ResolverToolMissing
+from tests import naht_frontend
 
 _FRONTEND = pathlib.Path(__file__).resolve().parents[2] / "frontend"
 _WERKZEUG_JS = _FRONTEND / "src" / "lib" / "werkzeugFehler.js"
 _CLIENT_JS = _FRONTEND / "src" / "api" / "client.js"
 _I18N = _FRONTEND / "src" / "i18n"
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("node") is None or not _WERKZEUG_JS.is_file(),
-    reason="node oder frontend/src/lib/werkzeugFehler.js nicht vorhanden",
-)
+# Gemeinsame Bedingung (S89-A1): lokal ueberspringen, in der CI fallen -- siehe
+# ``tests/naht_frontend.py``. Kein Buendeln hier, darum keine node_modules-Pakete.
+# ``client.js`` steht mit in der Liste: die Tests weiter unten fahren auch es ueber node.
+_riegel = naht_frontend.riegel(dateien=(_WERKZEUG_JS, _CLIENT_JS))
 
 # Der ansichts-eigene Schluessel fuer "irgendein anderer Fehler". Er bleibt je Ansicht
 # verschieden (die Handlung ist verschieden) -- nur der 503-Fall ist gemeinsam.

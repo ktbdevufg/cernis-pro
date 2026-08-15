@@ -33,7 +33,6 @@ Auftreten auf dieser Maschine.
 import json
 import pathlib
 import re
-import shutil
 import subprocess
 
 import pytest
@@ -41,6 +40,7 @@ import pytest
 from api.dns_bypass import DnsBypassStatusOut
 from application.dns_bypass import StartDnsBypassRecording
 from domain.dns_bypass import DnsBypassRecording
+from tests import naht_frontend
 
 _FRONTEND = pathlib.Path(__file__).resolve().parents[2] / "frontend"
 _VIEW_JSX = _FRONTEND / "src" / "components" / "DnsBypassView.jsx"
@@ -222,9 +222,10 @@ def test_die_cap_net_raw_naht_ist_unveraendert() -> None:
 
 # ── Frontend: die Ansicht liest den Marker und unterdrueckt den Leer-Kasten ───
 
-_nur_mit_frontend = pytest.mark.skipif(
-    not _VIEW_JSX.is_file(), reason="frontend/src/components/DnsBypassView.jsx nicht vorhanden"
-)
+# Gemeinsame Bedingung (S89-A1): lokal ueberspringen, in der CI fallen. Der Dekorator
+# statt eines Modul-Riegels, weil die Backend-Tests oben ohne node laufen duerfen.
+# ``_API_JS`` steht mit in der Liste: die Mapper-Tests unten importieren es ueber node.
+_nur_mit_frontend = naht_frontend.nur_mit_frontend(dateien=(_VIEW_JSX, _API_JS))
 
 
 @_nur_mit_frontend
@@ -286,9 +287,6 @@ def test_der_mapper_reicht_den_marker_aus_dem_status_durch() -> None:
 
     Ohne diesen Schritt kaeme der Marker nie in der Ansicht an.
     """
-    if shutil.which("node") is None:
-        pytest.skip("node nicht vorhanden")
-
     modul = _API_JS.resolve().as_uri()
     skript = (
         "globalThis.fetch = async () => ({\n"
@@ -315,9 +313,6 @@ def test_der_mapper_reicht_den_marker_aus_dem_status_durch() -> None:
 @_nur_mit_frontend
 def test_der_mapper_macht_aus_fehlendem_feld_kein_hindernis() -> None:
     """Fehlt ``permission_error`` (oder ist es leer), wird daraus ``null`` -- kein Ausgrauen."""
-    if shutil.which("node") is None:
-        pytest.skip("node nicht vorhanden")
-
     modul = _API_JS.resolve().as_uri()
     skript = (
         "globalThis.fetch = async () => ({\n"

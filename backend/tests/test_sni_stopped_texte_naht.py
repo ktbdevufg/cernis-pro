@@ -20,21 +20,20 @@ Zeichenketten: laeuft ein Wire-Wert auseinander, faellt es hier auf.
 
 import json
 import pathlib
-import shutil
 import subprocess
 
 import pytest
 
 from infrastructure.sni.sni_sniffer import _STOPPED_HELPER_DEAD, _STOPPED_POLL_FAILED
+from tests import naht_frontend
 
 _FRONTEND = pathlib.Path(__file__).resolve().parents[2] / "frontend"
 _SNI_JS = _FRONTEND / "src" / "api" / "sni.js"
 _I18N = _FRONTEND / "src" / "i18n"
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("node") is None or not _SNI_JS.is_file(),
-    reason="node oder frontend/src/api/sni.js nicht vorhanden",
-)
+# Gemeinsame Bedingung (S89-A1): lokal ueberspringen, in der CI fallen -- siehe
+# ``tests/naht_frontend.py``. Kein Buendeln hier, darum keine node_modules-Pakete.
+_riegel = naht_frontend.riegel(dateien=(_SNI_JS,))
 
 # Der echte Halbgeviertstrich (U+2014). Karls Wortlaut fordert ihn ausdruecklich --
 # ein Bindestrich (U+002D) ist ein anderes Zeichen und hier ein Fehler.

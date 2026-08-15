@@ -44,31 +44,26 @@ gestoppt"); der ist absichtlich nur im Kommentar festgehalten, nicht behoben.
 
 import json
 import pathlib
-import shutil
 import subprocess
 
 import pytest
 
+from tests import naht_frontend
+
 _FRONTEND = pathlib.Path(__file__).resolve().parents[2] / "frontend"
 _HOOK_JS = _FRONTEND / "src" / "hooks" / "useHelperResource.js"
-_NODE_MODULES = _FRONTEND / "node_modules"
 
-# ``esbuild`` MITGEPRUEFT (Muster ``test_netz_aufraeumen_texte_naht.py``): das
-# Skript unten importiert es, und der quality-Job der CI richtet zwar node ein,
-# installiert aber die Frontend-Abhaengigkeiten nicht -- dort fiel der Test mit
-# ERR_MODULE_NOT_FOUND, statt sich zu ueberspringen. ``react-dom`` steht hier
-# nicht in der Bedingung: React wird gestubbt, nicht gerendert.
-pytestmark = pytest.mark.skipif(
-    shutil.which("node") is None
-    or not _HOOK_JS.is_file()
-    or not (_NODE_MODULES / "esbuild").is_dir(),
-    reason=(
-        "Die node-Messung an useHelperResource.js faellt aus: node, "
-        "frontend/src/hooks/useHelperResource.js oder frontend/node_modules/esbuild "
-        "fehlt. Sie laeuft lokal mit installierten Frontend-Abhaengigkeiten "
-        "(frontend: npm ci); die Naht ist hier ungedeckt, nicht in Ordnung befunden."
-    ),
-)
+# Gemeinsame Bedingung (S89-A1): lokal ueberspringen, in der CI fallen -- siehe
+# ``tests/naht_frontend.py``. ``esbuild`` MITGEPRUEFT: das Skript unten importiert
+# es. ``react-dom`` steht hier nicht in der Liste: React wird gestubbt, nicht
+# gerendert. Der quality-Job der CI installiert die Frontend-Abhaengigkeiten
+# ausdruecklich (``npm ci`` in ``frontend``), damit diese Naht dort wirklich laeuft.
+#
+# ``scope="module"`` ist hier PFLICHT, kein Geschmack: die Messung unten steckt in
+# einer Fixture mit Modul-Scope, und pytest faehrt weitere Scopes zuerst. Bei
+# Funktions-Scope liefe die node-Messung VOR dem Riegel und faellt mit
+# ERR_MODULE_NOT_FOUND, statt sich zu ueberspringen -- gemessen in der Gegenprobe.
+_riegel = naht_frontend.riegel(dateien=(_HOOK_JS,), pakete=("esbuild",), scope="module")
 
 # Buendelt das ECHTE Hook-Modul mit React-Stub und faehrt die drei Faelle durch.
 # Ausgabe: ein JSON-Objekt je Fall mit dem Zustand vorher/nachher, der Zahl der
