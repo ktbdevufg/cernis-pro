@@ -1,0 +1,1590 @@
+"""Use-Cases der monitoring-Domaene -- der Live-Connectivity-Loop ``RunMonitor``.
+
+Fuehrt den Altcode-``run_monitor`` (``modules/monitor.py``) als sauberen Use-Case
+zusammen: die reine Domaenenlogik (``classify_transition`` + ``should_notify``,
+M.2), die sechs Loop-Ports (M.3) und -- ueber die Ports -- die Adapter (M.4). Kennt
+``domain/`` und ``ports/``, NIEMALS ``infrastructure/`` oder ``modules/``
+(maschinell per import-linter erzwungen). Alle Ports kommen per Constructor-
+Injection als Protocol-Typ herein. Kein Framework-Import, KEIN ``asyncio.Task``-
+Management: der Use-Case bietet ``run()``/``stop()``, das ``create_task``/Teardown
+treibt der Composition Root (``app.py``-Lifespan, M.9).
+
+LOOP-FORM (testbar): ``tick()`` ist EINE Iteration ueber alle Targets -- voll mit
+Fake-Ports deterministisch testbar (kein Loop-Takt). ``run()`` ist nur der triviale
+Rahmen ``while self._running: await self.tick(); await sleep(interval)``. So sitzt
+die GANZE Logik im getesteten ``tick``; ungetestet bleibt nur ``while``/``sleep``.
+
+STATE: ``self._status`` haelt ``target_id -> letzter alive-bool`` -- exakt wie der
+Altcode-``_status`` (nicht mehr: ``label``/``rtt`` sind KEIN Status-State). Er lebt
+ueber die ``tick``-Iterationen und ist der ``prev``-Input fuer
+``classify_transition``. ``current_status()`` gibt eine DEFENSIVE KOPIE der rohen
+``dict[str, bool]``-Map heraus -- die ``label``-Anreicherung zur Altcode-Form
+``{tid: {"alive", "label"}}`` macht der Rand (M.9: ``/api/monitor/status`` +
+WS-Connect laden die Targets via ``MonitorTargetSource`` und loesen ``label`` mit
+``tid``-Fallback auf). Naht-Linie wie der Broadcaster: der Use-Case gibt rohe
+Domaenen-Daten, der Rand baut die Response-Shape.
+
+TARGETS (Live-Reload): ``tick`` laedt die Targets PRO Iteration via
+``MonitorTargetSource.load()``. Das gibt den Altcode-Live-Reload ohne
+``configure()``-Kruecke: ein ueber ``/api/monitor/targets`` (M.9) geaendertes
+Custom-Target wirkt bei der naechsten Iteration automatisch (die TargetSource liest
+frisch aus den Settings).
+
+Pro-Target-Sequenz (altcode-treu, ``run_monitor`` Z.236-285):
+    target.enabled? sonst skip
+    -> ping(target) -> rtt_repo.save(sample)
+    -> prev = status.get(id); now = sample.alive
+    -> event = classify_transition(prev, now, sample.loss_pct)
+    -> status[id] = now            (IMMER -- auch ohne Event; prev der naechsten Runde)
+    -> wenn event: event_repo.save(MonitorEvent)
+                   + wenn should_notify(prev, event):
+                         notifier.notify(MonitorEvent)        (Desktop-Notification)
+                         alert_raiser.raise_alert(MonitorEvent) (regelbasierter Alert, A.7a)
+    -> IMMER broadcaster.broadcast(target, sample, event)
+
+BEWUSSTE, HARMLOSE REORDERING ggue. Altcode: Dort lief ``_notify_macos`` INLINE in
+den classify-Zweigen, also VOR dem ``_status``-Update und VOR ``_save_event``. Hier
+ist die Reihenfolge ``status-Update -> save_event -> notify``. Das aendert nichts
+Beobachtbares: ``notify`` ist ein best-effort-Seiteneffekt, ``save_event`` reine
+Persistenz -- es gibt keine Abhaengigkeit zwischen ihnen, und ``prev`` (der einzige
+Wert, den das Status-Update beeinflusst) ist fuer ``should_notify`` bereits VOR dem
+Update gelesen. Bewusst so geordnet (Klassifikation -> Status -> Konsequenzen),
+nicht versehentlich abweichend.
+"""
+
+import asyncio
+import time
+from dataclasses import dataclass
+from typing import Any, cast
+
+import structlog
+
+from application.monitoring.errors import LoggingTaskConflict, LoggingTaskNotFound
+from domain.monitoring import (
+    CUSTOM_TARGETS_KEY,
+    CaptureMode,
+    LatencyThreshold,
+    LoggingEventRow,
+    LoggingRttSample,
+    LoggingTask,
+    MonitorEvent,
+    MonitorTarget,
+    OperationMode,
+    PingSample,
+    ScheduleParseError,
+    SlaSample,
+    TaskState,
+    ThresholdCondition,
+    classify_transition,
+    compute_sla_stats,
+    conflicts_with,
+    is_window_active,
+    should_notify,
+)
+from domain.monitoring import (
+    pause as domain_pause,
+)
+from domain.monitoring import (
+    resume as domain_resume,
+)
+from domain.monitoring import (
+    start as domain_start,
+)
+from domain.monitoring import (
+    stop as domain_stop,
+)
+from domain.settings import Setting, SettingValue
+from ports.devices import Clock
+from ports.monitoring import (
+    AlertRaiserPort,
+    LoggingEventRepository,
+    LoggingRttRepository,
+    LoggingTaskRepository,
+    MonitorBroadcasterPort,
+    MonitorEventRepository,
+    MonitorLoggingSinkPort,
+    MonitorNotifierPort,
+    MonitorPingerPort,
+    MonitorTargetSource,
+    RttHistoryRepository,
+    ScanJobScheduler,
+    ScanTriggerCallback,
+    ScheduleRepository,
+    SlaSampleRepository,
+)
+from ports.settings import SettingsRepository
+
+# Sekunden pro Tag -- fuer die ``days`` -> ``since``-Umrechnung der SLA-Use-Cases.
+_SECONDS_PER_DAY = 86400
+
+_logger = structlog.get_logger(__name__)
+
+# Sekunden zwischen den tick-Durchlaeufen (Altcode ``_interval``, Default 5).
+_DEFAULT_INTERVAL = 5
+
+
+class RunMonitor:
+    """Orchestriert den Live-Connectivity-Loop (eine ``tick`` je Mess-Runde)."""
+
+    def __init__(
+        self,
+        pinger: MonitorPingerPort,
+        rtt_history: RttHistoryRepository,
+        event_repo: MonitorEventRepository,
+        notifier: MonitorNotifierPort,
+        broadcaster: MonitorBroadcasterPort,
+        target_source: MonitorTargetSource,
+        alert_raiser: AlertRaiserPort,
+        logging_sink: MonitorLoggingSinkPort,
+        interval: int = _DEFAULT_INTERVAL,
+    ) -> None:
+        self._pinger = pinger
+        self._rtt_history = rtt_history
+        self._event_repo = event_repo
+        self._notifier = notifier
+        self._broadcaster = broadcaster
+        self._target_source = target_source
+        self._alert_raiser = alert_raiser
+        self._logging_sink = logging_sink
+        self._interval = interval
+        # target_id -> letzter bekannter alive-Zustand (None = noch nie gemessen).
+        self._status: dict[str, bool] = {}
+        self._running = False
+        # Fehlerzustand des Loop (S88-P4, Muster ``RunThroughputPoll._last_error``):
+        # Wortlaut der letzten gescheiterten Mess-Runde + Zahl der AUFEINANDERFOLGENDEN
+        # Fehlschlaege. Eine gelungene Runde setzt beides zurueck.
+        self._last_error: str | None = None
+        self._consecutive_failures = 0
+
+    async def tick(self) -> None:
+        """Eine Mess-Runde ueber alle (frisch geladenen) Targets."""
+        targets = await self._target_source.load()
+        for target in targets:
+            if not target.enabled:
+                # Disabled Targets werden uebersprungen (kein Ping, kein
+                # Status-Update) -- altcode-treu (``if not target.enabled: continue``).
+                continue
+            await self._tick_target(target)
+
+    async def _tick_target(self, target: MonitorTarget) -> None:
+        """Misst ein Target, klassifiziert den Uebergang und loest die Konsequenzen aus."""
+        sample = await self._pinger.ping(target)
+        self._rtt_history.save(sample)
+
+        # prev VOR dem Status-Update lesen -- es ist der Eingang fuer Klassifikation
+        # UND fuer die Notify-Flanken-Regel (should_notify braucht prev).
+        prev = self._status.get(target.id)
+        now = sample.alive
+
+        event = classify_transition(prev, now, sample.loss_pct)
+        self._status[target.id] = now  # IMMER (auch ohne Event): prev der naechsten Runde.
+
+        if event is not None:
+            monitor_event = MonitorEvent(
+                target_id=target.id,
+                label=target.label,
+                event=event,
+                rtt_ms=sample.rtt_ms,
+                timestamp=sample.timestamp,
+            )
+            self._event_repo.save(monitor_event)
+            if should_notify(prev, event):
+                # Zwei best-effort-Konsequenzen an DERSELBEN Flanke (A.7a): die
+                # Desktop-Notification UND der regelbasierte Alert. Beide Ports werfen
+                # NIE (Adapter faengt+loggt) -> gegenseitig isoliert ohne try/except
+                # hier; Reihenfolge verhaltensneutral (notify wie bisher zuerst). Der
+                # Use-Case reicht nur sein MonitorEvent durch -- KEIN rule_type/message-
+                # Wissen (alerting-blind; das Mapping lebt im app.py-Adapter).
+                await self._notifier.notify(monitor_event)
+                await self._alert_raiser.raise_alert(monitor_event)
+
+        # IMMER broadcasten -- auch bei event=None (Altcode: monitor_update jede Runde).
+        await self._broadcaster.broadcast(target, sample, event)
+
+        # Langzeit-Logging-Sink (B-II): EINE zusaetzliche best-effort-Konsequenz, NACH
+        # broadcast -- verhaltensneutral (der bestehende ping/classify/notify/broadcast-
+        # Pfad bleibt exakt wie er war; der Sink haengt sich nur HINTEN an). Position
+        # nach broadcast gewaehlt, damit das Live-Update niemals hinter dem Logging-
+        # Schreiben wartet. now = sample.timestamp (der bereits gemessene ts -- KEINE
+        # neue Uhr im Loop); nur falls der Sentinel 0.0 anliegt (kein gesetzter ts),
+        # einmalig time.time() als Bezug. Der Sink ist best-effort (wirft NIE, der
+        # Adapter faengt selbst) -> KEIN try/except hier, wie bei notifier/alert_raiser.
+        sink_now = sample.timestamp if sample.timestamp else time.time()
+        await self._logging_sink.record(target, sample, event, sink_now)
+
+    async def run(self) -> None:
+        """Endlos-Rahmen: tickt bis ``stop()``. Trivial -- die Logik sitzt in ``tick``.
+
+        SCHUTZ UM DEN TICK (S88-P4): dieser Arbeiter hatte die groesste ungeschuetzte
+        Flaeche -- ``target_source.load``, ``pinger.ping``, ``rtt_history.save``,
+        ``event_repo.save`` und ``broadcaster.broadcast`` lagen samtlich ohne ``try``
+        im Pfad (nur ``notifier``/``alert_raiser``/``logging_sink`` fangen in ihren
+        Adaptern selbst). Ein Fehler dort riss den Live-Loop still: die Ausnahme lag
+        danach unbeachtet im Task-Objekt an ``app.state``, das Frontend sah nur eine
+        Status-Map, die nicht mehr weiterlief. Der Grund wird jetzt gemerkt und die
+        Schleife laeuft weiter; ``CancelledError`` bleibt unangetastet (Teardown-Signal,
+        kein Fehler). Muster ``RunThroughputPoll.run``.
+
+        Der Schutz sitzt bewusst im run-Rumpf jedes Arbeiters und NICHT in einer
+        gemeinsamen Basisklasse: die fuenf so abgesicherten Arbeiter liegen in vier
+        verschiedenen application-Subpaketen (cve, outbound_log, scheduler, monitoring);
+        eine gemeinsame Basis waere ein Quer-Import zwischen ihnen oder eine neue Schicht
+        unterhalb von ``application/``.
+
+        Die ``_status``-Map wird bei einem Fehlschlag NICHT geleert: anders als beim
+        Durchsatz-Poller (wo veraltete Raten als aktuelle Messung weiterlebten) ist die
+        letzte bekannte Erreichbarkeit eine gueltige Aussage ueber die letzte gelungene
+        Runde -- und ``prev`` traegt die Flankenerkennung der naechsten Runde. Ein Leeren
+        wuerde jedes Target beim naechsten Erfolg als frischen Uebergang melden.
+        """
+        self._running = True
+        while self._running:
+            try:
+                await self.tick()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # Grund wird gemerkt, nicht verschluckt (S3)
+                self._note_failure(exc)
+            else:
+                self._note_success()
+            await asyncio.sleep(self._interval)
+
+    def _note_failure(self, exc: Exception) -> None:
+        """Merkt den Wortlaut der gescheiterten Runde und zaehlt die Fehlschlag-Serie hoch."""
+        self._last_error = str(exc)
+        self._consecutive_failures += 1
+        _logger.warning(
+            "monitor_tick_failed",
+            error=self._last_error,
+            consecutive_failures=self._consecutive_failures,
+        )
+
+    def _note_success(self) -> None:
+        """Setzt Wortlaut und Zaehler nach einer gelungenen Runde zurueck."""
+        self._last_error = None
+        self._consecutive_failures = 0
+
+    def last_error(self) -> str | None:
+        """Wortlaut der letzten gescheiterten Mess-Runde, sonst ``None`` (S88-P4)."""
+        return self._last_error
+
+    def consecutive_failures(self) -> int:
+        """Zahl der AUFEINANDERFOLGENDEN gescheiterten Runden (0 = letzte Runde gelang)."""
+        return self._consecutive_failures
+
+    def stop(self) -> None:
+        """Beendet den ``run``-Loop nach der laufenden Iteration (Flag, kein Cancel)."""
+        self._running = False
+
+    def current_status(self) -> dict[str, bool]:
+        """Rohe ``target_id -> alive``-Map (DEFENSIVE Kopie, kein Live-Ref nach aussen).
+
+        Die Altcode-Form ``{tid: {"alive", "label"}}`` baut der Rand (M.9) durch
+        ``label``-Anreicherung aus den Targets -- siehe Modul-Docstring.
+        """
+        return dict(self._status)
+
+
+# ── Monitor-Lese-Use-Cases (M.9) ────────────────────────────────────────────
+# Duenne Pass-Through-Use-Cases (Muster GetScanHistory/GetSchedules) fuer die
+# REST-Lesepfade ``/api/monitor/events`` + ``/api/monitor/rtt/{id}``. Sie existieren,
+# weil der api-Ring die Repos (Ports) NICHT direkt rufen darf (import-linter:
+# api -> nur application) -- die EINZIGE Schicht, die der Router ansprechen kann.
+# Sie geben die ROHEN Domaenen-Objekte (MonitorEvent / PingSample) heraus; die
+# Response-Shape (ts aus timestamp, datetime-Formatierung, id weggelassen) baut der
+# api-Rand per Attribut-Zugriff -- Naht-Linie wie current_status/Broadcaster: der
+# Use-Case liefert Domaenen-Daten, der Rand die Wire-Form.
+
+
+class GetMonitorEvents:
+    """Letzte Uebergangs-Ereignisse ueber alle Targets (Pass-Through, nur Repo).
+
+    Reicht ``MonitorEventRepository.recent(limit)`` durch (neueste zuerst, ``ts``
+    absteigend wie der Altcode ``get_monitor_events``). Speist ``/api/monitor/events``.
+    Keine Ereignisse -> ``[]``.
+    """
+
+    def __init__(self, repository: MonitorEventRepository) -> None:
+        self._repository = repository
+
+    def __call__(self, limit: int = 100) -> list[MonitorEvent]:
+        return self._repository.recent(limit)
+
+
+class GetRttHistory:
+    """RTT-Verlaufspunkte EINES Targets (Pass-Through, nur Repo).
+
+    Reicht ``RttHistoryRepository.recent(target_id, limit)`` durch (chronologisch,
+    aelteste zuerst -- altcode-treu). Speist ``/api/monitor/rtt/{id}``. Unbekanntes
+    Target / keine Daten -> ``[]``.
+    """
+
+    def __init__(self, repository: RttHistoryRepository) -> None:
+        self._repository = repository
+
+    def __call__(self, target_id: str, limit: int = 120) -> list[PingSample]:
+        return self._repository.recent(target_id, limit)
+
+
+# ── Schedule-Use-Cases (M.6) ────────────────────────────────────────────────
+# Die Altcode-CRUD<->Job-Kopplung (add_schedule ruft _register_job) ist entkoppelt:
+# ``ManageSchedules`` haelt BEIDE Ports und orchestriert add/delete an EINER Stelle.
+# ``GetSchedules``/``UpdateSchedule`` sind duenne Pass-Through-Use-Cases (nur das
+# Repo) -- die EINZIGE Schicht, die der api-Ring (M.9) ansprechen darf (api -> nur
+# application). Muster wie GetScanHistory/GetDevices.
+
+
+def _row_last_run(row: dict[str, Any] | None) -> str | None:
+    """Die ``last_run``-Zeit einer Repo-Zeile als ``str`` (oder ``None`` = leer).
+
+    Die Zeilen sind rohe ``dict``s (Port-Vertrag: 1:1-Tabellen-Dump), der Wert ist
+    ``TEXT`` oder ``NULL`` -- der ``str()``-Cast macht das fuer mypy explizit, ohne
+    je aus ``None`` einen Text zu erfinden.
+    """
+    if row is None:
+        return None
+    value = row.get("last_run")
+    return None if value is None else str(value)
+
+
+def _write_run_times(
+    repository: ScheduleRepository,
+    schedule_id: int,
+    last_run: str | None,
+    next_run: str | None,
+) -> None:
+    """Schreibt die Ausfuehrungszeiten BEST-EFFORT (Finding 3).
+
+    Die Zeiten sind eine ANZEIGE-Information -- ihr Schreiben darf niemals den
+    fachlichen Vorgang reissen, an dem es haengt: weder einen laufenden geplanten
+    Scan (``RecordScheduleRun``) noch das Anlegen/Aktualisieren eines Schedules.
+    Ein Persistenz-Fehler wird darum GELOGGT und geschluckt, nicht geworfen.
+
+    Das ist KEIN stiller Fallback (S3): es wird nichts erfunden und nichts leise
+    ersetzt -- der Fehlschlag ist im Log sichtbar, und die Spalte behaelt schlicht
+    ihren alten Wert. Erfundene Werte gaebe es nur, wenn hier bei ``None`` ein
+    Ersatz-Zeitstempel eingesetzt wuerde; genau das passiert nicht (``None`` wird
+    unveraendert als "leer" durchgereicht).
+    """
+    try:
+        repository.set_run_times(schedule_id, last_run, next_run)
+    except Exception as exc:
+        _logger.warning(
+            "schedule_run_times_not_written",
+            schedule_id=schedule_id,
+            last_run=last_run,
+            next_run=next_run,
+            error=str(exc),
+        )
+
+
+class ManageSchedules:
+    """Legt Schedules an / loescht sie -- orchestriert Repo (DB) + Job-Engine.
+
+    ``add`` und ``delete`` brauchen beide Ports: die DB-Zeile UND den APScheduler-
+    Job. ``add`` ist BEST-EFFORT gegenueber einem kaputten Schedule-String (s.
+    ``add``-Docstring).
+
+    v2-ABWEICHUNG (M.9, bewusst ggue. dem abgenommenen M.6): Der
+    ``ScanTriggerCallback`` ist jetzt im ``__init__`` GEBUNDEN (war in M.6 das
+    fuenfte ``add``-Argument). Grund: ``add`` wird ueber ``POST /api/schedules``
+    (M.9) aufgerufen, und der api-Ring kann den Callback NICHT durchreichen -- er ist
+    Composition-Root-gebunden (lebt in ``app.py._scheduled_scan``, ruft ``modules``).
+    EINE Bindungsstelle (hier im ctor) speist BEIDE Pfade: den REST-``add`` UND die
+    lifespan-Registrierung der gespeicherten Schedules (``app.py`` uebergibt
+    denselben Callback an diesen ctor und an ``ScanJobScheduler.register/start``) --
+    so kann REST-add und lifespan-Job nicht divergieren. Die Adapter-Signaturen
+    (``register(schedule, callback)`` / ``start(callback)``) bleiben unveraendert
+    (der Adapter bleibt zustandslos); nur ``add`` verliert das Argument.
+    """
+
+    def __init__(
+        self,
+        repository: ScheduleRepository,
+        job_scheduler: ScanJobScheduler,
+        callback: ScanTriggerCallback,
+    ) -> None:
+        self._repository = repository
+        self._job_scheduler = job_scheduler
+        self._callback = callback
+
+    def add(
+        self,
+        name: str,
+        cidr: str,
+        profile_id: str,
+        schedule: str,
+    ) -> int:
+        """Legt die Schedule-Zeile an und registriert ihren Job (best-effort).
+
+        Der Job wird mit dem im ctor gebundenen ``ScanTriggerCallback`` registriert
+        (s. Klassen-Docstring -- EINE Callback-Quelle).
+
+        BEWUSSTE best-effort-Wahl bei kaputtem ``schedule``-String: Die DB-Zeile
+        wird IMMER angelegt (``repository.add``), dann der Job registriert. Wirft
+        ``ScanJobScheduler.register`` einen ``ScheduleParseError`` (unparsbarer
+        String, S.1-Fix statt stillem 24h-Fallback), wird er GEZIELT gefangen
+        (nicht ``except Exception``/``ValueError`` -- die eigenstaendige Exception
+        aus M.6 S.1 macht den Fang praezise): Warn-Log, Job NICHT registriert,
+        ``add`` kehrt regulaer zurueck.
+
+        Konsequenz (sichtbar, nie still): Der User sieht sein Schedule in der Liste
+        (Zeile da), aber es laeuft nicht (kein Job, Warn-geloggt). Das ist besser als
+        der Altcode (still 24h -- ein voellig anderes Intervall ohne Spur) UND besser
+        als das ``add`` komplett abzulehnen (dann waere die Eingabe spurlos weg). Der
+        "Zeile-da-aber-kein-Job"-Zustand ist sowohl in der Liste sichtbar als auch
+        geloggt.
+        """
+        schedule_id = self._repository.add(name, cidr, profile_id, schedule)
+        row = {
+            "id": schedule_id,
+            "cidr": cidr,
+            "profile_id": profile_id,
+            "schedule": schedule,
+        }
+        try:
+            self._job_scheduler.register(row, self._callback)
+        except ScheduleParseError as exc:
+            _logger.warning(
+                "schedule_job_not_registered",
+                schedule_id=schedule_id,
+                schedule=schedule,
+                error=str(exc),
+            )
+            # Kein Job -> keine naechste Feuerzeit. Die Zeile bleibt (best-effort),
+            # ihre next_run bleibt ehrlich leer (S3: kein erfundener Wert).
+            return schedule_id
+        # Job steht -> next_run aus der Engine nachziehen (last_run bleibt leer:
+        # ein frisches Schedule ist noch nie gelaufen).
+        _write_run_times(
+            self._repository,
+            schedule_id,
+            last_run=None,
+            next_run=self._job_scheduler.next_run_time(schedule_id),
+        )
+        return schedule_id
+
+    def delete(self, schedule_id: int) -> None:
+        """Loescht die Schedule-Zeile UND entfernt ihren Job (beide Ports).
+
+        REIHENFOLGE bewusst: erst die Zeile (``repository.delete``), dann der Job
+        (``job_scheduler.unregister``). Bei einem Teilausfall ist ein verwaister Job
+        OHNE Zeile harmloser als eine Zeile OHNE Job: der verwaiste Job wird beim
+        naechsten ``start()`` nicht neu registriert und stirbt spaetestens beim
+        Neustart, waehrend eine Zeile ohne Job in der Liste scheinbar AKTIV aussieht,
+        aber nie feuert (stiller Tot-Eintrag). Die Reihenfolge nicht umdrehen.
+        ``unregister`` ist ohnehin idempotent (+ Log) -- ein nie/schon entfernter Job
+        ist kein Fehler.
+        """
+        self._repository.delete(schedule_id)
+        self._job_scheduler.unregister(schedule_id)
+
+
+class GetSchedules:
+    """Liste aller Schedules als rohe Zeilen-dicts (Pass-Through, nur Repo)."""
+
+    def __init__(self, repository: ScheduleRepository) -> None:
+        self._repository = repository
+
+    def __call__(self) -> list[dict[str, Any]]:
+        return self._repository.list()
+
+
+class UpdateSchedule:
+    """Aktualisiert ``enabled``/``name`` eines Schedules UND zieht den Job nach (E1b).
+
+    Der Schalter schaltet jetzt wirklich (Fix des in M.6 bewusst bewahrten
+    Altcode-Bugs "deaktiviertes Schedule laeuft weiter"): ``enabled=False``
+    entfernt den APScheduler-Job (``unregister``, idempotent), ``enabled=True``
+    registriert ihn aus der aktualisierten Zeile neu -- mit demselben im ctor
+    gebundenen ``ScanTriggerCallback`` wie ``ManageSchedules`` (EINE
+    Callback-Quelle, M.9-Muster). ``enabled=None`` heisst: nur der Name wurde
+    geaendert, am Job aendert sich nichts.
+    """
+
+    def __init__(
+        self,
+        repository: ScheduleRepository,
+        job_scheduler: ScanJobScheduler,
+        callback: ScanTriggerCallback,
+    ) -> None:
+        self._repository = repository
+        self._job_scheduler = job_scheduler
+        self._callback = callback
+
+    def __call__(self, schedule_id: int, enabled: bool | None, name: str | None) -> None:
+        # REIHENFOLGE bewusst (Muster ``delete``): erst die Zeile
+        # (``repository.update``), dann der Job. Bei einem Teilausfall ist der
+        # Zeilen-Zustand die Wahrheit, an der sich der Job beim naechsten
+        # ``start()``/Neustart ohnehin ausrichtet -- ein kurz nachlaufender bzw.
+        # kurz fehlender Job heilt sich also selbst, waehrend die umgekehrte
+        # Richtung (Job weg, Zeile sagt noch "aktiv") einen dauerhaft stillen
+        # Tot-Eintrag hinterlassen koennte. Die Reihenfolge nicht umdrehen.
+        self._repository.update(schedule_id, enabled, name)
+        if enabled is None:
+            return  # reine Namensaenderung -- der Job bleibt unangetastet.
+        if enabled is False:
+            # unregister ist idempotent (+ Log) -- ein nie/schon entfernter Job
+            # ist kein Fehler.
+            self._job_scheduler.unregister(schedule_id)
+            # Kein Job mehr -> keine naechste Feuerzeit: next_run wird LEER
+            # (Finding 3). last_run bleibt erhalten -- der letzte Lauf hat
+            # stattgefunden, das Deaktivieren macht ihn nicht ungeschehen.
+            _write_run_times(
+                self._repository,
+                schedule_id,
+                last_run=self._last_run_of(schedule_id),
+                next_run=None,
+            )
+            return
+        # enabled is True: den Job aus der aktualisierten Zeile neu registrieren.
+        # Der Port hat bewusst keinen Einzel-Lesezugriff -- list() + id-Suche
+        # genuegt (Schedules sind eine Handvoll Zeilen, keine Port-Erweiterung
+        # ohne Not).
+        row = next(
+            (r for r in self._repository.list() if r.get("id") == schedule_id),
+            None,
+        )
+        if row is None:
+            # Zwischen update und list geloescht -- Warn-Log statt Wurf.
+            _logger.warning("schedule_row_missing", schedule_id=schedule_id)
+            return
+        job_row = {
+            "id": row["id"],
+            "cidr": row["cidr"],
+            "profile_id": row["profile_id"],
+            "schedule": row["schedule"],
+        }
+        try:
+            self._job_scheduler.register(job_row, self._callback)
+        except ScheduleParseError as exc:
+            # GEZIELTER Fang (Muster ManageSchedules.add): kaputter schedule-String
+            # -> Warn-Log, Job nicht registriert, die Zeile ist trotzdem aktualisiert.
+            _logger.warning(
+                "schedule_job_not_registered",
+                schedule_id=schedule_id,
+                schedule=row["schedule"],
+                error=str(exc),
+            )
+            # Kein Job -> next_run bleibt ehrlich leer (S3), last_run unberuehrt.
+            _write_run_times(
+                self._repository,
+                schedule_id,
+                last_run=_row_last_run(row),
+                next_run=None,
+            )
+            return
+        # Job steht wieder -> next_run aus der Engine nachziehen; last_run bleibt,
+        # wie es war (das Aktivieren ist kein Lauf).
+        _write_run_times(
+            self._repository,
+            schedule_id,
+            last_run=_row_last_run(row),
+            next_run=self._job_scheduler.next_run_time(schedule_id),
+        )
+
+    def _last_run_of(self, schedule_id: int) -> str | None:
+        """Liest die bestehende ``last_run``-Zeit einer Zeile (unveraendert durchreichen).
+
+        ``set_run_times`` setzt BEIDE Spalten (``None`` = leer) -- wer nur
+        ``next_run`` aendern will, muss ``last_run`` mitgeben. Der Port hat bewusst
+        keinen Einzel-Lesezugriff; ``list()`` + id-Suche genuegt (Muster oben:
+        Schedules sind eine Handvoll Zeilen, keine Port-Erweiterung ohne Not).
+        Zeile weg -> ``None`` (dann trifft das UPDATE ohnehin keine Zeile).
+        """
+        row = next(
+            (r for r in self._repository.list() if r.get("id") == schedule_id),
+            None,
+        )
+        return _row_last_run(row)
+
+
+class RecordScheduleRun:
+    """Haelt den Ausloesezeitpunkt eines geplanten Scans fest (Finding 3).
+
+    Der DRITTE Schreibpfad der Ausfuehrungszeiten neben ``ManageSchedules.add``
+    und ``UpdateSchedule`` -- und der einzige, der ``last_run`` wirklich fuellt:
+    Wenn der Scheduler ein Schedule ausloest, wird ``last_run`` auf DIESEN
+    Zeitpunkt gesetzt UND ``next_run`` frisch aus der Job-Engine nachgezogen
+    (der APScheduler hat seinen Trigger zu diesem Zeitpunkt bereits
+    weitergestellt, die neue Zeit ist also die naechste, nicht die eben
+    gefeuerte).
+
+    RING-ZUORDNUNG: Der Ausloeser selbst (``app.py._scheduled_scan``) lebt im
+    Composition Root, weil er den scanning-Use-Case verdrahtet. Die
+    Zeit-Schreiblogik gehoert aber nicht dorthin -- sie ist ein fachlicher
+    Schritt ueber zwei Ports und lebt darum HIER im application-Ring, als eigener
+    Use-Case, den der Composition Root nur noch aufruft. So bleibt die Richtung
+    ``infrastructure -> application`` unberuehrt (der Adapter wird gerufen, er
+    ruft nicht).
+
+    ZEITQUELLE: der injizierte ``Clock``-Port (Muster ``RecordScannedHost``/
+    ``GetDeviceStats``) -- ``clock.now().isoformat()`` liefert exakt das Format
+    von ``created_at`` (ISO 8601, UTC, mit ``+00:00``). Keine eigene Uhr im
+    Use-Case, kein ``datetime.now()``.
+
+    BEST-EFFORT (Punkt E): Ein Fehler beim Schreiben der Zeiten darf einen
+    laufenden geplanten Scan NIEMALS verhindern -- ``__call__`` wirft nicht, es
+    loggt (s. ``_write_run_times``).
+    """
+
+    def __init__(
+        self,
+        repository: ScheduleRepository,
+        job_scheduler: ScanJobScheduler,
+        clock: Clock,
+    ) -> None:
+        self._repository = repository
+        self._job_scheduler = job_scheduler
+        self._clock = clock
+
+    def __call__(self, schedule_id: int) -> None:
+        last_run = self._clock.now().isoformat()
+        # next_run NACH dem Feuern gelesen: die Engine hat den Trigger zu diesem
+        # Zeitpunkt schon weitergestellt. Kein Job/keine Engine -> None (ehrlich
+        # leer, kein erfundener Wert).
+        next_run = self._job_scheduler.next_run_time(schedule_id)
+        _write_run_times(self._repository, schedule_id, last_run=last_run, next_run=next_run)
+
+
+# Die beiden Ausgaenge eines geplanten Laufs, wie sie in ``scan_schedules.last_result``
+# landen (S88-P4). Benannte Konstanten statt Literale an drei Stellen -- der Wert ist ein
+# STABILER MARKER fuer die Anzeige, kein Anzeigetext: der Wortlaut fuer den Anwender
+# entsteht am Frontend-Rand (Muster ``NPCAP_MISSING``).
+SCHEDULE_RESULT_OK = "ok"
+SCHEDULE_RESULT_FAILED = "failed"
+
+
+class RecordScheduleResult:
+    """Haelt den AUSGANG eines geplanten Scans fest (S88-P4).
+
+    Gegenstueck zu ``RecordScheduleRun``: jener bucht den Ausloesezeitpunkt VOR dem
+    Scan, dieser den Ausgang DANACH. Beide bleiben getrennt, weil sie verschiedene
+    Aussagen sind und zu verschiedenen Zeiten entstehen -- ``last_run`` beantwortet
+    "wann wurde ausgeloest", ``last_result``/``last_error`` beantworten "wie ging es
+    aus". Vor S88-P4 gab es nur die erste, und ein gescheiterter Lauf sah in der
+    Tabelle exakt aus wie ein geglueckter.
+
+    RING-ZUORDNUNG wie bei ``RecordScheduleRun``: der Ausloeser (``app.py``) lebt im
+    Composition Root, die Schreiblogik ueber dem Port hier im application-Ring.
+
+    BEST-EFFORT: Ein Fehler beim Schreiben des Ausgangs darf den geplanten Scan
+    NIEMALS reissen -- ``__call__`` wirft nicht, es loggt.
+    """
+
+    def __init__(self, repository: ScheduleRepository) -> None:
+        self._repository = repository
+
+    def erfolg(self, schedule_id: int) -> None:
+        """Bucht einen geglueckten Lauf (``'ok'``, Fehlerwortlaut wird geleert)."""
+        self._schreiben(schedule_id, SCHEDULE_RESULT_OK, None)
+
+    def fehlschlag(self, schedule_id: int, error: str) -> None:
+        """Bucht einen gescheiterten Lauf (``'failed'`` + Wortlaut)."""
+        self._schreiben(schedule_id, SCHEDULE_RESULT_FAILED, error)
+
+    def _schreiben(self, schedule_id: int, result: str, error: str | None) -> None:
+        """Schreibt den Ausgang BEST-EFFORT (Linie ``_write_run_times``).
+
+        Der Ausgang ist eine ANZEIGE-Information -- sein Schreiben darf den Vorgang,
+        an dem es haengt, nicht reissen. Ein Persistenz-Fehler wird GELOGGT und
+        geschluckt, nicht geworfen. Das ist KEIN stiller Fallback (S3): es wird nichts
+        erfunden, der Fehlschlag steht im Log, und die Spalte behaelt ihren alten Wert.
+        """
+        try:
+            self._repository.set_run_result(schedule_id, result, error)
+        except Exception as exc:
+            _logger.warning(
+                "schedule_run_result_not_written",
+                schedule_id=schedule_id,
+                result=result,
+                error=str(exc),
+            )
+
+
+# ── SLA-Lese-Use-Cases (M.7) ────────────────────────────────────────────────
+# Pass-Through-Use-Cases (Muster GetScanHistory/GetSchedules): laden die Sample-
+# Zeilen ueber den Port und reichen sie in die reine Domaenen-Rechnung (M.2).
+# NUR Lesen -- der Schreibpfad ist ein eigener Schritt (M.7b), s. ports/monitoring.
+# Die ``days`` -> ``since``-Umrechnung passiert HIER (now - days*86400), damit das
+# Repo zeitlogik-frei bleibt -- ``time.time()`` direkt wie im Altcode (modules/sla),
+# kein eigener Clock-Port fuer diesen schmalen Schritt.
+
+
+class GetSlaStats:
+    """SLA-Gesamtstatistik EINES Targets ueber ``days`` Tage (Pass-Through, nur Repo).
+
+    Laedt die Sample-Zeilen (``repo.samples_for``) und reicht sie in die reine
+    ``compute_sla_stats`` (M.2). WICHTIG: Die Domaene setzt KEIN ``target_id`` ins
+    Ergebnis-dict (sie kennt das DB-Schluesselfeld nicht) -- dieser Use-Case ergaenzt
+    es, sonst braeche der ``/api/sla/{id}``-Response-Vertrag (der Altcode-
+    ``get_sla_stats`` liefert ``target_id`` mit). Leere Samples -> die Domaenen-Null-
+    Stats (``uptime_pct=None``), ebenfalls mit ``target_id`` angereichert.
+    """
+
+    def __init__(self, repository: SlaSampleRepository) -> None:
+        self._repository = repository
+
+    def __call__(self, target_id: str, days: int = 30) -> dict[str, Any]:
+        since = time.time() - days * _SECONDS_PER_DAY
+        rows = self._repository.samples_for(target_id, since)
+        stats = compute_sla_stats(rows, days)
+        # target_id ergaenzen (Domaene setzt es bewusst nicht) -- Vertrag /api/sla/{id}.
+        return {"target_id": target_id, **stats}
+
+
+class GetAllSlaStats:
+    """SLA-Statistik ALLER getrackten Targets (Pass-Through, orchestriert GetSlaStats).
+
+    Reproduziert den Altcode-``get_all_sla_stats``: ``repo.target_ids()`` -> je id eine
+    ``GetSlaStats``-Berechnung. Keine Targets mit Samples -> ``[]`` (real der
+    Dauerzustand, da ``sla_samples`` nie geschrieben wird -- s. ports/monitoring).
+    """
+
+    def __init__(self, repository: SlaSampleRepository) -> None:
+        self._repository = repository
+        self._get_one = GetSlaStats(repository)
+
+    def __call__(self, days: int = 30) -> list[dict[str, Any]]:
+        return [self._get_one(target_id, days) for target_id in self._repository.target_ids()]
+
+
+# ── Logging-SLA-Lese-Use-Case (C-3) ─────────────────────────────────────────
+# EIGENER SLA-Pfad NEBEN GetSlaStats/GetAllSlaStats -- nicht der bestehende: er liest
+# die dichten Logging-RTT-Messpunkte (``LoggingRttRepository``) statt der brachliegenden
+# ``sla_samples`` und fuettert dieselbe reine Domaenen-Rechnung (``compute_sla_stats``,
+# M.2). Wiederverwendung der Rechenlogik, KEINE neue SLA-Mathematik.
+
+# Fester Cutoff fuer eine OFFENE ``until``-Obergrenze des SLA-Ausschnitts (Schnitt 1b):
+# 9_999_999_999.0 ist Jahr 2286 (Unix-ts) -- sicher jenseits aller realen Mess-ts, also
+# faengt der halb-offene ``range(.., eff_until)`` praktisch "bis heute und darueber
+# hinaus" alle Punkte. BEWUSST eine feste Schranke statt ``time.time()``: so bleibt der
+# Use-Case uhrfrei und deterministisch testbar -- anders als der Composition-Root-Provider
+# (app.py, _logging_report_provider), der fuer dieselbe offene Grenze die Uhr nutzen DARF.
+_OPEN_UNTIL_CUTOFF = 9_999_999_999.0
+
+
+class GetLoggingTaskSla:
+    """SLA-Kennzahlen EINER Logging-Aufgabe -- gesamter Zeitraum ODER ein Ausschnitt (Pass-Through).
+
+    Muster ``GetSlaStats``: laedt die Sample-Zeilen und reicht sie in die reine
+    ``compute_sla_stats`` (M.2) -- aber aus dem Logging-RTT-Repo statt aus ``sla_samples``.
+    Ablauf: ``task_repo.get`` (``None`` -> ``LoggingTaskNotFound``, der bestehende
+    Fehler) -> die Messpunkte laden (``all_for`` ODER ``range``, s. unten) -> die
+    ``LoggingRttSample``-Objekte am Use-Case-Rand in die von der Domaene erwartete
+    Tupel-Reihenfolge ``(alive, rtt_ms, ts)`` umformen (``LoggingRttSample`` traegt
+    ``rtt_ms``/``loss_pct``/``alive``/``ts`` -- die Domaene bleibt unangetastet) ->
+    ``compute_sla_stats`` mit ``interval_s=task.interval_s`` (die korrekte
+    Downtime-Schaetzung pro Task, C-3). Das Ergebnis traegt ``task_id`` (Muster
+    ``GetSlaStats``: die Domaene setzt das Schluesselfeld bewusst nicht). Leere Samples
+    -> Null-Stats (``uptime_pct=None``). Der ``chart`` bleibt im Ergebnis-dict (kein
+    Eingriff -- ``compute_sla_stats`` baut ihn aus den geladenen Punkten).
+
+    ZEITRAUM (``since``/``until``, Schnitt 1b): OPTIONALER Ausschnitt ``[since, until)``.
+    * Beide ``None`` -> ``rtt_repo.all_for(task_id)``: ALLE Messpunkte des Tasks --
+      unveraendertes Bestandsverhalten (die Retention von 1 Monat begrenzt "alle"
+      ohnehin). Bestehende Aufrufer ohne ``since``/``until`` bleiben verhaltensgleich.
+    * Sonst -> ``rtt_repo.range(task_id, eff_since, eff_until)`` mit ``eff_since = since
+      if not None else 0.0`` und ``eff_until = until if not None else`` einem festen
+      grossen Cutoff (``_OPEN_UNTIL_CUTOFF``, s. dort).
+
+    UHRFREI -- bewusste Asymmetrie zum Composition-Root-Provider (app.py,
+    ``_logging_report_provider``): DORT wird fuer eine offene ``until``-Grenze die Uhr
+    genutzt (``export_clock.now() + 86400``), weil der Provider im Composition Root
+    sitzt und die Uhr nutzen DARF. HIER im Use-Case sitzt kein Provider dazwischen --
+    er bleibt rein/uhrfrei und nutzt fuer die offene ``until``-Grenze den festen
+    ``_OPEN_UNTIL_CUTOFF`` statt ``time.time()``. So bleibt der Use-Case deterministisch
+    testbar (kein time.time()-Bezug im Ergebnis).
+
+    DAYS-SEMANTIK (bewusst anders als ``GetSlaStats``): ``days`` ist KEIN Zeitfenster --
+    es wird nur fuer die Chart-Signatur/Stat-Konsistenz an ``compute_sla_stats``
+    durchgereicht (das ``days``-Feld im Ergebnis). Das Zeitfenster steuern allein
+    ``since``/``until`` (oder, bei beiden ``None``, der gesamte Task-Zeitraum).
+    """
+
+    def __init__(
+        self,
+        task_repo: LoggingTaskRepository,
+        rtt_repo: LoggingRttRepository,
+    ) -> None:
+        self._task_repo = task_repo
+        self._rtt_repo = rtt_repo
+
+    def __call__(
+        self,
+        task_id: str,
+        days: int = 30,
+        since: float | None = None,
+        until: float | None = None,
+    ) -> dict[str, Any]:
+        task = self._task_repo.get(task_id)
+        if task is None:
+            raise LoggingTaskNotFound(task_id)
+        # Beide Grenzen offen -> Bestandsverhalten (all_for = gesamter Task-Zeitraum).
+        # Sonst der halb-offene range-Ausschnitt: eff_since=0.0 fuer eine offene
+        # Untergrenze, eff_until=_OPEN_UNTIL_CUTOFF fuer eine offene Obergrenze (kein
+        # time.time() -- der Use-Case bleibt uhrfrei, s. Klassen-Docstring).
+        if since is None and until is None:
+            samples = self._rtt_repo.all_for(task_id)
+        else:
+            eff_since = since if since is not None else 0.0
+            eff_until = until if until is not None else _OPEN_UNTIL_CUTOFF
+            samples = self._rtt_repo.range(task_id, eff_since, eff_until)
+        # LoggingRttSample (rtt_ms/loss_pct/alive/ts) -> SlaSample-Tupel (alive, rtt_ms,
+        # ts) in DIESER Reihenfolge -- das Eingabeformat von compute_sla_stats. ``alive``
+        # zu ``float`` gehoben (1.0/0.0): SlaSample ist ``tuple[float, float, float]`` und
+        # die Domaene wertet es ohnehin nur truthy aus (1.0/0.0 verhalten sich identisch
+        # zu True/False). Umformung am Use-Case-Rand, die Domaene bleibt unangetastet.
+        rows: list[SlaSample] = [
+            (float(sample.alive), sample.rtt_ms, sample.ts) for sample in samples
+        ]
+        stats = compute_sla_stats(rows, days, interval_s=task.interval_s)
+        # task_id ergaenzen (Domaene setzt es bewusst nicht) -- target_id-Muster GetSlaStats.
+        return {"task_id": task_id, **stats}
+
+
+class GetLoggingTaskEvents:
+    """Ereignis-/Anomalie-Flanken EINER Logging-Aufgabe -- optionaler Ausschnitt (Pass-Through).
+
+    Muster ``GetLoggingTaskSla``: ``task_repo.get`` (``None`` -> ``LoggingTaskNotFound``,
+    der bestehende Fehler) -> die Flanken ueber den Event-Port laden -> roh zurueck. Gibt
+    die ROHEN ``LoggingEventRow``-Domaenenobjekte heraus, NICHT ein dict: die Wire-
+    Projektion einer LISTE macht im Haus der api-Rand, nicht der Use-Case (Muster
+    ``GetMonitorEvents``/``ListLoggingTasks`` -- der Router projiziert je Zeile). Anders
+    als ``GetLoggingTaskSla``, das ein dict zurueckgibt, weil es eine Domaenen-RECHNUNG
+    (``compute_sla_stats``) durchreicht; hier gibt es keine Rechnung, nur die Zeilen.
+
+    ZEITRAUM (``since``/``until``, Schnitt 1b-events): OPTIONALER Ausschnitt ``[since,
+    until)`` -- since/until-Logik EXAKT wie ``GetLoggingTaskSla``, mit EINEM Unterschied:
+    der Event-Port hat KEIN ``all_for`` (anders als ``LoggingRttRepository``). Darum nutzt
+    dieser Use-Case IMMER ``range`` -- auch im voll-offenen Fall (beide ``None``) mit
+    ``range(task_id, 0.0, _OPEN_UNTIL_CUTOFF)`` statt eines ``all_for``-Zweigs. Der feste
+    ``_OPEN_UNTIL_CUTOFF`` (Jahr 2286) faengt im halb-offenen ``range`` praktisch alle
+    Punkte, UHRFREI (wiederverwendete Cutoff-Konstante, kein ``time.time()`` -- so bleibt
+    der Use-Case deterministisch testbar, Muster ``GetLoggingTaskSla``).
+    """
+
+    def __init__(
+        self,
+        task_repo: LoggingTaskRepository,
+        event_repo: LoggingEventRepository,
+    ) -> None:
+        self._task_repo = task_repo
+        self._event_repo = event_repo
+
+    def __call__(
+        self,
+        task_id: str,
+        since: float | None = None,
+        until: float | None = None,
+    ) -> list[LoggingEventRow]:
+        task = self._task_repo.get(task_id)
+        if task is None:
+            raise LoggingTaskNotFound(task_id)
+        # IMMER range (kein all_for im Event-Port, anders als bei SLA): eff_since=0.0 fuer
+        # eine offene Untergrenze, eff_until=_OPEN_UNTIL_CUTOFF fuer eine offene Obergrenze
+        # (kein time.time() -- der Use-Case bleibt uhrfrei, s. Klassen-Docstring). Beide
+        # None -> der voll-offene range(0.0, CUTOFF) = alle Flanken des Tasks.
+        eff_since = since if since is not None else 0.0
+        eff_until = until if until is not None else _OPEN_UNTIL_CUTOFF
+        return self._event_repo.range(task_id, eff_since, eff_until)
+
+
+class GetLoggingTaskRtt:
+    """Die dichten RTT-Messpunkte EINER Logging-Aufgabe -- gesamter Zeitraum ODER ein Ausschnitt.
+
+    Schlanker LESE-Use-Case (Muster ``GetLoggingTaskEvents``): ``task_repo.get``
+    (``None`` -> ``LoggingTaskNotFound``, der bestehende Fehler) -> die Messpunkte ueber
+    das RTT-Repo laden -> die ROHEN ``LoggingRttSample``-Domaenenobjekte herausgeben (KEINE
+    Rechnung, keine Tupel-Umformung -- anders als ``GetLoggingTaskSla``, das die Samples in
+    ``compute_sla_stats`` fuettert). Speist die zeitfreie Serien-Aggregation (Block 3c):
+    der Router reicht diese rohen Samples in ``analyze_series``.
+
+    ZEITRAUM (``since``/``until``): OPTIONALER Ausschnitt ``[since, until)`` -- since/until-
+    Logik EXAKT wie ``GetLoggingTaskSla`` (anders als ``GetLoggingTaskEvents``: das
+    ``LoggingRttRepository`` HAT ein ``all_for``).
+    * Beide ``None`` -> ``rtt_repo.all_for(task_id)``: ALLE Messpunkte des Tasks (die
+      Retention von 1 Monat begrenzt "alle" ohnehin).
+    * Sonst -> ``rtt_repo.range(task_id, eff_since, eff_until)`` mit ``eff_since = since
+      if not None else 0.0`` und ``eff_until = until if not None else _OPEN_UNTIL_CUTOFF``
+      (offene Obergrenze ueber den festen Cutoff, kein ``time.time()`` -- UHRFREI,
+      deterministisch testbar, Muster ``GetLoggingTaskSla``).
+    """
+
+    def __init__(
+        self,
+        task_repo: LoggingTaskRepository,
+        rtt_repo: LoggingRttRepository,
+    ) -> None:
+        self._task_repo = task_repo
+        self._rtt_repo = rtt_repo
+
+    def __call__(
+        self,
+        task_id: str,
+        since: float | None = None,
+        until: float | None = None,
+    ) -> list[LoggingRttSample]:
+        task = self._task_repo.get(task_id)
+        if task is None:
+            raise LoggingTaskNotFound(task_id)
+        # Beide Grenzen offen -> all_for (gesamter Task-Zeitraum, Muster GetLoggingTaskSla);
+        # sonst der halb-offene range-Ausschnitt mit eff_since/eff_until.
+        if since is None and until is None:
+            return self._rtt_repo.all_for(task_id)
+        eff_since = since if since is not None else 0.0
+        eff_until = until if until is not None else _OPEN_UNTIL_CUTOFF
+        return self._rtt_repo.range(task_id, eff_since, eff_until)
+
+
+# ── Targets-Schreibpfad (M.9-Nachzuegler) ───────────────────────────────────
+# Der LESE-Pfad (``CompositeTargetSource.load``, infrastructure) komponiert die
+# Targets aus drei Quellen; HIER ist nur die benutzerdefinierte Quelle
+# (``monitor_custom_targets`` in den Settings) SCHREIBBAR. Bewusst KEIN eigener
+# Port und KEINE eigene Tabelle: die Custom-Targets sind ein Settings-Wert
+# (``list[dict]``), also nutzt der Schreibpfad das migrierte ``SettingsRepository``
+# direkt (cross-domain Port-Import -- application darf ``ports`` kennen, der
+# import-linter verbietet nur infrastructure/api). Kein ``configure_monitor`` mehr:
+# der ``RunMonitor`` laedt pro ``tick`` frisch via ``MonitorTargetSource.load()``,
+# also wirkt ein hier geschriebenes Target bei der naechsten Iteration automatisch
+# (Altcode-Live-Reload ohne die ``configure``-Kruecke).
+
+
+def _load_custom_targets(repository: SettingsRepository) -> list[dict[str, Any]]:
+    """Liest die rohe Custom-Targets-Liste aus den Settings (leer, wenn nicht gesetzt).
+
+    Altcode-treu: ``get_setting("monitor_custom_targets", []) or []`` -- ein nicht
+    gesetzter Key ODER ein nicht-Listen-Wert ergibt eine leere Liste (kein Fehler),
+    damit der Schreibpfad immer auf einer wohlgeformten Liste appended/filtert.
+    """
+    setting = repository.get(CUSTOM_TARGETS_KEY)
+    if setting is None or not isinstance(setting.value, list):
+        return []
+    # Defensive Kopie + nur dict-Eintraege (kaputte Fremdeintraege wuerden beim
+    # Zurueckschreiben sonst durchgereicht -- der LESE-Pfad ueberspringt sie ohnehin).
+    return [entry for entry in setting.value if isinstance(entry, dict)]
+
+
+def _save_custom_targets(repository: SettingsRepository, targets: list[dict[str, Any]]) -> None:
+    """Schreibt die Custom-Targets-Liste zurueck (``Setting``-validiert)."""
+    # ``list[dict[str, Any]]`` ist ein gueltiger ``SettingValue`` (JSON-serialisierbar);
+    # der Cast macht die Vertraeglichkeit fuer mypy explizit, ohne Laufzeitwirkung.
+    value: SettingValue = cast(SettingValue, targets)
+    repository.set(Setting(key=CUSTOM_TARGETS_KEY, value=value))
+
+
+class AddMonitorTarget:
+    """Fuegt ein benutzerdefiniertes Monitor-Target hinzu (Altcode POST /api/monitor/targets).
+
+    Liest die aktuelle ``monitor_custom_targets``-Liste, haengt das neue Target mit
+    der Altcode-Feldform (``id``/``label``/``host``/``interface``/``enabled``) an und
+    schreibt zurueck. KEINE ``configure``-Folge -- der Loop laedt frisch (Live-Reload).
+    """
+
+    def __init__(self, repository: SettingsRepository) -> None:
+        self._repository = repository
+
+    def __call__(
+        self,
+        target_id: str,
+        label: str,
+        host: str,
+        interface: str = "",
+        enabled: bool = True,
+    ) -> None:
+        targets = _load_custom_targets(self._repository)
+        targets.append(
+            {
+                "id": target_id,
+                "label": label,
+                "host": host,
+                "interface": interface,
+                "enabled": enabled,
+            }
+        )
+        _save_custom_targets(self._repository, targets)
+
+
+class DeleteMonitorTarget:
+    """Entfernt ein benutzerdefiniertes Monitor-Target nach ``id`` (Altcode DELETE).
+
+    Filtert die ``monitor_custom_targets``-Liste nach ``id != target_id`` und schreibt
+    zurueck. Idempotent: eine unbekannte ``id`` filtert nichts heraus (kein Fehler).
+    Eintraege OHNE ``id``-Schluessel werden konservativ BEHALTEN (sie matchen den zu
+    loeschenden ``target_id`` nicht). Nur die fest verdrahteten Internet-/Gateway-
+    Targets liegen ohnehin nicht in den Settings -- sie sind nicht loeschbar.
+    """
+
+    def __init__(self, repository: SettingsRepository) -> None:
+        self._repository = repository
+
+    def __call__(self, target_id: str) -> None:
+        targets = _load_custom_targets(self._repository)
+        remaining = [entry for entry in targets if entry.get("id") != target_id]
+        _save_custom_targets(self._repository, remaining)
+
+
+# ── Langzeit-Logging-Retention (B-I) ────────────────────────────────────────
+# Der EINZIGE Use-Case des B-I-Schritts 2: das Aufraeumen der dichten Logging-
+# Messdaten nach Ablauf der Retention-Spanne. GETRENNT vom fluechtigen Live-Monitor
+# (eigene Repos/Tabellen). Reiner Pass-Through auf ``delete_older_than`` beider
+# Mess-Repos -- KEINE Uhr im Use-Case (anders als die SLA-Use-Cases, die now -
+# days*86400 selbst rechnen): die Cutoffs kommen als METHODEN-Parameter herein, der
+# Aufrufer (Schritt 3 / B-II) rechnet ``now - 30d`` bzw. ``now - 365d``. So bleibt der
+# Use-Case deterministisch testbar (kein time.time()).
+
+# Retention-Spannen der Logging-Messdaten in SEKUNDEN -- benannte Policy-Konstanten.
+# BEWUSST NICHT hier angewendet (kein time.time() im Use-Case): sie dokumentieren die
+# Policy fuer Schritt 3 / B-II, der daraus die absoluten Cutoffs rechnet
+# (rtt_cutoff_ts = now - _RTT_RETENTION_S, event_cutoff_ts = now - _EVENT_RETENTION_S).
+_RTT_RETENTION_S = 30 * 86400  # dichte RTT-Messpunkte: 1 Monat (30 Tage)
+_EVENT_RETENTION_S = 365 * 86400  # Ereignis-/Anomalie-Flanken: 1 Jahr (365 Tage)
+
+
+@dataclass(frozen=True)
+class LoggingRetentionResult:
+    """Ergebnis EINES Retention-Laufs: geloeschte Zeilen je Messdaten-Art.
+
+    Klein und benannt (kein nacktes Tuple): die beiden Zahlen haben verschiedene
+    Bedeutung (RTT-Messpunkte vs. Ereignis-Flanken) und der Aufrufer (Log/Mengen-
+    Check) liest sie sprechend. ``rtt_deleted``/``event_deleted`` sind die
+    Rueckgabewerte der jeweiligen ``delete_older_than``-Aufrufe.
+    """
+
+    rtt_deleted: int
+    event_deleted: int
+
+
+class EnforceLoggingRetention:
+    """Loescht abgelaufene Logging-Messdaten ueber beide Mess-Repos (Pass-Through).
+
+    Haelt das RTT- und das Event-Repo und reicht je einen ABSOLUTEN Cutoff an deren
+    ``delete_older_than`` durch. KEINE Uhr, KEINE Spannen-Rechnung hier (s.
+    Modul-Kommentar): die beiden Cutoffs sind ``run``-Parameter -- der Aufrufer
+    (Schritt 3 / B-II) bildet sie aus ``_RTT_RETENTION_S`` / ``_EVENT_RETENTION_S``.
+    Die Task-DEFINITIONEN (``LoggingTaskRepository``) sind NICHT betroffen -- Retention
+    raeumt nur die Messdaten, nicht die Aufgaben selbst.
+    """
+
+    def __init__(
+        self,
+        rtt_repository: LoggingRttRepository,
+        event_repository: LoggingEventRepository,
+    ) -> None:
+        self._rtt_repository = rtt_repository
+        self._event_repository = event_repository
+
+    def run(self, rtt_cutoff_ts: float, event_cutoff_ts: float) -> LoggingRetentionResult:
+        """Loescht RTT-Messpunkte vor ``rtt_cutoff_ts`` und Events vor ``event_cutoff_ts``.
+
+        Reiner Pass-Through: je ein ``delete_older_than`` pro Repo, die Rueckgaben
+        (geloeschte Zeilen) gebuendelt im ``LoggingRetentionResult``. Beide Cutoffs
+        sind absolute ts-Werte -- die ``now - 30d`` / ``now - 365d``-Rechnung macht der
+        Aufrufer.
+        """
+        rtt_deleted = self._rtt_repository.delete_older_than(rtt_cutoff_ts)
+        event_deleted = self._event_repository.delete_older_than(event_cutoff_ts)
+        return LoggingRetentionResult(rtt_deleted=rtt_deleted, event_deleted=event_deleted)
+
+
+# ── Logging-Aufgaben-Lifecycle (B-I Schritt 3) ──────────────────────────────
+# Macht den Logging-Kern von aussen STEUERBAR: Anlegen + Lebenszyklus-Uebergaenge
+# der Task-DEFINITIONEN ueber dem ``LoggingTaskRepository``. GETRENNT vom fluechtigen
+# Live-Monitor (``RunMonitor``) -- diese Use-Cases ruehren weder Loop noch
+# ``rtt_history``/``monitor_events`` an. KEINE Uhr in den Use-Cases: wo ``now`` oder
+# eine ``id`` gebraucht wird, kommt sie als METHODEN-Parameter herein (der api-Rand
+# liefert ``time.time()`` / ``uuid4``) -- so bleiben die Use-Cases deterministisch
+# testbar (Muster: die Domaene ist zeitfrei, der Rand liefert die Zeit).
+#
+# KONFLIKT-Regel (Konzept): pro Ziel darf nur EINE Aufgabe gleichzeitig ``ACTIVE``
+# sein. Sie greift erst beim STARTEN/FORTSETZEN (nicht beim Anlegen) -- pro Ziel sind
+# beliebig viele Tasks anlegbar, der Konflikt entsteht erst, wenn ein zweiter aktiv
+# werden will. Geprueft via Domaenen-``conflicts_with`` gegen ``list_all``.
+
+
+def _find_active_conflict(candidate: LoggingTask, others: list[LoggingTask]) -> str | None:
+    """``id`` der bereits ``ACTIVE``-Aufgabe am selben Ziel -- oder ``None``.
+
+    Spiegelt die Domaenen-``conflicts_with`` (gleiches Praedikat: anderes ``id``,
+    gleiches ``target_id``, Zustand ``ACTIVE``), liefert aber die ID des Konkurrenten
+    statt nur ``bool`` -- die braucht der ``LoggingTaskConflict`` fuer die
+    Konzept-Meldung. ``conflicts_with`` bleibt die Wahrheit ueber das OB (hier nur das
+    WER), darum wird es vom Aufrufer zusaetzlich als Guard genutzt.
+    """
+    for other in others:
+        if (
+            other.id != candidate.id
+            and other.target_id == candidate.target_id
+            and other.state is TaskState.ACTIVE
+        ):
+            return other.id
+    return None
+
+
+class CreateLoggingTask:
+    """Legt eine neue Logging-Aufgabe im Zustand ``CREATED`` an (reine Anlage).
+
+    KEIN Start, KEINE Konfliktpruefung: Anlegen ist beliebig erlaubt (Konzept: pro
+    Ziel beliebig viele Tasks, Konflikt erst beim Starten). ``id`` und ``created_at``
+    kommen als Methoden-Parameter herein (der api-Rand liefert ``uuid4`` /
+    ``time.time()``) -- der Use-Case haelt keine Uhr. Die Modus-Felder
+    (``planned_start``/``planned_end`` bzw. ``max_duration_s``) reicht der Use-Case
+    durch; ihre Modus-Konsistenz prueft der Router (Schritt 3b, 422), nicht hier.
+
+    ``capture_mode``/``operation_mode`` kommen als ROHER ``str`` herein und werden HIER
+    in die Domaenen-``StrEnum`` gehoben -- so kennt der api-Rand die Domaenen-Enums
+    NICHT (import-linter: api -> nur application). Ein nicht zum Vokabular passender
+    String wirft ``ValueError`` (StrEnum-Konstruktor) -- am Router faengt das schon die
+    Body-Validierung (422) vorher ab; der Cast hier ist die zweite, autoritative Linie.
+
+    ``interval_s`` (C-2, Mess-Intervall in Sekunden) hat den Default 5 -- denselben wie
+    die Domaene (``LoggingTask.interval_s: int = 5``). Der Default liegt damit an der
+    Domaene (autoritativ); dieser Use-Case-Default spiegelt ihn nur, der Router setzt
+    KEINE eigene 5, sondern reicht ``interval_s`` nur durch, wenn der Client es gesetzt
+    hat (sonst greift dieser Default). Die Stufen-Validierung macht der Router (422).
+
+    SCHWELLWERT (Schnitt 4): der optionale ``LatencyThreshold`` der Aufgabe wird HIER
+    aus rohen Wire-Feldern (``threshold_condition`` als ``str`` + die uebrigen Felder)
+    gebaut -- EXAKT das ``capture_mode``/``operation_mode``-Muster: der api-Rand reicht
+    nur rohe Strings durch, die autoritative ``str`` -> ``ThresholdCondition``-Hebung und
+    der ``LatencyThreshold``-Bau passieren im Use-Case. So importiert der api-Ring KEINE
+    Domaenen-Typen (import-linter: api -> nur application, kein ``domain``) -- ein
+    fertiges ``LatencyThreshold``-Objekt am Router-Rand zu bauen wuerde diesen CI-harten
+    Contract brechen. ``threshold_condition is None`` = kein Schwellwert (Default), dann
+    bleibt ``task.threshold`` ``None``. Die rohe Wert-Validierung (condition-Vokabular,
+    ``consecutive_n >= 1``, ``limit_ms >= 0``) macht der Router (422); die Hebung hier ist
+    die zweite, autoritative Linie (ein ``ThresholdCondition``-Fehlwert wirft ``ValueError``).
+
+    RECURRING-Felder (3b): die fuenf ``recur_*``-Werte werden roh durchgereicht (wie
+    ``planned_start`` etc.) -- die Modus-Konsistenz prueft der Rand, nicht dieser Use-Case.
+    """
+
+    def __init__(self, repository: LoggingTaskRepository) -> None:
+        self._repository = repository
+
+    def __call__(
+        self,
+        *,
+        task_id: str,
+        target_id: str,
+        label: str,
+        purpose: str,
+        capture_mode: str,
+        operation_mode: str,
+        created_at: float,
+        planned_start: float | None = None,
+        planned_end: float | None = None,
+        max_duration_s: int | None = None,
+        interval_s: int = 5,
+        threshold_condition: str | None = None,
+        threshold_limit_ms: float = 0.0,
+        threshold_consecutive_n: int = 3,
+        threshold_notify_desktop: bool = True,
+        threshold_notify_email: bool = False,
+        recur_start_minute: int | None = None,
+        recur_end_minute: int | None = None,
+        recur_weekdays: frozenset[int] = frozenset(),
+        recur_from: float | None = None,
+        recur_until: float | None = None,
+    ) -> LoggingTask:
+        # Schwellwert nur bauen, wenn der Client eine condition gesendet hat -- sonst
+        # bleibt der Task ohne Schwellwert (Domaenen-Default ``threshold=None``). Die
+        # ``str`` -> Enum-Hebung ist autoritativ HIER (Muster ``CaptureMode(...)``).
+        threshold = (
+            LatencyThreshold(
+                condition=ThresholdCondition(threshold_condition),
+                limit_ms=threshold_limit_ms,
+                consecutive_n=threshold_consecutive_n,
+                notify_desktop=threshold_notify_desktop,
+                notify_email=threshold_notify_email,
+            )
+            if threshold_condition is not None
+            else None
+        )
+        task = LoggingTask(
+            id=task_id,
+            target_id=target_id,
+            label=label,
+            purpose=purpose,
+            capture_mode=CaptureMode(capture_mode),
+            operation_mode=OperationMode(operation_mode),
+            state=TaskState.CREATED,
+            planned_start=planned_start,
+            planned_end=planned_end,
+            max_duration_s=max_duration_s,
+            created_at=created_at,
+            interval_s=interval_s,
+            threshold=threshold,
+            recur_start_minute=recur_start_minute,
+            recur_end_minute=recur_end_minute,
+            recur_weekdays=recur_weekdays,
+            recur_from=recur_from,
+            recur_until=recur_until,
+        )
+        self._repository.save(task)
+        return task
+
+
+class StartLoggingTask:
+    """Uebergang ``CREATED`` -> ``ACTIVE`` mit Ziel-Konfliktpruefung.
+
+    Laedt den Task (``get``; ``None`` -> ``LoggingTaskNotFound``), prueft via
+    Domaenen-``conflicts_with`` gegen ``list_all``, ob am selben Ziel bereits eine
+    ``ACTIVE``-Aufgabe laeuft -> ``LoggingTaskConflict`` (mit der ID des laufenden
+    Konkurrenten). Sonst Domaenen-``start`` (``InvalidTaskTransition`` aus falschem
+    Ausgangszustand propagiert) -> ``save``. ``now`` ist Methoden-Parameter (api-Rand)
+    und wird seit B-II als effektiver Start an ``domain_start`` durchgereicht (ADR 0033):
+    der erste Start setzt damit den ``effective_start`` der Aufgabe, Bezugs-ts des
+    ``IMMEDIATE``-Fensters.
+    """
+
+    def __init__(self, repository: LoggingTaskRepository) -> None:
+        self._repository = repository
+
+    def __call__(self, task_id: str, now: float) -> LoggingTask:
+        task = self._repository.get(task_id)
+        if task is None:
+            raise LoggingTaskNotFound(task_id)
+        others = self._repository.list_all()
+        if conflicts_with(task, others):
+            running_id = _find_active_conflict(task, others)
+            # running_id ist hier nie None (conflicts_with == True heisst: es gibt
+            # einen Konkurrenten) -- der Fallback auf task_id ist nur ein defensiver
+            # Platzhalter fuer mypy (str statt str | None).
+            raise LoggingTaskConflict(running_id or task_id, task.target_id)
+        # now als effektiver Start an die Domaene (ADR 0033): erster Start setzt ihn.
+        started = domain_start(task, now)
+        self._repository.save(started)
+        return started
+
+
+class PauseLoggingTask:
+    """Uebergang ``ACTIVE`` -> ``PAUSED`` (Domaenen-``pause`` -> ``save``).
+
+    ``get`` (``None`` -> ``LoggingTaskNotFound``), dann Domaenen-``pause``; ein
+    ``InvalidTaskTransition`` aus falschem Ausgangszustand propagiert (der api-Rand
+    mappt ihn auf 409). KEINE Konfliktpruefung -- Pausieren entschaerft den Konflikt,
+    es erzeugt keinen.
+    """
+
+    def __init__(self, repository: LoggingTaskRepository) -> None:
+        self._repository = repository
+
+    def __call__(self, task_id: str) -> LoggingTask:
+        task = self._repository.get(task_id)
+        if task is None:
+            raise LoggingTaskNotFound(task_id)
+        paused = domain_pause(task)
+        self._repository.save(paused)
+        return paused
+
+
+class ResumeLoggingTask:
+    """Uebergang ``PAUSED`` -> ``ACTIVE`` mit Ziel-Konfliktpruefung.
+
+    Fortsetzen aus Pause ist im Sinne der Konzept-Regel ein Start (pro Ziel nur einer
+    aktiv) -- darum prueft dieser Use-Case VOR dem ``resume`` ebenfalls
+    ``conflicts_with`` gegen ``list_all`` (-> ``LoggingTaskConflict``). ``get``
+    (``None`` -> ``LoggingTaskNotFound``); ``InvalidTaskTransition`` aus falschem
+    Ausgangszustand propagiert (409 am Rand).
+    """
+
+    def __init__(self, repository: LoggingTaskRepository) -> None:
+        self._repository = repository
+
+    def __call__(self, task_id: str) -> LoggingTask:
+        task = self._repository.get(task_id)
+        if task is None:
+            raise LoggingTaskNotFound(task_id)
+        others = self._repository.list_all()
+        if conflicts_with(task, others):
+            running_id = _find_active_conflict(task, others)
+            raise LoggingTaskConflict(running_id or task_id, task.target_id)
+        resumed = domain_resume(task)
+        self._repository.save(resumed)
+        return resumed
+
+
+class StopLoggingTask:
+    """Uebergang ``{ACTIVE, PAUSED}`` -> ``FINISHED`` (Domaenen-``stop`` -> ``save``).
+
+    ``get`` (``None`` -> ``LoggingTaskNotFound``), dann Domaenen-``stop``; ein
+    ``InvalidTaskTransition`` aus falschem Ausgangszustand propagiert (409 am Rand).
+    """
+
+    def __init__(self, repository: LoggingTaskRepository) -> None:
+        self._repository = repository
+
+    def __call__(self, task_id: str) -> LoggingTask:
+        task = self._repository.get(task_id)
+        if task is None:
+            raise LoggingTaskNotFound(task_id)
+        finished = domain_stop(task)
+        self._repository.save(finished)
+        return finished
+
+
+class DeleteLoggingTask:
+    """Loescht eine Logging-Aufgaben-DEFINITION (Pass-Through, idempotent).
+
+    Reicht ``LoggingTaskRepository.delete`` durch -- idempotent (unbekannte ``id`` ist
+    kein Fehler, Muster ``ScheduleRepository.delete``). Die zugehoerigen Messdaten
+    (RTT/Events) liegen in eigenen Repos und werden hier NICHT mitgeloescht (das raeumt
+    die Retention, eigener Belang).
+    """
+
+    def __init__(self, repository: LoggingTaskRepository) -> None:
+        self._repository = repository
+
+    def __call__(self, task_id: str) -> None:
+        self._repository.delete(task_id)
+
+
+class ListLoggingTasks:
+    """Alle Logging-Aufgaben-Definitionen (Pass-Through, nur Repo).
+
+    Reicht ``LoggingTaskRepository.list_all`` roh durch (Muster ``GetSchedules``).
+    Leere Tabelle -> ``[]``. Die Wire-Form baut der api-Rand.
+    """
+
+    def __init__(self, repository: LoggingTaskRepository) -> None:
+        self._repository = repository
+
+    def __call__(self) -> list[LoggingTask]:
+        return self._repository.list_all()
+
+
+class GetLoggingTaskDetail:
+    """EINE Logging-Aufgaben-Definition anhand ihrer ``id`` (Pass-Through, nur Repo).
+
+    ``get`` (``None`` -> ``LoggingTaskNotFound``) -> roh zurueck. Die Wire-Form baut
+    der api-Rand (404-Mapping ebenfalls am Rand).
+    """
+
+    def __init__(self, repository: LoggingTaskRepository) -> None:
+        self._repository = repository
+
+    def __call__(self, task_id: str) -> LoggingTask:
+        task = self._repository.get(task_id)
+        if task is None:
+            raise LoggingTaskNotFound(task_id)
+        return task
+
+
+# Schwellwert fuer den Mengen-Befund von ``CheckLogVolume`` -- ab dieser Zahl
+# gespeicherter RTT-Messpunkte gilt das Volumen als "ueber Schwelle". Benannte
+# Policy-Konstante (kein Magic Number am Vergleich); bewusst grosszuegig (dichte
+# Logging-Messpunkte fallen schnell an, der Befund soll erst bei echter Menge feuern).
+# NUR ein Befund -- die angebotene Folge-Aktion (Aufraeumen) ist ein §9-Folgeschnitt.
+_LOG_VOLUME_THRESHOLD = 100_000
+
+
+@dataclass(frozen=True)
+class LogVolumeResult:
+    """Mengen-Befund der Logging-RTT-Messdaten: Gesamtzahl + Ueber-Schwelle-Flag.
+
+    Klein und benannt (kein nacktes Tuple): ``count`` ist die Gesamtzahl gespeicherter
+    RTT-Messpunkte, ``over_threshold`` der Vergleich gegen ``_LOG_VOLUME_THRESHOLD``.
+    Der Aufrufer (api-Rand / spaeterer §9-Schnitt) liest beide sprechend.
+    """
+
+    count: int
+    over_threshold: bool
+
+
+class CheckLogVolume:
+    """Mengen-Befund der Logging-RTT-Messdaten (NUR Abfrage, keine Aktion).
+
+    Liest ``LoggingRttRepository.count()`` und vergleicht gegen die benannte
+    ``_LOG_VOLUME_THRESHOLD``. KEINE Aktion, KEIN Loeschen -- die angebotene
+    Aufraeum-Aktion ist ein §9-Folgeschnitt. Bewusst rtt-only (s. Datei-/Abschluss-
+    Begruendung): die dichten RTT-Messpunkte sind die dominante Menge; sie ueber EINE
+    ``count()``-Abfrage zu beurteilen haelt den Befund schmal und eindeutig.
+    """
+
+    def __init__(self, rtt_repository: LoggingRttRepository) -> None:
+        self._rtt_repository = rtt_repository
+
+    def __call__(self) -> LogVolumeResult:
+        count = self._rtt_repository.count()
+        return LogVolumeResult(count=count, over_threshold=count > _LOG_VOLUME_THRESHOLD)
+
+
+# ── Wiederaufnahme aktiver Logging-Aufgaben nach Neustart (B-II Schritt 4) ───
+# Nach einem Neustart koennen Aufgaben in der DB ``ACTIVE`` stehen, deren Fenster
+# inzwischen abgelaufen ist (IMMEDIATE-Maximaldauer waehrend der Auszeit verstrichen,
+# SCHEDULED planned_end vorbei). Die eigentliche Wiederaufnahme der noch gueltigen
+# Aufgaben ist KEIN Extra-Schritt: der Sink liest jeden Tick die aktiven Tasks frisch
+# und schreibt ab dem naechsten Tick automatisch wieder. Dieser Use-Case raeumt nur die
+# ABGELAUFENEN auf -- sie duerfen nicht als ewig-aktiv haengenbleiben. KEINE Uhr im
+# Use-Case: ``now`` kommt als Parameter (der lifespan liefert ``time.time()``).
+
+
+@dataclass(frozen=True)
+class ResumeResult:
+    """Ergebnis EINES Resume-Laufs: weiterlaufende vs. beendete Aufgaben.
+
+    ``kept_active`` sind die Aufgaben mit noch offenem Fenster (sie laufen weiter, der
+    Sink nimmt sie automatisch auf), ``finished`` die abgelaufenen, die auf FINISHED
+    gesetzt wurden. Klein und benannt (kein nacktes Tuple) -- der lifespan liest beide
+    Zahlen sprechend fuers Log.
+    """
+
+    kept_active: int
+    finished: int
+
+
+class ResumeActiveLoggingTasks:
+    """Beendet abgelaufene ``ACTIVE``-Aufgaben nach Neustart; laesst gueltige laufen.
+
+    Laedt ``list_all`` und prueft fuer jede ``ACTIVE``-Aufgabe ``is_window_active(task,
+    now)`` (Bezugs-ts aus ``task.effective_start`` / ``planned_*`` -- die Domaene zieht
+    ihn selbst, ADR 0033):
+
+    * Fenster noch offen -> nichts tun (die Aufgabe bleibt ACTIVE; der Sink schreibt ab
+      dem naechsten Tick automatisch -- DAS ist die Wiederaufnahme).
+    * Fenster abgelaufen -> Domaenen-``stop`` + ``save`` (auf FINISHED setzen), damit sie
+      nicht als ewig-aktiv haengenbleibt.
+
+    Reiner, deterministisch testbarer Use-Case (kein ``asyncio``, keine Uhr) -- der
+    lifespan ruft ihn einmal beim Start.
+    """
+
+    def __init__(self, repository: LoggingTaskRepository) -> None:
+        self._repository = repository
+
+    def __call__(self, now: float) -> ResumeResult:
+        kept_active = 0
+        finished = 0
+        for task in self._repository.list_all():
+            if task.state is not TaskState.ACTIVE:
+                continue
+            if is_window_active(task, now):
+                kept_active += 1
+                continue
+            # Fenster abgelaufen -> beenden (stop leert effective_start, ADR 0033).
+            self._repository.save(domain_stop(task))
+            finished += 1
+        return ResumeResult(kept_active=kept_active, finished=finished)
+
+
+# ── Periodischer Retention-Runner (B-II Schritt 4) ──────────────────────────
+# Setzt die Logging-Retention DURCH: ein schlanker Runner im Muster ``RunMonitor`` /
+# ``RunThroughputPoll`` (run()/stop(), Logik in tick()), der periodisch
+# ``EnforceLoggingRetention`` mit now-basierten Cutoffs ruft. KEINE Endlosschleife im
+# lifespan -- der Composition Root treibt create_task/Teardown. Retention ist nicht
+# zeitkritisch, darum ein grosszuegiges, BENANNTES Intervall (kein Magic Number).
+
+# Intervall zwischen zwei Retention-Laeufen in SEKUNDEN: einmal pro Stunde. Benannte
+# Policy-Konstante -- Retention ist nicht zeitkritisch (die Spannen sind 30 Tage / 1
+# Jahr), ein stuendlicher Lauf haelt die Tabellen sauber, ohne die DB zu belasten.
+_CLEANUP_INTERVAL_S = 3600
+
+
+class RunLoggingRetention:
+    """Periodischer Runner, der ``EnforceLoggingRetention`` in einer Schleife ruft.
+
+    Muster ``RunMonitor``/``RunThroughputPoll``: ``tick()`` ist EIN Retention-Lauf (voll
+    testbar), ``run()`` nur der triviale ``while``/``sleep``-Rahmen. KEIN
+    ``asyncio.Task``-Management hier -- create_task/Teardown treibt der Composition Root
+    (``app.py``-lifespan), exakt wie beim Monitor-Loop.
+
+    BEST-EFFORT: ``tick`` faengt jeden Fehler des Retention-Laufs und loggt ihn (der
+    periodische Cleanup darf nie den Task killen -- sonst liefe die Retention nach einem
+    transienten DB-Fehler nie wieder). Die ``now - 30d`` / ``now - 365d``-Rechnung macht
+    HIER der Runner (der Aufrufer der zeitfreien ``EnforceLoggingRetention``); ``now``
+    ist ``time.time()`` -- der Runner ist der zeitbehaftete Rand um den reinen Use-Case.
+    """
+
+    def __init__(
+        self,
+        enforce: EnforceLoggingRetention,
+        *,
+        interval: int = _CLEANUP_INTERVAL_S,
+    ) -> None:
+        self._enforce = enforce
+        self._interval = interval
+        self._running = False
+        # Fehlerzustand des Loop (S88-P4, Muster ``RunThroughputPoll._last_error``):
+        # Wortlaut des letzten gescheiterten Durchlaufs + Zahl der AUFEINANDERFOLGENDEN
+        # Fehlschlaege. Ein gelungener Durchlauf setzt beides zurueck.
+        self._last_error: str | None = None
+        self._consecutive_failures = 0
+
+    async def tick(self) -> None:
+        """Ein Retention-Lauf: now-basierte Cutoffs rechnen, ``enforce.run`` rufen."""
+        try:
+            now = time.time()
+            result = self._enforce.run(
+                rtt_cutoff_ts=now - _RTT_RETENTION_S,
+                event_cutoff_ts=now - _EVENT_RETENTION_S,
+            )
+            _logger.info(
+                "logging_retention_run",
+                rtt_deleted=result.rtt_deleted,
+                event_deleted=result.event_deleted,
+            )
+        except Exception as exc:
+            # Best-effort: ein fehlgeschlagener Lauf darf den periodischen Task nicht
+            # killen -- geloggt, naechster Lauf laeuft regulaer weiter.
+            _logger.warning("logging_retention_run_failed", error=str(exc))
+
+    async def run(self) -> None:
+        """Endlos-Rahmen: tickt bis ``stop()``. Trivial -- die Logik sitzt in ``tick``.
+
+        SCHUTZ UM DEN DURCHLAUF (S88-P4): ``tick`` faengt seinen ganzen Rumpf schon selbst
+        -- der Schutz hier liegt eine Ebene HOEHER. Er deckt ab, was ausserhalb von
+        ``tick`` liegen kann (heute nur das ``sleep``, kuenftig alles, was im run-Rumpf
+        dazukommt) und macht den Fehlerzustand ueberhaupt erst abfragbar: bis dahin
+        verschwand ein gescheiterter Retention-Lauf ausschliesslich ins Log.
+        Doppelt gefangen ist hier kein Mangel. ``CancelledError`` bleibt unangetastet
+        (Teardown-Signal, kein Fehler).
+
+        Der Schutz sitzt bewusst im run-Rumpf jedes Arbeiters und NICHT in einer
+        gemeinsamen Basisklasse: die fuenf so abgesicherten Arbeiter liegen in vier
+        verschiedenen application-Subpaketen (cve, outbound_log, scheduler, monitoring);
+        eine gemeinsame Basis waere ein Quer-Import zwischen ihnen oder eine neue Schicht
+        unterhalb von ``application/``.
+        """
+        self._running = True
+        while self._running:
+            try:
+                await self.tick()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # Grund wird gemerkt, nicht verschluckt (S3)
+                self._note_failure(exc)
+            else:
+                self._note_success()
+            await asyncio.sleep(self._interval)
+
+    def _note_failure(self, exc: Exception) -> None:
+        """Merkt den Wortlaut des gescheiterten Durchlaufs und zaehlt die Serie hoch."""
+        self._last_error = str(exc)
+        self._consecutive_failures += 1
+        _logger.warning(
+            "logging_retention_run_loop_failed",
+            error=self._last_error,
+            consecutive_failures=self._consecutive_failures,
+        )
+
+    def _note_success(self) -> None:
+        """Setzt Wortlaut und Zaehler nach einem gelungenen Durchlauf zurueck."""
+        self._last_error = None
+        self._consecutive_failures = 0
+
+    def last_error(self) -> str | None:
+        """Wortlaut des letzten gescheiterten Durchlaufs, sonst ``None`` (S88-P4).
+
+        Bezieht sich auf den run-Rumpf, NICHT auf ``tick``: ``tick`` faengt seine Fehler
+        selbst und meldet sie nur ins Log (best-effort, unveraendert).
+        """
+        return self._last_error
+
+    def consecutive_failures(self) -> int:
+        """Zahl der AUFEINANDERFOLGENDEN gescheiterten Durchlaeufe (0 = letzter gelang)."""
+        return self._consecutive_failures
+
+    def stop(self) -> None:
+        """Beendet den ``run``-Loop nach der laufenden Iteration (Flag, kein Cancel)."""
+        self._running = False

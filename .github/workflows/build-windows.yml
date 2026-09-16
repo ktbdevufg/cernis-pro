@@ -1,0 +1,378 @@
+name: Build Windows
+
+# Baut das verteilbare Windows-Paket (NSIS-Installer) auf windows-latest und
+# fuehrt dazu den unveraenderten build.ps1 aus.
+#
+# ENTSCHEIDENDER UNTERSCHIED ZUM LINUX-WORKFLOW: Auf Windows gibt es KEINEN
+# Container. Der Linux-Job baut sein Debian-13-Image aus einem Dockerfile und
+# fuehrt den Build DARIN aus -- das geht auf windows-latest nicht. Statt eines
+# Images kommt die Toolchain hier ueber Setup-Actions: Node 20 (setup-node),
+# uv (setup-uv), Rust stable (rust-toolchain). Es gibt daher keinen "Image
+# bauen"-Schritt und kein chown/Besitzrechte-Zuruecksetzen (kein root im
+# Container, der Runner-User besitzt die Dateien ohnehin).
+#
+# WARUM KEIN actions/setup-python: Das Projekt laesst uv den Interpreter
+# verwalten. Das Linux-Dockerfile haelt fest, dass PyInstaller mit Python 3.13
+# inkompatibel ist, und ruft darum 'uv python install 3.12'. Wir machen es
+# genauso -- ein eigener Schritt 'uv python install 3.12' vor 'uv sync'. Mit
+# setup-python koennte der Runner 3.13 ziehen und PyInstaller scheitert.
+#
+# WARUM keine libpcap-Verifikation wie unter Linux: Der libibverbs/RDMA-Blocker
+# ist rein linux-spezifisch (glibc, ELF, readelf). Unter Windows existiert er
+# nicht -- der Kernbeweis dieses Workflows ist stattdessen, dass der auf der
+# lokalen VM reproduzierbar mit nativem Rust-Compiler-Absturz scheiternde
+# Tauri-Schritt (STATUS_ACCESS_VIOLATION / STATUS_ILLEGAL_INSTRUCTION) in der
+# CI vollstaendig durchlaeuft: beide PyInstaller-Binaries, Tauri-Bundle,
+# NSIS-Installer.
+
+on:
+  # Manueller Knopf (Actions-Tab) ...
+  workflow_dispatch:
+  push:
+    # ... und automatisch bei Release-Tags v*.
+    tags:
+      - "v*"
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    # Schreibrecht auf contents ist noetig, damit der Workflow bei v-Tags ein
+    # GitHub-Release anlegen und Assets hochladen darf. Bewusst auf Job-Ebene
+    # (nicht Workflow-Ebene) und nur dieses eine Recht -- minimale Rechte: die
+    # Dispatch-Builds brauchen es nicht, schaden aber nicht.
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # Toolchain via Setup-Actions statt via Container-Image. Versionen exakt
+      # wie in ci.yml und im Linux-Dockerfile (Node 20, uv, Rust stable),
+      # damit kein Drift zwischen den Werkbaenken entsteht.
+      - name: Node einrichten (LTS 20)
+        uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+
+      - name: uv installieren
+        uses: astral-sh/setup-uv@v8.1.0
+
+      - name: Rust-Toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      # Wie im Linux-Dockerfile: PyInstaller ist mit Python 3.13 inkompatibel,
+      # darum uv explizit auf 3.12 festnageln, BEVOR 'uv sync' (in build.ps1)
+      # laeuft. Bewusst KEIN setup-python -- der wuerde evtl. 3.13 bringen.
+      - name: Python 3.12 via uv installieren (PyInstaller-kompatibel)
+        run: uv python install 3.12
+
+      # Build-Version zur BUILD-ZEIT als Python-Datei erzeugen. config.py liest
+      # os.environ NICHT -- es importiert diese Datei. PyInstaller friert sie
+      # mit ein, damit die installierte App die volle Version kennt (kein
+      # Laufzeit-Env noetig). Der Suffix nennt nur die Architektur (x64), NICHT
+      # das Paketformat -- gleiche Begruendung wie im Linux-Workflow. Format wie
+      # dort: 2.0.0+x64.<7-stelliger-sha>, SHA via 'git rev-parse --short=7'.
+      #
+      # Auf windows-latest laeuft standardmaessig PowerShell. Die Datei wird
+      # darum per .NET WriteAllText mit UTF8Encoding($false) OHNE BOM
+      # geschrieben -- exakt das Muster, das build.ps1 fuer dieselbe Datei nutzt.
+      # Eine BOM am Dateianfang wuerde den Python-Import stoeren.
+      - name: Build-Version erzeugen (_build_version.py)
+        shell: pwsh
+        run: |
+          $shortSha = (git rev-parse --short=7 HEAD).Trim()
+          # Produktversion aus pyproject.toml ableiten (Quelle der Wahrheit) --
+          # nicht fest eintippen, damit der naechste Bump automatisch ankommt.
+          $productVersion = (Select-String -Path pyproject.toml -Pattern '^version = "(.*)"' | Select-Object -First 1).Matches.Groups[1].Value
+          if (-not $productVersion) { Write-Error "Produktversion aus pyproject.toml nicht lesbar"; exit 1 }
+          $buildVersion = "$productVersion+winx64.$shortSha"
+          Write-Host "Build-Version: $buildVersion"
+          $content = @"
+          """Im CI erzeugte Build-Version. Nicht committet (siehe .gitignore)."""
+
+          BUILD_VERSION = "$buildVersion"
+          "@
+          $target = Join-Path $PWD "backend\infrastructure\_build_version.py"
+          [System.IO.File]::WriteAllText($target, $content, (New-Object System.Text.UTF8Encoding($false)))
+
+      # MSVC-Umgebung einrichten: die Messung hat belegt, dass vcvarsall LIB auf
+      # eine SDK-Version zeigt, unter der ucrt.lib auf dem Runner NICHT existiert
+      # (LNK1181). ilammy/msvc-dev-cmd setzt PATH, LIB und INCLUDE step-
+      # uebergreifend ueber GITHUB_ENV auf das tatsaechlich vorhandene SDK. Diese
+      # Umgebung uebernimmt build.ps1 unten (Schritt 0 ueberspringt dann vcvarsall,
+      # weil VSINSTALLDIR bereits gesetzt ist).
+      - name: MSVC-Umgebung einrichten (msvc-dev-cmd)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      # DIAGNOSE (kein Fix): Misst die MSVC-Umgebung, wie sie auf dem Runner
+      # OHNE ilammy/msvc-dev-cmd zustande kommt. Ruft vswhere direkt, laesst
+      # vcvarsall.bat x64 die Umgebung setzen und gibt die fuer den Linker
+      # relevanten Variablen einzeln aus. continue-on-error, damit die reine
+      # Messung den Lauf nie bricht.
+      - name: MSVC-Umgebung messen (Diagnose)
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          Write-Host "vswhere-Pfad: $vswhere"
+          # MSVC-Umgebung GENAU wie build.ps1 ermitteln: kein -requires,
+          # -latest -products * -property installationPath, Select-Object -First 1
+          # und .Trim() beim Ableiten von vcvarsall.bat.
+          $vsInstall = (& $vswhere -latest -products * -property installationPath 2>$null | Select-Object -First 1)
+          Write-Host "installationPath: $vsInstall"
+
+          $vcvarsall = Join-Path $vsInstall.Trim() "VC\Auxiliary\Build\vcvarsall.bat"
+          Write-Host "vcvarsall: $vcvarsall"
+
+          # vcvarsall.bat x64 in cmd aufrufen und die komplette set-Ausgabe
+          # einsammeln. Danach die interessierenden Variablen filtern.
+          $setOutput = & cmd /c "`"$vcvarsall`" x64 >nul 2>&1 && set"
+
+          $gewuenscht = @("LIB", "INCLUDE", "WindowsSdkDir", "WindowsSDKVersion", "UCRTVersion", "VSINSTALLDIR")
+          foreach ($name in $gewuenscht) {
+            $zeile = $setOutput | Where-Object { $_ -match "^$name=" } | Select-Object -First 1
+            if ($zeile) {
+              $wert = $zeile.Substring($zeile.IndexOf("=") + 1)
+            } else {
+              $wert = ""
+            }
+            if ([string]::IsNullOrEmpty($wert)) {
+              Write-Host "${name}: <LEER>"
+            } else {
+              Write-Host "${name}: $wert"
+            }
+          }
+
+          # Zusaetzlich pruefen, ob ucrt.lib real auf der Platte existiert.
+          Write-Host "Suche nach ucrt.lib auf C:\ ..."
+          Get-ChildItem -Path C:\ -Filter ucrt.lib -Recurse -ErrorAction SilentlyContinue -File | Select-Object -First 5 | ForEach-Object { Write-Host $_.FullName }
+
+          # Alle tatsaechlich vorhandenen SDK-Lib-Versionen auflisten -- zeigt,
+          # welche SDK-Version LIB annimmt (vcvarsall) vs. welche real auf der
+          # Platte liegt (Verzeichnisnamen unter Windows Kits\10\Lib).
+          Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\Lib" -Directory | ForEach-Object { Write-Host ("SDK-Lib-Version: " + $_.Name) }
+
+      # Den unveraenderten build.ps1 ausfuehren. Er erledigt selbst: uv sync
+      # (--locked --group dev), Frontend-Build, beide PyInstaller-Binaries,
+      # Binaries fuer Tauri bereitstellen, Tauri-Build (NSIS-Installer) und das
+      # Einsammeln. Der Tauri-Schritt ist der Kernbeweis -- er scheitert auf der
+      # lokalen VM und muss hier durchlaufen.
+      - name: Windows-Build (build.ps1 -- Frontend + Binaries + Tauri/NSIS)
+        shell: pwsh
+        run: .\build.ps1
+
+      # Pruefsummen der Pakete. Platzierung NACH dem Bau-Schritt darueber und VOR
+      # dem Release-Schritt: vorher existiert der Installer nicht, nachher waere
+      # er schon hochgeladen. Einen chown-Schritt wie unter Linux gibt es hier
+      # nicht -- kein Container, der Runner-User besitzt die Dateien ohnehin
+      # (siehe Kopfkommentar). Nach build.ps1 veraendert kein Schritt die exe
+      # mehr, die Pruefsumme beschreibt also genau die ausgelieferte Datei.
+      #
+      # KEINE if-Bedingung: die Pruefsummen entstehen bei jedem Trigger, damit
+      # ein Dispatch-Lauf den Schritt mitprueft und nicht erst der Tag-Lauf.
+      #
+      # Format: Get-FileHash liefert die Pruefsumme in GROSSbuchstaben --
+      # sha256sum schreibt klein, darum .ToLower(). Danach zwei Leerzeichen und
+      # der blosse Dateiname ohne Pfad ($_.Name), so traegt 'sha256sum -c' im
+      # Zielverzeichnis.
+      #
+      # BOM und Zeilenende: bewusst [System.IO.File]::WriteAllText mit
+      # UTF8Encoding($false) -- das $false unterdrueckt die BOM. Das Zeilenende
+      # steht als explizites "`n" (LF) im String; WriteAllText schreibt den
+      # String unveraendert, wandelt also NICHT nach CRLF um. Weder Out-File
+      # noch Set-Content taugen hier: die haengen das plattformuebliche CRLF an,
+      # und Windows PowerShell schriebe zusaetzlich eine BOM. Mit BOM oder CRLF
+      # scheitert 'sha256sum -c' auf Linux/macOS. Dasselbe WriteAllText-Muster
+      # nutzt der Schritt "Build-Version erzeugen" oben aus demselben Grund.
+      - name: Pruefsummen der Pakete erzeugen
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $bundle = "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis"
+
+          $pakete = @(Get-ChildItem -Path $bundle -Filter *.exe -File -ErrorAction SilentlyContinue | Sort-Object Name)
+
+          foreach ($paket in $pakete) {
+            $hash = (Get-FileHash -Path $paket.FullName -Algorithm SHA256).Hash.ToLower()
+            $zeile = "$hash  $($paket.Name)`n"
+            $ziel = "$($paket.FullName).sha256"
+            [System.IO.File]::WriteAllText($ziel, $zeile, (New-Object System.Text.UTF8Encoding($false)))
+            Write-Host $zeile.TrimEnd("`n")
+          }
+
+          # Abbruch mit benannter Meldung, wenn keine einzige Paketdatei gefunden
+          # wurde. Kein stiller Durchlauf, kein Rueckfall auf eine schwaechere
+          # Pruefung -- ein leerer Fund ist ein Fehler, kein Normalfall.
+          if ($pakete.Count -eq 0) {
+            Write-Error "FEHLER: keine exe-Datei unter $bundle gefunden"
+            exit 1
+          }
+          Write-Host "Pruefsummen erzeugt: $($pakete.Count)"
+
+      # Die Lizenzaufstellung als EIGENSTAENDIGE Beigabe bereitstellen. Sie
+      # entsteht im Bau unter src-tauri/lizenzaufstellung.json und geht ueber
+      # bundle.resources in den NSIS-Installer -- also nur INNERHALB des Pakets.
+      # Das Website-Projekt erzeugt daraus die oeffentliche Lizenzseite und kann
+      # keine exe auspacken; darum hier eine benannte Kopie neben dem Installer.
+      #
+      # NAMENSSCHEMA <paketdateiname>.lizenzaufstellung.json: die Beigabe traegt
+      # den Namen des Installers, neben dem sie liegt -- dieselbe Konvention wie
+      # bei der .sha256-Datei des Schritts darueber.
+      #
+      # EINDEUTIGKEIT IM RELEASE folgt damit aus dem Paketnamen: der traegt
+      # Fassung und Architektur bereits und unterscheidet sich von den Paketen
+      # der anderen Workflows -- ein gleichnamiges zweites Asset kann im selben
+      # Release nicht entstehen.
+      #
+      # Die Pakete werden auf DEMSELBEN Weg ermittelt wie im unmittelbar davor
+      # stehenden Pruefsummen-Schritt (gleiches Get-ChildItem-Filtermuster,
+      # gleiche Sortierung) -- kein zweites, eigenes Suchmuster.
+      #
+      # GEGENPROBE PRODUKTVERSION: der Name stammt jetzt vom PAKET, nicht mehr
+      # aus der Datei. Damit Inhalt und Name nicht auseinanderlaufen koennen,
+      # wird die produktversion aus der Aufstellung gelesen und geprueft, dass
+      # diese Zeichenfolge im Paketdateinamen vorkommt. Trifft sie nicht zu,
+      # gehoeren Aufstellung und Paket zu verschiedenen Fassungen -- Abbruch mit
+      # benannter Meldung, die BEIDE Werte nennt. Die plattform wird weiterhin
+      # gelesen und ausgegeben, damit im Bauprotokoll sichtbar bleibt, welche
+      # Aufstellung entstand.
+      #
+      # Kein stiller Ausfall: $ErrorActionPreference = "Stop" plus die
+      # ausdruecklichen Pruefungen -- fehlt die Datei, ist sie leer, kein
+      # gueltiges JSON, fehlt eines der beiden Felder oder findet sich kein
+      # Paket, bricht der Schritt mit benannter Meldung ab. Dieselbe Regel wie
+      # bei if-no-files-found: error und fail_on_unmatched_files.
+      #
+      # Werkzeugwahl ConvertFrom-Json statt python3: Linux und macOS lesen die
+      # Felder mit python3, hier ist pwsh die Shell dieses Workflows und
+      # ConvertFrom-Json braucht kein zusaetzliches Werkzeug auf dem PATH. Die
+      # Datei ist rund ein Megabyte -- fuer den Parser unkritisch.
+      - name: Lizenzaufstellung als benannte Kopie bereitstellen
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $quelle = "src-tauri\lizenzaufstellung.json"
+          $bundle = "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis"
+
+          if (-not (Test-Path -Path $quelle -PathType Leaf)) {
+            Write-Error "FEHLER: $quelle wurde nicht erzeugt"; exit 1
+          }
+          if ((Get-Item $quelle).Length -eq 0) {
+            Write-Error "FEHLER: $quelle ist leer"; exit 1
+          }
+
+          $aufstellung = Get-Content -Path $quelle -Raw -Encoding UTF8 | ConvertFrom-Json
+          $produktversion = $aufstellung.produktversion
+          $plattform = $aufstellung.plattform
+          if ([string]::IsNullOrWhiteSpace($produktversion)) {
+            Write-Error "FEHLER: Feld 'produktversion' fehlt oder ist leer in $quelle"; exit 1
+          }
+          if ([string]::IsNullOrWhiteSpace($plattform)) {
+            Write-Error "FEHLER: Feld 'plattform' fehlt oder ist leer in $quelle"; exit 1
+          }
+
+          Write-Host "--- Lizenzaufstellung ---"
+          Write-Host "Produktversion: $produktversion"
+          Write-Host "Plattform:      $plattform"
+
+          $pakete = @(Get-ChildItem -Path $bundle -Filter *.exe -File -ErrorAction SilentlyContinue | Sort-Object Name)
+
+          foreach ($paket in $pakete) {
+            if (-not $paket.Name.Contains($produktversion)) {
+              Write-Error "FEHLER: Produktversion '$produktversion' aus $quelle kommt im Paketdateinamen '$($paket.Name)' nicht vor -- Aufstellung und Paket gehoeren zu verschiedenen Fassungen"
+              exit 1
+            }
+            $ziel = "$($paket.FullName).lizenzaufstellung.json"
+            Copy-Item -Path $quelle -Destination $ziel -Force
+            if ((Get-Item $ziel).Length -eq 0) {
+              Write-Error "FEHLER: Kopie $ziel ist leer"; exit 1
+            }
+            Write-Host "Beigabe: $(Split-Path -Leaf $ziel)"
+          }
+
+          # Abbruch mit benannter Meldung, wenn keine einzige Paketdatei gefunden
+          # wurde -- ohne Paket gibt es keinen Namen fuer die Beigabe.
+          if ($pakete.Count -eq 0) {
+            Write-Error "FEHLER: keine exe-Datei unter $bundle gefunden"
+            exit 1
+          }
+          Write-Host "Lizenzaufstellungen abgelegt: $($pakete.Count)"
+
+      # NUR die Lizenzaufstellung als Actions-Artefakt -- ausdruecklich NICHT der
+      # Installer. Der Verzicht auf einen Artefakt-Upload in diesem Workflow
+      # (Fall b unten) begruendet sich mit der GROESSE des ~850-MB-Bundles gegen
+      # das 2-GB-Gratis-Storage-Kontingent. Die Aufstellung ist rund ein
+      # Megabyte; auf sie trifft diese Begruendung nicht zu. Sie wird ausserdem
+      # gerade dann gebraucht, wenn KEIN Tag gesetzt ist: das Website-Projekt
+      # soll die Lizenzseite auch aus einem Dispatch-Lauf ziehen koennen.
+      #
+      # Optionen bewusst identisch zur Linux-Seite (if-no-files-found: error,
+      # retention-days: 14, actions/upload-artifact@v7) -- kein Sonderweg und
+      # keine neue Action-Fassung. Der Artefaktname traegt windows-x64, damit er
+      # weder mit den Linux- noch mit dem ARM64-Windows-Artefakt kollidiert.
+      #
+      # Das Muster nennt das nsis-Bundle-Verzeichnis, weil die Beigabe jetzt
+      # NEBEN dem Installer liegt. Es endet auf .lizenzaufstellung.json und
+      # greift damit ausschliesslich die Aufstellung -- der Installer selbst
+      # bleibt trotz gleichen Verzeichnisses aussen vor, die Groessen-Begruendung
+      # oben bleibt gewahrt.
+      - name: Lizenzaufstellung als Artefakt ablegen (jeder Lauf)
+        uses: actions/upload-artifact@v7
+        with:
+          name: cernis-pro-lizenzaufstellung-windows-x64
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe.lizenzaufstellung.json
+
+      # Ab hier Fallunterscheidung nach Trigger -- identische Logik wie im
+      # Linux-Workflow, nur mit den Windows-Bundle-Pfaden (NSIS statt deb/rpm).
+      # Das Triple ist der build.ps1-Default x86_64-pc-windows-msvc.
+      #
+      # Fall a) v-Tag: als GitHub-Release-Asset veroeffentlichen (zaehlt nicht
+      # gegen das 500-MB-Artefaktlimit und verfaellt nicht). softprops/action-
+      # gh-release legt ein fehlendes Release idempotent an und bietet mit
+      # fail_on_unmatched_files die geforderte Abbruch-bei-leerem-Glob-Semantik.
+      # Der NSIS-Installer ist der von build.ps1 garantierte Output.
+      - name: Release erstellen und Installer als Asset anhaengen (nur v-Tags)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v3
+        with:
+          name: CERNIS PRO ${{ github.ref_name }}
+          body: "Release ${{ github.ref_name }} -- Release-Notes werden separat gepflegt."
+          draft: false
+          # Gemeinsame Festlegung ALLER Build-Workflows: prerelease true, Freigabe von Hand.
+          prerelease: true
+          fail_on_unmatched_files: true
+          # Jedes Muster MUSS im Tag-Lauf treffen, sonst faellt das Release
+          # (fail_on_unmatched_files oben). Das .sha256-Muster trifft, weil der
+          # Schritt "Pruefsummen der Pakete erzeugen" ohne if-Bedingung neben
+          # JEDER NSIS-exe eine gleichnamige .sha256 anlegt und sonst selbst
+          # abbricht -- gibt es einen Installer, gibt es auch seine Pruefsumme.
+          # Das Lizenz-Muster trifft aus demselben Grund: der Schritt
+          # "Lizenzaufstellung als benannte Kopie bereitstellen" legt ohne
+          # if-Bedingung neben JEDER NSIS-exe eine gleichnamige
+          # .lizenzaufstellung.json an und bricht sonst selbst ab. Der Name
+          # stammt vom Paket; weil der bereits Fassung und Architektur traegt,
+          # kollidiert die x64-Beigabe im selben Release weder mit der
+          # ARM64-Beigabe noch mit denen der anderen Plattformen.
+          files: |
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe.sha256
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe.lizenzaufstellung.json
+
+      # Fall b) kein v-Tag (workflow_dispatch): BEWUSST
+      # KEIN Artefakt-Upload DES INSTALLERS. Ein ~850-MB-Bundle je Push fuellte
+      # das 2-GB-Gratis-Storage-Kontingent auf. Bei Push-Laeufen ist der
+      # erfolgreiche Durchlauf des Builds selbst der Beweis -- der fertige
+      # Installer wird nicht gebraucht. Verteilbare Installer entstehen
+      # ausschliesslich an v-Tags und werden dort (Fall a oben) als
+      # GitHub-Release-Asset veroeffentlicht: die zaehlen separat gegen das
+      # Kontingent und verfallen nicht.
+      #
+      # ABGRENZUNG: dieser Absatz betrifft AUSSCHLIESSLICH den Installer. Die
+      # rund ein Megabyte grosse Lizenzaufstellung wird sehr wohl in jedem Lauf
+      # als Artefakt abgelegt (eigener Schritt oben) -- auf sie trifft das
+      # Kontingent-Argument nicht zu.

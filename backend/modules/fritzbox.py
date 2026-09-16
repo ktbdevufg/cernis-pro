@@ -4,7 +4,6 @@ Uses the fritzconnection library (pip install fritzconnection)
 which handles TR-064 SOAP + Digest Auth correctly for all models.
 Supports FritzOS 7.x / 8.x, Fiber models (5590, 5530), DSL and Cable.
 """
-import socket
 from dataclasses import dataclass, field, asdict
 from typing import Optional
 
@@ -97,101 +96,6 @@ def _safe_call(fc: "FritzConnection", service: str, action: str, **kwargs) -> di
 def _is_fiber_model(model: str) -> bool:
     model_l = model.lower()
     return any(x in model_l for x in ["fiber", "5590", "5530", "5580", "cable"])
-
-
-# ── Auto-detection ────────────────────────────────────────────
-
-def detect_fritzbox(hosts_in_network: list[dict] = None) -> Optional[str]:
-    """
-    Try to find FritzBox. Returns best hostname/IP or None.
-    Strategy (in order of priority):
-    1. Previously saved fritz_host
-    2. Gateway IP → reverse DNS → check port 49000
-    3. AVM vendor hosts from last scan
-    4. Common default addresses
-    """
-    candidates = []
-
-    # 1. Previously saved host
-    try:
-        from modules.storage import get_setting
-        saved = get_setting("fritz_host", None)
-        if saved:
-            candidates.append(saved)
-    except Exception:
-        pass
-
-    # 2. Gateway from active interfaces → reverse DNS
-    try:
-        from modules.interfaces import get_interfaces
-        for iface in get_interfaces():
-            gw = iface.gateway
-            if not gw or gw in candidates:
-                continue
-            # Try reverse DNS on gateway IP → might give FQDN like fritzbox.mysticplace.de
-            try:
-                fqdn = socket.gethostbyaddr(gw)[0]
-                # Skip useless names that systemd-resolved/Debian return
-                # (e.g. "_gateway", "localhost", single-label names without dots)
-                if (fqdn and fqdn not in candidates
-                        and fqdn not in ("_gateway", "localhost")
-                        and not fqdn.startswith("_")):
-                    candidates.append(fqdn)  # prefer FQDN over raw IP
-            except Exception:
-                pass
-            if gw not in candidates:
-                candidates.append(gw)  # also try raw IP as fallback
-    except Exception:
-        pass
-
-    # 3. AVM vendor hosts from scan
-    if hosts_in_network:
-        for h in hosts_in_network:
-            v = (h.get("vendor") or "").lower()
-            if "avm" in v or "audiovisuell" in v:
-                ip = h["ip"]
-                if ip not in candidates:
-                    candidates.insert(0, ip)
-
-    # 4. Common default addresses
-    for default in ["fritz.box", "192.168.178.1", "192.168.1.1", "192.168.0.1"]:
-        if default not in candidates:
-            candidates.append(default)
-
-    for host in candidates:
-        try:
-            # Resolve hostname first (handles FQDNs like fritzbox.mysticplace.de)
-            try:
-                resolved = socket.getaddrinfo(host, 49000, socket.AF_INET,
-                                               socket.SOCK_STREAM, socket.IPPROTO_TCP)
-                if not resolved:
-                    continue
-                addr = resolved[0][4][0]
-            except socket.gaierror:
-                continue
-
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(2.0)
-            result = sock.connect_ex((addr, 49000))
-            sock.close()
-            if result == 0:
-                # Verify it's actually a FritzBox via TR-064 and get best hostname
-                if HAS_FRITZ:
-                    try:
-                        fc = FritzConnection(address=addr, port=49000, timeout=5.0)
-                        model = (fc.modelname or "").lower()
-                        if "fritz" not in model:
-                            continue  # TR-064 answered but not a FritzBox
-                        # If we connected via raw IP, check if FritzConnection
-                        # knows a better hostname (e.g. fritz.box)
-                        return host
-                    except Exception:
-                        pass  # TR-064 handshake failed, skip
-                else:
-                    return host
-        except Exception:
-            pass
-    return None
 
 
 # ── Main API class ────────────────────────────────────────────

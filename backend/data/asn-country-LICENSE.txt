@@ -1,0 +1,19 @@
+Geo-Datenbank (asn-country) — Lizenz-Dokumentation
+==================================================
+
+Quelle:        https://github.com/sapics/ip-location-db
+Verzeichnis:   asn-country
+Dateien:       asn-country-ipv4.csv, asn-country-ipv6.csv
+Lizenz:        CC0 1.0 (Public Domain Dedication, attributionsfrei)
+Abrufdatum:    2026-06-12
+
+Format pro Zeile (real, wie geladen — 3 Spalten, KEINE ASN):
+  ip_range_start,ip_range_end,country_code
+  (Beispiel: 1.0.0.0,1.0.0.255,AU)
+
+Diese Variante liefert nur das Land je IP-Bereich. Die ASN-Information liegt in
+einer getrennten Quelle (iptoasn-asn, siehe iptoasn-asn-LICENSE.txt), weil keine
+einzelne CSV der Quelle Land und ASN kombiniert.
+
+Die CSVs werden 1:1 wie geladen ins Repo getrackt (keine Umparsung).
+CC0 erlaubt Nutzung, Verteilung und Modifikation ohne Namensnennung.

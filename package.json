@@ -1,9 +1,10 @@
 {
   "name": "cernis-pro-app",
-  "version": "1.0.0",
+  "version": "2.1.2",
   "private": true,
+  "license": "GPL-2.0-only",
   "scripts": {
-    "build-tauri": "tauri build --target aarch64-pc-windows-msvc"
+    "build-tauri": "tauri build"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"

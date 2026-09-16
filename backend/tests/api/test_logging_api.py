@@ -1,0 +1,766 @@
+"""End-to-end-Tests der Logging-Aufgaben-REST-API (B-I Schritt 3) via TestClient.
+
+Echte Sqlite-Logging-Repos auf tmp_path-DBs via ``dependency_overrides`` (kein echtes
+cernis.db, kein Bootstrap-Loop -- ``AppConfig()`` hat ``bootstrap_on_startup`` aus).
+GETRENNT vom Live-Monitor (status/events/rtt -- eigene Testdatei). Belegt:
+
+* POST /api/monitor/logging      -> 201 + Wire-Form (Zustand created); Modus-Validierung 422.
+* GET  /api/monitor/logging      -> Liste der Aufgaben (Wire-Form).
+* GET  /api/monitor/logging/{id} -> 404 bei unbekannter id.
+* start/pause/resume/stop        -> Zustandsuebergaenge; 409 bei Konflikt/Transition.
+* DELETE /api/monitor/logging/{id} -> 204 (idempotent).
+* GET  /api/monitor/logging/volume -> count + over_threshold.
+"""
+
+from pathlib import Path
+from typing import Any
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from api.monitoring import (
+    provide_check_log_volume,
+    provide_create_logging_task,
+    provide_delete_logging_task,
+    provide_get_logging_task_detail,
+    provide_get_logging_task_events,
+    provide_get_logging_task_sla,
+    provide_list_logging_tasks,
+    provide_pause_logging_task,
+    provide_resume_logging_task,
+    provide_start_logging_task,
+    provide_stop_logging_task,
+)
+from app import create_app
+from application.monitoring import (
+    CheckLogVolume,
+    CreateLoggingTask,
+    DeleteLoggingTask,
+    GetLoggingTaskDetail,
+    GetLoggingTaskEvents,
+    GetLoggingTaskSla,
+    ListLoggingTasks,
+    PauseLoggingTask,
+    ResumeLoggingTask,
+    StartLoggingTask,
+    StopLoggingTask,
+)
+from infrastructure.config import AppConfig
+from infrastructure.monitoring import (
+    SqliteLoggingEventRepository,
+    SqliteLoggingRttRepository,
+    SqliteLoggingTaskRepository,
+)
+
+
+@pytest.fixture
+def db_path(tmp_path: Path) -> Path:
+    return tmp_path / "cernis.db"
+
+
+def _wired_app(db_path: Path) -> FastAPI:
+    tasks = SqliteLoggingTaskRepository(db_path)
+    rtt = SqliteLoggingRttRepository(db_path)
+    events = SqliteLoggingEventRepository(db_path)
+
+    app = create_app(AppConfig())
+    app.dependency_overrides[provide_create_logging_task] = lambda: CreateLoggingTask(tasks)
+    app.dependency_overrides[provide_list_logging_tasks] = lambda: ListLoggingTasks(tasks)
+    app.dependency_overrides[provide_get_logging_task_detail] = lambda: GetLoggingTaskDetail(tasks)
+    app.dependency_overrides[provide_start_logging_task] = lambda: StartLoggingTask(tasks)
+    app.dependency_overrides[provide_pause_logging_task] = lambda: PauseLoggingTask(tasks)
+    app.dependency_overrides[provide_resume_logging_task] = lambda: ResumeLoggingTask(tasks)
+    app.dependency_overrides[provide_stop_logging_task] = lambda: StopLoggingTask(tasks)
+    app.dependency_overrides[provide_delete_logging_task] = lambda: DeleteLoggingTask(tasks)
+    app.dependency_overrides[provide_check_log_volume] = lambda: CheckLogVolume(rtt)
+    app.dependency_overrides[provide_get_logging_task_sla] = lambda: GetLoggingTaskSla(tasks, rtt)
+    app.dependency_overrides[provide_get_logging_task_events] = lambda: GetLoggingTaskEvents(
+        tasks, events
+    )
+    return app
+
+
+def _create_body(**overrides: Any) -> dict[str, Any]:
+    """Valider IMMEDIATE-Create-Body (mit max_duration_s) -- per kwargs ueberschreibbar."""
+    body = {
+        "target_id": "wlan",
+        "label": "Server-Logging",
+        "purpose": "Stoerungssuche",
+        "capture_mode": "reachability_latency",
+        "operation_mode": "immediate",
+        "max_duration_s": 3600,
+    }
+    body.update(overrides)
+    return body
+
+
+# ── POST /api/monitor/logging (Anlage + Modus-Validierung) ──────────────────
+
+
+def test_create_returns_201_with_created_state(db_path: Path) -> None:
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.post("/api/monitor/logging", json=_create_body())
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["state"] == "created"
+    assert body["target_id"] == "wlan"
+    assert body["capture_mode"] == "reachability_latency"
+    assert body["operation_mode"] == "immediate"
+    assert body["max_duration_s"] == 3600
+    # Router erzeugt id + created_at.
+    assert isinstance(body["id"], str) and body["id"]
+    assert isinstance(body["created_at"], float)
+    # effective_start (ADR 0033) ist vor dem ersten Start None -- als Schluessel
+    # aber vorhanden (das Frontend leitet daraus die IMMEDIATE-Restzeit ab).
+    assert body["effective_start"] is None
+
+
+def test_create_scheduled_with_window(db_path: Path) -> None:
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.post(
+            "/api/monitor/logging",
+            json={
+                "target_id": "wlan",
+                "label": "L",
+                "purpose": "P",
+                "capture_mode": "interface_status",
+                "operation_mode": "scheduled",
+                "planned_start": 100.0,
+                "planned_end": 200.0,
+            },
+        )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["operation_mode"] == "scheduled"
+    assert (body["planned_start"], body["planned_end"]) == (100.0, 200.0)
+
+
+def test_create_unknown_capture_mode_is_422(db_path: Path) -> None:
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.post("/api/monitor/logging", json=_create_body(capture_mode="bogus"))
+    assert resp.status_code == 422
+
+
+def test_create_scheduled_without_window_is_422(db_path: Path) -> None:
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.post(
+            "/api/monitor/logging",
+            json={
+                "target_id": "wlan",
+                "label": "L",
+                "purpose": "P",
+                "capture_mode": "reachability",
+                "operation_mode": "scheduled",
+            },
+        )
+    assert resp.status_code == 422
+
+
+def test_create_immediate_without_duration_is_422(db_path: Path) -> None:
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.post(
+            "/api/monitor/logging",
+            json={
+                "target_id": "wlan",
+                "label": "L",
+                "purpose": "P",
+                "capture_mode": "reachability",
+                "operation_mode": "immediate",
+            },
+        )
+    assert resp.status_code == 422
+
+
+def test_create_missing_mandatory_field_is_422(db_path: Path) -> None:
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.post("/api/monitor/logging", json={"label": "no target_id"})
+    assert resp.status_code == 422
+
+
+# ── recurring (3b, wiederkehrendes Tagesfenster) ────────────────────────────
+
+
+def _recurring_body(**overrides: Any) -> dict[str, Any]:
+    """Valider RECURRING-Create-Body (Tagesfenster 10:00-11:00, Mo-Fr) -- ueberschreibbar."""
+    body = {
+        "target_id": "wlan",
+        "label": "Wiederkehrend",
+        "purpose": "Abend-Logging",
+        "capture_mode": "reachability_latency",
+        "operation_mode": "recurring",
+        "recur_start_minute": 600,
+        "recur_end_minute": 660,
+        "recur_weekdays": [0, 1, 2, 3, 4],
+    }
+    body.update(overrides)
+    return body
+
+
+def test_create_recurring_without_window_is_422(db_path: Path) -> None:
+    # operation_mode "recurring" ohne recur_start_minute/recur_end_minute -> 422.
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.post(
+            "/api/monitor/logging",
+            json={
+                "target_id": "wlan",
+                "label": "L",
+                "purpose": "P",
+                "capture_mode": "reachability",
+                "operation_mode": "recurring",
+            },
+        )
+    assert resp.status_code == 422
+
+
+def test_create_recurring_end_not_after_start_is_422(db_path: Path) -> None:
+    # recur_end_minute <= recur_start_minute -> 422 (halb-offenes Fenster braucht end > start).
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.post(
+            "/api/monitor/logging",
+            json=_recurring_body(recur_start_minute=660, recur_end_minute=600),
+        )
+    assert resp.status_code == 422
+
+
+def test_create_recurring_carries_recur_fields(db_path: Path) -> None:
+    # Gueltiger recurring-Create -> 201 + die recur_*-Felder in der Wire-Form. weekdays
+    # kommen sortiert zurueck (sorted(task.recur_weekdays)); recur_until fehlt -> None.
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.post(
+            "/api/monitor/logging",
+            json=_recurring_body(recur_weekdays=[4, 0, 2], recur_from=1000.0),
+        )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["operation_mode"] == "recurring"
+    assert body["recur_start_minute"] == 600
+    assert body["recur_end_minute"] == 660
+    assert body["recur_weekdays"] == [0, 2, 4]
+    assert body["recur_from"] == 1000.0
+    assert body["recur_until"] is None
+
+
+# ── interval_s (C-2, Mess-Intervall) ────────────────────────────────────────
+
+
+def test_create_with_valid_interval_carries_it(db_path: Path) -> None:
+    # Ein gueltiges interval_s (eine der Stufen) landet 1:1 in der Wire-Form.
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.post("/api/monitor/logging", json=_create_body(interval_s=60))
+    assert resp.status_code == 201
+    assert resp.json()["interval_s"] == 60
+
+
+def test_create_with_invalid_interval_is_422(db_path: Path) -> None:
+    # Ein interval_s ausserhalb der erlaubten Stufen {5,15,30,60,300} -> 422 (kein
+    # stiller Fallback).
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.post("/api/monitor/logging", json=_create_body(interval_s=7))
+    assert resp.status_code == 422
+
+
+def test_create_without_interval_defaults_to_5(db_path: Path) -> None:
+    # Ohne Angabe greift der Domaenen-/Use-Case-Default 5 (heutiges dichtes Verhalten).
+    # _create_body traegt KEIN interval_s.
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.post("/api/monitor/logging", json=_create_body())
+    assert resp.status_code == 201
+    assert resp.json()["interval_s"] == 5
+
+
+# ── Schwellwert-Alarm (Schnitt 4) ───────────────────────────────────────────
+
+
+def test_create_without_threshold_is_null(db_path: Path) -> None:
+    # Ohne threshold-Feld traegt die Wire-Form "threshold": null.
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.post("/api/monitor/logging", json=_create_body())
+    assert resp.status_code == 201
+    assert resp.json()["threshold"] is None
+
+
+def test_create_with_latency_threshold_carries_it(db_path: Path) -> None:
+    # Gueltiger LATENCY_ABOVE-Schwellwert -> 201, vollstaendige Wire-Form (echter
+    # DB-Round-trip: Router -> Use-Case (str->Enum) -> Persistenz -> Wire).
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.post(
+            "/api/monitor/logging",
+            json=_create_body(
+                threshold={
+                    "condition": "latency_above",
+                    "limit_ms": 150.0,
+                    "consecutive_n": 5,
+                    "notify_desktop": True,
+                    "notify_email": True,
+                }
+            ),
+        )
+    assert resp.status_code == 201
+    assert resp.json()["threshold"] == {
+        "condition": "latency_above",
+        "limit_ms": 150.0,
+        "consecutive_n": 5,
+        "notify_desktop": True,
+        "notify_email": True,
+    }
+
+
+def test_create_with_unreachable_threshold_uses_defaults(db_path: Path) -> None:
+    # UNREACHABLE mit nur condition -> die uebrigen Felder tragen die Wire-/Domaenen-
+    # Defaults (limit_ms 0.0, consecutive_n 3, notify_desktop True, notify_email False).
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.post(
+            "/api/monitor/logging",
+            json=_create_body(threshold={"condition": "unreachable"}),
+        )
+    assert resp.status_code == 201
+    assert resp.json()["threshold"] == {
+        "condition": "unreachable",
+        "limit_ms": 0.0,
+        "consecutive_n": 3,
+        "notify_desktop": True,
+        "notify_email": False,
+    }
+
+
+def test_create_with_unknown_condition_is_422(db_path: Path) -> None:
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.post(
+            "/api/monitor/logging",
+            json=_create_body(threshold={"condition": "bogus"}),
+        )
+    assert resp.status_code == 422
+
+
+def test_create_with_consecutive_n_zero_is_422(db_path: Path) -> None:
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.post(
+            "/api/monitor/logging",
+            json=_create_body(threshold={"condition": "latency_above", "consecutive_n": 0}),
+        )
+    assert resp.status_code == 422
+
+
+def test_create_with_negative_limit_is_422(db_path: Path) -> None:
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.post(
+            "/api/monitor/logging",
+            json=_create_body(threshold={"condition": "latency_above", "limit_ms": -1.0}),
+        )
+    assert resp.status_code == 422
+
+
+def test_threshold_reaches_use_case_as_raw_fields(db_path: Path) -> None:
+    """Spy: der Router reicht die ROHEN Schwellwert-Felder an den Use-Case durch.
+
+    Ersetzt den ``CreateLoggingTask``-Use-Case durch einen aufzeichnenden Spy (statt
+    des echten DB-Use-Case), um die Schichtgrenze zu belegen: der Router uebergibt
+    ``threshold_condition`` als ``str`` + die uebrigen rohen Felder (NICHT ein fertiges
+    LatencyThreshold-Objekt) -- die str->Enum-Hebung ist Use-Case-Sache.
+    """
+    captured: dict[str, Any] = {}
+
+    class _SpyCreate:
+        def __call__(self, **kwargs: Any) -> Any:
+            captured.update(kwargs)
+
+            class _Task:
+                # Minimal-Stub fuer _logging_task_to_dict (Attribut-Zugriff am Rand).
+                id = "spy"
+                target_id = "wlan"
+                label = "L"
+                purpose = "P"
+                capture_mode = "reachability_latency"
+                operation_mode = "immediate"
+                state = "created"
+                planned_start = None
+                planned_end = None
+                max_duration_s = 3600
+                created_at = 0.0
+                effective_start = None
+                interval_s = 5
+                threshold = None
+                recur_start_minute = None
+                recur_end_minute = None
+                recur_weekdays: frozenset[int] = frozenset()
+                recur_from = None
+                recur_until = None
+
+            return _Task()
+
+    app = create_app(AppConfig())
+    app.dependency_overrides[provide_create_logging_task] = lambda: _SpyCreate()
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/monitor/logging",
+            json=_create_body(
+                threshold={
+                    "condition": "latency_above",
+                    "limit_ms": 42.0,
+                    "consecutive_n": 2,
+                    "notify_desktop": False,
+                    "notify_email": True,
+                }
+            ),
+        )
+    assert resp.status_code == 201
+    assert captured["threshold_condition"] == "latency_above"
+    assert captured["threshold_limit_ms"] == 42.0
+    assert captured["threshold_consecutive_n"] == 2
+    assert captured["threshold_notify_desktop"] is False
+    assert captured["threshold_notify_email"] is True
+
+
+def test_threshold_appears_in_list_and_detail(db_path: Path) -> None:
+    # Ein Task mit Schwellwert erscheint korrekt in list UND detail (Wire-Form).
+    with TestClient(_wired_app(db_path)) as client:
+        tid = client.post(
+            "/api/monitor/logging",
+            json=_create_body(threshold={"condition": "unreachable", "consecutive_n": 4}),
+        ).json()["id"]
+        listed = client.get("/api/monitor/logging").json()
+        detail = client.get(f"/api/monitor/logging/{tid}").json()
+    row = next(r for r in listed if r["id"] == tid)
+    assert row["threshold"]["condition"] == "unreachable"
+    assert row["threshold"]["consecutive_n"] == 4
+    assert detail["threshold"]["condition"] == "unreachable"
+    assert detail["threshold"]["consecutive_n"] == 4
+
+
+# ── GET /api/monitor/logging (Liste) + Detail (404) ─────────────────────────
+
+
+def test_list_empty_is_empty(db_path: Path) -> None:
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.get("/api/monitor/logging")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_list_after_create(db_path: Path) -> None:
+    with TestClient(_wired_app(db_path)) as client:
+        client.post("/api/monitor/logging", json=_create_body(label="A"))
+        client.post("/api/monitor/logging", json=_create_body(label="B"))
+        rows = client.get("/api/monitor/logging").json()
+    assert {r["label"] for r in rows} == {"A", "B"}
+
+
+def test_detail_unknown_is_404(db_path: Path) -> None:
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.get("/api/monitor/logging/does-not-exist")
+    assert resp.status_code == 404
+
+
+def test_detail_returns_task(db_path: Path) -> None:
+    with TestClient(_wired_app(db_path)) as client:
+        tid = client.post("/api/monitor/logging", json=_create_body()).json()["id"]
+        resp = client.get(f"/api/monitor/logging/{tid}")
+    assert resp.status_code == 200
+    assert resp.json()["id"] == tid
+
+
+# ── Lifecycle: start/pause/resume/stop ──────────────────────────────────────
+
+
+def test_start_transitions_to_active(db_path: Path) -> None:
+    with TestClient(_wired_app(db_path)) as client:
+        tid = client.post("/api/monitor/logging", json=_create_body()).json()["id"]
+        resp = client.post(f"/api/monitor/logging/{tid}/start")
+    assert resp.status_code == 200
+    assert resp.json()["state"] == "active"
+
+
+def test_start_sets_effective_start(db_path: Path) -> None:
+    # effective_start (ADR 0033) ist None bei CREATED und wird beim ersten Start
+    # auf den Start-ts gesetzt -- der Bezugs-ts der IMMEDIATE-Restzeit im Frontend.
+    with TestClient(_wired_app(db_path)) as client:
+        created = client.post("/api/monitor/logging", json=_create_body()).json()
+        assert created["effective_start"] is None
+        started = client.post(f"/api/monitor/logging/{created['id']}/start").json()
+    assert isinstance(started["effective_start"], float)
+    assert started["effective_start"] > 0
+
+
+def test_start_unknown_is_404(db_path: Path) -> None:
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.post("/api/monitor/logging/nope/start")
+    assert resp.status_code == 404
+
+
+def test_start_conflict_is_409_with_concept_message(db_path: Path) -> None:
+    # Zwei Tasks am SELBEN Ziel: der erste laeuft, der zweite kollidiert beim Start.
+    with TestClient(_wired_app(db_path)) as client:
+        first = client.post("/api/monitor/logging", json=_create_body(target_id="wlan")).json()[
+            "id"
+        ]
+        second = client.post("/api/monitor/logging", json=_create_body(target_id="wlan")).json()[
+            "id"
+        ]
+        client.post(f"/api/monitor/logging/{first}/start")
+        resp = client.post(f"/api/monitor/logging/{second}/start")
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    # Konzept-Meldung traegt Ziel + laufende Task.
+    assert "wlan" in detail
+    assert first in detail
+
+
+def test_start_twice_is_409_invalid_transition(db_path: Path) -> None:
+    # Zweimal start auf DERSELBEN Task -> beim zweiten Mal ist er ACTIVE (kein CREATED).
+    with TestClient(_wired_app(db_path)) as client:
+        tid = client.post("/api/monitor/logging", json=_create_body()).json()["id"]
+        client.post(f"/api/monitor/logging/{tid}/start")
+        resp = client.post(f"/api/monitor/logging/{tid}/start")
+    assert resp.status_code == 409
+
+
+def test_pause_resume_stop_cycle(db_path: Path) -> None:
+    with TestClient(_wired_app(db_path)) as client:
+        tid = client.post("/api/monitor/logging", json=_create_body()).json()["id"]
+        client.post(f"/api/monitor/logging/{tid}/start")
+        assert client.post(f"/api/monitor/logging/{tid}/pause").json()["state"] == "paused"
+        assert client.post(f"/api/monitor/logging/{tid}/resume").json()["state"] == "active"
+        assert client.post(f"/api/monitor/logging/{tid}/stop").json()["state"] == "finished"
+
+
+def test_pause_created_is_409(db_path: Path) -> None:
+    # Pause aus CREATED (ohne start) -> InvalidTaskTransition -> 409.
+    with TestClient(_wired_app(db_path)) as client:
+        tid = client.post("/api/monitor/logging", json=_create_body()).json()["id"]
+        resp = client.post(f"/api/monitor/logging/{tid}/pause")
+    assert resp.status_code == 409
+
+
+def test_resume_conflict_is_409(db_path: Path) -> None:
+    # paused-Task am Ziel wlan; ein zweiter laeuft dort ACTIVE -> resume kollidiert.
+    with TestClient(_wired_app(db_path)) as client:
+        paused = client.post("/api/monitor/logging", json=_create_body(target_id="wlan")).json()[
+            "id"
+        ]
+        client.post(f"/api/monitor/logging/{paused}/start")
+        client.post(f"/api/monitor/logging/{paused}/pause")
+        other = client.post("/api/monitor/logging", json=_create_body(target_id="wlan")).json()[
+            "id"
+        ]
+        client.post(f"/api/monitor/logging/{other}/start")
+        resp = client.post(f"/api/monitor/logging/{paused}/resume")
+    assert resp.status_code == 409
+
+
+def test_stop_unknown_is_404(db_path: Path) -> None:
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.post("/api/monitor/logging/nope/stop")
+    assert resp.status_code == 404
+
+
+# ── DELETE (204, idempotent) ────────────────────────────────────────────────
+
+
+def test_delete_returns_204(db_path: Path) -> None:
+    with TestClient(_wired_app(db_path)) as client:
+        tid = client.post("/api/monitor/logging", json=_create_body()).json()["id"]
+        resp = client.delete(f"/api/monitor/logging/{tid}")
+    assert resp.status_code == 204
+    # Danach nicht mehr auffindbar.
+    with TestClient(_wired_app(db_path)) as client:
+        assert client.get(f"/api/monitor/logging/{tid}").status_code == 404
+
+
+def test_delete_unknown_is_idempotent_204(db_path: Path) -> None:
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.delete("/api/monitor/logging/never-existed")
+    assert resp.status_code == 204
+
+
+# ── GET /api/monitor/logging/volume ─────────────────────────────────────────
+
+
+def test_volume_empty_is_zero_under_threshold(db_path: Path) -> None:
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.get("/api/monitor/logging/volume")
+    assert resp.status_code == 200
+    assert resp.json() == {"count": 0, "over_threshold": False}
+
+
+def test_volume_counts_saved_rtt_points(db_path: Path) -> None:
+    # Messpunkte direkt ueber das Repo ablegen (Schreibpfad aus Messungen = B-II);
+    # der Endpunkt liest nur den count zurueck.
+    rtt = SqliteLoggingRttRepository(db_path)
+    rtt.save("t1", 1.0, 0.0, True, 100.0)
+    rtt.save("t1", 2.0, 0.0, True, 101.0)
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.get("/api/monitor/logging/volume")
+    assert resp.json() == {"count": 2, "over_threshold": False}
+
+
+# ── GET /api/monitor/logging/{id}/sla (C-3) ─────────────────────────────────
+
+
+def test_sla_returns_stats_for_known_task(db_path: Path) -> None:
+    # Task anlegen (id vom Router), dann RTT-Messpunkte direkt ueber das Repo ablegen
+    # -- der SLA-Endpunkt rechnet ueber all_for(task_id) die Kennzahlen.
+    with TestClient(_wired_app(db_path)) as client:
+        tid = client.post("/api/monitor/logging", json=_create_body()).json()["id"]
+    rtt = SqliteLoggingRttRepository(db_path)
+    rtt.save(tid, 4.0, 0.0, True, 1_700_000_000.0)
+    rtt.save(tid, 6.0, 0.0, True, 1_700_000_005.0)
+    rtt.save(tid, -1.0, 100.0, False, 1_700_000_010.0)  # ein down
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.get(f"/api/monitor/logging/{tid}/sla")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["task_id"] == tid
+    assert body["samples"] == 3
+    assert body["uptime_pct"] == round(2 / 3 * 100, 3)  # 2/3 alive
+    assert body["avg_rtt_ms"] == 5.0  # mean([4,6])
+
+
+def test_sla_empty_yields_null_uptime(db_path: Path) -> None:
+    # Task ohne Messpunkte -> Null-Stats (uptime_pct=None -> "noch keine Auswertung").
+    with TestClient(_wired_app(db_path)) as client:
+        tid = client.post("/api/monitor/logging", json=_create_body()).json()["id"]
+        resp = client.get(f"/api/monitor/logging/{tid}/sla")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["task_id"] == tid
+    assert body["uptime_pct"] is None
+    assert body["samples"] == 0
+
+
+def test_sla_unknown_task_returns_404(db_path: Path) -> None:
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.get("/api/monitor/logging/never-existed/sla")
+    assert resp.status_code == 404
+
+
+# ── since/until-Durchreichung am Router-Rand (Schnitt 1b) ────────────────────
+# Belegt, dass der Endpunkt die optionalen Query-Floats unveraendert an den Use-Case
+# durchreicht (Spy-Use-Case statt echter Repos -- die since/until-Naht ist "kommen die
+# Werte am Use-Case an", nicht die SLA-Mathematik, die der application-Test deckt).
+
+
+class _SpyGetSla:
+    """Ersetzt ``GetLoggingTaskSla`` und zeichnet die ``since``/``until``-kwargs auf.
+
+    Gibt ein triviales stats-dict zurueck (der Endpunkt reicht es nur durch); die
+    Signatur spiegelt ``GetLoggingTaskSla.__call__`` (``days`` mit Default, since/until
+    als kwargs).
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    def __call__(
+        self,
+        task_id: str,
+        days: int = 30,
+        since: float | None = None,
+        until: float | None = None,
+    ) -> dict[str, Any]:
+        self.calls.append({"task_id": task_id, "since": since, "until": until})
+        return {"task_id": task_id, "uptime_pct": None, "samples": 0, "chart": []}
+
+
+def _app_with_sla_spy(spy: _SpyGetSla) -> FastAPI:
+    app = create_app(AppConfig())
+    app.dependency_overrides[provide_get_logging_task_sla] = lambda: spy
+    return app
+
+
+def test_sla_passes_since_and_until_through_to_use_case() -> None:
+    spy = _SpyGetSla()
+    with TestClient(_app_with_sla_spy(spy)) as client:
+        resp = client.get("/api/monitor/logging/t1/sla?since=100.5&until=200.5")
+    assert resp.status_code == 200
+    assert spy.calls == [{"task_id": "t1", "since": 100.5, "until": 200.5}]
+
+
+def test_sla_without_query_passes_none_through() -> None:
+    spy = _SpyGetSla()
+    with TestClient(_app_with_sla_spy(spy)) as client:
+        resp = client.get("/api/monitor/logging/t1/sla")
+    assert resp.status_code == 200
+    assert spy.calls == [{"task_id": "t1", "since": None, "until": None}]
+
+
+# ── GET /api/monitor/logging/{id}/events (Schnitt 1b-events) ─────────────────
+
+
+def test_events_returns_wire_list_for_known_task(db_path: Path) -> None:
+    # Task anlegen (id vom Router), dann Event-Flanken direkt ueber das Repo ablegen --
+    # der Endpunkt projiziert je Zeile in das Wire-dict {event_type, rtt_ms, ts}.
+    with TestClient(_wired_app(db_path)) as client:
+        tid = client.post("/api/monitor/logging", json=_create_body()).json()["id"]
+    events = SqliteLoggingEventRepository(db_path)
+    events.save(tid, "down", -1.0, 1_700_000_000.0)
+    events.save(tid, "up", 5.0, 1_700_000_010.0)
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.get(f"/api/monitor/logging/{tid}/events")
+    assert resp.status_code == 200
+    assert resp.json() == [
+        {"event_type": "down", "rtt_ms": -1.0, "ts": 1_700_000_000.0},
+        {"event_type": "up", "rtt_ms": 5.0, "ts": 1_700_000_010.0},
+    ]
+
+
+def test_events_empty_is_empty_list(db_path: Path) -> None:
+    # Task ohne Flanken -> leere Liste (kein 404, der Task existiert ja).
+    with TestClient(_wired_app(db_path)) as client:
+        tid = client.post("/api/monitor/logging", json=_create_body()).json()["id"]
+        resp = client.get(f"/api/monitor/logging/{tid}/events")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_events_unknown_task_returns_404(db_path: Path) -> None:
+    with TestClient(_wired_app(db_path)) as client:
+        resp = client.get("/api/monitor/logging/never-existed/events")
+    assert resp.status_code == 404
+
+
+# ── since/until-Durchreichung am Events-Rand (Schnitt 1b-events) ─────────────
+# Belegt analog zur SLA-Naht, dass der Endpunkt die optionalen Query-Floats
+# unveraendert an den Use-Case durchreicht (Spy-Use-Case statt echter Repos).
+
+
+class _SpyGetEvents:
+    """Ersetzt ``GetLoggingTaskEvents`` und zeichnet die ``since``/``until``-kwargs auf.
+
+    Gibt eine leere Liste zurueck (der Endpunkt projiziert sie nur); die Signatur
+    spiegelt ``GetLoggingTaskEvents.__call__`` (since/until als kwargs, kein ``days``).
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    def __call__(
+        self,
+        task_id: str,
+        since: float | None = None,
+        until: float | None = None,
+    ) -> list[Any]:
+        self.calls.append({"task_id": task_id, "since": since, "until": until})
+        return []
+
+
+def _app_with_events_spy(spy: _SpyGetEvents) -> FastAPI:
+    app = create_app(AppConfig())
+    app.dependency_overrides[provide_get_logging_task_events] = lambda: spy
+    return app
+
+
+def test_events_passes_since_and_until_through_to_use_case() -> None:
+    spy = _SpyGetEvents()
+    with TestClient(_app_with_events_spy(spy)) as client:
+        resp = client.get("/api/monitor/logging/t1/events?since=100.5&until=200.5")
+    assert resp.status_code == 200
+    assert spy.calls == [{"task_id": "t1", "since": 100.5, "until": 200.5}]
+
+
+def test_events_without_query_passes_none_through() -> None:
+    spy = _SpyGetEvents()
+    with TestClient(_app_with_events_spy(spy)) as client:
+        resp = client.get("/api/monitor/logging/t1/events")
+    assert resp.status_code == 200
+    assert spy.calls == [{"task_id": "t1", "since": None, "until": None}]

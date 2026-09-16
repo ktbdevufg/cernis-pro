@@ -1,0 +1,195 @@
+/* Radialer Topologie-Graph. Designsprache wie die Monitor-/RTT-Karten:
+   Card-Fläche, --color-border, radius. Nur Token-Variablen, nie feste Farben. */
+
+.topology {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* Kopfzeile: Titel links, Knotenzahl + Reload rechts. */
+.topology__kopf {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.topology__titel {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.topology__kopf-rechts {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.topology__anzahl {
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--color-text-tert);
+}
+
+.topology__reload {
+  font-size: 12px;
+  padding: 4px 10px;
+  color: var(--color-accent);
+  background: transparent;
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.topology__reload:hover:not(:disabled) {
+  background: var(--color-accent-bg);
+}
+
+.topology__reload:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Host-Quelle: Segmented Control (zwei aneinanderstoßende Knöpfe). Designsprache
+   wie der Reload-Button (Akzentrand, Token-Variablen); der aktive Knopf trägt
+   den Akzent-Hintergrund. */
+.topology__quelle {
+  display: inline-flex;
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.topology__quelle-knopf {
+  font-size: 12px;
+  padding: 4px 10px;
+  color: var(--color-text-sec);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.topology__quelle-knopf + .topology__quelle-knopf {
+  border-left: 1px solid var(--color-accent-border);
+}
+
+.topology__quelle-knopf:hover:not(:disabled):not(.topology__quelle-knopf--aktiv) {
+  background: var(--color-accent-bg);
+}
+
+.topology__quelle-knopf--aktiv {
+  color: var(--color-accent);
+  background: var(--color-accent-bg);
+  font-weight: 600;
+}
+
+.topology__quelle-knopf:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Erklärender Untertext zur gewählten Quelle — zielgruppengerecht, kein Jargon. */
+.topology__quelle-hinweis {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+/* Legende: gemessen (durchgezogen) vs. angenommen (gestrichelt). */
+.topology__legende {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.topology__legende-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-text-sec);
+}
+
+.topology__legende-svg {
+  width: 28px;
+  height: 8px;
+  flex-shrink: 0;
+}
+
+/* Das radiale SVG-Feld. */
+.topology__svg {
+  width: 100%;
+  height: auto;
+  max-height: 540px;
+  display: block;
+}
+
+/* ── Kanten ─────────────────────────────────────────────────────────────── */
+
+/* Gemessen: durchgezogen, Akzentfarbe. */
+.topology__kante--measured {
+  stroke: var(--color-accent);
+  stroke-width: 2;
+}
+
+/* Angenommen: gestrichelt, dezent. */
+.topology__kante--assumed {
+  stroke: var(--color-text-tert);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+}
+
+/* ── Knoten ─────────────────────────────────────────────────────────────── */
+
+.topology__knoten-kreis {
+  fill: var(--color-card);
+  stroke: var(--color-text-sec);
+  stroke-width: 1.5;
+}
+
+/* Host: dezent. */
+.topology__knoten--host .topology__knoten-kreis {
+  fill: var(--color-bg);
+  stroke: var(--color-text-sec);
+}
+
+/* Switch/Netzgerät: Akzentrand, gefüllt mit Akzent-Hintergrund. */
+.topology__knoten--switch .topology__knoten-kreis,
+.topology__knoten--network .topology__knoten-kreis {
+  fill: var(--color-accent-bg);
+  stroke: var(--color-accent);
+}
+
+/* Gateway: optisch hervorgehoben — satter Akzentkern. */
+.topology__knoten--gateway .topology__knoten-kreis {
+  fill: var(--color-accent);
+  stroke: var(--color-accent-strong);
+  stroke-width: 2.5;
+}
+
+.topology__knoten-label {
+  font-size: 12px;
+  fill: var(--color-text-sec);
+  pointer-events: none;
+}
+
+.topology__knoten--gateway .topology__knoten-label {
+  fill: var(--color-text);
+  font-weight: 600;
+}
+
+/* Ruhige Leer-/Fehlermeldung statt leerem Kasten. */
+.topology__leer {
+  margin: 0;
+  padding: 32px 12px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--color-text-sec);
+}

@@ -1,0 +1,320 @@
+/* Detailansicht einer Logging-Aufgabe. Designsprache wie LoggingPanel/MonitorView:
+   Card-Flächen, --color-border, radius, Akzent-Token für den aktiven Zustand.
+   Nur Token-Variablen, nie feste Farben. */
+
+.logging-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.logging-detail__mono {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+/* Zurück-Knopf: dezent, links oben. */
+.logging-detail__zurueck {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 6px 12px;
+  font-size: 13px;
+  color: var(--color-text-sec);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.logging-detail__zurueck:hover {
+  color: var(--color-text);
+  border-color: var(--color-accent-border);
+}
+
+/* Dezenter Fehlerhinweis (Lade-/Detail-Fehler). */
+.logging-detail__fehler {
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--sev-med-text);
+  background: var(--sev-med-bg);
+  border: 1px solid var(--sev-med-bd);
+  border-radius: var(--radius-md);
+}
+
+/* ── Kopf ─────────────────────────────────────────────────────────────────── */
+.logging-detail__kopf {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.logging-detail__titel {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.logging-detail__kopf-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--color-text-sec);
+}
+
+.logging-detail__kopf-zweck {
+  color: var(--color-text-sec);
+}
+
+.logging-detail__kopf-zeile {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.logging-detail__ziel {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+  color: var(--color-text);
+}
+
+.logging-detail__trenner {
+  color: var(--color-text-tert);
+}
+
+/* ── Zeitraumwahl ─────────────────────────────────────────────────────────── */
+.logging-detail__zeitraum {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.logging-detail__zeitraum-label {
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--color-text-tert);
+}
+
+.logging-detail__zeitraum-knoepfe {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.logging-detail__stufe {
+  padding: 6px 12px;
+  font-size: 13px;
+  color: var(--color-text-sec);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.logging-detail__stufe:hover {
+  color: var(--color-text);
+  border-color: var(--color-accent-border);
+}
+
+.logging-detail__stufe--aktiv {
+  color: var(--color-accent-strong);
+  background: var(--color-accent-bg);
+  border-color: var(--color-accent-border);
+}
+
+.logging-detail__frei {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.logging-detail__frei-feld {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--color-text-sec);
+}
+
+.logging-detail__frei-feld input {
+  padding: 6px 8px;
+  font-size: 13px;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* ── Kennzahlen ───────────────────────────────────────────────────────────── */
+.logging-detail__kennzahlen {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.logging-detail__kennzahl {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.logging-detail__kennzahl-wert {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.logging-detail__kennzahl-label {
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+/* ── Chart-Tabs ───────────────────────────────────────────────────────────── */
+.logging-detail__chart-tabs {
+  display: flex;
+  gap: 8px;
+}
+
+.logging-detail__tab {
+  padding: 6px 14px;
+  font-size: 13px;
+  color: var(--color-text-sec);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.logging-detail__tab:hover {
+  color: var(--color-text);
+  border-color: var(--color-accent-border);
+}
+
+.logging-detail__tab--aktiv {
+  color: var(--color-accent-strong);
+  background: var(--color-accent-bg);
+  border-color: var(--color-accent-border);
+}
+
+/* ── Ereignis-Liste ───────────────────────────────────────────────────────── */
+.logging-detail__ereignisse-titel {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.logging-detail__ereignisse {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.logging-detail__ereignis {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  font-size: 13px;
+  background: var(--color-card);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.logging-detail__ereignis:last-child {
+  border-bottom: none;
+}
+
+.logging-detail__ereignis-zeit {
+  flex: 0 0 auto;
+  color: var(--color-text-sec);
+}
+
+.logging-detail__ereignis-typ {
+  flex: 1 1 auto;
+  color: var(--color-text);
+}
+
+.logging-detail__ereignis-rtt {
+  flex: 0 0 auto;
+  color: var(--color-text-sec);
+}
+
+/* ── Export ───────────────────────────────────────────────────────────────── */
+.logging-detail__export {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.logging-detail__export-titel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.logging-detail__export-knoepfe {
+  display: flex;
+  gap: 8px;
+}
+
+.logging-detail__export-knopf {
+  padding: 6px 14px;
+  font-size: 13px;
+  color: var(--color-accent-strong);
+  background: var(--color-accent-bg);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.logging-detail__export-knopf:hover:not(:disabled) {
+  background: var(--color-accent-bg-strong);
+}
+
+.logging-detail__export-knopf:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.logging-detail__export-fehler {
+  font-size: 13px;
+  color: var(--sev-med-text);
+}
+
+/* Ruhige Leer-/Nicht-gefunden-Meldung. */
+.logging-detail__leer {
+  margin: 0;
+  padding: 24px 12px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--color-text-sec);
+}
+
+/* Dezenter Lade-Indikator (schmaler Balken oben am Container). */
+.logging-detail__laedt {
+  height: 2px;
+  background: var(--color-accent);
+  border-radius: var(--radius-md);
+  opacity: 0.6;
+}

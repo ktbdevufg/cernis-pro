@@ -4,17 +4,16 @@ Sends alerts via Email (SMTP) and macOS native notifications (osascript).
 Alert rules stored in SQLite.
 """
 import sqlite3
-import smtplib
-import subprocess
 import json
 import time
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Optional
 
 from modules.db_path import DB_PATH  # noqa
+
+# Der Versand (macOS-Desktop + SMTP-E-Mail) lebt jetzt im v2-Kern; fire_alert (unten)
+# ruft ihn ueber notify_macos/notify_email auf (Import bei den Notification-Channels).
 
 
 # ── Data structures ───────────────────────────────────────────
@@ -139,134 +138,24 @@ def _save_alert_event(evt: AlertEvent):
 
 
 # ── Notification channels ─────────────────────────────────────
-
-def notify_macos(title: str, message: str, subtitle: str = ""):
-    """Send macOS desktop notification via osascript."""
-    try:
-        sub = f'subtitle "{subtitle}" ' if subtitle else ""
-        script = f'display notification "{message}" with title "{title}" {sub}sound name "Basso"'
-        subprocess.run(["osascript", "-e", script], timeout=3, capture_output=True)
-    except Exception:
-        pass
+#
+# Der eigentliche Versand (macOS-Desktop + SMTP-E-Mail) wurde in den v2-Kern
+# ueberfuehrt und dort neu gebaut (PFLICHT-TLS ohne Klartext-Rueckfall,
+# ``finally``-Verbindungsabbau, AppleScript-Escaping). Diese Regel-Verwaltung
+# (Teil B) ruft die Funktionen jetzt aus ihrem neuen Ort auf, statt sie selbst zu
+# halten:
+#   * infrastructure/alerting/desktop_notifier.notify_macos
+#   * infrastructure/alerting/email_sender.notify_email_with_log
+# ``notify_email`` (der duenne bool-Wrapper) wird hier lokal beibehalten, weil
+# ``fire_alert`` ihn nutzt und kein anderer Aufrufer existierte.
+from infrastructure.alerting.desktop_notifier import notify_macos  # noqa: E402
+from infrastructure.alerting.email_sender import notify_email_with_log  # noqa: E402
 
 
 def notify_email(subject: str, body: str, smtp_config: dict) -> bool:
     """Send email alert via SMTP. Returns True on success."""
     result = notify_email_with_log(subject, body, smtp_config)
     return result["success"]
-
-
-def notify_email_with_log(subject: str, body: str, smtp_config: dict) -> dict:
-    """Send email via SMTP with detailed step-by-step log."""
-    log = []
-    success = False
-
-    def step(msg):
-        log.append(msg)
-
-    try:
-        host     = smtp_config.get("host", "")
-        port     = int(smtp_config.get("port", 587))
-        user     = smtp_config.get("user", "")
-        password = smtp_config.get("password", "")
-        to_addr  = smtp_config.get("to", "")
-        from_addr = smtp_config.get("from", user)
-        use_ssl  = port == 465
-
-        step(f"Config: host={host}, port={port}, user={user}, from={from_addr}, to={to_addr}")
-        step(f"Mode: {'SMTPS/SSL' if use_ssl else 'STARTTLS' if port in (587, 25) else 'plain'}")
-
-        if not host:
-            step("ERROR: SMTP host is empty")
-            return {"success": False, "log": log}
-        if not to_addr:
-            step("ERROR: Recipient address is empty")
-            return {"success": False, "log": log}
-
-        # Build message
-        step("Building email message...")
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = f"[CERNIS PRO] {subject}"
-        msg["From"]    = from_addr
-        msg["To"]      = to_addr
-        msg.attach(MIMEText(body, "plain"))
-        html_body = f"""
-        <div style="font-family:monospace;background:#0a0c0f;color:#e8ecf4;padding:20px;border-radius:8px;">
-          <h2 style="color:#00d4ff;margin:0 0 12px">CERNIS PRO Alert</h2>
-          <pre style="background:#141820;padding:12px;border-radius:4px;color:#e8ecf4">{body}</pre>
-          <p style="color:#4a5a78;font-size:12px;margin-top:12px">CERNIS PRO v1.0.0</p>
-        </div>
-        """
-        msg.attach(MIMEText(html_body, "html"))
-        step("Message built OK")
-
-        # Connect
-        if use_ssl:
-            step(f"Connecting via SMTPS (SSL) to {host}:{port}...")
-            server = smtplib.SMTP_SSL(host, port, timeout=15)
-        else:
-            step(f"Connecting via SMTP to {host}:{port}...")
-            server = smtplib.SMTP(host, port, timeout=15)
-
-        step(f"Connected. Server banner: {server.ehlo_resp[:80] if server.ehlo_resp else '(none)'}")
-
-        # EHLO
-        step("Sending EHLO...")
-        code, resp = server.ehlo()
-        step(f"EHLO response: {code} {resp[:80] if resp else ''}")
-
-        # STARTTLS (for port 587/25/other non-SSL)
-        if not use_ssl and port != 25:
-            step("Starting TLS (STARTTLS)...")
-            try:
-                code, resp = server.starttls()
-                step(f"STARTTLS response: {code} {resp[:80] if resp else ''}")
-                code, resp = server.ehlo()
-                step(f"EHLO after TLS: {code}")
-            except smtplib.SMTPNotSupportedError:
-                step("STARTTLS not supported by server — continuing without encryption")
-            except Exception as e:
-                step(f"STARTTLS failed: {e} — continuing without encryption")
-
-        # Login
-        if user and password:
-            step(f"Logging in as '{user}'...")
-            try:
-                code, resp = server.login(user, password)
-                step(f"Login OK: {code} {resp[:80] if resp else ''}")
-            except smtplib.SMTPAuthenticationError as e:
-                step(f"LOGIN FAILED: {e.smtp_code} {e.smtp_error}")
-                server.quit()
-                return {"success": False, "log": log}
-        else:
-            step("No credentials — skipping login (anonymous relay)")
-
-        # Send
-        step(f"Sending email from '{from_addr}' to '{to_addr}'...")
-        result = server.sendmail(from_addr, to_addr, msg.as_string())
-        if result:
-            step(f"Partial failure: {result}")
-        else:
-            step("Email sent successfully!")
-            success = True
-
-        server.quit()
-        step("Connection closed.")
-
-    except smtplib.SMTPConnectError as e:
-        step(f"CONNECTION FAILED: {e}")
-    except smtplib.SMTPAuthenticationError as e:
-        step(f"AUTH FAILED: {e.smtp_code} {e.smtp_error}")
-    except smtplib.SMTPException as e:
-        step(f"SMTP ERROR: {e}")
-    except ConnectionRefusedError:
-        step(f"CONNECTION REFUSED: {host}:{port} — check host and port")
-    except TimeoutError:
-        step(f"TIMEOUT: Could not connect to {host}:{port} within 15s")
-    except Exception as e:
-        step(f"ERROR: {type(e).__name__}: {e}")
-
-    return {"success": success, "log": log}
 
 
 # ── Alert dispatcher ──────────────────────────────────────────

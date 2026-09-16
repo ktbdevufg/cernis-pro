@@ -60,6 +60,10 @@ class SettingsRepository(Protocol):
         """Loescht ein Setting. Idempotent -- kein Fehler bei fehlendem Key."""
         ...
 
+    def clear_all(self) -> None:
+        """Leert alle Settings (nur die eigene Tabelle)."""
+        ...
+
 
 class SecretStore(Protocol):
     """Eigenstaendige Secret-Ablage (ADR 0001: KEINE stillen Fallbacks).

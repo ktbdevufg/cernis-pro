@@ -21,3 +21,45 @@ class DeviceNotFoundError(DevicesApplicationError):
     def __init__(self, mac: str) -> None:
         self.mac = mac
         super().__init__(f"Kein Geraet mit MAC {mac!r}")
+
+
+class DeviceAlreadyExistsError(DevicesApplicationError):
+    """Zu der MAC existiert beim manuellen Anlegen schon ein Geraet.
+
+    Das manuelle Anlegen ist KEIN Upsert -- eine schon bekannte MAC ist ein
+    Konflikt, kein stilles Ueberschreiben. Der Aufrufer soll das vorhandene
+    Geraet stattdessen bearbeiten oder (falls archiviert) wiederherstellen.
+    """
+
+    def __init__(self, mac: str) -> None:
+        self.mac = mac
+        super().__init__(f"Geraet mit MAC {mac!r} existiert bereits")
+
+
+class DeviceBroadcastMacError(DevicesApplicationError):
+    """Beim manuellen Anlegen wurde die Ethernet-Broadcast-Adresse angegeben.
+
+    Die Broadcast-Adresse ist kein Geraet, sondern eine Adressierungsform -- sie
+    gehoert nicht in den Geraetebestand. Ein Nutzer, der sie von Hand eintraegt,
+    bekommt eine benannte Ablehnung statt eines stillen Verzichts (Finding S3);
+    der Router bildet das auf HTTP 422 ab (ungueltige Eingabe, kein Konflikt).
+    """
+
+    def __init__(self, mac: str) -> None:
+        self.mac = mac
+        super().__init__(f"MAC {mac!r} ist die Broadcast-Adresse und kein Geraet")
+
+
+class InvalidTrustStateError(DevicesApplicationError):
+    """Ein uebergebener ``trust_state``-Wert ist keiner der erlaubten Zustaende.
+
+    Der api-Ring darf den ``domain``-Ring nicht importieren (import-linter), kann
+    also nicht selbst gegen ``TrustState`` validieren. Deshalb nimmt der Use-Case
+    auch einen rohen ``str`` entgegen und hebt ihn intern via ``TrustState(...)``;
+    ein ungueltiger Wert ist KEIN stiller Fallback, sondern dieser Fehler -- den
+    der Router auf HTTP 422 abbildet.
+    """
+
+    def __init__(self, value: str) -> None:
+        self.value = value
+        super().__init__(f"Ungueltiger trust_state {value!r}")

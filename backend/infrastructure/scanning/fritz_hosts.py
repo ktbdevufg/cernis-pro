@@ -8,19 +8,22 @@ Host/User/Passwort werden im KONSTRUKTOR injiziert -- der Adapter baut die
 ``FritzBox``-Instanz mit genau diesen Werten. Die Verdrahtung (Werte aus den
 Settings ziehen) passiert im Composition Root (``app.py``, S.6), nicht hier.
 
-BEWUSST NICHT uebernommen: die ``detect_fritzbox``-Auto-Detection aus dem Altcode.
+BEWUSST NICHT uebernommen: die frueher vorhandene ``detect_fritzbox``-Auto-
+Detection aus dem Altcode. Sie wurde inzwischen ersatzlos aus
+``modules.fritzbox`` entfernt (kein Produktionsaufrufer mehr nach der M1-
+Umstellung); der Adapter bekommt seine Zieladresse ausschliesslich injiziert.
 
 Sicherheitsbefund (benannt, NICHT reproduziert -- S4-Familie "unsichere Defaults"):
 
-* ``modules.fritzbox.detect_fritzbox`` probiert bei der Suche hartkodierte
+* Das entfernte ``detect_fritzbox`` probierte bei der Suche hartkodierte
   Default-Adressen (``"fritz.box"``, ``"192.168.178.1"``, ``"192.168.1.1"``,
-  ``"192.168.0.1"``) und scannt aktiv Port 49000 dieser Ziele. Das ist
+  ``"192.168.0.1"``) und scannte aktiv Port 49000 dieser Ziele. Das ist
   Netzwerk-Probing mit fest verdrahteten Zielen -- gehoert NICHT in einen
-  reinen TR-064-Wrapper und wird hier bewusst nicht eingezogen. Der Adapter
-  bekommt seine Zieladresse ausschliesslich injiziert. (Kein hartkodiertes
-  Passwort im Spiel: ``FritzBox``-Default ist ``user=""``/``password=""``, also
-  kein klassisches S4-Credential-Default -- nur die Adress-Defaults sind das
-  Finding.)
+  reinen TR-064-Wrapper und wurde daher bewusst nicht eingezogen, sondern im
+  Altcode geloescht. Der Adapter bekommt seine Zieladresse ausschliesslich
+  injiziert. (Kein hartkodiertes Passwort im Spiel: ``FritzBox``-Default ist
+  ``user=""``/``password=""``, also kein klassisches S4-Credential-Default --
+  nur die Adress-Defaults waren das Finding.)
 
 Fehlerbehandlung -- zwei klar getrennte Faelle (Logik wie ``NmapScanError``, S.4c):
 

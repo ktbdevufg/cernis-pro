@@ -1,0 +1,373 @@
+/* Benutzerhandbuch-Ansicht (V3): gerahmte, zweispaltige Seite.
+   Links eine sticky Kategorie-Navigation, rechts ein umrahmter Container mit
+   sticky-Kopfzeile (Kapitelname + Werkzeugleiste) und lesbar begrenztem
+   Fließtext. Nur bestehende Design-Tokens (styles/tokens.css). */
+
+.manual {
+  /* Zweispaltiges Grid: feste Navigation links, Inhalt rechts. Der Gesamtblock
+     darf breiter werden — der Fließtext bleibt INNEN begrenzt (.manual__content). */
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  column-gap: 28px;
+  align-items: start;
+  /* Default-Schriftskalierung; per inline style aus dem State überschrieben. */
+  --manual-fontscale: 1;
+}
+
+/* Linke Spalte: vertikale, sticky Kategorie-Navigation. */
+.manual__toc {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  position: sticky;
+  top: 16px;
+  align-self: start;
+  padding: 12px 16px;
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-accent);
+  border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
+  background: var(--color-card);
+}
+
+.manual__toc-label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-tert);
+}
+
+.manual__toc-list {
+  /* Vertikale Liste (statt horizontaler Wrap-Liste). */
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.manual__toc-link {
+  display: block;
+  width: 100%;
+  padding: 4px 8px;
+  text-align: left;
+  font-size: 14px;
+  color: var(--color-link);
+  background: none;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.manual__toc-link:hover {
+  text-decoration: underline;
+}
+
+.manual__toc-link--aktiv {
+  color: var(--color-accent);
+  font-weight: 600;
+  background: var(--color-accent-border);
+}
+
+.manual__toc-link:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-md);
+}
+
+/* Rechte Spalte: umrahmter Container.
+   KEIN overflow: hidden — das erzeugte sonst einen eigenen Block-/Scroll-
+   Kontext und kappte das sticky der inneren .manual__bar (top: 0 maße dann
+   am Panel-Anfang statt am sichtbaren Rand des scrollenden
+   .function-shell__body). Die abgerundeten Ecken werden deshalb direkt an
+   den Randkindern gelöst (Bar oben, .manual__content unten), nicht durch
+   Clipping am Panel. */
+.manual__panel {
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+/* Kopfzeile, sticky am oberen Rand des scrollenden .function-shell__body. */
+.manual__bar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 26px;
+  background: var(--color-accent-bg);
+  border-bottom: 1px solid var(--color-border);
+  /* Obere Rundung selbst tragen, da das Panel nicht mehr clippt — passend
+     zum Panel-Radius, damit nichts über die Ecken übersteht. */
+  border-top-left-radius: var(--radius-lg);
+  border-top-right-radius: var(--radius-lg);
+}
+
+.manual__chapter {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.manual__tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* Werkzeugleisten-Knöpfe (Lupe, vor/zurück, schließen). */
+.manual__icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 6px;
+  font-size: 14px;
+  color: var(--color-text-sec);
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.manual__icon-btn:hover:not(:disabled) {
+  color: var(--color-text);
+  border-color: var(--color-accent-border);
+}
+
+.manual__icon-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.manual__icon-btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Schriftgrößen-Gruppe. */
+.manual__fontsize {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.manual__font-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 6px;
+  font-size: 13px;
+  color: var(--color-text-sec);
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.manual__font-btn:hover:not(:disabled) {
+  color: var(--color-text);
+  border-color: var(--color-accent-border);
+}
+
+.manual__font-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.manual__font-btn--aktiv {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+  background: var(--color-accent-border);
+}
+
+.manual__font-btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Inline-Suchfeld in der Kopfzeile (kein Overlay). */
+.manual__search {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.manual__search-input {
+  width: 160px;
+  height: 28px;
+  padding: 0 8px;
+  font-size: 13px;
+  color: var(--color-text);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.manual__search-input:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.manual__search-count {
+  font-size: 12px;
+  color: var(--color-text-tert);
+  white-space: nowrap;
+}
+
+/* Dezenter Speicher-Fehler-Hinweis (kein lauter Alarm). */
+.manual__save-error {
+  margin: 0;
+  padding: 8px 26px;
+  font-size: 13px;
+  color: var(--color-text-sec);
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* Textbereich: Innenabstand + lesbar begrenzte Zeilenlänge.
+   Trägt die untere Rundung des Panels, da das Panel nicht mehr clippt
+   (.manual__content ist stets das letzte Kind des Panels). */
+.manual__content {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  padding: 22px 26px;
+  max-width: 680px;
+  border-bottom-left-radius: var(--radius-lg);
+  border-bottom-right-radius: var(--radius-lg);
+}
+
+/* Eine Kategorie: Überschrift + ihre Abschnitte. */
+.manual__category {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.manual__category-title {
+  margin: 0;
+  padding-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-accent-strong);
+  border-bottom: 1px solid var(--color-accent-border);
+}
+
+/* Ein Handbuch-Abschnitt (ein help_content-Eintrag). */
+.manual__section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.manual__section-title {
+  margin: 0;
+  /* Skaliert mit der Schriftgrößen-Stufe — nur der Handbuch-Text, nicht die App. */
+  font-size: calc(18px * var(--manual-fontscale));
+  font-weight: 600;
+  color: var(--color-accent-strong);
+}
+
+/* Vorläufig-Hinweis: dezente Zeile, ehrlich kenntlich, kein lauter Alarm. */
+.manual__vorlaeufig {
+  margin: 0;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--color-text-sec);
+  background: var(--color-card);
+  border-left: 3px solid var(--color-accent-border);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+}
+
+/* Fließtext-Absatz: ruhige Zeilenhöhe, Haupttext nutzt die Vordergrundfarbe.
+   font-size skaliert mit der gewählten Stufe. */
+.manual__paragraph {
+  margin: 0;
+  font-size: calc(15px * var(--manual-fontscale));
+  line-height: 1.6;
+  color: var(--color-text);
+}
+
+/* Suchtreffer-Hervorhebung (über Tokens, kein dangerouslySetInnerHTML). */
+.manual__mark {
+  color: var(--color-text);
+  background: var(--color-accent-border);
+  border-radius: var(--radius-md);
+  padding: 0 1px;
+}
+
+.manual__mark--aktiv {
+  color: var(--color-text);
+  background: var(--color-accent);
+}
+
+/* Weiterführend-Links: kleine Liste externer Internet-Quellen. */
+.manual__links {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.manual__links-label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-tert);
+}
+
+.manual__links-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.manual__link {
+  font-size: 14px;
+  color: var(--color-link);
+}
+
+.manual__link:hover {
+  text-decoration: underline;
+}
+
+/* Responsiv: schmale Fenster -> eine Spalte, Navigation rückt nach oben und
+   wird wieder horizontal. Der Rahmen bleibt. */
+@media (max-width: 720px) {
+  .manual {
+    grid-template-columns: 1fr;
+    row-gap: 16px;
+  }
+
+  .manual__toc {
+    position: static;
+    border-left: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+  }
+
+  .manual__toc-list {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 6px 16px;
+  }
+
+  .manual__toc-link {
+    width: auto;
+    padding: 2px 6px;
+  }
+}

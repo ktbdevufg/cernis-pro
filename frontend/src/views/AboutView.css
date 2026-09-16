@@ -1,0 +1,360 @@
+/* Ansicht "Ueber CERNIS PRO": Uebersicht in vier Abschnitten mit Einstieg in den
+   Lizenz-Browser. Nur bestehende Design-Tokens (styles/tokens.css), keine neuen
+   Farben, keine externe Schrift. */
+
+.about {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 1200px;
+}
+
+/* Kopf der Aufstellung: Produktversion, Plattform, Erzeugungszeitpunkt. */
+.about__kopf {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-accent);
+  border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
+  background: var(--color-card);
+}
+
+.about__section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg);
+  min-width: 0;
+}
+
+.about__section-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+/* Der einordnende Text eines Abschnitts -- traegt die Erklaerung, warum eine
+   Angabe fehlt oder nicht zutrifft. */
+.about__section-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--color-text-sec);
+  max-width: 78ch;
+}
+
+.about__untertitel {
+  margin: 8px 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-tert);
+}
+
+.about__felder {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.about__zeile {
+  display: flex;
+  gap: 10px;
+  padding: 3px 0;
+  font-size: 13px;
+}
+
+.about__label {
+  flex: 0 0 190px;
+  color: var(--color-text-tert);
+}
+
+.about__wert {
+  flex: 1;
+  min-width: 0;
+  color: var(--color-text);
+  word-break: break-word;
+}
+
+/* Nicht belegte Angabe: ausdrueckliche Aussage, nie ein leeres Feld. */
+.about__wert--leer {
+  color: var(--color-text-tert);
+  font-style: italic;
+}
+
+.about__mono {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+.about__hinweis {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--color-text-sec);
+}
+
+/* --- Lade- und Fehlerzustand: sichtbar und ehrlich --- */
+
+.about__laden {
+  margin: 0;
+  padding: 24px 0;
+  font-size: 14px;
+  color: var(--color-text-sec);
+}
+
+.about__fehler {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--sev-high-bd);
+  border-radius: var(--radius-lg);
+  background: var(--sev-high-bg);
+}
+
+.about__fehler-titel {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--sev-high-text);
+}
+
+/* Das detail des Servers im WORTLAUT (die geprueften Pfade) -- unveraendert,
+   mit erhaltenen Umbruechen. */
+.about__fehler-detail {
+  margin: 0;
+  padding: 10px 12px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.about__fehler-detail-leer {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-sec);
+}
+
+/* --- Volltext des eigenen Werks (aufklappbar) --- */
+
+.about__details {
+  margin-top: 4px;
+}
+
+.about__summary {
+  font-size: 13px;
+  color: var(--color-link);
+  cursor: pointer;
+}
+
+.about__summary:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-md);
+}
+
+/* Lizenztext ZEICHENGLEICH: feste Schriftbreite, Umbrueche erhalten. */
+.about__text {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  max-height: 420px;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* --- Listen (Daten, native Eintraege, offene Angaben) --- */
+
+.about__liste {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.about__listen-eintrag {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  padding: 5px 0;
+  font-size: 13px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.about__daten-name {
+  flex: 1;
+  min-width: 0;
+  color: var(--color-text);
+  word-break: break-word;
+}
+
+.about__daten-lizenz {
+  flex: 0 0 auto;
+  color: var(--color-text-sec);
+  font-size: 12px;
+}
+
+/* --- Abschnitt der vorausgesetzten Programme --- */
+
+.about__programme {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.about__programm {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-card);
+}
+
+.about__programm-kopf {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.about__programm-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+  word-break: break-word;
+}
+
+/* Das Vorhandensein ist eine EIGENE Angabe, kein Fehlerzeichen. "vorhanden"
+   gruen, "fehlt" gedeckt-orange (Hinweis, nicht Alarm), "nicht_zutreffend"
+   neutral -- letzteres ist ein benannter Zustand, keine Luecke. */
+.about__vorhanden {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  font-size: 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-sec);
+  background: var(--color-bg);
+  white-space: nowrap;
+}
+
+.about__vorhanden--vorhanden {
+  color: var(--status-active-text);
+  background: var(--status-active-bg);
+  border-color: var(--status-active-bd);
+}
+
+.about__vorhanden--fehlt {
+  color: var(--sev-med-text);
+  background: var(--sev-med-bg);
+  border-color: var(--sev-med-bd);
+}
+
+.about__vorhanden--nicht_zutreffend {
+  color: var(--color-text-tert);
+  background: var(--color-bar);
+  border-color: var(--color-border);
+}
+
+/* "nicht ermittelbar" ist KEIN Fehler und KEIN "fehlt" (Befund 54b): der Eintrag
+   ist auf dieser Plattform gemeint, es gibt hier nur keine Pruefung, die ihn
+   beantworten koennte. Deshalb neutral wie "nicht zutreffend" und ausdruecklich
+   nicht in der Warnfarbe von "fehlt" -- die Farbe darf keine Aussage machen, die
+   der Text gerade verweigert. Vom neutralen Nachbarn unterscheidet ihn allein die
+   gestrichelte Kante: ungeklaert, nicht abgeschlossen. */
+.about__vorhanden--nicht_ermittelbar {
+  color: var(--color-text-tert);
+  background: var(--color-bar);
+  border-color: var(--color-border);
+  border-style: dashed;
+}
+
+/* --- Native Ebene --- */
+
+.about__nativ {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-card);
+}
+
+/* Die Eintraege der nativen Ebene, beschriftet statt als rohes JSON (Fund 3).
+   Dasselbe Kartenmuster wie .about__programm im Abschnitt darunter -- die
+   Uebersicht zeigt beide Listen damit in derselben Form. */
+
+.about__nativ-liste {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.about__nativ-eintrag {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+}
+
+/* Der Weg von einer Zahl zu den gezaehlten Eintraegen (Fund 2, Weg B). Kein
+   neuer Farbwert -- dieselben Tokens wie die uebrigen Bedienelemente. */
+.about__schalter {
+  align-self: flex-start;
+  margin-top: 8px;
+  padding: 6px 12px;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--color-text);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.about__schalter:hover {
+  border-color: var(--color-accent);
+}
+
+.about__schalter:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}

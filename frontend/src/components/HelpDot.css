@@ -1,0 +1,174 @@
+/* "?"-Hilfe-Punkt + Popup (CERNIS PRO 2.0)
+   Ausschließlich Farben/Radien aus tokens.css (var(--color-...), --radius-...) —
+   keine festen Farben. Der Knopf ist ein dezenter Umriss-Kreis, der erst bei
+   Hover Teal (Akzent) annimmt (Variante B). Das Popup hängt absolut unter dem
+   Knopf am relativ positionierten Wrapper. */
+
+.help-dot-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+/* Dezenter Umriss-Kreis mit "?"; Farbe erst bei Hover Teal. */
+.help-dot {
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-border);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--color-text-tert);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+
+.help-dot:hover {
+  color: var(--color-accent);
+  border-color: var(--color-accent-border);
+}
+
+.help-dot:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Popup: hängt unter dem Knopf, mit kleinem Abstand. Die horizontale Ausrichtung
+   (left/right) kommt aus den Richtungs-Modifiern — je nach Kanten-Erkennung. */
+.help-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  z-index: 60;
+  width: 340px;
+  max-width: min(340px, 86vw);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.14);
+  text-align: left;
+}
+
+/* Öffnungsrichtung (Kanten-Erkennung in HelpDot.jsx): rechts = Default (left:0),
+   links = bei randnaher Kachel, damit die Box nicht über den Viewport ragt. */
+.help-pop--rechts {
+  left: 0;
+  right: auto;
+}
+
+.help-pop--links {
+  right: 0;
+  left: auto;
+}
+
+.help-pop__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.help-pop__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+/* Kleiner Akzent-Punkt vor dem Titel. */
+.help-pop__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  flex: 0 0 auto;
+}
+
+.help-pop__close {
+  border: none;
+  background: transparent;
+  color: var(--color-text-tert);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.help-pop__close:hover {
+  color: var(--color-text-sec);
+}
+
+.help-pop__close:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.help-pop__body {
+  padding: 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-text-sec);
+}
+
+.help-pop__foot {
+  padding: 0 12px 12px;
+}
+
+/* Schlichter Umriss-Knopf "Mehr im Handbuch" (Layout 2). */
+.help-pop__more {
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-accent-strong);
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.help-pop__more:hover {
+  background: var(--color-accent-bg);
+}
+
+.help-pop__more:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Vertiefungs-Links: nur wenn der Eintrag welche hat. Dezent, mit oberer
+   Trennlinie und etwas Abstand zum Knopf. */
+.help-pop__links {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-border);
+}
+
+.help-pop__link {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--color-link);
+  text-decoration: none;
+}
+
+.help-pop__link:hover {
+  text-decoration: underline;
+}
+
+/* Reduzierte Bewegung: die dezenten Farb-/Hintergrund-Übergänge abschalten. */
+@media (prefers-reduced-motion: reduce) {
+  .help-dot,
+  .help-pop__more {
+    transition: none;
+  }
+}

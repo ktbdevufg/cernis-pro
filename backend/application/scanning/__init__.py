@@ -2,6 +2,7 @@
 
 from application.scanning.errors import ScanningApplicationError
 from application.scanning.use_cases import (
+    GetArpTable,
     GetScanDetail,
     GetScanHistory,
     LookupVendor,
@@ -9,6 +10,7 @@ from application.scanning.use_cases import (
 )
 
 __all__ = [
+    "GetArpTable",
     "GetScanDetail",
     "GetScanHistory",
     "LookupVendor",

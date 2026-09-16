@@ -1,0 +1,329 @@
+/* Scan-Tabelle: dicht, technisch, mit stickyem Kopf */
+
+.scan-table {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+}
+
+.scan-table__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+/* Monospace für IP/MAC/Ports/Ping — System-Monospace als Fallback. */
+.scan-table__mono {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+/* Kopfzeile bleibt beim Scrollen sichtbar. */
+.scan-table__head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.scan-table__th {
+  position: sticky;
+  top: 0;
+  padding: 9px 12px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-tert);
+  background: var(--color-bar);
+  border-bottom: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+.scan-table__th--status {
+  width: 28px;
+  padding-right: 0;
+}
+
+.scan-table__th--ping {
+  text-align: right;
+}
+
+/* Visuell verborgen, für Screenreader erhalten. */
+.scan-table__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Zwischenüberschrift als volle Zeile. */
+.scan-table__section-heading {
+  padding: 14px 12px 6px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-sec);
+  background: var(--color-bg);
+}
+
+.scan-table__row {
+  border-bottom: 1px solid var(--color-border);
+  cursor: pointer;
+}
+
+/* Gehoverte Zeile: leichte Akzentfläche statt neutralem Grau. */
+.scan-table__row:hover {
+  background: var(--color-accent-bg);
+}
+
+/* Gewählte Zeile: getönt, zeigt das Gerät im Panel. position: relative trägt
+   die absolute Wanne; die linke Markierung liefert die Wanne (kein Rand mehr). */
+.scan-table__row--aktiv,
+.scan-table__row--aktiv:hover {
+  position: relative;
+  background: var(--color-accent-bg);
+}
+
+/* Etwas Luft links in der ersten Zelle, damit die Wanne den Inhalt nicht
+   überlappt. */
+.scan-table__row--aktiv .scan-table__cell--status {
+  position: relative;
+  padding-left: 14px;
+}
+
+/* Die "Wanne" als Aktiv-Marker: vertikal, in der Mitte gleichmäßig, an den
+   Enden spitz auslaufend, Wölbung nach innen. Gefüllter SVG-Pfad in
+   Akzentfarbe (analog zur Reiter-Wanne, um 90° gedreht). */
+.scan-row__wanne {
+  position: absolute;
+  left: 1px;
+  top: 3px;
+  bottom: 3px;
+  width: 10px;
+  pointer-events: none;
+}
+
+.scan-row__wanne svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.scan-row__wanne path {
+  fill: var(--color-accent);
+  stroke: none;
+}
+
+.scan-table__cell {
+  padding: 9px 12px;
+  color: var(--color-text);
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.scan-table__cell--status {
+  padding-right: 0;
+}
+
+.scan-table__cell--os {
+  color: var(--color-text-sec);
+}
+
+.scan-table__cell--ping {
+  text-align: right;
+  color: var(--color-text-sec);
+}
+
+/* Statuspunkt: dezent getönt nach Auffälligkeit. */
+.scan-table__dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--sev-low-bd);
+}
+
+/* Für späteren Gebrauch reserviert, aktuell nicht am Böppel verwendet. */
+.scan-table__dot--auffaellig {
+  background: var(--sev-med-bd);
+}
+
+/* Aktiv (source === "ping"): sattes Grün + weiche Aura (zarter Schein, kein Ring). */
+.scan-table__dot--aktiv {
+  background: var(--status-aktiv);
+  box-shadow: 0 0 5px 1px color-mix(in srgb, var(--status-aktiv) 60%, transparent);
+}
+
+/* Inaktiver Import (source != "ping"): gefülltes, dunkles Grün, kein Schatten. */
+.scan-table__dot--inaktiv {
+  background: var(--status-inaktiv);
+}
+
+/* Vendor mit Geräte-Icon. */
+.scan-table__vendor {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.scan-table__vendor-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--color-text-tert);
+}
+
+/* Hostname mit optionalem Hinweis-Pill. */
+.scan-table__hostname {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* IP-Zelle: IP (mono) + "neu"-Pille sauber nebeneinander. */
+.scan-table__ip-zelle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.scan-table__pill {
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  /* Pille nicht mono: sie sitzt in der mono IP-Zelle, soll aber Sans tragen. */
+  font-family: sans-serif;
+}
+
+.scan-table__pill--neu {
+  color: var(--color-accent);
+  background: var(--color-accent-bg);
+  border-color: var(--color-accent-border);
+}
+
+.scan-table__pill--geaendert {
+  color: var(--color-accent);
+  background: transparent;
+  border-color: var(--color-accent-border);
+  opacity: 0.85;
+}
+
+/* Achse-B-Pillen (ADR 0029+0030): Bewertung „auffällig"/„kritisch" aus den
+   Severity-Tokens. Border + Text volle Tokenfarbe, Hintergrund ~18% Alpha.
+   Beide Tokens tragen Light- und Dark-Werte. */
+.scan-table__pill--auffaellig {
+  color: var(--severity-auffaellig);
+  background: color-mix(in srgb, var(--severity-auffaellig) 18%, transparent);
+  border-color: var(--severity-auffaellig);
+}
+
+.scan-table__pill--kritisch {
+  color: var(--severity-kritisch);
+  background: color-mix(in srgb, var(--severity-kritisch) 18%, transparent);
+  border-color: var(--severity-kritisch);
+}
+
+/* Trenner zwischen Achse B und Achse A: dünner, dezenter vertikaler Strich.
+   Wird nur gerendert, wenn beide Seiten eine Pille zeigen. */
+.scan-table__pill-trenner {
+  display: inline-block;
+  width: 1px;
+  height: 14px;
+  background: var(--color-border);
+  margin: 0 2px;
+}
+
+/* Port-Chips. */
+.scan-table__ports {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+/* Port-Chips: sehr dezent getönt im Markenton, ruhig nicht grell. */
+.scan-table__chip {
+  padding: 1px 6px;
+  font-size: 11px;
+  color: var(--color-accent);
+  background: var(--color-accent-bg);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+}
+
+.scan-table__chip--mehr {
+  color: var(--color-text-tert);
+  background: transparent;
+  border-color: var(--color-border);
+}
+
+.scan-table__chip--ndi {
+  color: var(--chip-ndi-text);
+  background: var(--chip-ndi-bg);
+  border-color: var(--chip-ndi-border);
+  font-weight: 500;
+}
+
+.scan-table__chip--mdns {
+  color: var(--chip-mdns-text);
+  background: var(--chip-mdns-bg);
+  border-color: var(--chip-mdns-border);
+}
+
+.scan-table__chip--ssdp {
+  color: var(--chip-ssdp-text);
+  background: var(--chip-ssdp-bg);
+  border-color: var(--chip-ssdp-border);
+}
+
+/* Geflaggte Ports (Achse B, Variante C): orange „auffällig" / rot „kritisch",
+   Token-Farben wie die Achse-B-Pillen (Border + Text voll, bg ~18% Alpha). */
+.scan-table__chip--auffaellig {
+  color: var(--severity-auffaellig);
+  background: color-mix(in srgb, var(--severity-auffaellig) 18%, transparent);
+  border-color: var(--severity-auffaellig);
+}
+
+.scan-table__chip--kritisch {
+  color: var(--severity-kritisch);
+  background: color-mix(in srgb, var(--severity-kritisch) 18%, transparent);
+  border-color: var(--severity-kritisch);
+}
+
+.scan-table__ports-leer {
+  color: var(--color-text-tert);
+}
+
+/* Sortierbare Spaltenköpfe (IP, Hersteller, Hostname, OS). */
+.scan-table__th--sortierbar {
+  cursor: pointer;
+  user-select: none;
+}
+
+.scan-table__th--sortierbar:hover {
+  color: var(--color-accent);
+}
+
+.scan-table__th--sortierbar:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
+}
+
+/* Dezenter Richtungs-Indikator hinter dem Spaltentext. */
+.scan-table__sort-pfeil {
+  margin-left: 0.35em;
+  opacity: 0.7;
+  font-size: 0.85em;
+}

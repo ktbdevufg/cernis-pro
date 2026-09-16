@@ -170,3 +170,43 @@ def test_get_never_leaks_shodan_key_plaintext(
     raw = client.get("/api/settings").text
     assert "leaktest123" not in raw  # Klartext taucht NIE auf
     assert REDACTED in raw  # stattdessen maskiert
+
+
+# ── cpnetcheck_token gilt als Secret (ADR 0014 Block 2b, SECRET_KEYS) ─────
+
+
+def test_cpnetcheck_token_is_secret_pure() -> None:
+    # Reine Domaenen-Behauptung: der neue Key ist in SECRET_KEYS -> is_secret True.
+    from domain.settings import is_secret
+
+    assert is_secret("cpnetcheck_token") is True
+
+
+def test_cpnetcheck_token_behaves_as_secret_end_to_end(
+    client: TestClient, secrets: KeyringSecretStore
+) -> None:
+    # Via UpdateSetting (normaler Pfad) abgelehnt: ein Secret-Key gehoert dort nicht hin.
+    assert client.put("/api/settings/cpnetcheck_token", json={"value": "x"}).status_code == 400
+    # Via UpdateSecret (Secret-Pfad) setzbar.
+    assert (
+        client.put("/api/settings/secrets/cpnetcheck_token", json={"value": "tok-abc"}).status_code
+        == 200
+    )
+    # In GetSettings redigiert -- der Klartext taucht NIE auf.
+    body = client.get("/api/settings").json()
+    assert body["cpnetcheck_token"] == REDACTED
+    assert "tok-abc" not in str(body)
+    # Der echte Wert liegt getrennt im SecretStore.
+    assert secrets.get("cpnetcheck_token") == "tok-abc"
+
+
+def test_cpnetcheck_url_is_plain_setting(client: TestClient) -> None:
+    # Die NICHT-geheime URL ist ein normales Setting -- ueber UpdateSetting setzbar + sichtbar.
+    assert (
+        client.put(
+            "/api/settings/cpnetcheck_url", json={"value": "https://eigen.example"}
+        ).status_code
+        == 200
+    )
+    body = client.get("/api/settings").json()
+    assert body["cpnetcheck_url"] == "https://eigen.example"

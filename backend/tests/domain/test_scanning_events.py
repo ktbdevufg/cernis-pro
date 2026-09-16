@@ -13,6 +13,7 @@ from domain.scanning import (
     HostFound,
     Info,
     PhaseChanged,
+    PortInterception,
     Progress,
     ScanCompleted,
     ScanError,
@@ -78,3 +79,18 @@ def test_events_carry_their_payload() -> None:
     assert PhaseChanged(phase="discovery", status="done", alive_count=3).alive_count == 3
     assert HostEnriched(host=EnrichedHost(ip="1.2.3.4", mac="AA")).host.ip == "1.2.3.4"
     assert PhaseChanged(phase="enrich", status="running", total=7).total == 7
+
+
+def test_scan_completed_carries_the_interception_result() -> None:
+    """``ScanCompleted`` traegt das Gegenproben-Ergebnis mit (Befund 53, S86-A11).
+
+    Additiv: ohne Angabe steht der Default "nicht geprueft, leere Portliste" --
+    bestehende Erzeuger bleiben gueltig.
+    """
+    assert ScanCompleted(total_found=1).interception == PortInterception()
+    mit_befund = ScanCompleted(
+        total_found=2,
+        interception=PortInterception(checked=True, intercepted_ports=(25, 143)),
+    )
+    assert mit_befund.total_found == 2
+    assert mit_befund.interception.intercepted_ports == (25, 143)

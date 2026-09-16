@@ -1,0 +1,539 @@
+/* Scan-Detail-Panel: seitliches Panel rechts, eigener vertikaler Scroll */
+
+.scan-detail {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 380px;
+  width: 380px;
+  min-height: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+  overflow: hidden;
+}
+
+/* Monospace für IP/MAC/Ports/Ping — System-Monospace als Fallback. */
+.scan-detail__mono {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+/* Kopf: Titel + IP links, Schließen rechts. */
+.scan-detail__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 14px 12px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bar);
+  flex-shrink: 0;
+}
+
+.scan-detail__heading {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.scan-detail__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text);
+  word-break: break-word;
+}
+
+.scan-detail__subtitle {
+  font-size: 13px;
+  color: var(--color-text-sec);
+}
+
+.scan-detail__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  color: var(--color-text-sec);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.scan-detail__close:hover {
+  color: var(--color-accent);
+  border-color: var(--color-accent-border);
+  background: var(--color-accent-bg);
+}
+
+.scan-detail__close:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Körper: scrollt unabhängig von der Tabelle. */
+.scan-detail__body {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 14px 18px;
+}
+
+.scan-detail__section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.scan-detail__section-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-tert);
+}
+
+/* --- Identität: Feld-Zeilen --- */
+.scan-detail__fields {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.scan-detail__field {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.scan-detail__field-label {
+  color: var(--color-text-sec);
+  flex-shrink: 0;
+}
+
+.scan-detail__field-value {
+  color: var(--color-text);
+  text-align: right;
+  word-break: break-word;
+}
+
+/* Statuszeile in Sprache, dezent getönt. */
+.scan-detail__status {
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  font-size: 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+}
+
+.scan-detail__status--bekannt {
+  color: var(--color-text-sec);
+  background: var(--color-bar);
+  border-color: var(--color-border);
+}
+
+.scan-detail__status--neu {
+  color: var(--sev-med-text);
+  background: var(--sev-med-bg);
+  border-color: var(--sev-med-bd);
+}
+
+.scan-detail__status--notable {
+  color: var(--sev-low-text);
+  background: var(--sev-low-bg);
+  border-color: var(--sev-low-bd);
+}
+
+/* --- Einordnung: Segmented Control (wertende Einschätzung) --- */
+.scan-detail__trust {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.scan-detail__trust-heading {
+  font-size: 12px;
+  color: var(--color-text-sec);
+}
+
+/* Drei zusammenhängende Knöpfe: gemeinsamer Rahmen, geteilte Trennlinien. */
+.scan-detail__trust-group {
+  display: flex;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.scan-detail__trust-btn {
+  flex: 1;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--color-text-sec);
+  background: transparent;
+  border: none;
+  border-left: 1px solid var(--color-border);
+  cursor: pointer;
+}
+
+.scan-detail__trust-btn:first-child {
+  border-left: none;
+}
+
+.scan-detail__trust-btn:hover:not(.scan-detail__trust-btn--aktiv) {
+  background: var(--color-bar);
+  color: var(--color-text);
+}
+
+.scan-detail__trust-btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+/* Aktiver Zustand: Türkis-Akzent (Einordnung ist kein Urteil — kein Severity-
+   Orange/Rot hier). */
+.scan-detail__trust-btn--aktiv {
+  color: var(--color-accent-strong);
+  background: var(--color-accent-bg);
+  font-weight: 500;
+}
+
+.scan-detail__trust-error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--sev-high-text);
+}
+
+/* Abweichungs-Feststellung: ruhiger, kleiner Hinweis (kein lautes Badge).
+   Dezenter Severity-Orange-Akzent über die schon genutzten notable-Tokens
+   (--sev-low-*) und den auffällig-Streifen links — keine neu kodierte Farbe. */
+.scan-detail__deviation {
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--sev-low-text);
+  background: var(--sev-low-bg);
+  border: 1px solid var(--sev-low-bd);
+  border-left: 2px solid var(--severity-auffaellig);
+  border-radius: var(--radius-md);
+}
+
+/* Label leicht abgesetzt (kräftiger), der Feststellungstext bleibt normal. */
+.scan-detail__deviation-label {
+  font-weight: 600;
+}
+
+/* --- Offene Ports --- */
+.scan-detail__ports {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.scan-detail__port {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 0;
+  font-size: 13px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.scan-detail__port:last-child {
+  border-bottom: none;
+}
+
+/* Hauptzeile eines Ports: Nummer, Proto, Service, Nachschlagen-Link in einer
+   Reihe (wie zuvor). Der Quittier-Bereich liegt darunter (zweite Zeile). */
+.scan-detail__port-haupt {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+/* Severity-Tönung der Port-Zeile (Achse B): dezenter farbiger Streifen links,
+   Token-Farben wie die Tabellen-Chips. Quittiert übertönt das gedämpft. */
+.scan-detail__port--auffaellig {
+  margin-left: -8px;
+  padding-left: 8px;
+  border-left: 2px solid var(--severity-auffaellig);
+}
+
+.scan-detail__port--kritisch {
+  margin-left: -8px;
+  padding-left: 8px;
+  border-left: 2px solid var(--severity-kritisch);
+}
+
+/* Quittierter Port: gedämpft, Severity-Markierung neutralisiert. Die Portnummer
+   wird leicht durchgestrichen-artig zurückgenommen (dezent, kein Lärm). */
+.scan-detail__port--quittiert {
+  border-left-color: var(--color-border);
+  opacity: 0.7;
+}
+
+.scan-detail__port--quittiert .scan-detail__port-num {
+  text-decoration: line-through;
+  color: var(--color-text-sec);
+}
+
+/* Quittier-Bereich (zweite Zeile): Knopf + ggf. Fehlerhinweis. */
+.scan-detail__ack {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Quittier-Knopf: Geometrie wie scan-detail__lookup-Umfeld, aber als Pille mit
+   dezenter Severity-Tönung. Sekundär, nicht laut. */
+.scan-detail__ack-btn {
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--color-text-sec);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.scan-detail__ack-btn:hover:not(:disabled) {
+  border-color: var(--color-accent-border);
+  background: var(--color-accent-bg);
+}
+
+.scan-detail__ack-btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.scan-detail__ack-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* Severity-getönte Quittier-Knöpfe: Rand/Text in der Tokenfarbe, ruhiger
+   Hintergrund. Spiegelt die Achse-B-Tokens der Tabelle. */
+.scan-detail__ack-btn--auffaellig {
+  color: var(--severity-auffaellig);
+  border-color: var(--severity-auffaellig);
+}
+
+.scan-detail__ack-btn--auffaellig:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--severity-auffaellig) 14%, transparent);
+}
+
+.scan-detail__ack-btn--kritisch {
+  color: var(--severity-kritisch);
+  border-color: var(--severity-kritisch);
+}
+
+.scan-detail__ack-btn--kritisch:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--severity-kritisch) 14%, transparent);
+}
+
+/* Dezenter „wird beim nächsten Scan wirksam"-Hinweis nach erfolgreichem Klick.
+   Klein/sekundär wie der Speichern-Hinweis. */
+.scan-detail__ack-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+/* Fehlerhinweis am Port: dezent, in der Fehlerfarbe (med-Token wie anderswo). */
+.scan-detail__ack-error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--sev-high-text);
+}
+
+.scan-detail__port-num {
+  color: var(--color-text);
+  min-width: 48px;
+}
+
+.scan-detail__port-proto {
+  color: var(--color-text-sec);
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.03em;
+}
+
+.scan-detail__port-service {
+  color: var(--color-text-sec);
+}
+
+/* Nachschlagen-Link: dezent, am rechten Rand. */
+.scan-detail__lookup {
+  margin-left: auto;
+  padding: 0;
+  font-size: 12px;
+  color: var(--color-link);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.scan-detail__lookup:hover {
+  text-decoration: underline;
+}
+
+.scan-detail__lookup:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.scan-detail__empty {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-tert);
+}
+
+/* --- Angekündigte Dienste (mDNS/SSDP) --- */
+.scan-detail__dienste {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.scan-detail__dienste-heading {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-tert);
+}
+
+.scan-detail__dienste-zeile {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.scan-detail__dienste-label {
+  color: var(--color-text-sec);
+}
+
+.scan-detail__chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* Chip-Geometrie eigenständig in dieser Datei (keine Kopplung an ScanTable.css),
+   Farben aus denselben Tokens wie die Tabelle. */
+.scan-detail__chip {
+  padding: 1px 6px;
+  font-size: 11px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.scan-detail__chip--mdns {
+  color: var(--chip-mdns-text);
+  background: var(--chip-mdns-bg);
+  border-color: var(--chip-mdns-border);
+}
+
+.scan-detail__chip--ssdp {
+  color: var(--chip-ssdp-text);
+  background: var(--chip-ssdp-bg);
+  border-color: var(--chip-ssdp-border);
+}
+
+/* --- Gerätenotizen: Formular --- */
+.scan-detail__form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.scan-detail__form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.scan-detail__form-label {
+  font-size: 12px;
+  color: var(--color-text-sec);
+}
+
+.scan-detail__input,
+.scan-detail__textarea {
+  width: 100%;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-sizing: border-box;
+}
+
+.scan-detail__textarea {
+  resize: vertical;
+  min-height: 72px;
+}
+
+.scan-detail__input::placeholder,
+.scan-detail__textarea::placeholder {
+  color: var(--color-text-tert);
+}
+
+.scan-detail__input:focus-visible,
+.scan-detail__textarea:focus-visible {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-bg);
+}
+
+/* Speichern: Akzent-Umrandung (Platzhalter, ohne Funktion). */
+.scan-detail__save {
+  align-self: flex-start;
+  padding: 7px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-accent-strong);
+  background: transparent;
+  border: 1px solid var(--color-accent-strong);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.scan-detail__save:hover {
+  background: var(--color-accent-bg);
+}
+
+.scan-detail__save:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.scan-detail__save-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-text-tert);
+}

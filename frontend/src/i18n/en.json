@@ -1,0 +1,2649 @@
+{
+  "npcap": {
+    "title": "Install Npcap",
+    "inlineHint": "This feature requires Npcap. Without Npcap, packet capture is not possible.",
+    "installBtn": "Install Npcap",
+    "bodyMissing": "CERNIS uses Npcap for passive capture of SNI, traffic and topology. Npcap is a separate program by the Nmap developers; its source code is viewable, but it is not open-source software. The free licence limits the number of installations — the Npcap licence terms are authoritative. You download and install it yourself; CERNIS does not bundle it.",
+    "downloadBtn": "Go to the Npcap download page"
+  },
+  "werkzeug": {
+    "nichtVerfuegbar": "A required system program is not available. No reason was provided."
+  },
+  "app": {
+    "version": "v2.0",
+    "laedt": "Loading …"
+  },
+  "header": {
+    "manual": "Manual",
+    "settings": "Settings",
+    "ueber": "About CERNIS PRO",
+    "liveOne": "Live monitoring active",
+    "liveMany": "{{count}} monitorings active",
+    "liveZurAnsicht": "Open logging view",
+    "outboundRecOne": "Outbound recording running",
+    "outboundRecZurAnsicht": "Go to outbound contacts",
+    "dnsRecOne": "DNS recording running",
+    "dnsRecZurAnsicht": "Go to DNS guard",
+    "dnsRecCount": "{{count}} queries",
+    "outboundRecRest": {
+      "tage": "{{value}} d",
+      "stunden": "{{value}} h",
+      "minuten": "{{value}} min",
+      "sekunden": "{{value}} s",
+      "zwei": "{{erste}} {{zweite}} left",
+      "eine": "{{erste}} left",
+      "jetzt": "ending now"
+    },
+    "home": "Go to home"
+  },
+  "settings": {
+    "title": "Settings",
+    "sectionGeneral": "General",
+    "language": "Language",
+    "sectionTraffic": "Traffic",
+    "autoRefresh": "Auto-refresh",
+    "refreshOff": "Off",
+    "saved": "Saved",
+    "fritzbox": {
+      "title": "FRITZ!Box",
+      "host": "Address",
+      "hostPlaceholder": "fritz.box",
+      "user": "User (optional)",
+      "userPlaceholder": "e.g. admin",
+      "password": "Password",
+      "passwordIsSet": "Password saved – leave empty to keep it.",
+      "passwordRemove": "Remove password",
+      "save": "Save",
+      "loading": "Loading …",
+      "loadError": "Could not load settings.",
+      "saveError": "Saving failed."
+    },
+    "auffaelligkeit": {
+      "upload": "Upload file",
+      "uploadHint": "A .txt with port numbers (one per line, comma/semicolon allowed, # for comments).",
+      "uploadTooLarge": "File too large (max. 1 MB).",
+      "uploadReadError": "File could not be read.",
+      "previewTitle": "Preview",
+      "previewValidCount": "{{count}} valid ports detected",
+      "previewInvalidLines": "{{count}} invalid lines ignored",
+      "previewAlreadyPresent": "{{count}} of them already in the list",
+      "previewNone": "No valid ports in the file.",
+      "previewEmptyHint": "With no valid ports there is nothing to add or replace.",
+      "previewAdd": "Add",
+      "previewReplace": "Replace",
+      "previewCancel": "Cancel",
+      "title": "What is suspicious?",
+      "loading": "Loading …",
+      "loadError": "Could not load settings.",
+      "saveError": "Saving failed.",
+      "suspiciousTitle": "Suspicious ports",
+      "criticalTitle": "Critical ports",
+      "colPort": "Port",
+      "colService": "Service",
+      "serviceUnknown": "—",
+      "addPortPlaceholder": "Add port",
+      "add": "Add",
+      "remove": "Remove",
+      "reset": "Reset to defaults",
+      "empty": "No ports in this list.",
+      "portInvalid": "Please enter a port between 1 and 65535.",
+      "portDuplicate": "This port is already in the list.",
+      "thresholdTitle": "Many high ports",
+      "thresholdLabel": "Suspicious above",
+      "thresholdUnit": "open ports above 1024",
+      "thresholdHint": "NAS and IoT devices legitimately keep a few high ports open; only many of them become unusual.",
+      "rulesTitle": "Rules on/off",
+      "rulesHint": "Enable or disable individual suspiciousness rules. Disabled rules are no longer evaluated.",
+      "rulesEmpty": "No rules available.",
+      "honestyTitle": "To be honest",
+      "honestyText": "The critical backdoor list is historically useful but barely catches modern malware: today it uses 443, DNS or dynamic ports. A hit is a clear signal, but not a full malware scan – no false sense of security.",
+      "disabledHint_one": "1 port is permanently ignored.",
+      "disabledHint_other": "{{count}} ports are permanently ignored.",
+      "portActive": "Port is evaluated",
+      "portInactive": "Port is ignored"
+    },
+    "dnswatch": {
+      "title": "DNS watchdog",
+      "loading": "Loading …",
+      "loadError": "Settings could not be loaded.",
+      "saveError": "Saving failed.",
+      "dohTitle": "Known DoH providers",
+      "dohHint": "IPs of known DNS-over-HTTPS providers. Matches are only flagged heuristically as “possible DoH”, not as suspicious.",
+      "addPlaceholder": "Add IP address",
+      "add": "Add",
+      "remove": "Remove",
+      "listEmpty": "No IPs in this list.",
+      "ipInvalid": "Please enter a valid IPv4 or IPv6 address.",
+      "ipDuplicate": "This IP is already in the list."
+    },
+    "nav": {
+      "general": "General",
+      "startseite": "Home page",
+      "fritzbox": "FRITZ!Box",
+      "auffaelligkeit": "What is suspicious?",
+      "dnswatch": "DNS watchdog",
+      "trafficDarstellung": "Traffic display",
+      "defaultcreds": "Default credentials",
+      "defaultcredsList": "Default credentials list",
+      "captureAccess": "Capture access",
+      "wartung": "Maintenance"
+    },
+    "startseite": {
+      "title": "Home page",
+      "hint": "Disabled areas are hidden on the home page. No data is lost – the areas reappear immediately once you switch them back on.",
+      "status": "Status line",
+      "schnellzugriff": "Quick access",
+      "beachtenswert": "Noteworthy",
+      "cve": "New CVE findings",
+      "kennzahlen": "Metrics footer",
+      "statusMonitoring": "Monitoring detail in the status line",
+      "loading": "Loading …",
+      "loadError": "Settings could not be loaded.",
+      "saveError": "Saving failed."
+    },
+    "wartung": {
+      "title": "Maintenance",
+      "rowTitle": "Delete data",
+      "rowDescription": "Reset scan data or restore CERNIS to factory state.",
+      "openButton": "Show options",
+      "doneScan": "Scan data has been reset.",
+      "doneSelected": "Selected data has been deleted.",
+      "doneFactory": "Restored to factory state. Your settings have been reset as well.",
+      "dialog": {
+        "title": "Delete data",
+        "close": "Close",
+        "cancel": "Cancel"
+      },
+      "choice": {
+        "scan": {
+          "title": "Reset scan data",
+          "deletes": "Pick what gets deleted: scan history, findings, monitoring, recordings, DNS.",
+          "keeps": "Keeps: settings and anything you don't check."
+        },
+        "factory": {
+          "title": "Factory state",
+          "deletes": "Deletes all data – scans, device memory, monitoring, settings. Behaves like a fresh install afterwards."
+        }
+      },
+      "builder": {
+        "title": "What should be deleted?",
+        "groupScan": "Scan & analysis",
+        "groupMonitoring": "Monitoring",
+        "groupOutbound": "Outbound contact recordings",
+        "groupDns": "DNS",
+        "item": {
+          "scanHistory": "Scan history",
+          "cve": "CVE findings and acknowledgements",
+          "arpGuard": "ARP guard: baseline and alerts",
+          "analysisAcks": "Analysis acknowledgements",
+          "knownHosts": "Device baseline (known devices)",
+          "rtt": "Response-time history and events",
+          "sla": "SLA measurements",
+          "logging": "Capture tasks and their data",
+          "outboundRecordings": "Outbound contact recordings",
+          "dnsBypassRecordings": "DNS bypass recordings: saved network captures with history and analysis",
+          "dnsTrustServers": "DNS server trust: your trust/reject decisions for detected DNS servers"
+        },
+        "rootHint": "Deleting the scan history necessarily removes the findings derived from it as well.",
+        "deleteSelected": "Delete selected",
+        "nothingSelected": "Select at least one item."
+      },
+      "confirm": {
+        "lead": "The following will be irreversibly deleted:",
+        "warning": "This cannot be undone. Are you sure?",
+        "includeSecrets": "Also remove stored credentials (cpnetcheck token in the keychain)",
+        "back": "Back",
+        "delete": "Delete permanently",
+        "error": "Deletion failed. Please try again.",
+        "scan": {
+          "title": "Reset scan data?",
+          "item1": "Scan history",
+          "item2": "CVE findings",
+          "item3": "Baseline",
+          "item4": "Acknowledgements"
+        },
+        "factory": {
+          "title": "Restore factory state?",
+          "item1": "All scan data",
+          "item2": "Device memory and notes",
+          "item3": "Monitoring recordings",
+          "item4": "Settings"
+        }
+      }
+    },
+    "trafficDarstellung": {
+      "title": "Traffic: unavailable figures",
+      "hint": "Not every operating system can provide every figure. On macOS the throughput per program cannot be measured — which programs talk to which counterparts is shown in full. This setting concerns only such unavailable figures; real measurements are always shown.",
+      "toggleLabel": "Show and explain unavailable figures",
+      "loading": "Loading …",
+      "loadError": "The setting could not be loaded.",
+      "saveError": "The setting could not be saved."
+    },
+    "defaultCreds": {
+      "title": "Check default credentials",
+      "warn": "A sharp special feature: CERNIS actively tries to log in to a device using its factory-default credentials. That is a real login attempt — use it only for devices on your own network that belong to you. For safety it is locked by default and must be unlocked here for each session.",
+      "toggleLabel": "Unlock for this session",
+      "loading": "Loading …",
+      "loadError": "The unlock state could not be loaded.",
+      "saveError": "The unlock state could not be changed.",
+      "dialogTitle": "Unlock default credential check?",
+      "dialogBody": "Before you unlock this special feature, please read what it does. It deliberately differs from the passive observation features of CERNIS.",
+      "dialogActiveTitle": "Active login attempt.",
+      "dialogActiveText": "CERNIS really logs in using default credentials. This can produce device logs or briefly lock accounts. Use it only on your own devices.",
+      "dialogOwnNetTitle": "Own network only.",
+      "dialogOwnNetText": "Targets outside the private network are rejected by the system.",
+      "dialogSessionTitle": "This session only.",
+      "dialogSessionText": "The unlock applies solely to the current CERNIS session. After a restart the feature is locked again.",
+      "confirm": "Unlock",
+      "cancel": "Cancel"
+    },
+    "captureAccess": {
+      "title": "Capture access",
+      "intro": "Access to your Mac's capture devices is set up. This lets CERNIS read the actual domain names without running as an administrator.",
+      "whatTitle": "What is set up:",
+      "whatGroup": "a dedicated user group for capturing",
+      "whatDaemon": "a small system service that restores the device permissions after every restart",
+      "whatDevices": "read and write permissions on the capture devices",
+      "revokeButton": "Revoke access",
+      "confirmTitle": "Really revoke access?",
+      "confirmSoloBody": "The setup will be removed completely: group, system service and device permissions. CERNIS will no longer be able to read the actual domain names until you set up access again.",
+      "confirmSharedTitle": "Careful — other accounts are affected",
+      "confirmSharedBody": "The capture devices belong to your Mac, not to your account. Besides you, other accounts have access as well. If you remove everything, those accounts lose their access too.",
+      "confirmSharedMembers": "Affected accounts:",
+      "actionMembershipOnly": "Remove only my access",
+      "actionFull": "Remove completely",
+      "confirm": "Revoke",
+      "cancel": "Cancel",
+      "laeuft": "Waiting for confirmation from your system …",
+      "erfolg": "Access has been revoked. You can set it up again at any time.",
+      "fehler": "Revoking did not succeed.",
+      "ladeFehler": "The state of capture access could not be loaded.",
+      "hinweisAnmeldung": "Note: for programs that are already running, the change takes effect after your next login."
+    },
+    "defaultCredsList": {
+      "navLabel": "Default credentials list",
+      "title": "Default credentials list",
+      "intro": "This list holds the factory-default credentials CERNIS knows about — grouped by manufacturer and model. Here you can review them, add your own entries, edit existing ones and switch individual entries on or off.",
+      "hint": "This list supplies the candidates for the active “Check default credentials” feature. The confidence per candidate indicates how reliable the value is. The list is never complete — you can extend it at any time.",
+      "hersteller": "Manufacturer",
+      "modell": "Model",
+      "zustand": "State",
+      "herkunft": "Origin",
+      "aktiv": "Active",
+      "kandidaten": "Candidates",
+      "username": "Username",
+      "password": "Password",
+      "konfidenz": "Confidence",
+      "quelleUrl": "Source (URL)",
+      "modellLeer": "manufacturer-wide",
+      "hatDefaults": "Has default credentials",
+      "keineBekanntenDefaults": "No known default credentials",
+      "konfidenzGesichert": "confirmed",
+      "konfidenzAuchMoeglich": "also possible",
+      "konfidenzVermutet": "suspected",
+      "konfidenzBenutzer": "own value",
+      "herkunftMitgeliefert": "shipped",
+      "herkunftBenutzer": "self-created",
+      "hinzufuegen": "Add entry",
+      "bearbeiten": "Edit",
+      "speichern": "Save",
+      "abbrechen": "Cancel",
+      "loeschen": "Delete",
+      "loeschenBestaetigen": "Really delete?",
+      "kandidatHinzufuegen": "Add candidate",
+      "kandidatEntfernen": "Remove candidate",
+      "neuerEintrag": "New entry",
+      "reset": "Reset to defaults",
+      "resetHinweis": "Resets the shipped entries to their delivery state. Your self-created entries are preserved.",
+      "leerzustand": "The list is empty. Add an entry or reset to defaults.",
+      "loading": "Loading …",
+      "ladeFehler": "The default credentials list could not be loaded.",
+      "passwortLeer": "(empty)",
+      "keineKandidaten": "No candidates stored."
+    }
+  },
+  "nav": {
+    "overview": "Overview",
+    "observe": "Observe",
+    "investigate": "Investigate",
+    "reporting": "Reporting",
+    "devices": "Devices",
+    "verwaltung": "Management"
+  },
+  "placeholder": {
+    "inProgress": "in progress"
+  },
+  "help": {
+    "ariaOeffnen": "Show help",
+    "ariaSchliessen": "Close",
+    "mehrImHandbuch": "More in the manual"
+  },
+  "manual": {
+    "title": "User Manual",
+    "vorlaeufigHint": "This section describes the planned behaviour; the final interface is not yet fixed.",
+    "linksLabel": "Further reading",
+    "tocLabel": "Contents",
+    "schrift": {
+      "label": "Font size",
+      "klein": "Smaller text",
+      "normal": "Normal text",
+      "gross": "Larger text",
+      "saveError": "Could not save the font size."
+    },
+    "suche": {
+      "oeffnen": "Search the manual",
+      "platzhalter": "Search the manual …",
+      "vorige": "Previous match",
+      "naechste": "Next match",
+      "schliessen": "Close search",
+      "zaehler": "{{n}} of {{m}}"
+    },
+    "pdf": {
+      "download": "Download manual as PDF",
+      "fehler": "The PDF could not be created."
+    },
+    "kategorien": {
+      "Grundlagen": "Basics",
+      "Startseite": "Home screen",
+      "Beobachten": "Observe",
+      "Diagnose": "Diagnostics",
+      "Untersuchen": "Investigate",
+      "Berichte": "Reports",
+      "Geraete": "Devices",
+      "Verwaltung": "Management",
+      "Einstellungen": "Settings"
+    }
+  },
+  "cards": {
+    "open": "Open",
+    "back": "Back",
+    "infoLabel": "More information",
+    "aktiv": "active"
+  },
+  "overview": {
+    "empty": {
+      "title": "Nothing observed yet",
+      "text": "There are no observations yet. Start a scan to capture the network.",
+      "startScan": "Start first scan"
+    },
+    "situation": {
+      "attention_one": "1 observation that deserves attention",
+      "attention_other": "{{count}} observations that deserve attention"
+    },
+    "findingsHeading": "Notable first",
+    "findings": {
+      "newDevice": {
+        "title": "New device on the network",
+        "subtitle": "A previously unknown device was seen on the network."
+      },
+      "outboundConnection": {
+        "title": "Unusual outbound connection",
+        "subtitle": "An outbound connection deviates from the usual pattern."
+      }
+    },
+    "metrics": {
+      "appsWithTraffic": "Apps with traffic",
+      "activeConnections": "Active connections",
+      "devicesOnNetwork": "Devices on network"
+    },
+    "status": {
+      "lastScanRelative": "Last scan {{zeit}} ago",
+      "lastScanUnknown": "No scan yet",
+      "relativeMinutes_one": "1 min",
+      "relativeMinutes_other": "{{count}} min",
+      "relativeHours_one": "1 h",
+      "relativeHours_other": "{{count}} h",
+      "relativeDays_one": "1 day",
+      "relativeDays_other": "{{count}} days",
+      "relativeJustNow": "a few seconds",
+      "devicesKnown_one": "1 device",
+      "devicesKnown_other": "{{count}} devices",
+      "observations_one": "1 observation",
+      "observations_other": "{{count}} observations",
+      "monitoringActive_one": "1 target monitored",
+      "monitoringActive_other": "{{count}} targets monitored",
+      "monitoringActiveHint": "Go to live monitoring",
+      "newScan": "New scan"
+    },
+    "quickAccessHeading": "Quick access",
+    "beachtenswertHeading": "Worth noting",
+    "fromLastScan": "from the last scan",
+    "cveHeading": "New CVE findings",
+    "cveNewBadge": "NEW"
+  },
+  "beobachten": {
+    "cards": {
+      "scan": {
+        "title": "Network scan",
+        "subtitle": "Capture the local network: devices, IPv4, MAC, open ports.",
+        "locked": ""
+      },
+      "watch": {
+        "title": "Guest watch",
+        "subtitle": "Newly seen, not-yet-classified devices — collected quietly, no alarm.",
+        "locked": ""
+      },
+      "traffic": {
+        "title": "Per-app traffic",
+        "subtitle": "Which application connects where, broken down by app.",
+        "locked": ""
+      },
+      "outbound": {
+        "title": "Outbound contacts",
+        "subtitle": "Who this machine talks to on the outside — grouped by operator, country or program.",
+        "locked": ""
+      },
+      "dnswatch": {
+        "title": "DNS watchdog",
+        "subtitle": "Devices/apps that bypass the expected DNS — port 53 to a foreign resolver or possible DoH.",
+        "locked": ""
+      },
+      "monitor": {
+        "title": "Live monitoring",
+        "subtitle": "Reachability and latency of gateway and internet, live.",
+        "locked": ""
+      },
+      "logging": {
+        "title": "Logging tasks",
+        "subtitle": "Record reachability and latency over time — immediate or scheduled.",
+        "locked": ""
+      },
+      "topology": {
+        "title": "Topology",
+        "subtitle": "The home network as a radial graph — gateway at the center, devices around it.",
+        "locked": ""
+      }
+    },
+    "scan": {
+      "deviceCount_one": "1 device",
+      "deviceCount_other": "{{count}} devices",
+      "startScan": "Start scan",
+      "columns": {
+        "status": "Status",
+        "ip": "IPv4",
+        "ipv6": "IPv6",
+        "mac": "MAC",
+        "vendor": "Vendor",
+        "hostname": "Hostname",
+        "ports": "Ports",
+        "mdns": "mDNS / NDI",
+        "ssdp": "SSDP / UPnP",
+        "os": "OS",
+        "ping": "Ping"
+      },
+      "columnManager": {
+        "button": "Columns",
+        "title": "Choose columns"
+      },
+      "sections": {
+        "notable": "New or notable",
+        "known": "Known devices"
+      },
+      "newPill": "new",
+      "changedPill": "changed",
+      "notablePill": "notable",
+      "auffaelligPill": "suspicious",
+      "kritischPill": "critical",
+      "pingUnit": "{{value}} ms",
+      "pingSubMs": ">1 ms",
+      "morePorts": "+{{count}}",
+      "morePortsTitle_one": "1 more port",
+      "morePortsTitle_other": "{{count}} more ports",
+      "scanning": "Scan running …",
+      "scanError": "Scan failed",
+      "netzZuGross": "This network is too large for this version of CERNIS PRO. You entered {{anzahl}} addresses; up to 4,096 are scanned — that is the equivalent of sixteen typical home networks.\n\nThe reason is runtime: a scan takes longer with every address, and on very large networks a scan can run for hours without giving you a usable result in between. CERNIS PRO is built for small networks in homes, practices and offices.",
+      "scanPhasePing": "Discovering hosts",
+      "scanPhasePorts": "Checking ports",
+      "scanPhaseMdns": "Detecting services",
+      "scanPhaseEnrich": "Enriching",
+      "scanProgress": "{{completed}} / {{total}}",
+      "historyEmpty": "No scan yet. Start a scan to see devices.",
+      "lastScanLabel": "Last scan: {{when}}",
+      "scanRunningButton": "Scan running …",
+      "scanComplete": "Scan complete",
+      "ifaceLabel": "Network interface",
+      "cidrLabel": "Network to scan (CIDR)",
+      "cidrMissing": "No network specified.",
+      "interceptedPorts_one": "One port is intercepted locally on this computer and is therefore not counted as a device property: {{ports}}. This is usually caused by security software with email protection.",
+      "interceptedPorts_other": "{{anzahl}} ports are intercepted locally on this computer and are therefore not counted as device properties: {{ports}}. This is usually caused by security software with email protection.",
+      "detail": {
+        "close": "Close",
+        "identity": {
+          "heading": "Identity",
+          "hostname": "Hostname",
+          "ip": "IPv4",
+          "mac": "MAC",
+          "vendor": "Vendor",
+          "os": "OS",
+          "ping": "Ping",
+          "pingUnit": "{{value}} ms",
+          "statusNew": "Seen on this network for the first time",
+          "statusKnown": "Known since the first scan",
+          "notable": "Notable in some way",
+          "additionalIps": "Additional addresses (same MAC)",
+          "trust": {
+            "heading": "Classification",
+            "trusted": "Trusted",
+            "neutral": "Neutral",
+            "watch": "Watch",
+            "saveError": "Could not save classification"
+          },
+          "deviation": {
+            "label": "Observation:",
+            "new": "New on the network since the last scan.",
+            "changed": "IP address has changed since the last scan."
+          }
+        },
+        "ports": {
+          "heading": "Open ports",
+          "lookup": "look up",
+          "empty": "No open ports found",
+          "acknowledge": "Acknowledge",
+          "unacknowledge": "Re-arm",
+          "ackDone": "Acknowledged — takes effect on next scan",
+          "unackDone": "Re-armed — takes effect on next scan",
+          "ackError": "Action failed.",
+          "lookupDialog": {
+            "title": "Port {{num}}/{{proto}}",
+            "service": "Service",
+            "generic": "There is no internal description for this port. You can look it up externally via the link below if needed.",
+            "wikipedia": "Look up on Wikipedia",
+            "close": "Close",
+            "info": {
+              "ftp": "FTP transfers files between computers. The classic variant is unencrypted; for sensitive data, FTPS or SFTP is common today.",
+              "ssh": "SSH provides encrypted remote access to a system (console, file transfer, tunnels). A common, encrypted way to manage a host.",
+              "telnet": "Telnet is an early remote-access service and works unencrypted. Nowadays it is mostly replaced by SSH.",
+              "smtp": "SMTP sends email between mail servers. The transport can be secured via STARTTLS.",
+              "dns": "DNS resolves names (e.g. example.com) into IP addresses. A fundamental service of network infrastructure.",
+              "http": "HTTP serves web pages and web APIs. The connection is unencrypted; the secured variant is HTTPS.",
+              "pop3": "POP3 retrieves email from a server. The classic variant is unencrypted; secured it runs over POP3S.",
+              "netbios": "NetBIOS handles name and session management in older Windows networks and is usually confined to the local network.",
+              "imap": "IMAP manages email directly on the server (multiple devices, in sync). Secured it runs over IMAPS.",
+              "https": "HTTPS serves web pages and APIs encrypted (HTTP over TLS). The common, secured way to access the web today.",
+              "smb": "SMB provides file and printer sharing (mainly in Windows networks). Usually only within the local network.",
+              "ipp": "IPP controls printing over the network and carries print jobs and status information.",
+              "imaps": "IMAPS is IMAP over an encrypted TLS connection — secured access to email on the server.",
+              "pop3s": "POP3S is POP3 over an encrypted TLS connection — secured retrieval of email.",
+              "mqtt": "MQTT is a lightweight messaging protocol, common in the context of IoT and sensor devices.",
+              "mysql": "MySQL is a database service. Its access should usually not be openly reachable on the network.",
+              "rdp": "RDP allows graphical remote control of a Windows machine. An RDP endpoint reachable from the internet is considered especially exposed.",
+              "postgresql": "PostgreSQL is a database service. Its access should usually not be openly reachable on the network.",
+              "vnc": "VNC allows graphical remote control of a machine. Depending on the configuration, the connection may be unencrypted.",
+              "http-alt": "An alternative HTTP port, often used for web applications, proxies or management interfaces."
+            }
+          }
+        },
+        "dienste": {
+          "heading": "Announced services",
+          "mdns": "mDNS",
+          "mdnsEmpty": "No mDNS services announced",
+          "ssdp": "SSDP / UPnP",
+          "ssdpEmpty": "No SSDP services announced"
+        },
+        "notes": {
+          "heading": "Device notes",
+          "label": "Label",
+          "labelPlaceholder": "Freely chosen name",
+          "tags": "Tags",
+          "tagsPlaceholder": "Keywords, comma-separated",
+          "notes": "Notes",
+          "notesPlaceholder": "Free note about this device",
+          "save": "Save",
+          "saveHint": "Saving follows with the data integration.",
+          "saveOk": "Saved.",
+          "saveError": "Save failed."
+        }
+      }
+    },
+    "watch": {
+      "counter_one": "{{count}} since your last look",
+      "counter_other": "{{count}} since your last look",
+      "subtitle": "A quiet collection — no alarm. Classify whenever it suits you.",
+      "empty": "Nothing waiting. New, unclassified devices show up here.",
+      "loadError": "Could not load the watch.",
+      "actionError": "Action failed.",
+      "actionTrust": "Trusted",
+      "actionNote": "Note",
+      "actionDismiss": "Hide",
+      "notePlaceholder": "Free note about this device",
+      "noteSave": "Save",
+      "seenUnknown": "first seen at an unknown time",
+      "seenJustNow": "first seen just now",
+      "seenMinutes_one": "first seen {{count}} minute ago",
+      "seenMinutes_other": "first seen {{count}} minutes ago",
+      "seenHours_one": "first seen {{count}} hour ago",
+      "seenHours_other": "first seen {{count}} hours ago",
+      "seenDays_one": "first seen {{count}} day ago",
+      "seenDays_other": "first seen {{count}} days ago"
+    },
+    "traffic": {
+      "title": "Per-app traffic",
+      "live": "live",
+      "liveInterval": "live · {{secs}} s",
+      "notablePill": "notable",
+      "down": "↓ {{value}}",
+      "up": "↑ {{value}}",
+      "rateBit": "{{value}} bit/s",
+      "rateKbit": "{{value}} kbit/s",
+      "rateMbit": "{{value}} Mbit/s",
+      "rateGbit": "{{value}} Gbit/s",
+      "unattributed": "Unattributed (needs root)",
+      "noTarget": "no target",
+      "mdns": "Multicast (mDNS)",
+      "loading": "Loading connections …",
+      "error": "Traffic unavailable",
+      "permissionTitle": "Note",
+      "unknownTarget": "Connects to an unknown target",
+      "connections_one": "Connections (1)",
+      "connections_other": "Connections ({{count}})",
+      "connCount_one": "· 1 connection",
+      "connCount_other": "· {{count}} connections",
+      "sections": {
+        "notable": "Notable",
+        "known": "Known targets"
+      },
+      "noPtr": "no PTR record",
+      "bundlePill": "×{{count}}",
+      "port": "Port {{value}}",
+      "showMore_one": "+ show 1 more target",
+      "showMore_other": "+ show {{count}} more targets",
+      "showLess": "show less",
+      "lookup": "look up",
+      "refresh": "Refresh",
+      "refreshIntervalLabel": "Auto-refresh",
+      "refreshOff": "Off",
+      "close": "Close",
+      "sniToggle": "SNI observation",
+      "sniStarting": "starting …",
+      "sniActive": "SNI active",
+      "sniHint": "Shows the real domain names apps request (instead of just the host). Requires elevated privileges.",
+      "sniPermission": "SNI observation requires elevated privileges.",
+      "sniStoppedPollFailed": "Capture stopped — data source not responding. Start again.",
+      "sniStoppedHelperDead": "Capture stopped — capture helper ended. Start again.",
+      "sniStoppedUnbekannt": "Capture stopped. Start again.",
+      "stateLabel": {
+        "established": "active",
+        "other": "status unclear",
+        "listen": "waiting",
+        "none": "connectionless"
+      },
+      "groupActive": "Active outbound traffic",
+      "groupLocal": "Local, no fixed peer ({{count}})",
+      "groupLocalHint": "Services waiting for connections, and connectionless UDP traffic such as local device discovery. Normal local network behaviour without a peer.",
+      "groupLocalToggleShow": "Show",
+      "groupLocalToggleHide": "Hide",
+      "durchsatzNichtMessbar": "On macOS it is not possible to measure how much data an individual program transfers — the operating system provides no interface for this. It cannot be unlocked. What is shown in full, however, is which program talks to which peer.",
+      "durchsatzOhneWerte": "No throughput values are currently available for the connections shown. What is displayed are the connections of your own user account.",
+      "durchsatzWerkzeugFehlt": "Per-program throughput comes from the system tool ss (package iproute2). It is not present on this system, so the throughput values stay empty. Which program talks to which peer is shown in full.",
+      "durchsatzMessungFehlgeschlagen": "The last throughput measurement failed, so no values are available right now. The connection list itself remains fully usable.",
+      "durchsatzRechteVerzicht": "Which program talks to which peer is shown in full. How much data an individual program transfers in the process is not shown by CERNIS on Windows: the operating system releases these figures only to programs that run permanently with elevated privileges. CERNIS deliberately does without that."
+    },
+    "outbound": {
+      "hostScopeLocal": "Contacts of this machine — passively observed, not a network-wide view.",
+      "sichtbareKontakte_one": "1 outbound contact",
+      "sichtbareKontakte_other": "{{count}} outbound contacts",
+      "sichtbareKontakte_zero": "No outbound contacts",
+      "aufzeichnungLaeuft_one": "1 recording running",
+      "aufzeichnungLaeuft_other": "{{count}} recordings running",
+      "groupByLabel": "Group by",
+      "groupBy": {
+        "operator": "Operator",
+        "country": "Country",
+        "programm": "Program"
+      },
+      "showLocalToggle": "Show local & infrastructure",
+      "emptyGroupOperator": "Not specified",
+      "emptyGroupCountry": "Not specified",
+      "emptyGroupProgramm": "No program",
+      "empty": "No outbound contacts. As soon as this machine talks to the outside, they show up here.",
+      "loadError": "Outbound contacts could not be loaded.",
+      "connectionsSuffix": "×{{count}}",
+      "match": {
+        "disclaimer": "These classifications come from the lists maintained in management, not from CERNIS. CERNIS only reflects them.",
+        "group": {
+          "tracker_ads": "Trackers & advertising",
+          "threat": "Threat"
+        },
+        "sourcePattern": "{{source}} (matched on: {{matchedOn}})",
+        "badgeTitle": "Which lists this contact is on — the classification comes from the lists, not from CERNIS."
+      },
+      "access": {
+        "title": "Set up capture access",
+        "intro": "To read the actual domain names, CERNIS needs one-time read access to your Mac's capture devices. Your Mac will now ask for your password or Touch ID.",
+        "onceTitle": "One time",
+        "onceText": "you are asked once, not on every start.",
+        "limitedTitle": "Limited",
+        "limitedText": "read access for capturing only. CERNIS still does not run as an administrator.",
+        "revocableTitle": "Revocable",
+        "revocableText": "the setup can be undone at any time.",
+        "nextStep": "Next, your Mac will show its usual system window to confirm.",
+        "confirm": "Set up",
+        "later": "Later",
+        "laeuft": "Waiting for confirmation from your system …",
+        "erfolg": "Access is set up. The actual domain names are now shown.",
+        "erfolgNeustart": "Access is set up. For it to take effect here, please restart CERNIS once — the actual domain names will then be shown.",
+        "abgebrochen": "Setup was cancelled. You can do it any time later.",
+        "fehler": "Setup did not succeed.",
+        "erneut": "Try again",
+        "schliessen": "Close",
+        "jetztEinrichten": "Grant permission"
+      },
+      "sni": {
+        "consentTitle": "Show real domain names?",
+        "consentIntro": "Often only the host appears, not the actual service behind it. The requested domain name is what makes trackers and ad networks visible. CERNIS can read these names passively:",
+        "consentPassiveTitle": "Passive",
+        "consentPassiveText": "reads along only, never interferes with traffic.",
+        "consentEphemeralTitle": "Ephemeral",
+        "consentEphemeralText": "only while this view is open, nothing is stored.",
+        "consentPrivilegeTitle": "Elevated rights",
+        "consentPrivilegeText": "set up once, no recurring dialog.",
+        "consentDontAsk": "Don't ask again",
+        "consentDeny": "Decline",
+        "consentGrant": "Allow",
+        "starting": "Starting real domain names …",
+        "offHinweis": "Real domain names are off. Some trackers stay invisible as a result.",
+        "offShow": "Show",
+        "startError": "Real domain names can't be shown because CERNIS is missing the required permission. You can grant it now — it takes a moment and can be revoked at any time.",
+        "startErrorOther": "Capturing the real domain names could not be started.",
+        "threatOne": "One peer is on a threat list",
+        "threatMany": "{{count}} peers are on threat lists",
+        "threatDisclaimer": "The classification comes from the selected lists, not from CERNIS.",
+        "threatShow": "Show",
+        "threatFilteredOne": "Filtered: only peers on threat lists (1)",
+        "threatFilteredMany": "Filtered: only peers on threat lists ({{count}})",
+        "threatFilterClear": "Clear filter"
+      }
+    },
+    "dnswatch": {
+      "hostScopeLocal": "Findings of this machine — passively observed, not a network-wide view.",
+      "countOpen": "open",
+      "countDoh": "possible DoH",
+      "countExpected": "as expected",
+      "countAcknowledged": "acknowledged",
+      "categoryLabels": {
+        "offen": "open",
+        "moegliche_doh": "possible DoH",
+        "erwartungsgemaess": "as expected"
+      },
+      "markKnown": "Mark as known",
+      "unmarkKnown": "Undo marking",
+      "footerExpected": "Expected DNS servers: {{servers}}",
+      "settingsHint": "Adjustable in administration under “DNS servers & trust”.",
+      "empty": "No device bypasses the expected DNS. Everything talks to the expected resolvers.",
+      "loadError": "DNS watchdog could not be loaded.",
+      "connectionsSuffix": "×{{count}}",
+      "noExpectedHint": "No expected DNS servers defined yet.",
+      "decideLink": "Decide in administration under “DNS servers & trust”."
+    },
+    "dnsscreen": {
+      "tabHost": "This machine",
+      "tabNetz": "Bypass on the network",
+      "erklaerHost": "What bypasses the expected DNS on THIS machine — read passively from local connections, without a network view.",
+      "erklaerNetz": "What bypasses the expected DNS ACROSS THE NETWORK — read passively from observed network traffic. Requires that CERNIS can see the network traffic (gateway/mirror/simple network)."
+    },
+    "dnsbypass": {
+      "countBypass": "Bypassers",
+      "countQueries": "Queries total",
+      "countExpected": "as expected",
+      "statusRuhe": "No recording active.",
+      "statusAktiv": "Recording … {{count}} queries collected.",
+      "start": "Start recording",
+      "stop": "Stop recording",
+      "startFehler": "Recording could not be started.",
+      "toTarget": "→ {{ziel}}",
+      "queriesSuffix": "×{{count}}",
+      "selfBadge": "this machine",
+      "dohBadge": "possible DoH",
+      "dohBadgeNamed": "possible DoH ({{quelle}})",
+      "hinweisTitel": "Note",
+      "loadError": "Network-wide bypass view could not be loaded.",
+      "emptyIdle": "No recording yet. Start a recording to see network-wide bypasses.",
+      "emptyRecording": "Recording in progress — no bypass captured yet.",
+      "emptyProminentTitle": "No bypass captured — can CERNIS see the network?",
+      "emptyProminentText": "The recording found no bypass. Only what CERNIS observes becomes visible network-wide: this requires the network traffic to arrive here (gateway/mirror port or a simple network). Without a network view the list stays empty, even if bypassing is actually happening.",
+      "prereqHint": "Only what CERNIS observes becomes visible network-wide — this requires a network view (gateway/mirror/simple network). Plain DNS (port 53) is detected reliably, DoH is only inferred heuristically.",
+      "footerExpected": "Expected DNS servers: {{servers}}",
+      "settingsHint": "Manage expected servers under Management → DNS servers & trust.",
+      "consent": {
+        "title": "Observe network-wide, passively?",
+        "intro": "To see network-wide DNS bypasses, CERNIS passively observes the DNS traffic on the network. Before this starts for the first time:",
+        "passiveTitle": "Passive",
+        "passiveText": "only observes, never intervenes in the traffic and blocks nothing.",
+        "ownNetTitle": "Only your own network",
+        "ownNetText": "only observes your own network's traffic, nothing beyond it.",
+        "prereqTitle": "Prerequisite",
+        "prereqText": "needs a network view (gateway/mirror/simple network) — otherwise the view stays empty.",
+        "dontAsk": "Don't ask again",
+        "deny": "Decline",
+        "grant": "Agree and start"
+      }
+    },
+    "monitor": {
+      "zieleTitel": "Targets",
+      "eventLogTitel": "Events",
+      "aktuelleRtt": "current latency",
+      "wartet": "waiting …",
+      "up": "UP",
+      "offline": "OFFLINE",
+      "eventUp": "Back online",
+      "eventDown": "Offline",
+      "eventDegraded": "Degraded",
+      "label": "Label",
+      "host": "IP / host",
+      "hinzufuegen": "Add",
+      "loeschen": "Remove target",
+      "logLeer": "No events recorded yet.",
+      "getrennt": "Connection lost, retrying …",
+      "ladeFehler": "Could not be removed.",
+      "verlaufTitel": "RTT history",
+      "liveFenster": "Live window",
+      "verlaufLeer": "No history data yet.",
+      "tonFuerZiel": "Sound for {{label}}",
+      "tonKeinZiel": "Sound (no target)",
+      "tonAnTitel": "Sound on",
+      "tonAusTitel": "Sound off"
+    },
+    "topology": {
+      "titel": "Network topology",
+      "neuLaden": "Reload",
+      "ladeFehler": "Could not load topology.",
+      "leer": "No topology data — run a scan or LLDP capture is required.",
+      "legendeGemessen": "measured (LLDP/CDP)",
+      "legendeAngenommen": "assumed (star to gateway)",
+      "typGateway": "Gateway",
+      "typSwitch": "Switch",
+      "typNetwork": "Network device",
+      "typHost": "Host",
+      "knotenAnzahl_one": "{{count}} node",
+      "knotenAnzahl_other": "{{count}} nodes",
+      "quelleLabel": "Devices to show",
+      "quelleLetzterScan": "Last scan",
+      "quelleAlleBekannten": "All known devices",
+      "quelleHinweisLetzterScan": "Shows only the devices found in the most recent scan — the current live picture of your network.",
+      "quelleHinweisAlleBekannten": "Shows every device ever found, including ones that are currently offline."
+    },
+    "logging": {
+      "modusAssistent": "Wizard",
+      "modusErweitert": "Advanced",
+      "neueAufgabe": "New logging task",
+      "schrittVon": "Step {{aktuell}} of {{gesamt}}",
+      "weiter": "Next",
+      "zurueck": "Back",
+      "anlegen": "Create",
+      "anlegenStarten": "Create & start",
+      "abbrechen": "Cancel",
+      "anlegenFehler": "Task could not be created.",
+      "schritt1Titel": "Target & purpose",
+      "schritt2Titel": "Capture",
+      "schritt3Titel": "Operation mode",
+      "zielLabel": "Target",
+      "zielPlaceholder": "Choose target …",
+      "zielLeer": "No targets available. Is monitoring running?",
+      "zweckLabel": "Purpose (optional)",
+      "zweckPlaceholder": "e.g. troubleshooting in the evening",
+      "bezeichnungLabel": "Label",
+      "bezeichnungPlaceholder": "e.g. gateway logging",
+      "captureLabel": "What is captured?",
+      "capture": {
+        "interface_status": {
+          "titel": "Interface status",
+          "text": "Only up/down per interface. Very frugal."
+        },
+        "reachability": {
+          "titel": "Reachability",
+          "text": "Whether the target responds. Little data."
+        },
+        "reachability_latency": {
+          "titel": "Reachability + latency",
+          "text": "Response and round-trip time (RTT).",
+          "mengeHinweis": "Produces the most measurement data."
+        }
+      },
+      "betriebLabel": "Operation mode",
+      "betriebSofort": "Immediate",
+      "betriebGeplant": "Scheduled",
+      "betriebWiederkehrend": "Recurring",
+      "recurTagesfensterLabel": "Daily window",
+      "recurVon": "from",
+      "recurBis": "to",
+      "recurWochentageLabel": "Weekdays",
+      "recurWochentag": {
+        "0": "Mon",
+        "1": "Tue",
+        "2": "Wed",
+        "3": "Thu",
+        "4": "Fri",
+        "5": "Sat",
+        "6": "Sun"
+      },
+      "recurZeitraumLabel": "Date range",
+      "recurZeitraumVon": "From",
+      "recurZeitraumBis": "To (optional)",
+      "recurVorschau": "Results in {{n}} measurement runs",
+      "recurVorschauUnbegrenzt": "Runs until further notice",
+      "planen": "Schedule",
+      "wiederkehrendKarte": "Recurring · {{von}}–{{bis}} · {{tage}}",
+      "wiederkehrendKarteBis": "until {{datum}}",
+      "dauerLabel": "Maximum duration",
+      "dauer": {
+        "30min": "30 minutes",
+        "2h": "2 hours",
+        "6h": "6 hours",
+        "1d": "1 day",
+        "1w": "1 week"
+      },
+      "startLabel": "Start",
+      "endeLabel": "End",
+      "intervallLabel": "Measurement interval",
+      "intervallHinweis": "Thins out the latency samples. Larger intervals produce less data.",
+      "intervall": {
+        "5s": "5 s",
+        "15s": "15 s",
+        "30s": "30 s",
+        "60s": "1 min",
+        "300s": "5 min"
+      },
+      "intervallKarte": {
+        "5s": "every 5 s",
+        "15s": "every 15 s",
+        "30s": "every 30 s",
+        "60s": "every 1 min",
+        "300s": "every 5 min"
+      },
+      "schwellwertLabel": "Threshold alert",
+      "schwellwertHinweis": "Raises an alert when the target meets a defined condition across several consecutive measurements.",
+      "schwellwertBedingungLabel": "Condition",
+      "schwellwertBedingung": {
+        "latency_above": "Latency above limit",
+        "unreachable": "Target unreachable"
+      },
+      "schwellwertGrenzwertLabel": "Limit (ms)",
+      "schwellwertEmpfindlichkeitLabel": "Sensitivity N",
+      "schwellwertEmpfindlichkeitHinweis": "Alert only after N consecutive measurements.",
+      "schwellwertDesktop": "Desktop notification",
+      "schwellwertEmail": "Email",
+      "schwellwertEmailNichtVerfuegbar": "Email notification is not yet available in this release.",
+      "schwellwertKarte": {
+        "latency": "Alert: latency > {{limit}} ms ({{n}}×)",
+        "unreachable": "Alert: outage ({{n}}×)"
+      },
+      "listeTitel": "Logging tasks",
+      "listeLeer": "No logging tasks created yet.",
+      "state": {
+        "created": "Created",
+        "active": "Active",
+        "paused": "Paused",
+        "finished": "Finished"
+      },
+      "captureKurz": {
+        "interface_status": "Interface status",
+        "reachability": "Reachability",
+        "reachability_latency": "Reachability + latency"
+      },
+      "aktion": {
+        "start": "Start",
+        "pause": "Pause",
+        "resume": "Resume",
+        "stop": "Stop",
+        "delete": "Delete",
+        "detail": "Report"
+      },
+      "aktionFehler": "Action failed.",
+      "rest": {
+        "tage": "{{value}}d",
+        "stunden": "{{value}}h",
+        "minuten": "{{value}}m",
+        "sekunden": "{{value}}s",
+        "zwei": "{{erste}} {{zweite}} left",
+        "eine": "{{erste}} left",
+        "jetzt": "ending now"
+      },
+      "sla": {
+        "verfuegbarkeit": "Availability {{wert}}%",
+        "avgRtt": "avg {{wert}} ms",
+        "downtime": "approx. {{wert}} min offline",
+        "keineAuswertung": "no analysis yet"
+      },
+      "ladeFehler": "Logging tasks could not be loaded.",
+      "detailTitel": "Report",
+      "detailFehler": "Detail data could not be loaded.",
+      "detailNichtGefunden": "Task not found.",
+      "zeitraumLabel": "Time range",
+      "zeitraum": {
+        "stunde": "Last hour",
+        "24h": "Last 24 hours",
+        "7tage": "Last 7 days",
+        "30tage": "Last 30 days",
+        "frei": "Custom"
+      },
+      "zeitraumVon": "From",
+      "zeitraumBis": "To",
+      "chartTab": {
+        "uptime": "Availability %",
+        "rtt": "Avg RTT (ms)"
+      },
+      "chartLeer": "Too few data points to plot a trend.",
+      "ereignisseTitel": "Events",
+      "ereignisseLeer": "No events in the selected time range.",
+      "ereignisSpalte": {
+        "zeitpunkt": "Time",
+        "ereignis": "Event",
+        "rtt": "RTT"
+      },
+      "exportTitel": "Export",
+      "exportPdf": "PDF",
+      "exportCsv": "CSV",
+      "exportJson": "JSON",
+      "exportLaeuft": "Loading …",
+      "exportFehler": "Export failed.",
+      "kennzahl": {
+        "verfuegbarkeit": "Availability",
+        "rtt": "Avg RTT",
+        "ausfallzeit": "Downtime",
+        "messpunkte": "Data points"
+      },
+      "keineAuswertung": "no analysis",
+      "minuten": "min",
+      "ansicht": {
+        "bericht": "Report",
+        "serie": "Series analysis",
+        "profil": "Behavior profile"
+      },
+      "profil": {
+        "titel": "Behavior profile",
+        "kennzahl": {
+          "aktivsteZeit": "Most active time",
+          "aktivsteTage": "Most active days",
+          "abweichungen": "Total deviations",
+          "aufzeichnungstage": "Recording days"
+        },
+        "leerzustand": {
+          "text": "Not enough data yet for a reliable pattern. A behavior profile needs at least two full weeks of recording. CERNIS keeps collecting — once enough days are available, the pattern will appear here on its own.",
+          "fortschritt": "{{tage}} / {{ziel}} days"
+        },
+        "tagesmuster": {
+          "titel": "Daily pattern",
+          "leer": "No data for the daily pattern yet."
+        },
+        "wochenmuster": {
+          "titel": "Weekly pattern",
+          "leer": "No data for the weekly pattern yet."
+        },
+        "hinweis": "Markings are hints at pattern breaks, not a verdict; the thresholds are chosen conservatively and can be adjusted.",
+        "legende": {
+          "typisch": "Typical",
+          "abweichung": "Deviation"
+        },
+        "wochentag": {
+          "mo": "Mon",
+          "di": "Tue",
+          "mi": "Wed",
+          "do": "Thu",
+          "fr": "Fri",
+          "sa": "Sat",
+          "so": "Sun"
+        }
+      },
+      "serie": {
+        "titel": "Series analysis",
+        "kennzahl": {
+          "verfuegbarkeit": "Availability",
+          "abbrueche": "Total outages",
+          "dauer": "Average duration",
+          "fenster": "Worst time of day"
+        },
+        "wasZeigen": {
+          "titel": "Show",
+          "abbrueche": "Outages",
+          "latenz": "Latency",
+          "alles": "Everything"
+        },
+        "darstellung": {
+          "titel": "View",
+          "einzellinien": "Per-day lines",
+          "heatmap": "Heatmap",
+          "rangliste": "Ranking",
+          "latenzLeer": "No data for this view in the selected context."
+        },
+        "empfehlung": "CERNIS recommends: {{modus}}",
+        "wiederherstellen": "Use recommendation",
+        "medianBand": "Median + band (computed)",
+        "keineLatenz": "This recording mode does not measure response times, so the latency views are unavailable.",
+        "tabelle": {
+          "titelAbbrueche": "Individual outages",
+          "von": "From",
+          "bis": "To",
+          "dauer": "Duration",
+          "nochOffen": "still open",
+          "leer": "No outages in the selected period."
+        },
+        "latenzTabelle": {
+          "titel": "Latency by time of day",
+          "slot": "Time of day",
+          "messpunkte": "Samples",
+          "p95": "p95",
+          "max": "Max",
+          "leer": "No response times in the selected period."
+        },
+        "rangliste": {
+          "slot": "Time of day",
+          "tage": "Days affected",
+          "laengster": "Longest outage"
+        }
+      }
+    },
+    "outboundlog": {
+      "leiste": {
+        "titelRuhe": "Record outbound contacts — no recording running",
+        "titelAktiv": "Recording running — {{label}}",
+        "knopfVerwaltung": "Recordings"
+      },
+      "neueAufzeichnung": "New recording",
+      "bezeichnungLabel": "Name",
+      "bezeichnungPlaceholder": "e.g. weekend observation",
+      "zweckLabel": "Purpose (optional)",
+      "zweckPlaceholder": "What is this recording for?",
+      "modusLabel": "Mode",
+      "modus": {
+        "detail": "Detailed trace",
+        "aggregate": "Summary"
+      },
+      "modusHinweis": {
+        "detail": "Records every point in time individually — very precise, but data-heavy. Limited to 24 hours for this reason. For longer observation, choose the summary recording. It additionally preserves the course over time and yields the same summary in the report.",
+        "aggregate": "Summarises per remote endpoint (first seen / last seen / how often) — compact, no time limit. Needs little space and yields the complete summary in the report."
+      },
+      "tiefeLabel": "Depth",
+      "tiefe": {
+        "anonymous": "Anonymous",
+        "appResolved": "With program"
+      },
+      "tiefeHinweis": {
+        "anonymous": "Shows the remote endpoints without program attribution.",
+        "appResolved": "Also shows which program is calling home — requires elevated rights (administrator/root). Without them the program column stays partly empty."
+      },
+      "intervallLabel": "Interval",
+      "intervall": {
+        "30s": "every 30 seconds",
+        "60s": "every 60 seconds",
+        "300s": "every 5 minutes"
+      },
+      "dauerLabel": "Duration",
+      "dauer": {
+        "1h": "1 hour",
+        "6h": "6 hours",
+        "12h": "12 hours",
+        "24h": "24 hours",
+        "custom": "custom"
+      },
+      "dauerCustomLabel": "Hours",
+      "dauerCustomHinweis": "Please enter 1 to 24 hours.",
+      "dauerKarte": "Duration: {{stunden}} h",
+      "erstelltAm": "Created {{datum}}",
+      "anlegen": "Create",
+      "anlegenFehler": "The recording could not be created.",
+      "listeTitel": "Recordings",
+      "listeLeer": "No recording created yet.",
+      "ladeFehler": "Recordings could not be loaded.",
+      "aktionFehler": "Action failed.",
+      "state": {
+        "created": "Created",
+        "active": "Running",
+        "paused": "Paused",
+        "finished": "Finished"
+      },
+      "aktion": {
+        "start": "Start",
+        "pause": "Pause",
+        "resume": "Resume",
+        "stop": "Stop",
+        "loeschen": "Delete",
+        "loeschenModalText": "Really delete recording “{{label}}”?",
+        "loeschenBestaetigen": "Delete",
+        "loeschenAbbrechen": "Cancel"
+      },
+      "konfliktHinweis": "A recording is already running. Only one can record at a time — please stop or pause the running one first.",
+      "detailHinweis": "Detailed recording, ends automatically after 24 h.",
+      "befundFolgt": "Findings for “{{label}}” to follow.",
+      "detailTitel": "Recording",
+      "karte": {
+        "titel": "Recordings",
+        "statusRuhe": "No recording active.",
+        "statusAktiv": "Recording: {{label}}"
+      },
+      "details": "Details",
+      "aendern": "Edit",
+      "speichern": "Save",
+      "abbrechen": "Cancel",
+      "gesperrtTitel": "Configuration locked",
+      "gesperrtHinweis": "Mode, depth, interval and duration can only be changed while the recording has not been started yet.",
+      "aenderungFehler": "The change could not be saved.",
+      "nameVergeben": "This name is already taken. Please choose another.",
+      "schliessen": "Close"
+    },
+    "lookup": {
+      "title": "Look up remote endpoint",
+      "close": "Close",
+      "copyIp": "Copy IP",
+      "copied": "copied",
+      "notFound": "not found",
+      "sourceLabel": "Source",
+      "loading": "Resolving …",
+      "error": "Resolution unavailable.",
+      "notice": "Plain facts from several sources. Where sources differ, both are shown — CERNIS does not judge.",
+      "conflict": {
+        "label": "Country information differs"
+      },
+      "resolution": {
+        "heading": "Name resolution",
+        "ptr": "Reverse-DNS (PTR)",
+        "forward": "Forward confirmation",
+        "tls": "TLS certificate",
+        "tlsSubject": "Subject (CN)",
+        "tlsSan": "SAN",
+        "tlsIssuer": "Issuer",
+        "tlsValidFrom": "Valid from",
+        "tlsValidUntil": "Valid until",
+        "tlsSerial": "Serial number",
+        "tlsFingerprint": "SHA-256 fingerprint",
+        "tlsSelfSigned": "self-signed",
+        "dyndns": "DynDNS database"
+      },
+      "operator": {
+        "heading": "Operator & network",
+        "org": "Operator",
+        "netname": "Network name",
+        "netRange": "Network range",
+        "asn": "ASN",
+        "asnOrg": "AS operator",
+        "abuse": "Abuse contact"
+      },
+      "location": {
+        "heading": "Location",
+        "rdapNet": "Country per RDAP network",
+        "orgAddress": "Country per org address",
+        "geoDb": "Country per Geo-DB"
+      },
+      "service": {
+        "heading": "Service on port",
+        "hint": "Port classification",
+        "banner": "Banner"
+      },
+      "external": {
+        "heading": "Investigate yourself",
+        "whois": {
+          "label": "WHOIS at the operator",
+          "hint": "Look up the network's registration and contact"
+        },
+        "reputation": {
+          "label": "Check reputation",
+          "hint": "Query the IP in public reputation sources"
+        },
+        "geo": {
+          "label": "Location & network",
+          "hint": "View geographic assignment and ASN"
+        }
+      }
+    }
+  },
+  "untersuchen": {
+    "cards": {
+      "analysis": {
+        "title": "Analysis",
+        "subtitle": "Patterns and relations across the collected observations.",
+        "locked": "needs collected data"
+      },
+      "diagnose": {
+        "title": "Diagnostics",
+        "subtitle": "Check reachability, DNS and DHCP on demand.",
+        "locked": ""
+      },
+      "cve": {
+        "title": "CVE matching",
+        "subtitle": "Match detected services against known CVE entries.",
+        "locked": ""
+      },
+      "defaultcreds": {
+        "title": "Default credentials",
+        "subtitle": "Active check: flags devices still using factory-default credentials.",
+        "locked": "Unlock it for this session in the settings first."
+      }
+    },
+    "defaultCreds": {
+      "notice": "Active check: CERNIS attempts a real login using default credentials. For devices on your own network only.",
+      "resultHit": "Device uses default credentials (user/password)",
+      "portLabel": "Port {{port}} ({{service}})",
+      "selfSigned": "Note: {{note}}",
+      "error": "The check could not be performed.",
+      "geraetewahl": {
+        "title": "Choose a device",
+        "hint": "Pick a device from the scan. Based on the manufacturer, CERNIS determines which factory default credentials are known — and only checks what you tick.",
+        "loading": "Loading devices …",
+        "loadError": "The device list could not be loaded.",
+        "leer": "No devices are known yet. Run a scan or enter a target manually.",
+        "spalteGeraet": "Device",
+        "spalteIp": "IP",
+        "spalteHersteller": "Manufacturer",
+        "spaltePorts": "Open ports",
+        "keinHersteller": "unknown",
+        "keinePorts": "none",
+        "auswaehlen": "Select",
+        "gewaehlt": "Selected",
+        "manuellTitle": "Or enter a target manually",
+        "manuellHint": "If the device isn't in the list, enter its IP directly. The manufacturer is then unknown — you can provide it in the next step.",
+        "manuellPlaceholder": "IP on your own network (e.g. 192.168.1.1)",
+        "manuellUebernehmen": "Use this",
+        "zurueck": "Choose another device"
+      },
+      "modell": {
+        "title": "Determine model",
+        "geraetLabel": "Device",
+        "herstellerLabel": "Manufacturer",
+        "herstellerLeer": "unknown",
+        "herstellerPlaceholder": "Enter manufacturer (e.g. AVM, TP-Link)",
+        "modellLabel": "Model (optional, to narrow down)",
+        "optionalHint": "The model is usually not known from the scan. If you know it more precisely, enter it here — it sharpens the lookup.",
+        "modellPlaceholder": "Model (optional)",
+        "ermitteln": "Determine check plan",
+        "ermittelt": "Determining …",
+        "erneutErmitteln": "Determine again",
+        "praezisieren": "Refine manufacturer/model"
+      },
+      "fall": {
+        "entwarnungTitle": "No factory default credentials known",
+        "entwarnungText": "For this device we know of no factory default credentials — the manufacturer is considered “secure by default” (each device ships with its own unique password). There is nothing to check here.",
+        "kandidatenTitle": "Known default credentials",
+        "kandidatenHint": "The following factory default credentials are known for this device. Tick what CERNIS should try against the device, then start the check.",
+        "keineInfosTitle": "No information on this device",
+        "keineInfosText": "We have no information about factory default credentials for this device. That doesn't mean there are none — only that we don't know them. Check with the manufacturer, or refine manufacturer/model and determine again.",
+        "herstellerLink": "Check with the manufacturer",
+        "keinLink": "No manufacturer link on file."
+      },
+      "kandidat": {
+        "konfidenzGesichert": "confirmed",
+        "konfidenzAuchMoeglich": "also possible",
+        "konfidenzVermutet": "assumed",
+        "konfidenzBenutzer": "your value",
+        "passwortLeer": "(empty)",
+        "spalteBenutzer": "User",
+        "spaltePasswort": "Password",
+        "spalteKonfidenz": "Confidence",
+        "pruefen": "Check",
+        "pruefe": "Checking …",
+        "keineAngehakt": "Tick at least one candidate to check."
+      },
+      "ergebnis": {
+        "trefferTitle": "Default credentials found",
+        "keinTrefferTitle": "No default credentials found",
+        "keinTrefferText": "No login was possible with the credentials checked. This is no clean bill of health — only the ticked candidates were tested.",
+        "note": "Note: {{note}}",
+        "erneut": "New check"
+      },
+      "historie": {
+        "title": "Earlier checks",
+        "loading": "Loading history …",
+        "loadError": "The check history could not be loaded.",
+        "leer": "No checks recorded yet.",
+        "spalteZeit": "Time",
+        "spalteHost": "Host",
+        "spalteGeraet": "Manufacturer / model",
+        "spalteErgebnis": "Result",
+        "treffer": "{{count}} finding",
+        "treffer_other": "{{count}} findings",
+        "keinTreffer": "no finding",
+        "detailTitle": "Findings of this check",
+        "detailLeer": "This check produced no findings.",
+        "detailLoadError": "The details could not be loaded.",
+        "modellLeer": "no model"
+      }
+    },
+    "route": {
+      "targetLabel": "Target",
+      "targetPlaceholder": "Enter a domain or IP (e.g. 1.1.1.1)",
+      "start": "Trace route",
+      "measuring": "Measuring …",
+      "idle": "Enter an internet target to show the network path to it.",
+      "noReply": "no reply",
+      "noHops": "No hops found.",
+      "error": "The route could not be measured.",
+      "permissionHint": "A more precise measurement is possible with privileges — it also runs without.",
+      "loadOrgs": "Load operator names (internet query)",
+      "loadingOrgs": "loading …",
+      "colHop": "Hop",
+      "colIp": "IP",
+      "colCountry": "Country",
+      "colOperator": "Operator / ASN",
+      "colRtt": "RTT",
+      "runningHint": "Measurement in progress — depending on the target this can take up to a minute."
+    },
+    "cve": {
+      "loading": "Loading CVE findings …",
+      "error": "The CVE findings could not be loaded.",
+      "groupLabel": "Grouping",
+      "bySeverity": "By severity",
+      "byDevice": "By device",
+      "newBadge": "NEW",
+      "cvssLabel": "CVSS score",
+      "ack": "Acknowledge",
+      "acking": "Acknowledging …",
+      "reactivate": "Show again",
+      "reactivating": "Showing …",
+      "showHidden": "Show hidden",
+      "hideHidden": "Hide hidden",
+      "hiddenHeading": "Hidden findings ({{count}})",
+      "noHidden": "No hidden findings",
+      "portLabel": "Port {{port}}",
+      "publishedLabel": "published {{date}}",
+      "findingCount": "{{count}} finding(s)",
+      "emptyNoFindings": "No open CVE findings.",
+      "emptyNoScan": "No scan yet — run a network scan, then CERNIS checks the discovered devices for vulnerabilities one by one.",
+      "emptyHint": "The check runs in the background and is throttled — findings appear gradually.",
+      "ackOnlyNote": "Acknowledged findings are hidden; you can show and reactivate them below.",
+      "severity": {
+        "critical": "Critical",
+        "high": "High",
+        "medium": "Medium",
+        "low": "Low",
+        "unknown": "Unknown"
+      },
+      "status": {
+        "sleeping": "All devices are up to date",
+        "checking": "Update in progress — {{offen}} of {{gesamt}} devices remaining",
+        "hosts": "{{checked}} devices checked · {{total}} currently checkable",
+        "active": "{{count}} active findings"
+      }
+    }
+  },
+  "reporting": {
+    "cards": {
+      "security": {
+        "title": "Network Security Report",
+        "subtitle": "Score, notable ports, CVE findings and network anomalies in one report.",
+        "locked": ""
+      },
+      "inventory": {
+        "title": "Network Inventory Report",
+        "subtitle": "Device inventory with vendors, categories, trust status and sightings.",
+        "locked": ""
+      },
+      "cve": {
+        "title": "CVE Report",
+        "subtitle": "Discovered vulnerabilities by severity, device and service – with a full findings list.",
+        "locked": ""
+      },
+      "outbound": {
+        "title": "Network Outbound Contacts Report",
+        "subtitle": "Where your network reaches out – remote peers, countries, operators and notable contacts.",
+        "locked": ""
+      },
+      "dnswatch": {
+        "title": "DNS Watch Report",
+        "subtitle": "This computer's DNS-relevant outbound contacts – as expected, open, or possible DoH, with a program mapping.",
+        "locked": ""
+      },
+      "behavior": {
+        "title": "Behaviour profile report",
+        "subtitle": "Recurring activity patterns per task or across all devices – daily rhythm, weekly pattern and flagged deviations.",
+        "locked": ""
+      }
+    }
+  },
+  "report": {
+    "security": {
+      "titel": "Network security report",
+      "kopf": {
+        "erstellt": "Created on {{datum}}"
+      },
+      "einleitung": "This report summarises the network's security state from the latest scan. It describes and contextualises the findings – it does not pass judgement.",
+      "fusszeile": "CERNIS PRO 2.0 — Professional Network Scanner & Monitor · Created on {{datum}}",
+      "ladeFehler": "The security report could not be loaded.",
+      "keinScan": "No scan yet – please run a network scan first.",
+      "stufe": {
+        "gut": "good",
+        "maessig": "moderate",
+        "kritisch": "critical",
+        "auffaellig": "notable"
+      },
+      "score": {
+        "von": "out of 100",
+        "aria": "Security score {{score}} out of 100",
+        "einordnung": "Network health: {{score}} out of 100 ({{level}}). {{deviceCount}} devices assessed; of those {{criticalDevices}} critical, {{notableDevices}} notable, {{cleanDevices}} without findings.",
+        "beitraegeTitel": "How the score is calculated",
+        "beitraegeAuf": "Show contributions",
+        "beitraegeZu": "Hide contributions",
+        "formel": "Score = 100 × (1 − total burden {{last}} / {{geraete}} devices)",
+        "sauber": "Remaining devices without findings: {{anzahl}}"
+      },
+      "beitraege": {
+        "geraet": "Device",
+        "befund": "Worst finding",
+        "last": "Burden",
+        "leer": "No device contributes burden to the score."
+      },
+      "kennzahl": {
+        "kritisch": "Critical",
+        "auffaellig": "Notable",
+        "ohneBefund": "No findings"
+      },
+      "donut": {
+        "geraete": "devices",
+        "aria": "Severity distribution across {{anzahl}} devices"
+      },
+      "balken": {
+        "titel": "Findings per device",
+        "weitere": "+ {{anzahl}} more"
+      },
+      "tabelle": {
+        "ports": "Hosts with notable ports",
+        "cve": "CVE findings",
+        "net": "Network anomalies",
+        "quittiert": "Already acknowledged",
+        "leer": "No entries."
+      },
+      "spalte": {
+        "geraet": "Device",
+        "ports": "Ports",
+        "schwere": "Severity",
+        "grund": "Reason",
+        "cve": "CVE",
+        "cvss": "CVSS",
+        "dienst": "Service",
+        "art": "Kind",
+        "beschreibung": "Description",
+        "quelle": "Source"
+      },
+      "quelle": {
+        "port": "Port",
+        "cve": "CVE",
+        "net": "Network"
+      },
+      "portGrund": "Open ports flagged by CERNIS as unusual",
+      "quittiertHinweis": "Acknowledged – not counted in the score.",
+      "fussnote": "This report describes and contextualises – it does not pass judgement.",
+      "rogue": {
+        "ungeprueft": "Rogue DHCP check not yet performed (requires an active check with root privileges). It can be triggered via the diagnostics / DNS watcher function.",
+        "geprueft": "Rogue DHCP last checked on {{datum}}."
+      },
+      "pdf": "Report as PDF",
+      "pdfFehler": "The PDF could not be created. Please try again."
+    },
+    "inventory": {
+      "titel": "Network inventory report",
+      "kopf": {
+        "erstellt": "Created on {{datum}}"
+      },
+      "einleitung": "This report lists which devices have been seen on the network. It describes and contextualises the inventory – it does not judge.",
+      "fusszeile": "CERNIS PRO 2.0 — Professional Network Scanner & Monitor · Created on {{datum}}",
+      "ladeFehler": "The inventory report could not be loaded.",
+      "leerzustand": "No devices recorded yet – please run a network scan first.",
+      "kennzahl": {
+        "gesamt": "Total",
+        "bekannt": "Known",
+        "unbekannt": "Unknown",
+        "aktiv": "Active (24 h)",
+        "vertraut": "Trusted",
+        "beobachtet": "Watched",
+        "neutral": "Neutral"
+      },
+      "donut": {
+        "geraete": "devices",
+        "bekanntTitel": "Known / unknown",
+        "vertrauenTitel": "Trust status",
+        "ariaBekannt": "Known/unknown across {{anzahl}} devices",
+        "ariaVertrauen": "Trust status across {{anzahl}} devices"
+      },
+      "legende": {
+        "bekannt": "Known",
+        "unbekannt": "Unknown",
+        "vertraut": "Trusted",
+        "beobachtet": "Watched",
+        "neutral": "Neutral"
+      },
+      "verteilung": {
+        "titel": "Distribution",
+        "vendor": "Vendor",
+        "kategorie": "Category",
+        "weitere": "+ {{anzahl}} more",
+        "leer": "No entries.",
+        "ohneHersteller": "No vendor identified",
+        "ohneKategorie": "No category identified"
+      },
+      "liste": {
+        "titel": "Device list",
+        "weitere": "+ {{anzahl}} more · complete in the PDF"
+      },
+      "filter": {
+        "aktiv": "Active",
+        "bekannt": "Known",
+        "unbekannt": "Unknown",
+        "archiviert": "Archived"
+      },
+      "sortierung": {
+        "label": "Sort by",
+        "lastSeen": "Last seen",
+        "name": "Name",
+        "vendor": "Vendor"
+      },
+      "spalte": {
+        "geraet": "Device",
+        "hersteller": "Vendor",
+        "ip": "Last IP",
+        "erstSichtung": "First seen",
+        "letztSichtung": "Last seen",
+        "gesehen": "Seen",
+        "kategorie": "Category",
+        "status": "Status"
+      },
+      "status": {
+        "vertraut": "Trusted",
+        "beobachtet": "Watched",
+        "bekannt": "Known",
+        "unbekannt": "Unknown"
+      },
+      "tabelle": {
+        "leer": "No devices in this selection."
+      },
+      "fussnote": "This report describes and contextualises – it does not pass judgement.",
+      "pdf": "Report as PDF",
+      "pdfFehler": "The PDF could not be created. Please try again."
+    },
+    "cve": {
+      "titel": "CVE report",
+      "kopf": {
+        "erstellt": "Created on {{datum}}"
+      },
+      "einleitung": "This report lists the vulnerabilities (CVEs) found on the network. It describes and contextualises – it does not judge.",
+      "fusszeile": "CERNIS PRO 2.0 — Professional Network Scanner & Monitor · Created on {{datum}}",
+      "ladeFehler": "The CVE report could not be loaded.",
+      "leerzustand": "No CVE findings yet – please run a scan and the CVE check first.",
+      "kennzahl": {
+        "aktiv": "Active findings",
+        "neu": "New (24 h)",
+        "betroffen": "Affected devices",
+        "quittiert": "Acknowledged",
+        "hoechste": "Highest severity",
+        "abdeckung": "Coverage",
+        "aeltste": "Oldest published"
+      },
+      "donut": {
+        "befunde": "findings",
+        "aria": "Severity distribution across {{anzahl}} findings"
+      },
+      "severity": {
+        "CRITICAL": "Critical",
+        "HIGH": "High",
+        "MEDIUM": "Medium",
+        "LOW": "Low",
+        "UNKNOWN": "Unknown"
+      },
+      "muster": {
+        "titel": "Patterns",
+        "geraet": "By device",
+        "dienst": "By service",
+        "weitere": "+ {{anzahl}} more",
+        "leer": "No entries."
+      },
+      "spalteGeraet": {
+        "geraet": "Device",
+        "befunde": "Findings",
+        "hoechste": "Highest severity",
+        "cvss": "Highest CVSS",
+        "dienste": "Services"
+      },
+      "spalteDienst": {
+        "dienst": "Service",
+        "befunde": "Findings",
+        "geraete": "Devices",
+        "hoechste": "Highest severity",
+        "cvss": "Highest CVSS",
+        "aeltste": "Oldest published",
+        "ohneDienst": "No service identified"
+      },
+      "liste": {
+        "titel": "Full findings list",
+        "hostBefunde": "{{anzahl}} findings, highest"
+      },
+      "spalte": {
+        "cve": "CVE",
+        "severity": "Severity",
+        "cvss": "CVSS",
+        "dienst": "Service",
+        "port": "Port",
+        "erstmals": "First seen",
+        "status": "Status"
+      },
+      "filter": {
+        "alle": "All",
+        "aktiv": "Active",
+        "quittiert": "Acknowledged",
+        "neu": "New"
+      },
+      "sortierung": {
+        "label": "Sort by",
+        "severity": "Severity",
+        "host": "Device",
+        "cvss": "CVSS"
+      },
+      "status": {
+        "aktiv": "Active",
+        "quittiert": "Acknowledged",
+        "neu": "NEW"
+      },
+      "tabelle": {
+        "leer": "No findings in this selection."
+      },
+      "neuHinweis": "New = first seen within the last 24 hours.",
+      "fussnote": "This report describes and contextualises – it does not pass judgement.",
+      "pdf": "Report as PDF",
+      "pdfFehler": "The PDF could not be created. Please try again."
+    },
+    "outbound": {
+      "titel": "Network Outbound Contacts Report",
+      "kopf": {
+        "erstellt": "Created on {{datum}}"
+      },
+      "einleitung": "This report shows which remote peers outside your network were contacted – organised by country, operator and notability. It draws on your recordings and therefore covers a past period; the list under Outbound Contacts, by contrast, shows the present moment. It describes and contextualises – it does not pass judgement.",
+      "fusszeile": "CERNIS PRO 2.0 — Professional Network Scanner & Monitor · Created on {{datum}}",
+      "ladeFehler": "The outbound contacts report could not be loaded.",
+      "leerzustandKeineAufzeichnung": "This report evaluates recorded periods. The list under Outbound Contacts shows the present moment – for a report, a period is recorded from it. You start a recording under Observe, Outbound Contacts, with “New recording”.",
+      "leerzustandNochKeineDaten": "No measurement points are available for this period yet. The view fills up as soon as this computer talks to the outside.",
+      "bezug": {
+        "label": "Scope",
+        "alle": "All recordings"
+      },
+      "kennzahl": {
+        "gegenstellen": "Remote peers",
+        "verbindungen": "Connections",
+        "laender": "Countries",
+        "betreiber": "Operators",
+        "auffaellig": "Notable",
+        "tracker": "Tracker",
+        "bedrohung": "Threat",
+        "lokal": "Local"
+      },
+      "verteilung": {
+        "titel": "Distribution",
+        "land": "Country",
+        "betreiber": "Operator",
+        "unbekannt": "(unknown)",
+        "ohneLand": "No country identified",
+        "ohneBetreiber": "No operator identified",
+        "weitere": "+ {{anzahl}} more",
+        "leer": "No entries."
+      },
+      "liste": {
+        "titel": "Contact list",
+        "weitere": "+ {{anzahl}} more · complete in the PDF"
+      },
+      "filter": {
+        "alle": "All",
+        "auffaellig": "Notable",
+        "lokal": "Local"
+      },
+      "sortierung": {
+        "label": "Sort",
+        "kontakte": "Contacts",
+        "name": "Name",
+        "land": "Country"
+      },
+      "schalter": {
+        "lokaleAusblenden": "Hide local"
+      },
+      "spalte": {
+        "gegenstelle": "Remote peer",
+        "name": "Name",
+        "land": "Country",
+        "betreiber": "Operator",
+        "app": "App",
+        "kontakte": "Contacts",
+        "bewertung": "Assessment"
+      },
+      "bewertung": {
+        "bedrohung": "Threat",
+        "tracker": "Tracker",
+        "keine": "—"
+      },
+      "badge": {
+        "bedrohungTitel": "Listed as a threat in: {{listen}}",
+        "trackerTitel": "Listed as a tracker in: {{listen}}"
+      },
+      "lokal": {
+        "marke": "Local",
+        "titel": "Peer inside your own network (local/infrastructure) – not an outbound contact."
+      },
+      "tabelle": {
+        "leer": "No contacts in this selection."
+      },
+      "fussnote": "This report describes and contextualises – it does not pass judgement.",
+      "pdf": "Report as PDF",
+      "pdfFehler": "The PDF could not be created. Please try again."
+    },
+    "dnsWatch": {
+      "titel": "DNS Watch Report",
+      "kopf": {
+        "erstellt": "Created on {{datum}}"
+      },
+      "einleitung": "This report summarises this computer's DNS-relevant outbound contacts and classifies them against the expected DNS servers and the known DoH providers. It describes and contextualises – it does not judge.",
+      "ladeFehler": "The DNS watch report could not be loaded.",
+      "leerzustand": "No DNS-relevant outbound contacts are currently recorded.",
+      "kennzahl": {
+        "aktiv": "Active",
+        "auffaellig": "Notable",
+        "quittiert": "Acknowledged",
+        "gesamt": "Contacts total"
+      },
+      "donut": {
+        "aktiv": "Active",
+        "aria": "Distribution of active DNS contacts by category: {{anzahl}} total"
+      },
+      "category": {
+        "offen": "Open (foreign resolver)",
+        "moegliche_doh": "Possible DoH",
+        "erwartungsgemaess": "As expected"
+      },
+      "muster": {
+        "titel": "Distribution",
+        "kategorie": "By category",
+        "programm": "By program",
+        "leer": "No entries.",
+        "weitere": "+ {{anzahl}} more"
+      },
+      "spalteKat": {
+        "kategorie": "Category",
+        "kontakte": "Contacts"
+      },
+      "spalteApp": {
+        "programm": "Program",
+        "kontakte": "Contacts",
+        "ohneProgramm": "No program identified"
+      },
+      "filter": {
+        "alle": "All",
+        "auffaellig": "Notable only",
+        "quittiert": "Acknowledged"
+      },
+      "sortierung": {
+        "label": "Sort by",
+        "kategorie": "Category",
+        "kontakte": "Contacts",
+        "gegenstelle": "Remote peer"
+      },
+      "liste": {
+        "titel": "DNS-relevant outbound contacts"
+      },
+      "spalte": {
+        "kategorie": "Category",
+        "gegenstelle": "Remote peer",
+        "name": "Name",
+        "programm": "Program",
+        "kontakte": "Contacts",
+        "status": "Status"
+      },
+      "status": {
+        "aktiv": "Active",
+        "quittiert": "Acknowledged"
+      },
+      "grundlage": {
+        "titel": "Basis of the classification",
+        "erwartet": "Expected DNS servers",
+        "doh": "Known DoH providers",
+        "keine": "(none)"
+      },
+      "tabelle": {
+        "leer": "No contacts for this selection."
+      },
+      "fussnote": "The report describes this computer's DNS-relevant outbound contacts and classifies them against your lists – it does not judge. Open only means: a resolver outside the expected list.",
+      "fusszeile": "CERNIS PRO 2.0 – DNS Watch Report · {{datum}}",
+      "pdf": "Download as PDF",
+      "pdfFehler": "The PDF could not be created."
+    },
+    "dnsBypass": {
+      "umschalter": {
+        "host": "This computer",
+        "netz": "Bypass in the network"
+      },
+      "bezug": {
+        "label": "Scope",
+        "alle": "All recordings"
+      },
+      "einleitung": "This report shows which devices in the network bypass the expected DNS – plain DNS (port 53) to a foreign resolver is detected reliably, DoH is only suspected heuristically. It describes and contextualises – it does not judge.",
+      "ladeFehler": "The network-wide DNS bypass report could not be loaded.",
+      "leerzustandKeineAufzeichnung": "No network-wide recording yet. Only what CERNIS reads along becomes visible network-wide – please start a recording in the DNS Watch (tab “Bypass in the network”) first.",
+      "leerzustandKeineUmgehung": "No bypass recorded. Only what CERNIS reads along becomes visible network-wide: this requires the network traffic to reach here (gateway/mirror port or a simple network). Without network visibility the list stays empty, even if bypassing actually happens.",
+      "kennzahl": {
+        "umgeher": "Bypassers",
+        "geraete": "Devices bypassing",
+        "anfragen": "Queries total",
+        "erwartet": "As expected"
+      },
+      "resolver": {
+        "titel": "Foreign resolvers (target IP)",
+        "spalteZiel": "Target IP",
+        "spalteAnfragen": "Queries",
+        "leer": "No foreign resolvers recorded."
+      },
+      "liste": {
+        "titel": "Bypassers in the network"
+      },
+      "spalte": {
+        "geraet": "Device",
+        "quelle": "Source IP",
+        "ziel": "Target IP",
+        "anfragen": "Queries",
+        "beispiele": "Queried names"
+      },
+      "selbst": "This computer",
+      "dohBadge": "possible DoH",
+      "dohBadgeNamed": "possible DoH ({{quelle}})",
+      "tabelle": {
+        "leer": "No bypass in this selection."
+      },
+      "grundlage": {
+        "titel": "Basis of the classification",
+        "erwartet": "Expected DNS servers",
+        "keine": "(none)"
+      },
+      "fussnote": "The report describes network-wide which devices bypass the expected DNS, and contextualises – it does not judge. Plain DNS (port 53) is detected reliably, DoH is only suspected heuristically.",
+      "fusszeile": "CERNIS PRO 2.0 – DNS Bypass Report · {{datum}}",
+      "pdf": "Download as PDF",
+      "pdfFehler": "The PDF could not be created."
+    },
+    "behavior": {
+      "titel": "Behaviour profile report",
+      "kopf": {
+        "erstellt": "Created on {{datum}}"
+      },
+      "einleitung": "This report shows the recurring activity patterns per task or device – daily rhythm, weekly pattern and the deviations flagged as atypical. It describes and contextualises – it passes no judgement.",
+      "ladeFehler": "The behaviour profile report could not be loaded.",
+      "bezug": {
+        "single": "This task",
+        "all": "All devices"
+      },
+      "aufgabeWahl": "Task",
+      "aufgabeHinweis": "Please select a task.",
+      "keineAufgaben": "No recurring tasks with behaviour data available.",
+      "kennzahl": {
+        "aufzeichnungstage": "Recorded days",
+        "genugDaten": "Enough data",
+        "abweichungen": "Deviations",
+        "ja": "yes",
+        "nein": "no"
+      },
+      "tagesverlauf": "Daily rhythm",
+      "wochenmuster": "Weekly pattern",
+      "keineDaten": "Not enough data yet for a behaviour profile.",
+      "spalte": {
+        "geraet": "Device",
+        "aufzeichnungstage": "Recorded days",
+        "genugDaten": "Enough data",
+        "abweichungen": "Deviations",
+        "aktivsteZeit": "Busiest time",
+        "aktivsterTag": "Busiest day"
+      },
+      "wochentage": [
+        "Mon",
+        "Tue",
+        "Wed",
+        "Thu",
+        "Fri",
+        "Sat",
+        "Sun"
+      ],
+      "pdf": "Download as PDF",
+      "pdfFehler": "The PDF could not be created."
+    }
+  },
+  "verwaltung": {
+    "cards": {
+      "geraeteverwaltung": {
+        "title": "Device management",
+        "subtitle": "Add, edit, archive and restore devices."
+      },
+      "wartung": {
+        "title": "Delete data",
+        "subtitle": "Reset scan data or restore the factory state."
+      },
+      "listen": {
+        "title": "List management",
+        "subtitle": "See which outbound contacts are listed as trackers, advertising, or threats — manage sources and set what's shown."
+      },
+      "dnsvertrauen": {
+        "title": "DNS servers & trust",
+        "subtitle": "See the DNS servers that were detected and decide, per server, whether you trust it — with clues to help you decide."
+      }
+    },
+    "dnsTrust": {
+      "intro": "This function shows the DNS servers CERNIS has observed on your network. Define which servers you expect and in what order, bring detected servers into your expectation, or reject a server. For each server you see a few clues to help you decide.",
+      "redLine": "CERNIS shows and classifies, but does not judge. Whether a DNS server is trustworthy is your call — the clues only help.",
+      "loading": "Loading DNS servers …",
+      "empty": "No DNS servers detected yet — they appear after the next start or a recording.",
+      "ladeFehler": "The DNS servers could not be loaded. Please check whether the backend is running.",
+      "aktionFehler": "The decision could not be saved.",
+      "aktionFehlerUnbekannt": "This address is not known yet and therefore cannot be rated.",
+      "aktionFehlerNichtBestaetigt": "An order can only be assigned to confirmed servers.",
+      "groups": {
+        "expected": {
+          "title": "Expected — ordered",
+          "lead": "The DNS servers you expect — in your order. The order is your expectation, not a measurement.",
+          "empty": "No expected DNS server yet. Use “Mark as expected” below to add a detected server."
+        },
+        "detected": {
+          "title": "Detected, not yet expected",
+          "lead": "Servers this machine actually uses or has seen. Decide whether they belong to your expectation."
+        },
+        "manual": {
+          "title": "Added manually",
+          "lead": "DNS servers you entered yourself. They count as expected but have not been observed here yet. As soon as such a server actually shows up, it moves up to the expected servers."
+        },
+        "rejected": {
+          "title": "Rejected",
+          "lead": "Servers you have rejected. You can revoke the decision at any time."
+        }
+      },
+      "category": {
+        "gateway": "Router",
+        "local_private": "Local",
+        "public_resolver": "Public resolver",
+        "unknown": "Unknown",
+        "threat_listed": "On a threat list"
+      },
+      "plausibility": {
+        "inInventorySince": "In inventory for {{days}} days",
+        "inInventoryPlain": "In inventory",
+        "notInInventory": "Not in inventory",
+        "vendor": "Vendor: {{vendor}}",
+        "openPorts": "Open ports: {{ports}}"
+      },
+      "actions": {
+        "reset": "Reset",
+        "trustDespiteThreat": "Trust despite the threat-list entry",
+        "markExpected": "Mark as expected",
+        "rankUp": "Move up",
+        "rankDown": "Move down",
+        "removeExpected": "Remove from expectation",
+        "reject": "Reject",
+        "addServer": "Add"
+      },
+      "placeholder": {
+        "badge": "non-functional (Windows default)",
+        "noDecisionNeeded": "no decision needed",
+        "note": "Windows reports three built-in IPv6 addresses as DNS servers. They are not used for name resolution. CERNIS shows them because Windows reports them, but does not treat them as foreign resolvers."
+      },
+      "rejected": {
+        "toggleShow": "Show",
+        "toggleHide": "Hide",
+        "count_one": "(1)",
+        "count_other": "({{count}})"
+      },
+      "aktionFehlerBereitsErfasst": "This address is already on record.",
+      "aktionFehlerUngueltig": "That is not a valid IP address.",
+      "manual": {
+        "notObserved": "not observed yet"
+      },
+      "addForm": {
+        "ipPlaceholder": "IP address",
+        "namePlaceholder": "Name (optional)"
+      }
+    },
+    "blocklist": {
+      "intro": "This feature checks your network's outbound contacts against publicly maintained lists and shows whether a remote endpoint is listed there as a tracker, advertising, or threat. Here you manage the list sources and set how much is shown.",
+      "redLine": "The classification comes from the named list, not from CERNIS. CERNIS only reflects it.",
+      "loading": "Loading lists …",
+      "never": "never",
+      "attributionRequired": "attribution required",
+      "refreshDueResult": "{{updated}} updated, {{failed}} failed.",
+      "ladeFehler": "The lists could not be loaded. Please check that the backend is running.",
+      "settingsFehler": "The setting could not be saved.",
+      "aktionFehler": "The action could not be completed.",
+      "settings": {
+        "title": "Display settings",
+        "strictnessLabel": "How strictly to show",
+        "groupTrackerAds": "Show trackers & advertising",
+        "groupThreat": "Show threats",
+        "saved": "Saved."
+      },
+      "strictness": {
+        "critical_only": {
+          "label": "Critical only",
+          "hint": "Shows only matches on threat lists (malware, phishing)."
+        },
+        "recommended": {
+          "label": "Recommended",
+          "hint": "Shows threats and trackers, keeps plain advertising quiet."
+        },
+        "all": {
+          "label": "Show everything",
+          "hint": "Shows every list match, including plain advertising."
+        }
+      },
+      "group": {
+        "tracker_ads": "Trackers & advertising",
+        "threat": "Threat"
+      },
+      "format": {
+        "hosts": "Hosts file",
+        "adblock": "Adblock filter",
+        "domain_list": "Domain list",
+        "ip_list": "IP list",
+        "csv_domain": "CSV (domains)",
+        "csv_ip": "CSV (IP addresses)"
+      },
+      "status": {
+        "never": "never loaded",
+        "ok": "loaded",
+        "broken": "broken"
+      },
+      "col": {
+        "name": "Name",
+        "group": "Group",
+        "format": "Format",
+        "status": "Status",
+        "entries": "Entries",
+        "fetched": "Last loaded",
+        "license": "License",
+        "active": "Active"
+      },
+      "sources": {
+        "title": "List sources",
+        "empty": "No lists added yet."
+      },
+      "actions": {
+        "add": "Add list",
+        "upload": "Upload list",
+        "refreshDue": "Update due lists",
+        "health": "Check lists",
+        "reset": "Reset to defaults",
+        "refresh": "Update",
+        "delete": "Delete"
+      },
+      "confirm": {
+        "resetTitle": "Reset to defaults?",
+        "resetText": "All your own lists and the entire load state will be lost; the bundled lists are recreated.",
+        "resetConfirm": "Reset",
+        "deleteText": "Delete this list?",
+        "deleteConfirm": "Delete",
+        "cancel": "Cancel"
+      },
+      "dialog": {
+        "close": "Close",
+        "cancel": "Cancel"
+      },
+      "add": {
+        "title": "Add list",
+        "lead": "Enter a publicly reachable list source. The list is loaded on the first update.",
+        "name": "Name",
+        "url": "Address (URL)",
+        "group": "Group",
+        "format": "Format",
+        "submit": "Add",
+        "successLead": "The list has been added.",
+        "licenseHint": "This source may be under a copyleft or attribution license: {{license}}. Please review its terms of use.",
+        "done": "Done",
+        "error": "The list could not be added. Please check group and format."
+      },
+      "upload": {
+        "title": "Upload list",
+        "lead": "Upload a list file or paste the list text directly. The content is read in immediately.",
+        "file": "File",
+        "text": "Or paste text",
+        "textPlaceholder": "Paste list text here …",
+        "submit": "Upload",
+        "success": "Uploaded — {{count}} entries read.",
+        "error": "The list could not be read. Please check the format."
+      },
+      "health": {
+        "title": "Check lists",
+        "lead": "These lists could not be loaded recently. You decide what should happen.",
+        "suggest": "Suggestion: use \"{{name}}\" instead.",
+        "builtinNote": "Bundled lists cannot be deleted, only disabled.",
+        "delete": "Delete broken list",
+        "activate": "Activate suggestion",
+        "close": "Close",
+        "allFine": "All lists are fine.",
+        "error": "The action could not be completed."
+      }
+    }
+  },
+  "geraete": {
+    "cards": {
+      "verwaltung": {
+        "title": "Device management",
+        "subtitle": "Add, edit, archive and restore devices."
+      },
+      "fritzbox": {
+        "title": "FRITZ!Box",
+        "subtitle": "WAN, Wi-Fi, connected devices and events of the FRITZ!Box."
+      }
+    },
+    "fritzbox": {
+      "connectTitle": "Connect to FRITZ!Box",
+      "connectIntro": "Signing in requires a FRITZ!Box user with TR-064 access.",
+      "addressLabel": "Address",
+      "userLabel": "User (optional)",
+      "passwordLabel": "Password",
+      "passwordIsSet": "Password stored – leave empty to keep it.",
+      "connectButton": "Connect",
+      "connectHint": "Many FRITZ!Box models allow local access without a password. When using a FRITZ!Box user account, TR-064 must be enabled there.",
+      "authHint": "Sign-in failed. Please check user/password and TR-064 access.",
+      "notConnected": "No FRITZ!Box is currently connected.",
+      "refresh": "Refresh",
+      "edit": "Edit",
+      "logout": "Disconnect",
+      "loading": "Loading …",
+      "loadError": "FRITZ!Box data could not be loaded.",
+      "unitMbit": "{{value}} Mbit/s",
+      "tabs": {
+        "overview": "Overview",
+        "wlanClients": "Wi-Fi devices",
+        "log": "Events",
+        "portForwardings": "Port forwardings"
+      },
+      "wan": {
+        "title": "WAN / Internet",
+        "status": "Status",
+        "connected": "Connected",
+        "disconnected": "Disconnected",
+        "ipExternal": "External IPv4",
+        "ipExternalV6": "External IPv6",
+        "uptime": "Uptime",
+        "sent": "Sent",
+        "recv": "Received"
+      },
+      "link": {
+        "title": "Fiber link",
+        "downstream": "Downstream",
+        "upstream": "Upstream"
+      },
+      "dsl": {
+        "title": "DSL",
+        "sync": "Sync",
+        "syncYes": "In sync",
+        "syncNo": "No sync",
+        "downstream": "Downstream",
+        "upstream": "Upstream",
+        "snr": "SNR (D/U)",
+        "snrValue": "{{down}} / {{up}} dB",
+        "attn": "Attenuation (D/U)",
+        "attnValue": "{{down}} / {{up}} dB"
+      },
+      "wlan": {
+        "title24": "Wi-Fi 2.4 GHz",
+        "title5": "Wi-Fi 5 GHz",
+        "status": "Status",
+        "on": "Active",
+        "off": "Off",
+        "ssid": "SSID",
+        "channel": "Channel",
+        "clients": "Devices"
+      },
+      "device": {
+        "title": "Device",
+        "model": "Model",
+        "firmware": "Firmware",
+        "totalHosts": "Known hosts",
+        "wlanClients": "Wi-Fi devices total"
+      },
+      "clients": {
+        "hostname": "Hostname",
+        "ip": "IP",
+        "mac": "MAC",
+        "band": "Band",
+        "signal": "Signal (dBm)",
+        "speed": "Speed (Mbit/s)",
+        "empty": "No Wi-Fi devices connected."
+      },
+      "log": {
+        "timestamp": "Time",
+        "message": "Event",
+        "empty": "No events available."
+      },
+      "forwardings": {
+        "enabled": "Status",
+        "on": "Active",
+        "off": "Off",
+        "description": "Description",
+        "protocol": "Protocol",
+        "external": "External",
+        "internal": "Internal",
+        "empty": "No port forwardings configured."
+      }
+    },
+    "verwaltung": {
+      "spaltenLabel": "Name",
+      "spaltenMac": "MAC",
+      "spaltenIp": "IP",
+      "spaltenHerkunft": "Source",
+      "spaltenGesehen": "Last seen",
+      "herkunftManuell": "manual",
+      "herkunftScan": "Scan",
+      "herkunftSelbst": "this machine",
+      "aktionArchivieren": "Archive",
+      "aktionWiederherstellen": "Restore",
+      "titelAktiv": "Active devices",
+      "titelAnlegen": "Add device",
+      "titelArchiv": "Archive",
+      "leerAktiv": "No active devices yet.",
+      "leerArchiv": "The archive is empty.",
+      "archivHinweis": "Archived devices are excluded from ratings and lists, but are kept – they can be restored at any time.",
+      "feldMac": "MAC address",
+      "feldLabel": "Name",
+      "feldKategorie": "Category",
+      "feldNotizen": "Notes",
+      "feldTags": "Tags (comma-separated)",
+      "knopfAnlegen": "Add",
+      "fehlerExistiert": "A device with this MAC address already exists.",
+      "fehlerMacUngueltig": "The MAC address is invalid. Please use the format AA:BB:CC:DD:EE:FF.",
+      "fehlerAnlegen": "The device could not be added.",
+      "laedt": "Loading …",
+      "ladeFehler": "The devices could not be loaded.",
+      "aufraeumen": {
+        "knopf": "Clean up by network",
+        "titelAuswahl": "Which devices should be removed?",
+        "ohneIp": "Without known IP",
+        "hinweis": "The assignment comes from a device's last known IP. If a device has since been seen in a different network, it appears there.",
+        "vorschauPosten": "Devices in network {{netz}} ({{anzahl}})",
+        "weiter": "Continue",
+        "nichtsGewaehlt": "Please select at least one group.",
+        "leer": "There are no devices that could be cleaned up.",
+        "ladeFehler": "The network groups could not be loaded."
+      }
+    },
+    "nachfrage": {
+      "titel": "Devices not seen in a while",
+      "einleitung": "These devices have not shown up for some time. You can take them out of the active list – they then move to the archive and stay there. Nothing happens on its own; you decide per device.",
+      "spalteName": "Name",
+      "spalteMac": "MAC",
+      "zuletztGesehen": "last seen:",
+      "knopfArchivieren": "Remove from list",
+      "knopfBehalten": "Keep",
+      "knopfSpaeter": "Later",
+      "leer": "There are currently no devices to ask about."
+    },
+    "blocklist": {
+      "intro": "Here you maintain the lists CERNIS checks your devices' outbound contacts against – for example trackers, ads or known threats. You can switch built-in lists on and off, add or upload your own lists, and set how strictly matches are shown.",
+      "redLine": "The classification comes from the list named in each case, not from CERNIS. CERNIS only reflects it.",
+      "loading": "Loading …",
+      "ladeFehler": "The lists could not be loaded.",
+      "settingsFehler": "The setting could not be saved.",
+      "aktionFehler": "The action failed. Please try again later.",
+      "never": "never",
+      "attributionRequired": "attribution required",
+      "settings": {
+        "title": "Display and strictness",
+        "strictnessLabel": "How strictly matches are shown",
+        "groupTrackerAds": "Trackers & ads",
+        "groupThreat": "Threats",
+        "saved": "Saved."
+      },
+      "strictness": {
+        "critical_only": {
+          "label": "Critical only",
+          "hint": "Shows only matches from threat lists."
+        },
+        "recommended": {
+          "label": "Recommended",
+          "hint": "Shows threats as well as trackers and ads."
+        },
+        "all": {
+          "label": "Show everything",
+          "hint": "Shows all matches, including plain ads."
+        }
+      },
+      "group": {
+        "tracker_ads": "Trackers & ads",
+        "threat": "Threats"
+      },
+      "format": {
+        "hosts": "Hosts file",
+        "adblock": "Adblock syntax",
+        "domain_list": "Domain list",
+        "ip_list": "IP list",
+        "csv_domain": "CSV (domain)",
+        "csv_ip": "CSV (IP)"
+      },
+      "status": {
+        "never": "never loaded",
+        "ok": "loaded",
+        "broken": "broken"
+      },
+      "col": {
+        "name": "Name",
+        "group": "Group",
+        "format": "Format",
+        "status": "Status",
+        "entries": "Entries",
+        "fetched": "Last loaded",
+        "license": "License",
+        "active": "Active"
+      },
+      "actions": {
+        "add": "Add list",
+        "upload": "Upload list",
+        "refreshDue": "Refresh all due",
+        "health": "Check lists",
+        "reset": "Restore factory state",
+        "refresh": "Refresh",
+        "delete": "Delete"
+      },
+      "refreshDueResult": "{{updated}} refreshed, {{failed}} failed.",
+      "sources": {
+        "title": "Sources",
+        "empty": "There are no lists yet."
+      },
+      "confirm": {
+        "cancel": "Cancel",
+        "deleteText": "Really delete this list?",
+        "deleteConfirm": "Delete",
+        "resetTitle": "Restore factory state",
+        "resetText": "All lists are deleted and the bundled factory lists are recreated. Your own and uploaded lists are lost in the process.",
+        "resetConfirm": "Reset"
+      },
+      "dialog": {
+        "close": "Close",
+        "cancel": "Cancel"
+      },
+      "add": {
+        "title": "Add list",
+        "lead": "Add a list by its internet address (URL). CERNIS then downloads it.",
+        "name": "Name",
+        "url": "URL",
+        "group": "Group",
+        "format": "Format",
+        "submit": "Add",
+        "error": "The list could not be added. Please check your input.",
+        "successLead": "The list was added.",
+        "licenseHint": "This source may be under a copyleft/attribution license: {{license}}. Please review its terms of use.",
+        "done": "Done"
+      },
+      "upload": {
+        "title": "Upload list",
+        "lead": "Upload a list as a file or paste the text directly.",
+        "file": "Choose file",
+        "text": "Or paste text",
+        "textPlaceholder": "One domain or IP per line …",
+        "submit": "Upload",
+        "error": "The list could not be uploaded. Please check your input.",
+        "success": "Uploaded – {{count}} entries detected."
+      },
+      "health": {
+        "title": "Check lists",
+        "lead": "These lists could not be loaded last time. You decide what should happen – nothing happens on its own.",
+        "suggest": "Suggestion: use “{{name}}” instead?",
+        "builtinNote": "Factory lists are not deleted, only deactivated.",
+        "delete": "Delete broken list",
+        "activate": "Activate suggestion",
+        "error": "The action failed. Please try again later.",
+        "close": "Close",
+        "allFine": "All good – no broken lists."
+      }
+    }
+  },
+  "theme": {
+    "light": "light",
+    "dark": "dark"
+  },
+  "lang": {
+    "de": "DE",
+    "en": "EN"
+  },
+  "fehlercodes": {
+    "E-101": "The required network port is already in use.",
+    "E-102": "The background service has crashed.",
+    "E-103": "Startup took too long (timeout).",
+    "E-104": "A required component is missing.",
+    "E-105": "The database was created by a newer program version.",
+    "E-201": "The scan connection was interrupted.",
+    "E-202": "The connection to monitoring/logging was lost.",
+    "E-203": "Traffic is not reachable.",
+    "E-204": "Name resolution is not reachable.",
+    "E-205": "The target is not reachable.",
+    "E-301": "Packet capture requires the CAP_NET_RAW capability.",
+    "E-401": "Sign-in to the FRITZ!Box failed.",
+    "E-402": "The FRITZ!Box is not reachable.",
+    "E-403": "The cpnetcheck service is not reachable.",
+    "E-404": "nmap is missing or failed.",
+    "E-501": "Saving failed.",
+    "E-502": "Deleting failed.",
+    "E-503": "The action failed.",
+    "E-504": "The export failed.",
+    "E-505": "The device was not found.",
+    "E-506": "The input is invalid.",
+    "E-507": "The key file for saved passwords is missing."
+  },
+  "lizenzen": {
+    "titel": "About CERNIS PRO",
+    "laden": "Loading the licence inventory …",
+    "nichtBelegt": "not documented",
+    "ja": "yes",
+    "nein": "no",
+    "fehler": {
+      "keineAufstellung": "The licence inventory was not found at runtime. It is generated during the build and shipped with the application; here it is missing. The server lists the paths it checked:",
+      "allgemein": "The licence inventory could not be loaded."
+    },
+    "abschnitt": {
+      "werk": {
+        "titel": "This work",
+        "text": "CERNIS PRO itself: author, licence, and where the source code can be obtained.",
+        "volltext": "Show the licence text verbatim"
+      },
+      "bestandteile": {
+        "titel": "Bundled components",
+        "text": "{{n}} software components ship with the application. Their licences and copyright notices are listed in the licence browser below.",
+        "imBrowserZeigen": "Show in the license browser"
+      },
+      "daten": {
+        "titel": "Bundled data",
+        "text": "{{n}} data sets ship with the application, such as reference tables and identifier lists.",
+        "keine": "No data sets are bundled."
+      },
+      "programme": {
+        "titel": "Required external programs",
+        "einordnung": "These programs are NOT bundled. CERNIS PRO calls them if they are present on your system; their licence belongs to the user's system, not to this distribution. That is why no licence is stated here — nothing is missing. The state “not applicable” means the program is not relevant on this platform at all.",
+        "keine": "No required external programs are listed."
+      }
+    },
+    "nativ": {
+      "titel": "Native layer (system libraries)",
+      "zustand": {
+        "nicht_angefordert": "not requested",
+        "erhoben": "collected",
+        "kein_paketverzeichnis": "no package database available"
+      }
+    },
+    "browser": {
+      "titel": "Licence browser",
+      "text": "Every component at a glance. Select an entry on the left to see its details and the full licence text on the right. The licence text is shown unaltered: not shortened, not re-wrapped, not translated."
+    },
+    "luecken": {
+      "titel": "Undocumented details",
+      "text": "For {{n}} components one detail could not be established from the source. It is listed here explicitly instead of quietly missing."
+    },
+    "filter": {
+      "lizenz": "Licence",
+      "herkunft": "Origin",
+      "suche": "Search",
+      "alle": "All",
+      "suchePlatzhalter": "Name or version",
+      "zaehler": "{{n}} of {{m}}",
+      "ohneLizenzId": "Without a licence statement",
+      "mitgelieferteBestandteile": "Bundled components"
+    },
+    "spalte": {
+      "name": "Name",
+      "fassung": "Version",
+      "lizenz": "Licence",
+      "herkunft": "Origin"
+    },
+    "liste": {
+      "keineBestandteile": "The inventory lists no components.",
+      "keinTreffer": "No component matches the filters and search."
+    },
+    "detail": {
+      "schliessen": "Close details",
+      "fassungKurz": "Version {{fassung}}",
+      "volltext": "Licence text",
+      "textLaedt": "Loading the licence text …",
+      "keinText": "No licence text is on file for this entry.",
+      "textFehler": "The licence text could not be loaded.",
+      "textUnbekannt": "There is no licence text for this key: {{schluessel}}"
+    },
+    "ebene": {
+      "python": "Python package",
+      "npm": "npm package",
+      "rust": "Rust crate",
+      "daten": "Data set",
+      "programme": "Required program",
+      "nativ": "System library"
+    },
+    "vorhanden": {
+      "vorhanden": "present",
+      "fehlt": "missing",
+      "nicht_zutreffend": "not applicable",
+      "nicht_ermittelbar": "cannot be determined"
+    },
+    "feld": {
+      "name": "Name",
+      "fassung": "Version",
+      "urheber": "Author",
+      "lizenzId": "Licence",
+      "lizenzIdQuelle": "Source of the licence statement",
+      "lizenzTextQuelle": "Source of the licence text",
+      "lizenz_text": "Licence text",
+      "quelltextBezug": "Where to obtain the source code",
+      "quelltextBezugQuelle": "Source of that information",
+      "herkunft": "Origin",
+      "urhebervermerk": "Copyright notice",
+      "urhebervermerkQuelle": "Source of the copyright notice",
+      "projektadresse": "Project address",
+      "mitgeliefert": "Bundled",
+      "nurClassifier": "Derived from classifier only",
+      "npmOrt": "Location in the npm tree",
+      "pfad": "Path",
+      "lizenzIdFundstelle": "Where the licence was found",
+      "zweck": "Purpose",
+      "quelleDerAngabe": "Source of the statement",
+      "lieferndesPaket": "Providing package",
+      "fundstelle": "Where it was found",
+      "plattform": "Platform",
+      "vorhanden": "On this system",
+      "produktversion": "Product version",
+      "erzeugtAm": "Inventory generated on",
+      "zustand": "State",
+      "zielplattform": "Target platform",
+      "quelleDerBinaries": "Source of the binaries",
+      "geleseneBinaries": "Binaries read",
+      "bezugsart": "Kind of dependency",
+      "binaries": "Contained in"
+    },
+    "bezugsart": {
+      "aufgerufen": "is called",
+      "vorausgesetzt": "is required, but never called",
+      "aufgerufen_und_vorausgesetzt": "is called and required"
+    }
+  },
+  "zeitplan": {
+    "_hinweis": "STORED, NOT YET WIRED (S88-P5): these texts belong to the schedule outcome (GET /api/schedules, columns last_result/last_error). There is no schedule view in the frontend yet; they are waiting for it, they are not dead. This key is never displayed.",
+    "letzterLaufOk": "{{time}} — succeeded",
+    "letzterLaufFehlgeschlagen": "{{time}} — failed ({{reason}})",
+    "letzterLaufNie": "not run yet"
+  }
+}

@@ -27,10 +27,17 @@ Sicherheits-/Altmuster-Befund (geprueft, hier akzeptabel):
   Einschaetzung festgehalten, nicht still uebergangen.
 """
 
+import asyncio
 from typing import Any
 
 from domain.scanning import SsdpService
 from modules.ssdp import discover_ssdp
+
+# Wartezeit vor dem EINEN internen Wiederholungsversuch, wenn der erste Lauf
+# nichts geliefert hat. Gleiche Begruendung und gleicher Wert wie im
+# mDNS-Adapter: spuerbar genug fuer spaet antwortende Geraete, unkritisch fuer
+# die Gesamtdauer des Scans.
+_RETRY_DELAY = 1.5
 
 
 def _to_domain(raw: Any) -> SsdpService:
@@ -55,6 +62,14 @@ class SsdpAdapter:
 
         ``discover_ssdp`` ist bereits async -- direkt awaiten. Nichts gefunden
         -> ``[]`` (siehe Modul-Docstring: best-effort, kein verdecktes Scheitern).
+
+        Bleibt der erste Lauf leer, wird GENAU EINMAL nach ``_RETRY_DELAY``
+        wiederholt -- ohne zweiten Nutzerklick. Semantik wie im mDNS-Adapter:
+        verlustfrei (kein Retry, wenn schon etwas kam), genau ein Versuch --
+        keine Schleife, keine Rekursion.
         """
         raw_devices = await discover_ssdp(timeout)
+        if not raw_devices:
+            await asyncio.sleep(_RETRY_DELAY)
+            raw_devices = await discover_ssdp(timeout)
         return [_to_domain(raw) for raw in raw_devices]

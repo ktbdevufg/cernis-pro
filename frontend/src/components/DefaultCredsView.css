@@ -1,0 +1,616 @@
+/* Standardzugangs-Prüfansicht (CERNIS PRO 2.0, Etappe D) — folgt der Design-
+   sprache der übrigen Diagnose-/Detail-Panels (gleiche Farb-/Radius-Variablen,
+   Muster RouteView.css / DnsWatchView.css). Nur Projekt-Tokens, keine
+   hartkodierten Farben. Befund-Akzent = Severity-Orange (--severity-auffaellig),
+   wie im Projekt üblich: Handlungshinweis, KEIN moralisches Rot. „Kein Fund" =
+   gedämpftes Grün (--color-ok-*), ehrlich (nicht „sicher"). */
+
+.defcreds {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 4px;
+}
+
+/* Ruhiger Warnhinweis oben: aktive Prüfung, nur eigene Geräte. */
+.defcreds__notice {
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  color: var(--color-text-sec);
+  background: var(--color-bar);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* Ein Ablauf-Schritt (Gerätewahl bzw. Modell/Prüfung). */
+.defcreds__step {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.defcreds__step-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.defcreds__step-hint {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--color-text-sec);
+}
+
+/* Dezenter Sekundärtext (Ladezustände, leere Listen, Hinweise). */
+.defcreds__muted {
+  font-size: 0.85rem;
+  color: var(--color-text-sec);
+  padding: 8px 0;
+}
+
+/* ---------------- Schritt 1: Gerätewahl ---------------- */
+
+.defcreds__geraete {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Zeile als Grid: Name | IP | Hersteller | Ports | Aktion. */
+.defcreds__geraet {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.defcreds__geraet--kopf {
+  background: transparent;
+  border: none;
+  padding: 2px 12px;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--color-text-tert);
+}
+
+.defcreds__geraet-name {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.defcreds__geraet-ip {
+  font-family: var(--font-mono, monospace);
+  color: var(--color-text-sec);
+}
+
+.defcreds__geraet-vendor,
+.defcreds__geraet-ports {
+  color: var(--color-text-sec);
+}
+
+.defcreds__geraet-pick {
+  padding: 5px 12px;
+  font-size: 0.82rem;
+  color: var(--color-accent-strong);
+  background: transparent;
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.defcreds__geraet-pick:hover:not(:disabled) {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.defcreds__geraet-pick:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Fallback-Block: manuelle IP-Eingabe. */
+.defcreds__manuell {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-border);
+}
+
+.defcreds__manuell-title {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+/* ---------------- Form-Grundbausteine ---------------- */
+
+.defcreds__form {
+  display: flex;
+  gap: 8px;
+}
+
+.defcreds__input {
+  flex: 1;
+  padding: 8px 12px;
+  font-size: 0.95rem;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.defcreds__input:focus {
+  outline: 2px solid var(--color-accent);
+  border-color: var(--color-accent-border);
+}
+
+.defcreds__start {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  font-size: 0.9rem;
+  color: var(--color-accent-strong);
+  background: transparent;
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.defcreds__start:hover:not(:disabled) {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.defcreds__start:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Zurück-/Neu-Knopf: textlich, dezent. */
+.defcreds__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 2px;
+  font-size: 0.82rem;
+  color: var(--color-text-sec);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.defcreds__back:hover {
+  color: var(--color-text);
+}
+
+/* ---------------- Schritt 2: Ziel + Modell-Ermittlung ---------------- */
+
+.defcreds__ziel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  background: var(--color-bar);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.defcreds__ziel-zeile {
+  display: flex;
+  gap: 8px;
+  font-size: 0.85rem;
+}
+
+.defcreds__ziel-label {
+  min-width: 96px;
+  color: var(--color-text-sec);
+}
+
+.defcreds__ziel-wert {
+  color: var(--color-text);
+  font-weight: 500;
+}
+
+.defcreds__modellform {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.defcreds__feld {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.defcreds__feld-label {
+  font-size: 0.82rem;
+  color: var(--color-text-sec);
+}
+
+/* ---------------- Fallanzeige ---------------- */
+
+.defcreds__fall {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Entwarnung: ruhiges Grün — für dieses Gerät sind keine Standardzugänge bekannt. */
+.defcreds__entwarnung {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--color-ok-bg);
+  border: 1px solid var(--color-ok-text);
+  border-radius: var(--radius-md);
+}
+
+.defcreds__entwarnung-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-ok-text);
+}
+
+.defcreds__entwarnung-title {
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.defcreds__entwarnung-text {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--color-text);
+}
+
+/* Keine Infos: neutral, ehrlich — kein Fund, aber auch kein Freibrief. */
+.defcreds__keineinfos {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.defcreds__keineinfos-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text);
+}
+
+.defcreds__keineinfos-title {
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.defcreds__keineinfos-text {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--color-text-sec);
+}
+
+/* Hersteller-Nachschlag-Links (öffnen extern). */
+.defcreds__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.defcreds__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--color-link);
+  text-decoration: none;
+}
+
+.defcreds__link:hover {
+  text-decoration: underline;
+}
+
+/* ---------------- Kandidaten-Auswahl ---------------- */
+
+.defcreds__kandidaten {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.defcreds__kandidaten-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text);
+}
+
+.defcreds__kandidaten-title {
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.defcreds__kandidaten-liste {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Eine ankreuzbare Kandidaten-Zeile. */
+.defcreds__kandidat {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.defcreds__kandidat:hover {
+  background: var(--color-bar);
+}
+
+.defcreds__kandidat-check {
+  flex: none;
+}
+
+.defcreds__kandidat-cred {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.88rem;
+  color: var(--color-text);
+}
+
+.defcreds__kandidat-sep {
+  color: var(--color-text-tert);
+}
+
+.defcreds__kandidat-pass {
+  color: var(--color-text-sec);
+}
+
+/* Konfidenz-Badge: dezent, farblich nach Verlässlichkeit abgestuft. */
+.defcreds__badge {
+  flex: none;
+  padding: 2px 8px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  border-radius: var(--radius-sm, 4px);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-sec);
+  background: var(--color-bar);
+  white-space: nowrap;
+}
+
+.defcreds__badge--gesichert {
+  color: var(--severity-auffaellig);
+  border-color: var(--severity-auffaellig);
+}
+
+.defcreds__badge--auch_moeglich {
+  color: var(--color-text);
+}
+
+.defcreds__badge--vermutet,
+.defcreds__badge--benutzer {
+  color: var(--color-text-tert);
+}
+
+/* ---------------- Ergebnis ---------------- */
+
+.defcreds__ergebnis {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Kein Fund: gedämpftes Grün, ehrlich formuliert (NICHT „sicher"). */
+.defcreds__ok {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  background: var(--color-ok-bg);
+  border: 1px solid var(--color-ok-text);
+  border-radius: var(--radius-md);
+}
+
+.defcreds__ok-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-ok-text);
+}
+
+.defcreds__ok-title {
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.defcreds__ok-text {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--color-text);
+}
+
+/* Fehler-/403-Zeile: ruhig, ohne Alarm (neutrale Einordnung). */
+.defcreds__error {
+  padding: 10px 12px;
+  font-size: 0.9rem;
+  color: var(--color-text);
+  background: var(--color-bar);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* Fund-Liste: je Fund eine abgesetzte Karte mit Severity-Orange-Akzent. */
+.defcreds__funde {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.defcreds__fund {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--severity-auffaellig);
+  border-radius: var(--radius-md);
+}
+
+.defcreds__fund-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--severity-auffaellig);
+}
+
+.defcreds__fund-title {
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.defcreds__fund-meta {
+  font-size: 0.82rem;
+  color: var(--color-text-sec);
+}
+
+.defcreds__fund-cred {
+  font-size: 0.88rem;
+  color: var(--color-text);
+  font-family: var(--font-mono, monospace);
+}
+
+.defcreds__fund-note {
+  font-size: 0.82rem;
+  color: var(--color-text-sec);
+  font-style: italic;
+}
+
+/* ---------------- Historie ---------------- */
+
+.defcreds__historie {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-border);
+}
+
+.defcreds__historie-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 2px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--color-text);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.defcreds__historie-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.defcreds__hist-liste {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.defcreds__hist-item {
+  display: flex;
+  flex-direction: column;
+}
+
+.defcreds__hist-row {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1.4fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 12px;
+  font-size: 0.82rem;
+  text-align: left;
+  color: var(--color-text);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.defcreds__hist-row:hover {
+  background: var(--color-bar);
+}
+
+.defcreds__hist-zeit {
+  color: var(--color-text-sec);
+  font-family: var(--font-mono, monospace);
+}
+
+.defcreds__hist-host {
+  font-family: var(--font-mono, monospace);
+}
+
+.defcreds__hist-geraet {
+  color: var(--color-text-sec);
+}
+
+.defcreds__hist-treffer {
+  justify-self: end;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.defcreds__hist-treffer--hit {
+  color: var(--severity-auffaellig);
+}
+
+.defcreds__hist-treffer--ok {
+  color: var(--color-ok-text);
+}
+
+.defcreds__hist-detail {
+  padding: 8px 12px 4px;
+}

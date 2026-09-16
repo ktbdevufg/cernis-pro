@@ -37,11 +37,11 @@
     "branches": ["main", "dev"],
     "active_branch": "dev",
     "clones": {
-      "linux_x64": "/home/kbach/Dokumente/Github-Repos/Cernis-Pro",
-      "macos_arm64": "/Volumes/KINGDATA/Github-Repos/Cernis-Pro",
-      "windows_x64": "C:\\Users\\Claude\\Github-Repos\\Cernis-Pro",
-      "windows_arm64": "C:\\Users\\karlbach\\Github-Repos\\Cernis-Pro",
-      "fedora": "/home/kbach/Dokumente/Github-Repos/Cernis-Pro"
+      "linux_x64": "<repo>",
+      "macos_arm64": "<repo>",
+      "windows_x64": "<repo>",
+      "windows_arm64": "<repo>",
+      "fedora": "<repo>"
     }
   },
   "project_structure": {
@@ -305,7 +305,7 @@
       "id": 28,
       "file": "package.json + build.ps1",
       "issue": "Build configured for x86_64-pc-windows-msvc — cannot produce ARM64 installer",
-      "fix": "package.json target -> aarch64-pc-windows-msvc. build.ps1: vcvarsall arm64, VS18 path, binary/installer paths to aarch64-pc-windows-msvc, dest C:\\Users\\karlbach. python -m PyInstaller/pip to survive vcvarsall PATH clobber",
+      "fix": "package.json target -> aarch64-pc-windows-msvc. build.ps1: vcvarsall arm64, VS18 path, binary/installer paths to aarch64-pc-windows-msvc, dest = build output directory. python -m PyInstaller/pip to survive vcvarsall PATH clobber",
       "fixed_date": "2026-04-03"
     },
     {

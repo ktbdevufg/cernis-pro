@@ -1,0 +1,101 @@
+/* Kopfzeile */
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 20px;
+  background: var(--color-bar);
+  /* Dünne Akzentlinie als untere Kante — Markenton dezent präsent. */
+  border-bottom: 1px solid var(--color-accent-border);
+}
+
+.app-header__brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.app-header__logo {
+  height: 44px;
+  width: auto;
+}
+
+.app-header__wordmark {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 18px;
+  font-weight: 500;
+  /* Wortmarke trägt den Markenton; "v2.0" bleibt dezent (siehe --version). */
+  color: var(--color-accent);
+}
+
+/* "PRO" der Wortmarke: erbt Schriftgroesse und Laufweite von .app-header__wordmark,
+   weicht NUR in Farbe und Gewicht ab. Die Farbe kommt ausschliesslich aus dem Token
+   (--color-wordmark-pro), damit der Hell/Dunkel-Wechsel automatisch greift.
+   "CERNIS" bleibt unveraendert im Markenton des Containers. */
+.app-header__pro {
+  color: var(--color-wordmark-pro);
+  font-weight: 600;
+}
+
+.app-header__version {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--color-text-tert);
+}
+
+/* Wrapper fuer die Kopfzeilen-Pills (rot Live-Monitoring + gelb Aussenkontakte).
+   Haelt beide mit Abstand nebeneinander, ohne dass das Header-space-between sie
+   auseinanderdrueckt. */
+.app-header__pills {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.app-header__controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Reines Icon-Bedienelement (Zahnrad): kein Rahmen, kein Kasten, Logo-Türkis. */
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  color: var(--color-accent);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.icon-button:hover {
+  color: var(--color-accent-strong);
+}
+
+.icon-button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Brand als Heim-Knopf: Button-Eigenheiten zuruecksetzen, damit Logo + Wortmarke
+   exakt wie zuvor aussehen. Klickbar -> Cursor + dezenter Hover. */
+.app-header__brand--button {
+  border: none;
+  background: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.app-header__brand--button:hover {
+  opacity: 0.85;
+}

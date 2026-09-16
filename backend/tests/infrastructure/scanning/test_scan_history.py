@@ -8,11 +8,19 @@ stillen ``or "[]"``-Rueckfalls bei kaputtem ``result_json``.
 """
 
 import sqlite3
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
-from domain.scanning import EnrichedHost, MdnsService, PortInfo, SsdpService
+from domain.scanning import (
+    EnrichedHost,
+    MdnsService,
+    PortInfo,
+    PortInterception,
+    SsdpService,
+)
+from infrastructure.scanning._serialization import dict_to_host
 from infrastructure.scanning.scan_history import (
     CorruptScanError,
     SqliteScanHistoryRepository,
@@ -20,9 +28,22 @@ from infrastructure.scanning.scan_history import (
 from ports.scanning import ScanHistoryRepository
 
 
+class FakeClock:
+    """Erfuellt das ``Clock``-Protocol strukturell; liefert einen festen Zeitpunkt.
+
+    Timezone-aware UTC -- wie ``SystemClock``, damit ``.isoformat()`` einen Offset
+    (``+00:00``) traegt und der Test deterministisch gegen den Erwartungswert prueft.
+    """
+
+    FIXED = datetime(2026, 7, 18, 13, 23, 45, 123456, tzinfo=UTC)
+
+    def now(self) -> datetime:
+        return self.FIXED
+
+
 @pytest.fixture
 def repo(tmp_path: Path) -> SqliteScanHistoryRepository:
-    return SqliteScanHistoryRepository(tmp_path / "cernis.db")
+    return SqliteScanHistoryRepository(tmp_path / "cernis.db", FakeClock())
 
 
 # ── Struktureller Vertrag ─────────────────────────────────────────────────
@@ -40,15 +61,32 @@ def test_save_then_list_summarizes_without_blob(repo: SqliteScanHistoryRepositor
         EnrichedHost(ip="192.168.1.2", mac="AA:BB:CC:DD:EE:01", vendor="X"),
         EnrichedHost(ip="192.168.1.3", mac="AA:BB:CC:DD:EE:02", vendor="Y"),
     )
-    repo.save("192.168.1.0/24", hosts)
+    repo.save("192.168.1.0/24", hosts, PortInterception())
 
     summaries = repo.list(20)
     assert len(summaries) == 1
     assert summaries[0].cidr == "192.168.1.0/24"
     assert summaries[0].host_count == 2  # == len(hosts)
     assert summaries[0].scan_id > 0
-    # scanned_at: ISO-Zeitstempel aus der DB-Spalte (DEFAULT datetime('now')), nicht leer.
+    # scanned_at: ISO-Zeitstempel aus der Clock (timezone-aware UTC), nicht leer.
     assert summaries[0].scanned_at != ""
+
+
+def test_save_sets_scanned_at_from_clock_with_tz_offset(
+    repo: SqliteScanHistoryRepository,
+) -> None:
+    """``scanned_at`` kommt aus der Clock: nicht leer, mit Zonen-Offset, exakter Wert.
+
+    Belegt die A10-Etappe: der Zeitstempel wird explizit ueber den Clock-Port gesetzt
+    (timezone-aware UTC, ISO-8601 mit +00:00) statt ueber den Schema-Default
+    ``datetime('now')`` (UTC ohne Zonen-Kennzeichnung).
+    """
+    repo.save("192.168.1.0/24", (), PortInterception())
+
+    scanned_at = repo.list(20)[0].scanned_at
+    assert scanned_at != ""  # nicht leer
+    assert scanned_at.endswith("+00:00")  # traegt eine Zeitzonen-Kennzeichnung
+    assert scanned_at == FakeClock.FIXED.isoformat()  # exakt der Clock-Wert
 
 
 def test_get_roundtrips_rich_host_lossless(repo: SqliteScanHistoryRepository) -> None:
@@ -86,8 +124,9 @@ def test_get_roundtrips_rich_host_lossless(repo: SqliteScanHistoryRepository) ->
         label="Lager-NAS",
         tags=("prod", "storage"),
         notes="Rack 3",
+        source="arp",  # nicht-Default -> beweist source-Round-trip eines gemergten Hosts
     )
-    repo.save("10.0.0.0/24", (host,))
+    repo.save("10.0.0.0/24", (host,), PortInterception())
     scan_id = repo.list(20)[0].scan_id
 
     record = repo.get(scan_id)
@@ -96,6 +135,7 @@ def test_get_roundtrips_rich_host_lossless(repo: SqliteScanHistoryRepository) ->
     assert len(record.hosts) == 1
     got = record.hosts[0]
     assert got == host  # vollstaendige, verlustfreie Feldgleichheit
+    assert got.source == "arp"  # source round-trippt (S.7f-Vorbau)
     # tuples bleiben tuples (nicht zu Listen degeneriert):
     assert isinstance(got.ports, tuple)
     assert isinstance(got.tags, tuple)
@@ -111,8 +151,75 @@ def test_get_roundtrips_rich_host_lossless(repo: SqliteScanHistoryRepository) ->
     assert record.scanned_at != ""
 
 
+def test_legacy_blob_without_source_defaults_to_ping() -> None:
+    """Alter DB-Blob (vor S.7f) ohne source-Feld -> EnrichedHost.source == "ping".
+
+    Rueckwaertskompatibilitaet: ein damals gespeicherter Host war ein Ping-Host.
+    """
+    legacy = {"ip": "10.0.0.9", "mac": "AA:BB:CC:DD:EE:09"}  # kein "source"-Schluessel
+    host = dict_to_host(scan_id=1, data=legacy)
+    assert host.source == "ping"
+
+
+def test_korrekte_paare_bleiben_erhalten() -> None:
+    """Korrekt geformte ``properties`` ([[k, v], ...]) -> verlustfreies tuple.
+
+    Regression gegen Ueberkorrektur: die Formpruefung in ``_str_pairs`` darf
+    gueltige Paare NICHT verwerfen.
+    """
+    data = {
+        "ip": "10.0.0.5",
+        "mac": "AA:BB:CC:DD:EE:01",
+        "mdns_services": [
+            {"name": "_smb._tcp", "properties": [["k", "v"], ["a", "b"]]},
+        ],
+    }
+    host = dict_to_host(scan_id=7, data=data)
+    assert host.mdns_services[0].properties == (("k", "v"), ("a", "b"))
+
+
+def test_flache_properties_liste_wird_corrupt_scan_error() -> None:
+    """Formfremdes ``properties`` (flache String-Liste statt [key, value]-Paaren)
+    -> benannter ``CorruptScanError`` MIT scan_id-Bezug, NICHT nackter ValueError.
+
+    MUTATIONSPROBE (durchgefuehrt, ROT bestaetigt, zurueckgesetzt): wird die
+    Laengen-Pruefung in ``_str_pairs`` auf ``!= 2`` verfaelscht, faellt der
+    Schwester-Test ``test_korrekte_paare_bleiben_erhalten``; wird die
+    ``isinstance``-Pruefung gelockert (Strings durchlassen), faellt
+    ``test_zwei_zeichen_string_ist_kein_paar``. Vor dem Fix lieferte dieser Pfad
+    einen nackten ``ValueError`` "too many values to unpack" ohne scan_id-Bezug.
+    """
+    data = {
+        "ip": "10.0.0.5",
+        "mac": "AA:BB:CC:DD:EE:01",
+        "mdns_services": [
+            {"name": "_smb._tcp", "properties": ["gcgl", "model", "at"]},
+        ],
+    }
+    with pytest.raises(CorruptScanError) as exc:
+        dict_to_host(scan_id=10, data=data)
+    assert exc.value.scan_id == 10  # Fehler MIT scan_id-Bezug
+
+
+def test_zwei_zeichen_string_ist_kein_paar() -> None:
+    """Ein 2-Zeichen-String wie "ab" darf NICHT als Paar (a, b) durchgehen.
+
+    Schaerft die isinstance-(list, tuple)-Pruefung ab: ``len("ab") == 2`` allein
+    wuerde den String sonst still als Paar entpacken. MUTATIONSPROBE: faellt die
+    ``isinstance``-Pruefung weg, laeuft dieser Test entweder still durch (falsches
+    Paar) oder kracht roh -- statt sauberem ``CorruptScanError``.
+    """
+    data = {
+        "ip": "10.0.0.5",
+        "mac": "AA:BB:CC:DD:EE:01",
+        "mdns_services": [{"name": "_smb._tcp", "properties": ["ab", "cd"]}],
+    }
+    with pytest.raises(CorruptScanError):
+        dict_to_host(scan_id=11, data=data)
+
+
 def test_save_empty_hosts_roundtrips(repo: SqliteScanHistoryRepository) -> None:
-    repo.save("10.0.0.0/30", ())
+    repo.save("10.0.0.0/30", (), PortInterception())
     scan_id = repo.list(20)[0].scan_id
     record = repo.get(scan_id)
     assert record is not None
@@ -127,9 +234,9 @@ def test_list_empty_returns_empty_list(repo: SqliteScanHistoryRepository) -> Non
 
 
 def test_list_newest_first_and_respects_limit(repo: SqliteScanHistoryRepository) -> None:
-    repo.save("10.0.0.0/24", ())
-    repo.save("10.0.1.0/24", ())
-    repo.save("10.0.2.0/24", ())
+    repo.save("10.0.0.0/24", (), PortInterception())
+    repo.save("10.0.1.0/24", (), PortInterception())
+    repo.save("10.0.2.0/24", (), PortInterception())
 
     summaries = repo.list(2)
     assert len(summaries) == 2  # limit greift
@@ -150,7 +257,11 @@ def test_get_unknown_id_returns_none(repo: SqliteScanHistoryRepository) -> None:
 def test_get_corrupt_json_raises_not_silent(
     repo: SqliteScanHistoryRepository, tmp_path: Path
 ) -> None:
-    repo.save("10.0.0.0/24", (EnrichedHost(ip="10.0.0.5", mac="AA:BB:CC:DD:EE:01"),))
+    repo.save(
+        "10.0.0.0/24",
+        (EnrichedHost(ip="10.0.0.5", mac="AA:BB:CC:DD:EE:01"),),
+        PortInterception(),
+    )
     scan_id = repo.list(20)[0].scan_id
 
     # result_json direkt korrumpieren (Bytes, die kein JSON sind)
@@ -165,13 +276,142 @@ def test_get_corrupt_json_raises_not_silent(
 
 
 def test_get_non_array_json_raises(repo: SqliteScanHistoryRepository, tmp_path: Path) -> None:
-    repo.save("10.0.0.0/24", ())
+    repo.save("10.0.0.0/24", (), PortInterception())
     scan_id = repo.list(20)[0].scan_id
 
     conn = sqlite3.connect(tmp_path / "cernis.db")
     conn.execute(
         "UPDATE scan_history SET result_json = ? WHERE id = ?",
         ('{"not": "a list"}', scan_id),
+    )
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(CorruptScanError):
+        repo.get(scan_id)
+
+
+# ── Gegenprobe auf abgefangene Ports (Befund 53) ────────────────────────────
+
+
+def test_interception_roundtrips_lossless(repo: SqliteScanHistoryRepository) -> None:
+    """Das Gegenproben-Ergebnis ueberlebt den DB-Round-trip vollstaendig."""
+    interception = PortInterception(
+        checked=True,
+        control_ips=("192.168.1.1", "192.168.1.85", "192.168.1.170"),
+        intercepted_ports=(25, 110, 143),
+    )
+    repo.save("192.168.1.0/24", (), interception)
+
+    record = repo.get(repo.list(20)[0].scan_id)
+    assert record is not None
+    assert record.interception == interception
+
+
+def test_checked_with_no_findings_differs_from_not_checked(
+    repo: SqliteScanHistoryRepository,
+) -> None:
+    """ "Geprueft, nichts gefunden" bleibt in der DB von "nicht geprueft" unterscheidbar."""
+    checked = PortInterception(checked=True, control_ips=("10.0.0.1", "10.0.0.2", "10.0.0.3"))
+    repo.save("10.0.0.0/24", (), checked)
+    not_checked = PortInterception(checked=False, reason="Zu wenige Kontroll-Adressen.")
+    repo.save("10.0.1.0/24", (), not_checked)
+
+    summaries = repo.list(20)
+    newer = repo.get(summaries[0].scan_id)
+    older = repo.get(summaries[1].scan_id)
+    assert newer is not None and older is not None
+
+    # Beide haben eine LEERE Portliste -- unterschieden werden sie ueber ``checked``.
+    assert older.interception.checked is True
+    assert older.interception.intercepted_ports == ()
+    assert newer.interception.checked is False
+    assert newer.interception.intercepted_ports == ()
+    assert newer.interception.reason == "Zu wenige Kontroll-Adressen."
+
+
+def test_legacy_row_without_interception_reads_as_not_checked(
+    repo: SqliteScanHistoryRepository, tmp_path: Path
+) -> None:
+    """Altbestand (Spalte NULL) liest sich als "nicht geprueft" -- was damals stimmte."""
+    repo.save("10.0.0.0/24", (), PortInterception(checked=True, intercepted_ports=(25,)))
+    scan_id = repo.list(20)[0].scan_id
+
+    # Zustand vor dieser Etappe nachstellen: Spalte auf NULL.
+    conn = sqlite3.connect(tmp_path / "cernis.db")
+    conn.execute("UPDATE scan_history SET interception_json = NULL WHERE id = ?", (scan_id,))
+    conn.commit()
+    conn.close()
+
+    record = repo.get(scan_id)
+    assert record is not None
+    assert record.interception == PortInterception()
+    assert record.interception.checked is False
+
+
+def test_schema_guard_adds_column_to_pre_existing_table(tmp_path: Path) -> None:
+    """Eine vor dieser Etappe angelegte Tabelle bekommt die Spalte per ALTER nachgeruestet."""
+    db_path = tmp_path / "cernis.db"
+    # Alte Tabelle OHNE interception_json anlegen (Schema vor Befund 53).
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        CREATE TABLE scan_history (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            scanned_at  TEXT DEFAULT (datetime('now')),
+            cidr        TEXT,
+            host_count  INTEGER,
+            result_json TEXT
+        );
+        INSERT INTO scan_history (cidr, host_count, result_json)
+        VALUES ('10.0.0.0/24', 0, '[]');
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    # Der Konstruktor ruft _ensure_schema -> ALTER TABLE.
+    repo = SqliteScanHistoryRepository(db_path, FakeClock())
+    scan_id = repo.list(20)[0].scan_id
+
+    # Der Altbestands-Eintrag ist weiter lesbar und gilt als "nicht geprueft".
+    record = repo.get(scan_id)
+    assert record is not None
+    assert record.interception.checked is False
+    # Und neue Scans schreiben in die nachgeruestete Spalte.
+    repo.save("10.0.1.0/24", (), PortInterception(checked=True, intercepted_ports=(25,)))
+    fresh = repo.get(repo.list(20)[0].scan_id)
+    assert fresh is not None
+    assert fresh.interception.intercepted_ports == (25,)
+
+
+def test_corrupt_interception_json_raises_not_silent(
+    repo: SqliteScanHistoryRepository, tmp_path: Path
+) -> None:
+    """Kaputtes ``interception_json`` ist ein Fehler, kein stiller "nicht geprueft"-Rueckfall."""
+    repo.save("10.0.0.0/24", (), PortInterception(checked=True))
+    scan_id = repo.list(20)[0].scan_id
+
+    conn = sqlite3.connect(tmp_path / "cernis.db")
+    conn.execute("UPDATE scan_history SET interception_json = ? WHERE id = ?", ("{kaputt", scan_id))
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(CorruptScanError) as exc:
+        repo.get(scan_id)
+    assert exc.value.scan_id == scan_id
+
+
+def test_non_object_interception_json_raises(
+    repo: SqliteScanHistoryRepository, tmp_path: Path
+) -> None:
+    """Formfremdes (gueltiges, aber kein Objekt) ``interception_json`` -> CorruptScanError."""
+    repo.save("10.0.0.0/24", (), PortInterception(checked=True))
+    scan_id = repo.list(20)[0].scan_id
+
+    conn = sqlite3.connect(tmp_path / "cernis.db")
+    conn.execute(
+        "UPDATE scan_history SET interception_json = ? WHERE id = ?", ('["nope"]', scan_id)
     )
     conn.commit()
     conn.close()

@@ -2,9 +2,19 @@
 import asyncio
 import subprocess
 import platform
+import os
 import re
 import ipaddress
 from dataclasses import dataclass
+
+import structlog
+
+_logger = structlog.get_logger(__name__)
+
+# Externe Kommandos (ping, arp, ip neigh) werden mit erzwungener C-Locale gestartet,
+# weil lokalisierte Ausgaben (z.B. Zeit= statt time=) das Parsing sonst still
+# scheitern lassen.
+_C_LOCALE_ENV = {**os.environ, "LC_ALL": "C", "LANG": "C"}
 
 
 @dataclass
@@ -20,18 +30,30 @@ class DiscoveredHost:
 async def ping_host(ip: str, timeout: float = 1.0) -> DiscoveredHost:
     """Ping a single host, return result."""
     system = platform.system()
+    if system == "Windows":
+        # Windows: nativer ICMP-Echo statt ping.exe. Lokalisierte ping.exe-Ausgabe
+        # (deutsch Zeit<, englisch time=) laesst jeden Regex still scheitern; die
+        # native iphlpapi liefert Status/RoundTripTime als Zahl. Der Import steht
+        # im Windows-Zweig (auf Nicht-Windows nie erreicht).
+        from infrastructure.icmp_windows import icmp_echo
+
+        alive, rtt = await icmp_echo(ip, timeout)
+        return DiscoveredHost(ip=ip, rtt_ms=rtt, is_alive=alive, source="ping")
+
+    # "-n": keine Namensaufloesung durch ping selbst -- 64 parallele pings ohne -n
+    # fluten sonst den lokalen DNS-Resolver mit PTR-Anfragen (gemessene Ursache
+    # fuer leere Hostnamen in der Enrich-Phase). Erreichbarkeitsmessung unveraendert.
     if system == "Darwin":
-        cmd = ["ping", "-c", "1", "-W", str(int(timeout * 1000)), "-t", "1", ip]
-    elif system == "Windows":
-        cmd = ["ping", "-n", "1", "-w", str(int(timeout * 1000)), ip]
+        cmd = ["ping", "-n", "-c", "1", "-W", str(int(timeout * 1000)), "-t", "1", ip]
     else:
-        cmd = ["ping", "-c", "1", "-W", str(int(timeout)), ip]
+        cmd = ["ping", "-n", "-c", "1", "-W", str(int(timeout)), ip]
 
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
+            env=_C_LOCALE_ENV,
         )
         stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout + 0.5)
         output = stdout.decode("utf-8", errors="replace")
@@ -50,8 +72,33 @@ async def ping_host(ip: str, timeout: float = 1.0) -> DiscoveredHost:
                 rtt = float(m.group(2))
 
         return DiscoveredHost(ip=ip, is_alive=alive, rtt_ms=rtt)
-    except (asyncio.TimeoutError, Exception):
+    except Exception as fehler:
+        # ``asyncio.TimeoutError`` ist eine ``Exception`` -- der fruehere Doppelfang
+        # ``(asyncio.TimeoutError, Exception)`` war redundant, beide Faelle enden ohnehin im
+        # selben Tot-Zustand. ``asyncio.CancelledError`` erbt seit Python 3.8 von
+        # ``BaseException`` und wird hier BEWUSST nicht gefangen (Abbruch bleibt Abbruch).
+        # S3: der Tot-Zustand bleibt unveraendert, er ist nur nicht mehr stumm.
+        _logger.debug("Ping fehlgeschlagen", ip=ip, fehler=str(fehler))
         return DiscoveredHost(ip=ip, is_alive=False)
+
+
+def normalize_arp_mac(raw: str) -> str:
+    """Bringt eine rohe ARP-MAC auf das kanonische Format oder verwirft sie.
+
+    Eingabe: MAC mit ':' oder '-' als Trenner, Oktette mit 1-2 Hex-Ziffern
+    (macOS' ``arp -a`` gibt Oktette OHNE fuehrende Null aus, z.B.
+    "b0:f2:8:dc:c1:e7"). Ausgabe: sechs zweistellig gepolsterte, lowercase
+    Hex-Oktette mit ':' verbunden ("b0:f2:08:dc:c1:e7") -- oder ``""`` bei
+    ungueltiger Eingabe (falsche Oktett-Zahl, kein Hex). Einheitliches Format,
+    damit ARP-MACs gegen die gepolsterten MACs anderer Quellen matchen.
+    """
+    teile = raw.strip().replace("-", ":").split(":")
+    if len(teile) != 6:
+        return ""
+    try:
+        return ":".join(f"{int(teil, 16):02x}" for teil in teile)
+    except ValueError:
+        return ""
 
 
 def get_arp_table() -> dict[str, str]:
@@ -60,24 +107,33 @@ def get_arp_table() -> dict[str, str]:
     arp_map = {}
 
     if system == "Darwin":
-        out = subprocess.run(["arp", "-a"], capture_output=True, encoding="utf-8", errors="replace").stdout or ""
+        out = subprocess.run(["arp", "-a"], capture_output=True, encoding="utf-8", errors="replace", env=_C_LOCALE_ENV).stdout or ""
         for line in out.splitlines():
-            m = re.search(r"\((\d+\.\d+\.\d+\.\d+)\) at ([0-9a-f:]{17})", line)
+            # Unpadded-tolerant: macOS gibt Oktette ohne fuehrende Null aus
+            # ("at b0:f2:8:dc:c1:e7"); ein starres {17}-Muster verwirft solche
+            # Eintraege komplett. incomplete-Zeilen ohne MAC matchen weiter nicht.
+            m = re.search(r"\((\d+\.\d+\.\d+\.\d+)\) at ([0-9a-f]{1,2}(?::[0-9a-f]{1,2}){5})", line, re.IGNORECASE)
             if m:
-                arp_map[m.group(1)] = m.group(2)
+                mac = normalize_arp_mac(m.group(2))
+                if mac:
+                    arp_map[m.group(1)] = mac
     elif system == "Windows":
-        out = subprocess.run(["arp", "-a"], capture_output=True, encoding="utf-8", errors="replace").stdout or ""
+        out = subprocess.run(["arp", "-a"], capture_output=True, encoding="utf-8", errors="replace", env=_C_LOCALE_ENV).stdout or ""
         for line in out.splitlines():
-            m = re.search(r"(\d+\.\d+\.\d+\.\d+)\s+([0-9a-f]{2}-[0-9a-f]{2}-[0-9a-f]{2}-[0-9a-f]{2}-[0-9a-f]{2}-[0-9a-f]{2})", line, re.IGNORECASE)
+            m = re.search(r"(\d+\.\d+\.\d+\.\d+)\s+([0-9a-f]{1,2}(?:-[0-9a-f]{1,2}){5})", line, re.IGNORECASE)
             if m:
-                arp_map[m.group(1)] = m.group(2).replace("-", ":").lower()
+                mac = normalize_arp_mac(m.group(2))
+                if mac:
+                    arp_map[m.group(1)] = mac
     elif system == "Linux":
         try:
-            out = subprocess.run(["ip", "neigh"], capture_output=True, encoding="utf-8", errors="replace").stdout or ""
+            out = subprocess.run(["ip", "neigh"], capture_output=True, encoding="utf-8", errors="replace", env=_C_LOCALE_ENV).stdout or ""
             for line in out.splitlines():
                 parts = line.split()
                 if len(parts) >= 5 and re.match(r"\d+\.\d+\.\d+\.\d+", parts[0]):
-                    mac = parts[4] if parts[4] != "FAILED" else ""
+                    # ip neigh liefert bereits gepolsterte MACs; die Normalisierung
+                    # ist dort idempotent und stellt das kanonische Format sicher.
+                    mac = normalize_arp_mac(parts[4]) if parts[4] != "FAILED" else ""
                     if mac:
                         arp_map[parts[0]] = mac
         except Exception:

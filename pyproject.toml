@@ -5,9 +5,15 @@
 
 [project]
 name = "cernis-pro"
-version = "2.0.0.dev0"
+version = "2.1.2"
 description = "CERNIS PRO — lokaler Netzwerk- und System-Scanner (Backend-Rewrite v2)"
 requires-python = ">=3.12"
+# Gesamtwerk ist GPL-2.0-only: scapy (GPL-2.0-only) im Sniffer zwingt v2,
+# GPLv3 ausgeschlossen. Siehe docs/LICENSE_AUDIT_2026-07.md.
+license = "GPL-2.0-only"
+classifiers = [
+    "License :: OSI Approved :: GNU General Public License v2 (GPLv2)",
+]
 
 # Laufzeit-Abhaengigkeiten. Pins gespiegelt aus backend/requirements.txt
 # (Altbestand laeuft weiter) plus die drei neuen Bausteine der v2-Architektur:
@@ -17,17 +23,16 @@ dependencies = [
     "fastapi>=0.111.0",
     "uvicorn[standard]>=0.29.0",
     "pydantic>=2.7.0",
-    "pydantic-settings>=2.2.0",
+    "pydantic-settings>=2.14.2",
     "structlog>=24.1.0",
-    "cryptography>=41.0.0",
+    "cryptography>=48.0.1",
     "zeroconf>=0.132.0",
-    "reportlab>=4.0.0",
+    "reportlab>=4.0.0,<4.3",
     "fritzconnection>=1.13.0",
     "psutil>=5.9.0",
     "pysnmp>=6.1.0",
     "dnspython>=2.4.0",
     "apscheduler>=3.10.0",
-    "websocket-client>=1.7.0",
     "websockets>=12.0",
     "scapy>=2.5.0",
     "keyring>=25.7.0",
@@ -43,12 +48,35 @@ dev = [
     "httpx>=0.27.0",
     "import-linter>=2.0",
     "pre-commit>=3.7.0",
+    "pyinstaller>=6.20.0",
+    "bandit>=1.9.4",
+    "pip-audit>=2.10.1",
 ]
 
 [tool.uv]
 # Anwendung, kein verteilbares Wheel — uv soll nur Abhaengigkeiten verwalten,
 # nicht das Projekt selbst bauen.
 package = false
+
+# ── Eigene Werksangaben ───────────────────────────────────────────────────
+# EINZIGE Pflegestelle fuer den Bezugsort des EIGENEN Quelltextes. Der Sammler
+# scripts/gen_license_manifest.py liest den Wert von hier und schreibt ihn in den
+# werk-Eintrag der Lizenzaufstellung; er wird nirgends ein zweites Mal gefuehrt.
+#
+# WARUM HIER und nicht in [project].urls: dieser Wert ist KEINE URL. Das
+# Repository ist privat, cernispro.de existiert nicht. [project].urls ist laut
+# PEP 621 eine URL-Tabelle — ein Satz darin waere eine Falschbelegung, und eine
+# erfundene Adresse ist ausdruecklich unerwuenscht. Ein neuer Schluessel direkt
+# in [project] ist nach PEP 621 ebenfalls unzulaessig (geschlossene Feldliste);
+# [tool.<name>] ist der dafuer vorgesehene Ort.
+#
+# NICHT zu verwechseln mit dem Feld projektadresse der Bestandteile: das ist die
+# Projektseite eines FREMDEN Bestandteils, dies hier der Bezug des eigenen Codes.
+#
+# Sobald der Quelltext unter einer erreichbaren Adresse liegt, wird GENAU DIESE
+# Zeile geaendert — keine weitere Stelle.
+[tool.cernis_pro]
+quelltext_bezug = "Der vollständige Quelltext dieses Werks liegt dem jeweiligen Release als Archiv bei."
 
 # ── Ruff (Lint + Format) ──────────────────────────────────────────────────
 # Greift waehrend der Migration nur auf den NEUEN Code unter backend/. Der
@@ -62,7 +90,6 @@ target-version = "py312"
 src = ["backend"]
 extend-exclude = [
     "backend/modules",
-    "backend/main.py",
     "backend/cernis_cli.py",
     "backend/runtime_hook.py",
     "backend/data",
@@ -92,6 +119,11 @@ files = [
     "backend/api",
     "backend/app.py",
     "backend/tests",
+    # Einzeln aufgefuehrt, nicht das ganze Verzeichnis scripts/: darin traegt
+    # fix-openssl-dll-arm64.py Bindestriche und ist damit kein gueltiger Modulname.
+    "scripts/gen_license_manifest.py",
+    "scripts/gen_debian_copyright.py",
+    "scripts/gen_rpm_licenses.py",
 ]
 
 # Altbestand (modules/) ist bewusst nicht typisiert und nicht Teil der strikten
@@ -102,13 +134,52 @@ module = ["modules", "modules.*"]
 follow_imports = "skip"
 ignore_missing_imports = true
 
-# Der Legacy-Einstiegspunkt main.py ist ebenfalls untypisiert und nicht Teil der
-# strikten Pruefung. Characterization-Tests (z. B. der Bootstrap-Lifespan-Contract)
-# duerfen `import main`, ohne dass mypy in den Legacy-Code hineinlaeuft -- gleiches
-# Muster wie modules/. Faellt weg, sobald der Einstiegspunkt auf app.py gewechselt ist.
+# APScheduler (feste dep, M.6 job_scheduler-Adapter) liefert KEINE Typ-Stubs / kein
+# py.typed-Marker -> mypy meldet sonst "import-untyped". Nur die fehlenden Stubs
+# ignorieren (NICHT follow_imports=skip -- es ist Third-Party, kein eigener Legacy-
+# Code wie modules/main). Der Adapter castet die Trigger-Argumente selbst (str/int).
 [[tool.mypy.overrides]]
-module = ["main"]
+module = ["apscheduler.*"]
+ignore_missing_imports = true
+
+# psutil (feste dep, T.3 traffic-Adapter) liefert KEINE Typ-Stubs / kein py.typed-
+# Marker -> mypy meldet sonst "import-untyped". Nur die fehlenden Stubs ignorieren
+# (wie apscheduler, NICHT follow_imports=skip -- Third-Party, kein Legacy-Code). Der
+# Adapter castet die psutil-Rueckgaben selbst (sconn-Felder/Process.name -> str).
+[[tool.mypy.overrides]]
+module = ["psutil.*"]
+ignore_missing_imports = true
+
+# scapy (feste dep, C.3 capture-Adapter) liefert nur PARTIELLE Stubs: die dynamisch
+# erzeugten Layer-Klassen (DNS/IP/TCP/Ether/... , scapy.contrib.{lldp,cdp}) und die
+# AsyncSniffer-Callback-Attribute fehlen darin -> mypy meldet sonst flaechig
+# "attr-defined". Darum follow_imports=skip (wie modules/main, NICHT nur
+# ignore_missing_imports wie apscheduler): die Stubs sind unvollstaendig genug, dass
+# das Hineinlaufen mehr Rauschen als Sicherheit bringt. Der Adapter kapselt scapy
+# ohnehin komplett in ``_scapy`` und arbeitet sonst nur mit den eigenen
+# Domaenenmodellen -- die scapy-Seite ist bewusst untypisiert (``pkt: Any``).
+[[tool.mypy.overrides]]
+module = ["scapy.*"]
 follow_imports = "skip"
+ignore_missing_imports = true
+
+# reportlab (feste dep, Block-1 export-Adapter, ADR 0015) liefert KEINE Typ-Stubs / kein
+# py.typed-Marker -> mypy meldet sonst "import-untyped". Nur die fehlenden Stubs ignorieren
+# (wie apscheduler/psutil, NICHT follow_imports=skip -- Third-Party, kein Legacy-Code). Der
+# Adapter (``infrastructure.export_pdf``) kapselt reportlab komplett und arbeitet sonst nur
+# mit dem eigenen ``domain.export.PdfReportModel`` -- die reportlab-Seite bleibt lokal.
+[[tool.mypy.overrides]]
+module = ["reportlab.*"]
+ignore_missing_imports = true
+
+# infrastructure._build_version entsteht erst beim Bau (CI erzeugt sie vor PyInstaller)
+# und ist nicht versioniert (.gitignore). Ohne diesen Eintrag faellt das Gate je nach
+# Anwesenheit des Artefakts unterschiedlich aus: fehlt die Datei, braucht der Import eine
+# Unterdrueckung; liegt sie nach einem lokalen Bau vor, meldet mypy genau diese
+# Unterdrueckung als unbenutzt ("unused-ignore"). Der ImportError-Zweig in
+# ``infrastructure.config`` ist der Dev-Normalfall und bleibt davon unberuehrt.
+[[tool.mypy.overrides]]
+module = ["infrastructure._build_version"]
 ignore_missing_imports = true
 
 # ── pytest ────────────────────────────────────────────────────────────────
@@ -176,20 +247,85 @@ type = "forbidden"
 source_modules = ["domain"]
 forbidden_modules = ["pydantic", "fastapi", "structlog"]
 
+# Jede Domaene kennt nur sich selbst -- die domain-Subpakete sind wechselseitig
+# unabhaengig. Dieses Prinzip traegt die ganze Migration (jede Fremddomaenen-Naht
+# laeuft ueber die Verdrahtung in app.py, nie ueber einen domain-internen Quer-
+# import: devices-Projektion S.7d, scheduler-Callback M.6, der Broadcaster nimmt
+# Domaenenobjekte statt fremde Typen). Bisher hielten es die Domaenen FAKTISCH ein,
+# ohne Gate. Mit ``domain/metrics`` (M.8) wird die Versuchung erstmals real -- ein
+# Aggregat-Querschnitt, dessen "fauler" Edit ``from domain.monitoring import
+# PingSample`` waere. Darum jetzt strukturell statt punktuell erzwungen: ein
+# independence-Contract ueber ALLE Subpakete, nicht nur metrics (das Prinzip ist
+# universell, das Gate soll es auch sein). ``devices``/``settings`` sind Einzel-
+# module, ``scanning``/``monitoring``/``metrics`` Pakete -- ``independence`` behandelt
+# beide gleich (kein Import zwischen je zwei der genannten Module/Pakete).
+[[tool.importlinter.contracts]]
+name = "domain-Subpakete sind wechselseitig unabhaengig"
+type = "independence"
+modules = [
+    "domain.devices",
+    "domain.scanning",
+    "domain.monitoring",
+    "domain.metrics",
+    "domain.settings",
+    "domain.alerting",
+    "domain.security",
+    "domain.capture",
+    "domain.agent",
+    "domain.interfaces",
+    "domain.traffic",
+    "domain.process",
+    "domain.analysis",
+    "domain.diagnostics",
+    "domain.export",
+    "domain.resolver",
+    "domain.sni",
+    "domain.fritz_detail",
+    "domain.cve",
+    "domain.dns_watch",
+    "domain.dns_bypass",
+    "domain.dns_trust",
+    "domain.scheduler",
+]
+
 # Die neuen Ringe duerfen den Altcode (modules/) NIE importieren. Der Legacy-Bezug
 # bleibt strikt auf app.py beschraenkt (Composition Root, nicht analysiert) -- z. B.
 # die Uebergangs-Kruecke des Bootstrap-Inits (P2.1b). So kann der Altcode nicht in
 # die sauberen Ringe lecken; jeder Versuch bricht CI.
 #
-# EINE eng eingezaeunte Ausnahme (ADR 0007): die scanning-Infrastructure-Adapter
-# DUERFEN modules/ importieren -- eine Reimplementierung der systemnahen Schicht
-# (Ping/Portscan/mDNS/SSDP/IPv6/Fritz) waere Wegwerf-Arbeit vor dem in Vision 5.2
-# vorgesehenen moeglichen Sprachwechsel. Die Ausnahme ist SUBTRAKTIV ueber
-# ignore_imports umgesetzt, NICHT als zweiter (additiver) Contract: ein forbidden-
-# Contract kann nur verbieten, nie erlauben -- die Lockerung MUSS daher am
-# bestehenden Contract haengen. source_modules/forbidden_modules bleiben
-# unveraendert; ignore_imports schneidet ausschliesslich Importe AUS dem Paket
-# `infrastructure.scanning` (beliebige Tiefe via `**`) in den Altcode heraus.
+# ZWEI eng eingezaeunte Ausnahmen (ADR 0007, in M.4 um monitoring erweitert): die
+# scanning- UND monitoring-Infrastructure-Adapter DUERFEN modules/ importieren -- eine
+# Reimplementierung der systemnahen Schicht (scanning: Ping/Portscan/mDNS/SSDP/IPv6/
+# Fritz; monitoring: Ping-Burst + osascript-Notification) waere Wegwerf-Arbeit vor dem
+# in Vision 5.2 vorgesehenen moeglichen Sprachwechsel. Die Ausnahme ist SUBTRAKTIV ueber
+# ignore_imports umgesetzt, NICHT als zweiter (additiver) Contract: ein
+# forbidden-Contract kann nur verbieten, nie erlauben -- die Lockerung MUSS daher am
+# bestehenden Contract haengen. source_modules/forbidden_modules bleiben unveraendert;
+# ignore_imports schneidet ausschliesslich Importe AUS den Paketen
+# `infrastructure.scanning` und `infrastructure.monitoring` (beliebige Tiefe via `**`)
+# in den Altcode heraus.
+#
+# ALERTING-AUSNAHME ENTFERNT (A.8): Der alerting-Versand (osascript-Desktop + SMTP) ist
+# jetzt im v2-Kern neu gebaut (`infrastructure.alerting.desktop_notifier` /
+# `email_sender`), der Notifier-Adapter delegiert an diese statt an
+# `modules.alerting.notify_email_with_log`; der SmtpConfig-Adapter nutzt bereits
+# `infrastructure.crypto` statt `modules.crypto`. Damit importiert KEIN Modul unter
+# `infrastructure.alerting` mehr aus `modules` -- die Ausnahme
+# `infrastructure.alerting.** -> modules` matchte nichts mehr (import-linter bricht bei
+# einem toten ignore hart ab) und ist ERSATZLOS gestrichen. Das ist eine
+# VERSCHAERFUNG, keine Lockerung: `infrastructure.alerting` ist ab jetzt CI-hart gegen
+# `modules` geblockt wie jeder andere saubere Ring. Genau der von ADR 0007 vorgesehene
+# Endzustand ("faellt ganz weg, sobald die systemnahe Schicht ersetzt ist"). Der
+# umgekehrte Legacy-Bezug `modules.alerting -> infrastructure.alerting` (Teil B
+# `fire_alert` ruft den migrierten Versand) ist NICHT analysiert: `modules` ist kein
+# root_package, import-linter betrachtet nur Kanten AUS den Ringen heraus.
+#
+# SCOPED innerhalb monitoring (ADR 0007): nur Pinger/Notifier nutzen modules
+# (_ping_burst/_notify_macos); die sqlite-Repos und der TargetSource-Adapter kommen
+# BEWUSST ohne modules aus (eigenes Schema wie SqliteScanHistoryRepository;
+# TargetSource zieht Settings ueber den migrierten ports/settings-Port). Der
+# `**`-Scope deckt das Paket maschinell ab; der minimal gehaltene reale
+# modules-Footprint ist eine bewusste Disziplin, im ADR festgehalten.
 #
 # WICHTIG zur Pattern-Form (in S.4a empirisch korrigiert): Die Zielseite ist
 # `modules` OHNE Suffix -- der forbidden-Contract loest die Kanten gegen das
@@ -198,13 +334,9 @@ forbidden_modules = ["pydantic", "fastapi", "structlog"]
 # NICHTS (verifiziert: "No matches for ignored import"). Das `**` auf der QUELLseite
 # deckt jeden kuenftigen scanning-Adapter (discovery/portscan/mdns/ssdp/ipv6/fritz,
 # S.4b) automatisch mit ab. JEDER andere Ring (domain, ports, application, api) und
-# JEDER andere infrastructure-Adapter bleibt vom selben Contract weiter CI-hart
-# gegen modules/ geblockt (Probe: Import ausserhalb scanning -> BROKEN).
-#
-# KEIN unmatched_ignore_imports_alerting mehr: der scanning-Adapter existiert seit
-# S.4a, die Expression matcht real -- ein "none"-Schalter wuerde nur kuenftige
-# Pattern-Fehler maskieren (genau das hatte er in S.3 getan). Faellt mit ADR 0007
-# ganz weg, sobald die systemnahe Schicht ersetzt ist.
+# JEDER andere infrastructure-Adapter -- inkl. `infrastructure.alerting` (A.8) --
+# bleibt vom selben Contract weiter CI-hart gegen modules/ geblockt (Probe: Import
+# ausserhalb scanning/monitoring -> BROKEN).
 [[tool.importlinter.contracts]]
 name = "neue Ringe importieren NICHT den Altcode (modules/)"
 type = "forbidden"
@@ -212,4 +344,5 @@ source_modules = ["domain", "ports", "application", "infrastructure", "api"]
 forbidden_modules = ["modules"]
 ignore_imports = [
     "infrastructure.scanning.** -> modules",
+    "infrastructure.monitoring.** -> modules",
 ]

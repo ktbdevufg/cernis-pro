@@ -1,0 +1,2649 @@
+{
+  "npcap": {
+    "title": "Npcap installieren",
+    "inlineHint": "Diese Funktion benötigt Npcap. Ohne Npcap ist keine Paketerfassung möglich.",
+    "installBtn": "Npcap installieren",
+    "bodyMissing": "CERNIS nutzt Npcap für passives Mitlesen von SNI, Datenverkehr und Topologie. Npcap ist ein separates Programm der Nmap-Entwickler; sein Quelltext ist einsehbar, es ist aber keine Open-Source-Software. Die kostenlose Lizenz begrenzt die Zahl der Installationen — maßgeblich sind die Npcap-Lizenzbedingungen. Sie laden und installieren es selbst; CERNIS bündelt es nicht.",
+    "downloadBtn": "Zur Npcap-Download-Seite"
+  },
+  "werkzeug": {
+    "nichtVerfuegbar": "Ein benötigtes Systemprogramm steht nicht zur Verfügung. Der Grund wurde nicht mitgeteilt."
+  },
+  "app": {
+    "version": "v2.0",
+    "laedt": "Lädt …"
+  },
+  "header": {
+    "manual": "Handbuch",
+    "settings": "Einstellungen",
+    "ueber": "Über CERNIS PRO",
+    "liveOne": "Live-Monitoring aktiv",
+    "liveMany": "{{count}} Monitorings aktiv",
+    "liveZurAnsicht": "Zur Logging-Ansicht",
+    "outboundRecOne": "Außenkontakte-Aufzeichnung läuft",
+    "outboundRecZurAnsicht": "Zur Außenkontakte-Ansicht",
+    "dnsRecOne": "DNS-Aufzeichnung läuft",
+    "dnsRecZurAnsicht": "Zur DNS-Wächter-Ansicht",
+    "dnsRecCount": "{{count}} Anfragen",
+    "outboundRecRest": {
+      "tage": "{{value}} Tg",
+      "stunden": "{{value}} Std",
+      "minuten": "{{value}} Min",
+      "sekunden": "{{value}} Sek",
+      "zwei": "noch {{erste}} {{zweite}}",
+      "eine": "noch {{erste}}",
+      "jetzt": "endet jetzt"
+    },
+    "home": "Zur Startseite"
+  },
+  "settings": {
+    "title": "Einstellungen",
+    "sectionGeneral": "Allgemein",
+    "language": "Sprache",
+    "sectionTraffic": "Verkehr",
+    "autoRefresh": "Automatisch aktualisieren",
+    "refreshOff": "Aus",
+    "saved": "Gespeichert",
+    "fritzbox": {
+      "title": "FRITZ!Box",
+      "host": "Adresse",
+      "hostPlaceholder": "fritz.box",
+      "user": "Benutzer (optional)",
+      "userPlaceholder": "z. B. admin",
+      "password": "Passwort",
+      "passwordIsSet": "Passwort gespeichert – leer lassen, um es zu behalten.",
+      "passwordRemove": "Passwort entfernen",
+      "save": "Speichern",
+      "loading": "Lädt …",
+      "loadError": "Einstellungen konnten nicht geladen werden.",
+      "saveError": "Speichern fehlgeschlagen."
+    },
+    "auffaelligkeit": {
+      "title": "Was ist auffällig?",
+      "loading": "Lädt …",
+      "loadError": "Einstellungen konnten nicht geladen werden.",
+      "saveError": "Speichern fehlgeschlagen.",
+      "suspiciousTitle": "Auffällige Ports",
+      "criticalTitle": "Kritische Ports",
+      "colPort": "Port",
+      "colService": "Service",
+      "serviceUnknown": "—",
+      "addPortPlaceholder": "Port hinzufügen",
+      "add": "Hinzufügen",
+      "remove": "Entfernen",
+      "reset": "Auf Standard zurücksetzen",
+      "empty": "Keine Ports in dieser Liste.",
+      "portInvalid": "Bitte einen Port zwischen 1 und 65535 eingeben.",
+      "portDuplicate": "Dieser Port steht bereits in der Liste.",
+      "upload": "Datei einlesen",
+      "uploadHint": "Eine .txt mit Portnummern (eine pro Zeile, Komma/Semikolon erlaubt, # für Kommentare).",
+      "uploadTooLarge": "Datei zu groß (max. 1 MB).",
+      "uploadReadError": "Datei konnte nicht gelesen werden.",
+      "previewTitle": "Vorschau",
+      "previewValidCount": "{{count}} gültige Ports erkannt",
+      "previewInvalidLines": "{{count}} Zeilen ungültig (ignoriert)",
+      "previewAlreadyPresent": "{{count}} davon bereits in der Liste",
+      "previewNone": "Keine gültigen Ports in der Datei.",
+      "previewEmptyHint": "Ohne gültige Ports gibt es nichts zu ergänzen oder zu ersetzen.",
+      "previewAdd": "Ergänzen",
+      "previewReplace": "Ersetzen",
+      "previewCancel": "Abbrechen",
+      "thresholdTitle": "Viele hohe Ports",
+      "thresholdLabel": "Auffällig ab mehr als",
+      "thresholdUnit": "offenen Ports oberhalb 1024",
+      "thresholdHint": "NAS und IoT-Geräte halten legitim ein paar hohe Ports offen; erst ab vielen wird es ungewöhnlich.",
+      "rulesTitle": "Regeln an/aus",
+      "rulesHint": "Schaltet einzelne Auffälligkeits-Regeln ein oder aus. Ausgeschaltete Regeln werden nicht mehr ausgewertet.",
+      "rulesEmpty": "Keine Regeln vorhanden.",
+      "honestyTitle": "Ehrlich gesagt",
+      "honestyText": "Die kritische Backdoor-Liste ist historisch nützlich, fängt moderne Malware aber kaum: die nutzt heute 443, DNS oder dynamische Ports. Ein Treffer ist ein klares Signal, aber kein vollständiger Malware-Scan – kein falsches Sicherheitsgefühl.",
+      "disabledHint_one": "1 Port wird dauerhaft nicht berücksichtigt.",
+      "disabledHint_other": "{{count}} Ports werden dauerhaft nicht berücksichtigt.",
+      "portActive": "Port wird gewertet",
+      "portInactive": "Port wird ignoriert"
+    },
+    "dnswatch": {
+      "title": "DNS-Wächter",
+      "loading": "Lädt …",
+      "loadError": "Einstellungen konnten nicht geladen werden.",
+      "saveError": "Speichern fehlgeschlagen.",
+      "dohTitle": "Bekannte DoH-Anbieter",
+      "dohHint": "IPs bekannter DNS-over-HTTPS-Anbieter. Treffer werden nur heuristisch als „mögliche DoH“ markiert, nicht als auffällig.",
+      "addPlaceholder": "IP-Adresse hinzufügen",
+      "add": "Hinzufügen",
+      "remove": "Entfernen",
+      "listEmpty": "Keine IPs in dieser Liste.",
+      "ipInvalid": "Bitte eine gültige IPv4- oder IPv6-Adresse eingeben.",
+      "ipDuplicate": "Diese IP steht bereits in der Liste."
+    },
+    "nav": {
+      "general": "Allgemein",
+      "startseite": "Startseite",
+      "fritzbox": "FRITZ!Box",
+      "auffaelligkeit": "Was ist auffällig?",
+      "dnswatch": "DNS-Wächter",
+      "trafficDarstellung": "Verkehrs-Darstellung",
+      "defaultcreds": "Standardzugänge",
+      "defaultcredsList": "Standardzugänge-Liste",
+      "captureAccess": "Mitschnitt-Zugriff",
+      "wartung": "Wartung"
+    },
+    "startseite": {
+      "title": "Startseite",
+      "hint": "Abgeschaltete Bereiche werden auf der Startseite ausgeblendet. Die Daten gehen dadurch nicht verloren – die Bereiche erscheinen sofort wieder, sobald du sie einschaltest.",
+      "status": "Status-Zeile",
+      "schnellzugriff": "Schnellzugriff",
+      "beachtenswert": "Beachtenswert",
+      "cve": "Neue CVE-Befunde",
+      "kennzahlen": "Kennzahlen-Fußzeile",
+      "statusMonitoring": "Monitoring-Angabe in der Status-Zeile",
+      "loading": "Lädt …",
+      "loadError": "Einstellungen konnten nicht geladen werden.",
+      "saveError": "Speichern fehlgeschlagen."
+    },
+    "wartung": {
+      "title": "Wartung",
+      "rowTitle": "Daten löschen",
+      "rowDescription": "Scan-Daten zurücksetzen oder CERNIS auf Werkszustand bringen.",
+      "openButton": "Optionen anzeigen",
+      "doneScan": "Scan-Daten zurückgesetzt.",
+      "doneSelected": "Ausgewählte Daten gelöscht.",
+      "doneFactory": "Auf Werkszustand zurückgesetzt. Die Einstellungen wurden ebenfalls zurückgesetzt.",
+      "dialog": {
+        "title": "Daten löschen",
+        "close": "Schließen",
+        "cancel": "Abbrechen"
+      },
+      "choice": {
+        "scan": {
+          "title": "Scan-Daten zurücksetzen",
+          "deletes": "Auswählen, was gelöscht wird: Scan-Historie, Befunde, Monitoring, Aufzeichnungen, DNS.",
+          "keeps": "Bleibt: Einstellungen und alles, was Sie nicht ankreuzen."
+        },
+        "factory": {
+          "title": "Werkszustand",
+          "deletes": "Löscht alle Daten – Scans, Geräte-Gedächtnis, Monitoring, Einstellungen. Verhält sich danach wie frisch installiert."
+        }
+      },
+      "builder": {
+        "title": "Was soll gelöscht werden?",
+        "groupScan": "Scan & Analyse",
+        "groupMonitoring": "Monitoring",
+        "groupOutbound": "Außenkontakte-Aufzeichnungen",
+        "groupDns": "DNS",
+        "item": {
+          "scanHistory": "Scan-Historie",
+          "cve": "CVE-Befunde und Quittierungen",
+          "arpGuard": "ARP-Wache: Baseline und Alarme",
+          "analysisAcks": "Analyse-Quittierungen",
+          "knownHosts": "Geräte-Baseline (bekannte Geräte)",
+          "rtt": "Antwortzeit-Verlauf und Ereignisse",
+          "sla": "SLA-Messwerte",
+          "logging": "Mitschnitt-Aufgaben und deren Daten",
+          "outboundRecordings": "Außenkontakte-Aufzeichnungen",
+          "dnsBypassRecordings": "DNS-Umgehungs-Aufzeichnungen: gespeicherte Netz-Mitschnitte samt Verlauf und Auswertung",
+          "dnsTrustServers": "DNS-Server-Vertrauen: deine Vertrauen-/Ablehnen-Entscheidungen zu erkannten DNS-Servern"
+        },
+        "rootHint": "Die Scan-Historie zu löschen entfernt zwingend auch die daraus abgeleiteten Befunde.",
+        "deleteSelected": "Ausgewähltes löschen",
+        "nothingSelected": "Wählen Sie mindestens einen Posten aus."
+      },
+      "confirm": {
+        "lead": "Folgendes wird unwiderruflich gelöscht:",
+        "warning": "Kann nicht rückgängig gemacht werden. Sind Sie sicher?",
+        "includeSecrets": "Auch gespeicherte Zugangsdaten entfernen (cpnetcheck-Token im Schlüsselbund)",
+        "back": "Zurück",
+        "delete": "Endgültig löschen",
+        "error": "Löschen fehlgeschlagen. Bitte erneut versuchen.",
+        "scan": {
+          "title": "Scan-Daten zurücksetzen?",
+          "item1": "Scan-Historie",
+          "item2": "CVE-Befundstand",
+          "item3": "Baseline",
+          "item4": "Quittierungen"
+        },
+        "factory": {
+          "title": "Auf Werkszustand zurücksetzen?",
+          "item1": "Alle Scan-Daten",
+          "item2": "Geräte-Gedächtnis und Notizen",
+          "item3": "Monitoring-Aufzeichnungen",
+          "item4": "Einstellungen"
+        }
+      }
+    },
+    "trafficDarstellung": {
+      "title": "Verkehr: nicht verfügbare Angaben",
+      "hint": "Manche Angaben kann nicht jedes Betriebssystem liefern. Auf macOS lässt sich der Durchsatz je Programm nicht messen — welche Programme mit welchen Gegenstellen sprechen, wird dagegen vollständig angezeigt. Diese Einstellung betrifft ausschließlich solche nicht verfügbaren Angaben; echte Messwerte werden immer angezeigt.",
+      "toggleLabel": "Nicht verfügbare Angaben zeigen und erklären",
+      "loading": "Lädt …",
+      "loadError": "Die Einstellung konnte nicht geladen werden.",
+      "saveError": "Die Einstellung konnte nicht gespeichert werden."
+    },
+    "defaultCreds": {
+      "title": "Standardzugänge prüfen",
+      "warn": "Eine scharfe Sonderfunktion: CERNIS versucht aktiv, sich bei einem Gerät mit werksseitig voreingestellten Zugangsdaten anzumelden. Das ist ein echter Login-Versuch — nutze sie ausschließlich für Geräte im eigenen Netz, die dir gehören. Aus Sicherheitsgründen ist sie standardmäßig gesperrt und muss hier für jede Sitzung neu freigeschaltet werden.",
+      "toggleLabel": "Für diese Sitzung freischalten",
+      "loading": "Lädt …",
+      "loadError": "Der Freischalt-Zustand konnte nicht geladen werden.",
+      "saveError": "Die Freischaltung konnte nicht geändert werden.",
+      "dialogTitle": "Standardzugänge prüfen freischalten?",
+      "dialogBody": "Bevor du diese Sonderfunktion freischaltest, lies bitte, was sie tut. Sie unterscheidet sich bewusst von den passiven Beobachtungs-Funktionen von CERNIS.",
+      "dialogActiveTitle": "Aktiver Login-Versuch.",
+      "dialogActiveText": "CERNIS meldet sich tatsächlich mit Standard-Zugangsdaten an. Das kann Geräte-Logs erzeugen oder Konten kurzzeitig sperren. Nur auf eigenen Geräten anwenden.",
+      "dialogOwnNetTitle": "Nur im eigenen Netz.",
+      "dialogOwnNetText": "Ziele außerhalb des privaten Netzes werden vom System abgelehnt.",
+      "dialogSessionTitle": "Nur für diese Sitzung.",
+      "dialogSessionText": "Die Freischaltung gilt ausschließlich für die aktuelle CERNIS-Sitzung. Nach einem Neustart ist die Funktion wieder gesperrt.",
+      "confirm": "Freischalten",
+      "cancel": "Abbrechen"
+    },
+    "captureAccess": {
+      "title": "Zugriff für den Mitschnitt",
+      "intro": "Der Zugriff auf die Mitschnitt-Geräte Ihres Macs ist eingerichtet. CERNIS kann damit die echten Domainnamen mitlesen, ohne als Administrator zu laufen.",
+      "whatTitle": "Eingerichtet ist:",
+      "whatGroup": "eine eigene Benutzergruppe für den Mitschnitt",
+      "whatDaemon": "ein kleiner Systemdienst, der die Geräterechte nach jedem Neustart wieder setzt",
+      "whatDevices": "Lese- und Schreibrechte auf die Mitschnitt-Geräte",
+      "revokeButton": "Zugriff widerrufen",
+      "confirmTitle": "Zugriff wirklich widerrufen?",
+      "confirmSoloBody": "Die Einrichtung wird vollständig zurückgenommen: Gruppe, Systemdienst und Geräterechte. CERNIS kann danach keine echten Domainnamen mehr mitlesen, bis Sie den Zugriff erneut einrichten.",
+      "confirmSharedTitle": "Achtung — weitere Konten betroffen",
+      "confirmSharedBody": "Die Mitschnitt-Geräte gehören zu Ihrem Mac, nicht zu Ihrem Konto. Neben Ihnen haben noch weitere Konten Zugriff. Wenn Sie vollständig entfernen, verlieren diese Konten ihren Zugriff ebenfalls.",
+      "confirmSharedMembers": "Betroffene Konten:",
+      "actionMembershipOnly": "Nur meinen Zugriff entfernen",
+      "actionFull": "Vollständig entfernen",
+      "confirm": "Widerrufen",
+      "cancel": "Abbrechen",
+      "laeuft": "Warten auf die Bestätigung durch Ihr System …",
+      "erfolg": "Der Zugriff wurde widerrufen. Sie können ihn jederzeit wieder einrichten.",
+      "fehler": "Der Widerruf hat nicht geklappt.",
+      "ladeFehler": "Der Zustand des Mitschnitt-Zugriffs konnte nicht geladen werden.",
+      "hinweisAnmeldung": "Hinweis: Für bereits laufende Programme greift der Entzug erst nach einer neuen Anmeldung."
+    },
+    "defaultCredsList": {
+      "navLabel": "Standardzugänge-Liste",
+      "title": "Standardzugänge-Liste",
+      "intro": "Diese Liste enthält die werksseitigen Standard-Zugangsdaten, die CERNIS kennt — geordnet nach Hersteller und Modell. Hier kannst du sie einsehen, eigene Einträge ergänzen, bestehende ändern und einzelne Einträge ein- oder ausschalten.",
+      "hint": "Diese Liste liefert die Kandidaten für die aktive Prüfung „Standardzugänge prüfen“. Die Konfidenz je Kandidat ordnet ein, wie verlässlich der Wert ist. Die Liste ist nie vollständig — sie lässt sich jederzeit erweitern.",
+      "hersteller": "Hersteller",
+      "modell": "Modell",
+      "zustand": "Zustand",
+      "herkunft": "Herkunft",
+      "aktiv": "Aktiv",
+      "kandidaten": "Kandidaten",
+      "username": "Benutzername",
+      "password": "Passwort",
+      "konfidenz": "Konfidenz",
+      "quelleUrl": "Quelle (URL)",
+      "modellLeer": "herstellerweit",
+      "hatDefaults": "Hat Standardzugänge",
+      "keineBekanntenDefaults": "Keine bekannten Standardzugänge",
+      "konfidenzGesichert": "gesichert",
+      "konfidenzAuchMoeglich": "auch möglich",
+      "konfidenzVermutet": "vermutet",
+      "konfidenzBenutzer": "eigener Wert",
+      "herkunftMitgeliefert": "mitgeliefert",
+      "herkunftBenutzer": "selbst angelegt",
+      "hinzufuegen": "Eintrag hinzufügen",
+      "bearbeiten": "Bearbeiten",
+      "speichern": "Speichern",
+      "abbrechen": "Abbrechen",
+      "loeschen": "Löschen",
+      "loeschenBestaetigen": "Wirklich löschen?",
+      "kandidatHinzufuegen": "Kandidat hinzufügen",
+      "kandidatEntfernen": "Kandidat entfernen",
+      "neuerEintrag": "Neuer Eintrag",
+      "reset": "Auf Standard zurücksetzen",
+      "resetHinweis": "Setzt die mitgelieferten Einträge auf den Auslieferungszustand zurück. Deine selbst angelegten Einträge bleiben dabei erhalten.",
+      "leerzustand": "Die Liste ist leer. Füge einen Eintrag hinzu oder setze auf Standard zurück.",
+      "loading": "Lädt …",
+      "ladeFehler": "Die Standardzugänge-Liste konnte nicht geladen werden.",
+      "passwortLeer": "(leer)",
+      "keineKandidaten": "Keine Kandidaten hinterlegt."
+    }
+  },
+  "nav": {
+    "overview": "Überblick",
+    "observe": "Beobachten",
+    "investigate": "Untersuchen",
+    "reporting": "Reporting",
+    "devices": "Geräte",
+    "verwaltung": "Verwaltung"
+  },
+  "placeholder": {
+    "inProgress": "in Arbeit"
+  },
+  "help": {
+    "ariaOeffnen": "Hilfe anzeigen",
+    "ariaSchliessen": "Schliessen",
+    "mehrImHandbuch": "Mehr im Handbuch"
+  },
+  "manual": {
+    "title": "Benutzerhandbuch",
+    "vorlaeufigHint": "Dieser Abschnitt beschreibt das geplante Verhalten; die endgültige Oberfläche wird noch festgelegt.",
+    "linksLabel": "Weiterführend",
+    "tocLabel": "Inhalt",
+    "schrift": {
+      "label": "Schriftgröße",
+      "klein": "Schrift kleiner",
+      "normal": "Schrift normal",
+      "gross": "Schrift größer",
+      "saveError": "Schriftgröße konnte nicht gespeichert werden."
+    },
+    "suche": {
+      "oeffnen": "Im Handbuch suchen",
+      "platzhalter": "Im Handbuch suchen …",
+      "vorige": "Vorheriger Treffer",
+      "naechste": "Nächster Treffer",
+      "schliessen": "Suche schließen",
+      "zaehler": "{{n}} von {{m}}"
+    },
+    "pdf": {
+      "download": "Handbuch als PDF herunterladen",
+      "fehler": "Das PDF konnte nicht erstellt werden."
+    },
+    "kategorien": {
+      "Grundlagen": "Grundlagen",
+      "Startseite": "Startseite",
+      "Beobachten": "Beobachten",
+      "Diagnose": "Diagnose",
+      "Untersuchen": "Untersuchen",
+      "Berichte": "Berichte",
+      "Geraete": "Geräte",
+      "Verwaltung": "Verwaltung",
+      "Einstellungen": "Einstellungen"
+    }
+  },
+  "cards": {
+    "open": "Öffnen",
+    "back": "Zurück",
+    "infoLabel": "Mehr Informationen",
+    "aktiv": "aktiv"
+  },
+  "overview": {
+    "empty": {
+      "title": "Noch nichts beobachtet",
+      "text": "Es liegen noch keine Beobachtungen vor. Starte einen Scan, um das Netzwerk aufzunehmen.",
+      "startScan": "Ersten Scan starten"
+    },
+    "situation": {
+      "attention_one": "1 Beobachtung, die Beachtung verdient",
+      "attention_other": "{{count}} Beobachtungen, die Beachtung verdienen"
+    },
+    "findingsHeading": "Auffälliges zuerst",
+    "findings": {
+      "newDevice": {
+        "title": "Neues Gerät im Netzwerk",
+        "subtitle": "Ein bisher unbekanntes Gerät wurde im Netz gesehen."
+      },
+      "outboundConnection": {
+        "title": "Ungewöhnliche ausgehende Verbindung",
+        "subtitle": "Eine ausgehende Verbindung weicht vom gewohnten Muster ab."
+      }
+    },
+    "metrics": {
+      "appsWithTraffic": "Apps mit Verkehr",
+      "activeConnections": "Aktive Verbindungen",
+      "devicesOnNetwork": "Geräte im Netz"
+    },
+    "status": {
+      "lastScanRelative": "Letzter Scan vor {{zeit}}",
+      "lastScanUnknown": "Noch kein Scan",
+      "relativeMinutes_one": "1 Min.",
+      "relativeMinutes_other": "{{count}} Min.",
+      "relativeHours_one": "1 Std.",
+      "relativeHours_other": "{{count}} Std.",
+      "relativeDays_one": "1 Tag",
+      "relativeDays_other": "{{count}} Tagen",
+      "relativeJustNow": "wenigen Sekunden",
+      "devicesKnown_one": "1 Gerät",
+      "devicesKnown_other": "{{count}} Geräte",
+      "observations_one": "1 Beobachtung",
+      "observations_other": "{{count}} Beobachtungen",
+      "monitoringActive_one": "1 Ziel überwacht",
+      "monitoringActive_other": "{{count}} Ziele überwacht",
+      "monitoringActiveHint": "Zur Live-Überwachung wechseln",
+      "newScan": "Neuer Scan"
+    },
+    "quickAccessHeading": "Schnellzugriff",
+    "beachtenswertHeading": "Beachtenswert",
+    "fromLastScan": "aus dem letzten Scan",
+    "cveHeading": "Neue CVE-Befunde",
+    "cveNewBadge": "NEU"
+  },
+  "beobachten": {
+    "cards": {
+      "scan": {
+        "title": "Netzwerk-Scan",
+        "subtitle": "Das lokale Netz aufnehmen: Geräte, IPv4, MAC, offene Ports.",
+        "locked": ""
+      },
+      "watch": {
+        "title": "Gäste-Wache",
+        "subtitle": "Neu gesehene, noch nicht eingeordnete Geräte — ruhig gesammelt, kein Alarm.",
+        "locked": ""
+      },
+      "traffic": {
+        "title": "Per-App-Verkehr",
+        "subtitle": "Welche Anwendung wohin verbindet, aufgeschlüsselt je App.",
+        "locked": ""
+      },
+      "outbound": {
+        "title": "Außenkontakte",
+        "subtitle": "Mit wem dieser Rechner nach außen spricht — gebündelt nach Betreiber, Land oder Programm.",
+        "locked": ""
+      },
+      "dnswatch": {
+        "title": "DNS-Wächter",
+        "subtitle": "Geräte/Apps, die den erwarteten DNS umgehen — Port 53 zu fremdem Resolver oder mögliche DoH.",
+        "locked": ""
+      },
+      "monitor": {
+        "title": "Live-Monitoring",
+        "subtitle": "Erreichbarkeit und Latenz von Gateway und Internet, live.",
+        "locked": ""
+      },
+      "logging": {
+        "title": "Logging-Aufgaben",
+        "subtitle": "Erreichbarkeit und Latenz über Zeit aufzeichnen — sofort oder geplant.",
+        "locked": ""
+      },
+      "topology": {
+        "title": "Topologie",
+        "subtitle": "Das Heimnetz als radialer Graph — Gateway im Zentrum, Geräte ringsum.",
+        "locked": ""
+      }
+    },
+    "scan": {
+      "deviceCount_one": "1 Gerät",
+      "deviceCount_other": "{{count}} Geräte",
+      "startScan": "Scan starten",
+      "columns": {
+        "status": "Status",
+        "ip": "IPv4",
+        "ipv6": "IPv6",
+        "mac": "MAC",
+        "vendor": "Hersteller",
+        "hostname": "Hostname",
+        "ports": "Ports",
+        "mdns": "mDNS / NDI",
+        "ssdp": "SSDP / UPnP",
+        "os": "OS",
+        "ping": "Ping"
+      },
+      "columnManager": {
+        "button": "Spalten",
+        "title": "Spalten wählen"
+      },
+      "sections": {
+        "notable": "Neu oder auffällig",
+        "known": "Bekannte Geräte"
+      },
+      "newPill": "neu",
+      "changedPill": "geändert",
+      "notablePill": "auffällig",
+      "auffaelligPill": "auffällig",
+      "kritischPill": "kritisch",
+      "pingUnit": "{{value}} ms",
+      "pingSubMs": ">1 ms",
+      "morePorts": "+{{count}}",
+      "morePortsTitle_one": "1 weiterer Port",
+      "morePortsTitle_other": "{{count}} weitere Ports",
+      "scanning": "Scan läuft …",
+      "scanError": "Scan fehlgeschlagen",
+      "netzZuGross": "Dieses Netz ist zu groß für diese Version von CERNIS PRO. Sie haben {{anzahl}} Adressen angegeben; geprüft werden bis zu 4.096 — das entspricht sechzehn üblichen Heimnetzen.\n\nDer Grund ist die Laufzeit: Ein Scan dauert mit jeder Adresse länger, und bei sehr großen Netzen kann ein Scan sich über Stunden ziehen, ohne dass Sie zwischendurch ein brauchbares Ergebnis sehen. CERNIS PRO ist für kleine Netze in Wohnung, Praxis und Büro entwickelt.",
+      "scanPhasePing": "Hosts suchen",
+      "scanPhasePorts": "Ports prüfen",
+      "scanPhaseMdns": "Dienste erfassen",
+      "scanPhaseEnrich": "Anreichern",
+      "scanProgress": "{{completed}} / {{total}}",
+      "historyEmpty": "Noch kein Scan. Starte einen Scan, um Geräte zu sehen.",
+      "lastScanLabel": "Letzter Scan: {{when}}",
+      "scanRunningButton": "Scan läuft …",
+      "scanComplete": "Scan abgeschlossen",
+      "ifaceLabel": "Netzwerk-Schnittstelle",
+      "cidrLabel": "Zu scannendes Netz (CIDR)",
+      "cidrMissing": "Kein Netz angegeben.",
+      "interceptedPorts_one": "Ein Port wird auf diesem Rechner lokal abgefangen und deshalb nicht als Geräteeigenschaft gewertet: {{ports}}. Ursache ist meist ein Sicherheitsprogramm mit Mailschutz.",
+      "interceptedPorts_other": "{{anzahl}} Ports werden auf diesem Rechner lokal abgefangen und deshalb nicht als Geräteeigenschaft gewertet: {{ports}}. Ursache ist meist ein Sicherheitsprogramm mit Mailschutz.",
+      "detail": {
+        "close": "Schließen",
+        "identity": {
+          "heading": "Identität",
+          "hostname": "Hostname",
+          "ip": "IPv4",
+          "mac": "MAC",
+          "vendor": "Hersteller",
+          "os": "OS",
+          "ping": "Ping",
+          "pingUnit": "{{value}} ms",
+          "statusNew": "Erstmals in diesem Netz gesehen",
+          "statusKnown": "Seit dem ersten Scan bekannt",
+          "notable": "Anderweitig auffällig",
+          "additionalIps": "Weitere Adressen (gleiche MAC)",
+          "trust": {
+            "heading": "Einordnung",
+            "trusted": "Vertraut",
+            "neutral": "Neutral",
+            "watch": "Beobachten",
+            "saveError": "Einordnung konnte nicht gespeichert werden"
+          },
+          "deviation": {
+            "label": "Feststellung:",
+            "new": "Seit dem letzten Scan neu im Netz.",
+            "changed": "IP-Adresse hat sich seit dem letzten Scan geändert."
+          }
+        },
+        "ports": {
+          "heading": "Offene Ports",
+          "lookup": "nachschlagen",
+          "empty": "Keine offenen Ports gefunden",
+          "acknowledge": "Quittieren",
+          "unacknowledge": "Wieder scharf stellen",
+          "ackDone": "Quittiert — wird beim nächsten Scan wirksam",
+          "unackDone": "Wieder scharf gestellt — wird beim nächsten Scan wirksam",
+          "ackError": "Aktion fehlgeschlagen.",
+          "lookupDialog": {
+            "title": "Port {{num}}/{{proto}}",
+            "service": "Dienst",
+            "generic": "Zu diesem Port liegt keine interne Beschreibung vor. Über den Link unten kannst du ihn bei Bedarf extern nachschlagen.",
+            "wikipedia": "Auf Wikipedia nachschlagen",
+            "close": "Schließen",
+            "info": {
+              "ftp": "FTP überträgt Dateien zwischen Rechnern. Die klassische Variante arbeitet unverschlüsselt; für sensible Daten ist heute FTPS oder SFTP üblich.",
+              "ssh": "SSH bietet verschlüsselten Fernzugriff auf ein System (Konsole, Dateiübertragung, Tunnel). Ein gängiger, verschlüsselter Verwaltungszugang.",
+              "telnet": "Telnet ist ein früher Fernzugriffsdienst und arbeitet unverschlüsselt. Heute meist durch SSH ersetzt.",
+              "smtp": "SMTP versendet E-Mails zwischen Mailservern. Der Transport kann per STARTTLS abgesichert werden.",
+              "dns": "DNS löst Namen (z. B. example.com) in IP-Adressen auf. Ein grundlegender Dienst der Netzinfrastruktur.",
+              "http": "HTTP liefert Webseiten und Web-APIs aus. Die Verbindung ist unverschlüsselt; die abgesicherte Variante ist HTTPS.",
+              "pop3": "POP3 ruft E-Mails von einem Server ab. Die klassische Variante ist unverschlüsselt; abgesichert läuft sie über POP3S.",
+              "netbios": "NetBIOS dient der Namens- und Sitzungsverwaltung in älteren Windows-Netzen und ist meist auf das lokale Netz beschränkt.",
+              "imap": "IMAP verwaltet E-Mails direkt auf dem Server (mehrere Geräte, synchron). Abgesichert läuft es über IMAPS.",
+              "https": "HTTPS liefert Webseiten und APIs verschlüsselt aus (HTTP über TLS). Der heute übliche, abgesicherte Web-Zugang.",
+              "smb": "SMB stellt Datei- und Druckerfreigaben bereit (vor allem in Windows-Netzen). Üblicherweise nur im lokalen Netz.",
+              "ipp": "IPP steuert das Drucken über das Netzwerk und übermittelt Druckaufträge sowie Statusinformationen.",
+              "imaps": "IMAPS ist IMAP über eine verschlüsselte TLS-Verbindung — der abgesicherte Zugriff auf E-Mails am Server.",
+              "pop3s": "POP3S ist POP3 über eine verschlüsselte TLS-Verbindung — der abgesicherte Abruf von E-Mails.",
+              "mqtt": "MQTT ist ein leichtgewichtiges Nachrichtenprotokoll, verbreitet im Umfeld von IoT- und Sensor-Geräten.",
+              "mysql": "MySQL ist ein Datenbankdienst. Der Zugang sollte üblicherweise nicht offen im Netz erreichbar sein.",
+              "rdp": "RDP ermöglicht die grafische Fernsteuerung eines Windows-Rechners. Ein aus dem Internet erreichbarer RDP-Zugang gilt als besonders exponiert.",
+              "postgresql": "PostgreSQL ist ein Datenbankdienst. Der Zugang sollte üblicherweise nicht offen im Netz erreichbar sein.",
+              "vnc": "VNC ermöglicht die grafische Fernsteuerung eines Rechners. Je nach Konfiguration ist die Verbindung nicht verschlüsselt.",
+              "http-alt": "Ein alternativer HTTP-Port, häufig für Web-Anwendungen, Proxys oder Verwaltungsoberflächen genutzt."
+            }
+          }
+        },
+        "dienste": {
+          "heading": "Angekündigte Dienste",
+          "mdns": "mDNS",
+          "mdnsEmpty": "Keine mDNS-Dienste angekündigt",
+          "ssdp": "SSDP / UPnP",
+          "ssdpEmpty": "Keine SSDP-Dienste angekündigt"
+        },
+        "notes": {
+          "heading": "Gerätenotizen",
+          "label": "Label",
+          "labelPlaceholder": "Frei vergebener Name",
+          "tags": "Tags",
+          "tagsPlaceholder": "Schlagworte, durch Komma getrennt",
+          "notes": "Notizen",
+          "notesPlaceholder": "Freie Notiz zu diesem Gerät",
+          "save": "Speichern",
+          "saveHint": "Speichern folgt mit der Datenanbindung.",
+          "saveOk": "Gespeichert.",
+          "saveError": "Speichern fehlgeschlagen."
+        }
+      }
+    },
+    "watch": {
+      "counter_one": "{{count}} seit deinem letzten Blick",
+      "counter_other": "{{count}} seit deinem letzten Blick",
+      "subtitle": "Ruhige Sammlung — kein Alarm. Ordne ein, wann es dir passt.",
+      "empty": "Nichts in der Wache. Neue, nicht eingeordnete Geräte erscheinen hier.",
+      "loadError": "Die Wache konnte nicht geladen werden.",
+      "actionError": "Aktion fehlgeschlagen.",
+      "actionTrust": "Vertraut",
+      "actionNote": "Notiz",
+      "actionDismiss": "Ausblenden",
+      "notePlaceholder": "Freie Notiz zu diesem Gerät",
+      "noteSave": "Speichern",
+      "seenUnknown": "zuerst gesehen zu unbekannter Zeit",
+      "seenJustNow": "gerade zuerst gesehen",
+      "seenMinutes_one": "zuerst gesehen vor {{count}} Minute",
+      "seenMinutes_other": "zuerst gesehen vor {{count}} Minuten",
+      "seenHours_one": "zuerst gesehen vor {{count}} Stunde",
+      "seenHours_other": "zuerst gesehen vor {{count}} Stunden",
+      "seenDays_one": "zuerst gesehen vor {{count}} Tag",
+      "seenDays_other": "zuerst gesehen vor {{count}} Tagen"
+    },
+    "traffic": {
+      "title": "Per-App-Verkehr",
+      "live": "live",
+      "liveInterval": "live · {{secs}} s",
+      "notablePill": "auffällig",
+      "down": "↓ {{value}}",
+      "up": "↑ {{value}}",
+      "rateBit": "{{value}} bit/s",
+      "rateKbit": "{{value}} kbit/s",
+      "rateMbit": "{{value}} Mbit/s",
+      "rateGbit": "{{value}} Gbit/s",
+      "unattributed": "Nicht zugeordnet (ohne Root)",
+      "noTarget": "kein Ziel",
+      "mdns": "Multicast (mDNS)",
+      "loading": "Verbindungen werden geladen …",
+      "error": "Verkehr nicht erreichbar",
+      "permissionTitle": "Hinweis",
+      "unknownTarget": "Spricht ein unbekanntes Ziel an",
+      "connections_one": "Verbindungen (1)",
+      "connections_other": "Verbindungen ({{count}})",
+      "connCount_one": "· 1 Verbindung",
+      "connCount_other": "· {{count}} Verbindungen",
+      "sections": {
+        "notable": "Auffällig",
+        "known": "Bekannte Ziele"
+      },
+      "noPtr": "kein PTR-Record",
+      "bundlePill": "×{{count}}",
+      "port": "Port {{value}}",
+      "showMore_one": "+ 1 weiteres Ziel einblenden",
+      "showMore_other": "+ {{count}} weitere Ziele einblenden",
+      "showLess": "weniger anzeigen",
+      "lookup": "nachschlagen",
+      "refresh": "Aktualisieren",
+      "refreshIntervalLabel": "Automatisch aktualisieren",
+      "refreshOff": "Aus",
+      "close": "Schließen",
+      "sniToggle": "SNI-Beobachtung",
+      "sniStarting": "wird gestartet …",
+      "sniActive": "SNI aktiv",
+      "sniHint": "Zeigt die echten von Apps angefragten Domainnamen (statt nur des Hosters). Erfordert erhöhte Rechte.",
+      "sniPermission": "SNI-Beobachtung braucht erhöhte Rechte.",
+      "sniStoppedPollFailed": "Aufzeichnung beendet — Datenquelle antwortet nicht. Erneut starten.",
+      "sniStoppedHelperDead": "Aufzeichnung beendet — Mitschnitt-Helfer beendet. Erneut starten.",
+      "sniStoppedUnbekannt": "Aufzeichnung beendet. Erneut starten.",
+      "stateLabel": {
+        "established": "aktiv",
+        "other": "Zustand unklar",
+        "listen": "wartet",
+        "none": "verbindungslos"
+      },
+      "groupActive": "Aktiver Außenverkehr",
+      "groupLocal": "Lokal, ohne feste Gegenstelle ({{count}})",
+      "groupLocalHint": "Dienste, die auf Verbindungen warten, und verbindungsloser UDP-Verkehr wie die lokale Gerätesuche. Normales lokales Netzverhalten ohne Gegenstelle.",
+      "groupLocalToggleShow": "Anzeigen",
+      "groupLocalToggleHide": "Ausblenden",
+      "durchsatzNichtMessbar": "Auf macOS lässt sich nicht messen, wie viele Daten ein einzelnes Programm überträgt — das Betriebssystem stellt dafür keine Schnittstelle bereit. Das lässt sich nicht freischalten. Vollständig angezeigt wird dagegen, welches Programm mit welcher Gegenstelle spricht.",
+      "durchsatzOhneWerte": "Für die angezeigten Verbindungen liegen gerade keine Durchsatzwerte vor. Angezeigt werden die Verbindungen des eigenen Benutzerkontos.",
+      "durchsatzWerkzeugFehlt": "Der Durchsatz je Programm stammt aus dem Systemwerkzeug ss (Paket iproute2). Auf diesem System ist es nicht vorhanden, darum bleiben die Durchsatzwerte leer. Welches Programm mit welcher Gegenstelle spricht, wird vollständig angezeigt.",
+      "durchsatzMessungFehlgeschlagen": "Die letzte Durchsatzmessung ist fehlgeschlagen, darum liegen gerade keine Werte vor. Die Verbindungsliste selbst bleibt vollständig nutzbar.",
+      "durchsatzRechteVerzicht": "Welches Programm mit welcher Gegenstelle spricht, wird vollständig angezeigt. Wie viele Daten ein einzelnes Programm dabei überträgt, zeigt CERNIS unter Windows nicht: das Betriebssystem gibt diese Zahlen nur an Programme heraus, die dauerhaft mit erhöhten Rechten laufen. CERNIS verzichtet bewusst darauf."
+    },
+    "outbound": {
+      "hostScopeLocal": "Kontakte dieses Rechners — passiv beobachtet, kein netzweiter Blick.",
+      "sichtbareKontakte_one": "1 Außenkontakt",
+      "sichtbareKontakte_other": "{{count}} Außenkontakte",
+      "sichtbareKontakte_zero": "Keine Außenkontakte",
+      "aufzeichnungLaeuft_one": "1 Aufzeichnung läuft",
+      "aufzeichnungLaeuft_other": "{{count}} Aufzeichnungen laufen",
+      "groupByLabel": "Gruppieren nach",
+      "groupBy": {
+        "operator": "Betreiber",
+        "country": "Land",
+        "programm": "Programm"
+      },
+      "showLocalToggle": "Lokale & Infrastruktur zeigen",
+      "emptyGroupOperator": "Ohne Angabe",
+      "emptyGroupCountry": "Ohne Angabe",
+      "emptyGroupProgramm": "Ohne Programm",
+      "empty": "Keine Außenkontakte. Sobald dieser Rechner nach außen spricht, erscheinen sie hier.",
+      "loadError": "Außenkontakte konnten nicht geladen werden.",
+      "connectionsSuffix": "×{{count}}",
+      "match": {
+        "disclaimer": "Diese Einordnungen stammen aus den in der Verwaltung gepflegten Listen, nicht von CERNIS. CERNIS bildet sie nur ab.",
+        "group": {
+          "tracker_ads": "Tracker & Werbung",
+          "threat": "Bedrohung"
+        },
+        "sourcePattern": "{{source}} (Treffer: {{matchedOn}})",
+        "badgeTitle": "Auf welchen Listen dieser Kontakt steht — die Einordnung stammt aus den Listen, nicht von CERNIS."
+      },
+      "access": {
+        "title": "Zugriff für den Mitschnitt einrichten",
+        "intro": "Damit CERNIS die echten Domainnamen mitlesen kann, braucht es einmalig Leserechte auf die Mitschnitt-Geräte Ihres Macs. Ihr Mac fragt dazu gleich nach Ihrem Passwort oder Touch ID.",
+        "onceTitle": "Einmalig",
+        "onceText": "die Abfrage kommt einmal, danach nicht mehr bei jedem Start.",
+        "limitedTitle": "Begrenzt",
+        "limitedText": "nur Leserechte für den Mitschnitt. CERNIS läuft weiterhin nicht als Administrator.",
+        "revocableTitle": "Widerrufbar",
+        "revocableText": "die Einrichtung lässt sich jederzeit wieder rückgängig machen.",
+        "nextStep": "Im nächsten Schritt zeigt Ihr Mac das gewohnte Systemfenster zur Bestätigung.",
+        "confirm": "Einrichten",
+        "later": "Später",
+        "laeuft": "Warten auf die Bestätigung durch Ihr System …",
+        "erfolg": "Der Zugriff ist eingerichtet. Die echten Domainnamen werden jetzt angezeigt.",
+        "erfolgNeustart": "Der Zugriff ist eingerichtet. Damit er auch hier greift, starten Sie CERNIS bitte einmal neu — dann werden die echten Domainnamen angezeigt.",
+        "abgebrochen": "Die Einrichtung wurde abgebrochen. Sie können sie jederzeit nachholen.",
+        "fehler": "Die Einrichtung hat nicht geklappt.",
+        "erneut": "Erneut versuchen",
+        "schliessen": "Schließen",
+        "jetztEinrichten": "Berechtigung erteilen"
+      },
+      "sni": {
+        "consentTitle": "Echte Domainnamen anzeigen?",
+        "consentIntro": "Oft erscheint nur der Hoster, nicht der echte Dienst dahinter. Erst der angefragte Domainname macht Tracker und Werbenetze sichtbar. CERNIS kann diese Namen passiv mitlesen:",
+        "consentPassiveTitle": "Passiv",
+        "consentPassiveText": "liest nur mit, greift nie in den Verkehr ein.",
+        "consentEphemeralTitle": "Flüchtig",
+        "consentEphemeralText": "nur solange diese Ansicht offen ist, nichts wird gespeichert.",
+        "consentPrivilegeTitle": "Erhöhte Rechte",
+        "consentPrivilegeText": "einmal eingerichtet, kein wiederkehrender Dialog.",
+        "consentDontAsk": "Nicht mehr fragen",
+        "consentDeny": "Ablehnen",
+        "consentGrant": "Zustimmen",
+        "starting": "Echte Domainnamen werden gestartet …",
+        "offHinweis": "Echte Domainnamen sind aus. Tracker bleiben dadurch teils unsichtbar.",
+        "offShow": "Anzeigen",
+        "startError": "Echte Domainnamen können nicht angezeigt werden, weil CERNIS die nötige Berechtigung fehlt. Sie können sie jetzt erteilen — das dauert einen Moment und lässt sich jederzeit widerrufen.",
+        "startErrorOther": "Die Erfassung der echten Domainnamen konnte nicht gestartet werden.",
+        "threatOne": "Eine Gegenstelle steht auf einer Bedrohungsliste",
+        "threatMany": "{{count}} Gegenstellen stehen auf Bedrohungslisten",
+        "threatDisclaimer": "Die Einordnung stammt von den gewählten Listen, nicht von CERNIS.",
+        "threatShow": "Anzeigen",
+        "threatFilteredOne": "Gefiltert: nur Gegenstellen auf Bedrohungslisten (1)",
+        "threatFilteredMany": "Gefiltert: nur Gegenstellen auf Bedrohungslisten ({{count}})",
+        "threatFilterClear": "Filter aufheben"
+      }
+    },
+    "dnswatch": {
+      "hostScopeLocal": "Befunde dieses Rechners — passiv beobachtet, kein netzweiter Blick.",
+      "countOpen": "offen",
+      "countDoh": "mögliche DoH",
+      "countExpected": "erwartungsgemäß",
+      "countAcknowledged": "quittiert",
+      "categoryLabels": {
+        "offen": "offen",
+        "moegliche_doh": "mögliche DoH",
+        "erwartungsgemaess": "erwartungsgemäß"
+      },
+      "markKnown": "Als bekannt markieren",
+      "unmarkKnown": "Markierung zurücknehmen",
+      "footerExpected": "Erwartete DNS-Server: {{servers}}",
+      "settingsHint": "In der Verwaltung unter „DNS-Server & Vertrauen“ anpassbar.",
+      "empty": "Kein Gerät umgeht den erwarteten DNS. Alles spricht mit den erwarteten Resolvern.",
+      "loadError": "DNS-Wächter konnte nicht geladen werden.",
+      "connectionsSuffix": "×{{count}}",
+      "noExpectedHint": "Noch keine erwarteten DNS-Server festgelegt.",
+      "decideLink": "In der Verwaltung unter „DNS-Server & Vertrauen“ entscheiden."
+    },
+    "dnsscreen": {
+      "tabHost": "Dieser Rechner",
+      "tabNetz": "Umgehung im Netz",
+      "erklaerHost": "Was auf DIESEM Rechner den erwarteten DNS umgeht — passiv aus den lokalen Verbindungen gelesen, ohne Netz-Sicht.",
+      "erklaerNetz": "Was IM GANZEN NETZ den erwarteten DNS umgeht — passiv aus dem mitgelesenen Netzverkehr. Setzt voraus, dass CERNIS den Netzverkehr sieht (Gateway/Mirror/einfaches Netz)."
+    },
+    "dnsbypass": {
+      "countBypass": "Umgeher",
+      "countQueries": "Anfragen gesamt",
+      "countExpected": "erwartungsgemäß",
+      "statusRuhe": "Keine Aufzeichnung aktiv.",
+      "statusAktiv": "Zeichnet auf … {{count}} Anfragen gesammelt.",
+      "start": "Aufzeichnung starten",
+      "stop": "Aufzeichnung stoppen",
+      "startFehler": "Aufzeichnung konnte nicht gestartet werden.",
+      "toTarget": "→ {{ziel}}",
+      "queriesSuffix": "×{{count}}",
+      "selfBadge": "eigener Host",
+      "dohBadge": "mögliche DoH",
+      "dohBadgeNamed": "mögliche DoH ({{quelle}})",
+      "hinweisTitel": "Hinweis",
+      "loadError": "Netzweite Umgehungs-Sicht konnte nicht geladen werden.",
+      "emptyIdle": "Noch keine Aufzeichnung. Starte eine Aufzeichnung, um netzweite Umgehungen zu sehen.",
+      "emptyRecording": "Aufzeichnung läuft — noch keine Umgehung erfasst.",
+      "emptyProminentTitle": "Keine Umgehung erfasst — sieht CERNIS das Netz?",
+      "emptyProminentText": "Die Aufzeichnung hat keine Umgehung gefunden. Netzweit sichtbar wird nur, was CERNIS mitliest: Das setzt voraus, dass der Netzverkehr hier ankommt (Gateway/Mirror-Port oder ein einfaches Netz). Ohne Netz-Sicht bleibt die Liste leer, auch wenn tatsächlich umgangen wird.",
+      "prereqHint": "Netzweit sichtbar wird nur, was CERNIS mitliest — das setzt Netz-Sicht voraus (Gateway/Mirror/einfaches Netz). Plain-DNS (Port 53) wird sicher erkannt, DoH nur heuristisch vermutet.",
+      "footerExpected": "Erwartete DNS-Server: {{servers}}",
+      "settingsHint": "Erwartete Server pflegst du unter Verwaltung → DNS-Server & Vertrauen.",
+      "consent": {
+        "title": "Netzweit passiv mitlesen?",
+        "intro": "Um netzweite DNS-Umgehungen zu sehen, liest CERNIS den DNS-Verkehr im Netz passiv mit. Bevor das zum ersten Mal startet:",
+        "passiveTitle": "Passiv",
+        "passiveText": "liest nur mit, greift nie in den Verkehr ein und blockiert nichts.",
+        "ownNetTitle": "Nur im eigenen Netz",
+        "ownNetText": "liest nur den Verkehr des eigenen Netzes mit, nichts darüber hinaus.",
+        "prereqTitle": "Voraussetzung",
+        "prereqText": "braucht Netz-Sicht (Gateway/Mirror/einfaches Netz) — sonst bleibt die Sicht leer.",
+        "dontAsk": "Nicht mehr fragen",
+        "deny": "Ablehnen",
+        "grant": "Zustimmen und starten"
+      }
+    },
+    "monitor": {
+      "zieleTitel": "Ziele",
+      "eventLogTitel": "Ereignisse",
+      "aktuelleRtt": "aktuelle Latenz",
+      "wartet": "wartet …",
+      "up": "UP",
+      "offline": "OFFLINE",
+      "eventUp": "Wieder online",
+      "eventDown": "Offline",
+      "eventDegraded": "Verzögert",
+      "label": "Bezeichnung",
+      "host": "IP / Host",
+      "hinzufuegen": "Hinzufügen",
+      "loeschen": "Ziel entfernen",
+      "logLeer": "Noch keine Ereignisse aufgezeichnet.",
+      "getrennt": "Verbindung unterbrochen, neuer Versuch …",
+      "ladeFehler": "Konnte nicht entfernt werden.",
+      "verlaufTitel": "RTT-Verlauf",
+      "liveFenster": "Live-Fenster",
+      "verlaufLeer": "Noch keine Verlaufsdaten.",
+      "tonFuerZiel": "Ton für {{label}}",
+      "tonKeinZiel": "Ton (kein Ziel)",
+      "tonAnTitel": "Signalton an",
+      "tonAusTitel": "Signalton aus"
+    },
+    "topology": {
+      "titel": "Netz-Topologie",
+      "neuLaden": "Neu laden",
+      "ladeFehler": "Topologie konnte nicht geladen werden.",
+      "leer": "Keine Topologie-Daten — Scan ausführen oder LLDP-Capture nötig.",
+      "legendeGemessen": "gemessen (LLDP/CDP)",
+      "legendeAngenommen": "angenommen (Stern zum Gateway)",
+      "typGateway": "Gateway",
+      "typSwitch": "Switch",
+      "typNetwork": "Netzgerät",
+      "typHost": "Host",
+      "knotenAnzahl_one": "{{count}} Knoten",
+      "knotenAnzahl_other": "{{count}} Knoten",
+      "quelleLabel": "Anzuzeigende Geräte",
+      "quelleLetzterScan": "Letzter Scan",
+      "quelleAlleBekannten": "Alle bekannten Geräte",
+      "quelleHinweisLetzterScan": "Zeigt nur die Geräte, die beim letzten Scan gefunden wurden — das aktuelle Live-Bild des Netzes.",
+      "quelleHinweisAlleBekannten": "Zeigt alle je gefundenen Geräte, auch solche, die gerade offline sind."
+    },
+    "logging": {
+      "modusAssistent": "Assistent",
+      "modusErweitert": "Erweitert",
+      "neueAufgabe": "Neue Logging-Aufgabe",
+      "schrittVon": "Schritt {{aktuell}} von {{gesamt}}",
+      "weiter": "Weiter",
+      "zurueck": "Zurück",
+      "anlegen": "Anlegen",
+      "anlegenStarten": "Anlegen & starten",
+      "abbrechen": "Abbrechen",
+      "anlegenFehler": "Aufgabe konnte nicht angelegt werden.",
+      "schritt1Titel": "Ziel & Zweck",
+      "schritt2Titel": "Erfassung",
+      "schritt3Titel": "Betriebsart",
+      "zielLabel": "Ziel",
+      "zielPlaceholder": "Ziel wählen …",
+      "zielLeer": "Keine Ziele verfügbar. Läuft das Monitoring?",
+      "zweckLabel": "Zweck (optional)",
+      "zweckPlaceholder": "z. B. Störungssuche am Abend",
+      "bezeichnungLabel": "Bezeichnung",
+      "bezeichnungPlaceholder": "z. B. Gateway-Logging",
+      "captureLabel": "Was wird erfasst?",
+      "capture": {
+        "interface_status": {
+          "titel": "Schnittstellen-Status",
+          "text": "Nur an/aus je Schnittstelle. Sehr sparsam."
+        },
+        "reachability": {
+          "titel": "Erreichbarkeit",
+          "text": "Ob das Ziel antwortet. Wenig Daten."
+        },
+        "reachability_latency": {
+          "titel": "Erreichbarkeit + Latenz",
+          "text": "Antwort und Antwortzeit (RTT).",
+          "mengeHinweis": "Erzeugt am meisten Messdaten."
+        }
+      },
+      "betriebLabel": "Betriebsart",
+      "betriebSofort": "Sofort",
+      "betriebGeplant": "Geplant",
+      "betriebWiederkehrend": "Wiederkehrend",
+      "recurTagesfensterLabel": "Tagesfenster",
+      "recurVon": "von",
+      "recurBis": "bis",
+      "recurWochentageLabel": "Wochentage",
+      "recurWochentag": {
+        "0": "Mo",
+        "1": "Di",
+        "2": "Mi",
+        "3": "Do",
+        "4": "Fr",
+        "5": "Sa",
+        "6": "So"
+      },
+      "recurZeitraumLabel": "Zeitraum",
+      "recurZeitraumVon": "Von",
+      "recurZeitraumBis": "Bis (optional)",
+      "recurVorschau": "Ergibt {{n}} Messläufe",
+      "recurVorschauUnbegrenzt": "Läuft bis auf Weiteres",
+      "planen": "Planen",
+      "wiederkehrendKarte": "Wiederkehrend · {{von}}–{{bis}} · {{tage}}",
+      "wiederkehrendKarteBis": "bis {{datum}}",
+      "dauerLabel": "Maximale Dauer",
+      "dauer": {
+        "30min": "30 Minuten",
+        "2h": "2 Stunden",
+        "6h": "6 Stunden",
+        "1d": "1 Tag",
+        "1w": "1 Woche"
+      },
+      "startLabel": "Start",
+      "endeLabel": "Ende",
+      "intervallLabel": "Mess-Intervall",
+      "intervallHinweis": "Verdichtet die Latenz-Messpunkte. Größere Intervalle erzeugen weniger Daten.",
+      "intervall": {
+        "5s": "5 s",
+        "15s": "15 s",
+        "30s": "30 s",
+        "60s": "1 Min",
+        "300s": "5 Min"
+      },
+      "intervallKarte": {
+        "5s": "alle 5 s",
+        "15s": "alle 15 s",
+        "30s": "alle 30 s",
+        "60s": "alle 1 Min",
+        "300s": "alle 5 Min"
+      },
+      "schwellwertLabel": "Schwellwert-Alarm",
+      "schwellwertHinweis": "Schlägt Alarm, wenn das Ziel eine festgelegte Bedingung über mehrere Messungen hinweg erfüllt.",
+      "schwellwertBedingungLabel": "Bedingung",
+      "schwellwertBedingung": {
+        "latency_above": "Latenz über Grenzwert",
+        "unreachable": "Ziel nicht erreichbar"
+      },
+      "schwellwertGrenzwertLabel": "Grenzwert (ms)",
+      "schwellwertEmpfindlichkeitLabel": "Empfindlichkeit N",
+      "schwellwertEmpfindlichkeitHinweis": "Alarm erst nach N Messungen in Folge.",
+      "schwellwertDesktop": "Desktop-Benachrichtigung",
+      "schwellwertEmail": "E-Mail",
+      "schwellwertEmailNichtVerfuegbar": "E-Mail-Benachrichtigung ist in dieser Programmversion noch nicht verfügbar.",
+      "schwellwertKarte": {
+        "latency": "Alarm: Latenz > {{limit}} ms ({{n}}×)",
+        "unreachable": "Alarm: Ausfall ({{n}}×)"
+      },
+      "listeTitel": "Logging-Aufgaben",
+      "listeLeer": "Noch keine Logging-Aufgaben angelegt.",
+      "state": {
+        "created": "Angelegt",
+        "active": "Aktiv",
+        "paused": "Pausiert",
+        "finished": "Beendet"
+      },
+      "captureKurz": {
+        "interface_status": "Schnittstellen-Status",
+        "reachability": "Erreichbarkeit",
+        "reachability_latency": "Erreichbarkeit + Latenz"
+      },
+      "aktion": {
+        "start": "Starten",
+        "pause": "Pause",
+        "resume": "Fortsetzen",
+        "stop": "Stoppen",
+        "delete": "Löschen",
+        "detail": "Bericht"
+      },
+      "aktionFehler": "Aktion fehlgeschlagen.",
+      "rest": {
+        "tage": "{{value}} Tg",
+        "stunden": "{{value}} Std",
+        "minuten": "{{value}} Min",
+        "sekunden": "{{value}} Sek",
+        "zwei": "noch {{erste}} {{zweite}}",
+        "eine": "noch {{erste}}",
+        "jetzt": "endet jetzt"
+      },
+      "sla": {
+        "verfuegbarkeit": "Verfügbarkeit {{wert}} %",
+        "avgRtt": "Ø {{wert}} ms",
+        "downtime": "ca. {{wert}} Min offline",
+        "keineAuswertung": "noch keine Auswertung"
+      },
+      "ladeFehler": "Logging-Aufgaben konnten nicht geladen werden.",
+      "detailTitel": "Bericht",
+      "detailFehler": "Detaildaten konnten nicht geladen werden.",
+      "detailNichtGefunden": "Aufgabe nicht gefunden.",
+      "zeitraumLabel": "Zeitraum",
+      "zeitraum": {
+        "stunde": "Letzte Stunde",
+        "24h": "Letzte 24 Stunden",
+        "7tage": "Letzte 7 Tage",
+        "30tage": "Letzte 30 Tage",
+        "frei": "Frei"
+      },
+      "zeitraumVon": "Von",
+      "zeitraumBis": "Bis",
+      "chartTab": {
+        "uptime": "Verfügbarkeit %",
+        "rtt": "Ø-RTT (ms)"
+      },
+      "chartLeer": "Zu wenige Messpunkte für einen Verlauf.",
+      "ereignisseTitel": "Ereignisse",
+      "ereignisseLeer": "Keine Ereignisse im gewählten Zeitraum.",
+      "ereignisSpalte": {
+        "zeitpunkt": "Zeitpunkt",
+        "ereignis": "Ereignis",
+        "rtt": "RTT"
+      },
+      "exportTitel": "Export",
+      "exportPdf": "PDF",
+      "exportCsv": "CSV",
+      "exportJson": "JSON",
+      "exportLaeuft": "Lädt …",
+      "exportFehler": "Export fehlgeschlagen.",
+      "kennzahl": {
+        "verfuegbarkeit": "Verfügbarkeit",
+        "rtt": "Ø-RTT",
+        "ausfallzeit": "Ausfallzeit",
+        "messpunkte": "Messpunkte"
+      },
+      "keineAuswertung": "keine Auswertung",
+      "minuten": "Min",
+      "ansicht": {
+        "bericht": "Bericht",
+        "serie": "Serien-Auswertung",
+        "profil": "Verhaltensprofil"
+      },
+      "profil": {
+        "titel": "Verhaltensprofil",
+        "kennzahl": {
+          "aktivsteZeit": "Aktivste Zeit",
+          "aktivsteTage": "Aktivste Tage",
+          "abweichungen": "Abweichungen gesamt",
+          "aufzeichnungstage": "Aufzeichnungstage"
+        },
+        "leerzustand": {
+          "text": "Noch zu wenig Daten für ein belastbares Muster. Ein Verhaltensprofil braucht mindestens zwei volle Wochen Aufzeichnung. CERNIS sammelt weiter — sobald genug Tage vorliegen, erscheint das Muster hier von selbst.",
+          "fortschritt": "{{tage}} / {{ziel}} Tage"
+        },
+        "tagesmuster": {
+          "titel": "Tagesmuster",
+          "leer": "Für das Tagesmuster liegen noch keine Daten vor."
+        },
+        "wochenmuster": {
+          "titel": "Wochenmuster",
+          "leer": "Für das Wochenmuster liegen noch keine Daten vor."
+        },
+        "hinweis": "Markierungen sind Hinweise auf Musterbrüche, kein Urteil; die Schwellen sind konservativ gewählt und anpassbar.",
+        "legende": {
+          "typisch": "Typisch",
+          "abweichung": "Abweichung"
+        },
+        "wochentag": {
+          "mo": "Mo",
+          "di": "Di",
+          "mi": "Mi",
+          "do": "Do",
+          "fr": "Fr",
+          "sa": "Sa",
+          "so": "So"
+        }
+      },
+      "serie": {
+        "titel": "Serien-Auswertung",
+        "kennzahl": {
+          "verfuegbarkeit": "Verfügbarkeit",
+          "abbrueche": "Abbrüche gesamt",
+          "dauer": "Durchschnittsdauer",
+          "fenster": "Auffälligstes Fenster"
+        },
+        "wasZeigen": {
+          "titel": "Was zeigen",
+          "abbrueche": "Abbrüche",
+          "latenz": "Latenz",
+          "alles": "Alles"
+        },
+        "darstellung": {
+          "titel": "Darstellung",
+          "einzellinien": "Einzellinien",
+          "heatmap": "Heatmap",
+          "rangliste": "Rangliste",
+          "latenzLeer": "Für diese Darstellung liegen im gewählten Kontext keine Daten vor."
+        },
+        "empfehlung": "CERNIS empfiehlt: {{modus}}",
+        "wiederherstellen": "Empfehlung übernehmen",
+        "medianBand": "Median + Band (berechnet)",
+        "keineLatenz": "In diesem Aufzeichnungsmodus werden keine Antwortzeiten gemessen — die Latenz-Sichten sind daher nicht verfügbar.",
+        "tabelle": {
+          "titelAbbrueche": "Einzelne Ausfälle",
+          "von": "Von",
+          "bis": "Bis",
+          "dauer": "Dauer",
+          "nochOffen": "noch offen",
+          "leer": "Keine Ausfälle im gewählten Zeitraum."
+        },
+        "latenzTabelle": {
+          "titel": "Latenz je Uhrzeit",
+          "slot": "Uhrzeit",
+          "messpunkte": "Messpunkte",
+          "p95": "p95",
+          "max": "Max",
+          "leer": "Keine Antwortzeiten im gewählten Zeitraum."
+        },
+        "rangliste": {
+          "slot": "Uhrzeit",
+          "tage": "Betroffene Tage",
+          "laengster": "Längster Ausfall"
+        }
+      }
+    },
+    "outboundlog": {
+      "leiste": {
+        "titelRuhe": "Außenkontakte aufzeichnen — keine Aufzeichnung läuft",
+        "titelAktiv": "Aufzeichnung läuft — {{label}}",
+        "knopfVerwaltung": "Aufzeichnungen"
+      },
+      "neueAufzeichnung": "Neue Aufzeichnung",
+      "bezeichnungLabel": "Bezeichnung",
+      "bezeichnungPlaceholder": "z. B. Wochenend-Beobachtung",
+      "zweckLabel": "Zweck (optional)",
+      "zweckPlaceholder": "Wozu wird aufgezeichnet?",
+      "modusLabel": "Modus",
+      "modus": {
+        "detail": "Detailverlauf",
+        "aggregate": "Sammlung"
+      },
+      "modusHinweis": {
+        "detail": "Zeichnet jeden Zeitpunkt einzeln auf — sehr genau, aber datenintensiv. Daher auf 24 Stunden begrenzt. Für längere Beobachtung die Sammel-Aufzeichnung wählen. Bewahrt zusätzlich den zeitlichen Verlauf und liefert im Bericht dieselbe Bilanz.",
+        "aggregate": "Fasst je Gegenstelle zusammen (erstmals/zuletzt/wie oft) — kompakt, zeitlich unbegrenzt. Braucht wenig Platz und liefert im Bericht die vollständige Bilanz."
+      },
+      "tiefeLabel": "Tiefe",
+      "tiefe": {
+        "anonymous": "Anonym",
+        "appResolved": "Mit Programm"
+      },
+      "tiefeHinweis": {
+        "anonymous": "Zeigt die Gegenstellen ohne Programm-Zuordnung.",
+        "appResolved": "Zeigt zusätzlich, welches Programm telefoniert — benötigt erweiterte Rechte (Administrator/root). Ohne diese bleibt die Programm-Spalte teils leer."
+      },
+      "intervallLabel": "Intervall",
+      "intervall": {
+        "30s": "alle 30 Sekunden",
+        "60s": "alle 60 Sekunden",
+        "300s": "alle 5 Minuten"
+      },
+      "dauerLabel": "Dauer",
+      "dauer": {
+        "1h": "1 Stunde",
+        "6h": "6 Stunden",
+        "12h": "12 Stunden",
+        "24h": "24 Stunden",
+        "custom": "benutzerdefiniert"
+      },
+      "dauerCustomLabel": "Stunden",
+      "dauerCustomHinweis": "Bitte 1 bis 24 Stunden angeben.",
+      "dauerKarte": "Dauer: {{stunden}} h",
+      "erstelltAm": "Erstellt am {{datum}}",
+      "anlegen": "Anlegen",
+      "anlegenFehler": "Aufzeichnung konnte nicht angelegt werden.",
+      "listeTitel": "Aufzeichnungen",
+      "listeLeer": "Noch keine Aufzeichnung angelegt.",
+      "ladeFehler": "Aufzeichnungen konnten nicht geladen werden.",
+      "aktionFehler": "Aktion fehlgeschlagen.",
+      "state": {
+        "created": "Angelegt",
+        "active": "Läuft",
+        "paused": "Pausiert",
+        "finished": "Beendet"
+      },
+      "aktion": {
+        "start": "Start",
+        "pause": "Pause",
+        "resume": "Fortsetzen",
+        "stop": "Stopp",
+        "loeschen": "Löschen",
+        "loeschenModalText": "Aufzeichnung „{{label}}“ wirklich löschen?",
+        "loeschenBestaetigen": "Löschen",
+        "loeschenAbbrechen": "Abbrechen"
+      },
+      "konfliktHinweis": "Es läuft bereits eine Aufzeichnung. Es kann immer nur eine gleichzeitig aufzeichnen — bitte die laufende zuerst beenden oder pausieren.",
+      "detailHinweis": "Detail-Aufzeichnung, endet automatisch nach 24 h.",
+      "befundFolgt": "Befund zu „{{label}}“ folgt.",
+      "detailTitel": "Aufzeichnung",
+      "karte": {
+        "titel": "Aufzeichnungen",
+        "statusRuhe": "Keine Aufzeichnung aktiv.",
+        "statusAktiv": "Zeichnet auf: {{label}}"
+      },
+      "details": "Details",
+      "aendern": "Ändern",
+      "speichern": "Speichern",
+      "abbrechen": "Abbrechen",
+      "gesperrtTitel": "Konfiguration gesperrt",
+      "gesperrtHinweis": "Modus, Tiefe, Intervall und Dauer lassen sich nur ändern, solange die Aufzeichnung noch nicht gestartet wurde.",
+      "aenderungFehler": "Die Änderung konnte nicht gespeichert werden.",
+      "nameVergeben": "Dieser Name ist bereits vergeben. Bitte einen anderen wählen.",
+      "schliessen": "Schließen"
+    },
+    "lookup": {
+      "title": "Gegenstelle nachschlagen",
+      "close": "Schließen",
+      "copyIp": "IP kopieren",
+      "copied": "kopiert",
+      "notFound": "nicht gefunden",
+      "sourceLabel": "Quelle",
+      "loading": "Wird aufgelöst …",
+      "error": "Auflösung nicht erreichbar.",
+      "notice": "Reine Fakten aus mehreren Quellen. Wo Quellen sich unterscheiden, steht beides — CERNIS bewertet nicht.",
+      "conflict": {
+        "label": "Länder-Angaben weichen ab"
+      },
+      "resolution": {
+        "heading": "Namensauflösung",
+        "ptr": "Reverse-DNS (PTR)",
+        "forward": "Forward-Bestätigung",
+        "tls": "TLS-Zertifikat",
+        "tlsSubject": "Subject (CN)",
+        "tlsSan": "SAN",
+        "tlsIssuer": "Aussteller (Issuer)",
+        "tlsValidFrom": "Gültig von",
+        "tlsValidUntil": "Gültig bis",
+        "tlsSerial": "Seriennummer",
+        "tlsFingerprint": "SHA-256-Fingerprint",
+        "tlsSelfSigned": "selbstsigniert",
+        "dyndns": "DynDNS-Datenbank"
+      },
+      "operator": {
+        "heading": "Betreiber & Netz",
+        "org": "Betreiber",
+        "netname": "Netz-Name",
+        "netRange": "Netz-Bereich",
+        "asn": "ASN",
+        "asnOrg": "Betreiber des AS",
+        "abuse": "Abuse-Kontakt"
+      },
+      "location": {
+        "heading": "Standort",
+        "rdapNet": "Land laut RDAP-Netz",
+        "orgAddress": "Land laut Org-Adresse",
+        "geoDb": "Land laut Geo-DB"
+      },
+      "service": {
+        "heading": "Dienst am Port",
+        "hint": "Port-Einordnung",
+        "banner": "Banner"
+      },
+      "external": {
+        "heading": "Selbst weiterprüfen",
+        "whois": {
+          "label": "WHOIS beim Betreiber",
+          "hint": "Registrierung und Kontakt des Netzes nachschlagen"
+        },
+        "reputation": {
+          "label": "Reputation prüfen",
+          "hint": "Die IP in öffentlichen Reputationsquellen abfragen"
+        },
+        "geo": {
+          "label": "Standort & Netz",
+          "hint": "Geografische Zuordnung und ASN ansehen"
+        }
+      }
+    }
+  },
+  "untersuchen": {
+    "cards": {
+      "analysis": {
+        "title": "Analyse",
+        "subtitle": "Muster und Zusammenhänge aus den gesammelten Beobachtungen.",
+        "locked": "braucht gesammelte Daten"
+      },
+      "diagnose": {
+        "title": "Diagnose",
+        "subtitle": "Erreichbarkeit, DNS und DHCP gezielt prüfen.",
+        "locked": ""
+      },
+      "cve": {
+        "title": "CVE-Abgleich",
+        "subtitle": "Erkannte Dienste gegen bekannte CVE-Einträge abgleichen.",
+        "locked": ""
+      },
+      "defaultcreds": {
+        "title": "Standardzugänge",
+        "subtitle": "Aktive Prüfung: meldet Geräte, die noch werksseitige Standard-Zugangsdaten nutzen.",
+        "locked": "Erst in den Einstellungen für diese Sitzung freischalten."
+      }
+    },
+    "defaultCreds": {
+      "notice": "Aktive Prüfung: CERNIS versucht einen echten Login mit Standard-Zugangsdaten. Nur für Geräte im eigenen Netz.",
+      "resultHit": "Gerät nutzt Standardzugang (Benutzer/Passwort)",
+      "portLabel": "Port {{port}} ({{service}})",
+      "selfSigned": "Zusatz: {{note}}",
+      "error": "Die Prüfung konnte nicht durchgeführt werden.",
+      "geraetewahl": {
+        "title": "Gerät wählen",
+        "hint": "Wähle ein Gerät aus dem Scan. CERNIS ermittelt anhand des Herstellers, welche Werks-Standardzugänge bekannt sind — und prüft nur gezielt, was du anhakst.",
+        "loading": "Geräte werden geladen …",
+        "loadError": "Die Geräteliste konnte nicht geladen werden.",
+        "leer": "Es sind noch keine Geräte bekannt. Starte einen Scan oder gib ein Ziel manuell ein.",
+        "spalteGeraet": "Gerät",
+        "spalteIp": "IP",
+        "spalteHersteller": "Hersteller",
+        "spaltePorts": "Offene Ports",
+        "keinHersteller": "unbekannt",
+        "keinePorts": "keine",
+        "auswaehlen": "Auswählen",
+        "gewaehlt": "Gewählt",
+        "manuellTitle": "Oder Ziel manuell eingeben",
+        "manuellHint": "Ist das Gerät nicht in der Liste, gib seine IP direkt ein. Der Hersteller ist dann unbekannt — im nächsten Schritt kannst du ihn selbst angeben.",
+        "manuellPlaceholder": "IP im eigenen Netz (z. B. 192.168.1.1)",
+        "manuellUebernehmen": "Übernehmen",
+        "zurueck": "Anderes Gerät wählen"
+      },
+      "modell": {
+        "title": "Modell ermitteln",
+        "geraetLabel": "Gerät",
+        "herstellerLabel": "Hersteller",
+        "herstellerLeer": "unbekannt",
+        "herstellerPlaceholder": "Hersteller eingeben (z. B. AVM, TP-Link)",
+        "modellLabel": "Modell (optional präzisieren)",
+        "optionalHint": "Das Modell ist aus dem Scan meist nicht bekannt. Kennst du es genauer, gib es hier ein — das schärft die Ermittlung.",
+        "modellPlaceholder": "Modell (optional)",
+        "ermitteln": "Prüfplan ermitteln",
+        "ermittelt": "Ermittle …",
+        "erneutErmitteln": "Erneut ermitteln",
+        "praezisieren": "Hersteller/Modell präzisieren"
+      },
+      "fall": {
+        "entwarnungTitle": "Keine Werks-Standardzugänge bekannt",
+        "entwarnungText": "Für dieses Gerät sind uns keine werksseitigen Standard-Zugangsdaten bekannt — der Hersteller gilt als „secure by default“ (jedes Gerät bekommt ab Werk ein eigenes Passwort). Es gibt hier nichts zu prüfen.",
+        "kandidatenTitle": "Bekannte Standardzugänge",
+        "kandidatenHint": "Für dieses Gerät sind die folgenden Werks-Standardzugänge bekannt. Hake an, was CERNIS gezielt am Gerät ausprobieren soll, und starte die Prüfung.",
+        "keineInfosTitle": "Keine Infos zu diesem Gerät",
+        "keineInfosText": "Zu diesem Gerät liegen uns keine Infos über Werks-Standardzugänge vor. Das heißt nicht, dass es keine gibt — nur, dass wir sie nicht kennen. Sieh beim Hersteller nach oder präzisiere Hersteller/Modell und ermittle erneut.",
+        "herstellerLink": "Beim Hersteller nachsehen",
+        "keinLink": "Kein Hersteller-Link hinterlegt."
+      },
+      "kandidat": {
+        "konfidenzGesichert": "gesichert",
+        "konfidenzAuchMoeglich": "auch möglich",
+        "konfidenzVermutet": "vermutet",
+        "konfidenzBenutzer": "eigener Wert",
+        "passwortLeer": "(leer)",
+        "spalteBenutzer": "Benutzer",
+        "spaltePasswort": "Passwort",
+        "spalteKonfidenz": "Konfidenz",
+        "pruefen": "Prüfen",
+        "pruefe": "Prüfe …",
+        "keineAngehakt": "Hake mindestens einen Kandidaten an, um zu prüfen."
+      },
+      "ergebnis": {
+        "trefferTitle": "Standardzugang gefunden",
+        "keinTrefferTitle": "Kein Standardzugang gefunden",
+        "keinTrefferText": "Mit den geprüften Zugangsdaten war keine Anmeldung möglich. Das ist kein Freibrief — geprüft wurden nur die angehakten Kandidaten.",
+        "note": "Zusatz: {{note}}",
+        "erneut": "Neue Prüfung"
+      },
+      "historie": {
+        "title": "Frühere Prüfungen",
+        "loading": "Historie wird geladen …",
+        "loadError": "Die Prüf-Historie konnte nicht geladen werden.",
+        "leer": "Noch keine Prüfungen aufgezeichnet.",
+        "spalteZeit": "Zeitpunkt",
+        "spalteHost": "Host",
+        "spalteGeraet": "Hersteller / Modell",
+        "spalteErgebnis": "Ergebnis",
+        "treffer": "{{count}} Fund",
+        "treffer_other": "{{count}} Funde",
+        "keinTreffer": "kein Fund",
+        "detailTitle": "Funde dieser Prüfung",
+        "detailLeer": "Diese Prüfung hat keine Funde ergeben.",
+        "detailLoadError": "Die Details konnten nicht geladen werden.",
+        "modellLeer": "ohne Modell"
+      }
+    },
+    "route": {
+      "targetLabel": "Ziel",
+      "targetPlaceholder": "Domain oder IP eingeben (z. B. 1.1.1.1)",
+      "start": "Route messen",
+      "measuring": "Messe …",
+      "idle": "Gib ein Internet-Ziel ein, um den Netzweg dorthin zu zeigen.",
+      "noReply": "keine Antwort",
+      "noHops": "Keine Hops ermittelt.",
+      "error": "Die Route konnte nicht gemessen werden.",
+      "permissionHint": "Genauere Messung mit Rechten möglich — die Messung läuft auch ohne.",
+      "loadOrgs": "Betreibernamen nachladen (Internet-Abfrage)",
+      "loadingOrgs": "lädt …",
+      "colHop": "Hop",
+      "colIp": "IP",
+      "colCountry": "Land",
+      "colOperator": "Betreiber / ASN",
+      "colRtt": "RTT",
+      "runningHint": "Die Messung läuft — das kann je nach Ziel bis zu einer Minute dauern."
+    },
+    "cve": {
+      "loading": "Lade CVE-Befunde …",
+      "error": "Die CVE-Befunde konnten nicht geladen werden.",
+      "groupLabel": "Gruppierung",
+      "bySeverity": "Nach Schwere",
+      "byDevice": "Nach Gerät",
+      "newBadge": "NEU",
+      "cvssLabel": "CVSS-Score",
+      "ack": "Quittieren",
+      "acking": "Quittiere …",
+      "reactivate": "Wieder einblenden",
+      "reactivating": "Blende ein …",
+      "showHidden": "Ausgeblendete einblenden",
+      "hideHidden": "Ausgeblendete verbergen",
+      "hiddenHeading": "Ausgeblendete Befunde ({{count}})",
+      "noHidden": "Keine ausgeblendeten Befunde",
+      "portLabel": "Port {{port}}",
+      "publishedLabel": "veröffentlicht {{date}}",
+      "findingCount": "{{count}} Befund(e)",
+      "emptyNoFindings": "Keine offenen CVE-Befunde.",
+      "emptyNoScan": "Noch kein Scan — führe einen Netzwerk-Scan aus, dann prüft CERNIS die gefundenen Geräte nach und nach auf Schwachstellen.",
+      "emptyHint": "Die Prüfung läuft im Hintergrund und ist gedrosselt — Befunde erscheinen nach und nach.",
+      "ackOnlyNote": "Quittierte Befunde werden ausgeblendet; sie lassen sich unten wieder einblenden und reaktivieren.",
+      "severity": {
+        "critical": "Kritisch",
+        "high": "Hoch",
+        "medium": "Mittel",
+        "low": "Niedrig",
+        "unknown": "Unbekannt"
+      },
+      "status": {
+        "sleeping": "Alle Geräte sind abgeglichen",
+        "checking": "Abgleich läuft — noch {{offen}} von {{gesamt}} Geräten",
+        "hosts": "{{checked}} Geräte geprüft · {{total}} aktuell prüfbar",
+        "active": "{{count}} aktive Befunde"
+      }
+    }
+  },
+  "reporting": {
+    "cards": {
+      "security": {
+        "title": "Netzwerk-Sicherheitsbericht",
+        "subtitle": "Score, auffällige Ports, CVE-Befunde und Netz-Auffälligkeiten in einem Bericht.",
+        "locked": ""
+      },
+      "inventory": {
+        "title": "Netzwerk-Bestandsbericht",
+        "subtitle": "Geräte-Inventar mit Herstellern, Kategorien, Vertrauensstatus und Sichtungen.",
+        "locked": ""
+      },
+      "cve": {
+        "title": "CVE-Bericht",
+        "subtitle": "Gefundene Schwachstellen nach Schweregrad, Gerät und Dienst – mit vollständiger Befundliste.",
+        "locked": ""
+      },
+      "outbound": {
+        "title": "Netzwerk-Außenkontakte-Bericht",
+        "subtitle": "Wohin Ihr Netz nach außen spricht – Gegenstellen, Länder, Betreiber und auffällige Kontakte.",
+        "locked": ""
+      },
+      "dnswatch": {
+        "title": "DNS-Wächter-Bericht",
+        "subtitle": "DNS-relevante Außenkontakte dieses Rechners – erwartungsgemäß, offen oder möglicher DoH, mit Programm-Zuordnung.",
+        "locked": ""
+      },
+      "behavior": {
+        "title": "Verhaltensprofil-Bericht",
+        "subtitle": "Wiederkehrende Aktivitätsmuster je Aufgabe oder über alle Geräte – Tagesverlauf, Wochenmuster und markierte Abweichungen.",
+        "locked": ""
+      }
+    }
+  },
+  "report": {
+    "security": {
+      "titel": "Netzwerk-Sicherheitsbericht",
+      "kopf": {
+        "erstellt": "Erstellt am {{datum}}"
+      },
+      "einleitung": "Dieser Bericht fasst den Sicherheitszustand des Netzwerks aus dem letzten Scan zusammen. Er beschreibt und ordnet die Befunde ein – er fällt kein Urteil.",
+      "fusszeile": "CERNIS PRO 2.0 — Professional Network Scanner & Monitor · Erstellt am {{datum}}",
+      "ladeFehler": "Der Sicherheitsbericht konnte nicht geladen werden.",
+      "keinScan": "Noch kein Scan vorhanden – bitte zuerst einen Netzwerk-Scan durchführen.",
+      "stufe": {
+        "gut": "gut",
+        "maessig": "mäßig",
+        "kritisch": "kritisch",
+        "auffaellig": "auffällig"
+      },
+      "score": {
+        "von": "von 100",
+        "aria": "Sicherheits-Score {{score}} von 100",
+        "einordnung": "Netz-Gesundheit: {{score}} von 100 ({{level}}). Bewertet wurden {{deviceCount}} Geräte; davon {{criticalDevices}} kritisch, {{notableDevices}} auffällig, {{cleanDevices}} ohne Befund.",
+        "beitraegeTitel": "Wie der Score zustande kommt",
+        "beitraegeAuf": "Beiträge anzeigen",
+        "beitraegeZu": "Beiträge ausblenden",
+        "formel": "Score = 100 × (1 − Gesamtlast {{last}} / {{geraete}} Geräte)",
+        "sauber": "Übrige Geräte ohne Befund: {{anzahl}}"
+      },
+      "beitraege": {
+        "geraet": "Gerät",
+        "befund": "Schwerster Befund",
+        "last": "Last",
+        "leer": "Kein Gerät trägt Last zum Score bei."
+      },
+      "kennzahl": {
+        "kritisch": "Kritisch",
+        "auffaellig": "Auffällig",
+        "ohneBefund": "Ohne Befund"
+      },
+      "donut": {
+        "geraete": "Geräte",
+        "aria": "Schwere-Verteilung über {{anzahl}} Geräte"
+      },
+      "balken": {
+        "titel": "Auffälligkeiten je Gerät",
+        "weitere": "+ {{anzahl}} weitere"
+      },
+      "tabelle": {
+        "ports": "Rechner mit auffälligen Ports",
+        "cve": "CVE-Befunde",
+        "net": "Netz-Auffälligkeiten",
+        "quittiert": "Bereits bestätigt",
+        "leer": "Keine Einträge."
+      },
+      "spalte": {
+        "geraet": "Gerät",
+        "ports": "Ports",
+        "schwere": "Schwere",
+        "grund": "Grund",
+        "cve": "CVE",
+        "cvss": "CVSS",
+        "dienst": "Dienst",
+        "art": "Art",
+        "beschreibung": "Beschreibung",
+        "quelle": "Quelle"
+      },
+      "quelle": {
+        "port": "Port",
+        "cve": "CVE",
+        "net": "Netz"
+      },
+      "portGrund": "Offene Ports, die CERNIS als ungewöhnlich einstuft",
+      "quittiertHinweis": "Bestätigt – nicht in der Wertung.",
+      "fussnote": "Dieser Bericht beschreibt und ordnet ein – er fällt kein Urteil.",
+      "rogue": {
+        "ungeprueft": "Rogue-DHCP-Prüfung noch nicht durchgeführt (erfordert aktive Prüfung mit Root-Rechten). Sie lässt sich über die Diagnose- bzw. DNS-Wächter-Funktion anstoßen.",
+        "geprueft": "Rogue-DHCP zuletzt geprüft am {{datum}}."
+      },
+      "pdf": "Bericht als PDF",
+      "pdfFehler": "Das PDF konnte nicht erstellt werden. Bitte erneut versuchen."
+    },
+    "inventory": {
+      "titel": "Netzwerk-Bestandsbericht",
+      "kopf": {
+        "erstellt": "Erstellt am {{datum}}"
+      },
+      "einleitung": "Dieser Bericht listet auf, welche Geräte im Netzwerk gesehen wurden. Er beschreibt den Bestand und ordnet ihn ein – er bewertet nicht.",
+      "fusszeile": "CERNIS PRO 2.0 — Professional Network Scanner & Monitor · Erstellt am {{datum}}",
+      "ladeFehler": "Der Bestandsbericht konnte nicht geladen werden.",
+      "leerzustand": "Noch keine Geräte erfasst – bitte zuerst einen Netzwerk-Scan durchführen.",
+      "kennzahl": {
+        "gesamt": "Gesamt",
+        "bekannt": "Bekannt",
+        "unbekannt": "Unbekannt",
+        "aktiv": "Aktiv (24 h)",
+        "vertraut": "Vertraut",
+        "beobachtet": "Beobachtet",
+        "neutral": "Neutral"
+      },
+      "donut": {
+        "geraete": "Geräte",
+        "bekanntTitel": "Bekannt / unbekannt",
+        "vertrauenTitel": "Vertrauensstatus",
+        "ariaBekannt": "Bekannt/unbekannt über {{anzahl}} Geräte",
+        "ariaVertrauen": "Vertrauensstatus über {{anzahl}} Geräte"
+      },
+      "legende": {
+        "bekannt": "Bekannt",
+        "unbekannt": "Unbekannt",
+        "vertraut": "Vertraut",
+        "beobachtet": "Beobachtet",
+        "neutral": "Neutral"
+      },
+      "verteilung": {
+        "titel": "Verteilung",
+        "vendor": "Hersteller",
+        "kategorie": "Kategorie",
+        "weitere": "+ {{anzahl}} weitere",
+        "leer": "Keine Einträge.",
+        "ohneHersteller": "Kein Hersteller ermittelt",
+        "ohneKategorie": "Keine Kategorie ermittelt"
+      },
+      "liste": {
+        "titel": "Geräteliste",
+        "weitere": "+ {{anzahl}} weitere · im PDF vollständig"
+      },
+      "filter": {
+        "aktiv": "Aktiv",
+        "bekannt": "Bekannt",
+        "unbekannt": "Unbekannt",
+        "archiviert": "Archiviert"
+      },
+      "sortierung": {
+        "label": "Sortieren",
+        "lastSeen": "Letzte Sichtung",
+        "name": "Name",
+        "vendor": "Hersteller"
+      },
+      "spalte": {
+        "geraet": "Gerät",
+        "hersteller": "Hersteller",
+        "ip": "Letzte IP",
+        "erstSichtung": "Erste Sichtung",
+        "letztSichtung": "Letzte Sichtung",
+        "gesehen": "Gesehen",
+        "kategorie": "Kategorie",
+        "status": "Status"
+      },
+      "status": {
+        "vertraut": "Vertraut",
+        "beobachtet": "Beobachtet",
+        "bekannt": "Bekannt",
+        "unbekannt": "Unbekannt"
+      },
+      "tabelle": {
+        "leer": "Keine Geräte in dieser Auswahl."
+      },
+      "fussnote": "Dieser Bericht beschreibt und ordnet ein – er fällt kein Urteil.",
+      "pdf": "Bericht als PDF",
+      "pdfFehler": "Das PDF konnte nicht erstellt werden. Bitte erneut versuchen."
+    },
+    "cve": {
+      "titel": "CVE-Bericht",
+      "kopf": {
+        "erstellt": "Erstellt am {{datum}}"
+      },
+      "einleitung": "Dieser Bericht listet die gefundenen Schwachstellen (CVEs) im Netzwerk auf. Er beschreibt und ordnet ein – er bewertet nicht.",
+      "fusszeile": "CERNIS PRO 2.0 — Professional Network Scanner & Monitor · Erstellt am {{datum}}",
+      "ladeFehler": "Der CVE-Bericht konnte nicht geladen werden.",
+      "leerzustand": "Noch keine CVE-Befunde – bitte zuerst einen Scan und die CVE-Prüfung durchführen.",
+      "kennzahl": {
+        "aktiv": "Aktive Befunde",
+        "neu": "Neu (24 h)",
+        "betroffen": "Betroffene Geräte",
+        "quittiert": "Quittiert",
+        "hoechste": "Höchste Severity",
+        "abdeckung": "Abdeckung",
+        "aeltste": "Älteste Veröffentlichung"
+      },
+      "donut": {
+        "befunde": "Befunde",
+        "aria": "Schweregrad-Verteilung über {{anzahl}} Befunde"
+      },
+      "severity": {
+        "CRITICAL": "Kritisch",
+        "HIGH": "Hoch",
+        "MEDIUM": "Mittel",
+        "LOW": "Niedrig",
+        "UNKNOWN": "Unbekannt"
+      },
+      "muster": {
+        "titel": "Muster",
+        "geraet": "Nach Gerät",
+        "dienst": "Nach Dienst",
+        "weitere": "+ {{anzahl}} weitere",
+        "leer": "Keine Einträge."
+      },
+      "spalteGeraet": {
+        "geraet": "Gerät",
+        "befunde": "Befunde",
+        "hoechste": "Höchste Severity",
+        "cvss": "Höchster CVSS",
+        "dienste": "Dienste"
+      },
+      "spalteDienst": {
+        "dienst": "Dienst",
+        "befunde": "Befunde",
+        "geraete": "Geräte",
+        "hoechste": "Höchste Severity",
+        "cvss": "Höchster CVSS",
+        "aeltste": "Älteste Veröffentlichung",
+        "ohneDienst": "Kein Dienst ermittelt"
+      },
+      "liste": {
+        "titel": "Vollständige Befundliste",
+        "hostBefunde": "{{anzahl}} Befunde, höchste"
+      },
+      "spalte": {
+        "cve": "CVE",
+        "severity": "Severity",
+        "cvss": "CVSS",
+        "dienst": "Dienst",
+        "port": "Port",
+        "erstmals": "Erstmals gesehen",
+        "status": "Status"
+      },
+      "filter": {
+        "alle": "Alle",
+        "aktiv": "Aktiv",
+        "quittiert": "Quittiert",
+        "neu": "Neu"
+      },
+      "sortierung": {
+        "label": "Sortieren",
+        "severity": "Schweregrad",
+        "host": "Gerät",
+        "cvss": "CVSS"
+      },
+      "status": {
+        "aktiv": "Aktiv",
+        "quittiert": "Quittiert",
+        "neu": "NEU"
+      },
+      "tabelle": {
+        "leer": "Keine Befunde in dieser Auswahl."
+      },
+      "neuHinweis": "Neu = erstmals innerhalb der letzten 24 Stunden gesehen.",
+      "fussnote": "Dieser Bericht beschreibt und ordnet ein – er fällt kein Urteil.",
+      "pdf": "Bericht als PDF",
+      "pdfFehler": "Das PDF konnte nicht erstellt werden. Bitte erneut versuchen."
+    },
+    "outbound": {
+      "titel": "Netzwerk-Außenkontakte-Bericht",
+      "kopf": {
+        "erstellt": "Erstellt am {{datum}}"
+      },
+      "einleitung": "Dieser Bericht zeigt, mit welchen Gegenstellen außerhalb Ihres Netzes Verbindung aufgenommen wurde – nach Land, Betreiber und Auffälligkeit geordnet. Er stützt sich auf Ihre Aufzeichnungen, wertet also einen zurückliegenden Zeitraum aus; die Liste unter Außenkontakte zeigt dagegen den aktuellen Augenblick. Er beschreibt und ordnet ein – er fällt kein Urteil.",
+      "fusszeile": "CERNIS PRO 2.0 — Professional Network Scanner & Monitor · Erstellt am {{datum}}",
+      "ladeFehler": "Der Außenkontakte-Bericht konnte nicht geladen werden.",
+      "leerzustandKeineAufzeichnung": "Dieser Bericht wertet aufgezeichnete Zeiträume aus. Die Liste unter Außenkontakte zeigt den aktuellen Augenblick – für einen Bericht wird daraus ein Zeitraum aufgezeichnet. Sie starten eine Aufzeichnung unter Beobachten, Außenkontakte, mit „Neue Aufzeichnung“.",
+      "leerzustandNochKeineDaten": "Für diesen Zeitraum liegen noch keine Messpunkte vor. Die Anzeige füllt sich, sobald dieser Rechner nach außen spricht.",
+      "bezug": {
+        "label": "Bezug",
+        "alle": "Alle Aufzeichnungen"
+      },
+      "kennzahl": {
+        "gegenstellen": "Gegenstellen",
+        "verbindungen": "Verbindungen",
+        "laender": "Länder",
+        "betreiber": "Betreiber",
+        "auffaellig": "Auffällig",
+        "tracker": "Tracker",
+        "bedrohung": "Bedrohung",
+        "lokal": "Lokal"
+      },
+      "verteilung": {
+        "titel": "Verteilung",
+        "land": "Land",
+        "betreiber": "Betreiber",
+        "unbekannt": "(unbekannt)",
+        "ohneLand": "Kein Land ermittelt",
+        "ohneBetreiber": "Kein Betreiber ermittelt",
+        "weitere": "+ {{anzahl}} weitere",
+        "leer": "Keine Einträge."
+      },
+      "liste": {
+        "titel": "Kontaktliste",
+        "weitere": "+ {{anzahl}} weitere · im PDF vollständig"
+      },
+      "filter": {
+        "alle": "Alle",
+        "auffaellig": "Auffällig",
+        "lokal": "Lokal"
+      },
+      "sortierung": {
+        "label": "Sortieren",
+        "kontakte": "Kontakte",
+        "name": "Name",
+        "land": "Land"
+      },
+      "schalter": {
+        "lokaleAusblenden": "Lokale ausblenden"
+      },
+      "spalte": {
+        "gegenstelle": "Gegenstelle",
+        "name": "Name",
+        "land": "Land",
+        "betreiber": "Betreiber",
+        "app": "App",
+        "kontakte": "Kontakte",
+        "bewertung": "Bewertung"
+      },
+      "bewertung": {
+        "bedrohung": "Bedrohung",
+        "tracker": "Tracker",
+        "keine": "—"
+      },
+      "badge": {
+        "bedrohungTitel": "Als Bedrohung geführt in: {{listen}}",
+        "trackerTitel": "Als Tracker geführt in: {{listen}}"
+      },
+      "lokal": {
+        "marke": "Lokal",
+        "titel": "Gegenstelle im eigenen Netz (lokal/Infrastruktur) – kein Außenkontakt."
+      },
+      "tabelle": {
+        "leer": "Keine Kontakte in dieser Auswahl."
+      },
+      "fussnote": "Dieser Bericht beschreibt und ordnet ein – er fällt kein Urteil.",
+      "pdf": "Bericht als PDF",
+      "pdfFehler": "Das PDF konnte nicht erstellt werden. Bitte erneut versuchen."
+    },
+    "dnsWatch": {
+      "titel": "DNS-Wächter-Bericht",
+      "kopf": {
+        "erstellt": "Erstellt am {{datum}}"
+      },
+      "einleitung": "Dieser Bericht fasst die DNS-relevanten Außenkontakte dieses Rechners zusammen und ordnet sie gegen die erwarteten DNS-Server und die bekannten DoH-Anbieter ein. Er beschreibt und ordnet ein – er urteilt nicht.",
+      "ladeFehler": "Der DNS-Wächter-Bericht konnte nicht geladen werden.",
+      "leerzustand": "Derzeit sind keine DNS-relevanten Außenkontakte erfasst.",
+      "kennzahl": {
+        "aktiv": "Aktiv",
+        "auffaellig": "Auffällig",
+        "quittiert": "Quittiert",
+        "gesamt": "Kontakte gesamt"
+      },
+      "donut": {
+        "aktiv": "Aktiv",
+        "aria": "Verteilung der aktiven DNS-Kontakte nach Kategorie: {{anzahl}} gesamt"
+      },
+      "category": {
+        "offen": "Offen (fremder Resolver)",
+        "moegliche_doh": "Möglicher DoH",
+        "erwartungsgemaess": "Erwartungsgemäß"
+      },
+      "muster": {
+        "titel": "Verteilung",
+        "kategorie": "Nach Kategorie",
+        "programm": "Nach Programm",
+        "leer": "Keine Einträge.",
+        "weitere": "+ {{anzahl}} weitere"
+      },
+      "spalteKat": {
+        "kategorie": "Kategorie",
+        "kontakte": "Kontakte"
+      },
+      "spalteApp": {
+        "programm": "Programm",
+        "kontakte": "Kontakte",
+        "ohneProgramm": "Kein Programm ermittelt"
+      },
+      "filter": {
+        "alle": "Alle",
+        "auffaellig": "Nur auffällige",
+        "quittiert": "Quittiert"
+      },
+      "sortierung": {
+        "label": "Sortierung",
+        "kategorie": "Kategorie",
+        "kontakte": "Kontakte",
+        "gegenstelle": "Gegenstelle"
+      },
+      "liste": {
+        "titel": "DNS-relevante Außenkontakte"
+      },
+      "spalte": {
+        "kategorie": "Kategorie",
+        "gegenstelle": "Gegenstelle",
+        "name": "Name",
+        "programm": "Programm",
+        "kontakte": "Kontakte",
+        "status": "Status"
+      },
+      "status": {
+        "aktiv": "Aktiv",
+        "quittiert": "Quittiert"
+      },
+      "grundlage": {
+        "titel": "Grundlage der Einordnung",
+        "erwartet": "Erwartete DNS-Server",
+        "doh": "Bekannte DoH-Anbieter",
+        "keine": "(keine)"
+      },
+      "tabelle": {
+        "leer": "Keine Kontakte für diese Auswahl."
+      },
+      "fussnote": "Der Bericht beschreibt die DNS-relevanten Außenkontakte dieses Rechners und ordnet sie gegen Ihre Listen ein – er urteilt nicht. Offen bedeutet nur: ein Resolver außerhalb der erwarteten Liste.",
+      "fusszeile": "CERNIS PRO 2.0 – DNS-Wächter-Bericht · {{datum}}",
+      "pdf": "Als PDF herunterladen",
+      "pdfFehler": "Das PDF konnte nicht erstellt werden."
+    },
+    "dnsBypass": {
+      "umschalter": {
+        "host": "Dieser Rechner",
+        "netz": "Umgehung im Netz"
+      },
+      "bezug": {
+        "label": "Bezug",
+        "alle": "Alle Aufzeichnungen"
+      },
+      "einleitung": "Dieser Bericht zeigt, welche Geräte im Netz den erwarteten DNS umgehen – Plain-DNS (Port 53) zu einem fremden Resolver wird sicher erkannt, DoH nur heuristisch vermutet. Er beschreibt und ordnet ein – er urteilt nicht.",
+      "ladeFehler": "Der netzweite DNS-Umgehungs-Bericht konnte nicht geladen werden.",
+      "leerzustandKeineAufzeichnung": "Noch keine netzweite Aufzeichnung vorhanden. Netzweit sichtbar wird nur, was CERNIS mitliest – bitte zuerst im DNS-Wächter (Reiter „Umgehung im Netz“) eine Aufzeichnung starten.",
+      "leerzustandKeineUmgehung": "Keine Umgehung erfasst. Netzweit sichtbar wird nur, was CERNIS mitliest: Das setzt voraus, dass der Netzverkehr hier ankommt (Gateway/Mirror-Port oder ein einfaches Netz). Ohne Netz-Sicht bleibt die Liste leer, auch wenn tatsächlich umgangen wird.",
+      "kennzahl": {
+        "umgeher": "Umgeher",
+        "geraete": "Geräte mit Umgehung",
+        "anfragen": "Anfragen gesamt",
+        "erwartet": "Erwartungsgemäß"
+      },
+      "resolver": {
+        "titel": "Fremde Resolver (Ziel-IP)",
+        "spalteZiel": "Ziel-IP",
+        "spalteAnfragen": "Anfragen",
+        "leer": "Keine fremden Resolver erfasst."
+      },
+      "liste": {
+        "titel": "Umgeher im Netz"
+      },
+      "spalte": {
+        "geraet": "Gerät",
+        "quelle": "Quell-IP",
+        "ziel": "Ziel-IP",
+        "anfragen": "Anfragen",
+        "beispiele": "Abgefragte Namen"
+      },
+      "selbst": "Dieser Rechner",
+      "dohBadge": "mögliche DoH",
+      "dohBadgeNamed": "mögliche DoH ({{quelle}})",
+      "tabelle": {
+        "leer": "Keine Umgehung in dieser Auswahl."
+      },
+      "grundlage": {
+        "titel": "Grundlage der Einordnung",
+        "erwartet": "Erwartete DNS-Server",
+        "keine": "(keine)"
+      },
+      "fussnote": "Der Bericht beschreibt netzweit, welche Geräte den erwarteten DNS umgehen, und ordnet ein – er urteilt nicht. Plain-DNS (Port 53) wird sicher erkannt, DoH nur heuristisch vermutet.",
+      "fusszeile": "CERNIS PRO 2.0 – DNS-Umgehungs-Bericht · {{datum}}",
+      "pdf": "Als PDF herunterladen",
+      "pdfFehler": "Das PDF konnte nicht erstellt werden."
+    },
+    "behavior": {
+      "titel": "Verhaltensprofil-Bericht",
+      "kopf": {
+        "erstellt": "Erstellt am {{datum}}"
+      },
+      "einleitung": "Dieser Bericht zeigt die wiederkehrenden Aktivitätsmuster je Aufgabe bzw. Gerät – Tagesverlauf, Wochenmuster und die als untypisch markierten Abweichungen. Er beschreibt und ordnet ein – er fällt kein Urteil.",
+      "ladeFehler": "Der Verhaltensprofil-Bericht konnte nicht geladen werden.",
+      "bezug": {
+        "single": "Diese Aufgabe",
+        "all": "Alle Geräte"
+      },
+      "aufgabeWahl": "Aufgabe",
+      "aufgabeHinweis": "Bitte eine Aufgabe wählen.",
+      "keineAufgaben": "Keine wiederkehrenden Aufgaben mit Verhaltensdaten vorhanden.",
+      "kennzahl": {
+        "aufzeichnungstage": "Aufzeichnungstage",
+        "genugDaten": "Genug Daten",
+        "abweichungen": "Abweichungen",
+        "ja": "ja",
+        "nein": "nein"
+      },
+      "tagesverlauf": "Tagesverlauf",
+      "wochenmuster": "Wochenmuster",
+      "keineDaten": "Noch keine ausreichenden Daten für ein Verhaltensprofil.",
+      "spalte": {
+        "geraet": "Gerät",
+        "aufzeichnungstage": "Aufzeichnungstage",
+        "genugDaten": "Genug Daten",
+        "abweichungen": "Abweichungen",
+        "aktivsteZeit": "Aktivste Zeit",
+        "aktivsterTag": "Aktivster Tag"
+      },
+      "wochentage": [
+        "Mo",
+        "Di",
+        "Mi",
+        "Do",
+        "Fr",
+        "Sa",
+        "So"
+      ],
+      "pdf": "Als PDF herunterladen",
+      "pdfFehler": "Das PDF konnte nicht erstellt werden."
+    }
+  },
+  "verwaltung": {
+    "cards": {
+      "geraeteverwaltung": {
+        "title": "Geräteverwaltung",
+        "subtitle": "Geräte anlegen, bearbeiten, archivieren und wiederherstellen."
+      },
+      "wartung": {
+        "title": "Daten löschen",
+        "subtitle": "Scan-Daten zurücksetzen oder den Werkszustand herstellen."
+      },
+      "listen": {
+        "title": "Listen-Verwaltung",
+        "subtitle": "Erkennen, welche Außenkontakte als Tracker, Werbung oder Bedrohung gelten — Quellen pflegen und Anzeige einstellen."
+      },
+      "dnsvertrauen": {
+        "title": "DNS-Server & Vertrauen",
+        "subtitle": "Erkannte DNS-Server sehen und je Server entscheiden, ob Sie ihm vertrauen — mit Indizien als Entscheidungshilfe."
+      }
+    },
+    "dnsTrust": {
+      "intro": "Diese Funktion zeigt die DNS-Server, die CERNIS in Ihrem Netz beobachtet hat. Legen Sie fest, welche Server Sie erwarten und in welcher Reihenfolge, holen Sie erkannte Server in Ihre Erwartung, oder lehnen Sie einen Server ab. Zu jedem Server sehen Sie ein paar Anhaltspunkte als Entscheidungshilfe.",
+      "redLine": "CERNIS zeigt und ordnet ein, urteilt aber nicht. Ob ein DNS-Server vertrauenswürdig ist, entscheiden Sie — die Anhaltspunkte helfen nur dabei.",
+      "loading": "DNS-Server werden geladen …",
+      "empty": "Noch keine DNS-Server erkannt — sie erscheinen nach dem nächsten Start oder einer Aufzeichnung.",
+      "ladeFehler": "Die DNS-Server konnten nicht geladen werden. Bitte prüfen Sie, ob das Backend läuft.",
+      "aktionFehler": "Die Entscheidung konnte nicht gespeichert werden.",
+      "aktionFehlerUnbekannt": "Diese Adresse ist noch nicht bekannt und kann darum nicht bewertet werden.",
+      "aktionFehlerNichtBestaetigt": "Eine Reihenfolge lässt sich nur für bestätigte Server vergeben.",
+      "groups": {
+        "expected": {
+          "title": "Erwartet — geordnet",
+          "lead": "Die DNS-Server, die Sie erwarten — in Ihrer Reihenfolge. Die Reihenfolge ist Ihre Erwartung, keine Messung.",
+          "empty": "Noch kein erwarteter DNS-Server. Wählen Sie unten „Als erwartet“, um einen erkannten Server aufzunehmen."
+        },
+        "detected": {
+          "title": "Erkannt, noch nicht erwartet",
+          "lead": "Server, die dieser Rechner tatsächlich nutzt oder gesehen hat. Entscheiden Sie, ob sie zu Ihrer Erwartung gehören."
+        },
+        "manual": {
+          "title": "Von Hand festgelegt",
+          "lead": "DNS-Server, die Sie selbst hinterlegt haben. Sie gelten als erwartet, wurden hier aber noch nicht beobachtet. Sobald ein solcher Server tatsächlich auftaucht, wandert er nach oben zu den erwarteten Servern."
+        },
+        "rejected": {
+          "title": "Abgelehnt",
+          "lead": "Server, die Sie abgelehnt haben. Sie können die Entscheidung jederzeit zurücknehmen."
+        }
+      },
+      "category": {
+        "gateway": "Router",
+        "local_private": "Lokal",
+        "public_resolver": "Öffentlicher Resolver",
+        "unknown": "Unbekannt",
+        "threat_listed": "Auf Bedrohungsliste"
+      },
+      "plausibility": {
+        "inInventorySince": "Im Bestand seit {{days}} Tagen",
+        "inInventoryPlain": "Im Bestand",
+        "notInInventory": "Nicht im Bestand",
+        "vendor": "Hersteller: {{vendor}}",
+        "openPorts": "Offene Ports: {{ports}}"
+      },
+      "actions": {
+        "reset": "Zurücksetzen",
+        "trustDespiteThreat": "Trotz Bedrohungslisten-Eintrag vertrauen",
+        "markExpected": "Als erwartet",
+        "rankUp": "Nach oben",
+        "rankDown": "Nach unten",
+        "removeExpected": "Aus Erwartung entfernen",
+        "reject": "Ablehnen",
+        "addServer": "Hinzufügen"
+      },
+      "placeholder": {
+        "badge": "ohne Funktion (Windows-Vorgabe)",
+        "noDecisionNeeded": "keine Entscheidung nötig",
+        "note": "Windows meldet drei fest eingebaute IPv6-Adressen als DNS-Server. Sie werden nicht zur Namensauflösung genutzt. CERNIS zeigt sie, weil Windows sie meldet, bewertet sie aber nicht als fremde Resolver."
+      },
+      "rejected": {
+        "toggleShow": "Anzeigen",
+        "toggleHide": "Ausblenden",
+        "count_one": "(1)",
+        "count_other": "({{count}})"
+      },
+      "aktionFehlerBereitsErfasst": "Diese Adresse ist bereits erfasst.",
+      "aktionFehlerUngueltig": "Das ist keine gültige IP-Adresse.",
+      "manual": {
+        "notObserved": "noch nicht beobachtet"
+      },
+      "addForm": {
+        "ipPlaceholder": "IP-Adresse",
+        "namePlaceholder": "Name (optional)"
+      }
+    },
+    "blocklist": {
+      "intro": "Diese Funktion gleicht die Außenkontakte Ihres Netzes mit öffentlich gepflegten Listen ab und zeigt, ob eine Gegenstelle dort als Tracker, Werbung oder Bedrohung geführt wird. Sie verwalten hier die Listenquellen und stellen ein, wie viel angezeigt wird.",
+      "redLine": "Die Einordnung stammt aus der jeweils genannten Liste, nicht von CERNIS. CERNIS bildet sie nur ab.",
+      "loading": "Listen werden geladen …",
+      "never": "noch nie",
+      "attributionRequired": "Namensnennung nötig",
+      "refreshDueResult": "{{updated}} aktualisiert, {{failed}} fehlgeschlagen.",
+      "ladeFehler": "Die Listen konnten nicht geladen werden. Bitte prüfen Sie, ob das Backend läuft.",
+      "settingsFehler": "Die Einstellung konnte nicht gespeichert werden.",
+      "aktionFehler": "Die Aktion konnte nicht ausgeführt werden.",
+      "settings": {
+        "title": "Anzeige-Einstellungen",
+        "strictnessLabel": "Wie streng angezeigt wird",
+        "groupTrackerAds": "Tracker & Werbung anzeigen",
+        "groupThreat": "Bedrohungen anzeigen",
+        "saved": "Gespeichert."
+      },
+      "strictness": {
+        "critical_only": {
+          "label": "Nur kritisch",
+          "hint": "Zeigt ausschließlich Treffer auf Bedrohungslisten (Schadsoftware, Phishing)."
+        },
+        "recommended": {
+          "label": "Empfohlen",
+          "hint": "Zeigt Bedrohungen und Tracker, lässt reine Werbung still."
+        },
+        "all": {
+          "label": "Alles zeigen",
+          "hint": "Zeigt jeden Listentreffer, auch reine Werbung."
+        }
+      },
+      "group": {
+        "tracker_ads": "Tracker & Werbung",
+        "threat": "Bedrohung"
+      },
+      "format": {
+        "hosts": "Hosts-Datei",
+        "adblock": "Adblock-Filter",
+        "domain_list": "Domain-Liste",
+        "ip_list": "IP-Liste",
+        "csv_domain": "CSV (Domains)",
+        "csv_ip": "CSV (IP-Adressen)"
+      },
+      "status": {
+        "never": "noch nie geladen",
+        "ok": "geladen",
+        "broken": "defekt"
+      },
+      "col": {
+        "name": "Name",
+        "group": "Gruppe",
+        "format": "Format",
+        "status": "Status",
+        "entries": "Einträge",
+        "fetched": "Zuletzt geladen",
+        "license": "Lizenz",
+        "active": "Aktiv"
+      },
+      "sources": {
+        "title": "Listenquellen",
+        "empty": "Es sind noch keine Listen eingetragen."
+      },
+      "actions": {
+        "add": "Liste hinzufügen",
+        "upload": "Liste hochladen",
+        "refreshDue": "Fällige aktualisieren",
+        "health": "Listen prüfen",
+        "reset": "Auf Werkszustand zurücksetzen",
+        "refresh": "Aktualisieren",
+        "delete": "Löschen"
+      },
+      "confirm": {
+        "resetTitle": "Auf Werkszustand zurücksetzen?",
+        "resetText": "Alle eigenen Listen und der gesamte Ladestand gehen verloren; die mitgelieferten Listen werden neu angelegt.",
+        "resetConfirm": "Zurücksetzen",
+        "deleteText": "Diese Liste löschen?",
+        "deleteConfirm": "Löschen",
+        "cancel": "Abbrechen"
+      },
+      "dialog": {
+        "close": "Schließen",
+        "cancel": "Abbrechen"
+      },
+      "add": {
+        "title": "Liste hinzufügen",
+        "lead": "Tragen Sie eine öffentlich erreichbare Listenquelle ein. Die Liste wird beim ersten Aktualisieren geladen.",
+        "name": "Name",
+        "url": "Adresse (URL)",
+        "group": "Gruppe",
+        "format": "Format",
+        "submit": "Hinzufügen",
+        "successLead": "Die Liste wurde angelegt.",
+        "licenseHint": "Diese Quelle steht möglicherweise unter einer Copyleft- oder Namensnennungs-Lizenz: {{license}}. Bitte prüfen Sie die Nutzungsbedingungen.",
+        "done": "Fertig",
+        "error": "Die Liste konnte nicht angelegt werden. Bitte prüfen Sie Gruppe und Format."
+      },
+      "upload": {
+        "title": "Liste hochladen",
+        "lead": "Laden Sie eine Listendatei hoch oder fügen Sie den Listentext direkt ein. Der Inhalt wird sofort eingelesen.",
+        "file": "Datei",
+        "text": "Oder Text einfügen",
+        "textPlaceholder": "Listentext hier einfügen …",
+        "submit": "Hochladen",
+        "success": "Hochgeladen — {{count}} Einträge eingelesen.",
+        "error": "Die Liste konnte nicht eingelesen werden. Bitte prüfen Sie das Format."
+      },
+      "health": {
+        "title": "Listen prüfen",
+        "lead": "Diese Listen konnten zuletzt nicht geladen werden. Sie entscheiden, was geschehen soll.",
+        "suggest": "Vorschlag: stattdessen „{{name}}“ einbinden.",
+        "builtinNote": "Mitgelieferte Listen können nicht gelöscht, nur deaktiviert werden.",
+        "delete": "Defekte Liste löschen",
+        "activate": "Vorschlag aktivieren",
+        "close": "Schließen",
+        "allFine": "Alle Listen sind in Ordnung.",
+        "error": "Die Aktion konnte nicht ausgeführt werden."
+      }
+    }
+  },
+  "geraete": {
+    "cards": {
+      "verwaltung": {
+        "title": "Geräteverwaltung",
+        "subtitle": "Geräte anlegen, bearbeiten, archivieren und wiederherstellen."
+      },
+      "fritzbox": {
+        "title": "FRITZ!Box",
+        "subtitle": "WAN, WLAN, verbundene Geräte und Ereignisse der FRITZ!Box."
+      }
+    },
+    "fritzbox": {
+      "connectTitle": "Mit FRITZ!Box verbinden",
+      "connectIntro": "Die Anmeldung braucht einen FRITZ!Box-Benutzer mit TR-064-Zugriff.",
+      "addressLabel": "Adresse",
+      "userLabel": "Benutzer (optional)",
+      "passwordLabel": "Passwort",
+      "passwordIsSet": "Passwort gespeichert – leer lassen, um es zu behalten.",
+      "connectButton": "Verbinden",
+      "connectHint": "Viele FRITZ!Box-Modelle erlauben lokalen Zugriff ohne Passwort. Wird ein FRITZ!Box-Benutzerkonto verwendet, muss dort TR-064 aktiviert sein.",
+      "authHint": "Anmeldung fehlgeschlagen. Bitte Benutzer/Passwort und den TR-064-Zugriff prüfen.",
+      "notConnected": "Es ist derzeit keine FRITZ!Box verbunden.",
+      "refresh": "Aktualisieren",
+      "edit": "Bearbeiten",
+      "logout": "Abmelden",
+      "loading": "Lädt …",
+      "loadError": "FRITZ!Box-Daten konnten nicht geladen werden.",
+      "unitMbit": "{{value}} Mbit/s",
+      "tabs": {
+        "overview": "Überblick",
+        "wlanClients": "WLAN-Geräte",
+        "log": "Ereignisse",
+        "portForwardings": "Portfreigaben"
+      },
+      "wan": {
+        "title": "WAN / Internet",
+        "status": "Status",
+        "connected": "Verbunden",
+        "disconnected": "Getrennt",
+        "ipExternal": "Externe IPv4",
+        "ipExternalV6": "Externe IPv6",
+        "uptime": "Uptime",
+        "sent": "Gesendet",
+        "recv": "Empfangen"
+      },
+      "link": {
+        "title": "Glasfaser-Link",
+        "downstream": "Downstream",
+        "upstream": "Upstream"
+      },
+      "dsl": {
+        "title": "DSL",
+        "sync": "Sync",
+        "syncYes": "Synchron",
+        "syncNo": "Kein Sync",
+        "downstream": "Downstream",
+        "upstream": "Upstream",
+        "snr": "SNR (D/U)",
+        "snrValue": "{{down}} / {{up}} dB",
+        "attn": "Dämpfung (D/U)",
+        "attnValue": "{{down}} / {{up}} dB"
+      },
+      "wlan": {
+        "title24": "WLAN 2,4 GHz",
+        "title5": "WLAN 5 GHz",
+        "status": "Status",
+        "on": "Aktiv",
+        "off": "Aus",
+        "ssid": "SSID",
+        "channel": "Kanal",
+        "clients": "Geräte"
+      },
+      "device": {
+        "title": "Gerät",
+        "model": "Modell",
+        "firmware": "Firmware",
+        "totalHosts": "Bekannte Hosts",
+        "wlanClients": "WLAN-Geräte gesamt"
+      },
+      "clients": {
+        "hostname": "Hostname",
+        "ip": "IP",
+        "mac": "MAC",
+        "band": "Band",
+        "signal": "Signal (dBm)",
+        "speed": "Speed (Mbit/s)",
+        "empty": "Keine WLAN-Geräte verbunden."
+      },
+      "log": {
+        "timestamp": "Zeitpunkt",
+        "message": "Ereignis",
+        "empty": "Keine Ereignisse vorhanden."
+      },
+      "forwardings": {
+        "enabled": "Status",
+        "on": "Aktiv",
+        "off": "Aus",
+        "description": "Beschreibung",
+        "protocol": "Protokoll",
+        "external": "Extern",
+        "internal": "Intern",
+        "empty": "Keine Portfreigaben eingerichtet."
+      }
+    },
+    "verwaltung": {
+      "spaltenLabel": "Name",
+      "spaltenMac": "MAC",
+      "spaltenIp": "IP",
+      "spaltenHerkunft": "Herkunft",
+      "spaltenGesehen": "Zuletzt gesehen",
+      "herkunftManuell": "manuell",
+      "herkunftScan": "Scan",
+      "herkunftSelbst": "eigener Host",
+      "aktionArchivieren": "Archivieren",
+      "aktionWiederherstellen": "Wiederherstellen",
+      "titelAktiv": "Aktive Geräte",
+      "titelAnlegen": "Gerät anlegen",
+      "titelArchiv": "Archiv",
+      "leerAktiv": "Noch keine aktiven Geräte im Bestand.",
+      "leerArchiv": "Das Archiv ist leer.",
+      "archivHinweis": "Archivierte Geräte sind aus Wertungen und Listen ausgenommen, bleiben aber erhalten – sie lassen sich jederzeit wiederherstellen.",
+      "feldMac": "MAC-Adresse",
+      "feldLabel": "Name",
+      "feldKategorie": "Kategorie",
+      "feldNotizen": "Notizen",
+      "feldTags": "Tags (kommagetrennt)",
+      "knopfAnlegen": "Anlegen",
+      "fehlerExistiert": "Ein Gerät mit dieser MAC-Adresse ist bereits im Bestand.",
+      "fehlerMacUngueltig": "Die MAC-Adresse ist ungültig. Bitte im Format AA:BB:CC:DD:EE:FF eingeben.",
+      "fehlerAnlegen": "Das Gerät konnte nicht angelegt werden.",
+      "laedt": "Lädt …",
+      "ladeFehler": "Die Geräte konnten nicht geladen werden.",
+      "aufraeumen": {
+        "knopf": "Nach Netz aufräumen",
+        "titelAuswahl": "Welche Geräte sollen entfernt werden?",
+        "ohneIp": "Ohne bekannte IP",
+        "hinweis": "Die Zuordnung stammt aus der zuletzt bekannten IP eines Geräts. Wurde ein Gerät inzwischen in einem anderen Netz gesehen, erscheint es dort.",
+        "vorschauPosten": "Geräte im Netz {{netz}} ({{anzahl}})",
+        "weiter": "Weiter",
+        "nichtsGewaehlt": "Wählen Sie mindestens eine Gruppe aus.",
+        "leer": "Es sind keine Geräte im Bestand, die sich aufräumen ließen.",
+        "ladeFehler": "Die Netzgruppen konnten nicht geladen werden."
+      }
+    },
+    "nachfrage": {
+      "titel": "Lange nicht gesehene Geräte",
+      "einleitung": "Diese Geräte sind seit einer Weile nicht mehr aufgetaucht. Sie können sie aus der aktiven Liste nehmen – sie wandern dann ins Archiv und bleiben dort erhalten. Nichts passiert von selbst; Sie entscheiden pro Gerät.",
+      "spalteName": "Name",
+      "spalteMac": "MAC",
+      "zuletztGesehen": "zuletzt gesehen:",
+      "knopfArchivieren": "Aus der Liste nehmen",
+      "knopfBehalten": "Behalten",
+      "knopfSpaeter": "Später",
+      "leer": "Derzeit gibt es keine Geräte, zu denen nachgefragt werden müsste."
+    },
+    "blocklist": {
+      "intro": "Hier pflegen Sie die Listen, gegen die CERNIS die Außenkontakte Ihrer Geräte abgleicht – etwa für Tracker, Werbung oder bekannte Bedrohungen. Sie können mitgelieferte Listen an- und abschalten, eigene Listen hinzufügen oder hochladen und einstellen, wie streng angezeigt wird.",
+      "redLine": "Die Einordnung stammt aus der jeweils genannten Liste, nicht von CERNIS. CERNIS bildet sie nur ab.",
+      "loading": "Lädt …",
+      "ladeFehler": "Die Listen konnten nicht geladen werden.",
+      "settingsFehler": "Die Einstellung konnte nicht gespeichert werden.",
+      "aktionFehler": "Die Aktion ist fehlgeschlagen. Bitte später erneut versuchen.",
+      "never": "noch nie",
+      "attributionRequired": "Namensnennung nötig",
+      "settings": {
+        "title": "Anzeige und Strenge",
+        "strictnessLabel": "Wie streng angezeigt wird",
+        "groupTrackerAds": "Tracker & Werbung",
+        "groupThreat": "Bedrohungen",
+        "saved": "Gespeichert."
+      },
+      "strictness": {
+        "critical_only": {
+          "label": "Nur kritisch",
+          "hint": "Zeigt nur Treffer aus Bedrohungs-Listen."
+        },
+        "recommended": {
+          "label": "Empfohlen",
+          "hint": "Zeigt Bedrohungen sowie Tracker und Werbung."
+        },
+        "all": {
+          "label": "Alles zeigen",
+          "hint": "Zeigt alle Treffer, auch reine Werbung."
+        }
+      },
+      "group": {
+        "tracker_ads": "Tracker & Werbung",
+        "threat": "Bedrohungen"
+      },
+      "format": {
+        "hosts": "Hosts-Datei",
+        "adblock": "Adblock-Syntax",
+        "domain_list": "Domain-Liste",
+        "ip_list": "IP-Liste",
+        "csv_domain": "CSV (Domain)",
+        "csv_ip": "CSV (IP)"
+      },
+      "status": {
+        "never": "noch nie geladen",
+        "ok": "geladen",
+        "broken": "defekt"
+      },
+      "col": {
+        "name": "Name",
+        "group": "Gruppe",
+        "format": "Format",
+        "status": "Status",
+        "entries": "Einträge",
+        "fetched": "Zuletzt geladen",
+        "license": "Lizenz",
+        "active": "Aktiv"
+      },
+      "actions": {
+        "add": "Liste hinzufügen",
+        "upload": "Liste hochladen",
+        "refreshDue": "Alle fälligen aktualisieren",
+        "health": "Listen prüfen",
+        "reset": "Auf Werkszustand zurücksetzen",
+        "refresh": "Aktualisieren",
+        "delete": "Löschen"
+      },
+      "refreshDueResult": "{{updated}} aktualisiert, {{failed}} fehlgeschlagen.",
+      "sources": {
+        "title": "Quellen",
+        "empty": "Es sind noch keine Listen vorhanden."
+      },
+      "confirm": {
+        "cancel": "Abbrechen",
+        "deleteText": "Diese Liste wirklich löschen?",
+        "deleteConfirm": "Löschen",
+        "resetTitle": "Auf Werkszustand zurücksetzen",
+        "resetText": "Alle Listen werden gelöscht und die mitgelieferten Werkslisten neu angelegt. Eigene und hochgeladene Listen gehen dabei verloren.",
+        "resetConfirm": "Zurücksetzen"
+      },
+      "dialog": {
+        "close": "Schließen",
+        "cancel": "Abbrechen"
+      },
+      "add": {
+        "title": "Liste hinzufügen",
+        "lead": "Fügen Sie eine Liste über ihre Internet-Adresse (URL) hinzu. CERNIS lädt sie anschließend herunter.",
+        "name": "Name",
+        "url": "URL",
+        "group": "Gruppe",
+        "format": "Format",
+        "submit": "Hinzufügen",
+        "error": "Die Liste konnte nicht angelegt werden. Bitte Eingaben prüfen.",
+        "successLead": "Die Liste wurde angelegt.",
+        "licenseHint": "Diese Quelle steht möglicherweise unter einer Copyleft-/Namensnennungs-Lizenz: {{license}}. Bitte prüfen Sie die Nutzungsbedingungen.",
+        "done": "Fertig"
+      },
+      "upload": {
+        "title": "Liste hochladen",
+        "lead": "Laden Sie eine Liste als Datei hoch oder fügen Sie den Text direkt ein.",
+        "file": "Datei wählen",
+        "text": "Oder Text einfügen",
+        "textPlaceholder": "Eine Domain oder IP pro Zeile …",
+        "submit": "Hochladen",
+        "error": "Die Liste konnte nicht hochgeladen werden. Bitte Eingaben prüfen.",
+        "success": "Hochgeladen – {{count}} Einträge erkannt."
+      },
+      "health": {
+        "title": "Listen prüfen",
+        "lead": "Diese Listen ließen sich zuletzt nicht laden. Sie entscheiden, was geschehen soll – nichts passiert von selbst.",
+        "suggest": "Vorschlag: stattdessen „{{name}}“ einbinden?",
+        "builtinNote": "Werkslisten werden nicht gelöscht, sondern nur deaktiviert.",
+        "delete": "Defekte Liste löschen",
+        "activate": "Vorschlag aktivieren",
+        "error": "Die Aktion ist fehlgeschlagen. Bitte später erneut versuchen.",
+        "close": "Schließen",
+        "allFine": "Alles in Ordnung – keine defekten Listen."
+      }
+    }
+  },
+  "theme": {
+    "light": "hell",
+    "dark": "dunkel"
+  },
+  "lang": {
+    "de": "DE",
+    "en": "EN"
+  },
+  "fehlercodes": {
+    "E-101": "Der benötigte Netzwerk-Port ist bereits belegt.",
+    "E-102": "Der Hintergrunddienst ist abgestürzt.",
+    "E-103": "Der Start hat zu lange gedauert (Zeitüberschreitung).",
+    "E-104": "Eine benötigte Komponente fehlt.",
+    "E-105": "Die Datenbank stammt aus einer neueren Programmversion.",
+    "E-201": "Die Scan-Verbindung wurde unterbrochen.",
+    "E-202": "Die Verbindung zum Monitoring/Logging ist getrennt.",
+    "E-203": "Der Verkehr (Traffic) ist nicht erreichbar.",
+    "E-204": "Die Namensauflösung ist nicht erreichbar.",
+    "E-205": "Das Ziel ist nicht erreichbar.",
+    "E-301": "Die Paketaufzeichnung braucht das Recht CAP_NET_RAW.",
+    "E-401": "Die Anmeldung an der FRITZ!Box ist gescheitert.",
+    "E-402": "Die FRITZ!Box ist nicht erreichbar.",
+    "E-403": "Der Dienst cpnetcheck ist nicht erreichbar.",
+    "E-404": "nmap fehlt oder ist fehlgeschlagen.",
+    "E-501": "Das Speichern ist fehlgeschlagen.",
+    "E-502": "Das Löschen ist fehlgeschlagen.",
+    "E-503": "Die Aktion ist fehlgeschlagen.",
+    "E-504": "Der Export ist fehlgeschlagen.",
+    "E-505": "Das Gerät wurde nicht gefunden.",
+    "E-506": "Die Eingabe ist ungültig.",
+    "E-507": "Die Schlüsseldatei für gespeicherte Passwörter fehlt."
+  },
+  "lizenzen": {
+    "titel": "Über CERNIS PRO",
+    "laden": "Die Lizenzaufstellung wird geladen …",
+    "nichtBelegt": "nicht belegt",
+    "ja": "ja",
+    "nein": "nein",
+    "fehler": {
+      "keineAufstellung": "Die Lizenzaufstellung wurde im laufenden Betrieb nicht gefunden. Sie wird beim Bau erzeugt und mit der Anwendung ausgeliefert; hier fehlt sie. Der Server nennt die geprüften Pfade:",
+      "allgemein": "Die Lizenzaufstellung konnte nicht geladen werden."
+    },
+    "abschnitt": {
+      "werk": {
+        "titel": "Eigenes Werk",
+        "text": "CERNIS PRO selbst: Urheber, Lizenz und der Ort, an dem der Quelltext bezogen werden kann.",
+        "volltext": "Lizenztext im Wortlaut anzeigen"
+      },
+      "bestandteile": {
+        "titel": "Mitgelieferte Bestandteile",
+        "text": "{{n}} Programmbestandteile werden mit der Anwendung ausgeliefert. Ihre Lizenzen und Urhebervermerke stehen im Lizenz-Browser weiter unten.",
+        "imBrowserZeigen": "Im Lizenz-Browser anzeigen"
+      },
+      "daten": {
+        "titel": "Mitgelieferte Daten",
+        "text": "{{n}} Datenbestände werden mit der Anwendung ausgeliefert, etwa Nachschlagewerke und Kennungslisten.",
+        "keine": "Es werden keine Datenbestände mitgeliefert."
+      },
+      "programme": {
+        "titel": "Vorausgesetzte Programme",
+        "einordnung": "Diese Programme werden NICHT mitgeliefert. CERNIS PRO ruft sie auf, wenn sie auf Ihrem System vorhanden sind; ihre Lizenz gehört zum System des Anwenders und nicht zu dieser Auslieferung. Deshalb tragen sie hier keine Lizenzangabe — das ist keine Lücke. Der Zustand „nicht zutreffend“ bedeutet, dass ein Programm auf dieser Plattform gar nicht in Frage kommt.",
+        "keine": "Es sind keine vorausgesetzten Programme verzeichnet."
+      }
+    },
+    "nativ": {
+      "titel": "Native Ebene (Systembibliotheken)",
+      "zustand": {
+        "nicht_angefordert": "nicht angefordert",
+        "erhoben": "erhoben",
+        "kein_paketverzeichnis": "kein Paketverzeichnis vorhanden"
+      }
+    },
+    "browser": {
+      "titel": "Lizenz-Browser",
+      "text": "Alle Bestandteile im Überblick. Wählen Sie einen Eintrag in der Liste, um rechts seine Angaben und den vollständigen Lizenztext zu sehen. Der Lizenztext wird unverändert gezeigt: nicht gekürzt, nicht umbrochen, nicht übersetzt."
+    },
+    "luecken": {
+      "titel": "Offene Angaben",
+      "text": "Bei {{n}} Bestandteilen konnte eine Angabe nicht aus der Quelle belegt werden. Sie steht hier ausdrücklich als offen, statt still zu fehlen."
+    },
+    "filter": {
+      "lizenz": "Lizenz",
+      "herkunft": "Herkunft",
+      "suche": "Suche",
+      "alle": "Alle",
+      "suchePlatzhalter": "Name oder Fassung",
+      "zaehler": "{{n}} von {{m}}",
+      "ohneLizenzId": "Ohne Lizenzangabe",
+      "mitgelieferteBestandteile": "Mitgelieferte Bestandteile"
+    },
+    "spalte": {
+      "name": "Name",
+      "fassung": "Fassung",
+      "lizenz": "Lizenz",
+      "herkunft": "Herkunft"
+    },
+    "liste": {
+      "keineBestandteile": "Die Aufstellung führt keine Bestandteile.",
+      "keinTreffer": "Kein Bestandteil passt zu Filter und Suche."
+    },
+    "detail": {
+      "schliessen": "Detailspalte schließen",
+      "fassungKurz": "Fassung {{fassung}}",
+      "volltext": "Lizenztext",
+      "textLaedt": "Der Lizenztext wird geladen …",
+      "keinText": "Für diesen Eintrag ist kein Lizenztext hinterlegt.",
+      "textFehler": "Der Lizenztext konnte nicht geladen werden.",
+      "textUnbekannt": "Zu diesem Schlüssel gibt es keinen Lizenztext: {{schluessel}}"
+    },
+    "ebene": {
+      "python": "Python-Paket",
+      "npm": "npm-Paket",
+      "rust": "Rust-Paket",
+      "daten": "Datenbestand",
+      "programme": "Vorausgesetztes Programm",
+      "nativ": "Systembibliothek"
+    },
+    "vorhanden": {
+      "vorhanden": "vorhanden",
+      "fehlt": "fehlt",
+      "nicht_zutreffend": "nicht zutreffend",
+      "nicht_ermittelbar": "nicht ermittelbar"
+    },
+    "feld": {
+      "name": "Name",
+      "fassung": "Fassung",
+      "urheber": "Urheber",
+      "lizenzId": "Lizenz",
+      "lizenzIdQuelle": "Quelle der Lizenzangabe",
+      "lizenzTextQuelle": "Quelle des Lizenztextes",
+      "lizenz_text": "Lizenztext",
+      "quelltextBezug": "Bezugsort des Quelltextes",
+      "quelltextBezugQuelle": "Quelle des Bezugsorts",
+      "herkunft": "Herkunft",
+      "urhebervermerk": "Urhebervermerk",
+      "urhebervermerkQuelle": "Quelle des Urhebervermerks",
+      "projektadresse": "Projektadresse",
+      "mitgeliefert": "Mitgeliefert",
+      "nurClassifier": "Nur aus Classifier abgeleitet",
+      "npmOrt": "Ort im npm-Baum",
+      "pfad": "Pfad",
+      "lizenzIdFundstelle": "Fundstelle der Lizenzangabe",
+      "zweck": "Zweck",
+      "quelleDerAngabe": "Quelle der Angabe",
+      "lieferndesPaket": "Lieferndes Paket",
+      "fundstelle": "Fundstelle",
+      "plattform": "Plattform",
+      "vorhanden": "Auf diesem System",
+      "produktversion": "Produktversion",
+      "erzeugtAm": "Aufstellung erzeugt am",
+      "zustand": "Zustand",
+      "zielplattform": "Zielplattform",
+      "quelleDerBinaries": "Quelle der Binärdateien",
+      "geleseneBinaries": "Gelesene Binärdateien",
+      "bezugsart": "Art des Bezugs",
+      "binaries": "Enthalten in"
+    },
+    "bezugsart": {
+      "aufgerufen": "wird aufgerufen",
+      "vorausgesetzt": "wird vorausgesetzt, nicht aufgerufen",
+      "aufgerufen_und_vorausgesetzt": "wird aufgerufen und vorausgesetzt"
+    }
+  },
+  "zeitplan": {
+    "_hinweis": "HINTERLEGT, NOCH NICHT ANGESCHLOSSEN (S88-P5): Diese Texte gehoeren zum Zeitplan-Ausgang (GET /api/schedules, Spalten last_result/last_error). Es gibt noch KEINE Zeitplan-Ansicht im Frontend; sie warten auf sie und sind nicht tot. Dieser Schluessel wird nie angezeigt.",
+    "letzterLaufOk": "{{zeit}} — erfolgreich",
+    "letzterLaufFehlgeschlagen": "{{zeit}} — fehlgeschlagen ({{grund}})",
+    "letzterLaufNie": "noch nicht gelaufen"
+  }
+}

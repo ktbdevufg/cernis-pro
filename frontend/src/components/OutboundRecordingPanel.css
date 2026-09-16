@@ -1,0 +1,913 @@
+/* Aussenkontakte-Aufzeichnung: Leiste + aufklappbare Verwaltung (Anlegen +
+   Liste/Player). Integriert in OutboundView (keine eigene Kachel mehr).
+   Nur Token-Variablen (tokens.css), nie feste Farben. Designsprache wie
+   LoggingPanel/Outbound (ruhige Card-Flaechen, Akzent dezent). Segmented Control
+   im Muster TopologyView/LoggingPanel; Zustands-Pille: active gruen / paused lila /
+   created grau / finished gedaempft. Die Aktiv-Leiste nutzt das Warnton-Set
+   (--sev-med-*), analog zur roten LivePill ueber --sev-high-*. */
+
+.outboundrec {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+/* ── AUFZEICHNUNGS-KARTE: selbsterklaerend (Kopf + Neu-Knopf + Liste) ─────────── */
+
+/* Die Karte: ruhige Card-Flaeche, fasst Kopf und Liste. Ersetzt die fruehere
+   Leiste + schmale Spalte. */
+.outboundrec-karte {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* Kopf: Icon + Titel + Status-Satz links, "Neue Aufzeichnung" rechts. Im Aktiv-
+   Zustand wechselt der Kopf in einen ruhigen Warnton (--sev-med-*, KEIN Alarm). */
+.outboundrec-karte__kopf {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--color-text);
+}
+
+/* Aktiv-Zustand: ruhiger Warnton ueber die --sev-med-*-Tokens, abgesetzt als
+   eigene gerundete Flaeche im Kartenkopf. */
+.outboundrec-karte__kopf--aktiv {
+  padding: 7px 10px;
+  color: var(--sev-med-text);
+  background: var(--sev-med-bg);
+  border: 1px solid var(--sev-med-bd);
+  border-radius: var(--radius-md);
+}
+
+.outboundrec-karte__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Karten-Titel "Aufzeichnungen": klar, etwas staerker als der Status-Satz. */
+.outboundrec-karte__titel {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+/* Ruhiger Status-Satz (Ruhe: "Keine Aufzeichnung aktiv."; Aktiv: "Zeichnet auf
+   …"). Kuerzt bei Ueberlaenge mit Ellipse. */
+.outboundrec-karte__statustext {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-sec);
+}
+
+/* Im Aktiv-Kopf traegt der Status-Satz den Warnton (nicht den gedaempften Ton). */
+.outboundrec-karte__kopf--aktiv .outboundrec-karte__statustext {
+  color: var(--sev-med-text);
+}
+
+/* Pulsierender Punkt im Aktiv-Zustand (im Warnton). Muster wie live-pill__punkt. */
+.outboundrec-karte__punkt {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: var(--sev-med-text);
+  animation: outboundrec-puls 1.6s ease-in-out infinite;
+}
+
+@keyframes outboundrec-puls {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+/* Pause/Stopp-Knoepfe im Aktiv-Kopf. */
+.outboundrec-karte__kopf-knoepfe {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* "Neue Aufzeichnung"-Knopf: dezenter Akzent-Knopf mit Plus-Icon, oeffnet das
+   Erstellen-Modal. */
+.outboundrec-karte__neu {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 5px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-accent-strong);
+  background: var(--color-accent-bg);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.outboundrec-karte__neu:hover {
+  background: var(--color-accent-bg-strong);
+}
+
+.outboundrec-karte__neu:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Liste der Aufzeichnungen. Genau ein Eintrag: volle Breite (flex-Spalte). Mehrere
+   Eintraege: 2-spaltig, wenn Platz (grid auto-fill minmax ~140px), sonst 1-spaltig. */
+.outboundrec-karte__liste {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.outboundrec-karte__liste--grid {
+  display: grid;
+  /* Breitere Mindestkachel (200px): auto-fill oeffnet bei Bedarf automatisch
+     weitere REIHEN statt die Karten zu quetschen. */
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  /* Zeilen- UND Spalten-Abstand. */
+  gap: 8px;
+}
+
+/* ── Kompakte Zeile der Liste ────────────────────────────────────────────────── */
+
+/* Nur Zustands-Pille + Name + Player-Icons + Zahnrad. Ruhige Card-Flaeche, klickbar
+   (oeffnet das Detail-Modal). */
+.outboundrec-kompakt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+  /* Die Karte selbst NIE horizontal scrollen -- der Name-Viewport haelt die
+     Ueberlaenge intern (Laufschrift), nichts quillt aus der Karte. */
+  overflow: hidden;
+}
+
+.outboundrec-kompakt:hover {
+  border-color: var(--color-accent-border);
+}
+
+.outboundrec-kompakt:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+/* Zustands-Punkt VOR dem Namen (nur active/paused): kleiner runder Punkt, ersetzt
+   die fruehere Zustands-Pille. active -> Warnton (--sev-med-text), paused ->
+   ruhiger neutraler Punkt (--color-text-tert). created/finished tragen keinen
+   Punkt (der Name allein genuegt). */
+.outboundrec-kompakt__punkt {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 999px;
+}
+
+.outboundrec-kompakt__punkt--aktiv {
+  background: var(--sev-med-text);
+}
+
+.outboundrec-kompakt__punkt--pausiert {
+  background: var(--color-text-tert);
+}
+
+/* Name: VIEWPORT zwischen Punkt und Knoepfen (overflow hidden, nowrap -- KEIN
+   Scrollbalken). Der innere Span laeuft bei Ueberlaenge als langsame, dauerhafte
+   Laufschrift; passt der Name rein, bleibt er still (keine sichtbare Bewegung, da
+   translateX(0) -> translateX(-100%) bei kurzem Text optisch nicht auffaellt --
+   und reduced-motion schaltet die Animation ohnehin ab). */
+.outboundrec-kompakt__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* Innerer Span: traegt Schriftbild. inline-block, damit translateX den vollen
+   Textlauf bewegt. Basis-Span hat KEINE Animation -- er steht still, solange der
+   Name in den Viewport passt (Default-Zustand). */
+.outboundrec-kompakt__name-inner {
+  display: inline-block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text);
+  white-space: nowrap;
+}
+
+/* Laufschrift NUR bei echtem Ueberlauf: die JS-Messung in KompakteKarte setzt diese
+   Modifier-Klasse, wenn der Inhalt breiter ist als der Viewport. Erst dann laeuft
+   der Text. */
+.outboundrec-kompakt__name-inner--laeuft {
+  animation: outboundrec-laufschrift 7s linear infinite;
+}
+
+/* Zuegige, dauerhafte Laufschrift: kurze Stehpause am Anfang (0-12 %), dann voller
+   Lauf von 0 bis -100% der eigenen Breite, loop. Nur transform animiert
+   (GPU-freundlich). */
+@keyframes outboundrec-laufschrift {
+  0%,
+  12% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-100%);
+  }
+}
+
+/* Barrierefrei: Bewegung respektieren. reduced-motion -> Animation aus, Name
+   statisch mit Ellipse (text-overflow greift dann auf dem Viewport). */
+@media (prefers-reduced-motion: reduce) {
+  .outboundrec-kompakt__name {
+    text-overflow: ellipsis;
+  }
+
+  .outboundrec-kompakt__name-inner--laeuft {
+    animation: none;
+  }
+}
+
+/* Player-Icons rechts. */
+.outboundrec-kompakt__knoepfe {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 6px;
+}
+
+/* Icon-Knopf: quadratisch, nur Icon (Label bleibt als title/aria-label). */
+.outboundrec-kompakt__knopf {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px;
+  color: var(--color-text-sec);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.outboundrec-kompakt__knopf--start {
+  color: var(--color-accent-strong);
+  border-color: var(--color-accent-border);
+}
+
+/* Pause = Warnton (konsistent zum Aktiv-Kopf, der ebenfalls --sev-med-* traegt). */
+.outboundrec-kompakt__knopf--pause {
+  color: var(--sev-med-text);
+}
+
+.outboundrec-kompakt__knopf--stop {
+  color: var(--sev-high-text);
+}
+
+/* Zahnrad: oeffnet die Details (neutral gehalten, bewusst kein Player-Akzent). */
+.outboundrec-kompakt__knopf--details {
+  color: var(--color-text-sec);
+}
+
+.outboundrec-kompakt__knopf:hover {
+  background: var(--color-accent-bg);
+}
+
+.outboundrec-kompakt__knopf:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+/* ── Erstellen-/Detail-Modal (Overlay nach Vorbild OutboundConsentDialog) ─────── */
+
+/* Backdrop: deckt die ganze App, zentriert den Dialog. z-index unter dem Consent-
+   Overlay (100), damit der Consent-Dialog bei gleichzeitigem Auftreten oben bleibt. */
+.outboundrec-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+/* Der Dialog selbst: Karten-Optik wie der Consent-Dialog. */
+.outboundrec-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  max-width: 480px;
+  max-height: calc(100vh - 3rem);
+  overflow-y: auto;
+  padding: 1.75rem;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.28);
+}
+
+/* Kopfzeile: Titel links, Schliessen-Knopf rechts. */
+.outboundrec-modal__kopf {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.outboundrec-modal__titel {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.outboundrec-modal__schliessen {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 4px;
+  color: var(--color-text-sec);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.outboundrec-modal__schliessen:hover {
+  color: var(--color-text);
+  background: var(--color-card);
+}
+
+.outboundrec-modal__schliessen:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.outboundrec-modal__inhalt {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* ── Loeschen-Bestaetigung: eigenes kleines Overlay UEBER dem Detail-Modal ─────── */
+
+/* Backdrop hoeher als das Detail-Modal (90), aber unter dem Consent-Overlay (100),
+   damit die Bestaetigung ueber dem geoeffneten Detail-Modal liegt. */
+.outboundrec-loeschmodal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 95;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+/* Kleiner Dialog: nur Frage-Text + zwei Knoepfe. Schmaler als das Detail-Modal. */
+.outboundrec-loeschmodal {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  max-width: 360px;
+  padding: 1.5rem;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.28);
+}
+
+.outboundrec-loeschmodal__text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--color-text);
+}
+
+.outboundrec-loeschmodal__knoepfe {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+/* Ruhiger Konflikt-Hinweis (start/resume mit 409): kein Alarm, sondern ein
+   neutraler Akzent-Hinweis ueber der Liste. */
+.outboundlog__konflikt {
+  flex-shrink: 0;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--color-accent-strong);
+  background: var(--color-accent-bg);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+}
+
+/* Dezenter Fehlerhinweis (Anlage/Aktion/Laden). Warnton, kein Alarm. */
+.outboundlog__fehler {
+  flex-shrink: 0;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--sev-med-text);
+  background: var(--sev-med-bg);
+  border: 1px solid var(--sev-med-bd);
+  border-radius: var(--radius-md);
+}
+
+/* ── (A) Anlage-Maske (Inhalt im Erstellen-Modal) ───────────────────────────── */
+
+/* Felder-Stapel der Maske. Sitzt jetzt im Modal -> kein eigener Card-Rahmen/
+   -Padding mehr (der Modal-Container bringt beides). */
+.outboundlog__maske-inhalt {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* ── Felder ─────────────────────────────────────────────────────────────────── */
+
+.outboundlog-feld {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.outboundlog-feld__label {
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+/* Ruhiger gedaempfter Hinweistext unter einem Feld (Modus-/Tiefe-Erklaerung).
+   SCHLICHTER Fliesstext -- KEIN Input-/Feld-Look (kein Border, kein Hintergrund),
+   damit der Hinweis nicht wie ein Eingabefeld aussieht (Karl-Feedback). */
+.outboundlog-feld__hinweis {
+  margin: 0;
+  padding: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--color-text-tert);
+}
+
+.outboundlog-feld__input,
+.outboundlog-feld__select {
+  padding: 7px 10px;
+  font-size: 13px;
+  color: var(--color-text);
+  /* background-color statt background-Shorthand, sonst würde der globale
+     Custom-Chevron (background-image) beim select zurückgesetzt. */
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* Nur das select braucht rechts Platz für den globalen Chevron; das Input nicht. */
+.outboundlog-feld__select {
+  padding-right: 28px;
+}
+
+.outboundlog-feld__input:focus-visible,
+.outboundlog-feld__select:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+/* Segmented Control (Modus/Tiefe): zwei aneinanderstossende Knoepfe in einer
+   Akzentrand-Wanne (Muster TopologyView/LoggingPanel-Segment). */
+.outboundlog-segment {
+  display: inline-flex;
+  align-self: flex-start;
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.outboundlog-segment__knopf {
+  padding: 5px 14px;
+  font-size: 13px;
+  color: var(--color-text-sec);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.outboundlog-segment__knopf + .outboundlog-segment__knopf {
+  border-left: 1px solid var(--color-accent-border);
+}
+
+.outboundlog-segment__knopf:hover:not(.outboundlog-segment__knopf--aktiv) {
+  background: var(--color-accent-bg);
+}
+
+.outboundlog-segment__knopf--aktiv {
+  color: var(--color-accent-strong);
+  background: var(--color-accent-bg-strong);
+  font-weight: 600;
+}
+
+.outboundlog-segment__knopf:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+/* ── Abschluss-/Knoepfe ─────────────────────────────────────────────────────── */
+
+.outboundlog__abschluss {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.outboundlog__knopf {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.outboundlog__knopf--primaer {
+  color: var(--color-accent-strong);
+  background: var(--color-accent-bg-strong);
+  border: 1px solid var(--color-accent-strong);
+}
+
+.outboundlog__knopf--primaer:hover:not(:disabled) {
+  background: var(--color-accent-bg);
+}
+
+/* "Abbrechen"-Knopf im Bearbeiten-Modus: neutraler Knopf, kein Akzent. */
+.outboundlog__knopf--abbrechen {
+  color: var(--color-text-sec);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+}
+
+.outboundlog__knopf--abbrechen:hover {
+  border-color: var(--color-accent-border);
+}
+
+/* "Loeschen"-Knopf (Bestaetigungs-Modal): roter Warnton ueber die --sev-high-*-
+   Tokens, Hintergrund dezent erst beim Hover. */
+.outboundlog__knopf--loeschen {
+  color: var(--sev-high-text);
+  background: var(--color-bg);
+  border: 1px solid var(--sev-high-bd);
+}
+
+.outboundlog__knopf--loeschen:hover {
+  background: var(--sev-high-bg);
+}
+
+.outboundlog__knopf:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.outboundlog__knopf:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ── (B) Aufzeichnungs-Liste ────────────────────────────────────────────────── */
+
+.outboundlog__listeTitel {
+  flex-shrink: 0;
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--color-text-tert);
+}
+
+.outboundlog__leer {
+  margin: 0;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--color-text-sec);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* Eine Aufzeichnungs-Karte: ruhige Card-Flaeche, klickbar (Auswahl fuer E5b). */
+.outboundlog-karte {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+
+.outboundlog-karte:hover {
+  border-color: var(--color-accent-border);
+}
+
+.outboundlog-karte--ausgewaehlt {
+  border-color: var(--color-accent);
+}
+
+.outboundlog-karte__kopf {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.outboundlog-karte__label {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.outboundlog-karte__meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--color-text-sec);
+}
+
+.outboundlog-karte__zweck {
+  color: var(--color-text-sec);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Modus-/Tiefe-Badges: dezente Pillen, klar abgesetzt von der Zustands-Pille. */
+.outboundlog-badge {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 999px;
+}
+
+.outboundlog-badge--modus {
+  color: var(--color-accent-strong);
+  background: var(--color-accent-bg);
+}
+
+.outboundlog-badge--tiefe {
+  color: var(--color-text-sec);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+}
+
+/* Dauer-Zusatzinfo in der Meta-Zeile (nur detail-Karten mit maxDurationS): ruhig,
+   gedaempft, kein Badge-Look -- reiht sich neben den Badges ein. */
+.outboundlog-karte__dauer {
+  flex-shrink: 0;
+  color: var(--color-text-tert);
+}
+
+/* "Erstellt am"-Zeile: eigene gedaempfte, kleine Zeile unter der Meta-Zeile. */
+.outboundlog-karte__erstellt {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--color-text-tert);
+}
+
+/* Custom-Stunden-Feld der Dauer-Wahl: rueckt unter das Stufen-Segment ein. */
+.outboundlog-feld--custom {
+  margin-top: 8px;
+}
+
+/* 24h-Detail-Hinweis (nur aktive Detail-Aufzeichnung): ruhige Info-Box. */
+.outboundlog-karte__detailhinweis {
+  padding: 6px 10px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--color-text-sec);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* Zustands-Pille: active gruen / paused lila / created grau / finished gedaempft. */
+.outboundlog-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  padding: 2px 9px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  border-radius: 999px;
+}
+
+.outboundlog-pill--aktiv {
+  color: var(--color-ok-text);
+  background: var(--color-ok-bg);
+}
+
+.outboundlog-pill--pausiert {
+  color: var(--chip-mdns-text);
+  background: var(--chip-mdns-bg);
+}
+
+.outboundlog-pill--angelegt {
+  color: var(--color-text-sec);
+  background: var(--sev-low-bg);
+}
+
+.outboundlog-pill--beendet {
+  color: var(--color-text-tert);
+  background: var(--color-bg);
+}
+
+/* Pulsierender Punkt im active-Pill. */
+.outboundlog-pill__punkt {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--status-aktiv);
+  animation: outboundlog-puls 1.6s ease-in-out infinite;
+}
+
+@keyframes outboundlog-puls {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+/* ── Player ──────────────────────────────────────────────────────────────────── */
+
+.outboundlog-player {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.outboundlog-player__knopf {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  font-size: 12px;
+  font-weight: 500;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.outboundlog-player__knopf--start {
+  color: var(--color-accent-strong);
+  border-color: var(--color-accent-border);
+}
+
+.outboundlog-player__knopf--start:hover {
+  background: var(--color-accent-bg);
+}
+
+.outboundlog-player__knopf--pause {
+  color: var(--chip-mdns-text);
+}
+
+.outboundlog-player__knopf--stop {
+  color: var(--sev-high-text);
+}
+
+/* "Loeschen"-Knopf (Detail-Modal): roter Warnton ueber die --sev-high-*-Tokens.
+   Hintergrund dezent erst beim Hover (kein Dauer-Alarm). */
+.outboundlog-player__knopf--delete {
+  color: var(--sev-high-text);
+  border-color: var(--sev-high-bd);
+}
+
+.outboundlog-player__knopf--delete:hover {
+  background: var(--sev-high-bg);
+}
+
+/* "Aendern"-Knopf (Detail-Modal): NEUTRAL -- kein Akzent, wie ein normaler Knopf
+   (color --color-text-sec, border --color-border). Hover dezent. */
+.outboundlog-player__knopf--aendern {
+  color: var(--color-text-sec);
+  border-color: var(--color-border);
+}
+
+/* Generischer Hover: dezenter Akzent-Grund -- ausser beim Loeschen-Knopf, der
+   seinen eigenen roten Hover (--sev-high-bg) behaelt. */
+.outboundlog-player__knopf:not(.outboundlog-player__knopf--delete):hover {
+  background: var(--color-accent-bg);
+}
+
+.outboundlog-player__knopf:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+/* ── Gesperrt-Hinweis (Bearbeiten-Modus, state !== "created") ─────────────────── */
+
+/* Ruhiger Hinweis statt Eingabefelder: Schloss + Erklaer-Satz, darunter die
+   aktuellen Konfig-Werte als Nur-Lese-Text. Kein Alarm -- neutrale Card-Flaeche. */
+.outboundlog-gesperrt {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.outboundlog-gesperrt__kopf {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-text-sec);
+}
+
+.outboundlog-gesperrt__titel {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.outboundlog-gesperrt__text {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--color-text-tert);
+}
+
+/* Nur-Lese-Werte: kleine Definition-Liste (Label : Wert). */
+.outboundlog-gesperrt__werte {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+}
+
+.outboundlog-gesperrt__zeile {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.outboundlog-gesperrt__zeile dt {
+  flex: 0 0 80px;
+  color: var(--color-text-tert);
+}
+
+.outboundlog-gesperrt__zeile dd {
+  margin: 0;
+  color: var(--color-text);
+}

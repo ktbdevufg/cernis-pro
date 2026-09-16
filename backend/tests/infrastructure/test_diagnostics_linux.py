@@ -1,0 +1,702 @@
+"""Tests der diagnostics-Adapter -- reine Parser + Tool-fehlt-Naht, kein echtes I/O.
+
+Kein echter dig/traceroute-/Netz-/Subprocess-Aufruf: die reinen Parser-Helfer werden
+gegen realistische ``dig``-/``traceroute``-Beispielausgaben geprueft (inkl. ``* * *``-
+Timeout-Hops), und die Tool-fehlt-Naht wird ueber gemocktes ``shutil.which`` belegt
+(``which`` None -> ``DiagnosticsToolMissing``). Die Subprocess-Aufrufe selbst sind
+gemockt, wo der Adapter-Kern getestet wird.
+"""
+
+import asyncio
+import os
+import shutil
+
+import httpx
+import pytest
+
+from domain.diagnostics import DnsRecord
+from infrastructure.diagnostics_linux import (
+    DiagnosticsToolMissing,
+    DigDnsResolver,
+    ExternalCheckFailed,
+    HttpxReachabilityProvider,
+    LinuxDhcpPermission,
+    LinuxPackageManagerDetector,
+    LinuxTraceroutePermission,
+    NmapDhcpProbe,
+    ShutilToolDetector,
+    SocketBannerGrabber,
+    SystemTracerouteRunner,
+    _banner_from_http_head,
+    _build_http_head_request,
+    _parse_dig_answer,
+    _parse_nmap_dhcp,
+    _parse_traceroute,
+    _run_dig,
+    _run_traceroute,
+)
+
+# ── dig-Parser (realistische Ausgaben) ────────────────────────────────────────
+
+_DIG_A = "example.com.\t\t195\tIN\tA\t104.20.23.154\nexample.com.\t\t195\tIN\tA\t172.66.147.243\n"
+_DIG_MX = "google.com.\t\t76\tIN\tMX\t10 smtp.google.com.\n"
+_DIG_PTR = "1.1.1.1.in-addr.arpa.\t764\tIN\tPTR\tone.one.one.one.\n"
+# Eine A-Abfrage, deren Antwort zusaetzlich eine CNAME-Begleitzeile enthaelt.
+_DIG_A_WITH_CNAME = (
+    "www.example.com.\t3600\tIN\tCNAME\texample.com.\nexample.com.\t\t195\tIN\tA\t104.20.23.154\n"
+)
+
+
+def test_parse_dig_answer_a_records() -> None:
+    records = _parse_dig_answer(_DIG_A, "A")
+    assert [r.value for r in records] == ["104.20.23.154", "172.66.147.243"]
+    assert all(r.record_type == "A" for r in records)
+
+
+def test_parse_dig_answer_mx_keeps_full_value() -> None:
+    # Der MX-Wert ist Prioritaet + Host -- alles ab dem 5. Feld.
+    records = _parse_dig_answer(_DIG_MX, "MX")
+    assert records == [DnsRecord(record_type="MX", value="10 smtp.google.com.")]
+
+
+def test_parse_dig_answer_ptr() -> None:
+    records = _parse_dig_answer(_DIG_PTR, "PTR")
+    assert [r.value for r in records] == ["one.one.one.one."]
+
+
+def test_parse_dig_answer_ignores_wrong_type_line() -> None:
+    # In einer A-Abfrage faellt die CNAME-Begleitzeile NICHT als A-Record durch.
+    records = _parse_dig_answer(_DIG_A_WITH_CNAME, "A")
+    assert [r.value for r in records] == ["104.20.23.154"]
+
+
+def test_parse_dig_answer_empty_output() -> None:
+    # Keine Antwort (NXDOMAIN/leer) -> leere Liste, kein Fehler.
+    assert _parse_dig_answer("", "A") == []
+
+
+def test_parse_dig_answer_skips_comment_and_malformed() -> None:
+    output = ";; comment line\nshort line\nexample.com. 1 IN A 5.6.7.8\n"
+    records = _parse_dig_answer(output, "A")
+    assert [r.value for r in records] == ["5.6.7.8"]
+
+
+# ── traceroute-Parser (inkl. Timeout-Hops) ────────────────────────────────────
+
+_TRACEROUTE = (
+    "traceroute to example.com (104.20.23.154), 30 hops max, 60 byte packets\n"
+    " 1  fritzbox.mysticplace.de (172.18.0.1)  0.674 ms  0.650 ms  0.632 ms\n"
+    " 2  46.128.193.1.dyn.pyur.net (46.128.193.1)  4.339 ms  4.321 ms  4.305 ms\n"
+    " 3  * * *\n"
+    " 4  109.104.59.156 (109.104.59.156)  13.413 ms  13.396 ms  13.380 ms\n"
+)
+
+
+def test_parse_traceroute_skips_header() -> None:
+    hops = _parse_traceroute(_TRACEROUTE)
+    # Die Kopfzeile (kein fuehrender int) ist kein Hop.
+    assert [h.hop for h in hops] == [1, 2, 3, 4]
+
+
+def test_parse_traceroute_prefers_ip_in_parens() -> None:
+    hops = _parse_traceroute(_TRACEROUTE)
+    assert hops[0].address == "172.18.0.1"
+    assert hops[0].rtt_ms == 0.674
+
+
+def test_parse_traceroute_timeout_hop_is_none() -> None:
+    # Der ``* * *``-Hop antwortet nicht -> address/rtt_ms ehrlich None, NICHT weggelassen.
+    timeout_hop = next(h for h in _parse_traceroute(_TRACEROUTE) if h.hop == 3)
+    assert timeout_hop.address is None
+    assert timeout_hop.rtt_ms is None
+
+
+def test_parse_traceroute_empty_output() -> None:
+    assert _parse_traceroute("") == []
+
+
+def test_parse_traceroute_no_dns_address_uses_ip_token() -> None:
+    # ``-n``-aehnliche Zeile ohne Klammer: erster Token ist die IP-Adresse.
+    line = " 5  80.64.189.74  5.019 ms\n"
+    hops = _parse_traceroute(line)
+    assert hops[0].address == "80.64.189.74"
+    assert hops[0].rtt_ms == 5.019
+
+
+# ── Tool-fehlt-Naht (gemocktes shutil.which) ──────────────────────────────────
+
+
+def test_resolve_dns_tool_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
+    with pytest.raises(DiagnosticsToolMissing) as exc_info:
+        asyncio.run(DigDnsResolver().resolve("example.com", ["A"]))
+    assert exc_info.value.tool == "dig"
+    assert "dig" in exc_info.value.message
+
+
+def test_traceroute_tool_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
+    with pytest.raises(DiagnosticsToolMissing) as exc_info:
+        asyncio.run(SystemTracerouteRunner().run("example.com", False))
+    assert exc_info.value.tool == "traceroute"
+
+
+# ── Adapter-Kern mit gemocktem Subprocess (kein echtes Tool) ──────────────────
+
+
+def test_resolve_dns_dedups_and_sorts(monkeypatch: pytest.MonkeyPatch) -> None:
+    # which sagt "da", der dig-Aufruf liefert die A-Beispielausgabe (zweimal pro Typ-
+    # Aufruf identisch -> dedup_records muss deduppen). Kein echtes dig.
+    monkeypatch.setattr(shutil, "which", lambda _name: "/usr/bin/dig")
+    monkeypatch.setattr("infrastructure.diagnostics_linux._run_dig", lambda _q, _t: _DIG_A)
+    result = asyncio.run(DigDnsResolver().resolve("example.com", ["A"]))
+    assert result.query == "example.com"
+    assert result.requested_types == ("A",)
+    # Zwei verschiedene A-Werte, aufsteigend sortiert.
+    assert [r.value for r in result.records] == ["104.20.23.154", "172.66.147.243"]
+
+
+def test_run_traceroute_reflects_privileged_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(shutil, "which", lambda _name: "/usr/sbin/traceroute")
+    monkeypatch.setattr(
+        "infrastructure.diagnostics_linux._run_traceroute", lambda _t, _p: _TRACEROUTE
+    )
+    result = asyncio.run(SystemTracerouteRunner().run("example.com", True))
+    assert result.target == "example.com"
+    assert result.privileged is True
+    assert [h.hop for h in result.hops] == [1, 2, 3, 4]
+
+
+# ── "--"-Terminator vor nutzergesteuerten Werten (F-07) ───────────────────────
+
+
+class _FakeCompleted:
+    """Minimaler ``subprocess.run``-Rueckgabe-Stub (nur ``stdout``)."""
+
+    def __init__(self) -> None:
+        self.stdout = ""
+
+
+def test_run_dig_places_terminator_before_query(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``_run_dig`` setzt ``--`` vor den nutzergesteuerten query (kein "-"-Wert als Option)."""
+    captured: list[list[str]] = []
+
+    def _fake_run(argv: list[str], **_kwargs: object) -> _FakeCompleted:
+        captured.append(argv)
+        return _FakeCompleted()
+
+    monkeypatch.setattr("infrastructure.diagnostics_linux.subprocess.run", _fake_run)
+    _run_dig("-leading-dash.example", "A")
+
+    argv = captured[0]
+    assert "--" in argv
+    # Der query steht NACH dem Terminator (wird nicht als Option interpretiert).
+    assert argv.index("--") < argv.index("-leading-dash.example")
+
+
+def test_run_traceroute_places_terminator_before_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``_run_traceroute`` setzt ``--`` vor das nutzergesteuerte target."""
+    captured: list[list[str]] = []
+
+    def _fake_run(argv: list[str], **_kwargs: object) -> _FakeCompleted:
+        captured.append(argv)
+        return _FakeCompleted()
+
+    monkeypatch.setattr("infrastructure.diagnostics_linux.subprocess.run", _fake_run)
+    _run_traceroute("-leading-dash.example", False)
+
+    argv = captured[0]
+    assert "--" in argv
+    assert argv.index("--") < argv.index("-leading-dash.example")
+
+
+# ── LinuxTraceroutePermission ─────────────────────────────────────────────────
+
+
+def test_permission_is_available_true_when_binary_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(shutil, "which", lambda _name: "/usr/sbin/traceroute")
+    assert LinuxTraceroutePermission().is_available() is True
+
+
+def test_permission_is_available_false_when_binary_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
+    assert LinuxTraceroutePermission().is_available() is False
+
+
+def test_permission_root_means_privileged_method(monkeypatch: pytest.MonkeyPatch) -> None:
+    # geteuid 0 -> privilegierte Methode moeglich -> None (kein Hinweis noetig).
+    monkeypatch.setattr(os, "geteuid", lambda: 0)
+    assert LinuxTraceroutePermission().check_permission() is None
+
+
+def test_permission_non_root_gives_hint_without_install_cmd(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Nicht-Root -> Hinweis (kein stiller Fallback), KEIN distro-Install-Befehl (das ist 1b).
+    monkeypatch.setattr(os, "geteuid", lambda: 1000)
+    hint = LinuxTraceroutePermission().check_permission()
+    assert hint is not None
+    assert "Root" in hint
+    assert "apt" not in hint and "dnf" not in hint
+
+
+# ── Block 1b: ShutilToolDetector ──────────────────────────────────────────────
+
+
+def test_tool_detector_available_when_binary_present(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(shutil, "which", lambda _name: "/usr/bin/dig")
+    assert ShutilToolDetector().is_available("dig") is True
+
+
+def test_tool_detector_unavailable_when_binary_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
+    assert ShutilToolDetector().is_available("dig") is False
+
+
+# ── Block 1b: LinuxPackageManagerDetector (Reihenfolge, erster gewinnt) ────────
+
+
+def _which_only(*present: str) -> "object":
+    """Baut ein ``shutil.which``-Stand-in, das nur die genannten Binaries 'findet'."""
+
+    def _which(name: str) -> str | None:
+        return f"/usr/bin/{name}" if name in present else None
+
+    return _which
+
+
+def test_package_manager_detect_first_in_order_wins(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Sowohl dnf als auch yum da -> der frueher gelistete (dnf) gewinnt.
+    monkeypatch.setattr(shutil, "which", _which_only("dnf", "yum"))
+    assert LinuxPackageManagerDetector().detect() == "dnf"
+
+
+def test_package_manager_detect_apt(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(shutil, "which", _which_only("apt"))
+    assert LinuxPackageManagerDetector().detect() == "apt"
+
+
+def test_package_manager_detect_pacman(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(shutil, "which", _which_only("pacman"))
+    assert LinuxPackageManagerDetector().detect() == "pacman"
+
+
+def test_package_manager_detect_apt_beats_pacman(monkeypatch: pytest.MonkeyPatch) -> None:
+    # apt steht vor pacman in der Reihenfolge -> apt gewinnt, egal welcher zuerst gefunden wird.
+    monkeypatch.setattr(shutil, "which", _which_only("pacman", "apt"))
+    assert LinuxPackageManagerDetector().detect() == "apt"
+
+
+def test_package_manager_detect_none_when_no_manager(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(shutil, "which", _which_only())
+    assert LinuxPackageManagerDetector().detect() is None
+
+
+# ── Block 2a: SocketBannerGrabber (gefakte asyncio-Sockets, kein echtes Netz) ──
+
+
+class _FakeReader:
+    """Gefakter ``asyncio.StreamReader``: liefert vordefinierte Bytes (oder Timeout)."""
+
+    def __init__(self, data: bytes = b"", *, raise_timeout: bool = False) -> None:
+        self._data = data
+        self._raise_timeout = raise_timeout
+
+    async def read(self, _n: int) -> bytes:
+        if self._raise_timeout:
+            raise TimeoutError
+        return self._data
+
+
+class _FakeWriter:
+    """Gefakter ``asyncio.StreamWriter``: merkt sich Geschriebenes, kein echter Socket."""
+
+    def __init__(self) -> None:
+        self.written: bytes = b""
+        self.closed = False
+
+    def write(self, data: bytes) -> None:
+        self.written += data
+
+    async def drain(self) -> None:
+        pass
+
+    def close(self) -> None:
+        self.closed = True
+
+    async def wait_closed(self) -> None:
+        pass
+
+
+def _patch_open_connection(
+    monkeypatch: pytest.MonkeyPatch,
+    reader: _FakeReader,
+    writer: _FakeWriter,
+) -> None:
+    """Ersetzt ``asyncio.open_connection`` durch ein Stand-in, das (reader, writer) liefert."""
+
+    async def _fake_open(_host: str, _port: int) -> tuple[_FakeReader, _FakeWriter]:
+        return reader, writer
+
+    monkeypatch.setattr("infrastructure.diagnostics_linux.asyncio.open_connection", _fake_open)
+
+
+def test_build_http_head_request_is_minimal_and_standard() -> None:
+    # GENAU eine minimale HTTP-HEAD-Anfrage -- keine konfigurierbaren Payloads.
+    assert (
+        _build_http_head_request("example.com") == b"HEAD / HTTP/1.0\r\nHost: example.com\r\n\r\n"
+    )
+
+
+def test_banner_from_http_head_extracts_status_and_server() -> None:
+    response = "HTTP/1.0 200 OK\r\nServer: nginx/1.25\r\nContent-Type: text/html\r\n\r\n"
+    assert _banner_from_http_head(response) == "HTTP/1.0 200 OK | Server: nginx/1.25"
+
+
+def test_banner_from_http_head_without_server_header() -> None:
+    response = "HTTP/1.0 404 Not Found\r\nContent-Type: text/html\r\n\r\n"
+    assert _banner_from_http_head(response) == "HTTP/1.0 404 Not Found"
+
+
+def test_banner_from_http_head_empty_is_none() -> None:
+    assert _banner_from_http_head("") is None
+
+
+def test_grab_banner_passive_reads_greeting_ok(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Passiver Port (22): der Dienst gruesst selbst -> ok, Banner gelesen + bereinigt.
+    writer = _FakeWriter()
+    _patch_open_connection(monkeypatch, _FakeReader(b"SSH-2.0-OpenSSH_9.6\r\n"), writer)
+    result = asyncio.run(SocketBannerGrabber().grab("example.com", 22))
+    assert result.state == "ok"
+    assert result.probe == "passive"
+    assert result.banner == "SSH-2.0-OpenSSH_9.6"
+    # Passive: NICHTS gesendet (nur gelesen) -- Sicherheits-Grenze.
+    assert writer.written == b""
+
+
+def test_grab_banner_empty_response_is_no_banner(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Verbunden, aber stiller Dienst (leere Antwort) -> no_banner, banner ehrlich None.
+    _patch_open_connection(monkeypatch, _FakeReader(b""), _FakeWriter())
+    result = asyncio.run(SocketBannerGrabber().grab("example.com", 22))
+    assert result.state == "no_banner"
+    assert result.banner is None
+
+
+def test_grab_banner_connection_refused_is_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Aktiv abgewiesen -> closed, banner None.
+    async def _refuse(_host: str, _port: int) -> tuple[_FakeReader, _FakeWriter]:
+        raise ConnectionRefusedError
+
+    monkeypatch.setattr("infrastructure.diagnostics_linux.asyncio.open_connection", _refuse)
+    result = asyncio.run(SocketBannerGrabber().grab("example.com", 22))
+    assert result.state == "closed"
+    assert result.banner is None
+
+
+def test_grab_banner_connect_timeout_is_filtered(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Connect-Timeout (wait_for) -> filtered, banner None.
+    async def _hang(_host: str, _port: int) -> tuple[_FakeReader, _FakeWriter]:
+        raise TimeoutError
+
+    monkeypatch.setattr("infrastructure.diagnostics_linux.asyncio.open_connection", _hang)
+    result = asyncio.run(SocketBannerGrabber().grab("example.com", 22))
+    assert result.state == "filtered"
+    assert result.banner is None
+
+
+def test_grab_banner_unreachable_oserror_is_filtered(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Unerreichbar (OSError, z. B. no route) -> filtered.
+    async def _unreach(_host: str, _port: int) -> tuple[_FakeReader, _FakeWriter]:
+        raise OSError("no route to host")
+
+    monkeypatch.setattr("infrastructure.diagnostics_linux.asyncio.open_connection", _unreach)
+    result = asyncio.run(SocketBannerGrabber().grab("example.com", 22))
+    assert result.state == "filtered"
+    assert result.banner is None
+
+
+def test_grab_banner_read_timeout_is_no_banner(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Connect ok, aber der Read laeuft in den Timeout -> no_banner (kein erfundener Wert).
+    _patch_open_connection(monkeypatch, _FakeReader(raise_timeout=True), _FakeWriter())
+    result = asyncio.run(SocketBannerGrabber().grab("example.com", 22))
+    assert result.state == "no_banner"
+    assert result.banner is None
+
+
+def test_grab_banner_http_head_sends_head_and_extracts_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Web-Port (80): http_head -> GENAU eine HEAD-Anfrage gesendet, Server-Header extrahiert.
+    writer = _FakeWriter()
+    response = b"HTTP/1.0 200 OK\r\nServer: nginx/1.25\r\nContent-Type: text/html\r\n\r\n"
+    _patch_open_connection(monkeypatch, _FakeReader(response), writer)
+    result = asyncio.run(SocketBannerGrabber().grab("example.com", 80))
+    assert result.probe == "http_head"
+    assert result.state == "ok"
+    assert result.banner == "HTTP/1.0 200 OK | Server: nginx/1.25"
+    # GENAU die eine minimale HEAD-Anfrage gesendet -- keine konfigurierbaren Payloads.
+    assert writer.written == b"HEAD / HTTP/1.0\r\nHost: example.com\r\n\r\n"
+
+
+def test_grab_banner_tls_port_is_passive_no_banner(monkeypatch: pytest.MonkeyPatch) -> None:
+    # TLS-Port (443): passive (kein TLS-Handshake in 2a). Ein TLS-Dienst gruesst bei rohem
+    # Connect nicht -> hier leere Antwort simuliert -> ehrlich no_banner, NICHT http_head.
+    writer = _FakeWriter()
+    _patch_open_connection(monkeypatch, _FakeReader(b""), writer)
+    result = asyncio.run(SocketBannerGrabber().grab("example.com", 443))
+    assert result.probe == "passive"
+    assert result.state == "no_banner"
+    assert result.banner is None
+    # Auch hier: NICHTS gesendet (passive) -- kein Klartext-HTTP an einen TLS-Port.
+    assert writer.written == b""
+
+
+# ── Block 2b: HttpxReachabilityProvider gegen httpx.MockTransport (kein Netz) ──
+
+_BASE_URL = "https://cpnetcheck.example"
+_TOKEN = "supergeheim-token-xyz"
+
+
+def _provider_with(handler: object) -> HttpxReachabilityProvider:
+    # MockTransport ersetzt das Netz -- KEINE echten Aufrufe. Der Provider baut den Client
+    # mit diesem Transport (verify-Naht bleibt unberuehrt; im Test irrelevant, kein TLS).
+    return HttpxReachabilityProvider(transport=httpx.MockTransport(handler))  # type: ignore[arg-type]
+
+
+def test_external_ip_200_parses_result_and_sets_bearer() -> None:
+    seen: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        seen["auth"] = request.headers.get("Authorization")
+        return httpx.Response(200, json={"ip": "203.0.113.7", "family": "ipv4"})
+
+    provider = _provider_with(handler)
+    result = asyncio.run(provider.get_external_ip(_BASE_URL, _TOKEN))
+    assert (result.ip, result.family) == ("203.0.113.7", "ipv4")
+    # Bearer-Header gesetzt, HTTPS-URL, korrekter Pfad.
+    assert seen["auth"] == f"Bearer {_TOKEN}"
+    assert seen["url"] == f"{_BASE_URL}/v1/myip"
+    assert str(seen["url"]).startswith("https://")
+
+
+def test_external_portcheck_200_parses_results_and_sends_body() -> None:
+    seen: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        seen["body"] = request.content
+        return httpx.Response(
+            200,
+            json={
+                "checked_ip": "203.0.113.7",
+                "family": "ipv4",
+                "results": [
+                    {"port": 80, "reachable": True, "state": "open"},
+                    {"port": 443, "reachable": False, "state": "filtered"},
+                ],
+            },
+        )
+
+    provider = _provider_with(handler)
+    ip, ports = asyncio.run(provider.check_ports(_BASE_URL, _TOKEN, [80, 443]))
+    assert ip.ip == "203.0.113.7"
+    assert [(p.port, p.reachable, p.state) for p in ports] == [
+        (80, True, "open"),
+        (443, False, "filtered"),
+    ]
+    assert seen["url"] == f"{_BASE_URL}/v1/portcheck"
+    # JSON-Body trug die Ports + Protokoll.
+    assert b'"ports"' in seen["body"]  # type: ignore[operator]
+    assert b'"tcp"' in seen["body"]  # type: ignore[operator]
+
+
+def test_external_401_maps_to_auth_error_without_token() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, json={"error": "bad token"})
+
+    provider = _provider_with(handler)
+    with pytest.raises(ExternalCheckFailed) as exc:
+        asyncio.run(provider.get_external_ip(_BASE_URL, _TOKEN))
+    # Neutrale Auth-Meldung -- der Token leakt NICHT in den Fehlertext.
+    assert "Authentifizierung" in exc.value.message
+    assert _TOKEN not in exc.value.message
+    assert _TOKEN not in str(exc.value)
+
+
+def test_external_422_maps_to_generic_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(422, json={"error": "invalid ports"})
+
+    provider = _provider_with(handler)
+    with pytest.raises(ExternalCheckFailed) as exc:
+        asyncio.run(provider.check_ports(_BASE_URL, _TOKEN, [80]))
+    # Der Dienst-Body ("invalid ports") wird NICHT durchgereicht.
+    assert "invalid ports" not in exc.value.message
+    assert _TOKEN not in exc.value.message
+
+
+def test_external_503_maps_to_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, json={"error": "down"})
+
+    provider = _provider_with(handler)
+    with pytest.raises(ExternalCheckFailed):
+        asyncio.run(provider.get_external_ip(_BASE_URL, _TOKEN))
+
+
+def test_external_timeout_maps_to_error_without_token() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectTimeout("timed out", request=request)
+
+    provider = _provider_with(handler)
+    with pytest.raises(ExternalCheckFailed) as exc:
+        asyncio.run(provider.get_external_ip(_BASE_URL, _TOKEN))
+    assert _TOKEN not in exc.value.message
+    assert _TOKEN not in str(exc.value)
+
+
+def test_external_network_error_maps_to_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("no route", request=request)
+
+    provider = _provider_with(handler)
+    with pytest.raises(ExternalCheckFailed):
+        asyncio.run(provider.get_external_ip(_BASE_URL, _TOKEN))
+
+
+def test_external_broken_json_maps_to_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        # 200, aber kein gueltiges JSON -- der Rohbody leakt nicht.
+        return httpx.Response(200, content=b"<html>not json</html>")
+
+    provider = _provider_with(handler)
+    with pytest.raises(ExternalCheckFailed):
+        asyncio.run(provider.get_external_ip(_BASE_URL, _TOKEN))
+
+
+def test_external_schema_mismatch_maps_to_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        # 200, JSON, aber ip fehlt -> Schema-Abweichung -> Fehler (kein erfundener Wert).
+        return httpx.Response(200, json={"family": "ipv4"})
+
+    provider = _provider_with(handler)
+    with pytest.raises(ExternalCheckFailed):
+        asyncio.run(provider.get_external_ip(_BASE_URL, _TOKEN))
+
+
+def test_external_unknown_port_state_maps_to_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "checked_ip": "203.0.113.7",
+                "family": "ipv4",
+                "results": [{"port": 80, "reachable": True, "state": "weird"}],
+            },
+        )
+
+    provider = _provider_with(handler)
+    with pytest.raises(ExternalCheckFailed):
+        asyncio.run(provider.check_ports(_BASE_URL, _TOKEN, [80]))
+
+
+# ── Block 3: Rogue-DHCP (nmap-Parser + Permission, kein echtes nmap/Netz) ──────
+
+# Realistische nmap broadcast-dhcp-discover-Ausgabe: EIN antwortender DHCP-Server.
+_NMAP_ONE_SERVER = """\
+Pre-scan script results:
+| broadcast-dhcp-discover:
+|   Response 1 of 1:
+|     Interface: eth0
+|     IP Offered: 192.168.1.50
+|     DHCP Message Type: DHCPOFFER
+|     Server Identifier: 192.168.1.1
+|     IP Address Lease Time: 1d00h00m00s
+|_    Subnet Mask: 255.255.255.0
+Nmap done: 0 IP addresses (0 hosts up) scanned in 5.20 seconds
+"""
+
+# Zwei antwortende DHCP-Server (ein erwarteter + ein potenzieller Rogue), zweiter mit MAC.
+_NMAP_TWO_SERVERS = """\
+Pre-scan script results:
+| broadcast-dhcp-discover:
+|   Response 1 of 2:
+|     IP Offered: 192.168.1.50
+|     Server Identifier: 192.168.1.1
+|   Response 2 of 2:
+|     IP Offered: 192.168.1.180
+|     Server Identifier: 192.168.1.66
+|_    Server MAC: de:ad:be:ef:00:01
+Nmap done: 0 IP addresses (0 hosts up) scanned in 6.10 seconds
+"""
+
+# Kein DHCP-Server geantwortet (kein Skript-Ergebnis).
+_NMAP_NO_SERVER = "Nmap done: 0 IP addresses (0 hosts up) scanned in 5.00 seconds\n"
+
+
+def test_parse_nmap_dhcp_one_server() -> None:
+    result = _parse_nmap_dhcp(_NMAP_ONE_SERVER)
+    assert result == [("192.168.1.1", None)]
+
+
+def test_parse_nmap_dhcp_two_servers_with_mac() -> None:
+    result = _parse_nmap_dhcp(_NMAP_TWO_SERVERS)
+    # Reihenfolge der Funde bleibt erhalten (Domaene sortiert spaeter); MAC nur beim zweiten.
+    assert result == [("192.168.1.1", None), ("192.168.1.66", "de:ad:be:ef:00:01")]
+
+
+def test_parse_nmap_dhcp_no_server() -> None:
+    assert _parse_nmap_dhcp(_NMAP_NO_SERVER) == []
+
+
+def test_dhcp_probe_tool_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    # nmap fehlt -> DiagnosticsToolMissing (kein stiller Fallback, Muster dig/traceroute).
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
+    with pytest.raises(DiagnosticsToolMissing):
+        asyncio.run(NmapDhcpProbe().discover())
+
+
+def test_dhcp_probe_parses_offers(monkeypatch: pytest.MonkeyPatch) -> None:
+    # nmap da + gemockte Ausgabe -> geparste Offers (kein echter nmap-/Netzaufruf).
+    monkeypatch.setattr(shutil, "which", lambda _name: "/usr/bin/nmap")
+    monkeypatch.setattr(
+        "infrastructure.diagnostics_linux._run_nmap_dhcp", lambda: _NMAP_TWO_SERVERS
+    )
+    result = asyncio.run(NmapDhcpProbe().discover())
+    assert result == [("192.168.1.1", None), ("192.168.1.66", "de:ad:be:ef:00:01")]
+
+
+def test_dhcp_permission_is_available_true_when_nmap_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(shutil, "which", lambda _name: "/usr/bin/nmap")
+    assert LinuxDhcpPermission().is_available() is True
+
+
+def test_dhcp_permission_is_available_false_when_nmap_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
+    assert LinuxDhcpPermission().is_available() is False
+
+
+def test_dhcp_permission_root_means_discovery_possible(monkeypatch: pytest.MonkeyPatch) -> None:
+    # geteuid 0 -> Discovery moeglich -> None (keine Sperre).
+    monkeypatch.setattr(os, "geteuid", lambda: 0)
+    assert LinuxDhcpPermission().check_permission() is None
+
+
+def test_dhcp_permission_non_root_blocks_without_install_cmd(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Kein Root -> Sperr-Begruendung, KEIN Install-Befehl (Block 1b), KEINE rootless Alternative.
+    monkeypatch.setattr(os, "geteuid", lambda: 1000)
+    hint = LinuxDhcpPermission().check_permission()
+    assert hint is not None
+    assert "Root" in hint
+    assert "sudo apt" not in hint and "install" not in hint.lower()

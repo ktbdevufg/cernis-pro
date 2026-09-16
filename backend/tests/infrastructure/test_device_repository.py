@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from domain.devices import Device, IpHistoryEntry
+from domain.devices import Device, IpHistoryEntry, TrustState
 from infrastructure.device_repository import (
     CorruptDeviceError,
     SqliteDeviceRepository,
@@ -82,6 +82,34 @@ def test_save_then_get_roundtrips_all_fields(repo: SqliteDeviceRepository) -> No
     assert got.last_seen.tzinfo is not None  # datetime tz-aware
 
 
+def test_trust_state_roundtrips(repo: SqliteDeviceRepository) -> None:
+    repo.save(_device(trust_state=TrustState.WATCH))
+    got = repo.get(MAC)
+    assert got is not None
+    assert got.trust_state is TrustState.WATCH
+
+
+def test_default_trust_state_neutral_roundtrips(repo: SqliteDeviceRepository) -> None:
+    repo.save(_device())  # _device setzt trust_state nicht -> Default NEUTRAL
+    got = repo.get(MAC)
+    assert got is not None
+    assert got.trust_state is TrustState.NEUTRAL
+
+
+def test_watch_dismissed_roundtrips(repo: SqliteDeviceRepository) -> None:
+    repo.save(_device(watch_dismissed=True))
+    got = repo.get(MAC)
+    assert got is not None
+    assert got.watch_dismissed is True
+
+
+def test_default_watch_dismissed_false_roundtrips(repo: SqliteDeviceRepository) -> None:
+    repo.save(_device())  # _device setzt watch_dismissed nicht -> Default False
+    got = repo.get(MAC)
+    assert got is not None
+    assert got.watch_dismissed is False
+
+
 def test_save_with_none_last_ip_roundtrips(repo: SqliteDeviceRepository) -> None:
     repo.save(_device(last_ip=None))
     got = repo.get(MAC)
@@ -125,6 +153,38 @@ def test_save_upsert_overwrites_existing(repo: SqliteDeviceRepository) -> None:
     assert len(repo.get_all(known_only=False)) == 1  # kein Duplikat
 
 
+def test_save_upsert_empty_hostname_keeps_stored_name(repo: SqliteDeviceRepository) -> None:
+    """Ueberschreibschutz: leerer Hostname im Folge-save loescht den Bestand NICHT.
+
+    Ein leerer Hostname heisst "beim Scan gerade nicht ermittelt" (z.B.
+    Resolver-Loeschfenster), NICHT "hat keinen Namen".
+    """
+    repo.save(_device(hostname="foo.local"))
+    repo.save(_device(hostname=""))
+    got = repo.get(MAC)
+    assert got is not None
+    assert got.hostname == "foo.local"  # Bestand bleibt erhalten
+
+
+def test_save_upsert_nonempty_hostname_still_overwrites(repo: SqliteDeviceRepository) -> None:
+    """Ein NICHT-leerer neuer Hostname ueberschreibt weiterhin korrekt."""
+    repo.save(_device(hostname="foo.local"))
+    repo.save(_device(hostname="bar.local"))
+    got = repo.get(MAC)
+    assert got is not None
+    assert got.hostname == "bar.local"
+
+
+def test_save_first_insert_with_empty_hostname_stays_empty(
+    repo: SqliteDeviceRepository,
+) -> None:
+    """Erst-Insert mit leerem Hostname bleibt "" (der Schutz greift nur beim Update)."""
+    repo.save(_device(hostname=""))
+    got = repo.get(MAC)
+    assert got is not None
+    assert got.hostname == ""
+
+
 # ── IP-History ───────────────────────────────────────────────────────────────
 
 
@@ -138,6 +198,28 @@ def test_append_and_get_ip_history_order_and_limit(repo: SqliteDeviceRepository)
 
 def test_get_ip_history_unknown_mac_returns_empty(repo: SqliteDeviceRepository) -> None:
     assert repo.get_ip_history("00:00:00:00:00:00") == []
+
+
+# ── get_unclassified (Wache) ────────────────────────────────────────────────
+
+
+def test_get_unclassified_empty_returns_empty_list(repo: SqliteDeviceRepository) -> None:
+    assert repo.get_unclassified() == []
+
+
+def test_get_unclassified_filters_known_and_dismissed(repo: SqliteDeviceRepository) -> None:
+    repo.save(_device("AA:BB:CC:DD:EE:01", is_known=False, watch_dismissed=False))  # in Wache
+    repo.save(_device("AA:BB:CC:DD:EE:02", is_known=True))  # bekannt -> raus
+    repo.save(_device("AA:BB:CC:DD:EE:03", is_known=False, watch_dismissed=True))  # weggelegt
+    macs = [d.mac for d in repo.get_unclassified()]
+    assert macs == ["AA:BB:CC:DD:EE:01"]
+
+
+def test_get_unclassified_orders_by_last_seen_desc(repo: SqliteDeviceRepository) -> None:
+    repo.save(_device("AA:BB:CC:DD:EE:01", is_known=False, last_seen=EARLIER))
+    repo.save(_device("AA:BB:CC:DD:EE:02", is_known=False, last_seen=NOW))
+    macs = [d.mac for d in repo.get_unclassified()]
+    assert macs == ["AA:BB:CC:DD:EE:02", "AA:BB:CC:DD:EE:01"]  # neuer zuerst
 
 
 # ── BUG-1-FIX: delete raeumt beide Tabellen ─────────────────────────────────
@@ -193,6 +275,68 @@ def test_get_corrupt_json_raises_with_mac(repo: SqliteDeviceRepository, tmp_path
         repo.get(MAC)
     assert exc_info.value.mac == MAC
     assert exc_info.value.column == "tags"
+
+
+# ── Migration: Alt-DB ohne trust_state-Spalte ───────────────────────────────
+
+
+def _create_legacy_devices_db(db_path: Path, mac: str) -> None:
+    """Legt eine devices-Tabelle OHNE trust_state-Spalte an (Vor-Migrations-Stand)."""
+    iso = "2026-05-28T12:00:00.000000+00:00"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE devices (
+                mac          TEXT PRIMARY KEY,
+                vendor       TEXT DEFAULT '',
+                label        TEXT DEFAULT '',
+                tags         TEXT DEFAULT '[]',
+                notes        TEXT DEFAULT '',
+                category     TEXT DEFAULT '',
+                is_known     INTEGER DEFAULT 0,
+                first_seen   TEXT,
+                last_seen    TEXT,
+                last_ip      TEXT DEFAULT '',
+                times_seen   INTEGER DEFAULT 1,
+                open_ports   TEXT DEFAULT '[]',
+                hostname     TEXT DEFAULT '',
+                os_guess     TEXT DEFAULT ''
+            );
+            """
+        )
+        conn.execute(
+            "INSERT INTO devices (mac, first_seen, last_seen) VALUES (?, ?, ?)",
+            (mac, iso, iso),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_migration_adds_trust_state_with_neutral_default(tmp_path: Path) -> None:
+    # Eine Alt-DB ohne trust_state-Spalte wird additiv migriert; die Bestandszeile
+    # bekommt verlustfrei den Default 'neutral'.
+    db_path = tmp_path / "cernis.db"
+    _create_legacy_devices_db(db_path, MAC)
+    repo = SqliteDeviceRepository(db_path)  # _ensure_schema ruestet die Spalte nach
+    got = repo.get(MAC)
+    assert got is not None
+    assert got.trust_state is TrustState.NEUTRAL
+
+
+def test_migration_adds_watch_dismissed_with_false_default(tmp_path: Path) -> None:
+    # Die Legacy-DB hat weder trust_state NOCH watch_dismissed; beide additiven
+    # Guards greifen verlustfrei. Die Bestandszeile bekommt watch_dismissed=False
+    # (gehoert also in die Wache, sofern nicht bekannt).
+    db_path = tmp_path / "cernis.db"
+    _create_legacy_devices_db(db_path, MAC)
+    repo = SqliteDeviceRepository(db_path)  # _ensure_schema ruestet die Spalte nach
+    got = repo.get(MAC)
+    assert got is not None
+    assert got.watch_dismissed is False
+    # Und die migrierte Zeile (is_known=0) erscheint in der Wache.
+    assert [d.mac for d in repo.get_unclassified()] == [MAC]
 
 
 # ── MAC-Normalisierung ───────────────────────────────────────────────────────

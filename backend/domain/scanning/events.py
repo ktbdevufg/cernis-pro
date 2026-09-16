@@ -10,9 +10,9 @@ koennte mypy die Menge der Subklassen nicht abschliessend kennen -- die
 Exhaustiveness-Pruefung entfiele.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-from domain.scanning.models import EnrichedHost
+from domain.scanning.models import EnrichedHost, PortInterception
 
 
 @dataclass(frozen=True)
@@ -61,6 +61,15 @@ class Info:
 @dataclass(frozen=True)
 class ScanCompleted:
     total_found: int
+    # Das Ergebnis der EINEN Gegenprobe je Scan (Befund 53) reist im
+    # Abschluss-Ereignis MIT. Grund: der Hinweis gehoert zu dem Ergebnis, das der
+    # Anwender gerade vor sich hat. Ein Nachschlag ueber die History waere eine
+    # zweite Anfrage und koennte einen anderen Scan treffen.
+    #
+    # Additiv mit Default: bestehende Erzeuger und Leser von ``ScanCompleted``
+    # (u. a. der geplante Scan in app.py, der nur ``isinstance`` prueft) bleiben
+    # unveraendert gueltig; ``total_found`` behaelt seine Bedeutung.
+    interception: PortInterception = field(default_factory=PortInterception)
 
 
 @dataclass(frozen=True)

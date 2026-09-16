@@ -1,326 +1,271 @@
-import React, { useState, useEffect, useRef } from 'react'
-import Sidebar from './components/Sidebar.jsx'
-import Toolbar from './components/Toolbar.jsx'
-import ProgressBar from './components/ProgressBar.jsx'
-import HostTable from './components/HostTable.jsx'
-import HostDetail from './components/HostDetail.jsx'
-// ScanSettings moved into SettingsView
-import ColumnManager from './components/ColumnManager.jsx'
-import TopologyView from './components/TopologyView.jsx'
-import PortDiff from './components/PortDiff.jsx'
-import MonitorView from './views/MonitorView.jsx'
-import DevicesView from './views/DevicesView.jsx'
-import SecurityView from './views/SecurityView.jsx'
-import { DEFAULT_VISIBLE, DEFAULT_ORDER } from './components/ColumnManager.jsx'
-import { useInterfaces } from './hooks/useInterfaces.js'
-import { useScan, SCAN_STATE } from './hooks/useScan.js'
-import { useSettings } from './hooks/useSettings.js'
-import { DEFAULT_CONFIG } from './components/ScanSettings.jsx'
-import { Network, GitCompare } from 'lucide-react'
-import FritzBoxView from './views/FritzBoxView.jsx'
-import ReportView from './views/ReportView.jsx'
-import ToolsView from './views/ToolsView.jsx'
-import SettingsView from './views/SettingsView.jsx'
-import SLAView from './views/SLAView.jsx'
-import AlertsView from './views/AlertsView.jsx'
-import InfraView from './views/InfraView.jsx'
-import useKeyboardShortcuts, { getShortcutsList } from './hooks/useKeyboardShortcuts.js'
+// App-Wurzel (CERNIS PRO 2.0)
+// Layout: fixe Kopfzeile, darunter Reiterleiste, darunter scrollbarer Inhalt.
+// Hält State: aktiver Reiter, Theme, Sprache. Theme + Sprache in localStorage.
 
-const css = `
-.app { height: 100vh; display: flex; overflow: hidden; background: var(--bg-0); }
-.app-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-.app-topbar {
-  display: flex; align-items: center;
-  height: var(--toolbar-h); flex-shrink: 0;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-1);
+import { lazy, Suspense, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+
+import { recordFeatureUsage } from "./api/usage.js";
+import AppHeader from "./components/AppHeader.jsx";
+import TabNav, { REITER } from "./components/TabNav.jsx";
+// Die grossen Views werden erst bei Bedarf geladen (Code-Splitting), damit der
+// Haupt-Chunk klein bleibt. AppHeader/TabNav bleiben statisch (immer sichtbar).
+const AboutView = lazy(() => import("./views/AboutView.jsx"));
+const DevicesView = lazy(() => import("./views/DevicesView.jsx"));
+const ReportingView = lazy(() => import("./views/ReportingView.jsx"));
+const InvestigateView = lazy(() => import("./views/InvestigateView.jsx"));
+const ManualView = lazy(() => import("./views/ManualView.jsx"));
+const ObserveView = lazy(() => import("./views/ObserveView.jsx"));
+const OverviewView = lazy(() => import("./views/OverviewView.jsx"));
+const SettingsView = lazy(() => import("./views/SettingsView.jsx"));
+const VerwaltungView = lazy(() => import("./views/VerwaltungView.jsx"));
+import "./App.css";
+
+const THEME_KEY = "cernis_theme";
+const LANG_KEY = "cernis_lang";
+const REFRESH_KEY = "cernis_traffic_refresh";
+
+// Erlaubte Auto-Refresh-Intervalle in Sekunden (0 = aus).
+const REFRESH_WERTE = [0, 5, 10, 30, 60];
+
+function ermittleStartTheme() {
+  const gespeichert = localStorage.getItem(THEME_KEY);
+  return gespeichert === "dark" || gespeichert === "light" ? gespeichert : "light";
 }
-.app-body { flex: 1; display: flex; overflow: hidden; min-height: 0; }
-.app-main  { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
-.app-view  { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
-.app-view-scroll { flex: 1; overflow-y: auto; }
-.error-bar {
-  background: rgba(255,61,61,0.1); border-bottom: 1px solid rgba(255,61,61,0.3);
-  color: var(--red); padding: 6px 16px; font-size: 12px; font-family: var(--font-mono);
-  flex-shrink: 0;
+
+function ermittleStartSprache() {
+  const gespeichert = localStorage.getItem(LANG_KEY);
+  return gespeichert === "de" || gespeichert === "en" ? gespeichert : "de";
 }
-.scan-overlay { position: fixed; inset: 0; pointer-events: none; z-index: 50; overflow: hidden; }
-.scan-line {
-  position: absolute; left: 0; right: 0; height: 1px;
-  background: linear-gradient(90deg, transparent, var(--accent), transparent);
-  opacity: 0.3; animation: scan-line 3s ease-in-out infinite;
+
+// Auto-Refresh-Intervall aus localStorage; nur erlaubte Werte, sonst 0 (aus).
+function ermittleStartRefresh() {
+  const gespeichert = Number(localStorage.getItem(REFRESH_KEY));
+  return REFRESH_WERTE.includes(gespeichert) ? gespeichert : 0;
 }
-.rescan-countdown {
-  font-family: var(--font-mono); font-size: 10px; color: var(--accent);
-  padding: 3px 8px; border-radius: 3px;
-  background: rgba(0,212,255,0.08); border: 1px solid rgba(0,212,255,0.2);
-  white-space: nowrap;
-}
-.view-btn {
-  display: flex; align-items: center; gap: 5px;
-  background: var(--bg-3); border: 1px solid var(--border);
-  color: var(--text-secondary); padding: 6px 11px; border-radius: 4px;
-  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em;
-  cursor: pointer; transition: all 0.12s; white-space: nowrap; border: none;
-}
-.view-btn:hover { color: var(--text-primary); }
-.view-btn:disabled { opacity: 0.35; cursor: not-allowed; }
-`
 
 export default function App() {
-  const { interfaces } = useInterfaces()
-  const [activeView, setActiveView]       = useState('scan')
-  const [selectedIface, setSelectedIface] = useState(null)
-  const [cidr, setCidr]                   = useState('192.168.1.0/24')
+  const { t, i18n } = useTranslation();
 
-  const [scanConfig, setScanConfig]       = useSettings('scan_config', DEFAULT_CONFIG)
-  const [columnOrder, setColumnOrder]     = useSettings('column_order', DEFAULT_ORDER)
-  const [columnVisible, setColumnVisible] = useSettings('column_visible', DEFAULT_VISIBLE)
-  const [autoRescan, setAutoRescan]       = useSettings('auto_rescan_secs', 0)
+  const [activeTab, setActiveTab] = useState(REITER[0].id);
+  const [theme, setTheme] = useState(ermittleStartTheme);
+  const [lang, setLang] = useState(ermittleStartSprache);
+  // Auto-Refresh-Intervall für den Per-App-Verkehr (Sekunden; 0 = aus).
+  const [refreshInterval, setRefreshInterval] = useState(ermittleStartRefresh);
+  // Einstellungs-Bereich ist ein eigener Modus (kein Reiter): überlagert den
+  // View-Bereich. Schließen kehrt zum vorher aktiven Reiter zurück.
+  const [settingsOffen, setSettingsOffen] = useState(false);
+  // Benutzerhandbuch ist ebenfalls ein eigener Modus (kein Reiter) und schließt
+  // sich mit den Einstellungen gegenseitig aus: immer nur einer ist offen.
+  const [handbuchOffen, setHandbuchOffen] = useState(false);
+  // "Ueber CERNIS PRO" (Lizenzaufstellung) ist der DRITTE eigene Modus (kein
+  // Reiter) und schliesst sich mit Einstellungen und Handbuch gegenseitig aus:
+  // immer nur einer ist offen.
+  const [ueberOffen, setUeberOffen] = useState(false);
+  // Wunsch-Funktion im Beobachten-Bereich (z. B. vom Kopfzeilen-Live-Pill). Wird
+  // EINMAL als initiale Funktion an ObserveView gereicht; danach von ObserveView
+  // quittiert (onFunktionGeoeffnet -> null), damit der Nutzer dort frei navigiert.
+  const [observeFunktion, setObserveFunktion] = useState(null);
+  // Wunsch-Funktion im Untersuchen-Bereich (z. B. von der Startseiten-Kachel).
+  // Spiegelt das observeFunktion-Muster: EINMAL als initiale Funktion an
+  // InvestigateView gereicht, danach von dort quittiert (onFunktionGeoeffnet ->
+  // null), damit der Nutzer dort frei navigiert.
+  const [investigateFunktion, setInvestigateFunktion] = useState(null);
+  // Sprungziel im Handbuch (help_id) oder null. Wird gesetzt, wenn der Nutzer im
+  // Popup "Mehr im Handbuch" wählt; ManualView springt beim Öffnen zum Anker.
+  // Beim normalen Menü-Weg (Kopfzeile) bleibt es null (kein Sprung).
+  const [handbuchSprung, setHandbuchSprung] = useState(null);
 
-  const [selectedHost, setSelectedHost]   = useState(null)
-  const [showDetail, setShowDetail]       = useState(false)
-  const [showTopo, setShowTopo]           = useState(false)
-  const [showDiff, setShowDiff]           = useState(false)
-  const [lastScanId, setLastScanId]       = useState(null)
-  const [countdown, setCountdown]         = useState(0)
-  const [monitorStatus, setMonitorStatus] = useState({})
-  const [showShortcuts, setShowShortcuts]   = useState(false)
-  const [fritzConnected, setFritzConnected]   = useState(false)
-  const [fritzStatus, setFritzStatus]         = useState(null)
-  const [scanProfile, setScanProfile]         = useState('standard')
-  const [isDark, setIsDark]               = useState(() => localStorage.getItem('cernis_theme') !== 'light')
+  // Von der Startseite (OverviewView): Reiter wechseln und optional zusätzlich
+  // die gewünschte Funktion im Ziel-Bereich vormerken. Ohne funktion bleibt es
+  // beim reinen Reiter-Wechsel (wie bisher).
+  //
+  // ZENTRALER ZÄHLPUNKT (Nutzungs-Ranking): jede echte, NUTZER-ausgelöste
+  // Funktionsöffnung wird hier EINMAL gezählt (feature_id = `${tab}:${funktion}`
+  // wenn funktion gesetzt, sonst `${tab}`). handleNavigate wird ausschließlich per
+  // Klick (springe → onNavigate) aufgerufen — die initialFunction-Effekte der Views
+  // laufen NICHT hierdurch, es gibt also keine programmatische Doppelzählung. Die
+  // Zählung ist Nebensache: ein Fehler darf den Navigationsfluss NIE stören, darum
+  // fire-and-forget mit still geschlucktem Fehler (try/catch + .catch am Promise).
+  const handleNavigate = (tab, funktion) => {
+    setActiveTab(tab);
+    try {
+      const featureId = funktion ? `${tab}:${funktion}` : tab;
+      recordFeatureUsage(featureId).catch(() => {});
+    } catch {
+      // Zählung ist Nebensache — niemals die Navigation stören.
+    }
+    if (!funktion) {
+      return;
+    }
+    if (tab === "observe") {
+      setObserveFunktion(funktion);
+    } else if (tab === "investigate") {
+      setInvestigateFunktion(funktion);
+    }
+  };
 
-  const { scanState, hosts, progress, error, startScan, stopScan } = useScan()
-  const scanning = scanState === SCAN_STATE.RUNNING
-  const done     = scanState === SCAN_STATE.DONE
+  // Vom Kopfzeilen-Pill: zur Logging-Ansicht springen. Reiter auf "observe" und
+  // die logging-Funktion vormerken; ein offener Einstellungs-Modus wird verlassen.
+  const goToLogging = () => {
+    setSettingsOffen(false);
+    setHandbuchOffen(false);
+    setUeberOffen(false);
+    setActiveTab("observe");
+    setObserveFunktion("logging");
+  };
 
-  // Monitor WebSocket — always active with reconnect
+  const goToOutbound = () => {
+    setSettingsOffen(false);
+    setHandbuchOffen(false);
+    setUeberOffen(false);
+    setActiveTab("observe");
+    setObserveFunktion("outbound");
+  };
+
+  // Vom Kopfzeilen-DNS-Pill: zur netzweiten DNS-Waechter-Sicht springen. Wie
+  // goToOutbound Reiter auf "observe" und die dnswatch-Funktion vormerken
+  // (ObserveView oeffnet dann den DnsWatchScreen); offene Modi werden verlassen.
+  const goToDnsWatch = () => {
+    setSettingsOffen(false);
+    setHandbuchOffen(false);
+    setUeberOffen(false);
+    setActiveTab("observe");
+    setObserveFunktion("dnswatch");
+  };
+
+  // Aus einem "?"-Hilfe-Popup: das Handbuch öffnen und beim Öffnen zum Anker der
+  // help_id springen. Einstellungen schließen (gegenseitiger Ausschluss), das
+  // Handbuch öffnen und das Sprungziel vormerken (ManualView springt dann dort).
+  const openManualAt = (helpId) => {
+    setSettingsOffen(false);
+    setUeberOffen(false);
+    setHandbuchOffen(true);
+    setHandbuchSprung(helpId);
+  };
+
+  // Theme am <html> setzen und persistieren.
   useEffect(() => {
-    let ws = null
-    let reconnectTimer = null
+    document.documentElement.setAttribute("data-theme", theme);
+    localStorage.setItem(THEME_KEY, theme);
+  }, [theme]);
 
-    const connect = () => {
-      const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
-      const wsBase = window.CERNIS_WS_BASE || `${protocol}://${window.location.host}`
-      ws = new WebSocket(`${wsBase}/ws/monitor`)
-      ws.onmessage = (e) => {
-        try {
-          const msg = JSON.parse(e.data)
-          if (msg.type === 'monitor_status') setMonitorStatus(msg.status)
-          if (msg.type === 'monitor_update') {
-            setMonitorStatus(prev => ({
-              ...prev,
-              [msg.target_id]: { alive: msg.alive, label: msg.label }
-            }))
-          }
-        } catch {}
-      }
-      ws.onclose = () => {
-        reconnectTimer = setTimeout(connect, 3000)
-      }
-      ws.onerror = () => {
-        // Monitor WS errors are silent - reconnect handles it
-        try { ws.close() } catch {}
-      }
-    }
-
-    connect()
-    return () => {
-      if (reconnectTimer) clearTimeout(reconnectTimer)
-      if (ws) ws.close()
-    }
-  }, [])
-
-  // Auto-select first interface
+  // Sprache in i18n übernehmen und persistieren.
   useEffect(() => {
-    if (interfaces.length > 0 && !selectedIface) {
-      const active = interfaces.find(i => i.ipv4 && i.gateway) || interfaces[0]
-      setSelectedIface(active)
-      if (active.network_cidr) setCidr(active.network_cidr)
+    if (i18n.language !== lang) {
+      i18n.changeLanguage(lang);
     }
-  }, [interfaces])
+    localStorage.setItem(LANG_KEY, lang);
+  }, [lang, i18n]);
 
-  // Load last scan id on startup + after each scan
+  // Auto-Refresh-Intervall persistieren (gleiches Muster wie Theme/Sprache).
   useEffect(() => {
-    fetch('/api/history?limit=1').then(r=>r.json()).then(data => {
-      if (data.length > 0) setLastScanId(data[0].id)
-    }).catch(() => {})
-  }, [done])
-
-  // Auto-rescan countdown
-  const rescanTimer = useRef(null), countdownTimer = useRef(null)
-  useEffect(() => {
-    if (rescanTimer.current)    clearTimeout(rescanTimer.current)
-    if (countdownTimer.current) clearInterval(countdownTimer.current)
-    setCountdown(0)
-    if ((autoRescan || 0) > 0 && !scanning) {
-      let rem = autoRescan
-      setCountdown(rem)
-      countdownTimer.current = setInterval(() => {
-        rem -= 1; setCountdown(rem)
-        if (rem <= 0) clearInterval(countdownTimer.current)
-      }, 1000)
-      rescanTimer.current = setTimeout(() => handleScan(), autoRescan * 1000)
-    }
-    return () => {
-      if (rescanTimer.current)    clearTimeout(rescanTimer.current)
-      if (countdownTimer.current) clearInterval(countdownTimer.current)
-    }
-  }, [autoRescan, done])
-
-  const toggleTheme = () => {
-    const next = !isDark
-    setIsDark(next)
-    document.body.classList.toggle('light', !next)
-    localStorage.setItem('cernis_theme', next ? 'dark' : 'light')
-  }
-
-  // Apply theme on mount
-  React.useEffect(() => {
-    document.body.classList.toggle('light', !isDark)
-  }, [])
-
-  // Keyboard shortcuts
-  useKeyboardShortcuts({
-    onScanToggle: () => scanning ? handleStop() : handleScan(),
-    onViewChange: setActiveView,
-    onClose: () => { setSelectedHost(null); setShowShortcuts(false) },
-    scanning,
-  })
-
-  React.useEffect(() => {
-    const handler = () => setShowShortcuts(true)
-    window.addEventListener('cernis:show-shortcuts', handler)
-    return () => window.removeEventListener('cernis:show-shortcuts', handler)
-  }, [])
-
-  const handleStop = () => {
-    stopScan()
-    if (rescanTimer.current)    clearTimeout(rescanTimer.current)
-    if (countdownTimer.current) clearInterval(countdownTimer.current)
-    setCountdown(0)
-  }
-
-  const handleScan = () => {
-    // Merge profile config with user settings
-    const PROFILES = {
-      quick:    { port_scan:false, mdns_scan:false, ssdp_scan:false, resolve_hostnames:false, ping_timeout:0.5, max_concurrent_ping:128 },
-      standard: {},
-      deep:     { port_scan:true, port_mode:'nmap', smb_scan:true, ping_timeout:1.5, max_concurrent_ping:32 },
-      iot:      { mdns_duration:10.0, custom_ports:[80,443,554,1883,5353,5900,5960,7788,8080,8443] },
-      security: { smb_scan:true, custom_ports:[21,22,23,25,53,80,110,135,139,143,389,443,445,3389,5900,6379,27017,9200] },
-    }
-    const profileOverride = PROFILES[scanProfile] || {}
-    startScan({ ...(scanConfig || DEFAULT_CONFIG), ...profileOverride, cidr })
-    setSelectedHost(null); setCountdown(0)
-    if (rescanTimer.current)    clearTimeout(rescanTimer.current)
-    if (countdownTimer.current) clearInterval(countdownTimer.current)
-  }
-
-  const fullHost = selectedHost ? hosts.find(h => h.ip === selectedHost.ip) || selectedHost : null
-  const arpAlertCount = 0  // loaded lazily in SecurityView
+    localStorage.setItem(REFRESH_KEY, String(refreshInterval));
+  }, [refreshInterval]);
 
   return (
-    <>
-      <style>{css}</style>
-      <div className="app">
-        {scanning && <div className="scan-overlay"><div className="scan-line" /></div>}
+    <div className="app">
+      <AppHeader
+        theme={theme}
+        onThemeChange={setTheme}
+        onOpenSettings={() => {
+          setHandbuchOffen(false);
+          setUeberOffen(false);
+          setSettingsOffen(true);
+        }}
+        onOpenManual={() => {
+          setSettingsOffen(false);
+          setUeberOffen(false);
+          setHandbuchOffen(true);
+          // Menü-Weg: kein Sprung, das Handbuch öffnet oben.
+          setHandbuchSprung(null);
+        }}
+        onOpenUeber={() => {
+          setSettingsOffen(false);
+          setHandbuchOffen(false);
+          setUeberOffen(true);
+        }}
+        onGoToLogging={goToLogging}
+        onGoToOutbound={goToOutbound}
+        onGoToDnsWatch={goToDnsWatch}
+        onGoHome={() => {
+          setSettingsOffen(false);
+          setHandbuchOffen(false);
+          setUeberOffen(false);
+          setActiveTab("overview");
+        }}
+      />
+      {/* Einstellungen, Handbuch UND "Über CERNIS PRO" sind kein Reiter: bei
+          einem offenen Modus bleibt kein Reiter aktiv markiert, daher blenden
+          wir die Reiterleiste aus. */}
+      {!settingsOffen && !handbuchOffen && !ueberOffen && (
+        <TabNav active={activeTab} onChange={setActiveTab} />
+      )}
 
-        {/* ── Sidebar ───────────────────────────────────────── */}
-        <Sidebar
-          activeView={activeView}
-          onViewChange={setActiveView}
-          monitorStatus={monitorStatus}
-          arpAlertCount={arpAlertCount}
-          isDark={isDark}
-          onToggleTheme={toggleTheme}
-        />
-
-        {/* ── Main content area ─────────────────────────────── */}
-        <div className="app-content">
-
-          {/* ── SCAN view ─────────────────────────────────── */}
-          {activeView === 'scan' && (
+      <main className="app__content">
+        {/* Ein einziges Suspense umschliesst alle lazy geladenen Views, damit
+            beim Nachladen eines Chunks ein ruhiger Platzhalter erscheint statt
+            eines Absturzes. */}
+        <Suspense
+          fallback={<div className="app__lazy-fallback">{t("app.laedt")}</div>}
+        >
+          {handbuchOffen ? (
+            <ManualView
+              sprungZiel={handbuchSprung}
+              onClose={() => {
+                setHandbuchOffen(false);
+                setHandbuchSprung(null);
+              }}
+            />
+          ) : ueberOffen ? (
+            <AboutView
+              onClose={() => setUeberOffen(false)}
+              onOpenManual={openManualAt}
+            />
+          ) : settingsOffen ? (
+            <SettingsView
+              lang={lang}
+              onLangChange={setLang}
+              onClose={() => setSettingsOffen(false)}
+              onOpenManual={openManualAt}
+            />
+          ) : (
             <>
-              <div className="app-topbar">
-                  <Toolbar
-                    interfaces={interfaces}
-                    selectedIface={selectedIface}
-                    onSelectIface={setSelectedIface}
-                    cidr={cidr}
-                    onCidrChange={setCidr}
-                    onScan={handleScan}
-                    onStop={stopScan}
-                    scanning={scanning}
-                    hostCount={hosts.length}
-                    lastScanId={lastScanId}
-                    autoRescan={autoRescan || 0}
-                    onAutoRescanChange={setAutoRescan}
-                    profile={scanProfile}
-                    onProfileChange={setScanProfile}
-                    extraButtons={<>
-                      {countdown > 0 && !scanning && (
-                        <span className="rescan-countdown">⟳ {countdown}s</span>
-                      )}
-                      <button className="icon-btn" onClick={() => setShowTopo(true)}
-                        disabled={hosts.length === 0} title="Network Topology">
-                        <Network size={12} /> Topo
-                      </button>
-                      <button className="icon-btn" onClick={() => setShowDiff(true)} title="Compare Scans">
-                        <GitCompare size={12} /> Diff
-                      </button>
-                      <ColumnManager
-                        order={columnOrder || DEFAULT_ORDER}
-                        visible={columnVisible || DEFAULT_VISIBLE}
-                        onChange={(o,v) => { setColumnOrder(o); setColumnVisible(v) }}
-                      />
-                    </>}
-                  />
-              </div>
-              <ProgressBar progress={progress} scanning={scanning} done={done} />
-              {error && <div className="error-bar">⚠ {error}</div>}
-              <div className="app-body">
-                <div className="app-main">
-                  <HostTable
-                    hosts={hosts}
-                    selectedIp={fullHost?.ip}
-                    onSelect={h => { setSelectedHost(h); setShowDetail(true) }}
-                    columnOrder={columnOrder || DEFAULT_ORDER}
-                    columnVisible={columnVisible || DEFAULT_VISIBLE}
-                  />
-                </div>
-                {showDetail && (
-                  <HostDetail host={fullHost} onClose={() => setShowDetail(false)} />
-                )}
-              </div>
+              {activeTab === "overview" && (
+                <OverviewView
+                  onNavigate={handleNavigate}
+                  onOpenManual={openManualAt}
+                />
+              )}
+              {activeTab === "observe" && (
+                <ObserveView
+                  refreshInterval={refreshInterval}
+                  onRefreshIntervalChange={setRefreshInterval}
+                  initialFunction={observeFunktion}
+                  onFunktionGeoeffnet={() => setObserveFunktion(null)}
+                  onOpenManual={openManualAt}
+                />
+              )}
+              {activeTab === "investigate" && (
+                <InvestigateView
+                  initialFunction={investigateFunktion}
+                  onFunktionGeoeffnet={() => setInvestigateFunktion(null)}
+                  onOpenManual={openManualAt}
+                />
+              )}
+              {activeTab === "reporting" && (
+                <ReportingView onOpenManual={openManualAt} />
+              )}
+              {activeTab === "devices" && (
+                <DevicesView onOpenManual={openManualAt} />
+              )}
+              {activeTab === "verwaltung" && (
+                <VerwaltungView onOpenManual={openManualAt} />
+              )}
             </>
           )}
-
-          {/* ── All other views ─────────────────────────── */}
-          {activeView !== 'scan' && (
-            <div style={{ flex:1, position:'relative', overflow:'hidden', display:'flex', flexDirection:'column' }}>
-              {activeView === 'monitor'  && <MonitorView monitorStatus={monitorStatus} />}
-              {activeView === 'devices'  && <DevicesView />}
-              {activeView === 'security' && <SecurityView />}
-              {activeView === 'fritzbox' && <FritzBoxView connected={fritzConnected} onConnect={(s) => { setFritzConnected(true); setFritzStatus(s) }} status={fritzStatus} />}
-              {activeView === 'report'   && <ReportView hosts={hosts} />}
-              {activeView === 'tools'    && <ToolsView selectedIface={selectedIface} />}
-              {activeView === 'sla'      && <SLAView />}
-              {activeView === 'alerts'   && <AlertsView />}
-              {activeView === 'infra'    && <InfraView selectedIface={selectedIface} />}
-              {activeView === 'settings' && <SettingsView interfaces={interfaces} cidr={cidr} scanConfig={scanConfig || DEFAULT_CONFIG} onScanConfigChange={setScanConfig} />}
-            </div>
-          )}
-
-        </div>{/* end app-content */}
-
-        {/* ── Modals ────────────────────────────────────────── */}
-        {showTopo && (
-          <TopologyView hosts={hosts} gateway={selectedIface?.gateway} onClose={() => setShowTopo(false)} />
-        )}
-        {showDiff && <PortDiff onClose={() => setShowDiff(false)} />}
-      </div>{/* end app */}
-    </>
-  )
+        </Suspense>
+      </main>
+    </div>
+  );
 }

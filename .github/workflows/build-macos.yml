@@ -1,0 +1,604 @@
+name: Build macOS
+
+# Baut das verteilbare macOS-Paket (.dmg) nativ auf macos-latest (Apple Silicon /
+# aarch64) und fuehrt dazu den unveraenderten build.sh aus.
+#
+# ENTSCHEIDENDER UNTERSCHIED ZUM LINUX-WORKFLOW (wie schon bei Windows): Auf macOS
+# gibt es KEINEN Container. Der Linux-Job baut sein Debian-13-Image aus einem
+# Dockerfile und fuehrt den Build DARIN aus -- das geht auf macOS-Runnern nicht
+# (Docker ist dort nicht verfuegbar). Statt eines Images kommt die Toolchain hier
+# ueber Setup-Actions: Node 20 (setup-node), uv (setup-uv), Rust stable
+# (rust-toolchain). Es gibt daher keinen "Image bauen"-Schritt und kein chown/
+# Besitzrechte-Zuruecksetzen (kein root im Container, der Runner-User besitzt die
+# Dateien ohnehin).
+#
+# WARUM KEIN actions/setup-python: Das Projekt laesst uv den Interpreter verwalten.
+# Das Linux-Dockerfile haelt fest, dass PyInstaller mit Python 3.13 inkompatibel
+# ist, und ruft darum 'uv python install 3.12'. Wir machen es genauso -- ein
+# eigener Schritt 'uv python install 3.12' vor 'uv sync'. Mit setup-python koennte
+# der Runner 3.13 ziehen und PyInstaller scheitert.
+#
+# SIGNING: JEDER Lauf baut echt signiert (Developer ID) -- auch Dispatch-Laeufe.
+# Das ist keine Vorliebe, sondern eine Konsequenz aus build.sh: seit der Haertung
+# (Commit 2e9f596) bricht build.sh in Schritt 0 mit exit 1 ab, wenn
+# APPLE_SIGNING_IDENTITY leer ist, und prueft am Ende zusaetzlich, dass die .app
+# NICHT ad-hoc signiert ist (Signature=adhoc / fehlender TeamIdentifier -> Fehler).
+# Ein unsignierter Pfad ist damit nicht mehr aufrufbar; der frueher hier stehende
+# Kommentar ("baut unsigniert, Tauri signiert ad-hoc") stammt aus der Zeit VOR
+# dieser Haertung und war veraltet. Darum: Zertifikat-Import in eine temporaere
+# Keychain laeuft IMMER, nicht nur an v-Tags.
+#
+# NOTARISIERUNG dagegen strikt NUR an v-Tags: sie ist langsam (Apple-Roundtrip)
+# und ausschliesslich fuer das echte Release-Asset noetig. Dispatch-Laeufe sind
+# Smoke-Tests des Bauvorgangs -- die brauchen kein Apple-Ticket.
+# Versions-Suffix arm64.
+
+on:
+  # Manueller Knopf (Actions-Tab) ...
+  workflow_dispatch:
+  push:
+    # ... und automatisch bei Release-Tags v*.
+    tags:
+      - "v*"
+
+jobs:
+  build-macos:
+    # macos-latest zeigt aktuell auf Apple Silicon (arm64) -- nativer aarch64-Build,
+    # kein Cross-Compile noetig.
+    runs-on: macos-latest
+    # Schreibrecht auf contents ist noetig, damit der Workflow bei v-Tags ein
+    # GitHub-Release anlegen und Assets hochladen darf. Bewusst auf Job-Ebene
+    # (nicht Workflow-Ebene) und nur dieses eine Recht -- minimale Rechte: die
+    # Dispatch-Builds brauchen es nicht, schaden aber nicht.
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # Toolchain via Setup-Actions statt via Container-Image. Versionen exakt
+      # wie in ci.yml und im Linux-Dockerfile (Node 20, uv, Rust stable),
+      # damit kein Drift zwischen den Werkbaenken entsteht.
+      - name: Node einrichten (LTS 20)
+        uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+
+      - name: uv installieren
+        uses: astral-sh/setup-uv@v8.1.0
+
+      - name: Rust-Toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      # Wie im Linux-Dockerfile: PyInstaller ist mit Python 3.13 inkompatibel,
+      # darum uv explizit auf 3.12 festnageln, BEVOR 'uv sync' laeuft. Bewusst
+      # KEIN setup-python -- der wuerde evtl. 3.13 bringen.
+      - name: Python 3.12 via uv installieren (PyInstaller-kompatibel)
+        run: uv python install 3.12
+
+      # Build-Version zur BUILD-ZEIT als Python-Datei erzeugen. config.py liest
+      # os.environ NICHT -- es importiert diese Datei. PyInstaller friert sie
+      # mit ein, damit die installierte App die volle Version kennt (kein
+      # Laufzeit-Env noetig). Der Suffix nennt nur die Architektur (arm64), NICHT
+      # das Paketformat -- gleiche Begruendung wie im Linux-Workflow. Format wie
+      # dort: 2.0.0+arm64.<7-stelliger-sha>, SHA via 'git rev-parse --short=7'.
+      # macos-latest laeuft mit bash, darum dieselbe heredoc-Variante wie im
+      # Linux-Workflow (kein BOM-Problem wie bei PowerShell/Windows).
+      - name: Build-Version erzeugen (_build_version.py)
+        shell: bash
+        run: |
+          SHORT_SHA=$(git rev-parse --short=7 HEAD)
+          # Produktversion aus pyproject.toml ableiten (Quelle der Wahrheit).
+          PRODUCT_VERSION=$(grep -m1 -E '^version = ' pyproject.toml | sed -E 's/^version = "(.*)"/\1/')
+          [ -n "$PRODUCT_VERSION" ] || { echo "FEHLER: Produktversion aus pyproject.toml nicht lesbar"; exit 1; }
+          BUILD_VERSION="${PRODUCT_VERSION}+arm64.${SHORT_SHA}"
+          echo "Build-Version: ${BUILD_VERSION}"
+          cat > backend/infrastructure/_build_version.py <<EOF
+          """Im CI erzeugte Build-Version. Nicht committet (siehe .gitignore)."""
+
+          BUILD_VERSION = "${BUILD_VERSION}"
+          EOF
+
+      # build.sh setzt eine vorhandene .venv voraus (Schritt 0 bricht sonst mit
+      # exit 1 ab). Der Linux-Container macht 'uv sync' auch separat VOR
+      # build-linux.sh -- hier genauso: Deps + .venv (inkl. Dev-Gruppe fuer
+      # PyInstaller) vor dem Build synchronisieren.
+      - name: Python-Deps (uv sync)
+        run: uv sync --locked --group dev
+
+      # build.sh Schritt 0 prueft 'nmap' und bricht sonst mit exit 1 ab.
+      # macos-latest-Runner haben nmap NICHT vorinstalliert -- daher hier VOR dem
+      # Build per Homebrew nachinstallieren.
+      - name: nmap installieren (build.sh Schritt 0 erwartet es)
+        run: brew install nmap
+
+      # Das Developer-ID-Zertifikat in eine EIGENE, temporaere Keychain importieren --
+      # nie in die login.keychain des Runners. Der Runner ist ephemer, aber eine
+      # dedizierte Keychain haelt den privaten Schluessel auf diesen Job begrenzt und
+      # macht das Aufraeumen trivial (die VM wird verworfen). Das Keychain-Passwort ist
+      # zufaellig und bleibt prozesslokal -- es wird nie ausgegeben.
+      # Laeuft IMMER (nicht nur an v-Tags), weil build.sh die Signatur erzwingt
+      # (siehe Kopfkommentar); ohne diesen Schritt braeche jeder Lauf in Schritt 0 ab.
+      - name: Signing-Zertifikat in temporaere Keychain importieren
+        shell: bash
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN_PWD=$(openssl rand -base64 24)
+          KEYCHAIN="$RUNNER_TEMP/build.keychain"
+          CERT="$RUNNER_TEMP/cert.p12"
+
+          security create-keychain -p "$KEYCHAIN_PWD" "$KEYCHAIN"
+          # Auto-Lock-Timeout 6 h: die Keychain darf waehrend des gesamten Builds
+          # nicht zuschnappen, sonst scheitert codesign mittendrin.
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PWD" "$KEYCHAIN"
+
+          echo "$MACOS_CERTIFICATE" | base64 --decode > "$CERT"
+          security import "$CERT" -k "$KEYCHAIN" -P "$MACOS_CERTIFICATE_PWD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          rm -f "$CERT"
+
+          # Die neue Keychain VORNE in die Suchliste, die bestehenden aber behalten
+          # (sonst findet 'security find-identity' -- und damit build.sh -- nichts,
+          # bzw. es gehen die System-Zertifikate der login.keychain verloren).
+          security list-keychains -d user -s "$KEYCHAIN" \
+            $(security list-keychains -d user | sed s/\"//g)
+          security default-keychain -s "$KEYCHAIN"
+          # Ohne Partition-List fragt macOS beim Signieren interaktiv nach dem
+          # Passwort -- im CI gibt es niemanden, der antwortet: der Build haengt.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PWD" "$KEYCHAIN" > /dev/null
+
+          # Kontrollausgabe: zeigt die Developer-ID (kein Geheimnis) im Log.
+          security find-identity -v -p codesigning "$KEYCHAIN"
+
+      # BEFUND, DER DIESEN SCHRITT NOETIG MACHT: Das ausgelieferte dmg trug
+      # bisher ein Ticket, die .app DARIN nicht. Auf einer Maschine ohne Netz
+      # verweigert macOS deshalb den Start der INSTALLIERTEN Anwendung -- das
+      # dmg-Ticket nuetzt nach dem Kopieren nichts mehr.
+      # Gemessen im tauri-bundler 2.8.1: sind APPLE_API_KEY, APPLE_API_ISSUER
+      # und APPLE_API_KEY_PATH gesetzt, verpackt der Bundler die .app selbst mit
+      # ditto, reicht sie mit 'notarytool submit --wait' ein und fuehrt 'xcrun
+      # stapler staple' darauf aus -- alles VOR dem dmg-Bau. Der Bundler
+      # erwartet den Schluessel als DATEI; darum muss sie existieren, BEVOR
+      # build.sh laeuft.
+      # Dekodierung (base64 --decode) und Ablage im RUNNER_TEMP wortgleich aus
+      # dem bestehenden Notarisierungsschritt uebernommen, plus chmod 600. Der
+      # Schluessel wird nie ausgegeben: 'echo "$MACOS_API_KEY"' schreibt direkt
+      # in die Datei, ins Protokoll gelangt nur der PFAD.
+      # Bedingung identisch zum bestehenden Notarisierungsschritt -- nur v-Tags.
+      - name: Notarisierungs-Schluessel als Datei bereitstellen (nur v-Tags)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          MACOS_API_KEY: ${{ secrets.MACOS_API_KEY }}
+        run: |
+          set -euo pipefail
+          NOTARY_DIR="$RUNNER_TEMP/notary"
+          KEY="$NOTARY_DIR/AuthKey.p8"
+          mkdir -p "$NOTARY_DIR"
+          echo "$MACOS_API_KEY" | base64 --decode > "$KEY"
+          chmod 600 "$KEY"
+          # Pfad (kein Geheimnis) an die folgenden Schritte durchreichen.
+          echo "NOTARY_KEY_PATH=$KEY" >> "$GITHUB_ENV"
+          echo "Schluesseldatei bereitgestellt: $KEY"
+
+      # Den unveraenderten build.sh ausfuehren. Er erledigt selbst: nmap-Check,
+      # venv-Aktivierung, Frontend-Build, beide PyInstaller-Binaries, Binaries
+      # fuer Tauri bereitstellen, Tauri-Build (.dmg) und das Einsammeln.
+      # APPLE_SIGNING_IDENTITY ist gesetzt -> echte Developer-ID-Signatur fuer
+      # .app UND .dmg; build.sh verifiziert das am Ende selbst (kein adhoc,
+      # TeamIdentifier vorhanden). Der Wert muss exakt der Identitaet aus der
+      # oben importierten Keychain entsprechen, sonst bricht build.sh ab.
+      #
+      # DIE DREI NOTARISIERUNGSVARIABLEN steuern den Bundler (siehe Schritt
+      # darueber). Bedeutung streng auseinanderhalten:
+      #   APPLE_API_KEY      = die Key-ID (z.B. 'ABCD123456'), NICHT der Inhalt
+      #                        -> Secret MACOS_API_KEY_ID
+      #   APPLE_API_ISSUER   = die Issuer-UUID -> Secret MACOS_API_ISSUER_ID
+      #   APPLE_API_KEY_PATH = Dateipfad zur .p8 aus dem Schritt darueber
+      # Das Secret MACOS_API_KEY (der base64-kodierte Schluesselinhalt) gehoert
+      # hier bewusst NICHT hin -- es geht ausschliesslich in die Datei.
+      #
+      # BERICHTIGUNG DER ALTEN AUSSAGE. Hier stand im Wortlaut:
+      #   "Im Nicht-Tag-Lauf liefert derselbe Bedingungsausdruck wie oben den
+      #    leeren String; der Bundler ueberspringt die Notarisierung dann still,
+      #    und Dispatch-Laeufe loesen keinen Apple-Roundtrip aus."
+      # DIESE AUSSAGE IST AM LAUF 31491898078 (workflow_dispatch auf bf4dc14)
+      # WIDERLEGT. Gemessen: der Bundler ruft notarytool auf und faellt an der
+      # leeren Issuer-UUID:
+      #   failed to notarize app: Error: The value '' is invalid for
+      #   '--issuer <issuer>': must be a valid UUID
+      # Ursache im Quelltext (tauri-bundler 2.8.1 und 2.9.4 wortgleich,
+      # src/bundle/macos/sign.rs Zeile 112 bis 117): die Erkennung nutzt
+      # 'var_os("APPLE_API_KEY")' und 'var_os("APPLE_API_ISSUER")'. var_os
+      # prueft VORHANDENSEIN, nicht Inhalt -- eine gesetzte leere Variable ist
+      # Some(""), also fuer den Bundler "vorhanden". Und ein env-Eintrag, dessen
+      # Ausdruck den leeren String liefert, IST gesetzt: das Protokoll des Laufs
+      # listet im env-Block des Schritts "APPLE_API_KEY:", "APPLE_API_ISSUER:"
+      # und "APPLE_API_KEY_PATH:" mit leerem Wert.
+      #
+      # DARAUS FOLGT DIE LOESUNG: Die drei Variablen duerfen im Nicht-Tag-Lauf
+      # nicht bloss leer sein, sie duerfen im env-Block GAR NICHT AUFTAUCHEN.
+      # GitHub Actions kennt keinen bedingten env-SCHLUESSEL (nur bedingte
+      # Werte), darum zwei Schritte mit einander ausschliessenden Bedingungen:
+      # dieser hier fuer v-Tags (env-Block WORTGLEICH wie bisher, nur ohne die
+      # inzwischen unnoetigen Bedingungsausdruecke) und der Schritt darunter fuer
+      # Nicht-Tag-Laeufe, dessen env-Block die drei Variablen nicht nennt. Damit
+      # greift im Nicht-Tag-Lauf der Zweig 'MissingCredentials' des Bundlers
+      # (sign.rs Zeile 156), der laut app.rs Zeile 139 (2.8.1; in 2.9.4 Zeile
+      # 147) mit 'log::warn!("skipping app notarization, {e}")' fortfaehrt --
+      # genau das Verhalten, das der alte Kommentar faelschlich schon fuer
+      # Leerwerte behauptete.
+      #
+      # KEIN STILLER FALLBACK IM TAG-LAUF: Dieser Schritt prueft vor build.sh,
+      # dass alle drei Werte nicht-leer sind, und bricht sonst mit benannter
+      # Meldung ab. Ohne diese Pruefung wuerde ein Tag-Lauf mit fehlendem Secret
+      # jetzt in denselben MissingCredentials-Zweig laufen und still
+      # unnotarisiert durchbauen -- das waere ein Rueckschritt gegenueber dem
+      # bisherigen harten Fehler.
+      - name: macOS-Build bei v-Tags (build.sh, signiert + notarisiert)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+          APPLE_API_KEY: ${{ secrets.MACOS_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.MACOS_API_ISSUER_ID }}
+          APPLE_API_KEY_PATH: ${{ env.NOTARY_KEY_PATH }}
+        run: |
+          set -euo pipefail
+          # Harte Vorpruefung statt stillem Rueckfall: fehlt eines der drei
+          # Zugangsdaten, faellt der Tag-Lauf HIER mit benannter Meldung, statt
+          # den Bundler in seinen MissingCredentials-Zweig laufen zu lassen und
+          # ein unnotarisiertes Paket zu veroeffentlichen.
+          fehlt() {
+            echo "FEHLER: $1 ist im v-Tag-Lauf leer oder nicht gesetzt."
+            echo "Ohne alle drei Werte notarisiert der Bundler nicht, sondern"
+            echo "ueberspringt die Notarisierung mit einer blossen Warnung --"
+            echo "das Release-Asset waere dann unnotarisiert. Pruefen: Secrets"
+            echo "MACOS_API_KEY_ID, MACOS_API_ISSUER_ID und der Schritt"
+            echo "'Notarisierungs-Schluessel als Datei bereitstellen'."
+            exit 1
+          }
+          [ -n "${APPLE_API_KEY:-}" ] || fehlt APPLE_API_KEY
+          [ -n "${APPLE_API_ISSUER:-}" ] || fehlt APPLE_API_ISSUER
+          [ -n "${APPLE_API_KEY_PATH:-}" ] || fehlt APPLE_API_KEY_PATH
+          # Zusatzpruefung fuer den gemessenen Fehlerfall: die Issuer-UUID muss
+          # dem UUID-Format entsprechen, sonst bricht notarytool erst mitten im
+          # Bundler ab (Lauf 31491898078). Der Wert selbst wird NICHT ausgegeben.
+          if ! printf '%s' "$APPLE_API_ISSUER" | grep -qiE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'; then
+            echo "FEHLER: APPLE_API_ISSUER ist keine UUID."
+            echo "notarytool verlangt das Issuer-Feld im UUID-Format; ein anderer"
+            echo "Wert laesst den Bundler erst beim Notarisieren fallen."
+            echo "Pruefen: Secret MACOS_API_ISSUER_ID."
+            exit 1
+          fi
+          # Die Schluesseldatei muss existieren und Inhalt haben -- der Bundler
+          # erwartet einen Pfad, nicht den Schluesselinhalt.
+          [ -s "$APPLE_API_KEY_PATH" ] || { echo "FEHLER: Schluesseldatei ${APPLE_API_KEY_PATH} fehlt oder ist leer."; exit 1; }
+          bash build.sh
+
+      # Derselbe Bau OHNE v-Tag. Einziger Unterschied zum Schritt darueber: der
+      # env-Block nennt APPLE_API_KEY, APPLE_API_ISSUER und APPLE_API_KEY_PATH
+      # NICHT -- weder gesetzt noch leer. Genau das ist der Kern der Aenderung
+      # (Begruendung im Kommentarblock des Tag-Schritts): nur eine ABWESENDE
+      # Variable laesst 'var_os' in sign.rs None liefern und fuehrt in den
+      # MissingCredentials-Zweig, der die Notarisierung mit einer Warnung
+      # ueberspringt. Ein Leerwert tat das nachweislich nicht.
+      #
+      # APPLE_SIGNING_IDENTITY bleibt gesetzt und wird gebraucht: build.sh
+      # bricht in Schritt 0 mit exit 1 ab, wenn sie leer ist, und prueft am Ende
+      # gegen eine Ad-hoc-Signatur (siehe Kopfkommentar). Sie WEGZULASSEN waere
+      # kein gangbarer Weg -- gemessen im CLI-Quelltext (tauri-cli 2.10.1,
+      # src/interface/rust.rs Zeile 1450) liest auch sie per 'var_os', ein
+      # Leerwert ergaebe also Some("") und liesse den Bundler mit leerer
+      # Identitaet signieren. Darum: Nicht-Tag-Laeufe signieren echt, wie bisher.
+      #
+      # Kein Notarisierungs-Roundtrip in diesem Zweig -- genau die Absicht des
+      # Kopfkommentars ("NOTARISIERUNG dagegen strikt NUR an v-Tags").
+      - name: macOS-Build ohne v-Tag (build.sh, signiert, ohne Notarisierung)
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        shell: bash
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+        run: bash build.sh
+
+      # Notarisierung -- NUR an v-Tags (siehe Kopfkommentar: langsamer Apple-
+      # Roundtrip, nur fuers echte Release-Asset noetig). Reihenfolge zwingend:
+      # build.sh signiert .app UND .dmg -> notarytool prueft das eingereichte .dmg
+      # -> stapler heftet das Ticket ans .dmg. Genotarisiert wird das dmg als
+      # Container; die .app darin ist bereits Developer-ID-signiert und wird von
+      # Apple mitgeprueft -- fuer die dmg-Verteilung ist das der uebliche Weg.
+      # Muss VOR dem Release-Asset-Schritt liegen, damit das hochgeladene dmg das
+      # angeheftete Ticket bereits traegt (Gatekeeper offline-tauglich).
+      - name: dmg notarisieren und stapeln (nur v-Tags)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          MACOS_API_KEY: ${{ secrets.MACOS_API_KEY }}
+          MACOS_API_KEY_ID: ${{ secrets.MACOS_API_KEY_ID }}
+          MACOS_API_ISSUER_ID: ${{ secrets.MACOS_API_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          NOTARY_DIR="$RUNNER_TEMP/notary"
+          KEY="$NOTARY_DIR/AuthKey.p8"
+          mkdir -p "$NOTARY_DIR"
+          echo "$MACOS_API_KEY" | base64 --decode > "$KEY"
+          # Der Key liegt im RUNNER_TEMP; unabhaengig vom Ausgang wieder loeschen.
+          trap 'rm -f "$KEY"' EXIT
+
+          DMG=$(ls src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg 2>/dev/null | head -1 || true)
+          if [ -z "$DMG" ] || [ ! -f "$DMG" ]; then
+            echo "FEHLER: kein .dmg unter src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/ gefunden."
+            echo "Ohne Paket gibt es nichts zu notarisieren -- der Build davor kann nicht erfolgreich gewesen sein."
+            exit 1
+          fi
+          echo "Notarisiere: $DMG"
+
+          # --wait blockiert bis zum Apple-Ergebnis; ein abgelehnter Submit liefert
+          # einen Exit-Code != 0 und bricht den Schritt ab (kein stiller Durchlauf).
+          xcrun notarytool submit "$DMG" \
+            --key "$KEY" \
+            --key-id "$MACOS_API_KEY_ID" \
+            --issuer "$MACOS_API_ISSUER_ID" \
+            --wait --timeout 30m
+
+          # Ticket anheften, damit Gatekeeper das dmg auch OHNE Netz akzeptiert.
+          xcrun stapler staple "$DMG"
+          # Harte Gegenprobe: muss erfolgreich sein, sonst ist der Schritt rot.
+          xcrun stapler validate "$DMG"
+          # Zusaetzliche Sichtprueferei fuers Log -- spctl bewertet dmg-Container
+          # nicht immer eindeutig, darum bewusst NICHT abbruchrelevant.
+          spctl -a -vvv -t install "$DMG" 2>&1 || true
+
+          # GEGENPROBE -- der eigentliche Wert dieses Schnitts: 'stapler
+          # validate' auf das dmg oben sagt NUR, dass der CONTAINER ein Ticket
+          # traegt. Genau das war der Trugschluss, der den Befund verdeckt hat:
+          # die .app IM dmg kann trotzdem ungestapelt sein, und nur sie
+          # ueberlebt das Kopieren nach /Applications. Ohne diese Pruefung
+          # waere derselbe Fehler beim naechsten Mal wieder unsichtbar.
+          # Dazu das dmg READ-ONLY einhaengen (-readonly, -nobrowse: kein
+          # Finder-Fenster im CI), stapler validate auf die .app darin, wieder
+          # aushaengen. Der trap haengt auch im Fehlerfall wieder aus -- sonst
+          # bliebe die Image-Anbindung haengen.
+          MOUNT_DIR="$RUNNER_TEMP/dmg-gegenprobe"
+          mkdir -p "$MOUNT_DIR"
+          trap 'rm -f "$KEY"; hdiutil detach "$MOUNT_DIR" -force >/dev/null 2>&1 || true' EXIT
+          hdiutil attach "$DMG" -readonly -nobrowse -noverify -mountpoint "$MOUNT_DIR"
+
+          APP=$(find "$MOUNT_DIR" -maxdepth 1 -name '*.app' | head -1)
+          if [ -z "$APP" ]; then
+            echo "FEHLER: keine .app im gemounteten dmg gefunden -- die Gegenprobe kann nicht greifen."
+            exit 1
+          fi
+          echo "Gegenprobe auf: $APP"
+
+          if ! xcrun stapler validate "$APP"; then
+            echo "FEHLER: die .app IM dmg traegt KEIN Notarisierungsticket."
+            echo "Das dmg allein reicht nicht: nach dem Kopieren nach /Applications"
+            echo "startet die Anwendung auf einer Maschine ohne Netz nicht."
+            echo "Ursache pruefen: APPLE_API_KEY / APPLE_API_ISSUER / APPLE_API_KEY_PATH"
+            echo "muessen im env-Block des build.sh-Schritts gesetzt sein."
+            exit 1
+          fi
+          echo "Gegenprobe bestanden: .app im dmg traegt ein Ticket."
+
+          hdiutil detach "$MOUNT_DIR"
+          # trap wieder auf das blosse Loeschen des Schluessels zuruecknehmen --
+          # das Image ist ausgehaengt, ein zweites detach waere sinnlos.
+          trap 'rm -f "$KEY"' EXIT
+
+      # Aufraeumen des Schluessels aus dem Bereitstellungsschritt. BEWUSST ein
+      # eigener Schritt mit if always() statt der trap-Technik des
+      # Notarisierungsschritts darueber: dort entsteht der Schluessel INNERHALB
+      # desselben run-Blocks, der ihn nutzt -- ein EXIT-trap deckt seine ganze
+      # Lebensdauer ab. Der Schluessel aus 3.1 dagegen ueberspannt MEHRERE
+      # Schritte (Bereitstellen -> build.sh); ein trap im Bereitstellungsschritt
+      # loeschte ihn sofort beim Ende jenes Schritts, und der Bundler faende ihn
+      # nicht mehr. if always() sorgt dafuer, dass er auch nach einem
+      # gescheiterten Build oder einer gescheiterten Notarisierung verschwindet.
+      - name: Notarisierungs-Schluessel entfernen
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f "$RUNNER_TEMP/notary/AuthKey.p8"
+          echo "Schluesseldatei entfernt (sofern vorhanden)."
+
+      # Pruefsummen der Pakete. Platzierung zwingend NACH dem Notarisierungs-
+      # Schritt darueber -- das ist hier der entscheidende Punkt: 'xcrun stapler
+      # staple' HEFTET das Apple-Ticket AN die dmg-Datei (stapler(1): "attaches
+      # tickets ... to app bundles, disk images, and packages"). Der Dateiinhalt
+      # aendert sich dadurch. Eine vor der Notarisierung gebildete Pruefsumme
+      # beschriebe also eine Datei, die so NICHT ausgeliefert wird -- genau im
+      # Tag-Lauf, dem einzigen, der Assets veroeffentlicht. Darum danach.
+      #
+      # KEINE if-Bedingung, obwohl der Notarisierungs-Schritt darueber eine hat:
+      # die Pruefsummen entstehen bei jedem Trigger, damit ein Dispatch-Lauf den
+      # Schritt mitprueft und nicht erst der Tag-Lauf. Beide Faelle stimmen:
+      # im Dispatch-Lauf entfaellt die Notarisierung, die Pruefsumme beschreibt
+      # die ungestapelte dmg; im Tag-Lauf lief sie vorher, die Pruefsumme
+      # beschreibt die gestapelte dmg -- also jeweils die reale Datei.
+      #
+      # Werkzeugwahl shasum statt sha256sum: shasum liegt als /usr/bin/shasum in
+      # jeder macOS-Fassung, sha256sum erst seit macOS 26. macos-latest zeigt
+      # nicht zwingend auf macOS 26 -- shasum ist die belastbare Wahl. Das
+      # Ausgabeformat ist byteweise identisch (gemessen): Pruefsumme, zwei
+      # Leerzeichen, Dateiname, LF. Durch den Wechsel ins Verzeichnis der Datei
+      # steht dort der blosse Dateiname ohne Pfad -- so traegt 'sha256sum -c
+      # datei.sha256' (bzw. 'shasum -a 256 -c') im Zielverzeichnis.
+      - name: Pruefsummen der Pakete erzeugen
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUNDLE="src-tauri/target/aarch64-apple-darwin/release/bundle/dmg"
+
+          ANZAHL=0
+          while IFS= read -r PAKET; do
+            ( cd "$(dirname "$PAKET")" && shasum -a 256 "$(basename "$PAKET")" > "$(basename "$PAKET").sha256" )
+            echo "$(cat "${PAKET}.sha256")"
+            ANZAHL=$((ANZAHL + 1))
+          done < <(find "$BUNDLE" -type f -name '*.dmg' | sort)
+
+          # Abbruch mit benannter Meldung, wenn keine einzige Paketdatei gefunden
+          # wurde. Kein stiller Durchlauf, kein Rueckfall auf eine schwaechere
+          # Pruefung -- ein leerer Fund ist ein Fehler, kein Normalfall.
+          [ "$ANZAHL" -gt 0 ] || { echo "FEHLER: keine dmg-Datei unter ${BUNDLE} gefunden"; exit 1; }
+          echo "Pruefsummen erzeugt: ${ANZAHL}"
+
+      # Die Lizenzaufstellung als EIGENSTAENDIGE Beigabe bereitstellen. Sie
+      # entsteht im Bau unter src-tauri/lizenzaufstellung.json und geht ueber
+      # bundle.resources ins dmg -- also nur INNERHALB des Pakets. Das
+      # Website-Projekt erzeugt daraus die oeffentliche Lizenzseite und kann kein
+      # dmg auspacken; darum hier eine benannte Kopie neben dem Paket.
+      #
+      # NAMENSSCHEMA <paketdateiname>.lizenzaufstellung.json: die Beigabe traegt
+      # den Namen des dmg, neben dem sie liegt -- dieselbe Konvention wie bei der
+      # .sha256-Datei des Schritts darueber.
+      #
+      # EINDEUTIGKEIT IM RELEASE folgt damit aus dem Paketnamen: der traegt
+      # Fassung und Plattform bereits und unterscheidet sich von den Paketen der
+      # Linux- und Windows-Workflows -- ein gleichnamiges zweites Asset kann im
+      # selben Release nicht entstehen.
+      #
+      # Die Pakete werden auf DEMSELBEN Weg ermittelt wie im unmittelbar davor
+      # stehenden Pruefsummen-Schritt (gleiches find-Suchmuster, gleiche
+      # Sortierung) -- kein zweites, eigenes Suchmuster.
+      #
+      # GEGENPROBE PRODUKTVERSION: der Name stammt jetzt vom PAKET, nicht mehr
+      # aus der Datei. Damit Inhalt und Name nicht auseinanderlaufen koennen,
+      # wird die produktversion aus der Aufstellung gelesen und geprueft, dass
+      # diese Zeichenfolge im Paketdateinamen vorkommt. Trifft sie nicht zu,
+      # gehoeren Aufstellung und Paket zu verschiedenen Fassungen -- Abbruch mit
+      # benannter Meldung, die BEIDE Werte nennt. Die plattform wird weiterhin
+      # gelesen und ausgegeben, damit im Bauprotokoll sichtbar bleibt, welche
+      # Aufstellung entstand.
+      #
+      # Kein stiller Ausfall: fehlt die Datei, ist sie leer, kein gueltiges JSON,
+      # fehlt eines der beiden Felder oder findet sich kein Paket, bricht der
+      # Schritt mit benannter Meldung ab -- dieselbe Regel wie bei
+      # fail_on_unmatched_files.
+      #
+      # python3 statt jq: der Sammler selbst laeuft unter python3, es ist auf
+      # macos-latest vorhanden, und derselbe Einzeiler steht wortgleich im
+      # Linux-Workflow -- kein zweites Werkzeug fuer dieselbe Aufgabe.
+      - name: Lizenzaufstellung als benannte Kopie bereitstellen
+        shell: bash
+        run: |
+          set -euo pipefail
+          QUELLE="src-tauri/lizenzaufstellung.json"
+          BUNDLE="src-tauri/target/aarch64-apple-darwin/release/bundle/dmg"
+          [ -f "$QUELLE" ] || { echo "FEHLER: ${QUELLE} wurde nicht erzeugt"; exit 1; }
+          [ -s "$QUELLE" ] || { echo "FEHLER: ${QUELLE} ist leer"; exit 1; }
+
+          PRODUKTVERSION=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("produktversion",""))' "$QUELLE")
+          PLATTFORM=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("plattform",""))' "$QUELLE")
+          [ -n "$PRODUKTVERSION" ] || { echo "FEHLER: Feld 'produktversion' fehlt oder ist leer in ${QUELLE}"; exit 1; }
+          [ -n "$PLATTFORM" ] || { echo "FEHLER: Feld 'plattform' fehlt oder ist leer in ${QUELLE}"; exit 1; }
+
+          echo "--- Lizenzaufstellung ---"
+          echo "Produktversion: ${PRODUKTVERSION}"
+          echo "Plattform:      ${PLATTFORM}"
+
+          ANZAHL=0
+          while IFS= read -r PAKET; do
+            PAKETNAME="$(basename "$PAKET")"
+            case "$PAKETNAME" in
+              *"${PRODUKTVERSION}"*) ;;
+              *)
+                echo "FEHLER: Produktversion '${PRODUKTVERSION}' aus ${QUELLE} kommt im Paketdateinamen '${PAKETNAME}' nicht vor -- Aufstellung und Paket gehoeren zu verschiedenen Fassungen"
+                exit 1
+                ;;
+            esac
+            ZIEL="${PAKET}.lizenzaufstellung.json"
+            cp "$QUELLE" "$ZIEL"
+            [ -s "$ZIEL" ] || { echo "FEHLER: Kopie ${ZIEL} ist leer"; exit 1; }
+            echo "Beigabe: $(basename "$ZIEL")"
+            ANZAHL=$((ANZAHL + 1))
+          done < <(find "$BUNDLE" -type f -name '*.dmg' | sort)
+
+          # Abbruch mit benannter Meldung, wenn keine einzige Paketdatei gefunden
+          # wurde -- ohne Paket gibt es keinen Namen fuer die Beigabe.
+          [ "$ANZAHL" -gt 0 ] || { echo "FEHLER: keine dmg-Datei unter ${BUNDLE} gefunden"; exit 1; }
+          echo "Lizenzaufstellungen abgelegt: ${ANZAHL}"
+
+      # NUR die Lizenzaufstellung als Actions-Artefakt -- ausdruecklich NICHT das
+      # dmg. Der Verzicht auf einen Artefakt-Upload in diesem Workflow (Fall b
+      # unten) begruendet sich mit der GROESSE des dmg gegen das 2-GB-Gratis-
+      # Storage-Kontingent. Die Aufstellung ist rund ein Megabyte; auf sie trifft
+      # diese Begruendung nicht zu. Sie wird ausserdem gerade dann gebraucht,
+      # wenn KEIN Tag gesetzt ist: das Website-Projekt soll die Lizenzseite auch
+      # aus einem Dispatch-Lauf ziehen koennen, ohne auf ein Release zu warten.
+      #
+      # Optionen bewusst identisch zur Linux-Seite (if-no-files-found: error,
+      # retention-days: 14, actions/upload-artifact@v7) -- kein Sonderweg und
+      # keine neue Action-Fassung. Der Artefaktname traegt macos, damit er nicht
+      # mit den Linux-Artefakten kollidiert.
+      #
+      # Das Muster nennt das dmg-Bundle-Verzeichnis, weil die Beigabe jetzt NEBEN
+      # dem Paket liegt. Es endet auf .lizenzaufstellung.json und greift damit
+      # ausschliesslich die Aufstellung -- das dmg selbst bleibt trotz gleichen
+      # Verzeichnisses aussen vor, die Groessen-Begruendung oben bleibt gewahrt.
+      - name: Lizenzaufstellung als Artefakt ablegen (jeder Lauf)
+        uses: actions/upload-artifact@v7
+        with:
+          name: cernis-pro-lizenzaufstellung-macos
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg.lizenzaufstellung.json
+
+      # Ab hier Fallunterscheidung nach Trigger -- identische Logik wie im
+      # Windows-/Linux-Workflow, nur mit dem macOS-Bundle-Pfad (dmg). Das Triple
+      # ist der build.sh-Default aarch64-apple-darwin.
+      #
+      # Fall a) v-Tag: als GitHub-Release-Asset veroeffentlichen (zaehlt nicht
+      # gegen das 500-MB-Artefaktlimit und verfaellt nicht). softprops/action-
+      # gh-release legt ein fehlendes Release idempotent an und bietet mit
+      # fail_on_unmatched_files die geforderte Abbruch-bei-leerem-Glob-Semantik.
+      # Die .dmg ist der von build.sh garantierte Output.
+      - name: Release erstellen und dmg als Asset anhaengen (nur v-Tags)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v3
+        with:
+          name: CERNIS PRO ${{ github.ref_name }}
+          body: "Release ${{ github.ref_name }} -- Release-Notes werden separat gepflegt."
+          draft: false
+          # Gemeinsame Festlegung ALLER Build-Workflows: prerelease true, weil ein
+          # Tag-Build noch keinen Plattform-Test belegt -- die Freigabe erfolgt von
+          # Hand (z.B. nach Gatekeeper-Pruefung des dmg auf einem zweiten Mac).
+          prerelease: true
+          fail_on_unmatched_files: true
+          # Jedes Muster MUSS im Tag-Lauf treffen, sonst faellt das Release
+          # (fail_on_unmatched_files oben). Das .sha256-Muster trifft, weil der
+          # Schritt "Pruefsummen der Pakete erzeugen" ohne if-Bedingung neben
+          # JEDER dmg eine gleichnamige .sha256 anlegt und sonst selbst abbricht
+          # -- gibt es eine dmg, gibt es auch ihre Pruefsumme.
+          # Das Lizenz-Muster trifft aus demselben Grund: der Schritt
+          # "Lizenzaufstellung als benannte Kopie bereitstellen" legt ohne
+          # if-Bedingung neben JEDER dmg eine gleichnamige
+          # .lizenzaufstellung.json an und bricht sonst selbst ab. Der Name
+          # stammt vom Paket; weil der bereits Fassung und Plattform traegt,
+          # kollidiert die macOS-Beigabe im selben Release nicht mit denen der
+          # Linux- und Windows-Workflows.
+          files: |
+            src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+            src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg.sha256
+            src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg.lizenzaufstellung.json
+
+      # Fall b) kein v-Tag (workflow_dispatch / temporaerer rewrite/v2-Push):
+      # BEWUSST KEIN Artefakt-Upload DES DMG. Ein grosses dmg je Push fuellte das
+      # 2-GB-Gratis-Storage-Kontingent auf. Bei Push-Laeufen ist der erfolgreiche
+      # Durchlauf des Builds selbst der Beweis -- die fertige .dmg wird nicht
+      # gebraucht. Verteilbare Pakete entstehen ausschliesslich an v-Tags und
+      # werden dort (Fall a oben) als GitHub-Release-Asset veroeffentlicht.
+      #
+      # ABGRENZUNG, damit dieser Absatz nicht zu weit gelesen wird: er betrifft
+      # AUSSCHLIESSLICH das dmg. Die Lizenzaufstellung wird sehr wohl in jedem
+      # Lauf als Artefakt abgelegt (eigener Schritt oben). Sie ist rund ein
+      # Megabyte statt mehrerer hundert -- das Kontingent-Argument trifft auf sie
+      # nicht zu, und sie ist der einzige Weg, an die Lizenzdaten zu kommen, ohne
+      # das dmg auszupacken.

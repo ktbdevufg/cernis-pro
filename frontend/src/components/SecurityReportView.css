@@ -1,0 +1,608 @@
+/* Sicherheitsbericht — In-App-Ansicht (Etappe 3). Designsprache wie
+   LoggingProfileView/SlaChart: Card-Flaechen, --color-border, radius, accent fuer
+   "gut", severity-Token fuer kritisch/auffaellig, sev-low fuer sauber. Nur Token-
+   Variablen, nie feste Farben. */
+
+.security-report {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.security-report__mono {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+.security-report__num {
+  text-align: right;
+}
+
+/* ── 1. Bericht-Titelkopf (Logo + grosse Ueberschrift + Erstelldatum) ──────────── */
+.security-report__kopf {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding-bottom: 14px;
+  border-bottom: 2px solid var(--color-accent);
+}
+
+/* Bildschirm: PDF-Knopf rechts im Kopf. Im Druck (Papier/PDF) unnoetig -> weg. */
+@media print {
+  .security-report__kopf-aktionen {
+    display: none;
+  }
+}
+
+.security-report__logo {
+  height: 44px;
+  width: auto;
+  display: block;
+}
+
+.security-report__kopf-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.security-report__titel {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--color-text);
+}
+
+.security-report__kopf-datum {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-tert);
+}
+
+/* Einleitung: ruhiger Fliesstext unter dem Kopf (Achse-B-Haltung in Klartext). */
+.security-report__einleitung {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--color-text-sec);
+}
+
+/* Dezenter Fehlerhinweis (Ladefehler kippt die Ansicht nicht). */
+.security-report__fehler {
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--sev-med-text);
+  background: var(--sev-med-bg);
+  border: 1px solid var(--sev-med-bd);
+  border-radius: var(--radius-md);
+}
+
+/* ── 2. Kein-Scan-Leerzustand ──────────────────────────────────────────────────── */
+.security-report__leerzustand {
+  padding: 20px 18px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.security-report__leerzustand-text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--color-text-sec);
+}
+
+/* ── 3a. Score-Gauge ──────────────────────────────────────────────────────────── */
+.security-report__gauge {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.security-report__gauge-visual {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.security-report__gauge-svg {
+  width: 100%;
+  max-width: 320px;
+  height: auto;
+  display: block;
+}
+
+/* Zahl-Block sitzt unter dem Halbkreis-Scheitel. */
+.security-report__gauge-zahl {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  margin-top: -28px;
+}
+
+.security-report__gauge-wert {
+  font-size: 44px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.security-report__gauge-von {
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+.security-report__gauge-stufe {
+  margin-top: 2px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* Erklaerzeile direkt unter dem Gauge: ordnet die Zahl mit echten Werten ein. */
+.security-report__gauge-einordnung {
+  margin: 0;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--color-text-sec);
+}
+
+.security-report__gauge-toggle {
+  align-self: center;
+  padding: 6px 14px;
+  font-size: 13px;
+  color: var(--color-accent);
+  background: var(--color-accent-bg);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.security-report__gauge-toggle:hover {
+  background: var(--color-accent-bg-strong);
+}
+
+/* Beitragsliste: standardmaessig eingeklappt (nur Anzeige). */
+.security-report__beitraege {
+  display: none;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.security-report__beitraege--offen {
+  display: flex;
+}
+
+.security-report__formel {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-tert);
+}
+
+.security-report__rest {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-text-sec);
+}
+
+/* ── 3.4 Score-Beitragsliste als eigener Abschnitt (mit Ueberschrift) ──────────── */
+.security-report__beitraege-abschnitt {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 18px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.security-report__beitraege-kopf {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* ── 3b. Schwere-Kennzahlen ────────────────────────────────────────────────────── */
+.security-report__kennzahlen {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.security-report__kennzahl {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-left-width: 4px;
+  border-radius: var(--radius-md);
+}
+
+.security-report__kennzahl--kritisch {
+  border-left-color: var(--cve-crit-bd);
+}
+
+.security-report__kennzahl--auffaellig {
+  border-left-color: var(--sev-med-bd);
+}
+
+.security-report__kennzahl--sauber {
+  border-left-color: var(--sev-low-bd);
+}
+
+.security-report__kennzahl-wert {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.security-report__kennzahl-label {
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+/* ── 3c. Schwere-Donut ─────────────────────────────────────────────────────────── */
+.security-report__donut {
+  position: relative;
+  align-self: center;
+  width: 180px;
+  height: 180px;
+}
+
+.security-report__donut-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.security-report__donut-mitte {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.security-report__donut-summe {
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.security-report__donut-label {
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+/* ── 3d. Geraete-Balken ────────────────────────────────────────────────────────── */
+.security-report__balken {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 18px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.security-report__abschnitt-titel {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.security-report__balken-liste {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Zweizeilig: Kopf (Name + Zahl) ueber der Balkenbahn in voller Breite. */
+.security-report__balken-zeile {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.security-report__balken-kopf {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+
+/* Fix 4: Die Komponente rendert IMMER alle Geraete. Am Bildschirm werden die ueber
+   Top-6 hinausgehenden Zeilen ausgeblendet (kompakte Ansicht + "+ X weitere"-Hinweis). */
+.security-report__balken-zeile--ueberzaehlig {
+  display: none;
+}
+
+.security-report__balken-label {
+  font-size: 12px;
+  color: var(--color-text-sec);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+}
+
+.security-report__balken-bahn {
+  display: flex;
+  height: 12px;
+  background: var(--sev-low-bg);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.security-report__balken-fueller {
+  height: 100%;
+}
+
+.security-report__balken-fueller--kritisch {
+  background: var(--cve-crit-bd);
+}
+
+.security-report__balken-fueller--auffaellig {
+  background: var(--sev-med-bd);
+}
+
+.security-report__balken-zahl {
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+.security-report__balken-rest {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+/* ── 4. Tabellen-Abschnitte ────────────────────────────────────────────────────── */
+.security-report__abschnitt {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  /* Ein Abschnitt bleibt moeglichst zusammen (kein Umbruch mittendrin). */
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.security-report__abschnitt-titel--num {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 6px;
+  border-bottom: 2px solid var(--color-accent);
+}
+
+.security-report__abschnitt-nummer {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-accent);
+  background: var(--color-accent-bg);
+  border-radius: 50%;
+}
+
+.security-report__tabelle {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.security-report__tabelle th {
+  text-align: left;
+  padding: 8px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--color-text-tert);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.security-report__tabelle td {
+  padding: 8px 10px;
+  color: var(--color-text);
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: top;
+}
+
+.security-report__tabelle .security-report__num {
+  text-align: right;
+}
+
+.security-report__tabelle--beitraege {
+  font-size: 12px;
+}
+
+/* CVE-Befunde nach Geraet gruppiert: pro Geraet ein Block mit eigener Ueberschrift
+   und kleiner Tabelle. */
+.security-report__cve-gruppen {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.security-report__cve-gruppe {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.security-report__cve-geraet {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-sec);
+}
+
+/* Feste Spaltenbreiten NUR fuer die CVE-Gruppen-Tabellen, damit alle
+   Geraete-Gruppen identisch ausgerichtet sind statt je Tabelle zu springen.
+   Gilt gezielt ueber .security-report__cve-gruppe, damit Ports/Netz-Tabellen
+   (gleiche Basisklasse) nicht betroffen sind.
+   Spalten: CVE-ID | CVSS (num) | Dienst | Beschreibung. */
+.security-report__cve-gruppe .security-report__tabelle {
+  table-layout: fixed;
+}
+.security-report__cve-gruppe .security-report__tabelle th:nth-child(1),
+.security-report__cve-gruppe .security-report__tabelle td:nth-child(1) {
+  width: 18%;
+}
+.security-report__cve-gruppe .security-report__tabelle th:nth-child(2),
+.security-report__cve-gruppe .security-report__tabelle td:nth-child(2) {
+  width: 10%;
+}
+.security-report__cve-gruppe .security-report__tabelle th:nth-child(3),
+.security-report__cve-gruppe .security-report__tabelle td:nth-child(3) {
+  width: 14%;
+}
+.security-report__cve-gruppe .security-report__tabelle th:nth-child(4),
+.security-report__cve-gruppe .security-report__tabelle td:nth-child(4) {
+  width: 58%;
+}
+/* Bei fixed-Layout sauber umbrechen, damit lange CVE-ID/Beschreibung nicht
+   ueberlaeuft (nur im CVE-Gruppen-Kontext). */
+.security-report__cve-gruppe .security-report__tabelle td {
+  overflow-wrap: anywhere;
+}
+
+/* Beschreibungs-Spalte darf umbrechen (Klartext kann lang sein). */
+.security-report__cve-beschreibung {
+  color: var(--color-text-sec);
+  white-space: normal;
+}
+
+/* Severity-Badge (klein, Token-Farben). */
+.security-report__badge {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: var(--radius-md);
+  white-space: nowrap;
+}
+
+.security-report__badge--kritisch {
+  color: var(--cve-crit-text);
+  background: var(--cve-crit-bg);
+  border: 1px solid var(--cve-crit-bd);
+}
+
+.security-report__badge--auffaellig {
+  color: var(--sev-med-text);
+  background: var(--sev-med-bg);
+  border: 1px solid var(--sev-med-bd);
+}
+
+.security-report__quittiert-hinweis {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-text-sec);
+}
+
+/* Ruhige Leer-Meldung (statt leerem Kasten). */
+.security-report__leer {
+  margin: 0;
+  padding: 16px 12px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--color-text-sec);
+}
+
+/* Achse-B-Fussnote (beschreibt und ordnet ein — kein Urteil). */
+.security-report__fussnote {
+  margin: 0;
+  font-size: 12px;
+  font-style: italic;
+  line-height: 1.5;
+  color: var(--color-text-tert);
+}
+
+/* Bericht-Fusszeile (UNSER Inhalt am Dokument-Ende: Wortmarke + Erstelldatum). Dezent,
+   mit Trennlinie nach oben, damit sie wie ein Dokument-Abschluss wirkt. */
+.security-report__fusszeile {
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+  text-align: center;
+  font-size: 11px;
+  color: var(--color-text-tert);
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+/* ── 5. Rogue-DHCP-Statushinweis (dezent) ──────────────────────────────────────── */
+.security-report__rogue {
+  margin: 0;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-sec);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* ── 6. PDF-Aktion (rechtsbuendig im Kopf) ─────────────────────────────────────── */
+/* Sitzt jetzt im header.security-report__kopf; margin-left:auto schiebt den Block
+   ganz nach rechts, neben Logo + Titel. Button oben buendig zur Ueberschrift. */
+.security-report__kopf-aktionen {
+  margin-left: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.security-report__pdf-fehler {
+  margin: 0;
+  font-size: 12px;
+  color: var(--sev-med-text);
+}
+
+.security-report__pdf {
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-bg);
+  background: var(--color-accent);
+  border: 1px solid var(--color-accent-strong);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.security-report__pdf:hover {
+  background: var(--color-accent-strong);
+}
+
+/* Dezenter Lade-Indikator (schmaler Balken oben am Container). */
+.security-report__laedt {
+  height: 2px;
+  background: var(--color-accent);
+  border-radius: var(--radius-md);
+  opacity: 0.6;
+}

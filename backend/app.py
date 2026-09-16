@@ -10,12 +10,18 @@ fastapi/starlette).
 """
 
 import asyncio
+import ipaddress
+import json
+import os
+import sqlite3
 import sys
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Callable, Sequence
+from contextlib import asynccontextmanager, suppress
+from dataclasses import dataclass, replace
+from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, Protocol
 
 import structlog
 from fastapi import FastAPI, Request
@@ -23,59 +29,889 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import Response
 from starlette.types import Scope
 
+from api.agent import (
+    provide_delete_agent,
+    provide_list_agents,
+    provide_ping_agent,
+    provide_save_agent,
+    provide_scan_via_agent,
+)
+from api.agent import router as agent_router
+from api.alerting import (
+    provide_add_alert_rule,
+    provide_delete_alert_rule,
+    provide_get_alert_history,
+    provide_get_alert_rules,
+    provide_get_smtp_config_raw,
+    provide_save_smtp_config,
+    provide_send_test_alert,
+    provide_update_alert_rule,
+)
+from api.alerting import router as alerting_router
+from api.analysis import (
+    UserRuleBody,
+    provide_acknowledge,
+    provide_add_user_rules,
+    provide_analyze,
+    provide_delete_user_rule,
+    provide_list_all_rules,
+    provide_list_user_rules,
+    provide_service_lookup,
+)
+from api.analysis import router as analysis_router
+from api.blocklist import (
+    AddSourceBody,
+    AddSourceOut,
+    ContactMatchOut,
+    HealthIssueOut,
+    HealthOut,
+    MatchBody,
+    MatchOut,
+    MatchResultsOut,
+    RefreshDueOut,
+    RefreshOut,
+    SettingsBody,
+    SettingsOut,
+    SourceOut,
+    UpdateSourceBody,
+    UploadSourceBody,
+    UploadSourceOut,
+    provide_add_source,
+    provide_delete_source,
+    provide_health,
+    provide_list_sources,
+    provide_match,
+    provide_read_settings,
+    provide_refresh_due,
+    provide_refresh_source,
+    provide_reset_defaults,
+    provide_update_source,
+    provide_upload_source,
+    provide_write_settings,
+)
+from api.blocklist import router as blocklist_router
+from api.capture import (
+    TopologySource,
+    provide_build_topology,
+    provide_capture_lldp,
+    provide_capture_status,
+    provide_get_lldp_neighbors,
+    provide_pcap_path,
+    provide_recent_packets,
+    provide_save_dir,
+    provide_start_capture,
+    provide_start_capture_uc,
+    provide_stop_capture,
+)
+from api.capture import router as capture_router
+from api.capture_access import (
+    provide_get_capture_access_status,
+    provide_grant_capture_access,
+    provide_revoke_capture_access,
+)
+from api.capture_access import router as capture_access_router
+from api.cve import (
+    provide_cve_acknowledge,
+    provide_get_acknowledged_findings,
+    provide_get_active_findings,
+    provide_get_cve_status,
+)
+from api.cve import router as cve_router
 from api.devices import (
+    provide_answer_archive_prompt,
+    provide_archive_device,
+    provide_create_device,
     provide_delete_device,
+    provide_dismiss_device_from_watch,
+    provide_entferne_geraete_menge,
+    provide_get_archive_candidates,
+    provide_get_archived_devices,
     provide_get_device,
     provide_get_device_stats,
     provide_get_devices,
+    provide_get_unclassified_devices,
+    provide_gruppiere_nach_netz,
     provide_record_scanned_host,
+    provide_restore_device,
     provide_update_device_meta,
 )
 from api.devices import router as devices_router
+from api.diagnostics import (
+    provide_build_route_geo,
+    provide_check_dhcp_permission,
+    provide_check_external,
+    provide_check_tools,
+    provide_check_traceroute_permission,
+    provide_detect_rogue_dhcp,
+    provide_enrich_route_orgs,
+    provide_grab_banner,
+    provide_resolve_dns,
+    provide_run_traceroute,
+)
+from api.diagnostics import router as diagnostics_router
+from api.dns_bypass import (
+    DnsBypassFindingOut,
+    DnsBypassOverviewOut,
+    DnsBypassStatusOut,
+    provide_dns_bypass_start,
+    provide_dns_bypass_status,
+    provide_dns_bypass_stop,
+    provide_dns_bypass_view,
+)
+from api.dns_bypass import router as dns_bypass_router
+from api.dns_trust import (
+    DnsServerPlausibilityOut,
+    TrustedDnsServerOut,
+    provide_dns_trust_create,
+    provide_dns_trust_decision,
+    provide_dns_trust_list,
+    provide_dns_trust_rank,
+)
+from api.dns_trust import router as dns_trust_router
+from api.dns_watch import (
+    DNS_DOH_PROVIDERS_KEY,
+    DnsContactOut,
+    DnsWatchOverviewOut,
+    provide_dns_watch,
+    provide_dns_watch_acknowledge,
+)
+from api.dns_watch import router as dns_watch_router
+from api.export import provide_export_analysis, provide_export_logging, provide_export_scan
+from api.export import router as export_router
+from api.fritz import provide_get_fritz_detail
+from api.fritz import router as fritz_router
+from api.interfaces import provide_list_interfaces
+from api.interfaces import router as interfaces_router
+from api.license_manifest import (
+    provide_get_license_manifest,
+    provide_get_license_text,
+    provide_laufende_plattform,
+)
+from api.license_manifest import router as license_manifest_router
+from api.maintenance import (
+    provide_delete_selected,
+    provide_factory_reset,
+    provide_reset_scan_data,
+)
+from api.maintenance import router as maintenance_router
+from api.metrics import provide_export_metrics
+from api.metrics import router as metrics_router
+from api.monitoring import (
+    provide_add_monitor_target,
+    provide_check_log_volume,
+    provide_create_logging_task,
+    provide_delete_logging_task,
+    provide_delete_monitor_target,
+    provide_get_all_sla_stats,
+    provide_get_logging_task_detail,
+    provide_get_logging_task_events,
+    provide_get_logging_task_rtt,
+    provide_get_logging_task_sla,
+    provide_get_monitor_events,
+    provide_get_rtt_history,
+    provide_get_schedules,
+    provide_get_sla_stats,
+    provide_list_logging_tasks,
+    provide_manage_schedules,
+    provide_monitor_status,
+    provide_pause_logging_task,
+    provide_resume_logging_task,
+    provide_start_logging_task,
+    provide_stop_logging_task,
+    provide_update_schedule,
+)
+from api.monitoring import router as monitoring_router
+from api.outbound import OutboundContactOut, OutboundOverviewOut, provide_outbound_contacts
+from api.outbound import router as outbound_router
+from api.outbound_log import (
+    provide_create_outbound_recording,
+    provide_delete_outbound_recording,
+    provide_edit_outbound_recording,
+    provide_get_outbound_aggregate,
+    provide_get_outbound_detail_range,
+    provide_get_outbound_recording,
+    provide_list_outbound_recordings,
+    provide_pause_outbound_recording,
+    provide_resume_outbound_recording,
+    provide_start_outbound_recording,
+    provide_stop_outbound_recording,
+)
+from api.outbound_log import router as outbound_log_router
+from api.process import provide_check_process_permission, provide_list_processes
+from api.process import router as process_router
+from api.report import (
+    BehaviorDayBandSlotOut,
+    BehaviorReportEntryOut,
+    BehaviorReportOut,
+    BehaviorReportTaskOut,
+    BehaviorSingleProfileOut,
+    BehaviorWeekSlotOut,
+    CveDeviceRowOut,
+    CveFindingOut,
+    CveFindingRowOut,
+    CveReportOut,
+    CveServiceRowOut,
+    CveSeverityCountOut,
+    DnsAppCountOut,
+    DnsBypassReportOut,
+    DnsBypassReportRecordingOut,
+    DnsBypassReportRowOut,
+    DnsBypassResolverOut,
+    DnsCategoryCountOut,
+    DnsWatchContactRowOut,
+    DnsWatchReportOut,
+    InventoryDeviceRowOut,
+    InventoryDistributionOut,
+    InventoryReportOut,
+    NetFindingOut,
+    OutboundContactRowOut,
+    OutboundCountryOut,
+    OutboundOperatorOut,
+    OutboundReportOut,
+    OutboundReportRecordingOut,
+    PortFindingOut,
+    ScoreContributionOut,
+    ScoreOut,
+    SecurityReportOut,
+    provide_behavior_report,
+    provide_behavior_report_pdf,
+    provide_behavior_report_tasks,
+    provide_cve_report,
+    provide_cve_report_pdf,
+    provide_dns_bypass_report,
+    provide_dns_bypass_report_pdf,
+    provide_dns_bypass_report_recordings,
+    provide_dns_watch_report,
+    provide_dns_watch_report_pdf,
+    provide_inventory_report,
+    provide_inventory_report_pdf,
+    provide_manual_pdf,
+    provide_outbound_report,
+    provide_outbound_report_pdf,
+    provide_outbound_report_recordings,
+    provide_security_report,
+    provide_security_report_pdf,
+)
+from api.report import router as report_router
+from api.resolver import provide_resolve_endpoint, provide_resolve_ptr_batch
+from api.resolver import router as resolver_router
 from api.scanning import (
+    provide_get_arp_table,
     provide_get_scan_detail,
     provide_get_scan_history,
     provide_lookup_vendor,
 )
 from api.scanning import router as scanning_router
+from api.scheduler import (
+    CreateJobBody,
+    ScheduledJobOut,
+    provide_scheduler_create,
+    provide_scheduler_delete,
+    provide_scheduler_list,
+    provide_scheduler_pause,
+    provide_scheduler_resume,
+)
+from api.scheduler import router as scheduler_router
+from api.security import (
+    EintragBody,
+    PruefenBody,
+    provide_add_default_creds,
+    provide_check_default_creds,
+    provide_clear_arp_baseline,
+    provide_delete_default_creds,
+    provide_ermittle_pruefplan,
+    provide_get_arp_alerts,
+    provide_get_arp_baseline,
+    provide_get_pruef_historie,
+    provide_get_pruef_historie_detail,
+    provide_inspect_tls,
+    provide_list_default_creds,
+    provide_lookup_cves,
+    provide_pruefen_kandidaten,
+    provide_reset_default_creds,
+    provide_run_arp_scan,
+    provide_set_default_creds_aktiv,
+    provide_target_scope_guard,
+    provide_update_default_creds,
+)
+from api.security import router as security_router
 from api.settings import (
     provide_get_settings,
     provide_update_secret,
     provide_update_setting,
 )
 from api.settings import router as settings_router
+from api.sni import (
+    provide_get_observed_sni,
+    provide_sni_running,
+    provide_start_sni,
+    provide_start_sni_uc,
+    provide_stop_sni,
+)
+from api.sni import router as sni_router
+from api.system import (
+    provide_system_info,
+    provide_url_opener,
+    provide_version,
+)
+from api.system import router as system_router
+from api.traffic import (
+    provide_check_traffic_permission,
+    provide_list_app_traffic,
+    provide_poll_error,
+    provide_start_poll,
+    provide_stop_poll,
+)
+from api.traffic import router as traffic_router
+from api.usage import provide_record_usage, provide_top_features
+from api.usage import router as usage_router
+from application.agent import (
+    DeleteAgent,
+    ListAgents,
+    PingAgent,
+    SaveAgent,
+    ScanViaAgent,
+)
+from application.alerting import (
+    AddAlertRule,
+    DeleteAlertRule,
+    GetAlertHistory,
+    GetAlertRules,
+    GetSmtpConfigRaw,
+    RaiseAlert,
+    SaveSmtpConfig,
+    SendTestAlert,
+    UpdateAlertRule,
+)
+from application.analysis import AddUserRules, AnalyzeSnapshot, ListUserRules
+from application.blocklist import (
+    DEFAULT_GROUP_THREAT_ENABLED,
+    DEFAULT_GROUP_TRACKER_ADS_ENABLED,
+    DEFAULT_REFRESH_DAYS,
+    DEFAULT_STRICTNESS,
+    SETTING_GROUP_THREAT,
+    SETTING_GROUP_TRACKER_ADS,
+    SETTING_REFRESH_DAYS,
+    SETTING_STRICTNESS,
+    AddUserSource,
+    BlocklistError,
+    BlocklistRefreshHandler,
+    CheckBlocklistHealth,
+    ContactInput,
+    DeleteUserSource,
+    ImportUploadedSource,
+    ListBlocklistSources,
+    MatchContacts,
+    RefreshDueSources,
+    RefreshSource,
+    ResetSourcesToDefaults,
+    SeedBuiltinDohContent,
+    SeedDefaultSources,
+    UpdateUserSource,
+    strictness_from_wire,
+)
+from application.capture import (
+    BuildTopology,
+    CaptureLldp,
+    GetLldpNeighbors,
+    RunCapture,
+    StartCapture,
+)
+from application.capture_access import (
+    GetCaptureAccessStatus,
+    GrantCaptureAccess,
+    RevokeCaptureAccess,
+)
+from application.cve import (
+    ActiveFinding,
+    GetAcknowledgedFindings,
+    GetActiveFindings,
+    GetCveMonitorStatus,
+    RunCveMonitor,
+)
 from application.devices import (
+    AnswerArchivePrompt,
+    ArchiveDevice,
+    CreateDevice,
     DeleteDevice,
+    DismissDeviceFromWatch,
+    GetArchiveCandidates,
+    GetArchivedDevices,
     GetDevice,
     GetDevices,
     GetDeviceStats,
+    GetUnclassifiedDevices,
     RecordScannedHost,
+    RestoreDevice,
     UpdateDeviceMeta,
 )
+from application.diagnostics import (
+    BuildRouteGeo,
+    CheckDhcpPermission,
+    CheckDiagnosticsTools,
+    CheckExternalReachability,
+    CheckTraceroutePermission,
+    DetectRogueDhcp,
+    EnrichRouteOrgs,
+    GetLatestRogueDhcp,
+    GrabBanner,
+    ResolveDns,
+    RogueDhcpPermissionError,
+    RunTraceroute,
+)
+from application.dns_bypass import (
+    DnsBypassRecorder,
+    GetDnsBypassReport,
+    StartDnsBypassRecording,
+    StopDnsBypassRecording,
+)
+from application.dns_trust import (
+    AddDnsTrustServer,
+    DnsServerPlausibility,
+    ListDnsTrustServers,
+    SetDnsServerRank,
+    SetDnsServerTrust,
+    SyncDnsTrustServer,
+    TrustedDnsServerIps,
+)
+from application.dns_watch import BuildDnsWatch, RawDnsConnection
+from application.export import (
+    ExportAnalysis,
+    ExportLoggingReport,
+    ExportScan,
+    LoggingReportNotFound,
+    ScanNotFoundError,
+)
+from application.fritz_detail import FritzDetailAuthError, GetFritzDetail
+from application.interfaces import ListInterfaces
+from application.license_manifest import GetLicenseManifest, GetLicenseText
+from application.maintenance import (
+    DeleteSelectedData,
+    EntferneGeraeteMenge,
+    FactoryReset,
+    GruppiereGeraeteNachNetz,
+    ResetScanData,
+)
+from application.metrics import ExportMetrics
+from application.monitoring import (
+    AddMonitorTarget,
+    CheckLogVolume,
+    CreateLoggingTask,
+    DeleteLoggingTask,
+    DeleteMonitorTarget,
+    EnforceLoggingRetention,
+    GetAllSlaStats,
+    GetLoggingTaskDetail,
+    GetLoggingTaskEvents,
+    GetLoggingTaskRtt,
+    GetLoggingTaskSla,
+    GetMonitorEvents,
+    GetRttHistory,
+    GetSchedules,
+    GetSlaStats,
+    ListLoggingTasks,
+    LoggingTaskNotFound,
+    ManageSchedules,
+    PauseLoggingTask,
+    RecordScheduleResult,
+    RecordScheduleRun,
+    ResumeActiveLoggingTasks,
+    ResumeLoggingTask,
+    RunLoggingRetention,
+    RunMonitor,
+    StartLoggingTask,
+    StopLoggingTask,
+    UpdateSchedule,
+)
+from application.monitoring.behavior_profile import ProfileSample
+from application.monitoring.scheduler_handler import MonitoringWindowHandler
+from application.outbound import BuildOutboundContacts, RawConnection
+from application.outbound_log import (
+    CreateOutboundRecording,
+    DeleteOutboundRecording,
+    EditOutboundRecording,
+    GetOutboundAggregate,
+    GetOutboundDetailRange,
+    GetOutboundRecording,
+    ListOutboundRecordings,
+    PauseOutboundRecording,
+    ResumeOutboundRecording,
+    RunOutboundRecorder,
+    StartOutboundRecording,
+    StopOutboundRecording,
+)
+from application.process import CheckProcessPermission, ListProcesses
+from application.reporting import (
+    ACHSE_B_FUSSNOTE,
+    REPORT_FOOTER_BEHAVIOR,
+    REPORT_FOOTER_CVE,
+    REPORT_FOOTER_DNS_BYPASS,
+    REPORT_FOOTER_DNS_WATCH,
+    REPORT_FOOTER_INVENTORY,
+    REPORT_FOOTER_OUTBOUND,
+    REPORT_FOOTER_SECURITY,
+    REPORT_INTRO_BEHAVIOR,
+    REPORT_INTRO_CVE,
+    REPORT_INTRO_DNS_BYPASS,
+    REPORT_INTRO_DNS_WATCH,
+    REPORT_INTRO_INVENTORY,
+    REPORT_INTRO_OUTBOUND,
+    REPORT_INTRO_SECURITY,
+    REPORT_TITLE_BEHAVIOR,
+    REPORT_TITLE_CVE,
+    REPORT_TITLE_DNS_BYPASS,
+    REPORT_TITLE_DNS_WATCH,
+    REPORT_TITLE_INVENTORY,
+    REPORT_TITLE_OUTBOUND,
+    REPORT_TITLE_SECURITY,
+    SCORE_LEVEL_LABELS,
+    BuildCveReport,
+    BuildDnsWatchReport,
+    BuildInventoryReport,
+    BuildOutboundReport,
+    BuildSecurityReport,
+    CveFindingRow,
+    CveMonitorInput,
+    CvePdfModel,
+    CveReport,
+    DnsBypassPdfModel,
+    DnsBypassReport,
+    DnsBypassReportInput,
+    DnsBypassReportRow,
+    DnsWatchContactRow,
+    DnsWatchPdfModel,
+    DnsWatchReport,
+    DnsWatchReportInput,
+    HostGroupBlock,
+    InventoryDeviceRow,
+    InventoryPdfModel,
+    InventoryReport,
+    Lang,
+    ManualPdfModel,
+    ManualPdfSection,
+    OutboundContactRow,
+    OutboundPdfModel,
+    OutboundReport,
+    OutboundReportInput,
+    SecurityPdfModel,
+    SecurityReport,
+    build_dns_bypass_report,
+    format_datum_kurz,
+    format_generated_at,
+)
+from application.reporting import (
+    CveFinding as ReportCveFinding,
+)
+from application.reporting import (
+    NetFinding as ReportNetFinding,
+)
+from application.reporting import (
+    PortFinding as ReportPortFinding,
+)
+from application.reporting.behavior_pdf_model import BehaviorPdfModel
+from application.reporting.behavior_report import (
+    BehaviorReport,
+    BehaviorTaskInput,
+    build_all_behavior_report,
+    build_single_behavior_report,
+)
+from application.resolver import ResolveEndpoint, ResolvePtrBatch
 from application.scanning import (
+    GetArpTable,
     GetScanDetail,
     GetScanHistory,
     LookupVendor,
     RunNetworkScan,
 )
+from application.scheduler import (
+    CreateScheduledJob,
+    DeleteScheduledJob,
+    ListScheduledJobs,
+    PauseScheduledJob,
+    ResumeScheduledJob,
+    RunScheduler,
+)
+from application.security import (
+    AddDefaultCredsEintrag,
+    CheckDefaultCreds,
+    ClearArpBaseline,
+    DeleteDefaultCredsEintrag,
+    ErmittlePruefplan,
+    GetArpAlerts,
+    GetArpBaseline,
+    GetDefaultCredsListe,
+    GetPruefHistorie,
+    GetPruefHistorieDetail,
+    InspectTls,
+    LookupCves,
+    PruefeGewaehlteKandidaten,
+    ResetDefaultCredsListe,
+    RunArpScan,
+    SetDefaultCredsAktiv,
+    SpeicherePruefung,
+    UpdateDefaultCredsEintrag,
+)
 from application.settings import GetSettings, UpdateSecret, UpdateSetting
+from application.sni import GetObservedSni, RunSniCapture, StartSniCapture
+from application.traffic import CheckTrafficPermission, ListAppTraffic, PollThroughput
+from application.usage import GetTopFeatures, RecordFeatureUsage
+from domain.analysis import (
+    ObservedConnection,
+    ObservedHost,
+    ObservedProcess,
+    Rule,
+    Severity,
+    Snapshot,
+    service_for_port,
+)
+from domain.analysis.engine import _SEVERITY_RANK
+from domain.blocklist import (
+    BlocklistGroup,
+    BlocklistSource,
+    MatchStrictness,
+    domain_suffix_candidates,
+)
+from domain.devices import Device, DeviceSource, is_broadcast_mac, normalize_mac
+from domain.dns_bypass import AggregatedBypass
+from domain.dns_trust import DnsServerCategory, DnsTrustState, categorize_dns_server
+from domain.dns_watch import doh_providers_or_default
+from domain.export import (
+    ExportableAnalysis,
+    ExportableFinding,
+    ExportableHost,
+    ExportableLoggingEvent,
+    ExportableLoggingReport,
+    ExportableLoggingRtt,
+    ExportablePort,
+    ExportableScan,
+)
+from domain.monitoring import (
+    LatencyThreshold,
+    LoggingTask,
+    MonitorEvent,
+    MonitorEventType,
+    OperationMode,
+    PingSample,
+    ThresholdCondition,
+    compute_sla_stats,
+)
+from domain.outbound_log import (
+    AggregatedContact,
+    ContactDelta,
+    OutboundDetailRow,
+    OutboundRecording,
+    RecordingMode,
+)
+from domain.process import classify_kind
+from domain.resolver_names import known_resolver_name
+from domain.scanning import EnrichedHost, HostEnriched, ScanCompleted, ScanConfig
+from domain.scheduler.models import DailyWindow
+from domain.security import CredentialKandidat, DefaultCredsEintrag
+from infrastructure._dns_expected_migration import migrate_expected_servers_to_trust
+from infrastructure.agent import (
+    SqliteAgentRepository,
+    UrllibAgentPinger,
+    WebsocketsAgentScanClient,
+)
+from infrastructure.alerting import (
+    AlertNotifierAdapter,
+    SettingsSmtpConfigAdapter,
+    SqliteAlertRuleRepository,
+)
+from infrastructure.analysis import BuiltinRuleProvider, StaticHelpLinkResolver
+from infrastructure.analysis_acknowledgements_db import SqliteAcknowledgementRepository
+from infrastructure.analysis_host_history_db import SqliteHostHistoryRepository
+from infrastructure.analysis_rules_db import SqliteUserRuleRepository
+from infrastructure.blocklist_entries_db import SqliteBlocklistEntryRepository
+from infrastructure.blocklist_fetcher import UrllibBlocklistFetcher
+from infrastructure.blocklist_sources_db import SqliteBlocklistSourceRepository
+from infrastructure.bundle_paths import resolve_bundle_path
+from infrastructure.capture import (
+    ScapyLldpSniffer,
+    ScapyPacketSniffer,
+    WebSocketCaptureBroadcaster,
+)
 from infrastructure.clock import SystemClock
-from infrastructure.config import APP_NAME, APP_VERSION, AppConfig
+from infrastructure.config import APP_NAME, APP_VERSION, AppConfig, display_version
+from infrastructure.crypto import KeyMissingError
+from infrastructure.cve_acknowledgements_db import SqliteCveAcknowledgementRepository
+from infrastructure.cve_checkstate_db import SqliteCveCheckStateRepository
+from infrastructure.cve_findings_db import SqliteCveFindingRepository
+from infrastructure.db_schema import schema_aufbauen, schema_pruefen
+from infrastructure.device_purge import SqliteDevicePurgeRepository
 from infrastructure.device_repository import SqliteDeviceRepository
+from infrastructure.diagnostics_linux import (
+    DiagnosticsToolMissing,
+    DigDnsResolver,
+    ExternalCheckFailed,
+    HttpxReachabilityProvider,
+    LinuxDhcpPermission,
+    LinuxPackageManagerDetector,
+    LinuxTraceroutePermission,
+    NmapDhcpProbe,
+    ShutilToolDetector,
+    SocketBannerGrabber,
+    SystemTracerouteRunner,
+)
+from infrastructure.dns_bypass_aggregate import SqliteDnsBypassAggregateRepository
+from infrastructure.dns_bypass_detail import SqliteDnsBypassDetailRepository
+from infrastructure.dns_bypass_recordings import SqliteDnsBypassRecordingRepository
+from infrastructure.dns_trust_repository import SqliteDnsTrustRepository
+from infrastructure.dns_watch_acknowledgements_db import (
+    SqliteDnsWatchAcknowledgementRepository,
+)
+from infrastructure.export_pdf import ReportlabRenderer
+from infrastructure.http_guard import is_origin_allowed
+
+# Plattform-Weiche fuer den Interface-Discovery-Adapter. sys.platform (nicht hasattr),
+# weil mypy --strict den Zweig statisch auswertet und so den plattformspezifischen
+# ctypes-Code des Windows-Adapters nur unter win32 typprueft -- ein hasattr-Guard
+# bliebe fuer mypy beidseitig sichtbar und wuerde die Linux-CI brechen. macOS
+# (darwin) nutzt den eigenen ifconfig/netstat-Adapter; alles uebrige (Linux) den
+# ip-Adapter.
+if sys.platform == "win32":
+    from infrastructure.interfaces_windows import (
+        InterfaceDiscoveryAdapter as InterfaceDiscoveryAdapter,
+    )
+elif sys.platform == "darwin":
+    from infrastructure.interfaces_macos import (
+        InterfaceDiscoveryAdapter as InterfaceDiscoveryAdapter,
+    )
+else:
+    from infrastructure.interfaces_linux import (
+        InterfaceDiscoveryAdapter as InterfaceDiscoveryAdapter,
+    )
+from infrastructure.license_manifest import LicenseManifestAdapter
 from infrastructure.logging import configure_logging
+from infrastructure.metrics import SqliteMetricsReader
+from infrastructure.monitoring import (
+    ApschedulerJobScheduler,
+    CompositeTargetSource,
+    MonitorLoggingSink,
+    MonitorNotifierAdapter,
+    MonitorPingerAdapter,
+    SqliteLoggingEventRepository,
+    SqliteLoggingRttRepository,
+    SqliteLoggingTaskRepository,
+    SqliteMonitorEventRepository,
+    SqliteRttHistoryRepository,
+    SqliteScheduleRepository,
+    SqliteSlaSampleRepository,
+    WebSocketMonitorBroadcaster,
+)
+from infrastructure.outbound_log_aggregate import SqliteOutboundAggregateRepository
+from infrastructure.outbound_log_detail import SqliteOutboundDetailRepository
+from infrastructure.outbound_log_recordings import SqliteOutboundRecordingRepository
+from infrastructure.process_linux import PsutilProcessAdapter
+from infrastructure.process_permission import ProcessPermissionAdapter
+from infrastructure.resolver import (
+    CsvGeoAsnDb,
+    RdapClient,
+    ResolverDataMissing,
+    ResolverToolMissing,
+    TlsCertReader,
+)
+
+# Plattform-Weiche fuer den PTR-/Vorwaerts-DNS-Adapter -- exakt dasselbe Muster wie beim
+# Interface-Discovery-Adapter oben. sys.platform (nicht hasattr), weil mypy --strict den
+# Zweig statisch auswertet: auf Windows fehlt das System-``dig``-Binary, dort traegt der
+# dnspython-Adapter die Aufloesung; sonst der bestehende DigDnsPtrResolver. Beide Zweige
+# binden dieselbe Name ``DigDnsPtrResolver``, damit die Verwendungsstelle unveraendert
+# bleibt (der gewaehlte Adapter erfuellt denselben PtrResolverPort-Vertrag).
+if sys.platform == "win32":
+    from infrastructure.resolver.dns_ptr_windows import (
+        DnspythonPtrResolver as DigDnsPtrResolver,
+    )
+else:
+    from infrastructure.resolver.dns_ptr import (
+        DigDnsPtrResolver as DigDnsPtrResolver,
+    )
+from infrastructure.reverse_dns import reverse_dns_name
+from infrastructure.rogue_dhcp_repository import SqliteRogueDhcpRepository
+from infrastructure.scanning.arp_table import ArpTableAdapter
+from infrastructure.scanning.fritz_detail import FritzDetailAdapter
+from infrastructure.scanning.fritz_hosts import FritzAuthError, FritzHostsAdapter
 from infrastructure.scanning.host_discovery import HostDiscoveryAdapter
 from infrastructure.scanning.hostname_resolver import HostnameResolverAdapter
 from infrastructure.scanning.ipv6_enrichment import Ipv6EnrichmentAdapter
 from infrastructure.scanning.mdns import MdnsAdapter
 from infrastructure.scanning.port_scanner import PortScannerAdapter
-from infrastructure.scanning.scan_history import SqliteScanHistoryRepository
+from infrastructure.scanning.scan_history import CorruptScanError, SqliteScanHistoryRepository
 from infrastructure.scanning.ssdp import SsdpAdapter
 from infrastructure.scanning.vendor_lookup import VendorLookupAdapter
+from infrastructure.scheduler_jobs_db import SqliteScheduledJobRepository
 from infrastructure.secret_store import KeyringSecretStore, SecretStoreUnavailableError
-from infrastructure.settings_repository import SqliteSettingsRepository
+from infrastructure.security import (
+    CveLookupAdapter,
+    DefaultCredsCheckerAdapter,
+    SqliteArpGuardRepository,
+    SqliteDefaultCredsHistoryRepository,
+    SqliteDefaultCredsListRepository,
+    TlsInspectorAdapter,
+    is_private_target,
+)
+from infrastructure.self_host import detect_self_host
+from infrastructure.settings_repository import CorruptSettingError, SqliteSettingsRepository
+from infrastructure.sni.errors import SniError, SniPermissionError
+from infrastructure.sni.sni_sniffer import ScapySniSniffer
+from infrastructure.system_resolvers import detect_system_resolvers
+
+# Plattform-Weiche fuer die traffic-Domaene, dreifach nach dem Muster der
+# Interface-Discovery-Weiche oben: Abfrage ueber sys.platform (nicht hasattr, damit
+# mypy --strict den Zweig statisch auswertet), plattformeigener Import INNERHALB des
+# Zweigs, und in JEDEM Zweig derselbe gebundene Name -- die Verwendungsstelle weiter
+# unten bleibt dadurch unveraendert.
+#
+# Der win32-Zweig betrifft AUSSCHLIESSLICH den Rechte-Adapter (S67-W-p, Finding 12):
+# Stufe 1 (welches Programm mit welcher Gegenstelle spricht) laeuft auf Windows ueber
+# denselben psutil-Datenadapter wie auf Linux und bleibt unangetastet. Nur die
+# Durchsatz-Auskunft ist auf Windows eine andere: die Messung waere ueber die
+# Ereignisablaufverfolgung technisch moeglich, verlangt aber dauerhaft erhoehte
+# Rechte -- und darauf verzichtet CERNIS bewusst (Karls Entscheidung). Vorher fiel
+# Windows in den else-Zweig und bekam den Linux-Rechte-Adapter, dessen is_available
+# dort False liefert; der Use-Case setzte daraufhin einen Zustand ohne Ursache, und
+# die Oberflaeche zeigte den macOS-Text. Der eigene Adapter sagt stattdessen, was
+# wirklich gilt.
+if sys.platform == "darwin":
+    from infrastructure.traffic_macos import (
+        PsutilTrafficAdapter as PsutilTrafficAdapter,
+    )
+    from infrastructure.traffic_macos import (
+        TrafficPermissionAdapter as TrafficPermissionAdapter,
+    )
+elif sys.platform == "win32":
+    from infrastructure.traffic_linux import (
+        PsutilTrafficAdapter as PsutilTrafficAdapter,
+    )
+    from infrastructure.traffic_windows import (
+        TrafficPermissionAdapter as TrafficPermissionAdapter,
+    )
+else:
+    from infrastructure.traffic_linux import (
+        PsutilTrafficAdapter as PsutilTrafficAdapter,
+    )
+    from infrastructure.traffic_permission import (
+        TrafficPermissionAdapter as TrafficPermissionAdapter,
+    )
+
+# Plattform-Weiche fuer die Capture-Rechteeinrichtung (Etappe 2), gleiches Muster wie
+# oben: gleicher gebundener Name in beiden Zweigen, die Auswahl trifft NUR der
+# Composition Root. macOS richtet den Zugriff auf die BPF-Geraete ein; auf allen
+# uebrigen Plattformen meldet der Adapter ehrlich "trifft hier nicht zu" (Linux regelt
+# das ueber CAP_NET_RAW im Paket-Postinstall) -- kein Fehler, kein vorgetaeuschter Erfolg.
+if sys.platform == "darwin":
+    from infrastructure.capture_access_macos import (
+        CaptureAccessAdapter as CaptureAccessAdapter,
+    )
+else:
+    from infrastructure.capture_access_other import (
+        CaptureAccessAdapter as CaptureAccessAdapter,
+    )
+from infrastructure.usage_stats_db import SqliteUsageStatsRepository
 
 # ── ÜBERGANGS-KRÜCKE P2.1b: Bootstrap-Init aus dem Altcode (modules/) ──────────
 # app.py ist Bootstrap-Owner und ruft die Init-/Teardown-Funktionen der noch
@@ -84,22 +920,18 @@ from infrastructure.settings_repository import SqliteSettingsRepository
 # nur hier erlaubt (Composition Root, nicht vom import-linter analysiert); ein
 # Guardrail-Contract verbietet den Ringen jeden modules/-Import. Jede Gruppe
 # faellt weg, sobald die jeweilige Domaene migriert ist.
-from modules.agent import init_agents_db
 from modules.alerting import init_alerts_db
 from modules.devices_db import init_devices_db
-from modules.interfaces import get_interfaces
-from modules.monitor import (
-    MonitorTarget,
-    run_monitor,
-    stop_monitor,
-)
-from modules.monitor import (
-    configure as configure_monitor,
-)
-from modules.scheduler import init_schedule_db, start_scheduler, stop_scheduler
-from modules.sla import init_sla_db
-from modules.storage import get_setting, init_db
-from ws_scan import make_ws_scan
+from modules.storage import init_db
+from ports.alerting import AlertNotifierPort, SmtpConfigPort
+from ports.cve import InventoryHost, InventoryPort, LookupCve
+from ports.diagnostics import TraceroutePermissionPort, TracerouteRunner
+from ports.scheduler import JobHandler
+from ports.security import PortQuery
+from ports.settings import SettingsRepository
+from ws_monitor import make_ws_monitor
+from ws_pcap import make_ws_pcap
+from ws_scan import make_ws_scan, record_host_best_effort, record_seen_best_effort
 
 logger = structlog.get_logger()
 
@@ -108,7 +940,17 @@ logger = structlog.get_logger()
 
 
 def _check_version_upgrade() -> None:
-    """Schreibt die Version-Markierung; Settings bleiben ueber Upgrades erhalten (wie main.py)."""
+    """Schreibt die Version-Markierung; Settings bleiben ueber Upgrades erhalten (wie main.py).
+
+    ABGRENZUNG ZUM SCHEMASTAND (S88-P1a): die Datei ``.version`` bleibt bestehen und
+    wird weiter geschrieben, aber sie ist NICHT die Quelle des Schemastands. Die
+    PROGRAMM-Fassung und der SCHEMA-Stand sind zwei verschiedene Dinge: zwei
+    Programmfassungen koennen dasselbe Schema tragen, und eine Datenbank kann von
+    einem Programm stammen, dessen Fassungsnummer nichts ueber ihren inneren Aufbau
+    verraet. Den Schemastand traegt seit 2.1.2 ``PRAGMA user_version`` in der
+    Datenbank selbst (siehe ``infrastructure.db_schema``); ``.version`` bleibt die
+    Programmspur -- eine Datei neben der Datenbank, fachlich nicht ausgewertet.
+    """
     from modules.db_path import DATA_DIR
 
     version_file = Path(DATA_DIR) / ".version"
@@ -118,59 +960,893 @@ def _check_version_upgrade() -> None:
         old_version = ""
     if old_version != APP_VERSION:
         if old_version:
-            logger.info("version_upgrade", old=old_version, new=APP_VERSION)
+            # Der Protokollname hiess frueher ``version_upgrade`` und behauptete damit
+            # eine Richtung, die er nicht kannte: dieselbe Zeile entstand auch beim
+            # RUECKSCHRITT auf eine aeltere Fassung (etwa nach einem zurueckgenommenen
+            # Update). ``version_changed`` benennt nur die Tatsache der Aenderung; die
+            # Richtung steht als eigenes Feld daneben, aus dem Vergleich der beiden
+            # Fassungen ERMITTELT statt vom Namen unterstellt. Der Vergleich laeuft
+            # ueber die Zahlengruppen (2.1.10 ist neuer als 2.1.9, textlich waere es
+            # aelter); ist eine der beiden Angaben nicht so lesbar, heisst die
+            # Richtung ehrlich "unbekannt" statt geraten (Finding S3).
+            logger.info(
+                "version_changed",
+                old=old_version,
+                new=APP_VERSION,
+                direction=_version_direction(old_version, APP_VERSION),
+            )
         version_file.write_text(APP_VERSION)
 
 
-def _build_monitor_targets() -> list[Any]:
-    """Monitor-Targets aus Interfaces + Settings (wie main.py, ohne toten wlan/lan-Code)."""
-    targets: list[Any] = []
-    for iface in get_interfaces():
-        if iface.gateway and iface.ipv4:
-            targets.append(
-                MonitorTarget(
-                    id=f"gw_{iface.name}",
-                    label=f"Gateway ({iface.name})",
-                    host=iface.gateway,
-                    interface=iface.name,
-                    enabled=True,
-                )
-            )
-    targets.append(
-        MonitorTarget(
-            id="internet_primary",
-            label="Internet (Google DNS)",
-            host="8.8.8.8",
-            interface="",
-            enabled=True,
-        )
-    )
-    targets.append(
-        MonitorTarget(
-            id="internet_secondary",
-            label="Internet (Cloudflare)",
-            host="1.1.1.1",
-            interface="",
-            enabled=True,
-        )
-    )
-    custom = get_setting("monitor_custom_targets", [])
-    for t in custom or []:
-        targets.append(MonitorTarget(**t))
-    return targets
+def _version_tuple(version: str) -> tuple[int, ...] | None:
+    """Zerlegt ``2.1.2`` in ``(2, 1, 2)``; ``None``, wenn nicht rein numerisch."""
+    teile = version.split(".")
+    if not teile or not all(t.isdigit() for t in teile):
+        return None
+    return tuple(int(t) for t in teile)
+
+
+def _version_direction(old: str, new: str) -> str:
+    """Benennt die Richtung eines Fassungswechsels: ``upgrade``/``downgrade``/``unknown``."""
+    alt, neu = _version_tuple(old), _version_tuple(new)
+    if alt is None or neu is None:
+        return "unknown"
+    if neu > alt:
+        return "upgrade"
+    if neu < alt:
+        return "downgrade"
+    return "unchanged"
+
+
+# Fabrik-Naht des geplanten Scans (E1): liefert (RunNetworkScan, RecordScannedHost,
+# record_seen-Callable). Wird von create_app auf die dortigen Builder gebunden
+# (spaetes Binden, Muster der "HIER gebunden"-Naehte) -- _scheduled_scan selbst
+# bleibt Modul-Level, weil seine Signatur der M.6-ScanTriggerCallback ist und die
+# Aufrufer (job_scheduler/ManageSchedules) unveraendert bleiben.
+_scheduled_scan_bausteine: Callable[[], tuple[Any, Any, Any]] | None = None
+
+# Zweite, EIGENE Fabrik-Naht (Finding 3): der Use-Case, der die Ausfuehrungszeiten
+# des ausgeloesten Schedules festhaelt. Bewusst NICHT in das Bausteine-Tupel oben
+# gepackt -- das buendelt die Scan-Bausteine; die Zeit-Buchung ist ein eigener,
+# unabhaengiger Belang (sie muss auch dann laufen, wenn der Scan spaeter scheitert).
+_scheduled_scan_zeitbuchung: Callable[[], RecordScheduleRun] | None = None
+
+# Dritte Fabrik-Naht (S88-P4): der Use-Case, der den AUSGANG des Laufs festhaelt.
+# Bewusst getrennt von der Zeitbuchung oben -- die beiden schreiben zu verschiedenen
+# Zeitpunkten (Ausloesung vor dem Scan, Ausgang danach) und beantworten verschiedene
+# Fragen. ``None`` = nicht verdrahtet (vor create_app) -> es wird nichts gebucht.
+_scheduled_scan_ergebnisbuchung: Callable[[], RecordScheduleResult] | None = None
+
+# Weck-Naht des Scan-Endes (S86-A4/B1): ein QUELLEN-AGNOSTISCHES Callable () -> None,
+# das der Composition Root im Lifespan auf ``RunCveMonitor.wake`` bindet. Der Scan stoesst
+# damit den CVE-Worker an, ohne dass application/scanning je application/cve importierte --
+# die Naht laeuft ausschliesslich hier (Regel 5), genau wie die uebrigen Quer-Naehte.
+# Modul-global (Muster _scheduled_scan_bausteine), weil BEIDE Konsumenten des Ereignis-
+# stroms sie brauchen und _scheduled_scan als Modul-Level-Callback kein app-Objekt kennt.
+# ``None`` = nicht verdrahtet (vor create_app / ohne bootstrap) -> es wird nicht geweckt.
+_cve_monitor_wecken: Callable[[], None] | None = None
+
+
+def wecke_cve_monitor_best_effort() -> None:
+    """Stoesst den CVE-Worker nach einem abgeschlossenen Scan an (best-effort, B1).
+
+    Der Scan WECKT nur -- er erhoeht die NVD-Last nicht: der Worker bleibt gedrosselt
+    (hoechstens ein Host mit Lookup je Tick), er merkt die geaenderte Lage bloss sofort,
+    statt bis zu einem vollen Intervall zu verschlafen.
+
+    Streng best-effort: ist die Naht nicht verdrahtet, passiert nichts; wirft sie, wird
+    das GELOGGT und verschluckt -- ein Fehlschlag beim Wecken darf einen Scan NIEMALS
+    scheitern lassen (der Scan ist der Zweck, das Wecken ein Nebeneffekt). Mit Warn-Log
+    ist es kein stiller S3-Fallback.
+    """
+    if _cve_monitor_wecken is None:
+        return
+    try:
+        _cve_monitor_wecken()
+    except Exception as exc:
+        logger.warning("cve_monitor_wecken_fehlgeschlagen", error=str(exc))
+
+
+def _buche_scan_erfolg(schedule_id: int) -> None:
+    """Bucht den geglueckten Ausgang eines geplanten Scans (S88-P4, best-effort).
+
+    Nicht verdrahtet (vor create_app) -> es passiert nichts. Der Use-Case selbst wirft
+    nie (er loggt), der Scan kann daran also nicht scheitern.
+    """
+    if _scheduled_scan_ergebnisbuchung is None:
+        return
+    _scheduled_scan_ergebnisbuchung().erfolg(schedule_id)
+
+
+def _buche_scan_fehlschlag(schedule_id: int, fehler: str) -> None:
+    """Bucht den gescheiterten Ausgang eines geplanten Scans samt Wortlaut (S88-P4)."""
+    if _scheduled_scan_ergebnisbuchung is None:
+        return
+    _scheduled_scan_ergebnisbuchung().fehlschlag(schedule_id, fehler)
 
 
 async def _scheduled_scan(cidr: str, profile_id: str, schedule_id: int) -> None:
-    # Bewusste Abweichung von main.py: die dortige Profil-/`config`-Maschinerie war
-    # toter Code (das berechnete `config` wurde nie genutzt -- discover_subnet nimmt
-    # nur `cidr`) und barg einen latenten KeyError bei fehlendem "standard"-Profil.
-    # Hier nur das beobachtbare Verhalten: Subnetz scannen, Ergebnis speichern.
-    from modules.discovery import discover_subnet
-    from modules.storage import save_scan
-
+    # E1: der geplante Scan nimmt DENSELBEN Pfad wie der manuelle -- voller
+    # RunNetworkScan (Enrich, Hostnamen, Historie ueber den scan_history-Port des
+    # Use-Case) plus die beiden Nachbearbeitungen pro angereichertem Host
+    # (devices-Projektion, analysis-Host-Historie), in der ws_scan.py-Reihenfolge.
+    # profile_id bleibt in der Signatur (M.6-ScanTriggerCallback, Aufrufer
+    # unveraendert), ist aber weiterhin ohne Wirkung -- ehrlich festgehalten,
+    # keine erfundene Profil-Logik.
     logger.info("scheduled_scan", cidr=cidr, profile=profile_id)
-    discovered = await discover_subnet(cidr, max_concurrent=64, timeout=1.0)
-    save_scan(cidr, [{"ip": h.ip, "mac": h.mac, "rtt_ms": h.rtt_ms} for h in discovered])
+    # Finding 3: den Ausloesezeitpunkt SOFORT buchen (last_run = jetzt, next_run
+    # frisch aus der Engine) -- VOR dem eigentlichen Scan und ausserhalb dessen
+    # try/except. Ein geplanter Lauf HAT stattgefunden, auch wenn er spaeter
+    # scheitert; und der Use-Case ist selbst best-effort (er wirft nie), kann den
+    # Scan also nicht verhindern.
+    if _scheduled_scan_zeitbuchung is not None:
+        _scheduled_scan_zeitbuchung()(schedule_id)
+    if _scheduled_scan_bausteine is None:
+        # Vor create_app kann kein Scheduler feuern; falls doch, ist das ein
+        # Verdrahtungsfehler -- laut loggen, den Scheduler NICHT reissen. Der Ausgang
+        # wird trotzdem gebucht (S88-P4): ein Lauf, der wegen fehlender Verdrahtung
+        # nicht stattfand, ist fuer den Anwender ein Fehlschlag wie jeder andere --
+        # ohne diese Buchung saehe die Zeile aus wie ein geglueckter Lauf.
+        logger.error("scheduled_scan_unverdrahtet", cidr=cidr)
+        _buche_scan_fehlschlag(schedule_id, "scheduled_scan_unverdrahtet")
+        return
+    try:
+        run_scan, record_host, record_seen = _scheduled_scan_bausteine()
+        config = ScanConfig(cidrs=(cidr,))
+        angereichert = 0
+        async for event in run_scan.run(config):
+            if isinstance(event, HostEnriched):
+                # Gleiche Reihenfolge wie der WS-Handler (ws_scan.py): erst die
+                # devices-Projektion, dann die Host-Historie -- beide best-effort
+                # (Fehler pro Host werden dort gefangen + geloggt).
+                record_host_best_effort(record_host, event.host)
+                record_seen_best_effort(record_seen, event.host)
+                angereichert += 1
+            elif isinstance(event, ScanCompleted):
+                # Scan-Ende -> CVE-Worker wecken (B1). Der Scan-Record ist zu diesem
+                # Zeitpunkt bereits geschrieben (ScanCompleted ist die LETZTE Anweisung
+                # des Use-Case, die Persistenz laeuft eine Zeile davor) -- der geweckte
+                # Worker sieht also den neuen Bestand. Dieselbe Behandlung wie im
+                # WS-Handler; wer nur einen der beiden anfasst, laesst den geplanten
+                # Scan aussen vor. Best-effort (die Funktion verschluckt + loggt).
+                wecke_cve_monitor_best_effort()
+        logger.info("scheduled_scan_done", cidr=cidr, hosts=angereichert)
+        # S88-P4: der geglueckte Ausgang wird gebucht. Er raeumt zugleich den Wortlaut
+        # eines frueheren Fehlschlags weg -- ein alter Fehlertext neben einem frischen
+        # Erfolg waere irrefuehrender als gar keiner.
+        _buche_scan_erfolg(schedule_id)
+    except Exception as exc:
+        # Ein geplanter Scan darf den Scheduler NICHT reissen: Fehler loggen,
+        # nicht werfen (best-effort-Linie des WS-Handlers).
+        logger.warning("scheduled_scan_failed", cidr=cidr, error=str(exc))
+        # S88-P4: der Fehlschlag erreicht jetzt auch den Anwender. Zuvor endete er hier
+        # im Log, und die Zeile in ``scan_schedules`` war von einem geglueckten Lauf
+        # nicht zu unterscheiden (``last_run`` wird vor dem Scan gebucht).
+        _buche_scan_fehlschlag(schedule_id, str(exc))
+
+
+# ── FritzBox-Hosts: Verdrahtungs-Wrapper (best-effort, S.7c) ──────────────────
+
+
+class _FritzHostsWiring:
+    """Verdrahtungs-Wrapper um den ``FritzHostsAdapter`` -- erfuellt ``FritzHostsPort``.
+
+    Buendelt zwei Verdrahtungs-Entscheidungen (S.7c) an EINER Stelle, damit der
+    ``RunNetworkScan``-Use-Case immer mit einem 10. Port baubar bleibt und Fritz
+    sauber best-effort ist:
+
+    * **Nicht konfiguriert** (kein ``fritz_host`` / kein ``fritz_password``): gar
+      keinen echten Adapter bauen -> ``[]`` ohne TR-064-Verbindungsversuch
+      (Entscheidung 2A, expliziter Null-Pfad statt Adapter mit leerem host, der
+      in einen Verbindungs-Timeout liefe).
+    * **Auth-Fehler** (falsche Credentials): ``FritzAuthError`` des echten Adapters
+      wird HIER zu ``[]`` gefangen UND geloggt (Entscheidung 3C). Fritz ist
+      optional -- ein Credential-Tippfehler darf NICHT den ganzen Scan abbrechen
+      (anders als nmap, ein angeforderter Scan-Modus). Das Logging ist PFLICHT:
+      ein verschluckter Auth-Fehler ohne Spur waere ein stiller Fallback (S3); mit
+      Warn-Log ist es dokumentierte best-effort-Semantik.
+
+    Der Use-Case sieht so nie eine ``FritzAuthError`` -- der Schichtungs-Vertrag
+    (application kennt nicht infrastructure) bleibt unberuehrt: der Fang sitzt im
+    Composition Root (app.py ist von den import-linter-Contracts ausgenommen).
+    """
+
+    def __init__(self, host: str, user: str, password: str) -> None:
+        # Echter Adapter nur, wenn host UND password gesetzt sind (wie der Altcode:
+        # Merge nur bei ``fritz_host AND fritz_pass``). Sonst Null-Pfad.
+        self._adapter = (
+            FritzHostsAdapter(host=host, user=user, password=password)
+            if host and password
+            else None
+        )
+
+    async def get_hosts(self) -> list[Any]:
+        if self._adapter is None:
+            return []  # nicht konfiguriert -> leerer Merge, kein Verbindungsversuch
+        try:
+            return await self._adapter.get_hosts()
+        except FritzAuthError as exc:
+            # best-effort: Auth-Fehler killt den Scan nicht -- aber GELOGGT (kein S3).
+            logger.warning("fritz_auth_failed", host=exc.host)
+            return []
+
+
+class _FritzDetailWiring:
+    """Verdrahtungs-Wrapper um den ``FritzDetailAdapter`` -- erfuellt ``FritzDetailPort``.
+
+    Uebersetzt die ``infrastructure``-``FritzAuthError`` des echten Adapters in den
+    application-eigenen ``FritzDetailAuthError`` (Muster wie ``_FritzHostsWiring``:
+    eine kleine Verdrahtungs-Klasse, die einen Port strukturell erfuellt). Diese
+    Uebersetzung MUSS im Composition Root passieren -- er ist von den import-linter-
+    Contracts ausgenommen und darf beide Typen kennen; so kann der api-Ring den
+    Auth-Fehler als reinen application-Typ fangen, ohne ``infrastructure`` zu
+    importieren.
+
+    Anders als ``_FritzHostsWiring`` wird der Auth-Fehler hier NICHT verschluckt:
+    der Detail-Endpunkt ist ein expliziter Lese-Pfad (REST), kein best-effort-Merge
+    -- der Fehler propagiert (als application-Typ) bis in den Router (502).
+    """
+
+    def __init__(self, host: str, user: str, password: str) -> None:
+        self._adapter = FritzDetailAdapter(host=host, user=user, password=password)
+
+    async def get_detail(self) -> Any:
+        try:
+            return await self._adapter.get_detail()
+        except FritzAuthError as exc:
+            raise FritzDetailAuthError(exc.host) from exc
+
+
+class _CompositeRuleProvider:
+    """Kombiniert mehrere ``RuleProvider`` ADDITIV -- erfuellt selbst den RuleProvider-Port.
+
+    A.2-Verdrahtung: die analysis-Engine soll die eingebauten ``DEFAULT_RULES`` UND die
+    benutzer-eigenen, gespeicherten Regeln sehen. Diese additive Kombination lebt HIER im
+    Composition Root (nicht im DB-Adapter -- jeder Adapter bleibt sortenrein) als kleiner
+    Wrapper-Provider, Muster wie ``_FritzHostsWiring``/``_MonitorAlertRaiser``: eine kleine
+    Verdrahtungs-Klasse, die einen Port (``ports.analysis.RuleProvider``) strukturell
+    erfuellt.
+
+    ``get_rules`` konkateniert die Regeln der gehaltenen Provider IN REIHENFOLGE (Defaults
+    zuerst, dann DB). Es kombiniert die PROVIDER, nicht rohe Listen -- der
+    ``BuiltinRuleProvider`` liefert die Defaults schon, der ``SqliteUserRuleRepository`` die
+    gespeicherten. Ohne gespeicherte Regeln liefert er exakt die Defaults (additiv: ein
+    leerer User-Store aendert das Verhalten nicht).
+    """
+
+    def __init__(self, *providers: BuiltinRuleProvider | SqliteUserRuleRepository) -> None:
+        self._providers = providers
+
+    def get_rules(self) -> tuple[Rule, ...]:
+        return tuple(rule for provider in self._providers for rule in provider.get_rules())
+
+
+# Settings-Key fuer die Deaktivierungs-Liste (JSON-Array von rule_id-Strings).
+_DISABLED_RULES_KEY = "analysis_disabled_rules"
+
+
+def _read_disabled_rule_ids(settings: SettingsRepository) -> frozenset[str]:
+    """Liest die Menge deaktivierter rule_ids defensiv aus den Settings.
+
+    Eine freie Funktion, weil zwei Stellen im Composition Root die EXAKT gleiche
+    disabled-Semantik brauchen: der ``_FilteredRuleProvider`` (filtert die Regeln fuer
+    die Engine heraus) und der ``/api/analysis/rules/all``-Runner (ADR 0028, der die
+    deaktivierten Regeln gerade NICHT filtert, sondern sie mit ``disabled: true``
+    markiert, damit die UI sie wieder einschalten kann). Eine gemeinsame Quelle
+    garantiert, dass beide dieselbe Menge sehen.
+
+    Defensiver Leer-Zustand (S3-konform): fehlender Key ODER Nicht-Listen-Wert ->
+    ``frozenset()`` ("nichts deaktiviert"). Kaputtes JSON (``CorruptSettingError``) ->
+    GELOGGTE Warnung + derselbe fail-safe-Rueckfall "nichts deaktiviert" -- eine kaputte
+    Komfort-Einstellung darf NICHT den Scan faellen und niemanden heimlich abschalten;
+    der Fehler wird benannt/geloggt, nicht still verschluckt. Nicht-String-Eintraege
+    werden uebersprungen.
+    """
+    try:
+        setting = settings.get(_DISABLED_RULES_KEY)
+    except CorruptSettingError:
+        # Kaputter JSON-Wert: GELOGGT (kein stiller Fallback, S3) und fail-safe
+        # auf "nichts deaktiviert" zurueck -- der Filter darf den Scan nicht faellen.
+        logger.warning("analysis_disabled_rules_corrupt", key=_DISABLED_RULES_KEY)
+        return frozenset()
+    if setting is None or not isinstance(setting.value, list):
+        # Fehlender Key (frische DB ist normal -> kein Log) oder Nicht-Listen-Wert:
+        # gueltiger Leer-Zustand "nichts deaktiviert".
+        return frozenset()
+    # Nur String-Eintraege als rule_id; kaputte Nicht-String-Eintraege ueberspringen.
+    return frozenset(x for x in setting.value if isinstance(x, str))
+
+
+# Defaults der cve-Domaene (ADR 0037): Auffrisch-Intervall 24h (Fall 3; 0 = aus), Scan-
+# Intervall 20s (Drosselung; der NVD-sleep(0.6) kommt obendrauf). Im Composition Root, weil
+# die Settings-Auswertung hier lebt -- die Domaene/Application tragen ihre eigenen Defaults
+# (DEFAULT_REFRESH_INTERVAL_HOURS / DEFAULT_SCAN_INTERVAL_SECONDS) fuer den direkten Gebrauch.
+_CVE_DEFAULT_REFRESH_HOURS = 24
+_CVE_DEFAULT_SCAN_SECONDS = 20
+
+# Default-Schwelle (Tage) fuer die Archivierungs-Nachfrage: lange nicht gesehene
+# Geraete werden ab hier als Kandidaten vorgeschlagen. Vom Setting
+# ``device_archive_prompt_days`` ueberschreibbar (s. _read_device_int_setting).
+_DEVICE_ARCHIVE_PROMPT_DEFAULT_DAYS = 30
+
+
+def _read_cve_int_setting(settings: SettingsRepository, key: str, default: int) -> int:
+    """Liest einen ganzzahligen cve-Setting-Wert defensiv (S3-konform).
+
+    Fehlender Key (frische DB ist normal -> kein Log) ODER Nicht-Zahl-Wert -> ``default``.
+    Kaputtes JSON (``CorruptSettingError``) -> GELOGGTE Warnung + ``default`` (eine kaputte
+    Komfort-Einstellung darf den Worker nicht faellen; der Fehler wird benannt, nicht still
+    verschluckt). Bools werden ausgeschlossen (``True`` ist in Python ein int-Subtyp, aber
+    als Intervall-Wert sinnlos). Negative Werte werden auf 0 geklemmt (0 = Fall 3 aus bzw.
+    minimal-Intervall) -- kein negativer sleep/Intervall.
+    """
+    try:
+        setting = settings.get(key)
+    except CorruptSettingError:
+        logger.warning("cve_setting_corrupt", key=key)
+        return default
+    if setting is None:
+        return default
+    value = setting.value
+    if isinstance(value, bool) or not isinstance(value, int):
+        return default
+    return max(0, value)
+
+
+def _read_device_int_setting(settings: SettingsRepository, key: str, default: int) -> int:
+    """Liest einen ganzzahligen devices-Setting-Wert defensiv (S3-konform).
+
+    Eigener Helfer statt ``_read_cve_int_setting`` wiederzuverwenden: der cve-Helfer
+    loggt mit dem festen Marker ``cve_setting_corrupt`` und gehoert fachlich zur
+    cve-Domaene -- hier wird mit ``device_setting_corrupt`` geloggt. Verhalten sonst
+    identisch: fehlender Key (frische DB ist normal -> kein Log) ODER Nicht-Zahl-Wert
+    -> ``default``; kaputtes JSON (``CorruptSettingError``) -> GELOGGTE Warnung +
+    ``default`` (eine kaputte Komfort-Einstellung darf nicht faellen); Bools
+    ausgeschlossen (``True`` ist int-Subtyp, als Schwelle sinnlos); negative Werte auf
+    0 geklemmt.
+    """
+    try:
+        setting = settings.get(key)
+    except CorruptSettingError:
+        logger.warning("device_setting_corrupt", key=key)
+        return default
+    if setting is None:
+        return default
+    value = setting.value
+    if isinstance(value, bool) or not isinstance(value, int):
+        return default
+    return max(0, value)
+
+
+class _FilteredRuleProvider:
+    """Filtert deaktivierte Regel-IDs aus einem inneren ``RuleProvider`` heraus.
+
+    ADR 0023: Built-in- und User-Regeln sollen per Settings abschaltbar sein, OHNE die
+    Regeln im Code anzufassen (Konfiguration = reine Daten). Die Deaktivierungs-Liste
+    liegt als Settings-Wert (``analysis_disabled_rules``, JSON-Array von ``rule_id``-
+    Strings) und wird ueber den ``SettingsRepository``-Port gelesen. Dieser Wrapper lebt
+    -- wie ``_CompositeRuleProvider`` -- HIER im Composition Root und erfuellt selbst
+    strukturell ``ports.analysis.RuleProvider`` (``get_rules() -> tuple[Rule, ...]``).
+
+    Defensiver Leer-Zustand: fehlender Key ODER Nicht-Listen-Wert -> ``frozenset()``
+    ("nichts deaktiviert, alle Regeln an"). Kaputtes JSON (``CorruptSettingError``)
+    -> geloggte Warnung + derselbe fail-safe-Rueckfall "alle Regeln an" -- der Filter
+    ist ein Nebenpfad in der Analyse, eine kaputte Komfort-Einstellung darf NICHT den
+    ganzen Scan faellen. Die fail-safe-Richtung ist "mehr zeigen, nichts heimlich
+    unterdruecken"; der Fehler wird benannt/geloggt, nicht still verschluckt (S3-konform).
+    """
+
+    def __init__(
+        self,
+        inner: "_CompositeRuleProvider | _ConfiguredRuleProvider",
+        settings: SqliteSettingsRepository,
+    ) -> None:
+        self._inner = inner
+        self._settings = settings
+
+    def get_rules(self) -> tuple[Rule, ...]:
+        # Gemeinsame defensive Lese-Quelle mit dem /rules/all-Runner (ADR 0028).
+        disabled = _read_disabled_rule_ids(self._settings)
+        return tuple(rule for rule in self._inner.get_rules() if rule.id not in disabled)
+
+
+# Settings-Keys fuer die per-Setting konfigurierbaren Regel-Parameter (ADR 0027).
+# Schwelle (Integer) + zwei Portlisten (JSON-Array von Integern). Die Built-in-Defaults
+# leben unveraendert in ``domain.analysis.rules``; ein gesetzter, wohlgeformter Wert
+# UEBERSCHREIBT den jeweiligen Regel-Parameter (dataclasses.replace), sonst greift der
+# Built-in-Default.
+_PORT_COUNT_THRESHOLD_KEY = "analysis_port_count_threshold"
+_SUSPICIOUS_PORTS_KEY = "analysis_suspicious_ports"
+_CRITICAL_PORTS_KEY = "analysis_critical_ports"
+
+# Default-Schwelle der ``host_many_high_ports``-Regel (gespiegelt aus rules.py als
+# fail-safe-Rueckfall, wenn das Setting fehlt/kaputt ist). Bewusst hier als benannte
+# Konstante: der Composition Root liest defensiv, die Domaene bleibt die Quelle der
+# eigentlichen Built-in-Regel.
+_PORT_COUNT_THRESHOLD_DEFAULT = 10
+
+# Built-in-Regel-IDs, deren Parameter konfigurierbar sind (ADR 0027). Stabil -- der
+# Deaktivierungs-Filter und spaetere Acknowledge-Historie referenzieren diese IDs.
+_PORT_COUNT_RULE_ID = "host_many_high_ports"
+_SUSPICIOUS_RULE_ID = "host_remote_access_port"
+_CRITICAL_RULE_ID = "host_backdoor_port"
+
+
+class _ConfiguredRuleProvider:
+    """Ueberschreibt konfigurierbare Built-in-Regel-Parameter aus den Settings (ADR 0027).
+
+    Drei Parameter sind per Setting aenderbar, OHNE die Built-in-Regeln im Code anzufassen
+    (Konfiguration = reine Daten, gleiche Linie wie ADR 0023):
+
+    * ``analysis_port_count_threshold`` (Integer) -> ``threshold`` der Regel
+      ``host_many_high_ports``.
+    * ``analysis_suspicious_ports`` (JSON-Array von Integern) -> ``ports`` der Regel
+      ``host_remote_access_port`` (datengetriebene auffaellig-Regel).
+    * ``analysis_critical_ports`` (JSON-Array von Integern) -> ``ports`` der Regel
+      ``host_backdoor_port`` (kritisch).
+
+    Wie ``_CompositeRuleProvider``/``_FilteredRuleProvider`` ein kleiner Wrapper-Provider
+    HIER im Composition Root, der strukturell ``ports.analysis.RuleProvider`` erfuellt
+    (``get_rules() -> tuple[Rule, ...]``). Er aendert KEINE Domaene und KEINE Engine: er
+    erzeugt per ``dataclasses.replace`` eine Kopie der betroffenen Default-Regel mit
+    ueberschriebenem Parameter und reicht alle anderen Regeln unveraendert durch -- ein
+    leeres Override-Set laesst jede Regel exakt wie gebaut.
+
+    Defensiver Leer-Zustand (S3-konform, gleiche Linie wie ``_disabled_rule_ids``):
+    fehlender Key / falscher Typ -> Built-in-Default (kein Log, frische DB ist normal);
+    kaputtes JSON (``CorruptSettingError``) -> GELOGGTE Warnung + Built-in-Default. Eine
+    kaputte Komfort-Einstellung darf den Scan NICHT faellen. Ein leeres Array ist ein
+    GUELTIGER Wert (= "diese Regel trifft nichts"), kein Rueckfall auf den Default.
+    """
+
+    def __init__(
+        self,
+        inner: _CompositeRuleProvider,
+        settings: SettingsRepository,
+    ) -> None:
+        self._inner = inner
+        self._settings = settings
+
+    def _port_count_threshold(self) -> int:
+        """Liest die Schwelle defensiv (fehlt/falscher Typ -> Default; kaputt -> Log+Default)."""
+        try:
+            setting = self._settings.get(_PORT_COUNT_THRESHOLD_KEY)
+        except CorruptSettingError:
+            logger.warning("analysis_port_count_threshold_corrupt", key=_PORT_COUNT_THRESHOLD_KEY)
+            return _PORT_COUNT_THRESHOLD_DEFAULT
+        # bool ist Subtyp von int -- ``True``/``False`` waeren ein versehentlicher
+        # Schwellenwert; explizit ausschliessen (nur echte Integer zaehlen).
+        if setting is None or not isinstance(setting.value, int) or isinstance(setting.value, bool):
+            return _PORT_COUNT_THRESHOLD_DEFAULT
+        return setting.value
+
+    def _ports_override(self, key: str) -> frozenset[int] | None:
+        """Liest eine Portliste defensiv. ``None`` = kein Override (Built-in-Default greift).
+
+        Vorhanden + Liste (auch leer) -> ``frozenset`` der Integer-Eintraege (ein leeres
+        Array ergibt ``frozenset()`` = gueltiger "trifft nichts"-Zustand). Fehlt / falscher
+        Typ -> ``None`` (Built-in-Default). Kaputtes JSON -> geloggte Warnung + ``None``.
+        Nicht-Integer-Eintraege (inkl. ``bool``) werden uebersprungen, wie der
+        Deaktivierungs-Filter kaputte rule_id-Eintraege ueberspringt.
+        """
+        try:
+            setting = self._settings.get(key)
+        except CorruptSettingError:
+            logger.warning("analysis_ports_setting_corrupt", key=key)
+            return None
+        if setting is None or not isinstance(setting.value, list):
+            return None
+        return frozenset(x for x in setting.value if isinstance(x, int) and not isinstance(x, bool))
+
+    def get_rules(self) -> tuple[Rule, ...]:
+        threshold = self._port_count_threshold()
+        suspicious = self._ports_override(_SUSPICIOUS_PORTS_KEY)
+        critical = self._ports_override(_CRITICAL_PORTS_KEY)
+        configured: list[Rule] = []
+        for rule in self._inner.get_rules():
+            if rule.id == _PORT_COUNT_RULE_ID:
+                configured.append(replace(rule, threshold=threshold))
+            elif rule.id == _SUSPICIOUS_RULE_ID and suspicious is not None:
+                configured.append(replace(rule, ports=suspicious))
+            elif rule.id == _CRITICAL_RULE_ID and critical is not None:
+                configured.append(replace(rule, ports=critical))
+            else:
+                configured.append(rule)
+        return tuple(configured)
+
+
+def _build_configured_provider(
+    rules: SqliteUserRuleRepository,
+    settings: SettingsRepository,
+) -> _ConfiguredRuleProvider:
+    """Baut den Provider-Stack Composite -> Configured (ADR 0029, Single Source).
+
+    Die Kette ``_CompositeRuleProvider(BuiltinRuleProvider(), <User-Regeln>)`` umschlossen
+    vom ``_ConfiguredRuleProvider`` (5a-Injektion von Schwelle/Portlisten, ADR 0027) lag
+    HEUTE zweimal inline im Composition Root (im ``_analyze_snapshot`` MIT zusaetzlichem
+    Filter, im ``/rules/all``-Runner OHNE Filter). Diese freie Funktion ist nun die EINE
+    Quelle dieser Kette -- semantisch identisch zu den beiden alten Inline-Stellen, kein
+    Verhaltenswechsel. ``rules`` ist der User-Regel-Store, ``settings`` die Settings-Quelle
+    fuer die konfigurierbaren Parameter (beide werden vom Aufrufer als frische Repo-Instanz
+    hereingereicht -- die Verdrahtung bleibt im Composition Root).
+    """
+    composite = _CompositeRuleProvider(BuiltinRuleProvider(), rules)
+    return _ConfiguredRuleProvider(composite, settings)
+
+
+def _build_filtered_provider(
+    rules: SqliteUserRuleRepository,
+    settings: SqliteSettingsRepository,
+) -> _FilteredRuleProvider:
+    """Baut den vollen Provider-Stack Composite -> Configured -> Filtered (ADR 0029).
+
+    Die gefilterte Variante (zusaetzlich der ``_FilteredRuleProvider``, der per Setting
+    abgeschaltete Regel-IDs herausnimmt, ADR 0023) -- der Stack, den die ENGINE sieht. Baut
+    auf ``_build_configured_provider`` auf, damit die gemeinsame Composite->Configured-Kette
+    Single Source bleibt. Genutzt von ``_analyze_snapshot`` (Engine-Pfad) und der WS-
+    Severity-Verdrahtung; der ``/rules/all``-Runner nutzt bewusst die UNGEFILTERTE Variante
+    (er muss deaktivierte Regeln weiter sehen, um sie wieder einschaltbar zu machen).
+    """
+    return _FilteredRuleProvider(_build_configured_provider(rules, settings), settings)
+
+
+def _observed_host(host: EnrichedHost, is_known: bool) -> ObservedHost:
+    """Projiziert einen scanning-``EnrichedHost`` auf analysis' ``ObservedHost`` (ADR 0029).
+
+    Die frueher im ``_analyze_snapshot`` inline gebaute Projektion -- jetzt EINE Quelle, von
+    der DB-Historie-Schleife (Bulk, GET /api/analysis) UND der Live-Host-Severity (WS-Loop)
+    genutzt. ``open_ports`` sind die Portnummern mit ``state == "open"`` (BEWUSST nur die
+    Nummern, kein ``PortInfo`` -- independence-Contract). ``is_known`` wird vom Aufrufer
+    bestimmt und hereingereicht (Bulk: aus dem ``known_macs``-Bulk-Read; WS: der schon vor
+    ``record_seen`` gelesene ``baseline_known``) -- die Projektion liest KEINE Historie.
+    """
+    return ObservedHost(
+        ip=host.ip,
+        hostname=host.hostname,
+        vendor=host.vendor,
+        open_ports=frozenset(p.port for p in host.ports if p.state == "open"),
+        is_known=is_known,
+    )
+
+
+def _severity_for_host(
+    host: EnrichedHost,
+    is_known: bool,
+    analyze: AnalyzeSnapshot,
+    acked: frozenset[int] = frozenset(),
+) -> Severity | None:
+    """Hoechste Achse-B-Severity EINES Live-Hosts gegen die konfigurierten Regeln (ADR 0029).
+
+    Baut einen Ein-Host-``Snapshot`` (nur ``hosts`` belegt, ``connections``/``processes``
+    leer, ``full_process_visibility`` auf dem Snapshot-Default ``False`` -- der Host-Pfad
+    haengt nicht an der Prozess-Sicht), laesst die injizierte ``AnalyzeSnapshot`` (mit dem
+    GEFILTERTEN Provider) darueber laufen und nimmt die hoechste Severity der
+    HOST-Beobachtungen (``kind`` beginnt mit ``host_`` -- die Host-RuleKinds aus
+    ``domain.analysis.rules.RuleKind``: host_remote_port/host_new/host_port_count).
+
+    ``"info"`` ist KEINE Auffaelligkeit (Achse B kennt nur ``"critical"``/``"notable"``):
+    bei nur info-/keinen Host-Befunden -> ``None``. Die Rangfolge kommt aus
+    ``_SEVERITY_RANK`` (``"critical"`` < ``"notable"`` < ``"info"``) -- kleinster Rang
+    gewinnt. Hosts ohne ``ip`` werden uebersprungen (kein bewertbares Subjekt) -> ``None``.
+
+    ``acked`` (ADR 0031): die QUITTIERTEN Ports dieses Hosts werden VOR dem Engine-Lauf
+    aus dem bewerteten Portstand entfernt -- ein quittierter Port traegt nicht mehr zur
+    Severity bei. Die "offen"-Projektion bleibt ansonsten identisch (``_observed_host``
+    selbst unveraendert); nur die fuer die BEWERTUNG sichtbare Portmenge wird reduziert.
+    Default leer -> kein Verhaltenswechsel fuer Bestandsaufrufer.
+    """
+    if not host.ip:
+        return None
+    observed = _observed_host(host, is_known)
+    if acked:
+        observed = replace(observed, open_ports=observed.open_ports - acked)
+    snapshot = Snapshot(hosts=(observed,))
+    resolved = analyze(snapshot)
+    host_severities = [
+        r.observation.severity
+        for r in resolved
+        if r.observation.kind.startswith("host_") and r.observation.severity != "info"
+    ]
+    if not host_severities:
+        return None
+    return min(host_severities, key=lambda sev: _SEVERITY_RANK[sev])
+
+
+# Achse-B-Severity-Stufen, in denen flagged_ports gruppiert werden (ADR 0030). NUR
+# "critical"/"notable" -- "info" ist KEINE Auffaelligkeit (gleiche Linie wie
+# _severity_for_host, das info ausfiltert). Stabile, leere Default-Form des Felds: jede
+# Stufe ist IMMER vorhanden, leere Stufe = []. Diese Liste ist die EINE Quelle dafuer,
+# welche Stufen das Feld kennt -- der Frame-Default in ws_scan spiegelt sie.
+_FLAGGED_SEVERITIES: tuple[Severity, ...] = ("critical", "notable")
+
+# RuleKind der portbasierten Achse-B-Regeln (ADR 0030). NUR diese tragen zu flagged_ports
+# bei: sie halten eine konkrete ``ports``-Menge, deren Schnitt mit den offenen Host-Ports
+# die "schuldigen" Ports liefert. host_port_count (anzahlbasiert) + host_new (kein Port)
+# faerben bewusst KEINEN einzelnen Port -- sie bleiben Teil von analysis_severity, tragen
+# aber nicht zu flagged_ports bei (siehe ADR 0030).
+_PORT_BASED_KIND = "host_remote_port"
+
+
+def _empty_flagged_ports() -> dict[str, list[int]]:
+    """Leere flagged_ports-Form (ADR 0030): jede Achse-B-Stufe vorhanden, leere Liste.
+
+    EINE Quelle der Default-Form -- genutzt vom Hosts-ohne-ip-Pfad in
+    ``_flagged_ports_for_host`` UND (gespiegelt) vom Frame-Default in ws_scan. So bleibt das
+    Feld-Schema konsistent: ``{"critical": [], "notable": []}``.
+    """
+    return {sev: [] for sev in _FLAGGED_SEVERITIES}
+
+
+def _flagged_ports_for_host(
+    host: EnrichedHost, provider: Any, acked: frozenset[int] = frozenset()
+) -> dict[str, list[int]]:
+    """Die konkret getroffenen offenen Ports EINES Live-Hosts je Achse-B-Stufe (ADR 0030).
+
+    Zweites Achse-B-Feld neben ``analysis_severity`` (0029, Host-Maximum). Waehrend die
+    Severity das Host-MAXIMUM traegt, traegt dieses Feld die MENGE der "schuldigen" Ports
+    pro Stufe -- damit das Frontend (Schnitt 6b) die betroffenen Port-Boeppel einfaerben
+    kann. Form: ``{"critical": [...], "notable": [...]}`` (sortierte Integer-Listen, leere
+    Stufe = ``[]``).
+
+    Die getroffene Portmenge ist der MENGENSCHNITT ``open & rule.ports`` -- NICHT das Parsen
+    des Observation-detail-Strings (Format-Kopplung waere fragil). ``open`` wird mit DEMSELBEN
+    Ausdruck wie ``_observed_host`` gebildet (Ports mit ``state == "open"``), keine zweite
+    Definition von "offen". Iteriert wird ueber ``provider.get_rules()`` -- den GEFILTERTEN
+    Provider, denselben, den ``_severity_for_host`` ueber die Engine sieht (Single Source);
+    nur ``kind == "host_remote_port"``-Regeln tragen bei, nach ``rule.severity`` (Union ueber
+    mehrere Regeln gleicher Stufe) gesammelt. ``host_port_count``/``host_new`` faerben keinen
+    Port und tragen bewusst NICHT bei (siehe ADR 0030).
+
+    ``acked`` (ADR 0031): die QUITTIERTEN Ports werden VOR der Schnittbildung aus ``open``
+    entfernt -- ein quittierter Port wird nicht mehr geflaggt. SELBE Reduktion wie in
+    ``_severity_for_host`` (beide ziehen ``acked`` vom selben "offen"-Stand ab), damit die
+    KONSISTENZ-Invariante zu ``analysis_severity`` haelt. Default leer -> kein
+    Verhaltenswechsel fuer Bestandsaufrufer.
+
+    Host ohne ``ip`` -> leere Form (kein bewertbares Subjekt, gleiche Linie wie
+    ``_severity_for_host``). Das haelt die KONSISTENZ-Invariante zu ``analysis_severity``:
+    beide kommen aus demselben Provider und derselben "offen"-Projektion, duerfen nicht
+    auseinanderlaufen.
+    """
+    if not host.ip:
+        return _empty_flagged_ports()
+    open_ports = {p.port for p in host.ports if p.state == "open"} - acked
+    flagged: dict[str, set[int]] = {sev: set() for sev in _FLAGGED_SEVERITIES}
+    for rule in provider.get_rules():
+        if rule.kind != _PORT_BASED_KIND or rule.severity not in flagged:
+            continue
+        flagged[rule.severity] |= open_ports & rule.ports
+    return {sev: sorted(ports) for sev, ports in flagged.items()}
+
+
+# ── monitoring -> alerting-Trigger-Naht (A.7a) ────────────────────────────────
+# Der erste echte VERHALTENS-Change der alerting-Migration: ab hier feuert RaiseAlert
+# real, wenn der monitor-Loop eine up/down-Flanke erkennt (alert_history wird
+# beschrieben, Alerts gehen je Nutzer-Regel raus). Die Naht lebt HIER im Composition
+# Root -- nicht in infrastructure -- weil sie BEIDE Domaenen kennt: sie liest ein
+# domain/monitoring.MonitorEvent UND ruft den application/alerting.RaiseAlert-Use-Case.
+# Ein infrastructure-Adapter duerfte application NICHT importieren (Contract
+# "infrastructure kennt nicht application"); app.py ist als Composition Root von den
+# import-linter-Contracts ausgenommen und der einzige erlaubte Ort. Muster wie
+# _scheduled_scan (M.6-ScanTriggerCallback) und _FritzHostsWiring: eine kleine
+# Verdrahtungs-Klasse, die einen Port strukturell erfuellt.
+
+# Der Alert-Message-Wortlaut, dupliziert aus MonitorNotifierAdapter._MESSAGES (infra).
+# Bewusst Option (i): View-Vokabular ("{label} is DOWN"/"is back UP") gehoert nicht in
+# die Domaene (models.py VIEW-Prinzip). Die Duplikation ist als VERTRAG abgesichert --
+# ein Test (test_alert_message_wording_matches_notifier) nagelt fest, dass dieses Dict
+# zeichengleich mit dem Notifier-Dict ist, sonst liefen Notification-Text und
+# alert_history-message kuenftig still auseinander. GLEICHE FORM wie _MESSAGES
+# (dict[MonitorEventType, str] mit {label}-Template), damit der Test schlicht == prueft.
+_ALERT_MESSAGES: dict[MonitorEventType, str] = {
+    MonitorEventType.DOWN: "{label} is DOWN",
+    MonitorEventType.UP: "{label} is back UP",
+}
+
+
+class _MonitorAlertRaiser:
+    """Verdrahtungs-Wrapper, der ``AlertRaiserPort`` erfuellt -- mappt MonitorEvent -> RaiseAlert.
+
+    Haelt den ``RaiseAlert``-Use-Case und uebersetzt das durchgereichte
+    ``MonitorEvent`` in den alerting-Aufruf (DF2-Mapping, A.7a):
+
+    * ``rule_type = "host_down"`` fuer BEIDE Flanken (down UND up) -- eine
+      Nutzer-Regel mit Typ ``host_down`` faengt beide Richtungen; ein eigener
+      rule_type fuer ``up`` wuerde nie eine existierende Regel matchen (toter Strang).
+    * ``target = event.target_id`` -- der stabile/semantische Target-Bezeichner
+      (= Frontend-Target-Kennung), gegen den die Regel mit ``target`` exakt oder
+      ``"any"`` matcht.
+    * ``message`` aus ``_ALERT_MESSAGES`` -- exakt der Notifier-Wortlaut (Vertrag, s.o.).
+
+    BEST-EFFORT (Port-Vertrag, EXAKT wie der MonitorNotifierAdapter): faengt JEDEN
+    Fehler des Use-Cases und loggt ihn -- wirft NIE in den Loop. So bleibt die
+    raise_alert-Konsequenz von der notify-Konsequenz isoliert (keine kann die andere
+    verschlucken), ohne dass der RunMonitor-Use-Case ein try/except braucht.
+    """
+
+    def __init__(self, raise_alert: RaiseAlert) -> None:
+        self._raise_alert = raise_alert
+
+    async def raise_alert(self, event: MonitorEvent) -> None:
+        template = _ALERT_MESSAGES.get(event.event)
+        if template is None:
+            # Nur up/down loesen einen Alert aus (should_notify filtert das im
+            # Use-Case bereits auf genau diese zwei Flanken -- hier defensiv kein Ruf).
+            return
+        message = template.format(label=event.label)
+        try:
+            await self._raise_alert(
+                rule_type="host_down",
+                target=event.target_id,
+                message=message,
+            )
+        except Exception:
+            # Best-effort: nie ein Loop-Fehler. MIT Log (kein stiller S3-Fang).
+            logger.warning("monitor_alert_raise_failed", target_id=event.target_id)
+
+
+# ── Schwellwert-Alarm -> alerting-Notifier-Naht (Schnitt 3b) ──────────────────
+# Die VIERTE Konsequenz-Naht des Monitorings, ganz analog zu _MonitorAlertRaiser:
+# der Logging-Sink wertet pro Tick je aktiver Aufgabe ihren Schwellwert per
+# evaluate_sample (Hysterese) aus und ruft bei einer Alarm-FLANKE den
+# ThresholdNotifierPort. Dieser Wrapper mappt die rein monitoring-seitige Flanke
+# (LoggingTask + LatencyThreshold + PingSample) auf den vorhandenen alerting-
+# Notifier (Desktop + E-Mail). Die Naht lebt HIER im Composition Root -- nicht im
+# Sink/infrastructure -- weil sie BEIDE Domaenen kennt: sie liest monitoring-Typen
+# UND ruft den alerting-Notifier/SmtpConfig. Ein infrastructure-Adapter duerfte das
+# nicht (Contract "monitoring kennt nicht alerting"); app.py ist als Composition
+# Root von den import-linter-Contracts ausgenommen und der einzige erlaubte Ort.
+# Muster wie _MonitorAlertRaiser: eine kleine Verdrahtungs-Klasse, die einen Port
+# (ThresholdNotifierPort) strukturell erfuellt.
+
+
+class _ThresholdNotifierWiring:
+    """Verdrahtungs-Wrapper, der ``ThresholdNotifierPort`` erfuellt -- mappt Flanke -> Notifier.
+
+    Haelt den vorhandenen alerting-``AlertNotifierAdapter`` (Desktop + E-Mail) und den
+    ``SettingsSmtpConfigAdapter`` und uebersetzt eine frisch gefeuerte Schwellwert-Flanke
+    in den/die gewuenschten Notification-Kanal/Kanaele (3b):
+
+    * **Titel**: ``"CERNIS PRO — <label>"`` -- exakt der Stil des ``_MonitorAlertRaiser``-
+      Umfelds bzw. der bestehenden Alert-Notifications (App-Name + Task-Label).
+    * **Nachricht**: deutsch, nennt das Task-Label, die verletzte Bedingung
+      (``LATENCY_ABOVE`` -> "Latenz ueber <limit_ms> ms"; ``UNREACHABLE`` -> "Ziel nicht
+      erreichbar") und bei Latenz den Messwert (``sample.rtt_ms``). Reiner Notification-
+      Text, KEINE i18n-Maschinerie.
+    * **Desktop** (``threshold.notify_desktop``): ``notifier.macos(title, message,
+      subtitle=task.label)`` -- ``subtitle`` aus dem Task-Label (wie der Notifier den
+      target nutzt).
+    * **E-Mail** (``threshold.notify_email``): ``smtp_config.load()``; NUR wenn das
+      Ergebnis nicht ``None`` ist (konfiguriert), ``notifier.email(subject=title,
+      body=message, config=cfg)``. Ist es ``None`` (keine SMTP-Config), wird KEINE Mail
+      versucht -- kein Fehler, still uebersprungen, aber per ``structlog.info`` sichtbar.
+
+    BEST-EFFORT (Port-Vertrag, EXAKT wie ``_MonitorAlertRaiser`` / der Sink): der GANZE
+    Methodenkoerper steht in try/except -- jeder Fehler wird per ``structlog.warning``
+    geloggt und NIE geworfen. Der Sink ruft uns best-effort, aber wir garantieren den
+    Vertrag selbst (so kann ein Notify-Fehler weder den Sink-``record`` noch den
+    Live-Loop killen).
+    """
+
+    def __init__(self, notifier: AlertNotifierPort, smtp_config: SmtpConfigPort) -> None:
+        self._notifier = notifier
+        self._smtp_config = smtp_config
+
+    @staticmethod
+    def _build_message(task: LoggingTask, threshold: LatencyThreshold, sample: PingSample) -> str:
+        """Baut den deutschen Notification-Text aus Task/Threshold/Sample (reiner View-String)."""
+        if threshold.condition is ThresholdCondition.UNREACHABLE:
+            return f"{task.label}: Ziel nicht erreichbar."
+        # LATENCY_ABOVE: verletzte Latenz-Bedingung + der ausloesende Messwert.
+        return (
+            f"{task.label}: Latenz ueber {threshold.limit_ms:g} ms (gemessen {sample.rtt_ms:g} ms)."
+        )
+
+    async def notify_threshold(
+        self,
+        task: LoggingTask,
+        threshold: LatencyThreshold,
+        sample: PingSample,
+        now: float,
+    ) -> None:
+        title = f"CERNIS PRO — {task.label}"
+        message = self._build_message(task, threshold, sample)
+        try:
+            if threshold.notify_desktop:
+                await self._notifier.macos(title, message, subtitle=task.label)
+            if threshold.notify_email:
+                cfg = self._smtp_config.load()
+                if cfg is None:
+                    # Mail gewuenscht, aber keine SMTP-Config -> still uebersprungen,
+                    # aber sichtbar (kein stiller S3-Fallback, kein Fehler).
+                    logger.info("threshold_email_skipped_no_smtp", task_id=task.id)
+                else:
+                    await self._notifier.email(subject=title, body=message, config=cfg)
+        except Exception:
+            # Best-effort: nie ein Sink-/Loop-Fehler. MIT Log (kein stiller S3-Fang).
+            logger.warning("threshold_notify_failed", task_id=task.id)
+
+
+# ── RECURRING-Logging <-> Scheduler-Job-Naht (3b-3) ──────────────────────────
+# Beim Anlegen eines RECURRING-Logging-Tasks soll automatisch der zugehoerige
+# Scheduler-Job (job_type "monitoring_window") entstehen, beim Loeschen wieder
+# verschwinden. Diese Naht lebt HIER im Composition Root -- nicht am
+# provide_*-Override (ein loses Wrapper-Closure briche die ``Annotated[...,
+# Depends]``-Signatur, mypy meckert), sondern als schmaler Erben-Wrapper, der den
+# Use-Case-Vertrag STRUKTURELL durch Vererbung erfuellt (Muster wie die anderen
+# Verdrahtungs-Wrapper, nur ueber Erbung statt Komposition, weil das Interface ein
+# konkreter Use-Case-Typ ist). Beide Wrapper kennen monitoring UND scheduler --
+# app.py ist als Composition Root von den import-linter-Contracts ausgenommen.
+
+
+class _CreateLoggingTaskWithSchedule(CreateLoggingTask):
+    """``CreateLoggingTask`` + Auto-Scheduler-Job fuer RECURRING-Tasks (3b-3).
+
+    Erbt von ``CreateLoggingTask`` (erfuellt den Use-Case-Vertrag durch Vererbung) und
+    haengt EINE Konsequenz an: legt der Nutzer einen RECURRING-Task an, entsteht der
+    zugehoerige ScheduledJob (``job_type`` "monitoring_window") ueber ``CreateScheduledJob``.
+    Der Job traegt in seinen ``params`` die ``task_id`` (damit der Handler den Task am Ende
+    des Gesamtzeitraums beenden kann) und ``recur_until`` (als String, leer = unbegrenzt).
+    Das ``DailyWindow`` baut sich aus den ``recur_*``-Feldern des frisch angelegten Tasks
+    (None-Leerwerte auf die Domaenen-Leerform 0/0.0 gemappt -- der Task ist hier bereits
+    RECURRING, also sind die Minuten gesetzt; die ``or``-Fallbacks sind nur mypy-Defensive).
+
+    Bei jedem anderen Modus (IMMEDIATE/SCHEDULED) wird KEIN Job angelegt -- der Wrapper
+    verhaelt sich dann exakt wie ``CreateLoggingTask``.
+    """
+
+    def __init__(self, repo: SqliteLoggingTaskRepository, create_job: CreateScheduledJob) -> None:
+        super().__init__(repo)
+        self._create_job = create_job
+
+    def __call__(self, **kwargs: Any) -> LoggingTask:
+        task = super().__call__(**kwargs)
+        if task.operation_mode is OperationMode.RECURRING:
+            window = DailyWindow(
+                start_minute=task.recur_start_minute or 0,
+                end_minute=task.recur_end_minute or 0,
+                weekdays=task.recur_weekdays,
+                from_epoch=task.recur_from or 0.0,
+                until_epoch=task.recur_until or 0.0,
+            )
+            self._create_job(
+                "monitoring_window",
+                (
+                    ("task_id", task.id),
+                    ("recur_until", str(task.recur_until) if task.recur_until else ""),
+                ),
+                window,
+            )
+        return task
+
+
+class _DeleteLoggingTaskWithUnschedule(DeleteLoggingTask):
+    """``DeleteLoggingTask`` + Mitloeschen des zugehoerigen Scheduler-Jobs (3b-3).
+
+    Gegenstueck zu ``_CreateLoggingTaskWithSchedule``: erbt von ``DeleteLoggingTask`` und
+    raeumt nach dem Loeschen der Task-Definition den verwaisten ScheduledJob ab. Sucht ueber
+    ``ListScheduledJobs`` den Job mit ``job_type == "monitoring_window"`` und ``task_id``-
+    ``param`` gleich der geloeschten ``task_id`` und entfernt ihn via ``DeleteScheduledJob``.
+
+    Idempotent wie der Basis-Use-Case: existiert kein passender Job (Task war nicht
+    RECURRING oder schon abgeraeumt), passiert nichts -- kein Fehler.
+    """
+
+    def __init__(
+        self,
+        repo: SqliteLoggingTaskRepository,
+        list_jobs: ListScheduledJobs,
+        delete_job: DeleteScheduledJob,
+    ) -> None:
+        super().__init__(repo)
+        self._list_jobs = list_jobs
+        self._delete_job = delete_job
+
+    def __call__(self, task_id: str) -> None:
+        super().__call__(task_id)
+        for job in self._list_jobs():
+            if job.job_type == "monitoring_window" and dict(job.params).get("task_id") == task_id:
+                self._delete_job(job.id)
 
 
 # ── Frontend-Serving (traversal-sicher) ───────────────────────────────────────
@@ -215,20 +1891,574 @@ class _SpaStaticFiles(StaticFiles):
     Path-Traversal); unbekannte Nicht-``api/``-/``ws/``-Pfade fallen auf
     ``index.html`` zurueck (fixer Pfad). KEINE Zeile konkateniert user-Input in
     einen Dateipfad -- genau das war die Altcode-Luecke (Finding S6).
+
+    Der Rueckfall gilt NUR fuer Client-Routen, nicht fuer Dateianfragen: Traegt
+    das letzte Pfadsegment eine Endung (Punkt), zielt die Anfrage auf eine Datei
+    und wird bei Nichtvorhandensein ehrlich mit 404 beantwortet.
     """
+
+    @staticmethod
+    def _zielt_auf_datei(path: str) -> bool:
+        """True, wenn das letzte Pfadsegment eine Endung traegt (= Dateianfrage).
+
+        Abgrenzung fuer den SPA-Rueckfall: ``/flags/zz.svg`` ist eine Dateianfrage
+        (404, wenn die Datei fehlt), ``/settings`` eine Client-Route (index.html).
+        Massgeblich ist allein das LETZTE Segment -- ein Punkt weiter vorne im Pfad
+        macht die Anfrage nicht zur Dateianfrage. Das Trennzeichen wird wie beim
+        api/ws-Waechter vorab vereinheitlicht, weil der Pfad aus der
+        Datei-Ausliefer-Schicht plattformabhaengig normalisiert ankommt (unter
+        Windows mit Rueckstrich) -- eine Plattformverzweigung gibt es NICHT.
+        """
+        letztes_segment = path.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+        return "." in letztes_segment
 
     async def get_response(self, path: str, scope: Scope) -> Response:
         # API/WS nicht auf index.html zurueckfallen lassen -> 404 (Sekundaer-
         # Absicherung; echte API-Routen matchen ohnehin vor diesem "/"-Mount).
-        if path.lstrip("/").startswith(("api/", "ws/")):
+        # Das Trennzeichen wird vorab vereinheitlicht, weil der Pfad aus der
+        # Datei-Ausliefer-Schicht plattformabhaengig normalisiert ankommt (unter
+        # Windows mit Rueckstrich) -- ohne das griffe der Vergleich dort nie.
+        if path.replace("\\", "/").lstrip("/").startswith(("api/", "ws/")):
             raise StarletteHTTPException(status_code=404)
         try:
             return await super().get_response(path, scope)
         except StarletteHTTPException as exc:
-            if exc.status_code == 404:
+            if exc.status_code == 404 and not self._zielt_auf_datei(path):
                 # SPA-Client-Route: index.html (fixer Pfad, sicherer StaticFiles-Lookup).
                 return await super().get_response("index.html", scope)
             raise
+
+
+# ── Sicherheitsbericht: PDF-Modell-Projektion (Etappe 4b, reine Funktion) ──────────────
+# Projiziert den application-Typ ``SecurityReport`` (samt der zwei ehrlichen Statuswerte) auf
+# das render-fertige ``SecurityPdfModel``. REIN und DETERMINISTISCH: KEINE Wanduhr -- das
+# Erzeugungsdatum (``generated_at_text``) und das Rogue-Pruefdatum (``pruefdatum``) kommen als
+# FERTIGE Strings herein (der Runner ``_security_report_pdf`` liest die Uhr GENAU EINMAL). Alle
+# Texte werden HIER fertig formatiert (deutsche Sprache, Dezimalkomma); der reportlab-Adapter
+# rendert sie nur. Modul-Ebene (nicht in ``create_app``), damit testbar ohne App-Bau.
+
+
+def _format_burden_de(value: float, lang: Lang = "de") -> str:
+    """Formatiert einen Lastwert sprachabhaengig, schlicht und robust.
+
+    Zwei Nachkommastellen; das TRENNZEICHEN richtet sich nach ``lang`` -- de das gewohnte
+    Dezimalkomma ("0,33"), en der Dezimalpunkt ("0.33"). Eine nachlaufende Null wird in BEIDEN
+    Sprachen NUR entfernt, wenn die zweite Nachkommastelle 0 ist (1,00 -> "1,0" / 1.00 ->
+    "1.0"; 0,33 bleibt "0,33"). Mehr Kuerzung nicht -- bewusst schlicht (Auftrag).
+
+    (E3a) Der Name bleibt ``_format_burden_de`` -- die deutsche Ausgabe ist unveraendert.
+    """
+    text = f"{value:.2f}"
+    if lang == "de":
+        text = text.replace(".", ",")
+    if text.endswith("0"):
+        text = text[:-1]
+    return text
+
+
+def _pdf_severity_label(severity: str, lang: Lang = "de") -> str:
+    """Mappt das rohe severity-Feld auf den Achse-B-Klartext ("kritisch"/"auffaellig").
+
+    "critical" -> "kritisch", alles andere ("notable") -> "auffaellig". Der Adapter faerbt die
+    Zelle/den Balken danach (Badge) -- KEIN Roh-Severity-String im Modell.
+
+    (E3c) ``lang`` waehlt die Sprache: de "kritisch"/"auffaellig" (unveraendert), en
+    "critical"/"notable".
+    """
+    if lang == "de":
+        return "kritisch" if severity == "critical" else "auffällig"
+    return "critical" if severity == "critical" else "notable"
+
+
+def _project_security_pdf_model(
+    report: SecurityReport,
+    has_scan: bool,
+    generated_at_text: str,
+    rogue_checked_ts: float | None,
+    pruefdatum: str = "",
+    lang: Lang = "de",
+) -> SecurityPdfModel:
+    """Projiziert ``SecurityReport`` (+ Statuswerte) auf das render-fertige ``SecurityPdfModel``.
+
+    REIN/DETERMINISTISCH (keine Uhr): ``generated_at_text`` (Erzeugungsdatum) und ``pruefdatum``
+    (Rogue-Pruefdatum) kommen FERTIG formatiert herein. ``has_scan`` ist hier nicht
+    text-relevant (die leere Basis traegt sich ueber Score 100 + leere Listen ehrlich selbst),
+    wird aber -- analog ``_security_report`` -- mitgefuehrt, weil der Runner es ohnehin haelt.
+
+    (E2) ``lang`` waehlt die Sprache der Texte: die Projektion loest die ``LocalizedText``-
+    Konstanten HIER via ``.get(lang)`` zum fertigen String auf und legt sie ins Modell -- der
+    Renderer liest nur noch (das Modell bleibt anzeige-fertig, ohne ``LocalizedText``). Neben
+    der querschnittlichen ``ACHSE_B_FUSSNOTE`` gilt das seit E2 auch fuer die drei
+    RAHMENTEXTE (Titel, Fusszeile, Einleitung). (E3c) Auch die Satzbausteine im Rumpf
+    (``score_einordnung``, ``rogue_hinweis``, Schwere-Labels) sind zweisprachig -- die festen
+    Saetze inline per ``if lang``, weil sie f-string-Platzhalter tragen.
+    """
+    score = report.score
+
+    # Score-Einordnung: fertiger Satz aus den Zaehlern (Achse-B: beschreibt/ordnet ein, KEINE
+    # Wertung angehaengt). Bei leerer Basis ehrlich der "keine Geraete"-Satz.
+    if score.device_count == 0:
+        if lang == "de":
+            score_einordnung = "Es wurden keine Geräte in die Bewertung einbezogen."
+        else:
+            score_einordnung = "No devices were included in the assessment."
+    elif lang == "de":
+        score_einordnung = (
+            f"Von {score.device_count} bewerteten Geräten sind {score.critical_devices} "
+            f"kritisch und {score.notable_devices} auffällig belastet; "
+            f"{score.clean_devices} ohne Befund."
+        )
+    else:
+        score_einordnung = (
+            f"Of {score.device_count} assessed devices, {score.critical_devices} "
+            f"are critically and {score.notable_devices} notably burdened; "
+            f"{score.clean_devices} without findings."
+        )
+
+    # Rogue-Hinweis: noch nie geprueft (ts None) -> Rechte-Hinweis; sonst das Pruefdatum
+    # (kommt als fertiger String ``pruefdatum`` herein -- HIER NICHT aus dem ts gerechnet).
+    if rogue_checked_ts is None:
+        if lang == "de":
+            rogue_hinweis = (
+                "Hinweis: Auf unerwartete DHCP-Server wurde noch nie geprüft "
+                "(erfordert erhöhte Rechte)."
+            )
+        else:
+            rogue_hinweis = (
+                "Note: unexpected DHCP servers have never been checked "
+                "(requires elevated privileges)."
+            )
+    elif lang == "de":
+        rogue_hinweis = f"Zuletzt auf unerwartete DHCP-Server geprüft am {pruefdatum}."
+    else:
+        rogue_hinweis = f"Last checked for unexpected DHCP servers on {pruefdatum}."
+
+    # Score-Beitragsliste: je belastetem Geraet ein fertiges Tripel (Label, Klartext-Schwere,
+    # Lastwert-Text mit Dezimalkomma).
+    contributions = tuple(
+        (
+            c.device_label,
+            _pdf_severity_label(c.worst_severity, lang),
+            _format_burden_de(c.burden_value, lang),
+        )
+        for c in score.contributions
+    )
+
+    # Geraete-Balken: je Geraet MIT Befund die Anzahl kritischer und auffaelliger OFFENER
+    # Befunde -- ueber alle drei OFFENEN Quellen gezaehlt (CVE via cvss_score: >= 9.0 kritisch).
+    # VOLLSTAENDIG (kein Top-N); nur Geraete mit crit+notable > 0. Sortiert (crit desc,
+    # notable desc, Label asc) fuer eine stabile, sinnvolle Balken-Reihenfolge.
+    crit_by_device: dict[str, int] = {}
+    notable_by_device: dict[str, int] = {}
+
+    def _bump(label: str, is_critical: bool) -> None:
+        target = crit_by_device if is_critical else notable_by_device
+        target[label] = target.get(label, 0) + 1
+        # sicherstellen, dass beide Zaehler den Schluessel kennen (fuer das Auslesen unten)
+        other = notable_by_device if is_critical else crit_by_device
+        other.setdefault(label, 0)
+
+    for p in report.port_findings:
+        _bump(p.device_label, p.severity == "critical")
+    for n in report.net_findings:
+        _bump(n.device_label, n.severity == "critical")
+    for c in report.cve_findings:
+        _bump(c.device_label, c.cvss_score >= 9.0)
+
+    geraete_balken = tuple(
+        (label, crit_by_device[label], notable_by_device[label])
+        for label in sorted(
+            crit_by_device,
+            key=lambda lbl: (-crit_by_device[lbl], -notable_by_device[lbl], lbl),
+        )
+        if crit_by_device[label] + notable_by_device[label] > 0
+    )
+
+    # port_rows (PORT_COLUMNS: Gerät, Ports, Schwere, Grund). Grund: IMMER der feste Klartext
+    # (kein Achse-B-Jargon, das rohe reason-Feld bewusst ignoriert).
+    port_rows = tuple(
+        (
+            p.device_label,
+            p.ports,
+            _pdf_severity_label(p.severity, lang),
+            "Offene Ports, die CERNIS als ungewöhnlich einstuft",
+        )
+        for p in report.port_findings
+    )
+
+    # cve_rows (CVE_COLUMNS: Gerät, CVE, CVSS, Dienst, Beschreibung), NACH GERAET GRUPPIERT:
+    # stabil nach device_label gruppieren (gleiche Labels untereinander), innerhalb der Gruppe
+    # nach cvss_score absteigend. CVSS als Text mit Dezimalkomma.
+    cve_order: list[str] = []
+    cve_groups: dict[str, list[ReportCveFinding]] = {}
+    for c in report.cve_findings:
+        if c.device_label not in cve_groups:
+            cve_groups[c.device_label] = []
+            cve_order.append(c.device_label)
+        cve_groups[c.device_label].append(c)
+    cve_rows = tuple(
+        (
+            c.device_label,
+            c.cve_id,
+            f"{c.cvss_score:.1f}".replace(".", ","),
+            c.service,
+            c.description,
+        )
+        for label in cve_order
+        for c in sorted(cve_groups[label], key=lambda f: f.cvss_score, reverse=True)
+    )
+
+    # net_rows (NET_COLUMNS: Art, Gerät, Schwere, Beschreibung).
+    net_rows = tuple(
+        (n.kind, n.device_label, _pdf_severity_label(n.severity, lang), n.description)
+        for n in report.net_findings
+    )
+
+    # acknowledged_rows (ACK_COLUMNS: Art, Gerät, Detail) -- alle drei quittierten Listen
+    # zusammengefuehrt, Reihenfolge: erst Ports, dann CVE, dann Netz. Leer -> leeres tuple
+    # (der Adapter laesst die Rubrik dann weg).
+    acknowledged_rows = (
+        *(("Port", p.device_label, f"Ports: {p.ports}") for p in report.acknowledged_port_findings),
+        *(
+            ("CVE", c.device_label, f"{c.cve_id} ({c.service})")
+            for c in report.acknowledged_cve_findings
+        ),
+        *((n.kind, n.device_label, n.description) for n in report.acknowledged_net_findings),
+    )
+
+    return SecurityPdfModel(
+        title=REPORT_TITLE_SECURITY.get(lang),
+        generated_at_text=generated_at_text,
+        footer_left=REPORT_FOOTER_SECURITY.get(lang),
+        achse_b_fussnote=ACHSE_B_FUSSNOTE.get(lang),
+        score_value=score.score,
+        score_level=score.level,
+        score_level_label=SCORE_LEVEL_LABELS[score.level].get(lang),
+        score_einordnung=score_einordnung,
+        critical_devices=score.critical_devices,
+        notable_devices=score.notable_devices,
+        clean_devices=score.clean_devices,
+        device_count=score.device_count,
+        total_burden=score.total_burden,
+        einleitung=REPORT_INTRO_SECURITY.get(lang),
+        rogue_hinweis=rogue_hinweis,
+        contributions=contributions,
+        geraete_balken=geraete_balken,
+        port_rows=port_rows,
+        cve_rows=cve_rows,
+        net_rows=net_rows,
+        acknowledged_rows=acknowledged_rows,
+    )
+
+
+# ── Benutzerhandbuch: PDF-Modell-Projektion + JSON-Lade-Helfer (reine Modul-Ebene) ───
+# Muster _project_security_pdf_model: REINE, deterministische Projektion (KEINE Uhr, KEINE I/O)
+# vom bereits geladenen help_content-dict auf das render-fertige ManualPdfModel. Der Runner
+# _manual_pdf liest die Uhr GENAU EINMAL und uebergibt fertige Kopf-/Fusstexte.
+
+# Pfad zur Hilfe-Quelle. Frozen-Build (PyInstaller): die Datei liegt NICHT in frontend/dist,
+# darum gibt die Spec sie eigens als Datenfile unter _MEIPASS/help/help_content.json mit (siehe
+# cernis_*.spec). Dev: relativ zu DIESEM Modul (app.py liegt in backend/, NICHT in backend/src):
+# von backend/ ein Verzeichnis hoch zum Repo-Root, dann frontend/src/lib/. Die Fallunterscheidung
+# kapselt der gemeinsame Helfer resolve_bundle_path (wie _LOGO_PATH). Existiert die Datei nicht,
+# liefert der Lade-Helfer ein leeres dict -> das PDF hat dann nur Kopf/Titel (ehrlicher Leerfall);
+# im Normalfall MUSS der Inhalt jetzt aber geladen werden.
+_HELP_CONTENT_PATH = resolve_bundle_path(
+    frozen_relative=os.path.join("help", "help_content.json"),
+    dev_absolute=os.path.normpath(
+        os.path.join(os.path.dirname(__file__), "..", "frontend", "src", "lib", "help_content.json")
+    ),
+)
+
+
+def _load_help_content() -> dict[str, object]:
+    """Laedt die Hilfe-Inhalte aus ``help_content.json`` -- fehlt die Datei, leeres dict.
+
+    Composition-Root-Bootstrap-Stil (synchroner Datei-Lesezugriff). Existiert die Datei nicht
+    (z. B. im frozen-Build), wird ein leeres dict geliefert (das PDF traegt dann nur Kopf/Titel
+    -- ehrlicher Leerfall, kein Absturz). Liest mit encoding utf-8.
+    """
+    if not os.path.exists(_HELP_CONTENT_PATH):
+        return {}
+    with open(_HELP_CONTENT_PATH, encoding="utf-8") as fh:
+        data = json.load(fh)
+    return data if isinstance(data, dict) else {}
+
+
+def _project_manual_pdf_model(
+    help_data: dict[str, object],
+    lang: str,
+    generated_at_text: str,
+    footer_left: str,
+    title: str,
+) -> ManualPdfModel:
+    """Projiziert das geladene help_content-dict auf das render-fertige ``ManualPdfModel``.
+
+    REIN/DETERMINISTISCH: KEINE Uhr, KEINE I/O (das dict ist bereits geladen). Iteriert die
+    Eintraege in EINFUEGE-Reihenfolge (Python-dict ist insertion-ordered = JSON-Reihenfolge),
+    ueberspringt den Schluessel ``_meta`` und nimmt sonst ALLE Eintraege (auch den einen mit
+    status "vorlaeufig"). Pro Eintrag: Kategorie + Sprachblock[lang] (titel + an Leerzeilen
+    getrennte, gestrippte, nicht-leere Stuecke von "lang"). ``lang`` wird normalisiert (alles
+    ausser "en" -> "de").
+    """
+    normalized = "en" if lang == "en" else "de"
+
+    # KATEGORIE-REINE GRUPPIERUNG (analog UI-Funktion ``baueKategorien`` in
+    # frontend/src/views/ManualView.jsx): Die JSON-Reihenfolge ist NICHT
+    # kategorierein, darum gruppieren wir hier. Kategorie-Reihenfolge folgt dem
+    # ERSTEN Auftreten in der JSON (nicht alphabetisch); innerhalb einer Kategorie
+    # bleiben die Eintraege in JSON-Reihenfolge. So steht jede Kategorie genau
+    # einmal als zusammenhaengender Block -- der Renderer erkennt den Gruppen-
+    # wechsel weiterhin am Wechsel des ``category_label``.
+    kategorie_reihenfolge: list[str] = []
+    gruppen: dict[str, list[ManualPdfSection]] = {}
+    for key, entry in help_data.items():
+        if key == "_meta" or not isinstance(entry, dict):
+            continue
+        kategorie = str(entry.get("kategorie", ""))
+        sprachblock = entry.get(normalized)
+        if not isinstance(sprachblock, dict):
+            continue
+        heading = str(sprachblock.get("titel", ""))
+        lang_text = str(sprachblock.get("lang", ""))
+        paragraphs = tuple(
+            stripped for stueck in lang_text.split("\n\n") if (stripped := stueck.strip())
+        )
+        if kategorie not in gruppen:
+            kategorie_reihenfolge.append(kategorie)
+            gruppen[kategorie] = []
+        gruppen[kategorie].append(
+            ManualPdfSection(category_label=kategorie, heading=heading, paragraphs=paragraphs)
+        )
+
+    sections: list[ManualPdfSection] = []
+    for kategorie in kategorie_reihenfolge:
+        sections.extend(gruppen[kategorie])
+
+    return ManualPdfModel(
+        title=title,
+        generated_at_text=generated_at_text,
+        footer_left=footer_left,
+        intro="",
+        sections=tuple(sections),
+    )
+
+
+# ── DNS-Umgehungs-Waechter: Composition-Root-Anreicherung (ADR 0042, Etappe 4b) ──
+# Zwei reine Anreicherungs-Nahtstellen, die die EIGENSTAENDIGE dns_bypass-Domaene
+# (independence-Contract) im Composition Root um Bestands-Wissen ergaenzen: die
+# Geraete-Zuordnung (Option 2) und die DoH-Bewertung ueber eine EIGENE Lookup-Naht
+# (NICHT MatchContacts -- das filtert alles durch die Anzeige-Strenge, DOH kommt da nie
+# durch). Beide leben als Modul-Funktionen (nicht in den view-Closures), damit sie mit
+# Fake-Repos testbar sind; aufgerufen werden sie AUSSCHLIESSLICH aus dem Root-Runner --
+# die Zuordnung faellt also nur hier, nie in domain/application dns_bypass.
+
+
+def _dns_bypass_name_by_ip(devices: list[Device]) -> dict[str, str]:
+    """Baut die best-effort Geraete-Namens-Map (Option 2): ``{last_ip: Anzeigename}``.
+
+    Die Quell-IP ist der Primaerschluessel; ein Anzeigename wird best-effort beigestellt,
+    WO die IP im Bestand passt (ueber ``Device.last_ip``), sonst spaeter ``None``. KEINE
+    harte Identitaet. Anzeige-Prioritaet ``label > hostname > mac`` (``label``/``hostname``
+    sind leere Strings, wenn ungesetzt -> dann der naechste Kandidat; ``mac`` ist immer
+    gesetzt und der sichere Fallback). Nur Geraete mit gesetzter ``last_ip`` gehen ein.
+    """
+    return {d.last_ip: (d.label or d.hostname or d.mac) for d in devices if d.last_ip}
+
+
+def _dns_bypass_self_ips(devices: list[Device]) -> set[str]:
+    """Die IPs der eigenen Hosts (``source=SELF``) mit gesetzter ``last_ip``.
+
+    Erlaubt dem DNS-Umgehungs-Bericht, einen Befund, dessen Quell-IP der eigene
+    Rechner ist, als "eigener Host" zu markieren. Best-effort ueber ``last_ip``
+    (dieselbe Naht wie ``_dns_bypass_name_by_ip``); ist kein eigener Host im
+    Bestand, ist die Menge leer (ehrlicher Leerfall).
+    """
+    return {d.last_ip for d in devices if d.last_ip and d.source == DeviceSource.SELF}
+
+
+async def _dns_bypass_resolver_names(
+    dst_ips: set[str], name_by_ip: dict[str, str]
+) -> dict[str, str]:
+    """Loest je Ziel-Resolver-IP einen best-effort Anzeigenamen -> ``{dst_ip: name}``.
+
+    Anreicherung im Composition Root (Regel 5), analog ``_dns_bypass_name_by_ip`` /
+    ``_dns_bypass_doh_lookup``. Prioritaet je Ziel-IP:
+
+      (a) Geraete-Bestand -- die Ziel-IP kann ein bekanntes Geraet sein (z. B. der
+          lokale Pi-hole), aufgeloest ueber DIESELBE ``last_ip``-Naht (``name_by_ip``);
+      (b) bekannte-oeffentliche-Resolver-Liste (``domain.resolver_names``);
+      (c) Reverse-DNS (PTR, ``infrastructure.reverse_dns``, best-effort mit Timeout);
+      (d) sonst KEIN Name -- der Eintrag fehlt in der Map (der Rand zeigt dann nur die
+          rohe IP; der Name ist Beigabe, nicht Ersatz).
+
+    Der Reverse-DNS-Lookup faellt NUR fuer IPs an, die (a)/(b) nicht schon aufloesen --
+    er ist best-effort mit hartem Timeout und blockiert den Aufbau nie. Nur nicht-leere
+    Namen kommen in die Map.
+    """
+    resolved: dict[str, str] = {}
+    for ip in dst_ips:
+        bestand = name_by_ip.get(ip)
+        if bestand:
+            resolved[ip] = bestand
+            continue
+        bekannt = known_resolver_name(ip)
+        if bekannt:
+            resolved[ip] = bekannt
+            continue
+        ptr = await reverse_dns_name(ip)
+        if ptr:
+            resolved[ip] = ptr
+    return resolved
+
+
+class _DohSourceLister(Protocol):
+    """Schmale Lese-Naht der Quellen-Definitionen fuer die DoH-Bewertung (nur ``list_all``).
+
+    Bewusst nur der eine Lookup, den ``_dns_bypass_doh_lookup`` braucht -- so bleibt die
+    Nahtstelle testbar mit schlanken Fakes (Muster ``DnsQuerySource``: narrow Protocol),
+    ohne das volle ``BlocklistSourceRepository`` nachbauen zu muessen. Der echte
+    ``SqliteBlocklistSourceRepository`` erfuellt es strukturell.
+    """
+
+    def list_all(self) -> list[BlocklistSource]:
+        """Alle Quellen-Definitionen (fuer den aktive-DOH-Filter)."""
+        ...
+
+
+class _DohEntryLookup(Protocol):
+    """Schmale Roh-Lookup-Naht der Eintraege fuer die DoH-Bewertung (IP + Domain).
+
+    Nur ``lookup_ips``/``lookup_domains`` -- die zwei Roh-Lookups, die die eigene DoH-Naht
+    nutzt (NICHT ``MatchContacts``). Der echte ``SqliteBlocklistEntryRepository`` erfuellt
+    es strukturell.
+    """
+
+    def lookup_ips(self, ip: str) -> list[tuple[str, str]]:
+        """Treffer fuer ``ip`` -> ``(source_id, matched_cidr)`` je Treffer."""
+        ...
+
+    def lookup_domains(self, candidates: list[str]) -> list[tuple[str, str]]:
+        """Treffer je Suffix-Kandidat -> ``(source_id, matched_domain)``."""
+        ...
+
+
+def _dns_bypass_doh_lookup(
+    sources: _DohSourceLister,
+    entries: _DohEntryLookup,
+    dst_ip: str,
+    qname: str,
+) -> tuple[bool, str | None]:
+    """Eigene DoH-Bewertung eines Ziels (``dst_ip``, best-effort ``qname``) -> (is_doh, name).
+
+    NICHT ``MatchContacts``: das filtert alle Treffer durch die Anzeige-Strenge
+    (``strictness_allows``), und ein ``DOH``-Treffer wird dort bewusst mit ``False``
+    beantwortet -- DoH kaeme da also nie durch. Stattdessen direkt die Roh-Lookups des
+    Eintrags-Repos abfragen (``lookup_ips`` fuer die Ziel-IP, ``lookup_domains`` fuer die
+    Suffix-Kandidaten des qname) und die Treffer auf AKTIVE Quellen der Gruppe ``DOH``
+    filtern (``enabled`` + ``group == DOH``, ueber die Quellen-Definitionen). Erster
+    Treffer, dessen ``source_id`` eine aktive DOH-Quelle ist -> ``(True, source.name)``;
+    sonst ``(False, None)``.
+    """
+    by_id = {s.id: s for s in sources.list_all()}
+    doh_ids = {s.id for s in by_id.values() if s.group == BlocklistGroup.DOH and s.enabled}
+    if not doh_ids:
+        return (False, None)
+    matches: list[tuple[str, str]] = list(entries.lookup_ips(dst_ip))
+    if qname:
+        matches += entries.lookup_domains(list(domain_suffix_candidates(qname)))
+    for source_id, _matched_on in matches:
+        if source_id in doh_ids:
+            return (True, by_id[source_id].name)
+    return (False, None)
+
+
+# Das feste Default-Label, mit dem der eigene Host FRUEHER angelegt wurde. Traegt ein
+# bestehender Eintrag GENAU diesen Wert, gilt er als nicht vom User geaendert und wird
+# beim Start einmalig auf den Hostnamen umgesetzt (siehe _register_self_host).
+_SELF_HOST_ALT_DEFAULT_LABEL = "Dieser Rechner"
+
+
+def _register_self_host(repository: SqliteDeviceRepository, clock: SystemClock) -> None:
+    """Nimmt den eigenen Host beim Start EINMALIG in den Bestand auf (best-effort).
+
+    Ein aktiver Netz-Scan findet den eigenen Host nicht; damit die eigene IP im
+    Bestand steht (und der DNS-Umgehungs-Bericht die Quelle aufloest), wird der
+    Rechner, auf dem CERNIS laeuft, hier als ``Device`` mit
+    ``source=DeviceSource.SELF`` upgesertet -- ueber die bestehende
+    ``save``-Naht des Repositories, NICHT ueber den Scan.
+
+    Bewahrung wie beim Scan-Upsert: existiert der Eintrag schon (gleiche MAC),
+    werden NUR ``last_ip``/``hostname``/``source`` aktualisiert; die
+    user-gesteuerten Felder (``label``/``is_known``/``trust_state``/``tags``/
+    ``notes`` u. a.) bleiben unangetastet. Ein neuer Eintrag bekommt als Label
+    den ECHTEN Hostnamen (z. B. "ubultsvm"; die Kennzeichnung "eigener Host"
+    kommt bereits ueber ``source=SELF``) und ``is_known=True``. Faellt der
+    Hostname leer aus, dient die MAC als Fallback (nie ein leeres Label).
+
+    best-effort: scheitert die Interface-Ermittlung -- oder wirft irgendetwas --,
+    wird geloggt und geschluckt (KEIN Startup-Crash). 127.0.0.1 / ``lo`` wird von
+    ``detect_self_host`` strikt ausgeschlossen. Ebenso ausgeschlossen ist die
+    Ethernet-Broadcast-Adresse: sie ist kein Geraet und wird still uebersprungen
+    (nur geloggt), wie im Scan-Aufnahmepfad.
+    """
+    try:
+        detected = detect_self_host()
+        if detected is None:
+            logger.info("self_host_not_detected")
+            return
+        mac = normalize_mac(detected.mac)
+        # Die Broadcast-Adresse ist kein Geraet, sondern eine Adressierungsform --
+        # gleiche Behandlung wie im Scan-Aufnahmepfad: still uebersprungen (nur
+        # geloggt), kein Fehler. Faktisch kann das nicht auftreten, bleibt aber
+        # nicht unbehandelt.
+        if is_broadcast_mac(mac):
+            logger.info("self_host_broadcast_mac_skipped", mac=mac)
+            return
+        now = clock.now()
+        existing = repository.get(mac)
+        if existing is None:
+            # Label = echter Hostname (die "eigener Host"-Kennzeichnung traegt
+            # source=SELF im Frontend). Leerer Hostname -> MAC als Fallback,
+            # damit nie ein leeres Label entsteht.
+            device = Device(
+                mac=mac,
+                first_seen=now,
+                last_seen=now,
+                last_ip=detected.ip,
+                is_known=True,
+                label=detected.hostname or mac,
+                hostname=detected.hostname,
+                source=DeviceSource.SELF,
+            )
+        else:
+            # NUR die Fakten des eigenen Hosts nachfuehren -- die user-gesteuerten
+            # Felder (label/is_known/trust_state/tags/notes/...) NICHT ueberschreiben
+            # (Muster der Scan-Bewahrung). last_seen wird mitgezogen, damit der
+            # eigene Host als aktiv gilt.
+            #
+            # Alt-Zustand-Korrektur (EINMALIG): frueher wurde der eigene Host mit dem
+            # festen Default-Label "Dieser Rechner" angelegt. Traegt der bestehende
+            # Eintrag GENAU dieses alte Default-Label (also NICHT vom User bewusst
+            # geaendert), wird es jetzt auf den echten Hostnamen umgesetzt (Fallback
+            # MAC, nie leer) -- so zeigt der Bericht kuenftig "ubultsvm". Ein echtes,
+            # vom User selbst vergebenes Label bleibt unangetastet.
+            label = existing.label
+            if label == _SELF_HOST_ALT_DEFAULT_LABEL:
+                label = detected.hostname or mac
+            device = replace(
+                existing,
+                last_seen=now,
+                last_ip=detected.ip,
+                hostname=detected.hostname or existing.hostname,
+                label=label,
+                source=DeviceSource.SELF,
+            )
+        repository.save(device)
+        logger.info("self_host_registered", mac=mac, ip=detected.ip)
+    except Exception as exc:
+        # best-effort: der eigene Host ist Komfort, kein Startup-Gate.
+        logger.warning("self_host_registration_failed", error=str(exc))
 
 
 def create_app(config: AppConfig | None = None) -> FastAPI:
@@ -236,28 +2466,233 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     cfg = config or AppConfig()
     configure_logging(level=cfg.log_level, json_logs=cfg.log_json)
 
+    # ── Schemanaht, erste Haelfte: die ENTSCHEIDUNG (S88-P1a) ─────────────────────
+    # Zweite Haelfte ist ``schema_aufbauen`` ganz am Ende dieser Funktion, direkt vor
+    # ``return app`` -- dort laufen die Aufbauschritte und dort wird ``user_version``
+    # als letzte Handlung gesetzt. Die Zweiteilung ist eine ENTSCHEIDUNG, kein
+    # Versehen: die Fassungspruefung ist eine Entscheidung UEBER die Datenbank, der
+    # Aufbau eine Handlung AN ihr. Nur die Entscheidung muss frueh fallen.
+    #
+    # Warum genau hier: dies ist die erste datenbankberuehrende Handlung im Koerper
+    # von create_app. Die frueheste Repository-Nutzung steht weiter unten
+    # (``default_creds_list_repository().ensure_seeded()``), gefolgt von fuenf
+    # weiteren im Koerper -- alle liegen NACH dieser Zeile. Damit ist zugesichert,
+    # dass eine zu neue Datenbank (Fall D, SchemaTooNewError) verweigert wird, BEVOR
+    # irgendein Repository sie beruehrt hat. Fall C (Sicherung + Migration) wird
+    # ebenfalls hier vollstaendig erledigt: eine Migration darf nicht zwischen halb
+    # gebauten Repositories liegen.
+    #
+    # Der Aufruf haengt bewusst NICHT an ``cfg.bootstrap_on_startup``: sechs
+    # Repositories entstehen auch ohne diesen Schalter (gemessen, s. o.), also darf
+    # die Fassungspruefung nicht dahinter liegen -- sonst liefe der Schalter-lose Weg
+    # ungeprueft auf eine womoeglich zu neue Datei.
+    from modules.db_path import get_db_path
+
+    _schema_db_pfad = get_db_path()
+    _vorgefundene_schema_fassung = schema_pruefen(_schema_db_pfad)
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        # Die Weck-Naht (S86-A4/B1) ist modul-global (s. dort): sie wird unten an den
+        # gestarteten CVE-Worker gebunden und beim Teardown wieder geloest.
+        global _cve_monitor_wecken
         logger.info("startup", service=APP_NAME, version=APP_VERSION)
         # Bootstrap nur, wenn app.py der produktive Owner ist (P2.3). Default aus
         # -> kein echter DB-/Monitor-/Scheduler-Start in Tests oder bei
-        # versehentlichem Doppelstart. Sequenz exakt wie main.py (P2.1a-Contract).
+        # versehentlichem Doppelstart.
         if cfg.bootstrap_on_startup:
             _check_version_upgrade()
-            init_db()
-            init_devices_db()
-            configure_monitor(_build_monitor_targets(), interval=5)
-            # Referenz auf app.state halten (verhindert vorzeitige GC des Tasks).
-            _app.state.monitor_task = asyncio.create_task(run_monitor())
-            init_schedule_db()
-            init_sla_db()
-            init_alerts_db()
-            init_agents_db()
-            start_scheduler(_scheduled_scan)
+            # init_db()/init_devices_db() liefen frueher HIER; sie sind nach S88-P1a
+            # Aufbauschritte der Schemanaht (schema_aufbauen am Ende von create_app)
+            # und duerfen nicht doppelt laufen. Dasselbe gilt fuer init_alerts_db()
+            # weiter unten.
+            # Eigenen Host EINMALIG in den Bestand aufnehmen (ADR self-host): ein
+            # aktiver Scan findet den eigenen Rechner nicht -> die eigene IP bliebe
+            # im DNS-Umgehungs-Bericht unaufgeloest. Upsert ueber die device-Naht
+            # (nicht ueber den Scan), best-effort (Fehler werden geschluckt).
+            _register_self_host(device_repository(), device_clock)
+            # DNS-Vertrauensmodell (ADR 0043, E3): einmalig die vertrauenswuerdigen
+            # Kandidaten erfassen -- System-Resolver (detect_system_resolvers) + Gateway
+            # (_topology_gateway) je IP ueber SyncDnsTrustServer. best-effort/Fehler
+            # geschluckt im Bootstrap selbst (kein Startup-Crash), Muster _register_self_host.
+            await _dns_trust_bootstrap()
+            # ── monitoring v2 (M.9): Altcode-Loop (configure_monitor + run_monitor)
+            # und Altcode-Scheduler (start_scheduler) ERSETZT durch die v2-Use-Cases.
+            # Der RunMonitor tickt bis stop(); der Task haengt an app.state (kein GC).
+            # Die gespeicherten aktiven Schedules registriert die Verdrahtung HIER
+            # (der ApschedulerJobScheduler.start() tut das bewusst nicht -- er kennt
+            # das Repo nicht), exakt wie der Altcode-``start_scheduler``.
+            run_monitor_uc = _build_run_monitor()
+            _app.state.run_monitor = run_monitor_uc
+            _app.state.monitor_task = asyncio.create_task(run_monitor_uc.run())
+            # traffic-Durchsatz-Poller AUTO (T.4b-2): nur wenn explizit eingeschaltet.
+            # Default aus -> der Durchsatz wird sparsam erst auf Anforderung erfasst
+            # (MANUELL ueber POST /api/traffic/poll/start). Nutzt DENSELBEN Singleton +
+            # app.state-Keys wie der MANUELL-Pfad (eine Instanz, ein State).
+            if cfg.traffic_poll_auto:
+                poll_throughput_uc = _poll_throughput()
+                _app.state.poll_throughput = poll_throughput_uc
+                _app.state.poll_task = asyncio.create_task(poll_throughput_uc.run())
+            job_scheduler().start(_scheduled_scan)
+            for row in schedule_repository().list():
+                if row["enabled"]:
+                    job_scheduler().register(row, _scheduled_scan)
+            # ── Langzeit-Logging B-II: Resume + periodischer Cleanup ──────────
+            # RESUME: aktive Aufgaben mit noch offenem Fenster nimmt der Sink ab dem
+            # naechsten Tick automatisch wieder auf (er liest die aktiven Tasks frisch)
+            # -- KEIN Extra-Schritt. Der Use-Case beendet nur die ABGELAUFENEN, die
+            # sonst als ewig-aktiv haengenblieben (IMMEDIATE-Maximaldauer/SCHEDULED-Ende
+            # waehrend der Auszeit verstrichen). Einmaliger Aufruf, time.time() als now.
+            import time
+
+            resume_result = ResumeActiveLoggingTasks(logging_task_repository())(time.time())
+            logger.info(
+                "logging_tasks_resumed",
+                kept_active=resume_result.kept_active,
+                finished=resume_result.finished,
+            )
+            # CLEANUP: periodischer Retention-Runner (Muster monitor_task/poll_task).
+            # Setzt EnforceLoggingRetention stuendlich durch; haengt an app.state, der
+            # Teardown stoppt+canceled+awaitet ihn (suppress CancelledError).
+            logging_retention_uc = RunLoggingRetention(
+                EnforceLoggingRetention(logging_rtt_repository(), logging_event_repository())
+            )
+            _app.state.logging_retention = logging_retention_uc
+            _app.state.logging_cleanup_task = asyncio.create_task(logging_retention_uc.run())
+            # ── CVE-Drip-Worker (ADR 0037) ────────────────────────────────────
+            # Gedrosselter Hintergrund-Loop (Muster monitor_task): prueft pro Intervall
+            # HOECHSTENS EINEN faelligen Host (Faelle 1-3) gegen den jüngsten Scan-Bestand.
+            # KEIN stures Neu-Pruefen beim Start -- die tick-Logik entscheidet Faelligkeit
+            # aus dem persistierten last_checked_ts je Host (dreimal Neustart am Tag
+            # rattert NICHT dreimal alles durch; Fall 3 greift erst nach dem Intervall).
+            # Leerer Bestand / kein faelliger Host -> der Loop schlaeft (kein NVD-Aufruf).
+            # Haengt an app.state; der Teardown stoppt+cancelt+awaitet ihn.
+            run_cve_monitor_uc = _build_run_cve_monitor()
+            _app.state.run_cve_monitor = run_cve_monitor_uc
+            _app.state.cve_monitor_task = asyncio.create_task(run_cve_monitor_uc.run())
+            # Weck-Naht (S86-A4/B1) an den gerade gebauten Worker binden: ab hier stoesst
+            # ein abgeschlossener Scan (beide Wege -- WS-Handler und _scheduled_scan) den
+            # Worker an, statt ihn bis zu einem vollen Intervall verschlafen zu lassen.
+            # Die Drosselung bleibt unberuehrt (tick prueft weiter hoechstens EINEN Host
+            # mit Lookup) -- geweckt wird nur der Schlaf, nicht die NVD-Last. global wie
+            # die uebrigen Modul-Level-Naehte, weil _scheduled_scan kein app-Objekt kennt
+            # (die global-Erklaerung steht am Anfang von lifespan).
+            _cve_monitor_wecken = run_cve_monitor_uc.wake
+            # ── Aussenkontakte-Recorder (E3b) ─────────────────────────────────
+            # Snapshot-Worker (Muster cve_monitor_task): tickt bis stop(); schreibt aber
+            # nur, wenn ueber den (in E4 kommenden) REST-Weg eine Aufzeichnung ACTIVE
+            # gesetzt wurde. Bis dahin tickt er und macht nur DETAIL-Retention (harmlos,
+            # leere DB -- ehrlicher Leerzustand, S3). Haengt an app.state; der Teardown
+            # stoppt+cancelt+awaitet ihn.
+            run_outbound_recorder_uc = _build_run_outbound_recorder()
+            _app.state.run_outbound_recorder = run_outbound_recorder_uc
+            _app.state.outbound_recorder_task = asyncio.create_task(run_outbound_recorder_uc.run())
+            # ── v2-Scheduler-Worker (Block 3a, Etappe 3b) ─────────────────────
+            # Lifespan-Worker (Muster cve_monitor_task): tickt bis stop(); der Task
+            # haengt an app.state (kein GC). Die Handler-Registry ist in 3b LEER --
+            # der Worker laeuft und tut nichts (ehrlicher Leerzustand, S3); der erste
+            # Handler (monitoring_window) kommt in Block 3b. Getrennt vom alten
+            # ApschedulerJobScheduler (job_scheduler().start oben), eigene Tabelle.
+            run_scheduler_uc = _build_run_scheduler()
+            _app.state.run_scheduler = run_scheduler_uc
+            _app.state.scheduler_task = asyncio.create_task(run_scheduler_uc.run())
+            # ── blocklist-Domaene (Ring 4+5) ─────────────────────────────────
+            # Idempotente Start-Initialisierung: fehlende Werksquellen anlegen (bestehende
+            # bleiben unangetastet -> Nutzer-Aenderungen ueberleben) UND -- falls noch keiner
+            # existiert -- den taeglich tickenden Auto-Refresh-Job (blocklist_refresh)
+            # anlegen. Beides ueber die Composition-Root-Closures (DB-Schreiben nur im
+            # bootstrap-Pfad, nie beim Import/Test ohne bootstrap_on_startup).
+            _seed_blocklist_defaults()
+            _ensure_blocklist_refresh_job()
+            # init_alerts_db() lief frueher HIER; es ist nach S88-P1a ein Aufbauschritt
+            # der Schemanaht (schema_aufbauen am Ende von create_app) und darf nicht
+            # doppelt laufen -- wie init_db()/init_devices_db() weiter oben.
+            # agent (A.4+5): KEIN init_agents_db mehr -- das v2-SqliteAgentRepository
+            # legt die remote_agents-Tabelle beim Bau selbst an (_ensure_schema),
+            # Muster wie die schedule/sla-Repos. Der letzte modules.agent-Bootstrap-
+            # Faden faellt damit weg.
         yield
         if cfg.bootstrap_on_startup:
-            stop_monitor()
-            stop_scheduler()
+            # stop() setzt das Loop-Flag (Abbruch nach der laufenden Iteration);
+            # cancel() bricht zusaetzlich ein laufendes sleep(interval) sofort ab.
+            # Den CancelledError beim Awaiten unterdruecken -- erwarteter Abgang.
+            run_monitor_uc.stop()
+            _app.state.monitor_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await _app.state.monitor_task
+            # Langzeit-Logging-Cleanup (B-II): periodischer Retention-Runner -- selber
+            # Teardown wie der monitor_task (stop-Flag + cancel + awaiten, CancelledError
+            # unterdruecken). Laeuft immer (im bootstrap-Block gestartet).
+            logging_retention_uc.stop()
+            _app.state.logging_cleanup_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await _app.state.logging_cleanup_task
+            # CVE-Drip-Worker (ADR 0037): selber Teardown wie der monitor_task (stop-Flag
+            # + cancel + awaiten, CancelledError unterdruecken). Laeuft immer (im bootstrap-
+            # Block gestartet).
+            run_cve_monitor_uc.stop()
+            _app.state.cve_monitor_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await _app.state.cve_monitor_task
+            # Weck-Naht (B1) wieder loesen: der Worker ist gestoppt, ein spaeterer
+            # Weckruf haette keinen Empfaenger mehr. Wichtig, weil die Naht MODUL-global
+            # ist -- ohne dieses Zuruecksetzen zeigte sie ueber das Ende dieser App
+            # hinaus auf einen toten Worker (mehrere App-Instanzen im selben Prozess,
+            # wie im Test). Das Aufraeumen spiegelt die Bindung oben.
+            _cve_monitor_wecken = None
+            # Aussenkontakte-Recorder (E3b): selber Teardown wie der cve_monitor_task
+            # (stop-Flag + cancel + awaiten, CancelledError unterdruecken). Laeuft immer
+            # (im bootstrap-Block gestartet).
+            run_outbound_recorder_uc.stop()
+            _app.state.outbound_recorder_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await _app.state.outbound_recorder_task
+            # v2-Scheduler-Worker (Etappe 3b): selber Teardown wie der cve_monitor_task
+            # (stop-Flag + cancel + awaiten, CancelledError unterdruecken). Laeuft immer
+            # (im bootstrap-Block gestartet).
+            run_scheduler_uc.stop()
+            _app.state.scheduler_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await _app.state.scheduler_task
+            # capture-Loop (C.5): laeuft NUR, wenn ueber POST /api/pcap/start gestartet
+            # (kein startup-Autostart). Beim Shutdown sauber stoppen + canceln, falls aktiv.
+            capture_task = getattr(_app.state, "capture_task", None)
+            if capture_task is not None and not capture_task.done():
+                run_capture().stop()
+                capture_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await capture_task
+            # DNS-Umgehungs-Recorder (ADR 0042, Etappe 4b): laeuft NUR, wenn ueber POST
+            # /api/dns-bypass/start gestartet (ON-DEMAND, kein startup-Autostart). Beim
+            # Shutdown sauber stoppen (rec.stop() best-effort) + canceln + awaiten, falls
+            # aktiv -- selber Teardown wie der capture_task.
+            dns_bypass_task = getattr(_app.state, "dns_bypass_task", None)
+            if dns_bypass_task is not None and not dns_bypass_task.done():
+                dns_bypass_recorder().stop()
+                dns_bypass_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await dns_bypass_task
+            # traffic-Poll-Loop (T.4b-2): laeuft per AUTO (oben) ODER MANUELL
+            # (POST /api/traffic/poll/start). Beim Shutdown sauber stoppen + canceln,
+            # falls aktiv -- selber Pfad fuer beide Modi (ein Singleton/Task).
+            poll_task = getattr(_app.state, "poll_task", None)
+            if poll_task is not None and not poll_task.done():
+                poll_uc = getattr(_app.state, "poll_throughput", None)
+                if poll_uc is not None:
+                    poll_uc.stop()
+                poll_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await poll_task
+            # sni-Sniff (ADR 0017): laeuft NUR, wenn ueber POST /api/sni/start gestartet
+            # (kein startup-Autostart, MANUELL). Anders als der capture-/poll-Loop gibt
+            # es KEINE Coroutine/keinen asyncio.Task -- der Adapter haelt die beiden
+            # Hintergrund-THREADS (scapy-AsyncSniffer + psutil-Poller). Daher kein
+            # task.cancel(): der lifespan-Shutdown stoppt+joint die Threads ueber
+            # RunSniCapture.stop() (idempotent), falls ein Sniff lief.
+            run_sni_uc = getattr(_app.state, "run_sni", None)
+            if run_sni_uc is not None:
+                run_sni_uc.stop()
+            job_scheduler().stop()
         logger.info("shutdown", service=APP_NAME)
 
     app = FastAPI(title="CERNIS PRO", version=APP_VERSION, lifespan=lifespan)
@@ -270,6 +2705,42 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Origin-Guard fuer zustandsaendernde HTTP-Methoden (Finding F-01, Etappe 1).
+    # Schliesst die Angriffsflaeche "fremde Webseite im lokalen Browser triggert die
+    # localhost-API": ein boeser Tab kann zwar einen POST/PUT/DELETE/PATCH an
+    # ``http://localhost:...`` absetzen, aber der Browser setzt dabei zwingend den
+    # ``Origin``-Header auf die Tab-Herkunft -- und die steht nicht in der Allowlist.
+    #
+    # Reihenfolge (add_middleware fuegt VORNE ein -> zuletzt hinzugefuegt laeuft
+    # AUSSEN): der Guard wird NACH der CORSMiddleware hinzugefuegt, sitzt also INNEN
+    # von CORS. Ein abgewiesener Request wird VOR der Route (403) gestoppt, aber die
+    # Antwort laeuft auf dem Rueckweg weiter durch die aeussere CORSMiddleware -- die
+    # CORS-Header bleiben also unberuehrt gesetzt (fuer erlaubte Origins). Nur
+    # zustandsaendernde Methoden werden geprueft; GET/HEAD/OPTIONS (Lesezugriffe +
+    # CORS-Preflight) laufen immer durch. Die Allowlist wird injiziert (dieselbe
+    # ``cfg.cors_allow_origins`` wie CORS -- EINE Quelle der Wahrheit), der Guard liest
+    # NICHT selbst aus der Umgebung.
+    _origin_allowlist = cfg.cors_allow_origins
+    _guarded_methods = frozenset({"POST", "PUT", "DELETE", "PATCH"})
+
+    class _OriginGuardMiddleware(BaseHTTPMiddleware):
+        """Weist zustandsaendernde Requests mit fremder ``Origin`` mit 403 ab."""
+
+        async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+            if request.method in _guarded_methods:
+                origin = request.headers.get("origin")
+                if not is_origin_allowed(origin, _origin_allowlist):
+                    logger.warning(
+                        "origin_rejected",
+                        origin=origin,
+                        method=request.method,
+                        path=request.url.path,
+                    )
+                    return JSONResponse({"detail": "Origin nicht erlaubt."}, status_code=403)
+            return await call_next(request)
+
+    app.add_middleware(_OriginGuardMiddleware)
 
     @app.get("/health", tags=["ops"])
     async def health() -> dict[str, str]:
@@ -318,8 +2789,14 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         device_repository(), device_clock
     )
     app.dependency_overrides[provide_get_devices] = lambda: GetDevices(device_repository())
+    app.dependency_overrides[provide_get_unclassified_devices] = lambda: GetUnclassifiedDevices(
+        device_repository()
+    )
     app.dependency_overrides[provide_get_device] = lambda: GetDevice(device_repository())
     app.dependency_overrides[provide_update_device_meta] = lambda: UpdateDeviceMeta(
+        device_repository()
+    )
+    app.dependency_overrides[provide_dismiss_device_from_watch] = lambda: DismissDeviceFromWatch(
         device_repository()
     )
     app.dependency_overrides[provide_delete_device] = lambda: DeleteDevice(device_repository())
@@ -328,19 +2805,70 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.dependency_overrides[provide_record_scanned_host] = lambda: RecordScannedHost(
         device_repository(), device_clock
     )
+    # Geraete-Lebenszyklus (A3): Anlegen/Archivieren/Wiederherstellen + Nachfrage.
+    app.dependency_overrides[provide_create_device] = lambda: CreateDevice(
+        device_repository(), device_clock
+    )
+    app.dependency_overrides[provide_archive_device] = lambda: ArchiveDevice(device_repository())
+    app.dependency_overrides[provide_restore_device] = lambda: RestoreDevice(device_repository())
+    app.dependency_overrides[provide_get_archived_devices] = lambda: GetArchivedDevices(
+        device_repository()
+    )
+    app.dependency_overrides[provide_answer_archive_prompt] = lambda: AnswerArchivePrompt(
+        device_repository()
+    )
+
+    # Aufraeumen nach Netz (S88-P3): Gruppierung + Mengen-Loeschung. Die Gruppierung
+    # laeuft ueber das vorhandene device_repository (reine Rechnung ueber last_ip,
+    # nichts gespeichert). Die Loeschung braucht einen EIGENEN Adapter mit EIGENER
+    # Connection -- nur so liegen die acht Tabellen in EINER Transaktion; die
+    # uebrigen Repos koennen ausschliesslich tabellenweites clear_all.
+    @lru_cache(maxsize=1)
+    def device_purge_repository() -> SqliteDevicePurgeRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteDevicePurgeRepository(get_db_path())
+
+    app.dependency_overrides[provide_gruppiere_nach_netz] = lambda: GruppiereGeraeteNachNetz(
+        device_repository()
+    )
+    app.dependency_overrides[provide_entferne_geraete_menge] = lambda: EntferneGeraeteMenge(
+        device_purge_repository()
+    )
+
+    # Nachfrage-Kandidaten: die Tage-Schwelle wird LIVE aus dem Setting gelesen und
+    # in den Use-Case eingesetzt, sodass der Endpunkt argumentlos aufrufen kann. Der
+    # Provider liefert daher ein Callable[[], list], nicht die Use-Case-Instanz.
+    def _build_get_archive_candidates() -> Callable[[], list[Any]]:
+        days = _read_device_int_setting(
+            repository(), "device_archive_prompt_days", _DEVICE_ARCHIVE_PROMPT_DEFAULT_DAYS
+        )
+        use_case = GetArchiveCandidates(device_repository(), device_clock)
+        return lambda: use_case(days)
+
+    app.dependency_overrides[provide_get_archive_candidates] = _build_get_archive_candidates
 
     # ── scanning-Domaene v2 verdrahten (Regel 5: ports<->infrastructure nur hier) ──
     # REST (history/vendor) ueber duenne Use-Cases im api-Ring; der WS-Handler
     # /ws/scan lebt im Composition Root (ws_scan.py), weil er domain-Event-Typen
     # + Adapter-Exceptions kennt (im api-Ring verboten). Das ScanHistory-Repository
     # teilt die DB mit settings/devices; die uebrigen Adapter sind zustandslos.
+    scan_history_clock = SystemClock()
+
     @lru_cache(maxsize=1)
     def scan_history_repository() -> SqliteScanHistoryRepository:
         from modules.db_path import get_db_path
 
-        return SqliteScanHistoryRepository(get_db_path())
+        return SqliteScanHistoryRepository(get_db_path(), scan_history_clock)
 
     vendor_lookup = VendorLookupAdapter()
+    arp_table = ArpTableAdapter()
+
+    # PTR/Forward-DNS-Adapter (dig) EINMAL gebaut und geteilt: er ist zustandslos, und
+    # GENAU DIESELBE Instanz traegt den Scan-HostnameResolver (cache-freie PTR-Abfrage,
+    # umgeht den negativen mDNSResponder-Cache), den reichen ResolveEndpoint und den
+    # schlanken Batch-PTR-Use-Case (Verdrahtung weiter unten im resolver-Block).
+    ptr_resolver = DigDnsPtrResolver()
 
     app.include_router(scanning_router)
     app.dependency_overrides[provide_get_scan_history] = lambda: GetScanHistory(
@@ -350,23 +2878,647 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         scan_history_repository()
     )
     app.dependency_overrides[provide_lookup_vendor] = lambda: LookupVendor(vendor_lookup)
+    app.dependency_overrides[provide_get_arp_table] = lambda: GetArpTable(arp_table)
 
     # WS-Handler: pro Verbindung einen frischen RunNetworkScan mit den konkreten
-    # Adaptern. FritzHostsPort ist NICHT dabei (Merge -> S.7); die uebrigen
-    # Adapter sind zustandslos, das ScanHistory-Repository wird memoisiert geteilt.
+    # Adaptern. ArpTableAdapter (S.7b) + FritzHosts-Wrapper (S.7c) sind dabei. Die
+    # zustandslosen Adapter werden pro Scan neu gebaut; das ScanHistory-Repository
+    # wird geteilt. Die Fritz-Credentials werden PRO SCAN frisch gelesen (Aenderung
+    # in den Settings wirkt ohne App-Neustart).
     def _build_run_network_scan() -> RunNetworkScan:
+        # Credentials zum Scan-Zeitpunkt lesen: host/user aus dem Settings-
+        # Repository (Rohwerte), das Passwort als Klartext DIREKT aus dem
+        # SecretStore (Composition Root darf Secret-Klartext lesen, um einen
+        # Adapter zu bauen -- das ist sein Job; NIE ueber GetSettings, der maskiert).
+        fritz_host_setting = repository().get("fritz_host")
+        fritz_user_setting = repository().get("fritz_user")
+        fritz_host = str(fritz_host_setting.value) if fritz_host_setting is not None else ""
+        fritz_user = str(fritz_user_setting.value) if fritz_user_setting is not None else ""
+        fritz_password = secret_store().get("fritz_password") or ""
         return RunNetworkScan(
             discovery=HostDiscoveryAdapter(),
             port_scanner=PortScannerAdapter(),
             vendor_lookup=vendor_lookup,
-            resolver=HostnameResolverAdapter(),
+            resolver=HostnameResolverAdapter(ptr_resolver=ptr_resolver),
             mdns=MdnsAdapter(),
             ssdp=SsdpAdapter(),
             ipv6=Ipv6EnrichmentAdapter(),
+            fritz_hosts=_FritzHostsWiring(fritz_host, fritz_user, fritz_password),
+            arp_table=arp_table,
             scan_history=scan_history_repository(),
         )
 
-    app.add_api_websocket_route("/ws/scan", make_ws_scan(_build_run_network_scan))
+    # devices-Projektion (S.7d): der WS-Handler verbucht pro angereichertem Host
+    # ueber RecordScannedHost in die devices-DB. Die Projektion EnrichedHost ->
+    # ScannedHost + der Aufruf liegen im Composition Root (ws_scan.py), NICHT im
+    # scanning-Use-Case (keine scanning->devices-Domaenenkopplung). Gleiche
+    # Verdrahtung wie der api-Provider oben (DeviceRepository + Clock).
+    def _build_record_scanned_host() -> RecordScannedHost:
+        return RecordScannedHost(device_repository(), device_clock)
+
+    # analysis-Host-Historie-Schreibnaht (C.2): die zweite, von der devices-Projektion
+    # UNABHAENGIGE Schreib-Naht. Liefert das record_seen-Callable (mac) -> None aus dem
+    # Host-Historie-Repo. Das Repo (host_history_repository) ist als lru_cache erst im
+    # analysis-Block weiter unten definiert; diese Closure laeuft aber erst bei der
+    # WS-Verbindung (spaete Namensaufloesung, Muster _build_run_monitor/_scheduled_scan).
+    # Diese Naht pflegt die Historie, aus der die LESE-Naht (_analyze_snapshot) spaeter
+    # ObservedHost.is_known fuellt -- die Baseline der new_host_seen-Regel (ADR 0013).
+    def _build_record_seen() -> Any:
+        return host_history_repository().record_seen
+
+    # Fabrik-Naht des geplanten Scans (E1) an die drei Builder binden -- ab hier
+    # nimmt _scheduled_scan denselben Pfad wie der manuelle Scan. global statt
+    # app.state, weil _scheduled_scan als M.6-ScanTriggerCallback auf Modul-Level
+    # lebt (Signatur/Aufrufer unveraendert) und kein app-Objekt kennt.
+    def _scheduled_scan_bausteine_impl() -> tuple[Any, Any, Any]:
+        return (
+            _build_run_network_scan(),
+            _build_record_scanned_host(),
+            _build_record_seen(),
+        )
+
+    global _scheduled_scan_bausteine
+    _scheduled_scan_bausteine = _scheduled_scan_bausteine_impl
+
+    # Zeitbuchungs-Naht (Finding 3) an den Use-Case binden -- gleiches Muster, aber
+    # eigene Naht (s. Modul-Kommentar). Spaete Namensaufloesung von
+    # schedule_repository/job_scheduler/schedule_clock, die erst im monitoring-Block
+    # weiter unten entstehen (Muster _build_is_known/host_history_repository).
+    def _scheduled_scan_zeitbuchung_impl() -> RecordScheduleRun:
+        return RecordScheduleRun(schedule_repository(), job_scheduler(), schedule_clock)
+
+    global _scheduled_scan_zeitbuchung
+    _scheduled_scan_zeitbuchung = _scheduled_scan_zeitbuchung_impl
+
+    # Ergebnisbuchungs-Naht (S88-P4) -- dasselbe Muster, eigene Naht: sie braucht nur das
+    # Repository (weder Job-Engine noch Uhr; der Ausgang traegt keinen Zeitstempel, der
+    # steht schon in last_run).
+    def _scheduled_scan_ergebnisbuchung_impl() -> RecordScheduleResult:
+        return RecordScheduleResult(schedule_repository())
+
+    global _scheduled_scan_ergebnisbuchung
+    _scheduled_scan_ergebnisbuchung = _scheduled_scan_ergebnisbuchung_impl
+
+    # Baseline-Anreicherung des host_detail-Frames (ADR 0019): zwei zusaetzliche
+    # Lese-Pfade, die der WS-Handler pro angereichertem Host konsultiert.
+    # get_device liefert die kuratierten devices-Felder (label/tags/notes) -- gleicher
+    # Use-Case wie der api-Provider provide_get_device, pro Verbindung frisch gebaut
+    # (Muster _build_record_scanned_host). is_known liefert den VORZUSTAND der Host-
+    # Historie (gelesen VOR record_seen) -- analog _build_record_seen, nur die Lese-
+    # statt der Schreib-Methode desselben Repos (spaete Namensaufloesung von
+    # host_history_repository, das erst im analysis-Block definiert ist).
+    def _build_get_device() -> GetDevice:
+        return GetDevice(device_repository())
+
+    def _build_is_known() -> Any:
+        # Baseline EINMAL beim WS-Aufbau lesen. Leere Historie (allererster Scan, kein
+        # Vorzustand) -> JEDER Host bekannt: new_host_seen feuert nicht ("neu" ist gegen
+        # eine leere Baseline bedeutungslos; gleiche Linie wie MAC-lose Hosts -> True).
+        # Sonst der normale Vorzustand-Abgleich gegen die vor record_seen gelesene Menge.
+        repo = host_history_repository()
+        baseline = repo.known_macs()
+        if not baseline:
+            return lambda mac: True
+        return lambda mac: True if not mac else (mac in baseline)
+
+    # analysis-Achse-B-Bewertung (ADR 0029 + 0030): der WS-Handler bewertet pro
+    # angereichertem Host den LIVE-Portstand gegen die KONFIGURIERTEN Regeln und traegt BEIDE
+    # Achse-B-Felder ins host_detail-Frame -- analysis_severity (Host-Maximum, 0029) UND
+    # flagged_ports (die getroffenen offenen Ports je Stufe, 0030).
+    #
+    # Single Source (ADR 0030): EIN gefilterter Provider wird pro Verbindung EINMAL gebaut
+    # (DERSELBE _build_filtered_provider wie der REST-Pfad), daraus EINE AnalyzeSnapshot-
+    # Instanz. Das zurueckgegebene Callable liefert beide Felder zusammen: die Severity aus
+    # dem Engine-Lauf (_severity_for_host), die flagged_ports aus dem Mengenschnitt ueber
+    # GENAU DENSELBEN Provider (_flagged_ports_for_host) -- so koennen die beiden Achse-B-
+    # Felder nicht auseinanderlaufen (Konsistenz-Invariante). KEINE DB-Historie -- die WS-
+    # Quelle bewertet den aktuellen Scan-Host, nicht den abgeschlossenen Scan aus der DB.
+    def _build_axis_b() -> Any:
+        provider = _build_filtered_provider(analysis_rule_repository(), repository())
+        analyze = AnalyzeSnapshot(provider, StaticHelpLinkResolver())
+        # acked-Lese-Naht (ADR 0031): das acknowledged_ports-Callable (mac) -> set[int] aus
+        # dem Acknowledge-Repo, EINMAL pro Verbindung geholt (spaete Namensaufloesung von
+        # acknowledgement_repository, das erst im analysis-Block weiter unten definiert ist
+        # -- Muster wie _build_is_known/host_history_repository). Die acked-Logik lebt
+        # KOMPLETT in dieser Closure (geringste Kopplung, Teil 3): ws_scan setzt nur ein
+        # weiteres Frame-Feld und braucht keine zweite Factory.
+        acknowledged_ports = acknowledgement_repository().acknowledged_ports
+
+        # Das Callable liefert ein TRIPEL (severity, flagged, acked_list): die quittierten
+        # Ports werden EINMAL je Host geholt und doppelt genutzt -- (a) die BEWERTUNG
+        # (severity + flagged) auf dem um ``acked`` reduzierten Portstand bilden (Single
+        # Source, beide aus demselben reduzierten Stand -> Konsistenz haelt), (b) als
+        # sortierte Liste ins host_detail-Frame (das Panel in 8b braucht sie). Die normale
+        # "offen"-Projektion (Frame-Feld ``ports``) bleibt UNberuehrt -- nur die Bewertung
+        # reduziert. Die Signatur (host, known) bleibt; ``acked`` wird INNEN geholt.
+        def axis_b(
+            host: EnrichedHost, known: bool
+        ) -> tuple[Severity | None, dict[str, list[int]], list[int]]:
+            acked = frozenset(acknowledged_ports(host.mac)) if host.mac else frozenset()
+            return (
+                _severity_for_host(host, known, analyze, acked),
+                _flagged_ports_for_host(host, provider, acked),
+                sorted(acked),
+            )
+
+        return axis_b
+
+    app.add_api_websocket_route(
+        "/ws/scan",
+        make_ws_scan(
+            _build_run_network_scan,
+            _build_record_scanned_host,
+            _build_record_seen,
+            _build_get_device,
+            _build_is_known,
+            _build_axis_b,
+            # Origin-Guard (F-01): dieselbe Allowlist wie HTTP/CORS -- der WS-Handshake
+            # prueft die Origin VOR accept() und schliesst boese Browser-Tabs aus.
+            cfg.cors_allow_origins,
+            # Scan-Ende-Naht (S86-A4/B1): weckt den CVE-Worker, sobald ein Scan durch
+            # ist. Die Modul-Funktion (nicht die Naht selbst) wird uebergeben, damit
+            # die Bindung SPAET aufgeloest wird -- ``_cve_monitor_wecken`` entsteht
+            # erst im Lifespan, dieser Aufruf laeuft schon in create_app.
+            wecke_cve_monitor_best_effort,
+        ),
+    )
+
+    # ── fritz-Detailansicht verdrahten (read-only, Regel 5: ports<->infra nur hier) ──
+    # GET /api/fritz/detail liefert den vollen TR-064-Schnappschuss (WAN/DSL/WLAN/
+    # Clients/Log/Portfreigaben) ueber GetFritzDetail -> FritzDetailAdapter. Der
+    # Adapter wird PRO REQUEST frisch mit den aktuellen Credentials gebaut (Aenderung
+    # in den Settings wirkt ohne App-Neustart -- Muster wie _build_run_network_scan):
+    # host/user aus dem Settings-Repository (Rohwerte), das Passwort als Klartext
+    # DIREKT aus dem SecretStore. Anders als beim best-effort-Scan-Merge (_FritzHosts-
+    # Wiring) wird hier KEIN Auth-Fehler verschluckt: der Detail-Endpunkt ist ein
+    # expliziter Lese-Pfad -> FritzAuthError schlaegt bis in den Router durch (502).
+    # Nicht erreichbar/nicht konfiguriert bleibt der Leer-Zustand (reachable=False).
+    # Dieser Endpunkt wird NICHT gecacht (jeder Abruf ist ein frischer Schnappschuss).
+    def _build_get_fritz_detail() -> GetFritzDetail:
+        fritz_host_setting = repository().get("fritz_host")
+        fritz_user_setting = repository().get("fritz_user")
+        fritz_host = str(fritz_host_setting.value) if fritz_host_setting is not None else ""
+        fritz_user = str(fritz_user_setting.value) if fritz_user_setting is not None else ""
+        fritz_password = secret_store().get("fritz_password") or ""
+        # Wiring-Wrapper statt nacktem Adapter: er uebersetzt die infrastructure-
+        # FritzAuthError in den application-FritzDetailAuthError, den der Router faengt.
+        return GetFritzDetail(
+            _FritzDetailWiring(host=fritz_host, user=fritz_user, password=fritz_password)
+        )
+
+    app.include_router(fritz_router)
+    app.dependency_overrides[provide_get_fritz_detail] = _build_get_fritz_detail
+
+    # ── metrics-Querschnitt (M.8) ────────────────────────────────────────────
+    # Der MetricsReader liest dieselbe cernis.db (devices/rtt_history/sla_samples/
+    # scan_history) wie die anderen Repos -- zustandslos (haelt nur den db_path,
+    # aggregiert pro snapshot()-Aufruf frisch). Darum EINMAL gebaut und geteilt
+    # (lru_cache, Muster wie scan_history_repository); der ExportMetrics-Use-Case
+    # wird pro Request frisch darum gewickelt (guenstig, haelt nur den Reader).
+    @lru_cache(maxsize=1)
+    def metrics_reader() -> SqliteMetricsReader:
+        from modules.db_path import get_db_path
+
+        return SqliteMetricsReader(get_db_path())
+
+    app.include_router(metrics_router)
+    app.dependency_overrides[provide_export_metrics] = lambda: ExportMetrics(metrics_reader())
+
+    # ── monitoring-Domaene v2 verdrahten (M.9, Regel 5: ports<->infra nur hier) ──
+    # REST (status/events/rtt/sla/schedules) ueber duenne Use-Cases im api-Ring; der
+    # WS-Handler /ws/monitor lebt im Composition Root (ws_monitor.py), weil er den
+    # Broadcaster-Adapter (infra) mit dem RunMonitor-Status (application) verbindet.
+    # Die vier sqlite-Repos teilen die cernis.db (lru_cache wie scan_history); pinger/
+    # notifier/broadcaster/scheduler sind zustandslos bzw. langlebige Singletons.
+    @lru_cache(maxsize=1)
+    def rtt_history_repository() -> SqliteRttHistoryRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteRttHistoryRepository(get_db_path())
+
+    @lru_cache(maxsize=1)
+    def monitor_event_repository() -> SqliteMonitorEventRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteMonitorEventRepository(get_db_path())
+
+    @lru_cache(maxsize=1)
+    def sla_sample_repository() -> SqliteSlaSampleRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteSlaSampleRepository(get_db_path())
+
+    schedule_clock = SystemClock()
+
+    @lru_cache(maxsize=1)
+    def schedule_repository() -> SqliteScheduleRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteScheduleRepository(get_db_path(), schedule_clock)
+
+    # Langzeit-Logging-Repos (B-I): drei eigene Tabellen (``monitoring_log_*``),
+    # GETRENNT vom fluechtigen Live-Monitor (rtt_history/monitor_events). lru_cache wie
+    # die uebrigen sqlite-Repos (teilen die cernis.db). NUR Provider + Endpunkt-
+    # Verdrahtung -- KEIN Loop-/Lifespan-Eingriff (Schreibpfad + Auto-Resume = B-II).
+    @lru_cache(maxsize=1)
+    def logging_task_repository() -> SqliteLoggingTaskRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteLoggingTaskRepository(get_db_path())
+
+    @lru_cache(maxsize=1)
+    def logging_rtt_repository() -> SqliteLoggingRttRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteLoggingRttRepository(get_db_path())
+
+    @lru_cache(maxsize=1)
+    def logging_event_repository() -> SqliteLoggingEventRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteLoggingEventRepository(get_db_path())
+
+    # Aussenkontakte-Aufzeichnung (E3b) -- drei Repos je eigener sqlite-Tabelle, Muster
+    # der logging_*-Factories oben (db_path-Factory, lru_cache-Singleton).
+    @lru_cache(maxsize=1)
+    def outbound_recording_repository() -> SqliteOutboundRecordingRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteOutboundRecordingRepository(get_db_path())
+
+    @lru_cache(maxsize=1)
+    def outbound_detail_repository() -> SqliteOutboundDetailRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteOutboundDetailRepository(get_db_path())
+
+    @lru_cache(maxsize=1)
+    def outbound_aggregate_repository() -> SqliteOutboundAggregateRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteOutboundAggregateRepository(get_db_path())
+
+    @lru_cache(maxsize=1)
+    def job_scheduler() -> ApschedulerJobScheduler:
+        return ApschedulerJobScheduler()
+
+    @lru_cache(maxsize=1)
+    def target_source() -> CompositeTargetSource:
+        # Liest die Custom-Targets ueber den migrierten settings-Port (NICHT modules).
+        # Interface-Gateways ueber den nativen, plattformabhaengigen
+        # InterfaceDiscoveryAdapter (sys.platform-Weiche oben, zustandslos).
+        return CompositeTargetSource(repository(), InterfaceDiscoveryAdapter())
+
+    # Broadcaster-SINGLETON: EINE langlebige Instanz, die der RunMonitor-Loop
+    # bespielt UND in die die /ws/monitor-Handler subscriben. Beide teilen dieselben
+    # Subscriber -- darum lru_cache (genau eine Instanz pro App), kein per-Request-Bau.
+    @lru_cache(maxsize=1)
+    def monitor_broadcaster() -> WebSocketMonitorBroadcaster:
+        return WebSocketMonitorBroadcaster()
+
+    # RunMonitor pro Lifespan einmal gebaut (haelt den Loop-State _status). Bekommt
+    # den Broadcaster-Singleton -> seine broadcast()-Frames erreichen die WS-Clients.
+    # alert_raiser (A.7a): die monitoring->alerting-Naht. _MonitorAlertRaiser haelt
+    # einen frischen RaiseAlert mit den drei alerting-Adaptern (alle weiter unten im
+    # alerting-Block definiert -- diese Closure laeuft erst im lifespan, da sind alle
+    # Provider da; spaete Namensaufloesung, Muster wie _scheduled_scan). Der RunMonitor
+    # bleibt alerting-blind: er ruft nur AlertRaiserPort.raise_alert(event).
+    def _build_run_monitor() -> RunMonitor:
+        return RunMonitor(
+            pinger=MonitorPingerAdapter(),
+            rtt_history=rtt_history_repository(),
+            event_repo=monitor_event_repository(),
+            notifier=MonitorNotifierAdapter(),
+            broadcaster=monitor_broadcaster(),
+            target_source=target_source(),
+            alert_raiser=_MonitorAlertRaiser(
+                RaiseAlert(
+                    alert_rule_repository(),
+                    alert_notifier,
+                    smtp_config_adapter(),
+                )
+            ),
+            # Langzeit-Logging-Sink (B-II): haelt die drei logging-Repos (Provider
+            # existieren schon). Schreibt pro Tick in die aktiven Logging-Aufgaben --
+            # best-effort, der Live-Loop bleibt unberuehrt.
+            logging_sink=MonitorLoggingSink(
+                logging_task_repository(),
+                logging_rtt_repository(),
+                logging_event_repository(),
+                # 3b: Schwellwert-Notifier -- mappt die Alarm-Flanke auf den vorhandenen
+                # alerting-Notifier (Desktop + E-Mail). Bezieht EXAKT die im alerting-
+                # Block gebauten Provider (alert_notifier + smtp_config_adapter()), wie
+                # der RaiseAlert daneben -- keine neuen Provider, spaete Namensaufloesung.
+                threshold_notifier=_ThresholdNotifierWiring(alert_notifier, smtp_config_adapter()),
+            ),
+        )
+
+    # status_provider: die label-angereicherte {tid:{alive,label}}-Map fuer
+    # /api/monitor/status UND den WS-Connect-Frame. Kombiniert RunMonitor.current_status()
+    # (rohe {tid: alive}-Map) mit target_source.load() (label, tid-Fallback). Diese
+    # Komposition kennt nur der Composition Root -- darum als Callable gereicht. Greift
+    # auf den laufenden RunMonitor (app.state) zu; vor dem Start (kein bootstrap) ->
+    # leere Map (kein Loop -> nichts gemessen), niemals ein Fehler.
+    async def _monitor_status() -> dict[str, dict[str, Any]]:
+        run_monitor_uc = getattr(app.state, "run_monitor", None)
+        raw = run_monitor_uc.current_status() if run_monitor_uc is not None else {}
+        targets = await target_source().load()
+        labels = {t.id: t.label for t in targets}
+        return {tid: {"alive": alive, "label": labels.get(tid, tid)} for tid, alive in raw.items()}
+
+    # ManageSchedules: der ScanTriggerCallback (_scheduled_scan) ist HIER gebunden
+    # (Weg-3-Umbau, M.9) -- EINE Quelle fuer REST-add UND lifespan-Registrierung.
+    app.include_router(monitoring_router)
+    app.dependency_overrides[provide_monitor_status] = lambda: _monitor_status
+    app.dependency_overrides[provide_get_monitor_events] = lambda: GetMonitorEvents(
+        monitor_event_repository()
+    )
+    app.dependency_overrides[provide_get_rtt_history] = lambda: GetRttHistory(
+        rtt_history_repository()
+    )
+    app.dependency_overrides[provide_get_all_sla_stats] = lambda: GetAllSlaStats(
+        sla_sample_repository()
+    )
+    app.dependency_overrides[provide_get_sla_stats] = lambda: GetSlaStats(sla_sample_repository())
+    app.dependency_overrides[provide_get_schedules] = lambda: GetSchedules(schedule_repository())
+    app.dependency_overrides[provide_manage_schedules] = lambda: ManageSchedules(
+        schedule_repository(), job_scheduler(), _scheduled_scan
+    )
+    app.dependency_overrides[provide_update_schedule] = lambda: UpdateSchedule(
+        schedule_repository(), job_scheduler(), _scheduled_scan
+    )
+    # targets-Schreibpfad (M.9-Nachzuegler): Add/Delete auf den migrierten settings-
+    # ``repository()`` (Custom-Targets liegen als ``monitor_custom_targets``-Setting).
+    # Kein eigenes Repo, keine ``configure``-Folge -- der Loop laedt pro tick frisch.
+    app.dependency_overrides[provide_add_monitor_target] = lambda: AddMonitorTarget(repository())
+    app.dependency_overrides[provide_delete_monitor_target] = lambda: DeleteMonitorTarget(
+        repository()
+    )
+    # Langzeit-Logging-Lifecycle (B-I Schritt 3): Anlegen + Lebenszyklus ueber dem
+    # ``logging_task_repository()``; der Mengen-Befund ueber dem ``logging_rtt_repository()``.
+    # NUR Endpunkt-Verdrahtung -- KEIN Lifespan-/Loop-Eingriff (B-II).
+    # Auto-Scheduler-Job (3b-3): der Create-Override nutzt den Erben-Wrapper, der bei
+    # einem RECURRING-Task zusaetzlich den monitoring_window-Job anlegt (CreateScheduledJob
+    # ueber dem scheduled_job_repository() -- spaete Namensaufloesung, die Factory ist im
+    # scheduler-Block weiter unten definiert, Muster wie _build_run_monitor/alert_notifier).
+    app.dependency_overrides[provide_create_logging_task] = lambda: _CreateLoggingTaskWithSchedule(
+        logging_task_repository(),
+        CreateScheduledJob(scheduled_job_repository()),
+    )
+    app.dependency_overrides[provide_list_logging_tasks] = lambda: ListLoggingTasks(
+        logging_task_repository()
+    )
+    app.dependency_overrides[provide_get_logging_task_detail] = lambda: GetLoggingTaskDetail(
+        logging_task_repository()
+    )
+    app.dependency_overrides[provide_start_logging_task] = lambda: StartLoggingTask(
+        logging_task_repository()
+    )
+    app.dependency_overrides[provide_pause_logging_task] = lambda: PauseLoggingTask(
+        logging_task_repository()
+    )
+    app.dependency_overrides[provide_resume_logging_task] = lambda: ResumeLoggingTask(
+        logging_task_repository()
+    )
+    app.dependency_overrides[provide_stop_logging_task] = lambda: StopLoggingTask(
+        logging_task_repository()
+    )
+    # Mitloeschen (3b-3): der Delete-Override nutzt den Erben-Wrapper, der nach dem
+    # Loeschen der Task-Definition den verwaisten monitoring_window-Job abraeumt
+    # (ListScheduledJobs/DeleteScheduledJob ueber dem scheduled_job_repository()).
+    app.dependency_overrides[provide_delete_logging_task] = lambda: (
+        _DeleteLoggingTaskWithUnschedule(
+            logging_task_repository(),
+            ListScheduledJobs(scheduled_job_repository()),
+            DeleteScheduledJob(scheduled_job_repository()),
+        )
+    )
+    app.dependency_overrides[provide_check_log_volume] = lambda: CheckLogVolume(
+        logging_rtt_repository()
+    )
+    # Logging-SLA (C-3): EIGENER SLA-Pfad neben GetSlaStats -- Task-Repo (fuer get +
+    # interval_s) UND RTT-Repo (all_for), gefuettert in die reine compute_sla_stats.
+    app.dependency_overrides[provide_get_logging_task_sla] = lambda: GetLoggingTaskSla(
+        logging_task_repository(), logging_rtt_repository()
+    )
+    # Logging-Events (Schnitt 1b-events): Task-Repo (fuer get + 404) UND Event-Repo
+    # (range) -- rohe LoggingEventRow-Flanken, die Wire-Projektion macht der Router.
+    app.dependency_overrides[provide_get_logging_task_events] = lambda: GetLoggingTaskEvents(
+        logging_task_repository(), logging_event_repository()
+    )
+    # Serien-RTT (Block 3c): Task-Repo (fuer get + 404) UND RTT-Repo (all_for/range) --
+    # rohe LoggingRttSample-Messpunkte fuer die zeitfreie analyze_series; der Router
+    # reicht sie zusammen mit den Event-Flanken in die Aggregation.
+    app.dependency_overrides[provide_get_logging_task_rtt] = lambda: GetLoggingTaskRtt(
+        logging_task_repository(), logging_rtt_repository()
+    )
+
+    app.add_api_websocket_route(
+        "/ws/monitor",
+        make_ws_monitor(monitor_broadcaster(), _monitor_status, cfg.cors_allow_origins),
+    )
+
+    # ── alerting-Domaene v2 verdrahten (A.6, Regel 5: ports<->infra nur hier) ──
+    # REST-only: alerting hat KEINEN Loop (kein lifespan-Umbau, kein WS). Drei Adapter:
+    # das Rule-Repo teilt die cernis.db (lru_cache wie scan_history); der Notifier ist
+    # zustandslos; der SmtpConfig-Adapter teilt sich den MIGRIERTEN settings-``repository()``
+    # mit der bestehenden settings-Verdrahtung (das smtp_config-Setting lebt dort, nicht in
+    # einem eigenen Repo). RaiseAlert hat KEINEN Endpunkt; ab A.7a ist er ueber die
+    # monitoring->alerting-Naht (_MonitorAlertRaiser, im _build_run_monitor oben) am
+    # monitor-Loop verdrahtet -- er bekommt dort Repo + Notifier + SmtpConfig.
+    @lru_cache(maxsize=1)
+    def alert_rule_repository() -> SqliteAlertRuleRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteAlertRuleRepository(get_db_path())
+
+    alert_notifier = AlertNotifierAdapter()
+
+    def smtp_config_adapter() -> SettingsSmtpConfigAdapter:
+        # Teilt das settings-``repository()`` (smtp_config-Setting). Pro Request frisch
+        # gewickelt (haelt nur den Repo-Verweis) -- guenstig, kein lru_cache noetig.
+        return SettingsSmtpConfigAdapter(repository())
+
+    app.include_router(alerting_router)
+    app.dependency_overrides[provide_get_alert_rules] = lambda: GetAlertRules(
+        alert_rule_repository()
+    )
+    app.dependency_overrides[provide_add_alert_rule] = lambda: AddAlertRule(alert_rule_repository())
+    app.dependency_overrides[provide_update_alert_rule] = lambda: UpdateAlertRule(
+        alert_rule_repository()
+    )
+    app.dependency_overrides[provide_delete_alert_rule] = lambda: DeleteAlertRule(
+        alert_rule_repository()
+    )
+    app.dependency_overrides[provide_get_alert_history] = lambda: GetAlertHistory(
+        alert_rule_repository()
+    )
+    app.dependency_overrides[provide_get_smtp_config_raw] = lambda: GetSmtpConfigRaw(
+        smtp_config_adapter()
+    )
+    app.dependency_overrides[provide_save_smtp_config] = lambda: SaveSmtpConfig(
+        smtp_config_adapter()
+    )
+    app.dependency_overrides[provide_send_test_alert] = lambda: SendTestAlert(
+        smtp_config_adapter(), alert_notifier
+    )
+
+    # ── security-Domaene v2 verdrahten (SEC.6, Regel 5: ports<->infra nur hier) ──
+    # ARP-Guard: eigenes SQLite (teilt die DB mit settings/devices/scanning). Die drei
+    # Inspektoren (cve/tls/creds) sind zustandslose stdlib-Adapter (kein modules-Import,
+    # kein ADR-0007). RunArpScan WIEDERVERWENDET die bestehenden scanning-Adapter
+    # ``arp_table`` + ``vendor_lookup`` (oben instanziiert) -- KEIN zweiter Adapter.
+    # KEINE alerting-Naht: ARP-Alerts feuern keine alerting-Regeln (DF1, Naht-Notiz steht).
+    @lru_cache(maxsize=1)
+    def arp_guard_repository() -> SqliteArpGuardRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteArpGuardRepository(get_db_path())
+
+    cve_lookup_adapter = CveLookupAdapter()
+    tls_inspector_adapter = TlsInspectorAdapter()
+    default_creds_adapter = DefaultCredsCheckerAdapter()
+
+    # Standardzugangs-Redesign Etappe C: die verwaltbare Liste + die Pruef-Historie (eigene
+    # SQLite-Tabellen, teilen die DB via get_db_path -- Muster arp_guard_repository). Beide
+    # als @lru_cache-Factory (eine Instanz je Prozess). Der DefaultCredsCheckerAdapter
+    # (default_creds_adapter, oben) wird fuer die gezielte Kandidaten-Pruefung
+    # WIEDERVERWENDET -- kein zweiter Adapter.
+    @lru_cache(maxsize=1)
+    def default_creds_list_repository() -> SqliteDefaultCredsListRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteDefaultCredsListRepository(get_db_path())
+
+    @lru_cache(maxsize=1)
+    def default_creds_history_repository() -> SqliteDefaultCredsHistoryRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteDefaultCredsHistoryRepository(get_db_path())
+
+    # Erst-Seeding beim Start (einmalig, idempotent): fuellt die mitgelieferte Liste ein,
+    # wenn noch keine mitgelieferte Zeile da ist (ensure_seeded ueberschreibt nichts).
+    default_creds_list_repository().ensure_seeded()
+
+    # default-creds ist eine scharfe Opt-in-Sonderfunktion: sitzungsweites Arm-Flag am
+    # app.state (Startwert False, NICHT persistent -- Muster capture/traffic). Der
+    # Endpunkt bleibt bis zum Arm-Aufruf 403.
+    app.state.default_creds_armed = False
+
+    app.include_router(security_router)
+    # RunArpScan: arp_table + vendor_lookup sind DIESELBEN Instanzen wie im scanning-Block
+    # (Wiederverwendung, kein zweiter ArpTable/Vendor-Adapter).
+    app.dependency_overrides[provide_run_arp_scan] = lambda: RunArpScan(
+        arp_table, vendor_lookup, arp_guard_repository()
+    )
+    app.dependency_overrides[provide_get_arp_alerts] = lambda: GetArpAlerts(arp_guard_repository())
+    app.dependency_overrides[provide_get_arp_baseline] = lambda: GetArpBaseline(
+        arp_guard_repository()
+    )
+    app.dependency_overrides[provide_clear_arp_baseline] = lambda: ClearArpBaseline(
+        arp_guard_repository()
+    )
+    app.dependency_overrides[provide_lookup_cves] = lambda: LookupCves(cve_lookup_adapter)
+    app.dependency_overrides[provide_inspect_tls] = lambda: InspectTls(tls_inspector_adapter)
+    app.dependency_overrides[provide_check_default_creds] = lambda: CheckDefaultCreds(
+        default_creds_adapter
+    )
+    # Ziel-Bereichs-Guard: infra-reine is_private_target hier verdrahtet (Regel 5, damit
+    # der api-Ring infrastructure nicht direkt importiert).
+    app.dependency_overrides[provide_target_scope_guard] = lambda: is_private_target
+
+    # ── Standardzugangs-Redesign Etappe C: Composition-Root-Runner + Verdrahtung ──
+    # Der api-Ring bleibt domain-frei -- das Bauen der domain.DefaultCredsEintrag aus dem
+    # Body-DTO passiert HIER (Muster _add_user_rules). Die List-CRUD-Runner nutzen das
+    # default_creds_list_repository (Reader+Store in einer Instanz), die Pruef-/Historie-
+    # Runner das history_repository + den wiederverwendeten default_creds_adapter.
+    def _eintrag_from_body(body: EintragBody) -> DefaultCredsEintrag:
+        # DTO -> domain.DefaultCredsEintrag. Die konfidenz-/zustand-/herkunft-Literale
+        # kommen als Strings herein; die strukturelle Validierung macht der Store (reine
+        # Domaenen-Validierung -> ValueError). type: ignore an den Literal-Grenzen (Muster
+        # _add_user_rules: severity/kind als str ins Literal-Feld).
+        return DefaultCredsEintrag(
+            eintrag_id=body.eintrag_id,
+            hersteller=body.hersteller,
+            modell=body.modell,
+            zustand=body.zustand,  # type: ignore[arg-type]
+            kandidaten=tuple(
+                CredentialKandidat(
+                    username=kandidat.username,
+                    password=kandidat.password,
+                    konfidenz=kandidat.konfidenz,  # type: ignore[arg-type]
+                )
+                for kandidat in body.kandidaten
+            ),
+            quelle_url=body.quelle_url,
+            aktiv=body.aktiv,
+            herkunft=body.herkunft,  # type: ignore[arg-type]
+        )
+
+    def _list_default_creds() -> list[Any]:
+        return list(GetDefaultCredsListe(default_creds_list_repository())())
+
+    def _add_default_creds(body: EintragBody) -> None:
+        # AddDefaultCredsEintrag validiert im Store -> ValueError bei Issue/Duplikat-id.
+        AddDefaultCredsEintrag(default_creds_list_repository())(_eintrag_from_body(body))
+
+    def _update_default_creds(eintrag_id: str, body: EintragBody) -> bool:
+        # Der Store macht bei unbekannter id einen stillen No-op -- darum HIER pruefen, ob
+        # die id existiert, und das dem api-Rand zurueckmelden (False -> 404). Die
+        # eintrag_id aus dem Pfad ist massgeblich (nicht die aus dem Body).
+        repo = default_creds_list_repository()
+        vorhanden = any(e.eintrag_id == eintrag_id for e in repo.get_eintraege())
+        if not vorhanden:
+            return False
+        eintrag = _eintrag_from_body(body)
+        # eintrag_id des Pfads erzwingen (der Body koennte eine abweichende tragen).
+        if eintrag.eintrag_id != eintrag_id:
+            eintrag = replace(eintrag, eintrag_id=eintrag_id)
+        UpdateDefaultCredsEintrag(repo)(eintrag)
+        return True
+
+    def _delete_default_creds(eintrag_id: str) -> None:
+        DeleteDefaultCredsEintrag(default_creds_list_repository())(eintrag_id)
+
+    def _set_default_creds_aktiv(eintrag_id: str, aktiv: bool) -> None:
+        SetDefaultCredsAktiv(default_creds_list_repository())(eintrag_id, aktiv)
+
+    def _reset_default_creds() -> None:
+        ResetDefaultCredsListe(default_creds_list_repository())()
+
+    def _ermittle_pruefplan(hersteller: str, modell: str) -> Any:
+        return ErmittlePruefplan(default_creds_list_repository())(hersteller, modell)
+
+    async def _pruefen_kandidaten(body: PruefenBody) -> list[Any]:
+        # Gezielte Pruefung (aktive Logins im wiederverwendeten default_creds_adapter):
+        # genau die gewaehlten Kandidaten gegen die offenen Ports. Danach das Ergebnis in
+        # die Historie schreiben (fall="kandidaten" -- diese Pruefung laeuft immer mit vom
+        # Aufrufer gewaehlten Kandidaten). Die Guards (Arm/Privatnetz) sitzen am api-Rand.
+        kandidaten = [(k.username, k.password) for k in body.kandidaten]
+        findings = await PruefeGewaehlteKandidaten(default_creds_adapter)(
+            body.host, body.ports, kandidaten
+        )
+        SpeicherePruefung(default_creds_history_repository())(
+            body.host, body.hersteller, body.modell, "kandidaten", findings
+        )
+        return list(findings)
+
+    def _get_pruef_historie() -> list[Any]:
+        return list(GetPruefHistorie(default_creds_history_repository())())
+
+    def _get_pruef_historie_detail(eintrag_id: int) -> Any | None:
+        return GetPruefHistorieDetail(default_creds_history_repository())(eintrag_id)
+
+    app.dependency_overrides[provide_list_default_creds] = lambda: _list_default_creds
+    app.dependency_overrides[provide_add_default_creds] = lambda: _add_default_creds
+    app.dependency_overrides[provide_update_default_creds] = lambda: _update_default_creds
+    app.dependency_overrides[provide_delete_default_creds] = lambda: _delete_default_creds
+    app.dependency_overrides[provide_set_default_creds_aktiv] = lambda: _set_default_creds_aktiv
+    app.dependency_overrides[provide_reset_default_creds] = lambda: _reset_default_creds
+    app.dependency_overrides[provide_ermittle_pruefplan] = lambda: _ermittle_pruefplan
+    app.dependency_overrides[provide_pruefen_kandidaten] = lambda: _pruefen_kandidaten
+    app.dependency_overrides[provide_get_pruef_historie] = lambda: _get_pruef_historie
+    app.dependency_overrides[provide_get_pruef_historie_detail] = lambda: _get_pruef_historie_detail
 
     @app.exception_handler(SecretStoreUnavailableError)
     async def _on_secret_store_unavailable(
@@ -378,6 +3530,4689 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             status_code=503,
             content={"detail": "Secret-Speicher (OS-Keystore) ist nicht verfuegbar."},
         )
+
+    @app.exception_handler(KeyMissingError)
+    async def _on_key_missing(_request: Request, _exc: KeyMissingError) -> JSONResponse:
+        # Befund 65: die Schluesseldatei fehlt, obwohl ein Chiffrat gespeichert ist --
+        # der Verlustfall. Bis hierher endete er als nackter 500 (Internal Server Error)
+        # ohne jede Aussage.
+        #
+        # WARUM EIN HANDLER UND KEINE ROUTEN-FASSUNG: der Fehler entsteht in der
+        # Krypto-Schicht und kann JEDEN Pfad treffen, der ein gespeichertes Geheimnis
+        # liest -- heute die SMTP-Wege (GET/PUT /alerts/smtp, POST /alerts/test), morgen
+        # jeden weiteren Nutzer von ``secret_cipher.decrypt``. Ein Handler fasst die
+        # Ursache EINMAL an ihrer Grenze; ein try/except je Route muesste bei jedem neuen
+        # Leser wiederholt werden und waere genau dann vergessen, wenn es darauf ankommt.
+        # Praezedenz im Haus: SecretStoreUnavailableError (oben), SniPermissionError,
+        # RogueDhcpPermissionError -- alle als Handler, aus demselben Grund.
+        #
+        # 500 -> 503: die Anwendung ist intakt, ein benoetigtes Betriebsmittel fehlt.
+        # Derselbe Code wie beim nicht verfuegbaren Secret-Speicher (gleiche Lage).
+        logger.error("secret_cipher_key_missing", key_file=str(_exc.key_file))
+        return JSONResponse(
+            status_code=503,
+            content={
+                # Karl hat entschieden (Befund 65): Wortlaut Fassung B, Code E-507 in der
+                # bestehenden Klasse E-5xx (Aktionen und Daten) -- keine neue Klasse.
+                # Hausform des Anhangs: "Klartext. (E-xxx)" (wie api/dns_trust.py,
+                # api/scanning.py). Der Text sagt dem Anwender nicht nur, DASS etwas fehlt,
+                # sondern was das fuer sein Passwort heisst und wie er es zurueckholt.
+                #
+                # EINSPRACHIG DEUTSCH, dem Bestand folgend: das Backend leitet fuer
+                # Fehlermeldungen KEINE Sprache aus der Anfrage ab -- es gibt weder eine
+                # Accept-Language-Auswertung noch einen Meldungs-Katalog, und JEDER
+                # ``detail``-Text im Haus ist deutsch (Praezedenz direkt oben:
+                # SecretStoreUnavailableError). Das ``lang`` in ``application/reporting``
+                # ist KEIN Gegenbeispiel: es ist ein expliziter Query-Parameter der
+                # Report-Endpunkte (api/report.py) fuer den PDF-INHALT; ein
+                # Exception-Handler bekommt ihn nicht. Die englische Fassung liegt dort,
+                # wo die Sprache umgeschaltet wird -- im Frontend unter
+                # fehlercodes."E-507" in i18n/en.json.
+                "detail": (
+                    "Gespeicherte Passwörter sind zurzeit nicht lesbar, weil die "
+                    f"zugehörige Schlüsseldatei fehlt. Erwarteter Ort: {_exc.key_file}. "
+                    "Die Datei gehört zu Ihren Anwendungsdaten und wird zusammen mit der "
+                    "Datenbank gesichert. Liegt sie in einer Sicherung vor, stellt das "
+                    "Zurückspielen dieser einen Datei das Passwort wieder her. "
+                    "Andernfalls muss das Passwort neu eingegeben werden. (E-507)"
+                )
+            },
+        )
+
+    # ── cve-Domaene verdrahten (ADR 0037, Regel 5: Quer-Domaenen-Naht nur hier) ──
+    # CVE-Schwachstellen-Monitoring ueber den bekannten Geraete-Bestand. Die cve-Domaene
+    # kennt WEDER security NOCH scanning/devices -- beide Quer-Nähte (Bestand+Ports,
+    # NVD-Lookup) laufen AUSSCHLIESSLICH hier ueber quellen-agnostische Provider, die die
+    # Fremd-Daten in die cve-eigenen Rand-Typen (InventoryHost/LookupCve) projizieren
+    # (Muster BuildTopology, ADR 0035/0036).
+
+    @lru_cache(maxsize=1)
+    def cve_finding_repository() -> SqliteCveFindingRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteCveFindingRepository(get_db_path())
+
+    @lru_cache(maxsize=1)
+    def cve_checkstate_repository() -> SqliteCveCheckStateRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteCveCheckStateRepository(get_db_path())
+
+    cve_acknowledgement_clock = SystemClock()
+
+    @lru_cache(maxsize=1)
+    def cve_acknowledgement_repository() -> SqliteCveAcknowledgementRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteCveAcknowledgementRepository(get_db_path(), cve_acknowledgement_clock)
+
+    # Host-/Port-QUELLE des Worker (ADR 0037): der JUENGSTE gespeicherte Scan-Record. Er
+    # traegt je Host MAC + IP + die offenen Ports MIT Servicename (EnrichedHost.ports), ist
+    # PERSISTENT und ueberlebt Neustarts -- der Worker arbeitet damit gegen den letzten
+    # bekannten Port-Stand je Host, OHNE dass ein brandneuer Scan noetig ist. Lesepfad wie
+    # der topology/analysis-Schnitt B: list(1) -> juengste Summary, get() -> ScanRecord.
+    # Ausfallsicher (Schnitt B): kein Scan ODER CorruptScanError -> ehrlich leerer Bestand
+    # (der Worker schlaeft dann, kein NVD-Aufruf), kein Crash. Nur Ports mit state=="open"
+    # gelten als offen (Muster _flagged_ports ~Z.874).
+    class _ScanHistoryInventory:
+        def list_hosts(self) -> list[InventoryHost]:
+            summaries = scan_history_repository().list(1)
+            if not summaries:
+                return []
+            try:
+                record = scan_history_repository().get(summaries[0].scan_id)
+            except CorruptScanError:
+                logger.warning("cve.inventory_skipped_corrupt_scan", scan_id=summaries[0].scan_id)
+                return []
+            if record is None:
+                return []
+            hosts: list[InventoryHost] = []
+            for h in record.hosts:
+                if not h.mac:
+                    # Ohne stabile MAC kein Pruefstand/Befund-Schluessel -> ueberspringen.
+                    continue
+                open_ports = tuple(
+                    InventoryPort(p.port, p.service) for p in h.ports if p.state == "open"
+                )
+                hosts.append(InventoryHost(mac=h.mac, ip=h.ip, ports=open_ports))
+            return hosts
+
+    # CVE-Lookup-NAHT (ADR 0037): WIEDERVERWENDET den vorhandenen security-``cve_lookup_adapter``
+    # (oben instanziiert) -- KEIN zweiter NVD-Adapter. Uebersetzt die cve-eigenen
+    # InventoryPort -> ports.security.PortQuery und die zurueckkommenden CveFinding ->
+    # cve-eigene LookupCve. Ehrlicher NVD-Ausfall (S3) liegt im Adapter (leere Liste +
+    # Warn-Log, kein erfundener Befund); diese Naht erfindet nichts dazu.
+    class _SecurityCveLookup:
+        async def lookup(self, ports: Sequence[InventoryPort]) -> list[LookupCve]:
+            queries = [PortQuery(port=p.port, service=p.service) for p in ports]
+            findings = await cve_lookup_adapter.lookup_for_host(queries)
+            return [
+                LookupCve(
+                    cve_id=f.cve_id,
+                    description=f.description,
+                    severity=f.severity,
+                    cvss_score=f.cvss_score,
+                    published=f.published,
+                    port=f.port,
+                    service=f.service,
+                    url=f.url,
+                )
+                for f in findings
+            ]
+
+    cve_inventory = _ScanHistoryInventory()
+    cve_lookup_provider = _SecurityCveLookup()
+
+    # Auffrisch-Intervall (Fall 3) live aus der Setting ``cve_refresh_interval_hours``
+    # (Default 24h, 0/leer = Auffrischung AUS). Als Provider-Callable -> Live-Reload, eine
+    # geaenderte Setting wirkt beim naechsten tick. Ausfallsicher gegen kaputte Settings
+    # (CorruptSettingError) und Nicht-Zahl-Werte -> Default; gibt Sekunden zurueck.
+    def _cve_refresh_interval_seconds() -> float:
+        hours = _read_cve_int_setting(
+            repository(), "cve_refresh_interval_hours", _CVE_DEFAULT_REFRESH_HOURS
+        )
+        return hours * 3600.0
+
+    def _build_run_cve_monitor() -> RunCveMonitor:
+        interval = _read_cve_int_setting(
+            repository(), "cve_scan_interval_seconds", _CVE_DEFAULT_SCAN_SECONDS
+        )
+        return RunCveMonitor(
+            inventory=cve_inventory,
+            lookup=cve_lookup_provider,
+            findings=cve_finding_repository(),
+            checkstate=cve_checkstate_repository(),
+            # Das ack-Log gehoert in den Worker (Befund 56): faellt ein QUITTIERTER Befund
+            # beim Ersetzen weg, haengt er ein ``unack`` an -- sonst griffe die alte
+            # Quittierung beim Wiederauftauchen still wieder. Ueber den PORT injiziert,
+            # der application-Ring kennt infrastructure nicht.
+            acknowledgements=cve_acknowledgement_repository(),
+            refresh_interval_provider=_cve_refresh_interval_seconds,
+            interval=interval,
+        )
+
+    app.include_router(cve_router)
+    app.dependency_overrides[provide_get_active_findings] = lambda: GetActiveFindings(
+        cve_finding_repository(), cve_acknowledgement_repository()
+    )
+    # Etappe 3a (ADR 0037): Lesepfad fuer die QUITTIERTEN Befunde (Spiegelbild, gleiche Repos).
+    app.dependency_overrides[provide_get_acknowledged_findings] = lambda: GetAcknowledgedFindings(
+        cve_finding_repository(), cve_acknowledgement_repository()
+    )
+
+    # Laufzeitzustands-Naht des Status (S86-A4/B2): liefert dem Lese-Use-Case den ECHTEN
+    # Zustand des Worker als blankes Callable () -> bool. Der Worker liegt unter
+    # ``app.state.run_cve_monitor`` -- den DARF nur der Composition Root kennen; der
+    # application-Ring bekommt ausschliesslich dieses Callable (kein Import, kein
+    # app.state). Ausfallsicher: kein Worker verdrahtet (vor dem Lifespan, ohne
+    # bootstrap_on_startup, nach einem Teardown) -> ``False``, also "es laeuft kein
+    # Abgleich" statt eines Fehlers. ``getattr`` mit Default statt hasattr-Pruefung,
+    # weil app.state die Attribute erst im Lifespan bekommt.
+    def _cve_monitor_checking() -> bool:
+        worker = getattr(app.state, "run_cve_monitor", None)
+        return bool(worker is not None and worker.is_checking)
+
+    # Fehlerzustands-Naht des Status (S88-P4): dieselbe Linie wie ``_cve_monitor_checking``
+    # -- ein blankes Callable ueber den Worker an ``app.state``, kein Import und kein
+    # app.state im application-Ring. Kein Worker verdrahtet -> ``(None, 0)``, also "kein
+    # gemerkter Fehler" statt eines Fehlers im Lesepfad.
+    def _cve_monitor_error() -> tuple[str | None, int]:
+        worker = getattr(app.state, "run_cve_monitor", None)
+        if worker is None:
+            return None, 0
+        return worker.last_error(), worker.consecutive_failures()
+
+    app.dependency_overrides[provide_get_cve_status] = lambda: GetCveMonitorStatus(
+        cve_inventory,
+        cve_checkstate_repository(),
+        cve_finding_repository(),
+        cve_acknowledgement_repository(),
+        refresh_interval_provider=_cve_refresh_interval_seconds,
+        checking_provider=_cve_monitor_checking,
+        error_provider=_cve_monitor_error,
+    )
+
+    # Acknowledge-Schreibnaht (ADR 0037, Muster _acknowledge): Pass-Through an record(...).
+    def _cve_acknowledge(mac: str, cve_id: str, port: int, action: str) -> None:
+        cve_acknowledgement_repository().record(mac, cve_id, port, action)
+
+    app.dependency_overrides[provide_cve_acknowledge] = lambda: _cve_acknowledge
+
+    # ── scheduler-Domaene v2 verdrahten (Block 3a, Etappe 3b, Regel 5: ports<->infra nur hier) ──
+    # Der v2-Scheduler haengt -- getrennt vom alten ApschedulerJobScheduler/_scheduled_scan,
+    # der unberuehrt daneben weiterlaeuft -- an der laufenden App: ein REST-Router fuer die
+    # Verwaltung der Jobs und ein Lifespan-Worker (gestartet weiter unten im Lifespan). Repo-
+    # Factory wie die anderen Repos (injizierter db_path via get_db_path()), Muster cve.
+
+    @lru_cache(maxsize=1)
+    def scheduled_job_repository() -> SqliteScheduledJobRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteScheduledJobRepository(get_db_path())
+
+    # Handler-Registry (job_type -> JobHandler): erster Abnehmer monitoring_window (Block
+    # 3b) registriert -- beendet einen RECURRING-Logging-Task am Ende seines
+    # Gesamtzeitraums (StopLoggingTask ueber dem logging_task_repository()). Weitere
+    # Job-Typen kommen hier dazu.
+    _monitoring_window_handler = MonitoringWindowHandler(StopLoggingTask(logging_task_repository()))
+    scheduler_handlers: dict[str, JobHandler] = {
+        _monitoring_window_handler.job_type: _monitoring_window_handler,
+    }
+
+    def _build_run_scheduler() -> RunScheduler:
+        return RunScheduler(scheduled_job_repository(), scheduler_handlers)
+
+    # Anlege-Runner: baut aus dem flachen CreateJobBody den domain-DailyWindow + params-Tupel
+    # und legt den Job ueber CreateScheduledJob an (Regel 4: die Projektion lebt HIER im
+    # Composition Root, der api-Ring kennt domain/application nicht).
+    def _scheduler_create(body: CreateJobBody) -> int:
+        window = DailyWindow(
+            start_minute=body.window.start_minute,
+            end_minute=body.window.end_minute,
+            weekdays=frozenset(body.window.weekdays),
+            from_epoch=body.window.from_epoch,
+            until_epoch=body.window.until_epoch,
+        )
+        params = tuple((k, v) for k, v in body.params)
+        return CreateScheduledJob(scheduled_job_repository())(body.job_type, params, window)
+
+    # Lese-Runner: projiziert jeden ScheduledJob auf die flache ScheduledJobOut-Wire-Form
+    # (window flach ausgerollt, weekdays sortiert, state als str).
+    def _scheduler_list() -> list[ScheduledJobOut]:
+        return [
+            ScheduledJobOut(
+                id=job.id,
+                job_type=job.job_type,
+                params=[(k, v) for k, v in job.params],
+                start_minute=job.window.start_minute,
+                end_minute=job.window.end_minute,
+                weekdays=sorted(job.window.weekdays),
+                from_epoch=job.window.from_epoch,
+                until_epoch=job.window.until_epoch,
+                state=job.state.value,
+            )
+            for job in ListScheduledJobs(scheduled_job_repository())()
+        ]
+
+    # Zustands-Runner: pause/resume/delete je ein Pass-Through an den jeweiligen Use-Case.
+    def _scheduler_pause(job_id: int) -> None:
+        PauseScheduledJob(scheduled_job_repository())(job_id)
+
+    def _scheduler_resume(job_id: int) -> None:
+        ResumeScheduledJob(scheduled_job_repository())(job_id)
+
+    def _scheduler_delete(job_id: int) -> None:
+        DeleteScheduledJob(scheduled_job_repository())(job_id)
+
+    app.include_router(scheduler_router)
+    app.dependency_overrides[provide_scheduler_create] = lambda: _scheduler_create
+    app.dependency_overrides[provide_scheduler_list] = lambda: _scheduler_list
+    app.dependency_overrides[provide_scheduler_pause] = lambda: _scheduler_pause
+    app.dependency_overrides[provide_scheduler_resume] = lambda: _scheduler_resume
+    app.dependency_overrides[provide_scheduler_delete] = lambda: _scheduler_delete
+
+    # ── blocklist-Domaene v2 verdrahten (Ring 4+5, Regel 5: ports<->infra nur hier) ──
+    # Aussenkontakt-Bewertung gegen lokal gepflegte Blocklists. Zwei Repo-Factories
+    # (Quellen-Definitionen + geparste Eintraege) wie scheduled_job_repository(); der echte
+    # Fetcher (urllib) erfuellt das BlocklistFetcher-Protocol strukturell. Die Projektion
+    # Domaene->Wire macht der Composition Root HIER (Regel 4: der api-Ring kennt domain/
+    # application nicht). Die Settings (Strenge/Intervall/Gruppen-Schalter) liegen im
+    # bestehenden Key-Value-SettingsRepository -- KEINE neue Settings-Domaene.
+
+    @lru_cache(maxsize=1)
+    def blocklist_source_repository() -> SqliteBlocklistSourceRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteBlocklistSourceRepository(get_db_path())
+
+    @lru_cache(maxsize=1)
+    def blocklist_entry_repository() -> SqliteBlocklistEntryRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteBlocklistEntryRepository(get_db_path())
+
+    @lru_cache(maxsize=1)
+    def blocklist_fetcher() -> UrllibBlocklistFetcher:
+        return UrllibBlocklistFetcher()
+
+    # Settings-Lese-Helfer (Muster _read_cve_int_setting): Strenge (str, validiert beim
+    # Schreiben), Intervall (int, Default 7), Gruppen-Schalter (bool). Defensiv gegen
+    # fehlende/kaputte Settings -> Default (eine kaputte Komfort-Einstellung darf nicht
+    # faellen; S3-ehrlich, der Fehler ist im cve-/device-Helfer-Muster geloggt).
+    def _read_blocklist_refresh_days() -> int:
+        return _read_cve_int_setting(repository(), SETTING_REFRESH_DAYS, DEFAULT_REFRESH_DAYS)
+
+    def _read_blocklist_str_setting(key: str, default: str) -> str:
+        try:
+            setting = repository().get(key)
+        except CorruptSettingError:
+            logger.warning("blocklist_setting_corrupt", key=key)
+            return default
+        if setting is None or not isinstance(setting.value, str):
+            return default
+        return setting.value
+
+    def _read_blocklist_bool_setting(key: str, default: bool) -> bool:
+        try:
+            setting = repository().get(key)
+        except CorruptSettingError:
+            logger.warning("blocklist_setting_corrupt", key=key)
+            return default
+        if setting is None or not isinstance(setting.value, bool):
+            return default
+        return setting.value
+
+    def _read_blocklist_strictness() -> MatchStrictness:
+        # Defensiv: ein kaputter/unbekannter gespeicherter Wert faellt auf den Default
+        # zurueck (der Schreibpfad validiert; ein Altwert darf den Lesepfad nicht faellen).
+        raw = _read_blocklist_str_setting(SETTING_STRICTNESS, DEFAULT_STRICTNESS)
+        try:
+            return MatchStrictness(raw)
+        except ValueError:
+            return MatchStrictness(DEFAULT_STRICTNESS)
+
+    def _blocklist_enabled_groups() -> frozenset[BlocklistGroup]:
+        # Die zwei Gruppen-Feinschalter -> die Menge der aktiven Gruppen fuer MatchContacts.
+        groups: set[BlocklistGroup] = set()
+        if _read_blocklist_bool_setting(
+            SETTING_GROUP_TRACKER_ADS, DEFAULT_GROUP_TRACKER_ADS_ENABLED
+        ):
+            groups.add(BlocklistGroup.TRACKER_ADS)
+        if _read_blocklist_bool_setting(SETTING_GROUP_THREAT, DEFAULT_GROUP_THREAT_ENABLED):
+            groups.add(BlocklistGroup.THREAT)
+        return frozenset(groups)
+
+    # Projektion Domaene->Wire (HIER, nicht im Router). Eine Quelle / ein Treffer / ein
+    # Lade-Ergebnis -> die jeweilige *Out-Form.
+    def _blocklist_source_out(source: BlocklistSource) -> SourceOut:
+        return SourceOut(
+            id=source.id,
+            name=source.name,
+            group=source.group.value,
+            fmt=source.fmt.value,
+            origin=source.origin.value,
+            url=source.url,
+            license=source.license,
+            attribution_required=source.attribution_required,
+            enabled=source.enabled,
+            last_fetched_ts=source.last_fetched_ts,
+            status=source.status.value,
+            entry_count=source.entry_count,
+        )
+
+    def _blocklist_refresh_out(result: object) -> RefreshOut:
+        # result ist ein application.RefreshResult (frozen dataclass); per Attribut gelesen.
+        return RefreshOut(
+            source_id=result.source_id,  # type: ignore[attr-defined]
+            ok=result.ok,  # type: ignore[attr-defined]
+            entry_count=result.entry_count,  # type: ignore[attr-defined]
+            error=result.error,  # type: ignore[attr-defined]
+        )
+
+    # Lese-Runner.
+    def _blocklist_list_sources() -> list[SourceOut]:
+        sources = ListBlocklistSources(
+            blocklist_source_repository(), blocklist_entry_repository()
+        )()
+        return [_blocklist_source_out(source) for source in sources]
+
+    def _blocklist_health() -> HealthOut:
+        issues = CheckBlocklistHealth(blocklist_source_repository())()
+        return HealthOut(
+            issues=[
+                HealthIssueOut(
+                    source_id=issue.source_id,
+                    name=issue.name,
+                    group=issue.group.value,
+                    suggested_replacement_id=issue.suggested_replacement_id,
+                )
+                for issue in issues
+            ]
+        )
+
+    def _blocklist_read_settings() -> SettingsOut:
+        return SettingsOut(
+            strictness=_read_blocklist_str_setting(SETTING_STRICTNESS, DEFAULT_STRICTNESS),
+            refresh_interval_days=_read_blocklist_refresh_days(),
+            group_tracker_ads_enabled=_read_blocklist_bool_setting(
+                SETTING_GROUP_TRACKER_ADS, DEFAULT_GROUP_TRACKER_ADS_ENABLED
+            ),
+            group_threat_enabled=_read_blocklist_bool_setting(
+                SETTING_GROUP_THREAT, DEFAULT_GROUP_THREAT_ENABLED
+            ),
+        )
+
+    # Schreib-Runner.
+    def _blocklist_add_source(body: AddSourceBody) -> AddSourceOut:
+        # Ungueltige group/fmt -> BlocklistError -> ValueError (api-Rand faengt nur
+        # ValueError -> 422).
+        try:
+            result = AddUserSource(blocklist_source_repository())(
+                body.name, body.url, body.group, body.fmt
+            )
+        except BlocklistError as exc:
+            raise ValueError(str(exc)) from exc
+        return AddSourceOut(source_id=result.source_id, license_hint=result.license_hint)
+
+    def _blocklist_upload_source(body: UploadSourceBody) -> UploadSourceOut:
+        # Ungueltige group/fmt -> BlocklistError -> ValueError (api-Rand: 422).
+        try:
+            result = ImportUploadedSource(
+                blocklist_source_repository(), blocklist_entry_repository()
+            )(body.name, body.group, body.fmt, body.content)
+        except BlocklistError as exc:
+            raise ValueError(str(exc)) from exc
+        return UploadSourceOut(source_id=result.source_id, entry_count=result.entry_count)
+
+    def _blocklist_update_source(source_id: str, body: UpdateSourceBody) -> None:
+        # BlocklistError trennt "unbekannte id" (404) von "Vokabular-Fehlwert" (422). Da der
+        # Use-Case fuer beides BlocklistError wirft, unterscheidet der Composition Root: liegt
+        # die Quelle nicht vor -> KeyError (404); sonst der Vokabular-Fehler -> ValueError (422).
+        if blocklist_source_repository().get(source_id) is None:
+            raise KeyError(f"Unbekannte Quelle: {source_id!r}")
+        try:
+            UpdateUserSource(blocklist_source_repository())(
+                source_id,
+                name=body.name,
+                url=body.url,
+                group=body.group,
+                fmt=body.fmt,
+                enabled=body.enabled,
+            )
+        except BlocklistError as exc:
+            raise ValueError(str(exc)) from exc
+
+    def _blocklist_delete_source(source_id: str) -> None:
+        DeleteUserSource(blocklist_source_repository(), blocklist_entry_repository())(source_id)
+
+    def _blocklist_build_refresh_due() -> RefreshDueSources:
+        refresh = RefreshSource(
+            blocklist_source_repository(), blocklist_entry_repository(), blocklist_fetcher()
+        )
+        return RefreshDueSources(blocklist_source_repository(), refresh)
+
+    def _blocklist_refresh_source(source_id: str) -> RefreshOut:
+        # Unbekannte id / Upload-ohne-url -> BlocklistError; hier in KeyError (404) uebersetzt.
+        # Ein Download-/Parse-Fehler ist KEIN Wurf -> er kommt als RefreshResult(ok=False).
+        refresh = RefreshSource(
+            blocklist_source_repository(), blocklist_entry_repository(), blocklist_fetcher()
+        )
+        try:
+            result = refresh(source_id)
+        except BlocklistError as exc:
+            raise KeyError(str(exc)) from exc
+        return _blocklist_refresh_out(result)
+
+    def _blocklist_refresh_due() -> RefreshDueOut:
+        results = _blocklist_build_refresh_due()(_read_blocklist_refresh_days())
+        return RefreshDueOut(results=[_blocklist_refresh_out(result) for result in results])
+
+    def _blocklist_reset_defaults() -> None:
+        ResetSourcesToDefaults(blocklist_source_repository(), blocklist_entry_repository())()
+
+    def _blocklist_write_settings(body: SettingsBody) -> None:
+        # Strenge zuerst validieren (unbekannt -> UnknownStrictnessError -> ValueError -> 422),
+        # bevor irgendetwas geschrieben wird (kein halber Schreibvorgang). Geschrieben wird
+        # ueber den UpdateSetting-Use-Case (Hausstil; validiert Key, lehnt Secret-Keys ab --
+        # die blocklist-Keys sind keine Secrets).
+        write_setting = UpdateSetting(repository())
+        if body.strictness is not None:
+            # Nur Validierung; ein Fehlwert wirft BlocklistError -> in ValueError
+            # uebersetzt, damit der api-Rand (faengt nur ValueError) auf 422 mappt.
+            try:
+                strictness_from_wire(body.strictness)
+            except BlocklistError as exc:
+                raise ValueError(str(exc)) from exc
+            write_setting(SETTING_STRICTNESS, body.strictness)
+        if body.refresh_interval_days is not None:
+            write_setting(SETTING_REFRESH_DAYS, body.refresh_interval_days)
+        if body.group_tracker_ads_enabled is not None:
+            write_setting(SETTING_GROUP_TRACKER_ADS, body.group_tracker_ads_enabled)
+        if body.group_threat_enabled is not None:
+            write_setting(SETTING_GROUP_THREAT, body.group_threat_enabled)
+
+    def _blocklist_match(body: MatchBody) -> MatchResultsOut:
+        # Strenge aus dem Body (validiert) ODER aus den Settings; die Gruppen-Feinschalter
+        # aus den Settings fliessen immer ein. BlocklistError der Hebung -> ValueError
+        # (der api-Rand faengt nur ValueError -> 422).
+        if body.strictness is not None:
+            try:
+                strictness = strictness_from_wire(body.strictness)
+            except BlocklistError as exc:
+                raise ValueError(str(exc)) from exc
+        else:
+            strictness = _read_blocklist_strictness()
+        contacts = [
+            ContactInput(remote_ip=contact.remote_ip, hostname=contact.hostname)
+            for contact in body.contacts
+        ]
+        results = MatchContacts(blocklist_source_repository(), blocklist_entry_repository())(
+            contacts, strictness, _blocklist_enabled_groups()
+        )
+        return MatchResultsOut(
+            results=[
+                ContactMatchOut(
+                    remote_ip=result.remote_ip,
+                    hostname=result.hostname,
+                    matches=[
+                        MatchOut(
+                            source_id=match.source_id,
+                            source_name=match.source_name,
+                            group=match.group.value,
+                            matched_on=match.matched_on,
+                        )
+                        for match in result.matches
+                    ],
+                )
+                for result in results
+            ]
+        )
+
+    # Auto-Refresh-Handler in die Scheduler-Registry eintragen (neben monitoring_window).
+    # Der Handler liest interval_days LIVE und ruft RefreshDueSources (Faelligkeit via
+    # last_fetched_ts -- das DailyWindow tickt nur taeglich, s. scheduler_handler-Docstring).
+    _blocklist_refresh_handler = BlocklistRefreshHandler(
+        _blocklist_build_refresh_due(), _read_blocklist_refresh_days
+    )
+    scheduler_handlers[_blocklist_refresh_handler.job_type] = _blocklist_refresh_handler
+
+    # Start-Initialisierung (idempotent): die fehlenden Werksquellen anlegen UND -- falls noch
+    # keiner existiert -- den taeglich tickenden Refresh-Job (03:00-04:00 lokal, alle Tage).
+    # Wird im Lifespan-Bootstrap einmal gerufen (unten), nicht hier (kein DB-Schreiben beim
+    # Import/Test ohne bootstrap_on_startup).
+    def _seed_blocklist_defaults() -> None:
+        SeedDefaultSources(blocklist_source_repository())()
+        # NACH dem Anlegen der Werksquellen: den MITGELIEFERTEN Inhalt der zwei
+        # DOH-BUILTIN-Quellen (url=None -> kein URL-Refresh) idempotent laden -- nur
+        # wenn noch nie geladen (entry_count None). Muster ImportUploadedSource.
+        SeedBuiltinDohContent(blocklist_source_repository(), blocklist_entry_repository())()
+
+    def _ensure_blocklist_refresh_job() -> None:
+        existing = ListScheduledJobs(scheduled_job_repository())()
+        if any(job.job_type == BlocklistRefreshHandler.job_type for job in existing):
+            return
+        window = DailyWindow(
+            start_minute=180,
+            end_minute=240,
+            weekdays=frozenset(),
+            from_epoch=0.0,
+            until_epoch=0.0,
+        )
+        CreateScheduledJob(scheduled_job_repository())(BlocklistRefreshHandler.job_type, (), window)
+        logger.info("blocklist_refresh_job_created")
+
+    app.include_router(blocklist_router)
+    app.dependency_overrides[provide_list_sources] = lambda: _blocklist_list_sources
+    app.dependency_overrides[provide_add_source] = lambda: _blocklist_add_source
+    app.dependency_overrides[provide_upload_source] = lambda: _blocklist_upload_source
+    app.dependency_overrides[provide_update_source] = lambda: _blocklist_update_source
+    app.dependency_overrides[provide_delete_source] = lambda: _blocklist_delete_source
+    app.dependency_overrides[provide_refresh_source] = lambda: _blocklist_refresh_source
+    app.dependency_overrides[provide_refresh_due] = lambda: _blocklist_refresh_due
+    app.dependency_overrides[provide_reset_defaults] = lambda: _blocklist_reset_defaults
+    app.dependency_overrides[provide_health] = lambda: _blocklist_health
+    app.dependency_overrides[provide_read_settings] = lambda: _blocklist_read_settings
+    app.dependency_overrides[provide_write_settings] = lambda: _blocklist_write_settings
+    app.dependency_overrides[provide_match] = lambda: _blocklist_match
+
+    # ── capture-Domaene v2 verdrahten (C.4+5, Regel 5: ports<->infra nur hier) ──
+    # REST (pcap/lldp) ueber duenne Use-Cases im api-Ring; der WS-Handler /ws/pcap
+    # lebt im Composition Root (ws_pcap.py, Broadcaster-Adapter -> WS-Transport).
+    # Drei langlebige Singletons (lru_cache, EINE Instanz pro App): der Sniffer (haelt
+    # den AsyncSniffer + die scapy-Rohpakete fuer wrpcap), der LLDP-Sniffer und der
+    # Broadcaster (den der RunCapture-Loop bespielt UND in den die /ws/pcap-Handler
+    # subscriben -- beide teilen dieselben Subscriber). RunCapture + CaptureLldp halten
+    # den Loop-State (Stats/Ringpuffer bzw. Nachbartabelle) und sind darum ebenfalls
+    # Singletons. capture_task laeuft NICHT im startup (anders als der monitor-Loop) --
+    # er startet on-demand ueber POST /api/pcap/start; der lifespan-shutdown cancelt ihn.
+    @lru_cache(maxsize=1)
+    def packet_sniffer() -> ScapyPacketSniffer:
+        return ScapyPacketSniffer()
+
+    @lru_cache(maxsize=1)
+    def lldp_sniffer() -> ScapyLldpSniffer:
+        return ScapyLldpSniffer()
+
+    @lru_cache(maxsize=1)
+    def capture_broadcaster() -> WebSocketCaptureBroadcaster:
+        return WebSocketCaptureBroadcaster()
+
+    # Ziel-Pfad der temp-pcap, die RunCapture.stop() schreibt (Altcode: _pcap_file im
+    # tempdir mit Zeitstempel-Name -- hier ein fester Name pro App, der bei jedem Stop
+    # ueberschrieben wird; status/save lesen den zuletzt geschriebenen Pfad).
+    import tempfile
+
+    _capture_pcap_path = str(Path(tempfile.gettempdir()) / "cernis_capture.pcap")
+
+    @lru_cache(maxsize=1)
+    def run_capture() -> RunCapture:
+        return RunCapture(packet_sniffer(), capture_broadcaster(), _capture_pcap_path)
+
+    @lru_cache(maxsize=1)
+    def capture_lldp() -> CaptureLldp:
+        return CaptureLldp(lldp_sniffer())
+
+    # StartCapture-Composition-Callable: prueft (StartCapture-Use-Case) und startet bei
+    # ok=True den RunCapture-Loop als Task (create_task + app.state.capture_task -- das
+    # kennt nur der Composition Root, NICHT der api-Ring). Ein bereits laufender Capture
+    # wird nicht doppelt gestartet (Altcode: if _capture_running: return ok) -- der alte
+    # Task bleibt, das ``ok`` wird durchgereicht. Gibt das {ok,error} des Use-Case zurueck.
+    def _start_capture(interface: str | None, bpf_filter: str, max_packets: int) -> dict[str, Any]:
+        result = StartCapture(packet_sniffer())()
+        if not result["ok"]:
+            return result
+        existing = getattr(app.state, "capture_task", None)
+        if existing is not None and not existing.done():
+            # Bereits ein Capture aktiv -- nicht doppelt starten (altcode-treu).
+            return result
+        app.state.capture_task = asyncio.create_task(
+            run_capture().run(interface, bpf_filter, max_packets)
+        )
+        return result
+
+    def _stop_capture() -> None:
+        run_capture().stop()
+
+    # save-Ziel-Verzeichnis (Filesystem-Policy -> Composition Root, NICHT Use-Case):
+    # Desktop/Schreibtisch/Downloads/Home-Fallback, altcode-treu (main.api_pcap_save).
+    def _save_dir() -> Path:
+        home = Path.home()
+        for candidate in [home / "Desktop", home / "Schreibtisch", home / "Downloads", home]:
+            if candidate.is_dir():
+                return candidate
+        return home
+
+    app.include_router(capture_router)
+    app.dependency_overrides[provide_start_capture_uc] = lambda: StartCapture(packet_sniffer())
+    app.dependency_overrides[provide_start_capture] = lambda: _start_capture
+    app.dependency_overrides[provide_stop_capture] = lambda: _stop_capture
+    app.dependency_overrides[provide_capture_status] = lambda: run_capture().status
+    app.dependency_overrides[provide_recent_packets] = lambda: run_capture().recent_packets
+    app.dependency_overrides[provide_pcap_path] = lambda: run_capture().pcap_path
+    app.dependency_overrides[provide_save_dir] = lambda: _save_dir
+    app.dependency_overrides[provide_capture_lldp] = lambda: capture_lldp()
+    app.dependency_overrides[provide_get_lldp_neighbors] = lambda: GetLldpNeighbors(capture_lldp())
+
+    # ── Topologie (ADR 0035): radialer Heimnetz-Graph ──────────────────────────
+    # Regel 5: die Quer-Domaenen-Naht laeuft AUSSCHLIESSLICH hier im Composition
+    # Root. BuildTopology kennt weder devices/scanning/interfaces noch infra -- es
+    # bekommt drei schlanke Provider-Callables, die hier die Fremd-Daten in rohe
+    # dicts/den Roh-Wert projizieren (Muster application.export.ScanProvider):
+    #   * Hosts  <- WAEHLBARE Quelle (Nutzer-Wahl, s.u.): juengster Scan ODER Bestand,
+    #   * Nachbarn <- akkumulierte LLDP/CDP-Tabelle (GetLldpNeighbors),
+    #   * Gateway-IP <- primaeres Interface (ListInterfaces, async -> Coroutine-Provider).
+    #
+    # Host-Quelle als Nutzer-Wahl (Leitprinzip Karl: maximale Entscheidungsfreiheit,
+    # Muster AUTO/MANUELL beim Polling): zwei Projektionen, der Endpunkt waehlt per
+    # ``?source=`` welche (str -> Projektion-Hebung HIER, nicht im Use-Case).
+    #   * "all_known": gesamter device_repository-Bestand (alle je gesehenen Geraete,
+    #     auch offline) -- das bisherige Verhalten.
+    def _topology_hosts_all_known() -> list[dict[str, str]]:
+        devices = GetDevices(device_repository())(known_only=False)
+        return [
+            {
+                "mac": d.mac,
+                "ip": d.last_ip or "",
+                "hostname": d.hostname,
+                "vendor": d.vendor,
+            }
+            for d in devices
+        ]
+
+    #   * "last_scan": nur die Hosts des JUENGSTEN gespeicherten Scans (Live-Bild).
+    #     Lesepfad wie der analysis-hosts-Schnitt (Schnitt B, s.u. ~Z.2374): das
+    #     bestehende scan_history_repository() (lru_cache, im scanning-Block
+    #     verdrahtet) -- list(1) liefert die juengste Summary, get() den ScanRecord
+    #     mit den EnrichedHost-Objekten. KEIN neuer Scan-Zugriff, KEINE zweite
+    #     Repo-Instanz. Ausfallsicher (Muster Schnitt B): kein Scan ODER ein
+    #     CorruptScanError -> ehrlich leere Hostliste, kein Crash.
+    def _topology_hosts_last_scan() -> list[dict[str, str]]:
+        summaries = scan_history_repository().list(1)
+        if not summaries:
+            return []
+        try:
+            record = scan_history_repository().get(summaries[0].scan_id)
+        except CorruptScanError:
+            logger.warning("topology.hosts_skipped_corrupt_scan", scan_id=summaries[0].scan_id)
+            return []
+        if record is None:
+            return []
+        return [
+            {
+                "mac": h.mac,
+                "ip": h.ip,
+                "hostname": h.hostname,
+                "vendor": h.vendor,
+            }
+            for h in record.hosts
+        ]
+
+    def _topology_neighbors() -> list[dict[str, str]]:
+        neighbors = GetLldpNeighbors(capture_lldp())()
+        return [
+            {
+                "source_mac": n.source_mac,
+                "chassis_id": n.chassis_id,
+                "system_name": n.system_name,
+                "system_desc": n.system_desc,
+                "port_id": n.port_id,
+                "protocol": n.protocol,
+            }
+            for n in neighbors
+        ]
+
+    async def _topology_gateway() -> str:
+        interfaces = await ListInterfaces(InterfaceDiscoveryAdapter())()
+        for iface in interfaces:
+            if iface.is_primary and iface.gateway:
+                return iface.gateway
+        return ""
+
+    # Factory statt fertigem Use-Case: der Endpunkt reicht die gewaehlte ``source``
+    # herein, hier faellt die Entscheidung, WELCHE Host-Projektion ``BuildTopology``
+    # bekommt. So bleibt der Use-Case quellen-agnostisch (Regel 5: die Quelle-
+    # Unterscheidung lebt in der Verdrahtung). Nachbarn/Gateway sind quellen-
+    # unabhaengig und in beiden Faellen identisch.
+    def _build_topology_for(source: TopologySource) -> BuildTopology:
+        host_provider = (
+            _topology_hosts_last_scan if source == "last_scan" else _topology_hosts_all_known
+        )
+        return BuildTopology(host_provider, _topology_neighbors, _topology_gateway)
+
+    app.dependency_overrides[provide_build_topology] = lambda: _build_topology_for
+
+    app.add_api_websocket_route(
+        "/ws/pcap", make_ws_pcap(capture_broadcaster(), cfg.cors_allow_origins)
+    )
+
+    # ── agent-Domaene v2 verdrahten (A.4+5, Regel 5: ports<->infra nur hier) ──
+    # REST-only (Client-Seite): GET/POST/DELETE /api/agents + ping/scan. KEIN WS --
+    # der einzige agent-WS (/agent/scan) lebt auf der ZURUECKGESTELLTEN Server-Seite
+    # (modules.agent.create_agent_app), die hier nicht verdrahtet wird; der scan-
+    # Endpunkt ist REST mit wait_for, der WebsocketsAgentScanClient macht die
+    # ausgehende WS-Verbindung INTERN. Das Repository teilt die cernis.db (lru_cache
+    # wie scan_history) und legt die remote_agents-Tabelle beim Bau selbst an
+    # (_ensure_schema -- darum entfiel init_agents_db im lifespan). Der secret_store()
+    # ist der SETTINGS-Singleton (oben): der Agent-Token lebt unter token_key(id) im
+    # SELBEN Keystore, Variante-B-Trennung (Stammdaten im Repo, Secret getrennt).
+    # Pinger/ScanClient sind zustandslos -> einmal gebaut, pro Request frisch um den
+    # Use-Case gewickelt (guenstig). KEIN Exception-Handler noetig: AgentNotFoundError
+    # mappt der api-Rand selbst auf 404, alles andere im scan-Pfad auf 503;
+    # SecretStoreUnavailableError faengt der bestehende globale 503-Handler.
+    @lru_cache(maxsize=1)
+    def agent_repository() -> SqliteAgentRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteAgentRepository(get_db_path())
+
+    agent_pinger = UrllibAgentPinger()
+    agent_scan_client = WebsocketsAgentScanClient()
+
+    app.include_router(agent_router)
+    app.dependency_overrides[provide_list_agents] = lambda: ListAgents(agent_repository())
+    app.dependency_overrides[provide_save_agent] = lambda: SaveAgent(
+        agent_repository(), secret_store()
+    )
+    app.dependency_overrides[provide_delete_agent] = lambda: DeleteAgent(
+        agent_repository(), secret_store()
+    )
+    app.dependency_overrides[provide_ping_agent] = lambda: PingAgent(
+        agent_repository(), agent_pinger, secret_store()
+    )
+    app.dependency_overrides[provide_scan_via_agent] = lambda: ScanViaAgent(
+        agent_repository(), agent_scan_client, secret_store()
+    )
+
+    # ── System-/Glue-Endpunkte verdrahten (ADR-0004 P.1) ─────────────────────────
+    # Self-contained Glue ohne Domaene. Die vier Provider reichen Infrastruktur in den
+    # api-Ring (der infrastructure/modules NICHT kennen darf): Version, der reduzierte
+    # Dependency-Report, die Interface-Liste (Uebergangs-Adapter) und der Browser-Opener.
+
+    def _system_info() -> dict[str, Any]:
+        # REDUZIERT (ADR-0004 P.1): version + nmap-Binary + nur die v2-real-genutzten
+        # Deps. nmap via shutil.which (NICHT modules.portscan._find_nmap). Die mit
+        # main.py sterbenden Quer-Deps (pysnmp/reportlab/fritzconnection/...) sind RAUS.
+        import importlib.util
+        import shutil
+
+        return {
+            # Nach aussen/GUI -> Anzeige-Form ("2.0.0-x64.a1b2c3d"). Der Suffix
+            # nennt nur die Architektur, kein Paketformat.
+            "version": display_version(),
+            "nmap": shutil.which("nmap") is not None,
+            "scapy": importlib.util.find_spec("scapy") is not None,
+        }
+
+    def _open_url(url: str) -> None:
+        # Default-Opener: webbrowser.open. Der Schema-Guard (nur http/https) sitzt im
+        # api-Rand (api/system.open_url) -- dieser Opener wird nur bei gueltiger URL
+        # gerufen. Lokaler Import: kein webbrowser im App-Bau-Pfad.
+        import webbrowser
+
+        webbrowser.open(url)
+
+    app.include_router(system_router)
+    # /api/version bzw. /api/status -> nach aussen/GUI -> Anzeige-Form.
+    app.dependency_overrides[provide_version] = lambda: display_version
+    app.dependency_overrides[provide_system_info] = lambda: _system_info
+    app.dependency_overrides[provide_url_opener] = lambda: _open_url
+
+    # ── interfaces-Domaene v2 verdrahten (I.3, loest den Uebergangs-Endpunkt ab) ──
+    # Zustandsloser Adapter direkt instanziiert (Muster ArpTableAdapter): der
+    # Use-Case holt die rohen Interfaces ueber den Port und reichert sie fachlich an
+    # (type/status/is_primary). Die fruhere system.py-Glue-Naht + der Uebergangs-
+    # Adapter infrastructure.interfaces sind entfallen.
+    app.include_router(interfaces_router)
+    app.dependency_overrides[provide_list_interfaces] = lambda: ListInterfaces(
+        InterfaceDiscoveryAdapter()
+    )
+
+    # ── Lizenzaufstellung verdrahten (S73-P5a, zwei lesende Endpunkte) ────────────
+    # GETEILTER Adapter-Singleton (lru_cache, Muster _traffic_adapter): der Adapter
+    # haelt die einmal gelesene Aufstellung in der INSTANZ (Aufgabe 1d). Zwei
+    # Instanzen laesen die 720 kB zweimal von der Platte -- beide Use-Cases muessen
+    # sich darum dieselbe teilen. Der Zustand sitzt bewusst hier im Composition Root
+    # und nicht als Modul-Global im Adapter: so gehoert er einer App-Instanz und ist
+    # im Test kontrollierbar.
+    @lru_cache(maxsize=1)
+    def _license_manifest_adapter() -> LicenseManifestAdapter:
+        return LicenseManifestAdapter()
+
+    # Die laufende Plattform wird HIER ermittelt (Aufgabe 3d) und dem Use-Case
+    # uebergeben -- weder Router noch Use-Case fragen selbst ``sys.platform``. Die
+    # Bezeichner sind die der Aufstellung (Feld ``plattform`` der Ebene ``programme``:
+    # Linux / macOS / Windows), nicht die Python-Kuerzel; die Uebersetzung gehoert an
+    # die Naht zwischen Laufzeit und Fachlichkeit, also hierher.
+    if sys.platform == "win32":
+        _laufende_plattform = "Windows"
+    elif sys.platform == "darwin":
+        _laufende_plattform = "macOS"
+    else:
+        _laufende_plattform = "Linux"
+
+    # Die plattformeigene Pruefung fuer Eintraege, die NICHT ueber den Suchpfad
+    # auffindbar sind (Befund 54b, Naht ``ProgrammPruefung``). Verdrahtet auf
+    # dieselbe Quelle wie der Npcap-Marker der Sniff-Familie -- genau das Muster der
+    # DNS-Naht aus Befund 52, einschliesslich des lokalen Imports: der
+    # infrastructure-Client bleibt aus dem App-Bau heraus.
+    #
+    # Der Use-Case kennt weder ``sniffd_client`` noch eine Plattform; er reicht nur
+    # den Namen herein. Die Zuordnung Name -> Quelle faellt HIER (Importregel 5).
+    #
+    # Dreiwertig, ohne stillen Rueckfall: ``None`` heisst "keine Aussage" und wird im
+    # Use-Case zu ``nicht_ermittelbar``, nie zu "fehlt". Das betrifft (a) jeden
+    # Namen, fuer den es hier keine Quelle gibt, und (b) Npcap ausserhalb von
+    # Windows -- dort prueft ``sniffd_platform_supported`` gar nicht auf Npcap,
+    # sondern auf die Tragfaehigkeit der Naht, und sein Ergebnis waere zu dieser
+    # Frage keine Auskunft.
+    def _license_programm_pruefung(name: str) -> bool | None:
+        if name != "Npcap":
+            return None
+        if sys.platform != "win32":
+            return None
+        from infrastructure.sniffd_client.base import sniffd_unavailable_reason
+
+        # Derselbe Marker, den SNI und der DNS-Waechter lesen: leer = Npcap erkannt,
+        # ``NPCAP_MISSING`` = alle vier Erkennungsstufen ohne Treffer.
+        return sniffd_unavailable_reason() != "NPCAP_MISSING"
+
+    app.include_router(license_manifest_router)
+    app.dependency_overrides[provide_get_license_manifest] = lambda: GetLicenseManifest(
+        _license_manifest_adapter(), _license_programm_pruefung
+    )
+    app.dependency_overrides[provide_get_license_text] = lambda: GetLicenseText(
+        _license_manifest_adapter()
+    )
+    app.dependency_overrides[provide_laufende_plattform] = lambda: _laufende_plattform
+
+    # ── traffic-Domaene v2 verdrahten (T.3+T.4b-2, Per-App-Netzwerk-Monitoring) ──
+    # GETEILTER Adapter-Singleton (lru_cache, Muster run_capture): Poller UND Leser
+    # nutzen DIESELBE PsutilTrafficAdapter-Instanz -- sonst pollt der eine, liest der
+    # andere aus einer zweiten Instanz. Der Adapter ist zustandslos, der Singleton
+    # ist hier nur Disziplin (eine Quelle), kein State.
+    @lru_cache(maxsize=1)
+    def _traffic_adapter() -> PsutilTrafficAdapter:
+        return PsutilTrafficAdapter()
+
+    # PollThroughput-Singleton: haelt den Mess-/Raten-State ueber die Zeit. AUTO
+    # (lifespan) UND MANUELL (Endpunkte) greifen auf DENSELBEN Singleton zu -- so
+    # gibt es nur einen State, und der Doppelstart-Schutz (poll_task.done()) hindert
+    # zwei parallele Loops. Intervall aus der Config (Vision-Regler).
+    @lru_cache(maxsize=1)
+    def _poll_throughput() -> PollThroughput:
+        return PollThroughput(_traffic_adapter(), interval=cfg.traffic_poll_interval)
+
+    # ListAppTraffic-Runner (Naht current_rates -> rates, Muster _monitor_status):
+    # liest die Raten des laufenden Pollers ueber app.state (Fallback {} ohne Poller
+    # -> ehrliche Stufe 1, Raten None) und reicht sie an den Use-Case. Greift auf den
+    # GETEILTEN Adapter zu (gleiche Quelle wie der Poller).
+    async def _list_app_traffic() -> list[Any]:
+        poll = getattr(app.state, "poll_throughput", None)
+        rates = poll.current_rates() if poll is not None else {}
+        # Kumulative Zaehler getrennt: sie stehen schon nach dem ERSTEN tick, die
+        # Raten erst nach dem zweiten -- so tragen die Byte-Felder sofort Werte.
+        counters = poll.current_counters() if poll is not None else {}
+        return await ListAppTraffic(_traffic_adapter())(rates, counters)
+
+    # MANUELL-Lebenszyklus (Muster _start_capture): startet den Poll-Loop als Task an
+    # app.state, kein Doppelstart (task.done()-Check). AUTO (lifespan) nutzt denselben
+    # Singleton + dieselben app.state-Keys -- laeuft AUTO bereits, verhindert der
+    # done()-Check hier einen zweiten Task.
+    def _start_poll() -> dict[str, Any]:
+        poll = _poll_throughput()
+        app.state.poll_throughput = poll
+        existing = getattr(app.state, "poll_task", None)
+        if existing is not None and not existing.done():
+            return {"ok": True}  # bereits aktiv -- nicht doppelt starten
+        app.state.poll_task = asyncio.create_task(poll.run())
+        return {"ok": True}
+
+    def _stop_poll() -> None:
+        poll = getattr(app.state, "poll_throughput", None)
+        if poll is not None:
+            poll.stop()
+        task = getattr(app.state, "poll_task", None)
+        if task is not None:
+            task.cancel()
+
+    # Grund eines gescheiterten laufenden Mess-tick fuer die Status-Naht (der
+    # api-Ring kennt app.state nicht). Ohne laufenden Poller gibt es keinen
+    # Messfehler zu melden -> None.
+    def _poll_error() -> str | None:
+        poll = getattr(app.state, "poll_throughput", None)
+        if poll is None:
+            return None
+        error: str | None = poll.last_error()
+        return error
+
+    app.include_router(traffic_router)
+    app.dependency_overrides[provide_list_app_traffic] = lambda: _list_app_traffic
+    app.dependency_overrides[provide_check_traffic_permission] = lambda: CheckTrafficPermission(
+        TrafficPermissionAdapter()
+    )
+    app.dependency_overrides[provide_start_poll] = lambda: _start_poll
+    app.dependency_overrides[provide_stop_poll] = lambda: _stop_poll
+    app.dependency_overrides[provide_poll_error] = lambda: _poll_error
+
+    # ── Capture-Rechteeinrichtung verdrahten (Etappe 2, Sniff-Familie) ──────────
+    # Zustandsloser Adapter direkt instanziiert (Muster InterfaceDiscoveryAdapter):
+    # er haelt keinen State, sondern prueft bzw. richtet Rechte ein. Welche Klasse
+    # das ist, entschied die Plattform-Weiche beim Import (macOS vs. uebrige).
+    app.include_router(capture_access_router)
+    app.dependency_overrides[provide_get_capture_access_status] = lambda: GetCaptureAccessStatus(
+        CaptureAccessAdapter()
+    )
+    app.dependency_overrides[provide_grant_capture_access] = lambda: GrantCaptureAccess(
+        CaptureAccessAdapter()
+    )
+    app.dependency_overrides[provide_revoke_capture_access] = lambda: RevokeCaptureAccess(
+        CaptureAccessAdapter()
+    )
+
+    # ── sni-Domaene v2 verdrahten (ADR 0017, passiver SNI-Mitschnitt) ────────────
+    # EIN langlebiger Adapter-Singleton (lru_cache, Muster run_capture/_traffic_adapter):
+    # der Sniffer haelt die beiden Hintergrund-Threads (scapy-AsyncSniffer + psutil-
+    # Poller) + den internen Ringpuffer (deque maxlen). RunSniCapture/GetObservedSni/
+    # StartSniCapture teilen DENSELBEN Adapter -- EINE Erfassung pro App. KEIN Autostart
+    # (anders als monitor/poll-AUTO): der Sniff startet on-demand ueber POST /api/sni/start.
+    @lru_cache(maxsize=1)
+    def sni_sniffer() -> ScapySniSniffer:
+        return ScapySniSniffer()
+
+    @lru_cache(maxsize=1)
+    def run_sni() -> RunSniCapture:
+        return RunSniCapture(sni_sniffer())
+
+    # StartSni-Composition-Callable (Muster _start_capture): prueft (StartSniCapture)
+    # und startet bei ok=True den Sniff. Anders als capture KEIN asyncio.create_task --
+    # der Sniff laeuft in den Adapter-Threads, nicht in einer Coroutine. Der Callable
+    # legt den Use-Case auf app.state, damit der lifespan-Shutdown ihn stoppen kann.
+    # Ein echter Start-Fehler (Rechte/Geraet) wirft SniError -> globaler 503-Handler;
+    # der regulaere Permission-Fall geht ueber die {ok,error}-Naht -> 403 VOR dem Start.
+    def _start_sni(interface: str | None) -> dict[str, Any]:
+        result = StartSniCapture(sni_sniffer())()
+        if not result["ok"]:
+            return result
+        run_sni_uc = run_sni()
+        app.state.run_sni = run_sni_uc
+        run_sni_uc.start(interface)  # idempotent gegen einen bereits laufenden Sniff
+        return result
+
+    def _stop_sni() -> None:
+        run_sni().stop()
+
+    app.include_router(sni_router)
+    app.dependency_overrides[provide_start_sni] = lambda: _start_sni
+    app.dependency_overrides[provide_stop_sni] = lambda: _stop_sni
+    app.dependency_overrides[provide_start_sni_uc] = lambda: StartSniCapture(sni_sniffer())
+    app.dependency_overrides[provide_sni_running] = lambda: run_sni().is_running
+    app.dependency_overrides[provide_get_observed_sni] = lambda: GetObservedSni(sni_sniffer())
+
+    @app.exception_handler(SniPermissionError)
+    async def _on_sni_permission_error(_request: Request, exc: SniPermissionError) -> JSONResponse:
+        # Fehlende Rechte (CAP_NET_RAW/root) -> ehrliche 403 (nicht 503): das Frontend
+        # (api/sni.js) faengt gezielt 403 fuer den Rechte-Hinweis. Muss VOR dem
+        # generischen SniError-Handler stehen.
+        logger.warning("sni_permission_error", error=str(exc))
+        # Paketaufzeichnung ohne CAP_NET_RAW -> E-301 (Praesentations-Code am
+        # HTTP-Rand; die application-Exception bleibt unveraendert).
+        return JSONResponse(status_code=403, content={"detail": f"{exc} (E-301)"})
+
+    @app.exception_handler(SniError)
+    async def _on_sni_error(_request: Request, exc: SniError) -> JSONResponse:
+        # Ein echter Sniff-Start-Fehler (toter Sniffer-Thread/Geraet/scapy) ist ein
+        # FEHLER, kein stiller Fallback (ADR 0001/S3). Muster DiagnosticsToolMissing/
+        # ResolverToolMissing -> 503: infra-Exception, am Composition Root gemappt.
+        logger.error("sni_error", error=str(exc))
+        return JSONResponse(status_code=503, content={"detail": str(exc)})
+
+    # ── process-Domaene v2 verdrahten (P.3, reine Lese-Sicht aus /proc) ──────────
+    # Zustandslose Adapter direkt instanziiert (Muster interfaces). Kein Poller, kein
+    # app.state -- process ist reine Lese-Domaene. Der Runner entscheidet anhand view
+    # zwischen flat()/tree() und serialisiert NICHT (das macht der api-Ring) -- er gibt
+    # Domaenen-Objekte als list[Any] zurueck (flat: ProcessInfo-Liste; tree:
+    # ProcessNode-Wald als Liste). Der api-Ring kennt keine domain-Typen, daher Any.
+    def _process_adapter() -> PsutilProcessAdapter:
+        return PsutilProcessAdapter()  # zustandslos, pro Aufruf billig
+
+    async def _list_processes(view: str) -> list[Any]:
+        uc = ListProcesses(_process_adapter())
+        if view == "tree":
+            return list(await uc.tree())  # Wald als Liste von ProcessNode
+        return await uc.flat()  # flache ProcessInfo-Liste
+
+    app.include_router(process_router)
+    app.dependency_overrides[provide_list_processes] = lambda: _list_processes
+    app.dependency_overrides[provide_check_process_permission] = lambda: CheckProcessPermission(
+        ProcessPermissionAdapter()
+    )
+
+    # ── diagnostics-Domaene v2 verdrahten (1a: DNS + traceroute, ADR 0014) ────────
+    # Zustandslose Adapter direkt instanziiert (Muster process/interfaces). Kein Poller,
+    # kein app.state -- reine Frage-Antwort-Domaene. Die Runner reichen die HTTP-Parameter
+    # an die duennen Use-Cases durch und geben das Domaenen-Objekt als Any zurueck (der
+    # api-Ring serialisiert, kennt keine domain-Typen).
+    async def _resolve_dns(query: str, types: list[str]) -> Any:
+        # ``types`` kommt als list[str] vom api-Ring; die Werte sind die DnsRecordType-
+        # Literale (FastAPI validiert sie nicht gegen das Literal -- der Adapter reicht
+        # unbekannte Typen schlicht an dig weiter, eine leere Antwort ist kein Fehler).
+        return await ResolveDns(DigDnsResolver())(query, types)  # type: ignore[arg-type]
+
+    # PLATTFORMWEICHE traceroute (S66-W-h1, Finding 15/16): Windows hat KEIN
+    # traceroute-Binary -- der Linux-Adapter scheitert dort am shutil.which-Riegel und beide
+    # Naehte (hier und "Route zum Ziel" weiter unten) blieben tot. Der Windows-Zweig misst
+    # nativ ueber iphlpapi (IcmpSendEcho mit gesetzter TTL), erfuellt denselben Port und
+    # braucht keine erhoehten Rechte. Die Weiche steht AUSSCHLIESSLICH hier im Composition
+    # Root (Regel 5) und der plattformeigene Import INNERHALB der Weiche, damit die
+    # statische Pruefung auf Linux nicht ueber das win32-Modul stolpert. Beide Naehte
+    # muessen denselben Adapter waehlen -- eine uebersehene Stelle ergibt genau den
+    # bisherigen Fehlerzustand an der anderen Naht.
+    if sys.platform == "win32":
+        from infrastructure.traceroute_windows import (
+            WindowsTraceroutePermission,
+            WindowsTracerouteRunner,
+        )
+
+        _traceroute_runner: TracerouteRunner = WindowsTracerouteRunner()
+        _traceroute_permission: TraceroutePermissionPort = WindowsTraceroutePermission()
+    else:
+        _traceroute_runner = SystemTracerouteRunner()
+        _traceroute_permission = LinuxTraceroutePermission()
+
+    async def _run_traceroute(target: str, privileged: bool) -> Any:
+        return await RunTraceroute(_traceroute_runner)(target, privileged)
+
+    app.include_router(diagnostics_router)
+    app.dependency_overrides[provide_resolve_dns] = lambda: _resolve_dns
+    app.dependency_overrides[provide_run_traceroute] = lambda: _run_traceroute
+    app.dependency_overrides[provide_check_traceroute_permission] = lambda: (
+        CheckTraceroutePermission(_traceroute_permission)
+    )
+
+    # ── diagnostics 1b: Tool-/Paketmanager-Erkennung verdrahten ───────────────────
+    # Zustandslose which-Adapter direkt instanziiert (Muster oben). Der Runner reicht den
+    # optionalen ``tools``-Param (None -> alle) an den synchronen Use-Case durch und gibt
+    # den ToolReport als Any zurueck (der api-Ring serialisiert, kennt keine domain-Typen).
+    # KEINE Selbst-Installation -- der Use-Case liefert nur den Befehls-TEXT.
+    def _check_tools(tools: list[str] | None) -> Any:
+        return CheckDiagnosticsTools(ShutilToolDetector(), LinuxPackageManagerDetector())(tools)
+
+    app.dependency_overrides[provide_check_tools] = lambda: _check_tools
+
+    # ── diagnostics 2a: Banner-Grabbing verdrahten ────────────────────────────────
+    # Zustandsloser asyncio-Socket-Adapter direkt instanziiert (Muster oben). Der Runner
+    # reicht target/port an den duennen Use-Case durch und gibt das BannerResult als Any
+    # zurueck (der api-Ring serialisiert, kennt keine domain-Typen). KEIN Tool-/Rechte-
+    # Thema -- ein gewoehnlicher TCP-Connect. KEINE konfigurierbaren Payloads.
+    async def _grab_banner(target: str, port: int) -> Any:
+        return await GrabBanner(SocketBannerGrabber())(target, port)
+
+    app.dependency_overrides[provide_grab_banner] = lambda: _grab_banner
+
+    @app.exception_handler(DiagnosticsToolMissing)
+    async def _on_diagnostics_tool_missing(
+        _request: Request, exc: DiagnosticsToolMissing
+    ) -> JSONResponse:
+        # Fehlendes System-Binary (dig/traceroute) ist ein Fehler, kein stiller Fallback
+        # (ADR 0001). Vorbild SecretStoreUnavailableError: infra-Exception -> 503. Die
+        # neutrale Meldung benennt das fehlende Programm; der Install-Hinweis folgt in 1b.
+        logger.error("diagnostics_tool_missing", tool=exc.tool)
+        # nmap fehlt/fehlgeschlagen -> E-404 (nur fuer nmap; dig/traceroute haben
+        # keinen eigenen Schema-Code und bleiben ohne Anhang).
+        detail = exc.message
+        if exc.tool == "nmap":
+            detail = f"{detail} (E-404)"
+        return JSONResponse(status_code=503, content={"detail": detail})
+
+    # ── diagnostics 2b: externer IP/Port-Check via cpnetcheck verdrahten ───────────
+    # Modell D: der Use-Case liest URL (settings-``repository()``) + Token (``secret_store()``,
+    # die DIESELBEN lazy-memoisierten Factories wie settings/agent) und ruft den
+    # httpx-Provider NUR, wenn beides gesetzt ist. Der Runner reicht die optionale Portliste
+    # (None -> reiner IP-Check) an den Use-Case durch und gibt das ExternalCheckResult als
+    # Any zurueck (der api-Ring serialisiert, kennt keine domain-Typen). Der Provider ist
+    # zustandslos (httpx.AsyncClient pro Aufruf) -- pro Request frisch gewickelt, kein State.
+    async def _check_external(ports: list[int] | None) -> Any:
+        return await CheckExternalReachability(
+            HttpxReachabilityProvider(), repository(), secret_store()
+        )(ports)
+
+    app.dependency_overrides[provide_check_external] = lambda: _check_external
+
+    @app.exception_handler(ExternalCheckFailed)
+    async def _on_external_check_failed(
+        _request: Request, exc: ExternalCheckFailed
+    ) -> JSONResponse:
+        # Externer cpnetcheck-Dienst gescheitert -> 502 (Bad Gateway, der Fehler liegt im
+        # externen Dienst, nicht in CERNIS). Vorbild DiagnosticsToolMissing -> 503: infra-
+        # Exception, am Composition Root gemappt. Die Meldung ist NEUTRAL -- der Adapter hat
+        # bereits jeden Token/internen Detail entfernt; hier wird NICHTS Zusaetzliches
+        # geloggt, was den Token enthalten koennte.
+        logger.error("external_check_failed")
+        # Externer cpnetcheck-Dienst nicht erreichbar/gescheitert -> E-403.
+        return JSONResponse(status_code=502, content={"detail": f"{exc.message} (E-403)"})
+
+    # ── diagnostics 3: Rogue-DHCP-Erkennung verdrahten ────────────────────────────
+    # Zustandslose Adapter direkt instanziiert (Muster process/interfaces). Der Use-Case
+    # zieht die erwartete Menge selbst (Setting expected_dhcp_servers via repository() ODER
+    # Gateway-Fallback ueber den BESTEHENDEN interfaces-Port InterfaceDiscoveryAdapter, Muster
+    # wie 2b settings/secret injiziert). Vor dem Discovery prueft er die Root-Rechte
+    # (LinuxDhcpPermission); ohne Root wirft er RogueDhcpPermissionError -> 403 (Handler
+    # unten), der Probe laeuft NIE blind. Der Runner gibt das RogueDhcpResult als Any zurueck.
+    #
+    # Persistenz (ADR 0038): der Singleton-Store (SqliteRogueDhcpRepository, eigene
+    # rogue_dhcp_latest-Tabelle in cernis.db) wird injiziert + time.time() als checked_ts
+    # hereingereicht (KEINE Wanduhr im Use-Case, Muster ResumeActiveLoggingTasks(time.time())).
+    # Der Use-Case speichert so nach JEDEM erfolgreichen Lauf ueberschreibend den letzten
+    # Stand fuer den spaeteren Sicherheitsbericht. Schema-Init geschieht im Adapter-Konstruktor
+    # (lazy-memoisiert wie die anderen Repos -- haelt nur den db_path, zustandslos).
+    @lru_cache(maxsize=1)
+    def rogue_dhcp_repository() -> SqliteRogueDhcpRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteRogueDhcpRepository(get_db_path())
+
+    async def _detect_rogue_dhcp() -> Any:
+        import time
+
+        return await DetectRogueDhcp(
+            NmapDhcpProbe(),
+            LinuxDhcpPermission(),
+            repository(),
+            InterfaceDiscoveryAdapter(),
+            rogue_dhcp_repository(),
+        )(time.time())
+
+    app.dependency_overrides[provide_detect_rogue_dhcp] = lambda: _detect_rogue_dhcp
+    app.dependency_overrides[provide_check_dhcp_permission] = lambda: CheckDhcpPermission(
+        LinuxDhcpPermission()
+    )
+
+    @app.exception_handler(RogueDhcpPermissionError)
+    async def _on_rogue_dhcp_permission(
+        _request: Request, exc: RogueDhcpPermissionError
+    ) -> JSONResponse:
+        # Rogue-DHCP ohne Root (oder nmap fehlt) -> 403 (die Discovery ist nicht erlaubt,
+        # nicht der Dienst kaputt). Ehrliche Sperre, kein stiller Fallback (S3) -- der Probe
+        # wurde NICHT gerufen. Muster der Tool-fehlt-/Dienst-Naht: das Mapping sitzt am
+        # Composition Root, der api-Ring bleibt clean. Die Meldung ist die Rechte-Begruendung.
+        logger.error("rogue_dhcp_permission_denied")
+        return JSONResponse(status_code=403, content={"detail": exc.message})
+
+    # ── resolver-Domaene v2 verdrahten (Teilschritt 3, Regel 5: ports<->infra nur hier) ──
+    # Vier Quell-Adapter: PTR/Forward-DNS (dig), RDAP (httpx), TLS-Cert (stdlib ssl) sind
+    # zustandslos und werden pro Request frisch gewickelt. Die Geo/ASN-DB (CsvGeoAsnDb) ist
+    # die EINE Ausnahme: ihr Konstruktor LAEDT die vier CSVs in sortierte Listen -- darum
+    # EINMAL beim App-Bau (lru_cache, Muster wie scan_history_repository), NICHT pro Request.
+    # Fehlt eine CSV, wirft sie beim ERSTEN Lookup-Bau ResolverDataMissing -> 503 (Handler
+    # unten); der Bau selbst ist lazy (erst beim ersten /api/resolve, nicht beim App-Bau --
+    # so faellt ein Test ohne Daten-CSVs nicht schon beim create_app um).
+    @lru_cache(maxsize=1)
+    def geo_asn_db() -> CsvGeoAsnDb:
+        return CsvGeoAsnDb()
+
+    # Der PTR/Forward-DNS-Adapter ``ptr_resolver`` ist bereits weiter oben (Scan-
+    # Verdrahtung) EINMAL gebaut -- dieselbe zustandslose Instanz traegt hier den
+    # reichen ResolveEndpoint und den schlanken Batch-PTR-Use-Case (Paket 5,
+    # Auftrag: eine Instanz wiederverwenden, nicht neu bauen).
+
+    # Runner: reicht ip/port an den ResolveEndpoint-Use-Case durch und gibt das
+    # RemoteEndpointFacts als Any zurueck (der api-Ring serialisiert, kennt keine domain-
+    # Typen). Die zwei zustandslosen Adapter (RDAP/TLS) pro Aufruf frisch; die Geo-DB und
+    # der PTR-Adapter geteilt.
+    async def _resolve_endpoint(ip: str, port: int | None) -> Any:
+        return await ResolveEndpoint(
+            ptr_resolver, RdapClient(), geo_asn_db(), TlsCertReader()
+        ).resolve(ip, port)
+
+    # Batch-PTR (Paket 5): EINE langlebige ResolvePtrBatch-Instanz pro App -- ihr
+    # prozesslokaler TTL-Cache lebt am Use-Case-Objekt und soll ueber Requests hinweg
+    # greifen (eine frische Instanz pro Request haette einen stets leeren Cache). Nutzt
+    # DENSELBEN ptr_resolver wie ResolveEndpoint. Der Marker liefert immer diese Instanz.
+    resolve_ptr_batch_uc = ResolvePtrBatch(ptr_resolver)
+
+    app.include_router(resolver_router)
+    app.dependency_overrides[provide_resolve_endpoint] = lambda: _resolve_endpoint
+    app.dependency_overrides[provide_resolve_ptr_batch] = lambda: resolve_ptr_batch_uc
+
+    @app.exception_handler(ResolverToolMissing)
+    async def _on_resolver_tool_missing(
+        _request: Request, exc: ResolverToolMissing
+    ) -> JSONResponse:
+        # Fehlendes System-Binary (dig) ist ein Fehler, kein stiller Fallback (ADR 0001).
+        # Vorbild DiagnosticsToolMissing -> 503: infra-Exception, am Composition Root
+        # gemappt. Die neutrale Meldung benennt das fehlende Programm.
+        logger.error("resolver_tool_missing", tool=exc.tool)
+        return JSONResponse(status_code=503, content={"detail": exc.message})
+
+    @app.exception_handler(ResolverDataMissing)
+    async def _on_resolver_data_missing(
+        _request: Request, exc: ResolverDataMissing
+    ) -> JSONResponse:
+        # Fehlende Geo/ASN-CSV ist ein echter Konfigurationsfehler, kein stiller Leer-
+        # Fallback (S3). Gleiches Muster wie ResolverToolMissing -> 503: infra-Exception,
+        # am Composition Root gemappt. Die Meldung benennt die fehlende Datei.
+        logger.error("resolver_data_missing", path=exc.path)
+        return JSONResponse(status_code=503, content={"detail": exc.message})
+
+    # ── outbound-Domaene v2 verdrahten (Block 2, Etappe 2b; Regel 5: Naht nur hier) ──
+    # Die Aussenkontakt-Sicht DIESES Hosts fuehrt DREI Quellen zusammen
+    # (Verbindungen/Namen/Geo). Der application-Ring (BuildOutboundContacts) nennt
+    # KEINE dieser Quell-Domaenen -- die drei quellen-agnostischen Provider werden HIER
+    # aus den bestehenden Root-Helfern gebaut (traffic/resolver/sni bleiben getrennt).
+    # Reuse der schon in Scope stehenden Helfer: _traffic_adapter(), resolve_ptr_batch_uc,
+    # _resolve_endpoint, sni_sniffer()/GetObservedSni -- nichts davon neu bauen.
+    async def _outbound_contacts() -> OutboundOverviewOut:
+        # (1) Verbindungs-Provider SYNCHRON im Protocol-Sinn: BuildOutboundContacts ruft
+        # den Provider synchron, list_connections() ist aber async. Sauberste Loesung im
+        # Rahmen der 2a-Signatur: den Snapshot EINMAL hier async holen und einen sync
+        # Provider (Closure ueber die schon geholte Liste) hereinreichen. Mappt
+        # domain.traffic.Connection -> RawConnection und filtert remote=None raus (der
+        # Provider liefert NUR Verbindungen mit Gegenstelle).
+        conns = await _traffic_adapter().list_connections()
+        # Kanonisierung der Gegenstellen-IP GENAU HIER (nicht in der Domaene): eine IPv6 mit
+        # eingebetteter IPv4 (``::ffff:1.2.3.4`` mapped bzw. ``::1.2.3.4`` compatible) wird auf
+        # die reine IPv4 reduziert. Dadurch gruppiert ``BuildOutboundContacts._group_by_ip``
+        # schon auf der kanonischen IP und mapped/compatible/reine IPv4 fallen zu EINER
+        # Gegenstelle zusammen -- identisch zum Berichts-Lesepfad (_build_outbound_report_data),
+        # der denselben Helfer nutzt. remote_port/app_name/pid bleiben unveraendert (die erste
+        # Verbindung je kanonischer IP gewinnt, wie bisher in der Domaenenlogik).
+        raws = [
+            RawConnection(
+                remote_ip=_canonical_remote_ip(c.remote.ip),
+                remote_port=c.remote.port,
+                app_name=c.app_name,
+                pid=c.pid,
+            )
+            for c in conns
+            if c.remote is not None
+        ]
+
+        def _connections_provider() -> list[RawConnection]:
+            return raws
+
+        # (2) Namens-Provider (async, ips -> {ip: hostname|None}): kombiniert SNI (konkreter,
+        # app-naeher) mit PTR. Regel pro IP: zuerst der SNI-Hostname, sonst der PTR-Name,
+        # sonst None -- ueber alle angefragten IPs.
+        async def _hostname_provider(ips: Sequence[str]) -> dict[str, str | None]:
+            wanted = set(ips)
+            sni_by_ip: dict[str, str] = {}
+            for observed in GetObservedSni(sni_sniffer())():
+                if observed.remote_ip in wanted:
+                    # Erster SNI-Treffer je IP gewinnt (deterministisch ueber die Reihenfolge).
+                    sni_by_ip.setdefault(observed.remote_ip, observed.hostname)
+            ptr_by_ip = await resolve_ptr_batch_uc(tuple(ips))
+            return {ip: sni_by_ip.get(ip) or ptr_by_ip.get(ip) for ip in ips}
+
+        # (3) Geo/Betreiber/ASN-Provider (async, ip -> (country, operator, asn)): projiziert
+        # die RemoteEndpointFacts aus _resolve_endpoint defensiv. country: GeoDB vor RDAP-Netz;
+        # operator: asn_org (Klartext); asn: asn-Nummer. Jedes Feld kann None sein -- dann
+        # bleibt die Komponente None (BuildOutboundContacts kapselt try/except schon; hier nur
+        # ehrlich projizieren, S3).
+        async def _geo_operator_provider(
+            ip: str,
+        ) -> tuple[str | None, str | None, str | None]:
+            facts = await _resolve_endpoint(ip, None)
+            country = facts.country_geodb.value or facts.country_rdap_net.value
+            operator = facts.asn_org.value or (f"AS{facts.asn.value}" if facts.asn.value else None)
+            asn = facts.asn.value
+            return (country, operator, asn)
+
+        overview = await BuildOutboundContacts(
+            _connections_provider, _hostname_provider, _geo_operator_provider
+        )()
+        # Projektion application.OutboundOverview -> api.OutboundOverviewOut (Regel 4:
+        # der api-Ring kennt den application-Typ NICHT; die Projektion faellt hier im Root).
+        return OutboundOverviewOut(
+            contacts=[
+                OutboundContactOut(
+                    remote_ip=contact.remote_ip,
+                    remote_port=contact.remote_port,
+                    hostname=contact.hostname,
+                    country=contact.country,
+                    operator=contact.operator,
+                    asn=contact.asn,
+                    app_name=contact.app_name,
+                    pid=contact.pid,
+                    connection_count=contact.connection_count,
+                )
+                for contact in overview.contacts
+            ],
+            host_scope=overview.host_scope,
+        )
+
+    # Snapshot-Naht des Aussenkontakte-Recorders (E3b): liefert den AKTUELLEN Snapshot
+    # DIESES Hosts als list[ContactDelta] (eine je Remote-IP). Nutzt DIESELBE
+    # Provider-Kette wie _outbound_contacts (traffic-conns -> RawConnection, SNI+PTR-Namen,
+    # Geo/Operator) ueber denselben Use-Case BuildOutboundContacts und mappt dessen
+    # OutboundContact-Ergebnisse 1:1 auf ContactDelta -- der sauberste Reuse ohne Duplikat
+    # der Gruppierungs-/Anreicherungslogik. Unterschied zu _outbound_contacts: KEINE
+    # api-Projektion (kein OutboundOverviewOut), KEIN pid (ContactDelta fuehrt kein pid).
+    async def _outbound_contact_deltas() -> list[ContactDelta]:
+        conns = await _traffic_adapter().list_connections()
+        # Dieselbe Kanonisierung wie im Live-Pfad -- hier zusaetzlich fuer den SCHREIBpfad:
+        # outbound_log_detail/-aggregate erhalten damit von vornherein die kanonische IP,
+        # statt dass der Bericht ::v4-Formen erst zur Lesezeit zusammenfuehren muss. Der
+        # Aggregat-Schluessel (recording_id + remote_ip) faellt fuer mapped/compatible und
+        # reine IPv4 damit zusammen -- genau die gewuenschte Zusammenfuehrung; der Merge je
+        # remote_ip (``merge_contact``) bleibt korrekt, da ``_group_by_ip`` pro Tick ohnehin
+        # nur EIN Delta je kanonischer IP liefert. Alt-Bestand wird NICHT migriert: der
+        # Berichts-Lesepfad fuehrt vorhandene ::v4-Eintraege weiterhin lesend zusammen.
+        raws = [
+            RawConnection(
+                remote_ip=_canonical_remote_ip(c.remote.ip),
+                remote_port=c.remote.port,
+                app_name=c.app_name,
+                pid=c.pid,
+            )
+            for c in conns
+            if c.remote is not None
+        ]
+
+        def _connections_provider() -> list[RawConnection]:
+            return raws
+
+        async def _hostname_provider(ips: Sequence[str]) -> dict[str, str | None]:
+            wanted = set(ips)
+            sni_by_ip: dict[str, str] = {}
+            for observed in GetObservedSni(sni_sniffer())():
+                if observed.remote_ip in wanted:
+                    sni_by_ip.setdefault(observed.remote_ip, observed.hostname)
+            ptr_by_ip = await resolve_ptr_batch_uc(tuple(ips))
+            return {ip: sni_by_ip.get(ip) or ptr_by_ip.get(ip) for ip in ips}
+
+        async def _geo_operator_provider(
+            ip: str,
+        ) -> tuple[str | None, str | None, str | None]:
+            facts = await _resolve_endpoint(ip, None)
+            country = facts.country_geodb.value or facts.country_rdap_net.value
+            operator = facts.asn_org.value or (f"AS{facts.asn.value}" if facts.asn.value else None)
+            asn = facts.asn.value
+            return (country, operator, asn)
+
+        overview = await BuildOutboundContacts(
+            _connections_provider, _hostname_provider, _geo_operator_provider
+        )()
+        # 1:1-Map OutboundContact -> ContactDelta (ohne pid -- ContactDelta fuehrt es nicht;
+        # die App-Zuordnung bleibt in app_name).
+        return [
+            ContactDelta(
+                remote_ip=contact.remote_ip,
+                remote_port=contact.remote_port,
+                hostname=contact.hostname,
+                country=contact.country,
+                operator=contact.operator,
+                asn=contact.asn,
+                app_name=contact.app_name,
+                connection_count=contact.connection_count,
+            )
+            for contact in overview.contacts
+        ]
+
+    # Worker-Factory des Aussenkontakte-Recorders (E3b, Muster _build_run_cve_monitor):
+    # verdrahtet die drei outbound_log-Repos + die Snapshot-Naht _outbound_contact_deltas.
+    # interval/retention bleiben Default (rec.interval_s pro Tick, 24-h-Detail-Retention).
+    def _build_run_outbound_recorder() -> RunOutboundRecorder:
+        return RunOutboundRecorder(
+            outbound_recording_repository(),
+            outbound_detail_repository(),
+            outbound_aggregate_repository(),
+            _outbound_contact_deltas,
+        )
+
+    app.include_router(outbound_router)
+    app.dependency_overrides[provide_outbound_contacts] = lambda: _outbound_contacts
+
+    # ── Aussenkontakte-Aufzeichnung v2 verdrahten (E4; Regel 5: Naht nur hier) ──
+    # Lifecycle-/Lese-Use-Cases ueber den drei outbound_log-Repos (E3b, db_path-Factory +
+    # lru_cache-Singleton oben). Muster wie die monitoring-Logging-Use-Cases: jeder Marker
+    # bekommt eine Lambda, die den Use-Case mit den passenden Repos baut. Der Recorder-Worker
+    # (Lifespan) ist davon getrennt -- hier NUR die REST-Endpunkte.
+    # CreateOutboundRecording/Start/Pause/Resume/Stop/List/Get arbeiten allein ueber dem
+    # Recording-Repo; GetOutboundAggregate ueber dem Aggregate-Repo, GetOutboundDetailRange
+    # ueber dem Detail-Repo. DeleteOutboundRecording braucht ALLE DREI Repos (loescht die
+    # Definition + raeumt die Aggregate; das Detail-Repo wird gehalten, s. Use-Case-Docstring).
+    app.include_router(outbound_log_router)
+    app.dependency_overrides[provide_create_outbound_recording] = lambda: CreateOutboundRecording(
+        outbound_recording_repository()
+    )
+    app.dependency_overrides[provide_start_outbound_recording] = lambda: StartOutboundRecording(
+        outbound_recording_repository()
+    )
+    app.dependency_overrides[provide_pause_outbound_recording] = lambda: PauseOutboundRecording(
+        outbound_recording_repository()
+    )
+    app.dependency_overrides[provide_resume_outbound_recording] = lambda: ResumeOutboundRecording(
+        outbound_recording_repository()
+    )
+    app.dependency_overrides[provide_stop_outbound_recording] = lambda: StopOutboundRecording(
+        outbound_recording_repository()
+    )
+    app.dependency_overrides[provide_edit_outbound_recording] = lambda: EditOutboundRecording(
+        outbound_recording_repository()
+    )
+    app.dependency_overrides[provide_delete_outbound_recording] = lambda: DeleteOutboundRecording(
+        outbound_recording_repository(),
+        outbound_detail_repository(),
+        outbound_aggregate_repository(),
+    )
+    app.dependency_overrides[provide_list_outbound_recordings] = lambda: ListOutboundRecordings(
+        outbound_recording_repository()
+    )
+    app.dependency_overrides[provide_get_outbound_recording] = lambda: GetOutboundRecording(
+        outbound_recording_repository()
+    )
+    app.dependency_overrides[provide_get_outbound_aggregate] = lambda: GetOutboundAggregate(
+        outbound_aggregate_repository()
+    )
+    app.dependency_overrides[provide_get_outbound_detail_range] = lambda: GetOutboundDetailRange(
+        outbound_detail_repository()
+    )
+
+    # ── dns_watch-Domaene v2 verdrahten (Block 2, Etappe 2d-3; Regel 5: Naht nur hier) ──
+    # Die DNS-Befund-Sicht DIESES Hosts fuehrt FUENF Quellen zusammen
+    # (Verbindungen/Namen/Quittierungen/erwartete-Server/DoH-Listen). Der application-Ring
+    # (BuildDnsWatch) nennt KEINE Quell-Domaene -- die Provider werden HIER aus den schon
+    # in Scope stehenden Root-Helfern gebaut (NICHTS neu): _traffic_adapter(),
+    # GetObservedSni/sni_sniffer(), resolve_ptr_batch_uc, repository() (Settings).
+    # Die zwei editierbaren Listen sind normale Listen-Settings (value = JSON-Liste
+    # von IP-Strings); erwartete Server sind GENAU die konfigurierten (D4: kein
+    # Gateway-Fallback mehr).
+    dns_watch_acknowledgement_clock = SystemClock()
+
+    @lru_cache(maxsize=1)
+    def dns_watch_acknowledgement_repository() -> SqliteDnsWatchAcknowledgementRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteDnsWatchAcknowledgementRepository(
+            get_db_path(), dns_watch_acknowledgement_clock
+        )
+
+    def _dns_watch_read_list(key: str) -> list[str]:
+        # Liest einen Settings-Key defensiv als Liste von Strings (S3: kein Wurf bei
+        # fehlendem/krummem Wert). get_all() liefert den JSON-decodierten Wert; ist er
+        # eine Liste -> als Strings, sonst leere Liste (dann greift der domain-Default).
+        value = repository().get_all().get(key)
+        if isinstance(value, list):
+            return [str(x) for x in value]
+        return []
+
+    async def _dns_watch() -> DnsWatchOverviewOut:
+        # (1) Verbindungs-Provider: GENAU wie im outbound-Block den Snapshot EINMAL async
+        # holen und einen sync Closure-Provider darueber reichen (BuildDnsWatch ruft den
+        # Provider synchron). Mappt domain.traffic.Connection -> RawDnsConnection und
+        # filtert remote=None raus (nur Verbindungen mit Gegenstelle).
+        conns = await _traffic_adapter().list_connections()
+        raws = [
+            RawDnsConnection(
+                remote_ip=c.remote.ip,
+                remote_port=c.remote.port,
+                l4=c.l4,
+                app_name=c.app_name,
+                pid=c.pid,
+            )
+            for c in conns
+            if c.remote is not None
+        ]
+
+        def _connections_provider() -> list[RawDnsConnection]:
+            return raws
+
+        # (2) Namens-Provider (async, ips -> {ip: hostname|None}): dieselbe SNI+PTR-Logik
+        # wie im outbound-Block -- eigene lokale Closure (NICHT refaktoriert). Regel pro IP:
+        # zuerst der SNI-Hostname, sonst der PTR-Name, sonst None.
+        async def _hostname_provider(ips: Sequence[str]) -> dict[str, str | None]:
+            wanted = set(ips)
+            sni_by_ip: dict[str, str] = {}
+            for observed in GetObservedSni(sni_sniffer())():
+                if observed.remote_ip in wanted:
+                    sni_by_ip.setdefault(observed.remote_ip, observed.hostname)
+            ptr_by_ip = await resolve_ptr_batch_uc(tuple(ips))
+            return {ip: sni_by_ip.get(ip) or ptr_by_ip.get(ip) for ip in ips}
+
+        # (3) Die fuenf Provider fuer BuildDnsWatch: acknowledged liest die quittierten
+        # Befund-Schluessel; die erwartete Menge kommt aus DEM VERTRAUENSMODELL
+        # (S62 L7a) -- ueber _dns_trust_expected_servers, also GENAU DIESELBE Naht wie
+        # beim netzweiten Waechter (TrustedDnsServerIps, frisch gelesen, deterministisch
+        # geordnet). Der frueher eigene Einstellungs-Schluessel dns_expected_servers
+        # ENTFAELLT: eine Quelle, ein Ergebnis, beide Sichten zeigen dieselbe Menge in
+        # derselben Reihenfolge. Das Gateway ist damit automatisch erwartet (beim
+        # Bootstrap TRUSTED), jeder weitere Resolver erst nach bewusster Bestaetigung in
+        # der Vertrauens-Ansicht. Die DoH-Liste faellt unveraendert auf die
+        # domain-Startliste, wenn der Nutzer nichts konfiguriert hat.
+        overview = await BuildDnsWatch(
+            _connections_provider,
+            _hostname_provider,
+            dns_watch_acknowledgement_repository().acknowledged_keys,
+            _dns_trust_expected_servers,
+            lambda: doh_providers_or_default(_dns_watch_read_list(DNS_DOH_PROVIDERS_KEY)),
+        )()
+        # Projektion application.DnsWatchOverview -> api.DnsWatchOverviewOut (Regel 4:
+        # der api-Ring kennt den application-Typ NICHT; die Projektion faellt hier im Root).
+        return DnsWatchOverviewOut(
+            contacts=[
+                DnsContactOut(
+                    remote_ip=contact.remote_ip,
+                    remote_port=contact.remote_port,
+                    category=contact.category,
+                    hostname=contact.hostname,
+                    app_name=contact.app_name,
+                    pid=contact.pid,
+                    connection_count=contact.connection_count,
+                    acknowledged=contact.acknowledged,
+                )
+                for contact in overview.contacts
+            ],
+            host_scope=overview.host_scope,
+            counts=dict(overview.counts),
+            expected_servers=list(overview.expected_servers),
+            doh_providers=list(overview.doh_providers),
+        )
+
+    def _dns_watch_acknowledge(remote_ip: str, category: str, action: str) -> None:
+        # Schreib-Naht analog _acknowledge: EINE append-only Log-Zeile (ack/unack).
+        dns_watch_acknowledgement_repository().record(remote_ip, category, action)
+
+    app.include_router(dns_watch_router)
+    app.dependency_overrides[provide_dns_watch] = lambda: _dns_watch
+    app.dependency_overrides[provide_dns_watch_acknowledge] = lambda: _dns_watch_acknowledge
+
+    # ── netzweiter DNS-Umgehungs-Waechter verdrahten (ADR 0042, Etappe 3) ──
+    # Die netzweite Umgehungs-Sicht fuehrt HIER (Regel 5: nur Composition Root) den
+    # PERSISTENTEN Aufzeichnungs-Stand aus SQLite (Etappe 3) ueber GetDnsBypassReport
+    # zusammen, stellt je Quell-IP einen best-effort Geraetenamen aus dem Bestand bei
+    # (Option 2, _dns_bypass_name_by_ip) und bewertet je Ziel DoH ueber die EIGENE
+    # Lookup-Naht (_dns_bypass_doh_lookup, NICHT MatchContacts). Der Recorder ist ein
+    # Singleton (lru_cache), damit /start, /stop, /status und der Lese-Runner DENSELBEN
+    # halten; der Task-Handle lebt in app.state (Muster capture_task). Aufzeichnung
+    # ON-DEMAND (Muster pcap): Task erst bei /start, gecancelt bei /stop +
+    # lifespan-Shutdown -- KEIN Dauer-Mitlesen (ADR 0042).
+    #
+    # Drei SQLite-Repos je eigener Tabelle (Muster der outbound_log-Repos oben: db_path-
+    # Factory + lru_cache-Singleton), damit Recorder-Schreibpfad und Lese-Runner GENAU
+    # dieselben Stores treffen.
+    @lru_cache(maxsize=1)
+    def dns_bypass_recording_repository() -> SqliteDnsBypassRecordingRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteDnsBypassRecordingRepository(get_db_path())
+
+    @lru_cache(maxsize=1)
+    def dns_bypass_detail_repository() -> SqliteDnsBypassDetailRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteDnsBypassDetailRepository(get_db_path())
+
+    @lru_cache(maxsize=1)
+    def dns_bypass_aggregate_repository() -> SqliteDnsBypassAggregateRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteDnsBypassAggregateRepository(get_db_path())
+
+    def _dns_trust_expected_servers() -> list[str]:
+        # DIE erwartete DNS-Server-Menge -- EINE Quelle fuer BEIDE Waechter (ADR 0043, E4;
+        # S62 L7a). Der Name nennt bewusst die QUELLE (dns_trust), nicht einen der beiden
+        # Verbraucher: sie speist den netzweiten Umgehungs-Waechter (Recorder-Tick +
+        # Live-View + Bericht) UND den host-lokalen DNS-Waechter. Wer hier etwas aendert,
+        # aendert beide Sichten.
+        #
+        # QUELLE: die Menge der als TRUSTED kuratierten DNS-Server (TrustedDnsServerIps).
+        # Damit ist das Gateway automatisch erwartet (beim Bootstrap TRUSTED) und ein
+        # lokaler Resolver (Pi-hole) nach Nutzer-Bestaetigung ebenfalls -- alles andere
+        # bleibt Umgehung. Der frueher dokumentierte "Gateway fehlt im sync-Recorder"-
+        # Kompromiss ENTFAELLT, weil das Gateway beim Bootstrap TRUSTED wird und damit
+        # synchron in der Menge steht.
+        #
+        # REIHENFOLGE: deterministisch -- TrustedDnsServerIps sortiert nach dem
+        # nutzergesetzten expected_rank, dann nach ip. Sie schlaegt bis in Oberflaeche,
+        # Bericht und PDF durch, ein unsortiertes Set duerfte das nicht.
+        #
+        # SYNCHRON und FRISCH: das Callable fragt bei JEDEM Tick/View erneut
+        # repo.list_all() ab (kein eingefrorenes Set) -- eine nachtraegliche
+        # Vertrauens-Aenderung (Nutzer bestaetigt einen Resolver) greift ohne Neustart.
+        # TrustedDnsServerIps wird HIER lazy erzeugt (die lru_cache-Factory
+        # dns_trust_repository ist zur Laufzeit gebunden, auch wenn sie im Quelltext
+        # weiter unten steht).
+        return TrustedDnsServerIps(dns_trust_repository())()
+
+    def _dns_bypass_trust_lookup(ip: str) -> tuple[DnsServerCategory, DnsTrustState] | None:
+        # SYNCHRONE (Kategorie, Trust-Zustand)-Naht fuer die Recorder-Tick-Klassifikation
+        # (ADR 0043, E4): liest je Ziel-IP den Vertrauens-Record frisch aus dem Bestand.
+        # Unbekannte IP -> None (der Recorder wertet das als UNCLASSIFIED = kein Fehlalarm;
+        # die vorgelagerte dns_trust_sync-Erfassung ordnet sie erst ein). Bei JEDEM Tick
+        # frisch gelesen -> eine nachtraegliche Trust-Aenderung wirkt ohne Neustart. Das
+        # dns_trust_repository() steht im Quelltext weiter unten, ist zur Laufzeit aber
+        # gebunden (Closure).
+        record = dns_trust_repository().get(ip)
+        if record is None:
+            return None
+        return (record.category, record.trust_state)
+
+    @lru_cache(maxsize=1)
+    def dns_bypass_recorder() -> DnsBypassRecorder:
+        # Der DnsHelperClient erfuellt das DnsQuerySource-Protocol strukturell
+        # (start/poll_queries/stop/is_running -- is_running erbt er aus dem gemeinsamen
+        # _BaseSubprocessHelper-Kern). Lokaler Import: der infrastructure-Client bleibt aus
+        # dem App-Bau/Import heraus (wie die anderen Root-Singletons). Persistenz + erwartete
+        # Menge kommen als Ports/Callable herein (Etappe 3).
+        from infrastructure.sniffd_client.dns_client import DnsHelperClient
+
+        return DnsBypassRecorder(
+            source=DnsHelperClient(),
+            recordings=dns_bypass_recording_repository(),
+            detail=dns_bypass_detail_repository(),
+            aggregate=dns_bypass_aggregate_repository(),
+            # ADR 0043, E4: die Umgehungs-Klassifikation ist KEINE flache IP-Menge mehr,
+            # sondern das Drei-Zustands-Urteil bypass_verdict(Kategorie, Trust-Zustand) je
+            # Ziel-IP -- ueber diese synchron lesende Naht in den Vertrauens-Bestand.
+            trust_lookup=_dns_bypass_trust_lookup,
+            # DNS-Vertrauensmodell (ADR 0043, E3): je Umgehungs-Ziel best-effort in den
+            # Vertrauens-Bestand aufnehmen -- ein Schreibpfad, der nur bei aktiver Aufzeichnung
+            # laeuft (passt; kein Schreiben bei reinen Lesezugriffen). Die Naht ist lazy (das
+            # Factory-Ergebnis wird erst zur Laufzeit erzeugt), also ist _dns_trust_sync_detected
+            # hier bereits gebunden.
+            dns_trust_sync=_dns_trust_sync_detected,
+        )
+
+    def _dns_bypass_permission_error() -> str | None:
+        # Traegt die Plattform die Sniff-Naht grundsaetzlich? Genau DIE Quelle, aus der
+        # ``SniSniffer.check_permission`` seinen Marker zieht (``NPCAP_MISSING`` auf
+        # Windows ohne erkanntes Npcap, sonst leer). Lokaler Import wie beim
+        # ``DnsHelperClient``: der infrastructure-Client bleibt aus dem App-Bau heraus.
+        #
+        # Der Marker geht UNVERAENDERT hinaus -- die Oberflaeche vergleicht exakt gegen
+        # ihn. Kein Text wird hier gebaut, nichts umformuliert.
+        from infrastructure.sniffd_client.base import sniffd_unavailable_reason
+
+        marker = sniffd_unavailable_reason()
+        return marker or None
+
+    async def _dns_bypass_view() -> DnsBypassOverviewOut:
+        # (1) PERSISTENTER Stand (Etappe 3): der Bericht der aktiven bzw. juengsten
+        # Aufzeichnung aus SQLite -- KEIN RAM-Puffer mehr. ``until`` = jetzt (Detail-Fenster
+        # bis zur aktuellen Uhr) fuer den ehrlichen queries_total.
+        import time
+
+        recorder = dns_bypass_recorder()
+        report = GetDnsBypassReport(
+            dns_bypass_recording_repository(),
+            dns_bypass_detail_repository(),
+            dns_bypass_aggregate_repository(),
+        )(until=time.time())
+
+        # (2) Erwartete-Resolver-Menge NUR fuer die Anzeige ueber DIESELBE Quelle wie der
+        # Recorder (ADR 0043, E4 -- EINE Wahrheit): die Menge der als TRUSTED kuratierten
+        # DNS-Server (TrustedDnsServerIps, FRISCH gelesen). Der angezeigte "Erwartete
+        # DNS-Server"-Beleg zeigt dann die TRUSTED-IPs. Ist eine Aufzeichnung vorhanden, gilt
+        # aber ihr eingefrorener expected_servers-Beleg als Wahrheit (gegen den beim Schreiben
+        # klassifiziert wurde) -- ehrliche Historie, nicht nachtraeglich umgedeutet.
+        display_expected = _dns_trust_expected_servers()
+        expected_servers = (
+            list(report.recording.expected_servers)
+            if report.recording is not None
+            else list(display_expected)
+        )
+
+        # (3) Kennzahlen direkt aus dem Aggregat (nur Umgehungen) + dem Detail-Gesamtstand:
+        # bypass_total = Summe der Umgehungs-Anfragen, bypass_devices = distinct Quell-IPs,
+        # expected_total = alle DETAIL-Zeilen minus die Umgehungen (ehrlich, kein Fake).
+        bypass_total = sum(agg.query_count for agg in report.aggregates)
+        bypass_devices = len({agg.src_ip for agg in report.aggregates})
+        expected_total = max(report.queries_total - bypass_total, 0)
+
+        # (4) Anreicherung (Regel 5, faellt NUR hier): Geraete-Namens-Map einmal je Aufbau,
+        # DoH-Bewertung je Datensatz ueber die eigene Lookup-Naht (Ziel-IP + best-effort
+        # erstes sample_qname). Die Zuordnung liegt bewusst NICHT in domain/application.
+        devices = GetDevices(device_repository())(known_only=False)
+        name_by_ip = _dns_bypass_name_by_ip(devices)
+        self_ips = _dns_bypass_self_ips(devices)
+        # Ziel-Resolver-Namen einmal je Aufbau best-effort aufloesen (Bestand > bekannte
+        # Resolver > PTR), damit jede Finding-Zeile den Ziel-Namen neben der IP zeigt.
+        resolver_names = await _dns_bypass_resolver_names(
+            {agg.dst_ip for agg in report.aggregates}, name_by_ip
+        )
+        # HINWEIS (ADR 0043, E3): die Vertrauens-Erfassung der Umgehungs-Ziele passiert
+        # BEWUSST NICHT hier -- ein reiner GET-Lese-View darf nicht in die DB schreiben. Die
+        # dst_ips werden stattdessen im Recorder-Tick (Schreibpfad, nur bei aktiver
+        # Aufzeichnung) erfasst; Resolver/Gateway kommen im lifespan-Bootstrap herein.
+        sources = blocklist_source_repository()
+        entries = blocklist_entry_repository()
+
+        findings_out: list[DnsBypassFindingOut] = []
+        for agg in report.aggregates:
+            qname = agg.sample_qnames[0] if agg.sample_qnames else ""
+            is_doh, doh_source_name = _dns_bypass_doh_lookup(sources, entries, agg.dst_ip, qname)
+            findings_out.append(
+                DnsBypassFindingOut(
+                    src_ip=agg.src_ip,
+                    device_name=name_by_ip.get(agg.src_ip),
+                    is_self=agg.src_ip in self_ips,
+                    dst_ip=agg.dst_ip,
+                    resolver_name=resolver_names.get(agg.dst_ip),
+                    is_doh=is_doh,
+                    doh_source_name=doh_source_name,
+                    query_count=agg.query_count,
+                    sample_qnames=list(agg.sample_qnames),
+                )
+            )
+
+        return DnsBypassOverviewOut(
+            findings=findings_out,
+            expected_servers=expected_servers,
+            queries_total=report.queries_total,
+            bypass_total=bypass_total,
+            expected_total=expected_total,
+            bypass_devices=bypass_devices,
+            recording=recorder.is_active(),
+        )
+
+    def _dns_bypass_start(interface: str | None) -> str | None:
+        # ON-DEMAND (Muster pcap _start_capture): der Start-Use-Case legt eine BENANNTE
+        # Aufzeichnung an (recording_id/now kommen HIER vom Rand -- uuid4/time.time), setzt
+        # sie ACTIVE und bindet den Recorder. Bei Erfolg (err None) und noch keinem
+        # laufenden Task den Schreib-Loop als Task starten. Bereits laufender Task/aktiver
+        # Recorder -> kein zweiter Task, err None (idempotent).
+        import time
+        from uuid import uuid4
+
+        rec = dns_bypass_recorder()
+        err = StartDnsBypassRecording(
+            rec,
+            dns_bypass_recording_repository(),
+            _dns_trust_expected_servers,
+            # Vorpruefung VOR dem Start (Befund 52, Regel 5: die Naht faellt nur hier).
+            # Dieselbe Quelle, aus der SNI seinen ``permission_error`` zieht -- der
+            # DNS-Waechter war die einzige Ansicht der Sniff-Familie ohne sie.
+            permission_check=_dns_bypass_permission_error,
+        )(interface, recording_id=str(uuid4()), now=time.time())
+        if err is not None:
+            return err
+        existing = getattr(app.state, "dns_bypass_task", None)
+        if existing is not None and not existing.done():
+            return None
+        app.state.dns_bypass_task = asyncio.create_task(rec.run())
+        return None
+
+    def _dns_bypass_stop() -> None:
+        # stop() ueber den Use-Case (setzt die aktive Aufzeichnung FINISHED + stoppt die
+        # Quelle, idempotent/best-effort), dann den Task canceln (best-effort, KEIN await
+        # hier -- der lifespan-Shutdown awaitet ihn sauber).
+        rec = dns_bypass_recorder()
+        StopDnsBypassRecording(rec, dns_bypass_recording_repository())()
+        task = getattr(app.state, "dns_bypass_task", None)
+        if task is not None:
+            task.cancel()
+
+    def _dns_bypass_status() -> DnsBypassStatusOut:
+        # Billiger Poll: der laufende Recorder-Zustand + die Zahl bisher persistierter
+        # DETAIL-Zeilen (aus SQLite statt RAM-Puffer), KEINE Verdichtung. Dazu der
+        # Plattform-Marker (Befund 52) -- er kostet nur einen lokalen Check und erspart
+        # der Ansicht einen zweiten Abruf.
+        rec = dns_bypass_recorder()
+        return DnsBypassStatusOut(
+            recording=rec.is_active(),
+            collected_queries=dns_bypass_detail_repository().count(),
+            permission_error=_dns_bypass_permission_error(),
+        )
+
+    app.include_router(dns_bypass_router)
+    app.dependency_overrides[provide_dns_bypass_view] = lambda: _dns_bypass_view
+    app.dependency_overrides[provide_dns_bypass_start] = lambda: _dns_bypass_start
+    app.dependency_overrides[provide_dns_bypass_stop] = lambda: _dns_bypass_stop
+    app.dependency_overrides[provide_dns_bypass_status] = lambda: _dns_bypass_status
+
+    # ── DNS-Server-Vertrauensmodell verdrahten (ADR 0043, Etappe 3) ──
+    # Der Composition Root fuellt die echten Lookups der quellen-agnostischen Use-Cases
+    # (Regel 5, faellt NUR hier). NOCH KEINE api, KEIN Frontend, KEIN Umbau der bestehenden
+    # Umgehungs-Klassifikation (expected_servers) -- das ist E4/E5/E6. Die Use-Cases werden
+    # hier instanziiert + intern bereitgestellt; die Verdrahtung an api/Waechter kommt spaeter.
+    #
+    # Repo als lru_cache-Singleton je eigener Tabelle (Muster der dns_bypass-Repos oben:
+    # db_path-Factory).
+    @lru_cache(maxsize=1)
+    def dns_trust_repository() -> SqliteDnsTrustRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteDnsTrustRepository(get_db_path())
+
+    def _dns_trust_is_public_resolver(ip: str) -> bool:
+        # PublicResolverCheck: der schon vorhandene, saubere Weg ist die bekannte-
+        # oeffentliche-Resolver-Liste (domain.resolver_names.known_resolver_name != None) --
+        # DIESELBE Naht, die _dns_bypass_resolver_names schon nutzt. (Die DoH-Gruppe waere die
+        # Alternative, ist aber qname-/eintrags-gebunden; die Resolver-Liste ist der schlanke,
+        # rein IP-basierte Test, den dieser Check braucht.)
+        return known_resolver_name(ip) is not None
+
+    def _dns_trust_is_threat_listed(ip: str) -> bool:
+        # ThreatCheck: Treffer der IP in einer AKTIVEN THREAT-Quelle (Muster der bestehenden
+        # Blocklist-Lookup-Naht _dns_bypass_doh_lookup, hier fuer die Gruppe THREAT). Roh-
+        # Lookup lookup_ips, gefiltert auf enabled + group == THREAT.
+        sources = blocklist_source_repository()
+        threat_ids = {
+            s.id for s in sources.list_all() if s.group == BlocklistGroup.THREAT and s.enabled
+        }
+        if not threat_ids:
+            return False
+        entries = blocklist_entry_repository()
+        return any(source_id in threat_ids for source_id, _matched in entries.lookup_ips(ip))
+
+    def _dns_trust_plausibility_map(
+        devices: list[Device], now: float
+    ) -> dict[str, DnsServerPlausibility]:
+        # PlausibilityProvider-Grundlage: aus dem Geraete-Bestand ueber die last_ip-Naht
+        # (Muster _dns_bypass_name_by_ip) je bekannter IP schlanke, REIN DESKRIPTIVE Indizien.
+        # first_seen_days = ganze Tage seit Device.first_seen bis now (>= 0; None ist hier nie
+        # noetig, da der Bestand ein first_seen traegt). display_name-Prioritaet label>hostname>mac.
+        result: dict[str, DnsServerPlausibility] = {}
+        for device in devices:
+            if not device.last_ip:
+                continue
+            first_seen_days = max(int((now - device.first_seen.timestamp()) // 86400), 0)
+            result[device.last_ip] = DnsServerPlausibility(
+                in_inventory=True,
+                first_seen_days=first_seen_days,
+                vendor=device.vendor,
+                open_ports=device.open_ports,
+                display_name=(device.label or device.hostname or device.mac),
+            )
+        return result
+
+    def _dns_trust_plausibility(ip: str) -> DnsServerPlausibility | None:
+        # Best-effort Einzel-Lookup ueber den aktuellen Bestand (kein Treffer -> None). Uhr am
+        # Rand (time.time), der Use-Case bleibt uhrfrei.
+        import time
+
+        devices = GetDevices(device_repository())(known_only=False)
+        return _dns_trust_plausibility_map(devices, time.time()).get(ip)
+
+    def _make_sync_dns_trust_server() -> SyncDnsTrustServer:
+        # GatewayProvider: der schon vorhandene _topology_gateway (liefert "" statt None ->
+        # der Use-Case behandelt beides als "kein Gateway").
+        return SyncDnsTrustServer(
+            repo=dns_trust_repository(),
+            gateway=_topology_gateway,
+            is_public_resolver=_dns_trust_is_public_resolver,
+            is_threat_listed=_dns_trust_is_threat_listed,
+            plausibility=_dns_trust_plausibility,
+        )
+
+    async def _dns_trust_sync_detected(ip: str) -> None:
+        # Je erkannter Ziel-/Resolver-IP SyncDnsTrustServer aufrufen, damit Server ueberhaupt
+        # in den Bestand kommen. best-effort, nicht-blockierend, Fehler schlucken (die Erfassung
+        # ist Beigabe, kein Muss -- sie darf weder Recorder-Tick noch Bootstrap reissen). Diese
+        # Naht wird an ZWEI getrennte Trigger gehaengt: den lifespan-Bootstrap (Resolver +
+        # Gateway) und den Recorder-Tick (Umgehungs-Ziele) -- NIE an einen GET-Lese-View.
+        #
+        # Funktionslose Windows-Platzhalter (fec0:0:0:ffff::1..3, dokumentierte Microsoft-
+        # Konvention) werden NICHT herausgefiltert, sondern gekennzeichnet: das Setzen des
+        # Flags leistet der Use-Case selbst (ein einziger Schreibvorgang), hier ist keine
+        # Nachkorrektur mehr noetig.
+        import time
+
+        with suppress(Exception):
+            await _make_sync_dns_trust_server()(ip, time.time())
+
+    async def _dns_expected_servers_migration() -> None:
+        # EINMAL-MIGRATION des entfallenen Settings-Schluessels dns_expected_servers
+        # (S62 L7a, Muster _cve_mac): die Adressen der alten "erwartete DNS-Server"-Liste
+        # in die Vertrauens-Tabelle uebernehmen und als vertraut markieren. Sie stand
+        # fuer genau diese Aussage; sie einfach fallen zu lassen waere stiller Datenverlust.
+        #
+        # Die Kategorie kommt aus der VORHANDENEN Ableitung: das categorize-Callable
+        # loest die drei Flags GENAU so auf wie SyncDnsTrustServer (Gateway ueber
+        # _topology_gateway, oeffentlicher Resolver / Bedrohungsliste ueber dieselben zwei
+        # Checks) und ruft dann die reine domain.categorize_dns_server. Das Gateway wird
+        # dafuer EINMAL vorab aufgeloest (die Migration laeuft sync in einer Transaktion,
+        # der Gateway-Lookup ist async) -- die Migration erfindet keine zweite Ableitung.
+        #
+        # Ein Fehler wird LAUT protokolliert, der Start laeuft trotzdem weiter (Muster der
+        # cve-Migration): ein unmigrierter Altbestand ist unschoen, ein toter Backend-Start
+        # waere der schlechtere Ausgang. Die Transaktion des _connect rollt bei einem Bruch
+        # alles zurueck -- entweder uebernommen UND Schluessel geloescht, oder nichts.
+        import time
+
+        from modules.db_path import get_db_path
+
+        try:
+            gateway_ip = await _topology_gateway()
+
+            def _categorize(ip: str) -> str:
+                return str(
+                    categorize_dns_server(
+                        ip,
+                        is_gateway=bool(gateway_ip) and ip == gateway_ip,
+                        is_public_resolver=_dns_trust_is_public_resolver(ip),
+                        is_threat_listed=_dns_trust_is_threat_listed(ip),
+                    )
+                )
+
+            # Beide Tabellen liegen in derselben cernis.db; beide Adapter sind zu diesem
+            # Zeitpunkt konstruiert (repository()/dns_trust_repository() haben ihr
+            # _ensure_schema gelaufen), die Tabellen existieren also.
+            repository()
+            dns_trust_repository()
+            conn = sqlite3.connect(get_db_path())
+            try:
+                with conn:
+                    ergebnis = migrate_expected_servers_to_trust(conn, _categorize, time.time())
+            finally:
+                conn.close()
+        except Exception as exc:
+            logger.error("dns_expected_servers_migration_failed", error=str(exc))
+            return
+
+        if not ergebnis.ran:
+            return
+        # Nichts still verschlucken: uebernommene, bewahrte und uebersprungene Werte
+        # kommen in EINE Protokollzeile (uebersprungen = unbrauchbare Altwerte, s. Modul).
+        logger.info(
+            "dns_expected_servers_migration_done",
+            migriert=ergebnis.migrated,
+            bestehend_bewahrt=ergebnis.kept,
+            uebersprungen=ergebnis.skipped,
+        )
+
+    async def _dns_trust_bootstrap() -> None:
+        # BOOTSTRAP-Erfassung (ADR 0043, E3): einmalig beim Backend-Start die
+        # vertrauenswuerdigen Kandidaten in den Bestand nehmen -- die real genutzten
+        # System-Resolver (detect_system_resolvers, hart getimt) UND das Gateway
+        # (_topology_gateway). So kommen Pi-hole/Gateway/VPN-Resolver in den Vertrauens-
+        # Bestand, unabhaengig von einer Aufzeichnung. best-effort, Fehler schlucken (kein
+        # Startup-Crash) -- Muster _register_self_host.
+        #
+        # REIHENFOLGE (S62 L7a, zwingend): die Altbestands-Migration laeuft VOR der
+        # Erfassung. Andersherum legte der Sync eine Altbestands-Adresse zuerst als
+        # NEUTRAL an, und die Migration ueberspraenge sie danach als "bereits vorhanden" --
+        # der uebernommene Vertrauens-Zustand ginge verloren.
+        await _dns_expected_servers_migration()
+        with suppress(Exception):
+            for resolver_ip in await detect_system_resolvers():
+                await _dns_trust_sync_detected(resolver_ip)
+            gateway_ip = await _topology_gateway()
+            if gateway_ip:
+                await _dns_trust_sync_detected(gateway_ip)
+
+    # Lese-/Aktions-Use-Cases (intern bereitgestellt; an die api verdrahtet in E5, s. u.).
+    # Bewusst instanziiert + auf app.state geparkt, damit die Naht real steht (mypy/import-
+    # linter pruefen sie mit) und die api-Runner sie ohne Doppel-Instanziierung abgreifen.
+    _list_dns_trust_servers = ListDnsTrustServers(dns_trust_repository(), _dns_trust_plausibility)
+    _set_dns_server_trust = SetDnsServerTrust(dns_trust_repository())
+    # Anlege-Use-Case (S63 L7d): DIESELBEN vier Nahtstellen wie _make_sync_dns_trust_server --
+    # die Kategorie-Ableitung eines von Hand hinterlegten Servers ist exakt die des
+    # beobachteten (keine zweite Ableitung).
+    _add_dns_trust_server = AddDnsTrustServer(
+        repo=dns_trust_repository(),
+        gateway=_topology_gateway,
+        is_public_resolver=_dns_trust_is_public_resolver,
+        is_threat_listed=_dns_trust_is_threat_listed,
+        plausibility=_dns_trust_plausibility,
+    )
+    app.state.list_dns_trust_servers = _list_dns_trust_servers
+    app.state.set_dns_server_trust = _set_dns_server_trust
+    app.state.add_dns_trust_server = _add_dns_trust_server
+    app.state.trusted_dns_server_ips = TrustedDnsServerIps(dns_trust_repository())
+
+    # ── dns_trust-api verdrahten (ADR 0043, E5; Regel 4/5: Projektion + Naht nur hier) ──
+    # Der api-Ring (api/dns_trust.py) kennt WEDER application NOCH domain -- die Projektion
+    # application (TrustedDnsServer + DnsServerPlausibility) -> api-Out faellt HIER im Root.
+    def _dns_trust_list() -> list[TrustedDnsServerOut]:
+        # Lese-Runner: ListDnsTrustServers liefert je Server (TrustedDnsServer, Plausibilitaet|
+        # None) in first_seen-Reihenfolge; hier auf die Wire-Form projizieren (Regel 4).
+        return [
+            TrustedDnsServerOut(
+                ip=server.ip,
+                category=server.category,
+                trust_state=server.trust_state,
+                first_seen=server.first_seen,
+                last_seen=server.last_seen,
+                display_name=server.display_name,
+                notes=server.notes,
+                is_platform_placeholder=server.is_platform_placeholder,
+                expected_rank=server.expected_rank,
+                origin=server.origin,
+                plausibility=(
+                    None
+                    if indizien is None
+                    else DnsServerPlausibilityOut(
+                        in_inventory=indizien.in_inventory,
+                        first_seen_days=indizien.first_seen_days,
+                        vendor=indizien.vendor,
+                        open_ports=list(indizien.open_ports),
+                        display_name=indizien.display_name,
+                    )
+                ),
+            )
+            for server, indizien in _list_dns_trust_servers()
+        ]
+
+    def _dns_trust_decision(ip: str, decision: str) -> None:
+        # Schreib-Runner: vertrauen/ablehnen/zuruecksetzen. now am Rand (time.time), der
+        # Use-Case bleibt uhrfrei. Eine ip ohne erfassten Server wirft im Use-Case
+        # DnsTrustServerNotFoundError -- der Router mappt sie auf 404; hier NICHT fangen
+        # (kein stiller Fallback, S3).
+        import time
+
+        _set_dns_server_trust(ip, decision, time.time())
+
+    _set_dns_server_rank = SetDnsServerRank(dns_trust_repository())
+
+    def _dns_trust_rank(ip: str, rank: int) -> None:
+        # Rang-Runner (Muster _dns_trust_decision): now am Rand, Use-Case uhrfrei. Eine
+        # ip ohne erfassten Server bzw. ein rank > 0 fuer einen nicht bestaetigten Server
+        # wirft im Use-Case (404 bzw. 409 am Router); hier NICHT fangen (S3).
+        import time
+
+        _set_dns_server_rank(ip, rank, time.time())
+
+    async def _dns_trust_create(ip: str, name: str) -> None:
+        # Anlege-Runner (Muster _dns_trust_decision): now am Rand, Use-Case uhrfrei.
+        # ASYNC, weil AddDnsTrustServer die Gateway-Naht awaitet (wie SyncDnsTrustServer).
+        # Eine bereits erfasste bzw. unbrauchbare Adresse wirft im Use-Case
+        # (409 bzw. 422 am Router); hier NICHT fangen (S3).
+        import time
+
+        await _add_dns_trust_server(ip, time.time(), name)
+
+    app.include_router(dns_trust_router)
+    app.dependency_overrides[provide_dns_trust_list] = lambda: _dns_trust_list
+    app.dependency_overrides[provide_dns_trust_decision] = lambda: _dns_trust_decision
+    app.dependency_overrides[provide_dns_trust_rank] = lambda: _dns_trust_rank
+    app.dependency_overrides[provide_dns_trust_create] = lambda: _dns_trust_create
+
+    # ── Sicherheitsbericht: Fuenf-Quellen-Projektion (Etappe 2b, Regel 5/Composition Root) ──
+    # DIESE Naht KENNT alle fuenf Quell-Domaenen (analysis/cve/security/dns_watch/diagnostics)
+    # und darf laut import-linter NUR hier im Composition Root liegen. Sie ruft die fuenf
+    # echten Quellen ab, projiziert sie auf die NEUTRALEN Berichts-Typen (ReportPortFinding/
+    # ReportCveFinding/ReportNetFinding) und reicht die fertigen Listen an den duennen
+    # Use-Case ``BuildSecurityReport`` -> ``build_security_report``. KEIN HTTP-Endpunkt (das
+    # ist Etappe 2c); hier nur die ehrliche Datenseite. Die Funktion ist async (zwei Quellen
+    # -- DNS-Waechter, jueng. Scan-Helfer -- sind ohnehin async im Bestand) und gibt den
+    # fertigen ``SecurityReport`` zurueck SAMT der zwei ehrlichen Statusfelder (has_scan,
+    # rogue_dhcp_checked_ts); der Endpunkt-Runner (Etappe 2c) projiziert sie auf die Wire-Form.
+    # Rueckgabe als kleines lokales Tupel (SecurityReport, has_scan, checked_ts): beide
+    # Statuswerte liegen HIER ohnehin vor (ob ein Scan-record als Basis vorlag, und der
+    # rogue-Stand wird unten gelesen) -- so vermeidet die Naht jede Doppelarbeit (keine
+    # zweite Scan-/Rogue-Lesung im Endpunkt-Runner, Auftrag Etappe 2c).
+    async def _build_security_report_data() -> tuple[SecurityReport, bool, float | None]:
+        # (1) JUENGSTER SCAN als Basis (analysis-Schnitt-B-Muster, list(1)->get->record.hosts,
+        # ausfallsicher). Kein Scan / kaputter Scan -> ehrlich leere Basis: leere
+        # device_labels + leere Findings -> build_security_report liefert Score 100 ueber
+        # leere Basis. ``has_scan`` haelt ehrlich fest, OB ein Scan-record als Basis vorlag
+        # (record is not None) -- ein leerer, aber existierender Scan zaehlt als has_scan True.
+        base_hosts: list[EnrichedHost] = []
+        has_scan = False
+        summaries = scan_history_repository().list(1)
+        if summaries:
+            try:
+                record = scan_history_repository().get(summaries[0].scan_id)
+            except CorruptScanError:
+                logger.warning(
+                    "security_report.base_scan_skipped_corrupt", scan_id=summaries[0].scan_id
+                )
+                record = None
+            if record is not None:
+                has_scan = True
+                base_hosts = list(record.hosts)
+
+        # device_label EINES Scan-Hosts: kuratierter Anzeigename (label) falls vorhanden,
+        # sonst hostname, sonst ip, sonst mac. EINE Quelle der Label-Bildung (auch der ARP-/
+        # DNS-/Rogue-Match-Schluessel unten nutzt ip/mac konsistent zu dieser Reihenfolge).
+        def _host_label(host: EnrichedHost) -> str:
+            return host.label or host.hostname or host.ip or host.mac
+
+        # (7) device_labels = ALLE Geraete des juengsten Scans (Basis N), unabhaengig davon ob
+        # sie Findings haben. Das ``archived``-Flag existiert noch nicht -> alle zaehlen; der
+        # archived-Ausschluss dockt spaeter GENAU HIER an (Vorfilter der base_hosts).
+        device_labels = [_host_label(host) for host in base_hosts]
+        # Schneller mac/ip -> device_label-Index der Basis fuer das Zuordnen der quellen-
+        # eigenen Schluessel (CVE liefert mac/ip, ARP ip, DNS remote_ip). Ein Quell-Befund
+        # OHNE Basis-Treffer behaelt seinen eigenen Schluessel als Label (s. Kommentar (8)).
+        label_by_mac = {host.mac: _host_label(host) for host in base_hosts if host.mac}
+        label_by_ip = {host.ip: _host_label(host) for host in base_hosts if host.ip}
+
+        # (2) PORTS: je Host die Achse-B-Bewertung ueber GENAU die vorhandenen Helfer + denselben
+        # gefilterten Provider (Single Source, Konsistenz-Invariante NICHT brechen). acked je
+        # Host aus dem Acknowledge-Repo abziehen (wie der WS-Pfad). Aus flagged_ports je Stufe
+        # ("critical"/"notable") EINEN PortFinding bauen (nur Hosts MIT geflaggten Ports).
+        # ``_flagged_ports_for_host`` zieht ``acked`` VOR der Schnittbildung ab -- ein
+        # quittierter Port wird nicht mehr geflaggt (darum entfaellt eine ack_port-Liste:
+        # quittierte Ports erscheinen schlicht nicht in den offenen flagged_ports).
+        provider = _build_filtered_provider(analysis_rule_repository(), repository())
+        acknowledged_ports = acknowledgement_repository().acknowledged_ports
+        port_findings: list[ReportPortFinding] = []
+        for host in base_hosts:
+            acked = frozenset(acknowledged_ports(host.mac)) if host.mac else frozenset()
+            flagged = _flagged_ports_for_host(host, provider, acked)
+            label = _host_label(host)
+            for severity in _FLAGGED_SEVERITIES:
+                ports = flagged.get(severity, [])
+                if not ports:
+                    continue
+                port_findings.append(
+                    ReportPortFinding(
+                        device_label=label,
+                        ports=", ".join(str(p) for p in sorted(ports)),
+                        severity=severity,
+                        # Klartext-Grund ohne Mehraufwand/Raten: die getroffenen Ports kommen
+                        # ausschliesslich aus host_remote_port-Regeln (ADR 0030) -- eine
+                        # generische, ehrliche Begruendung statt einer fragil rekonstruierten
+                        # Einzelregel-Beschreibung (kein Raten).
+                        reason="auffaellige offene Ports (Achse-B-Regel)",
+                    )
+                )
+
+        # (3) CVE: aktive Befunde -> ReportCveFinding (severity ROH mitgefuehrt, die Burden-
+        # Einstufung laeuft ueber cvss_score). Quittierte -> ack_cve (Spiegelbild). device_label
+        # via mac/ip aus der Basis, sonst der Roh-Schluessel (mac||ip) des Befunds selbst.
+        def _cve_label(mac: str, ip: str) -> str:
+            return label_by_mac.get(mac) or label_by_ip.get(ip) or mac or ip
+
+        def _project_cves(findings: list[ActiveFinding]) -> list[ReportCveFinding]:
+            return [
+                ReportCveFinding(
+                    device_label=_cve_label(f.mac, f.ip),
+                    cve_id=f.cve_id,
+                    cvss_score=f.cvss_score,
+                    severity=f.severity,
+                    service=f.service,
+                    description=f.description,
+                )
+                for f in findings
+            ]
+
+        cve_active = GetActiveFindings(cve_finding_repository(), cve_acknowledgement_repository())()
+        cve_acked = GetAcknowledgedFindings(
+            cve_finding_repository(), cve_acknowledgement_repository()
+        )()
+        cve_findings = _project_cves(cve_active)
+        ack_cve = _project_cves(cve_acked)
+
+        net_findings: list[ReportNetFinding] = []
+        ack_net: list[ReportNetFinding] = []
+
+        # (4) ARP: je Alert ein NetFinding. severity-Mapping ARP "high"->"critical",
+        # "medium"->"notable" (alles andere konservativ "notable"). device_label = betroffene
+        # ip (via Basis gemappt, sonst die ip selbst); description aus den echten
+        # ArpAlertRecord-Feldern (message + alte/neue MAC), kein Raten. ARP-Alerts kennen kein
+        # Quittieren (E.1: Momentaufnahme je Scan) -> nur offene net_findings.
+        arp_alerts = GetArpAlerts(arp_guard_repository())()
+        for alert in arp_alerts:
+            net_findings.append(
+                ReportNetFinding(
+                    kind="IP-Konflikt",
+                    device_label=label_by_ip.get(alert.ip) or alert.ip,
+                    description=(
+                        f"{alert.message} (alt {alert.old_mac} -> neu {alert.new_mac})"
+                        if alert.old_mac or alert.new_mac
+                        else alert.message
+                    ),
+                    severity="critical" if alert.severity == "high" else "notable",
+                )
+            )
+
+        # (5) DNS-UMGEHUNG: BuildDnsWatch-Overview ueber die schon verdrahtete _dns_watch-Naht
+        # holen (kein Re-Wiring). NUR "offen"/"moegliche_doh" werden NetFindings (kind
+        # "DNS-Umgehung"); "erwartungsgemaess" NICHT. severity konservativer Default "notable"
+        # -- HINWEIS: das DNS-Umgehungs-Severity-Mapping wird spaeter ein editierbares
+        # analysis-Setting (dann hier andocken). Quittierte (acknowledged) -> ack_net.
+        dns_category_text = {"offen": "offen", "moegliche_doh": "moegliche DoH"}
+        dns_overview = await _dns_watch()
+        for contact in dns_overview.contacts:
+            if contact.category not in dns_category_text:
+                continue
+            finding = ReportNetFinding(
+                kind="DNS-Umgehung",
+                device_label=contact.remote_ip or (contact.hostname or ""),
+                description=f"DNS-Kontakt eingestuft als {dns_category_text[contact.category]}",
+                severity="notable",
+            )
+            (ack_net if contact.acknowledged else net_findings).append(finding)
+
+        # (6) ROGUE-DHCP: letzten gespeicherten Stand lesen (kein aktiver, root-pflichtiger
+        # Probe). None -> KEIN NetFinding (Etappe 2c zeigt den "noch nie geprueft"-Hinweis).
+        # Stand mit has_unexpected True -> je UNERWARTETEM Server (is_expected False) ein
+        # NetFinding (severity "critical" -- ein fremder DHCP-Server ist ernst). checked_ts
+        # kommt aus dem GESPEICHERTEN Stand (KEINE neue Wanduhr), nur formatiert.
+        rogue = GetLatestRogueDhcp(rogue_dhcp_repository())()
+        # checked_ts des letzten gespeicherten Stands fuer das ehrliche Statusfeld
+        # (None = noch nie geprueft). Aus DERSELBEN Lesung -- keine zweite Rogue-Abfrage.
+        rogue_checked_ts = rogue.checked_ts if rogue is not None else None
+        if rogue is not None and rogue.has_unexpected:
+            checked_date = datetime.fromtimestamp(rogue.checked_ts).strftime("%Y-%m-%d %H:%M")
+            for server in rogue.servers:
+                if server.is_expected:
+                    continue
+                net_findings.append(
+                    ReportNetFinding(
+                        kind="Rogue-DHCP",
+                        device_label=server.ip,
+                        description=f"Unerwarteter DHCP-Server entdeckt (geprueft {checked_date})",
+                        severity="critical",
+                    )
+                )
+
+        # (8) ARP/DNS/Rogue-Findings, deren device_label NICHT in device_labels ist (fremdes
+        # Geraet), bleiben TROTZDEM in den Findings-Listen (echte Befunde -> erscheinen in den
+        # Berichts-Tabellen). build_device_burdens ordnet Findings per device_label den
+        # Basis-Geraeten zu: ein Finding auf einem Nicht-Basis-Label findet kein Basis-Geraet
+        # und hebt damit den Score NICHT (die Score-Basis N bleibt der Scan-Bestand) -- das ist
+        # akzeptabel und ehrlich (keine kuenstliche Basis-Erweiterung).
+        report = BuildSecurityReport()(
+            device_labels=device_labels,
+            port_findings=port_findings,
+            cve_findings=cve_findings,
+            net_findings=net_findings,
+            ack_port=[],
+            ack_cve=ack_cve,
+            ack_net=ack_net,
+        )
+        # Bericht SAMT der zwei ehrlichen Statuswerte zurueck (beide hier ohnehin bekannt):
+        # has_scan (ob ein Scan-record als Basis vorlag) + rogue_checked_ts (None = nie geprueft).
+        return report, has_scan, rogue_checked_ts
+
+    # ── Sicherheitsbericht: HTTP-Endpunkt-Runner (Etappe 2c, Muster _dns_watch, Regel 4/5) ──
+    # Composition-Root-Runner fuer GET /api/report/security: ruft die schon verdrahtete
+    # Datenseite _build_security_report_data (liefert SecurityReport + has_scan + checked_ts)
+    # und PROJIZIERT den application-Typ SecurityReport auf die api-Wire-Form SecurityReportOut
+    # (Score -> ScoreOut, je Finding -> *Out). Die Projektion lebt -- wie bei _dns_watch --
+    # HIER im Composition Root, NICHT im Router (Regel 4: der api-Ring kennt application nicht).
+    # Keine Wanduhr: rogue_dhcp_checked_ts kommt aus dem GESPEICHERTEN Stand durch die Closure.
+    async def _security_report() -> SecurityReportOut:
+        report, has_scan, rogue_checked_ts = await _build_security_report_data()
+        return SecurityReportOut(
+            score=ScoreOut(
+                score=report.score.score,
+                level=report.score.level,
+                device_count=report.score.device_count,
+                total_burden=report.score.total_burden,
+                critical_devices=report.score.critical_devices,
+                notable_devices=report.score.notable_devices,
+                clean_devices=report.score.clean_devices,
+                contributions=[
+                    ScoreContributionOut(
+                        device_label=c.device_label,
+                        worst_severity=c.worst_severity,
+                        burden_value=c.burden_value,
+                    )
+                    for c in report.score.contributions
+                ],
+            ),
+            port_findings=[
+                PortFindingOut(
+                    device_label=p.device_label,
+                    ports=p.ports,
+                    severity=p.severity,
+                    reason=p.reason,
+                )
+                for p in report.port_findings
+            ],
+            cve_findings=[
+                CveFindingOut(
+                    device_label=c.device_label,
+                    cve_id=c.cve_id,
+                    cvss_score=c.cvss_score,
+                    severity=c.severity,
+                    service=c.service,
+                    description=c.description,
+                )
+                for c in report.cve_findings
+            ],
+            net_findings=[
+                NetFindingOut(
+                    kind=n.kind,
+                    device_label=n.device_label,
+                    description=n.description,
+                    severity=n.severity,
+                )
+                for n in report.net_findings
+            ],
+            acknowledged_port_findings=[
+                PortFindingOut(
+                    device_label=p.device_label,
+                    ports=p.ports,
+                    severity=p.severity,
+                    reason=p.reason,
+                )
+                for p in report.acknowledged_port_findings
+            ],
+            acknowledged_cve_findings=[
+                CveFindingOut(
+                    device_label=c.device_label,
+                    cve_id=c.cve_id,
+                    cvss_score=c.cvss_score,
+                    severity=c.severity,
+                    service=c.service,
+                    description=c.description,
+                )
+                for c in report.acknowledged_cve_findings
+            ],
+            acknowledged_net_findings=[
+                NetFindingOut(
+                    kind=n.kind,
+                    device_label=n.device_label,
+                    description=n.description,
+                    severity=n.severity,
+                )
+                for n in report.acknowledged_net_findings
+            ],
+            # device_count = Basis N (Anzahl beruecksichtigter Geraete) aus device_labels.
+            device_count=len(report.device_labels),
+            has_scan=has_scan,
+            rogue_dhcp_checked_ts=rogue_checked_ts,
+        )
+
+    # ── Sicherheitsbericht: PDF-Download-Runner (Etappe 4b, Muster _export_scan, Regel 4/5) ──
+    # Composition-Root-Runner fuer GET /api/report/security/pdf: ruft die schon verdrahtete
+    # Datenseite _build_security_report_data, liest die Wanduhr GENAU HIER (der EINZIGE Ort mit
+    # Uhr -- die Projektion _project_security_pdf_model ist rein), projiziert auf das
+    # render-fertige SecurityPdfModel und rendert es ueber den zustandslosen ReportlabRenderer.
+    # Rueckgabe ist ein kleines lokales Ergebnis-Objekt (content/media_type/filename) -- der
+    # api-Ring liest nur diese drei Attribute (Muster ExportResult; Regel 4: kein Typ-Import).
+    @dataclass(frozen=True)
+    class _SecurityPdfResult:
+        content: bytes
+        media_type: str
+        filename: str
+
+    async def _security_report_pdf(lang: str) -> _SecurityPdfResult:
+        # lang normalisieren: "en" bleibt, jeder andere Wert faellt auf "de" (Muster _manual_pdf).
+        normalized: Lang = "en" if lang == "en" else "de"
+        report, has_scan, rogue_checked_ts = await _build_security_report_data()
+        # Wanduhr GENAU HIER lesen (einziger Ort) -- Projektion und Modell bleiben rein.
+        import time
+
+        now = time.time()
+        generated_at_text = format_generated_at(now, normalized)
+        # Rogue-Pruefdatum aus dem GESPEICHERTEN Stand (nicht aus der Wanduhr): nur formatiert.
+        pruefdatum = (
+            datetime.fromtimestamp(rogue_checked_ts).strftime("%d.%m.%Y %H:%M")
+            if rogue_checked_ts is not None
+            else ""
+        )
+        model = _project_security_pdf_model(
+            report, has_scan, generated_at_text, rogue_checked_ts, pruefdatum, normalized
+        )
+        pdf_bytes = ReportlabRenderer().render_security_report_pdf(model, normalized)
+        datumsteil = format_datum_kurz(now, normalized)
+        name = "Network-Security-Report" if normalized == "en" else "Netzwerk-Sicherheitsbericht"
+        return _SecurityPdfResult(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            filename=f"CERNISPRO_{name}_{datumsteil}.pdf",
+        )
+
+    # ── Benutzerhandbuch: PDF-Download-Runner (Muster _security_report_pdf, Regel 4/5) ──
+    # Composition-Root-Runner fuer GET /api/report/manual/pdf: laedt die Hilfe-Inhalte, liest
+    # die Wanduhr GENAU HIER (einziger Ort mit Uhr -- _project_manual_pdf_model ist rein),
+    # projiziert auf das render-fertige ManualPdfModel und rendert es ueber den zustandslosen
+    # ReportlabRenderer (derselbe Import wie der Sicherheitsbericht). Rueckgabe ist ein kleines
+    # lokales Ergebnis-Objekt (content/media_type/filename) -- der api-Ring liest nur diese drei.
+    @dataclass(frozen=True)
+    class _ManualPdfResult:
+        content: bytes
+        media_type: str
+        filename: str
+
+    async def _manual_pdf(lang: str) -> _ManualPdfResult:
+        # lang normalisieren: "en" bleibt, jeder andere Wert faellt auf "de" (Auftrag).
+        normalized = "en" if lang == "en" else "de"
+        help_data = _load_help_content()
+        # Wanduhr GENAU HIER lesen (einziger Ort) -- Projektion und Modell bleiben rein.
+        import time
+
+        now = time.time()
+        generated_at_text = "Erstellt am " + datetime.fromtimestamp(now).strftime("%d.%m.%Y %H:%M")
+        if normalized == "en":
+            title = "CERNIS PRO 2.0 - User Manual"
+            footer_left = "CERNIS PRO 2.0 - User Manual"
+        else:
+            title = "CERNIS PRO 2.0 - Benutzerhandbuch"
+            footer_left = "CERNIS PRO 2.0 - Benutzerhandbuch"
+        model = _project_manual_pdf_model(
+            help_data, normalized, generated_at_text, footer_left, title
+        )
+        pdf_bytes = ReportlabRenderer().render_manual_pdf(model)
+        if normalized == "en":
+            filename = "CERNISPRO_User-Manual.pdf"
+        else:
+            filename = "CERNISPRO_Benutzerhandbuch.pdf"
+        return _ManualPdfResult(content=pdf_bytes, media_type="application/pdf", filename=filename)
+
+    # ── Bestandsbericht: EINE-Quelle-Projektion (Etappe 2, Regel 5/Composition Root) ──
+    # Viel einfacher als der Sicherheitsbericht: die Datenseite liest NUR die devices-Domaene
+    # (Stats + alle Geraete + archivierte) und projiziert die echten Device-Objekte auf die
+    # NEUTRALEN Berichts-Zeilen (InventoryDeviceRow). KEINE Uhr in der Datenseite -- die
+    # 24h-Aktiv-Grenze entsteht in GetDeviceStats selbst (ueber device_clock); die Datums-Texte
+    # je Zeile sind reine Formatierung der schon vorhandenen Device-Zeitstempel (keine Wanduhr).
+    def _build_inventory_report_data() -> InventoryReport:
+        # (1) Bestands-Grundzahlen aus DeviceStats (die 24h-Grenze bildet GetDeviceStats aus
+        # device_clock selbst). device_repository()/device_clock sind die schon verdrahteten
+        # Provider-Bausteine -- Muster wie die device-overrides oben (kein zweiter Adapter).
+        stats = GetDeviceStats(device_repository(), device_clock)()
+
+        # (2) Geraete-Mengen aus ZWEI getrennten Quellen: GetDevices(known_only=False) liefert
+        # laut Repo-Vertrag NUR nicht-archivierte (get_all blendet archivierte aus), die
+        # archivierten kommen separat aus GetArchivedDevices. Die Trennung folgt der HERKUNFT
+        # der Liste, NICHT dem archived-Feld der get_all-Objekte.
+        active_devices = GetDevices(device_repository())(known_only=False)
+        archived_devices = GetArchivedDevices(device_repository())()
+
+        def _device_label(d: Device) -> str:
+            # Erster nicht-leerer: label || hostname || last_ip || mac. last_ip ist str|None ->
+            # ``or`` behandelt None/"" gleich; mac ist Pflicht (nie leer) -> sicherer Fallback.
+            return d.label or d.hostname or (d.last_ip or "") or d.mac
+
+        def _to_row(d: Device, *, archived: bool) -> InventoryDeviceRow:
+            # Reine Projektion eines Device auf die neutrale Berichts-Zeile. archived kommt aus
+            # der HERKUNFT der Liste (Parameter), nicht aus d.archived. Die Datums-Texte sind
+            # reine Formatierung der vorhandenen Zeitstempel (keine Wanduhr); last_seen_ts dient
+            # dem Sortieren im Frontend/der Aggregation.
+            return InventoryDeviceRow(
+                device_label=_device_label(d),
+                vendor=d.vendor,
+                last_ip=d.last_ip or "",
+                first_seen_text=d.first_seen.strftime("%d.%m.%Y %H:%M"),
+                last_seen_text=d.last_seen.strftime("%d.%m.%Y %H:%M"),
+                last_seen_ts=d.last_seen.timestamp(),
+                times_seen=d.times_seen,
+                category=d.category,
+                is_known=d.is_known,
+                trust_state=str(d.trust_state),
+                source=str(d.source),
+                archived=archived,
+            )
+
+        rows = [_to_row(d, archived=False) for d in active_devices]
+        rows += [_to_row(d, archived=True) for d in archived_devices]
+
+        # (3) Aggregation ueber den duennen Use-Case: Grundzahlen aus DeviceStats unveraendert
+        # durch, die Verteilungen/Sortierungen rechnet build_inventory_report rein.
+        return BuildInventoryReport()(
+            total=stats.total,
+            known=stats.known,
+            unknown=stats.unknown,
+            active_24h=stats.active,
+            rows=rows,
+        )
+
+    # Anzeige-Status je Geraete-Zeile (Klartext fuers PDF): trust_state "trusted"/"watch" sind
+    # eindeutig; "neutral" haengt davon ab, ob das Geraet bekannt ist. KEINE Wertung -- nur die
+    # Klartext-Beschriftung des vorhandenen Zustands (lokaler Helfer, Muster wie andere oben).
+    def _status_text(is_known: bool, trust_state: str, lang: Lang = "de") -> str:
+        if trust_state == "trusted":
+            return "Vertraut" if lang == "de" else "Trusted"
+        if trust_state == "watch":
+            return "Beobachtet" if lang == "de" else "Watched"
+        if lang == "de":
+            return "Bekannt" if is_known else "Unbekannt"
+        return "Known" if is_known else "Unknown"
+
+    # Reine Projektion InventoryReport -> render-fertiges InventoryPdfModel (Muster
+    # _project_security_pdf_model): KEINE Uhr -- generated_at_text kommt fertig formatiert herein.
+    def _project_inventory_pdf_model(
+        report: InventoryReport, generated_at_text: str, lang: Lang = "de"
+    ) -> InventoryPdfModel:
+        # Verteilungs-Tabellen je Eintrag (label, count-als-Text). Geraete-Tabellen je Zeile ein
+        # String-Tupel in der jeweiligen *_COLUMNS-Reihenfolge (Status als Klartext via
+        # _status_text -- der Bestand wertet nicht, er beschreibt nur).
+        vendor_rows = tuple((entry.label, str(entry.count)) for entry in report.vendor_distribution)
+        category_rows = tuple(
+            (entry.label, str(entry.count)) for entry in report.category_distribution
+        )
+        device_rows = tuple(
+            (
+                r.device_label,
+                r.vendor,
+                r.last_ip,
+                r.first_seen_text,
+                r.last_seen_text,
+                str(r.times_seen),
+                r.category,
+                _status_text(r.is_known, r.trust_state, lang),
+            )
+            for r in report.device_rows
+        )
+        archived_rows = tuple(
+            (
+                r.device_label,
+                r.vendor,
+                r.last_ip,
+                r.last_seen_text,
+                _status_text(r.is_known, r.trust_state, lang),
+            )
+            for r in report.archived_rows
+        )
+        return InventoryPdfModel(
+            title=REPORT_TITLE_INVENTORY.get(lang),
+            generated_at_text=generated_at_text,
+            footer_left=REPORT_FOOTER_INVENTORY.get(lang),
+            achse_b_fussnote=ACHSE_B_FUSSNOTE.get(lang),
+            einleitung=REPORT_INTRO_INVENTORY.get(lang),
+            total=report.total,
+            known=report.known,
+            unknown=report.unknown,
+            active_24h=report.active_24h,
+            trusted=report.trusted,
+            watch=report.watch,
+            neutral=report.neutral,
+            vendor_rows=vendor_rows,
+            category_rows=category_rows,
+            device_rows=device_rows,
+            archived_rows=archived_rows,
+        )
+
+    # ── Bestandsbericht: HTTP-Endpunkt-Runner (Muster _security_report, Regel 4/5) ──
+    # Ruft die Datenseite und PROJIZIERT InventoryReport auf die api-Wire-Form
+    # InventoryReportOut. async, obwohl die Datenseite sync ist (Muster-Konsistenz + die
+    # FastAPI-Signatur des InventoryReportRunner-Protocols ist async).
+    async def _inventory_report() -> InventoryReportOut:
+        report = _build_inventory_report_data()
+
+        def _row_out(r: InventoryDeviceRow) -> InventoryDeviceRowOut:
+            return InventoryDeviceRowOut(
+                device_label=r.device_label,
+                vendor=r.vendor,
+                last_ip=r.last_ip,
+                first_seen_text=r.first_seen_text,
+                last_seen_text=r.last_seen_text,
+                last_seen_ts=r.last_seen_ts,
+                times_seen=r.times_seen,
+                category=r.category,
+                is_known=r.is_known,
+                trust_state=r.trust_state,
+                source=r.source,
+                archived=r.archived,
+            )
+
+        return InventoryReportOut(
+            total=report.total,
+            known=report.known,
+            unknown=report.unknown,
+            active_24h=report.active_24h,
+            trusted=report.trusted,
+            watch=report.watch,
+            neutral=report.neutral,
+            vendor_distribution=[
+                InventoryDistributionOut(label=e.label, count=e.count)
+                for e in report.vendor_distribution
+            ],
+            category_distribution=[
+                InventoryDistributionOut(label=e.label, count=e.count)
+                for e in report.category_distribution
+            ],
+            device_rows=[_row_out(r) for r in report.device_rows],
+            archived_rows=[_row_out(r) for r in report.archived_rows],
+        )
+
+    # ── Bestandsbericht: PDF-Download-Runner (Muster _security_report_pdf, Regel 4/5) ──
+    # Ruft die Datenseite, liest die Wanduhr GENAU HIER (einziger Ort mit Uhr -- die Projektion
+    # _project_inventory_pdf_model ist rein), projiziert auf das render-fertige InventoryPdfModel
+    # und rendert es ueber den zustandslosen ReportlabRenderer. Rueckgabe ein kleines lokales
+    # Ergebnis-Objekt (content/media_type/filename) -- der api-Ring liest nur diese drei Attribute.
+    @dataclass(frozen=True)
+    class _InventoryPdfResult:
+        content: bytes
+        media_type: str
+        filename: str
+
+    async def _inventory_report_pdf(lang: str) -> _InventoryPdfResult:
+        # lang normalisieren: "en" bleibt, jeder andere Wert faellt auf "de" (Muster _manual_pdf).
+        normalized: Lang = "en" if lang == "en" else "de"
+        report = _build_inventory_report_data()
+        # Wanduhr GENAU HIER lesen (einziger Ort) -- Projektion und Modell bleiben rein.
+        import time
+
+        now = time.time()
+        generated_at_text = format_generated_at(now, normalized)
+        model = _project_inventory_pdf_model(report, generated_at_text, normalized)
+        pdf_bytes = ReportlabRenderer().render_inventory_report_pdf(model, normalized)
+        datumsteil = format_datum_kurz(now, normalized)
+        name = "Network-Inventory-Report" if normalized == "en" else "Netzwerk-Bestandsbericht"
+        return _InventoryPdfResult(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            filename=f"CERNISPRO_{name}_{datumsteil}.pdf",
+        )
+
+    # ── CVE-Bericht: Datenseite (Muster _build_inventory_report_data, Regel 4/5) ──
+    # EINE Quelle: die drei schon verdrahteten CVE-Use-Cases (GENAU die Factory-Aufrufe der
+    # overrides um Zeile 2603-2615). KEINE Uhr in der Datenseite -- die Datums-Texte je Zeile sind
+    # reine Formatierung der vorhandenen first_seen_ts (kein Wanduhr-Zugriff, Muster _to_row).
+    def _build_cve_report_data() -> CveReport:
+        # (1) Die drei Use-Cases mit den EXAKTEN Factory-Aufrufen der bestehenden overrides.
+        active = GetActiveFindings(cve_finding_repository(), cve_acknowledgement_repository())()
+        acked = GetAcknowledgedFindings(
+            cve_finding_repository(), cve_acknowledgement_repository()
+        )()
+        status = GetCveMonitorStatus(
+            cve_inventory,
+            cve_checkstate_repository(),
+            cve_finding_repository(),
+            cve_acknowledgement_repository(),
+            refresh_interval_provider=_cve_refresh_interval_seconds,
+        )()
+
+        # (R1) Geraetenamen-Lookup aus der devices-Domaene (Muster Bestandsbericht): aktive
+        # UND archivierte Geraete, damit auch ein archiviertes Geraet seinen Namen behaelt.
+        geraete = GetDevices(device_repository())(known_only=False)
+        archiviert = GetArchivedDevices(device_repository())()
+
+        # MAC-Normalisierung: d.mac ist via Device.__post_init__ schon kanonisch
+        # (AA:BB:CC:DD:EE:FF). ActiveFinding.mac stammt aus dem Scan-Record (EnrichedHost.mac)
+        # und durchlaeuft KEINE erzwungene Normalisierung -- die Schreibweise KANN abweichen.
+        # Darum laufen BEIDE Seiten des Lookups durch die EINE Quelle normalize_mac (idempotent);
+        # eine nicht normalisierbare MAC (leer/Muell) faellt ehrlich auf den Rohwert zurueck
+        # (kein Absturz, kein stiller Fehl-Lookup).
+        def _mac_key(mac: str) -> str:
+            try:
+                return normalize_mac(mac)
+            except ValueError:
+                return mac
+
+        mac_to_label: dict[str, str] = {}
+        mac_to_ip: dict[str, str] = {}
+        for d in (*geraete, *archiviert):
+            label = d.label or d.hostname or (d.last_ip or "") or d.mac
+            mac_to_label[_mac_key(d.mac)] = label
+            mac_to_ip[_mac_key(d.mac)] = d.last_ip or ""
+
+        def _cve_label(f: ActiveFinding) -> str:
+            # (R1) Geraetename aus dem devices-Lookup (label||hostname||last_ip||mac), sonst die
+            # Finding-IP, sonst die mac (Pflicht, nie leer) -- erster nicht-leerer.
+            return mac_to_label.get(_mac_key(f.mac)) or f.ip or f.mac
+
+        def _cve_ip(f: ActiveFinding) -> str:
+            # IP fuer den Host-Kopf: die Finding-IP, ersatzweise die Geraete-IP aus dem Lookup.
+            return f.ip or mac_to_ip.get(_mac_key(f.mac), "")
+
+        def _to_row(f: ActiveFinding, *, acknowledged: bool) -> CveFindingRow:
+            # Reine Projektion eines ActiveFinding auf die neutrale Berichts-Zeile. acknowledged
+            # kommt aus der HERKUNFT der Liste (Parameter), nicht aus dem Befund. first_seen_text
+            # ist reine Formatierung des vorhandenen first_seen_ts (keine Wanduhr); first_seen_ts
+            # bleibt als Sortier-/Alters-Schluessel erhalten.
+            return CveFindingRow(
+                device_label=_cve_label(f),
+                mac=f.mac,
+                ip=_cve_ip(f),
+                cve_id=f.cve_id,
+                severity=f.severity,
+                cvss_score=f.cvss_score,
+                service=f.service,
+                port=f.port,
+                first_seen_text=datetime.fromtimestamp(f.first_seen_ts).strftime("%d.%m.%Y %H:%M"),
+                first_seen_ts=f.first_seen_ts,
+                published=f.published,
+                acknowledged=acknowledged,
+                is_new=f.is_new,
+            )
+
+        rows = [_to_row(f, acknowledged=False) for f in active]
+        rows += [_to_row(f, acknowledged=True) for f in acked]
+
+        # (2) status auf die neutralen Monitor-Kennzahlen projizieren (Feld zu Feld).
+        monitor = CveMonitorInput(
+            hosts_total=status.hosts_total,
+            hosts_due=status.hosts_due,
+            hosts_checked=status.hosts_checked,
+            findings_total=status.findings_total,
+            findings_active=status.findings_active,
+        )
+
+        # (3) Aggregation ueber den duennen Use-Case (Severity-Normalisierung/Sortierung rein).
+        return BuildCveReport()(status=monitor, rows=rows)
+
+    # Abdeckungs-Text aus den Host-Zaehlern (am Composition Root, NICHT in der reinen Funktion --
+    # die laesst coverage_text leer). Wird im HTTP- UND im PDF-Runner GLEICH gesetzt.
+    def _cve_coverage_text(hosts_total: int, hosts_checked: int, lang: Lang = "de") -> str:
+        # (E3c) ``lang`` waehlt die Sprache: de unveraendert, en die englische Fassung. Der
+        # feste Satz inline per ``if lang``, weil er f-string-Platzhalter traegt.
+        if hosts_total <= 0:
+            return "Noch keine Hosts geprüft" if lang == "de" else "No hosts checked yet"
+        prozent = round(hosts_checked / hosts_total * 100)
+        if lang == "de":
+            return f"{hosts_checked} von {hosts_total} Hosts geprüft ({prozent} %)"
+        return f"{hosts_checked} of {hosts_total} hosts checked ({prozent} %)"
+
+    # (Etappe 3b / E3a) Severity-Stufen als ANZEIGE-Text, je Sprache eine Map. Der ROHE
+    # NVD-Schluessel (CRITICAL/HIGH/...) bleibt der technische Schluessel (Sortierung,
+    # Farb-Lookup, JSON); hier wird AUSSCHLIESSLICH der angezeigte Text uebersetzt.
+    _SEV_DE = {
+        "CRITICAL": "Kritisch",
+        "HIGH": "Hoch",
+        "MEDIUM": "Mittel",
+        "LOW": "Niedrig",
+        "UNKNOWN": "Unbekannt",
+    }
+    _SEV_EN = {
+        "CRITICAL": "Critical",
+        "HIGH": "High",
+        "MEDIUM": "Medium",
+        "LOW": "Low",
+        "UNKNOWN": "Unknown",
+    }
+
+    def _sev_label(roh: str, lang: Lang = "de") -> str:
+        """Uebersetzt den ROHEN NVD-Schluessel in den Anzeige-Text der Sprache ``lang``.
+
+        Unbekannter Schluessel -> die "Unbekannt"/"Unknown"-Stufe der jeweiligen Sprache
+        (unveraendertes Verhalten der deutschen Fassung).
+        """
+        tabelle = _SEV_DE if lang == "de" else _SEV_EN
+        return tabelle.get(roh.upper(), tabelle["UNKNOWN"])
+
+    # Status-Text je Befund-Zeile, Variante C (R3): quittiert UND is_new sind ZWEI
+    # Dimensionen. Quittiert schlaegt durch ("Quittiert"); sonst zeigt ein aktiver Befund
+    # "Aktiv · NEU" wenn neu, sonst "Aktiv".
+    def _cve_status_text(row: CveFindingRow, lang: Lang = "de") -> str:
+        if row.acknowledged:
+            return "Quittiert" if lang == "de" else "Acknowledged"
+        if row.is_new:
+            return "Aktiv · NEU" if lang == "de" else "Active · NEW"
+        return "Aktiv" if lang == "de" else "Active"
+
+    # (R5 / E3a) Datums-Helfer: NVD published ist ISO (YYYY-MM-DD oder ISO-8601 mit Zeit) ->
+    # de TT.MM.JJJJ, en ISO YYYY-MM-DD (Schreibweise wie ``report_texts.format_datum_kurz``).
+    # Leer -> "—" (in beiden Sprachen). Unerwartetes Format -> ehrlich der Rohwert (kein Absturz).
+    def _fmt_published(iso: str, lang: Lang = "de") -> str:
+        if not iso:
+            return "—"
+        muster = "%d.%m.%Y" if lang == "de" else "%Y-%m-%d"
+        try:
+            return datetime.strptime(iso[:10], "%Y-%m-%d").strftime(muster)
+        except ValueError:
+            return iso
+
+    # (R2) Host-Gruppen-Bloecke fuer das PDF: je HostFindingGroup eine fertige Kopfzeile + die
+    # CVE-Zeilen in FINDING_GROUP_COLUMNS-Reihenfolge (ohne Geraet, das steht im Kopf).
+    def _project_cve_host_groups(
+        report: CveReport, lang: Lang = "de"
+    ) -> tuple[HostGroupBlock, ...]:
+        bloecke: list[HostGroupBlock] = []
+        for g in report.host_groups:
+            # Host-Kopf sauber bauen -- ohne IP-Teil (und ohne doppelten Trenner), wenn keine IP.
+            # (Etappe 3b) IP nur anhaengen, wenn sie sich vom device_label UNTERSCHEIDET --
+            # bei namenlosen Geraeten ist device_label == ip (sonst doppelte IP im Kopf).
+            teile = [g.device_label]
+            if g.ip and g.ip != g.device_label:
+                teile.append(g.ip)
+            teile.append(g.mac)
+            hoechste = _sev_label(g.highest_severity, lang)
+            teile.append(f"{g.finding_count} Befunde, höchste {hoechste}")
+            header = " · ".join(teile)
+            rows = tuple(
+                (
+                    r.cve_id,
+                    _sev_label(r.severity, lang),
+                    f"{r.cvss_score:.1f}",
+                    r.service,
+                    str(r.port),
+                    r.first_seen_text,
+                    _cve_status_text(r, lang),
+                )
+                for r in g.rows
+            )
+            bloecke.append(HostGroupBlock(header=header, rows=rows))
+        return tuple(bloecke)
+
+    # Reine Projektion CveReport -> render-fertiges CvePdfModel (Muster
+    # _project_inventory_pdf_model): KEINE Uhr -- generated_at_text/coverage_text kommen fertig.
+    def _project_cve_pdf_model(
+        report: CveReport, generated_at_text: str, coverage_text: str, lang: Lang = "de"
+    ) -> CvePdfModel:
+        # (Etappe 3b) severity_rows BLEIBT roh (Schluessel fuer Farb-Lookup _SEV_COLORS im
+        # Renderer). severity_labels traegt je (roh_key, deutscher_text) die Legenden-Anzeige.
+        severity_rows = tuple((sc.severity, str(sc.count)) for sc in report.severity_counts)
+        severity_labels = tuple(
+            (sc.severity, _sev_label(sc.severity, lang)) for sc in report.severity_counts
+        )
+        device_rows = tuple(
+            (
+                r.device_label,
+                str(r.finding_count),
+                _sev_label(r.highest_severity, lang),
+                f"{r.highest_cvss:.1f}",
+                r.services,
+            )
+            for r in report.device_rows
+        )
+        service_rows = tuple(
+            (
+                r.service,
+                str(r.finding_count),
+                str(r.device_count),
+                _sev_label(r.highest_severity, lang),
+                f"{r.highest_cvss:.1f}",
+                _fmt_published(r.oldest_published, lang),
+            )
+            for r in report.service_rows
+        )
+        finding_rows = tuple(
+            (
+                r.device_label,
+                r.cve_id,
+                _sev_label(r.severity, lang),
+                f"{r.cvss_score:.1f}",
+                r.service,
+                str(r.port),
+                r.first_seen_text,
+                _cve_status_text(r, lang),
+            )
+            for r in report.all_rows
+        )
+        return CvePdfModel(
+            title=REPORT_TITLE_CVE.get(lang),
+            generated_at_text=generated_at_text,
+            footer_left=REPORT_FOOTER_CVE.get(lang),
+            achse_b_fussnote=ACHSE_B_FUSSNOTE.get(lang),
+            einleitung=REPORT_INTRO_CVE.get(lang),
+            active_total=report.active_total,
+            acknowledged_total=report.acknowledged_total,
+            new_total=report.new_total,
+            affected_devices=report.affected_devices,
+            hosts_total=report.hosts_total,
+            hosts_checked=report.hosts_checked,
+            coverage_text=coverage_text,
+            highest_severity=_sev_label(report.highest_severity, lang),
+            oldest_published_text=_fmt_published(report.oldest_published, lang),
+            severity_rows=severity_rows,
+            severity_labels=severity_labels,
+            device_rows=device_rows,
+            service_rows=service_rows,
+            finding_rows=finding_rows,
+            host_groups=_project_cve_host_groups(report, lang),
+        )
+
+    # ── CVE-Bericht: HTTP-Endpunkt-Runner (Muster _inventory_report, Regel 4/5) ──
+    # Ruft die Datenseite und PROJIZIERT CveReport auf die api-Wire-Form CveReportOut. Der
+    # coverage_text kommt NICHT aus report (dort leer) -- er wird hier am Root gebildet.
+    async def _cve_report() -> CveReportOut:
+        report = _build_cve_report_data()
+        # Der JSON-Endpunkt kennt keine Sprachwahl -> bewusst die deutsche Fassung ("de").
+        coverage = _cve_coverage_text(report.hosts_total, report.hosts_checked, "de")
+        return CveReportOut(
+            generated_findings_total=report.generated_findings_total,
+            active_total=report.active_total,
+            acknowledged_total=report.acknowledged_total,
+            new_total=report.new_total,
+            affected_devices=report.affected_devices,
+            hosts_total=report.hosts_total,
+            hosts_checked=report.hosts_checked,
+            coverage_text=coverage,
+            highest_severity=report.highest_severity,
+            oldest_published=report.oldest_published,
+            severity_counts=[
+                CveSeverityCountOut(severity=sc.severity, count=sc.count)
+                for sc in report.severity_counts
+            ],
+            device_rows=[
+                CveDeviceRowOut(
+                    device_label=r.device_label,
+                    mac=r.mac,
+                    finding_count=r.finding_count,
+                    highest_severity=r.highest_severity,
+                    highest_cvss=r.highest_cvss,
+                    services=r.services,
+                )
+                for r in report.device_rows
+            ],
+            service_rows=[
+                CveServiceRowOut(
+                    service=r.service,
+                    finding_count=r.finding_count,
+                    device_count=r.device_count,
+                    highest_severity=r.highest_severity,
+                    highest_cvss=r.highest_cvss,
+                    oldest_published=r.oldest_published,
+                )
+                for r in report.service_rows
+            ],
+            all_rows=[
+                CveFindingRowOut(
+                    device_label=r.device_label,
+                    mac=r.mac,
+                    cve_id=r.cve_id,
+                    severity=r.severity,
+                    cvss_score=r.cvss_score,
+                    service=r.service,
+                    port=r.port,
+                    first_seen_text=r.first_seen_text,
+                    first_seen_ts=r.first_seen_ts,
+                    published=r.published,
+                    acknowledged=r.acknowledged,
+                    is_new=r.is_new,
+                )
+                for r in report.all_rows
+            ],
+        )
+
+    # ── CVE-Bericht: PDF-Download-Runner (Muster _inventory_report_pdf, Regel 4/5) ──
+    # Ruft die Datenseite, liest die Wanduhr GENAU HIER (einziger Ort mit Uhr -- die Projektion
+    # _project_cve_pdf_model ist rein), projiziert auf das render-fertige CvePdfModel und rendert
+    # es ueber den zustandslosen ReportlabRenderer. Rueckgabe ein kleines lokales Ergebnis-Objekt.
+    @dataclass(frozen=True)
+    class _CvePdfResult:
+        content: bytes
+        media_type: str
+        filename: str
+
+    async def _cve_report_pdf(lang: str) -> _CvePdfResult:
+        # lang normalisieren: "en" bleibt, jeder andere Wert faellt auf "de" (Muster _manual_pdf).
+        normalized: Lang = "en" if lang == "en" else "de"
+        report = _build_cve_report_data()
+        # Wanduhr GENAU HIER lesen (einziger Ort) -- Projektion und Modell bleiben rein.
+        import time
+
+        now = time.time()
+        generated_at_text = format_generated_at(now, normalized)
+        coverage = _cve_coverage_text(report.hosts_total, report.hosts_checked, normalized)
+        model = _project_cve_pdf_model(report, generated_at_text, coverage, normalized)
+        pdf_bytes = ReportlabRenderer().render_cve_report_pdf(model, normalized)
+        datumsteil = format_datum_kurz(now, normalized)
+        name = "CVE-Report" if normalized == "en" else "CVE-Bericht"
+        return _CvePdfResult(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            filename=f"CERNISPRO_{name}_{datumsteil}.pdf",
+        )
+
+    # ── Aussenkontakte-Bericht (Etappe 2b): die Naht zu den Quell-Domaenen ──────────
+    # Regel 5: der Composition Root ist der EINZIGE Ort, der die Quell-Domaenen kennt und auf die
+    # neutralen Berichts-Zeilen PROJIZIERT. Quellen: die schon verdrahteten outbound_log-Repos
+    # (Aggregate je Aufzeichnung + Recording-Definitionen) und die blocklist-Naht (MatchContacts
+    # ueber den beiden blocklist-Repos, mit Strenge/Gruppen aus den Settings). Nichts Neues bauen.
+
+    # Neutrale is_local-Hilfe (lokale/Infrastruktur-Erkennung). S3: eine leere/ungueltige IP wird
+    # NICHT als lokal gewertet (sie bleibt sichtbar). IPv4-mapped IPv6 (::ffff:a.b.c.d) wird vor
+    # der Pruefung entpackt, damit die is_private-Logik auf der echten IPv4 greift.
+    def _ip_is_local(ip: str) -> bool:
+        if not ip:
+            return False
+        try:
+            adresse = ipaddress.ip_address(ip)
+        except ValueError:
+            return False
+        # IPv4-mapped IPv6 auf die eingebettete IPv4 reduzieren (sonst greift is_private nicht).
+        if isinstance(adresse, ipaddress.IPv6Address) and adresse.ipv4_mapped is not None:
+            adresse = adresse.ipv4_mapped
+        return (
+            adresse.is_private
+            or adresse.is_loopback
+            or adresse.is_link_local
+            or adresse.is_unspecified
+            or adresse.is_reserved
+        )
+
+    # Kanonische Form einer Gegenstellen-IP fuer die Gruppierung im Bericht. Eine IPv6-Adresse mit
+    # EINGEBETTETER IPv4 wird auf diese IPv4 reduziert -- sonst erscheint DIESELBE Gegenstelle
+    # zweimal (einmal als 1.2.3.4, einmal in IPv6-Schreibweise) und wird bei Gegenstellen/Laendern/
+    # Betreibern doppelt gezaehlt. Abgedeckt sind BEIDE Notationen:
+    #   * IPv4-MAPPED   ``::ffff:a.b.c.d`` -- ueber ``ipv4_mapped``.
+    #   * IPv4-COMPATIBLE ``::a.b.c.d``    -- ``ipv4_mapped`` liefert hier None; erkannt wird sie
+    #     daran, dass die oberen 96 Bit 0 sind (``int(adresse) <= 0xFFFFFFFF``). Diese Notation
+    #     stellt den Grossteil des Realbestands.
+    # AUSGENOMMEN bleiben ``::`` (unspecified, int 0) und ``::1`` (Loopback, int 1): das sind KEINE
+    # eingebetteten IPv4 und duerfen nicht zu 0.0.0.0/0.0.0.1 verfaelscht werden. Reine IPv4 sowie
+    # echte IPv6 (fe80::… link-local, 2xxx:… global) bleiben unveraendert -- S3: nichts
+    # stillschweigend umschreiben, was nicht sicher erkannt wurde.
+    def _canonical_remote_ip(ip: str) -> str:
+        if not ip:
+            return ip
+        try:
+            adresse = ipaddress.ip_address(ip)
+        except ValueError:
+            return ip
+        if isinstance(adresse, ipaddress.IPv6Address):
+            if adresse.ipv4_mapped is not None:
+                return str(adresse.ipv4_mapped)
+            roh = int(adresse)
+            if 1 < roh <= 0xFFFFFFFF:
+                return str(ipaddress.IPv4Address(roh))
+        return ip
+
+    # Verschmilzt zwei Aggregate EINER Gegenstelle zu einem: total_count summiert, peak_count
+    # maximal (Spitze EINES Zyklus), first_seen/last_seen min/max, Anreicherungsfelder behalten den
+    # ersten nicht-leeren Wert (vorhandener Wert hat Vorrang -- ein None/"" loescht nichts).
+    # ``key_ip`` ist die remote_ip des Ergebnisses; so nutzen der Alle-Merge (unveraenderte IP) und
+    # der kanonische Pass (kanonische IP) DIESELBE Regel ohne Code-Duplikat.
+    def _merge_aggregated(
+        vorhanden: AggregatedContact, neu: AggregatedContact, key_ip: str
+    ) -> AggregatedContact:
+        return AggregatedContact(
+            remote_ip=key_ip,
+            first_seen=min(vorhanden.first_seen, neu.first_seen),
+            last_seen=max(vorhanden.last_seen, neu.last_seen),
+            total_count=vorhanden.total_count + neu.total_count,
+            peak_count=max(vorhanden.peak_count, neu.peak_count),
+            remote_port=vorhanden.remote_port or neu.remote_port,
+            hostname=vorhanden.hostname or neu.hostname,
+            country=vorhanden.country or neu.country,
+            operator=vorhanden.operator or neu.operator,
+            asn=vorhanden.asn or neu.asn,
+            app_name=vorhanden.app_name or neu.app_name,
+        )
+
+    # Recordings-Runner fuer das Dropdown: die Recording-Definitionen auf die schlanke Wire-Form
+    # projizieren. Leer -> [] (ein ehrliches Datum, kein Fehler).
+    async def _outbound_report_recordings() -> list[OutboundReportRecordingOut]:
+        recordings = outbound_recording_repository().list_all()
+        return [
+            OutboundReportRecordingOut(id=rec.id, label=rec.label or rec.id) for rec in recordings
+        ]
+
+    # Verdichtet die rohen DETAIL-Messpunkte EINER Aufzeichnung auf dieselbe Form, die der
+    # AGGREGATE-Pfad liefert (``AggregatedContact`` je remote_ip). Noetig, weil die beiden
+    # Zeitmodi in GETRENNTE Tabellen schreiben (recorder.py: DETAIL -> outbound_log_detail,
+    # AGGREGATE -> outbound_log_aggregate) -- ohne diese Verdichtung bliebe jede
+    # Detail-Aufzeichnung im Bericht dauerhaft leer, obwohl die Daten vollstaendig vorliegen.
+    #
+    # Die Regel ist NICHT neu erfunden, sondern die des Schreibpfads (``domain.merge_contact``):
+    # ``total_count`` summiert die ``connection_count`` der Messpunkte, ``peak_count`` ist deren
+    # MAXIMUM (Spitze EINES Zyklus), ``first_seen``/``last_seen`` sind min/max der Messpunkt-``ts``.
+    # Die Anreicherungsfelder behalten den ersten nicht-leeren Wert -- identisch zum Alle-Fall
+    # unten, damit ein None/"" keinen bereits bekannten Wert loescht.
+    #
+    # Bewusst hier im Composition Root und NICHT in ``BuildOutboundReport``: der Use-Case bleibt
+    # quellen-agnostisch und bekommt weiterhin fertige Zeilen (Regel 4/5).
+    def _detail_to_aggregate(rows: list[OutboundDetailRow]) -> list[AggregatedContact]:
+        verdichtet: dict[str, AggregatedContact] = {}
+        for row in rows:
+            vorhanden = verdichtet.get(row.remote_ip)
+            if vorhanden is None:
+                verdichtet[row.remote_ip] = AggregatedContact(
+                    remote_ip=row.remote_ip,
+                    first_seen=row.ts,
+                    last_seen=row.ts,
+                    total_count=row.connection_count,
+                    peak_count=row.connection_count,
+                    remote_port=row.remote_port,
+                    hostname=row.hostname,
+                    country=row.country,
+                    operator=row.operator,
+                    asn=row.asn,
+                    app_name=row.app_name,
+                )
+                continue
+            verdichtet[row.remote_ip] = AggregatedContact(
+                remote_ip=vorhanden.remote_ip,
+                first_seen=min(vorhanden.first_seen, row.ts),
+                last_seen=max(vorhanden.last_seen, row.ts),
+                total_count=vorhanden.total_count + row.connection_count,
+                peak_count=max(vorhanden.peak_count, row.connection_count),
+                remote_port=vorhanden.remote_port or row.remote_port,
+                hostname=vorhanden.hostname or row.hostname,
+                country=vorhanden.country or row.country,
+                operator=vorhanden.operator or row.operator,
+                asn=vorhanden.asn or row.asn,
+                app_name=vorhanden.app_name or row.app_name,
+            )
+        return list(verdichtet.values())
+
+    # Waehlt die QUELLE einer Aufzeichnung anhand ihres Zeitmodus und liefert in BEIDEN Faellen
+    # dieselbe Form (``AggregatedContact``-Liste). Der Modus bestimmt nur, WOHER gelesen wird --
+    # nicht, wie das Ergebnis aussieht.
+    #
+    # KEIN stiller Fallback (S3): liefert die zum Modus gehoerende Quelle nichts, bleibt das
+    # Ergebnis ehrlich leer. Es wird NIEMALS ersatzweise die andere Tabelle gelesen -- das wuerde
+    # Zahlen aus einem fremden Erfassungsmodus vortaeuschen.
+    #
+    # ``until`` ist ein absoluter ts vom Aufrufer (die Repos bleiben uhrfrei); ``since=0.0``
+    # bedeutet "von Anfang an" -- exakt das Muster des DNS-Umgehungs-Berichts im selben
+    # Composition Root (``detail_repo.range(rec.id, 0.0, until)``).
+    def _outbound_source_for(rec: OutboundRecording, until: float) -> list[AggregatedContact]:
+        if rec.mode is RecordingMode.DETAIL:
+            return _detail_to_aggregate(outbound_detail_repository().range(rec.id, 0.0, until))
+        return list(outbound_aggregate_repository().list_for(rec.id))
+
+    # ── Aussenkontakte-Bericht: Datenseite (Muster _build_cve_report_data, Regel 4/5) ──
+    # Liest die Kontakte EINER Aufzeichnung oder aller gemergt -- je Aufzeichnung aus der zu ihrem
+    # Zeitmodus passenden Quelle --, bewertet sie gegen die Blocklisten und projiziert auf die
+    # neutralen Berichts-Zeilen. Die Datums-Texte je Zeile sind reine Formatierung der vorhandenen
+    # first_seen/last_seen (Muster _to_row im CVE-Bericht). Die Uhr wird NUR fuer die obere
+    # Fenstergrenze der DETAIL-Abfrage gebraucht (Muster _build_dns_bypass_report_data).
+    # MatchContacts ist sync; die Datenseite kann sync bleiben.
+    def _build_outbound_report_data(recording_id: str | None) -> OutboundReport:
+        import time
+
+        until = time.time()
+
+        # (1) Bezugsrahmen bestimmen + Kontakte je Aufzeichnung aus der passenden Quelle sammeln.
+        if recording_id:
+            # Nur DIESE Aufzeichnung. Label aus der Recording-Definition (auf id zurueckfallen).
+            rec = outbound_recording_repository().get(recording_id)
+            recording_label = (rec.label if rec is not None else "") or recording_id
+            recording_scope = "single"
+            # Unbekannte Aufzeichnung -> ehrlich leer (kein Raten ueber die Quelle).
+            aggregate = [] if rec is None else _outbound_source_for(rec, until)
+        else:
+            # ALLE Aufzeichnungen zusammengefasst. Der Rand/PDF setzt die "Alle Aufzeichnungen"-
+            # Anzeige -> recording_label hier bewusst leer, recording_scope = "all".
+            recording_label = ""
+            recording_scope = "all"
+            # Je remote_ip zu EINER Zeile mergen: total_count summieren, peak_count max, first_seen
+            # min, last_seen max, Anreicherungsfelder ersten nicht-leeren Wert behalten. Eine
+            # simple lokale Merge-Schleife genuegt (KEINE domain.merge_contact -- das ist der
+            # Schreibpfad; hier wird nur gelesen/zusammengefasst).
+            gemergt: dict[str, AggregatedContact] = {}
+            for rec in outbound_recording_repository().list_all():
+                # Je Aufzeichnung die zu IHREM Modus passende Quelle -- gemischte Bestaende aus
+                # DETAIL- und AGGREGATE-Laeufen laufen so korrekt in denselben Merge zusammen.
+                for a in _outbound_source_for(rec, until):
+                    vorhanden = gemergt.get(a.remote_ip)
+                    if vorhanden is None:
+                        gemergt[a.remote_ip] = a
+                        continue
+                    # Anreicherung: ersten nicht-leeren Wert behalten (vorhandener Wert hat
+                    # Vorrang, sonst der neue -- ein None/"" loescht keinen Bestandswert).
+                    gemergt[a.remote_ip] = _merge_aggregated(vorhanden, a, vorhanden.remote_ip)
+            aggregate = list(gemergt.values())
+
+        # (1b) Kanonischer Zusammenfuehr-Pass -- gilt fuer BEIDE Zweige (der Alle-Merge oben
+        # gruppiert auf der ROHEN remote_ip, der Einzel-Zweig merged gar nicht). 1.2.3.4 und
+        # ::ffff:1.2.3.4 sind dieselbe Gegenstelle und werden hier zu EINER Zeile. Iteration in
+        # bestehender Reihenfolge, dict bewahrt die Einfuegereihenfolge -> deterministisch.
+        kanonisch: dict[str, AggregatedContact] = {}
+        for a in aggregate:
+            key_ip = _canonical_remote_ip(a.remote_ip)
+            vorhanden = kanonisch.get(key_ip)
+            if vorhanden is None:
+                kanonisch[key_ip] = a if a.remote_ip == key_ip else replace(a, remote_ip=key_ip)
+                continue
+            kanonisch[key_ip] = _merge_aggregated(vorhanden, a, key_ip)
+        aggregate = list(kanonisch.values())
+
+        # (2) Blocklist-Bewertung ueber MatchContacts (Ergebnis in EINGABE-Reihenfolge -> per
+        # Index zuordnen). Strenge/Gruppen kommen aus den Settings (wie im _blocklist_match-Pfad).
+        contacts = [ContactInput(remote_ip=a.remote_ip, hostname=a.hostname) for a in aggregate]
+        match_results = MatchContacts(blocklist_source_repository(), blocklist_entry_repository())(
+            contacts, _read_blocklist_strictness(), _blocklist_enabled_groups()
+        )
+
+        # (3) Projektion je Aggregat -> OutboundContactRow (mit der Bewertung aus Schritt 2).
+        rows: list[OutboundContactRow] = []
+        for index, a in enumerate(aggregate):
+            result = match_results[index]
+            # Treffer nach Gruppe trennen, source_name dedupliziert + sortiert (als Tuple).
+            tracker_lists = tuple(
+                sorted(
+                    {m.source_name for m in result.matches if m.group == BlocklistGroup.TRACKER_ADS}
+                )
+            )
+            threat_lists = tuple(
+                sorted({m.source_name for m in result.matches if m.group == BlocklistGroup.THREAT})
+            )
+            rows.append(
+                OutboundContactRow(
+                    remote_ip=a.remote_ip,
+                    hostname=a.hostname or "",
+                    country=a.country or "",
+                    operator=a.operator or "",
+                    asn=a.asn or "",
+                    app_name=a.app_name or "",
+                    # Datums-Texte: reine Formatierung der vorhandenen ts (keine Wanduhr) --
+                    # SPIEGELT die Bestands-/CVE-Formatierung ("%d.%m.%Y %H:%M").
+                    first_seen_text=datetime.fromtimestamp(a.first_seen).strftime("%d.%m.%Y %H:%M"),
+                    last_seen_text=datetime.fromtimestamp(a.last_seen).strftime("%d.%m.%Y %H:%M"),
+                    first_seen_ts=a.first_seen,
+                    last_seen_ts=a.last_seen,
+                    total_count=a.total_count,
+                    peak_count=a.peak_count,
+                    is_local=_ip_is_local(a.remote_ip),
+                    tracker_lists=tracker_lists,
+                    threat_lists=threat_lists,
+                )
+            )
+
+        # (4)+(5) Bezugsrahmen-Kennzahlen setzen + ueber den reinen Use-Case aggregieren.
+        status = OutboundReportInput(
+            recording_label=recording_label, recording_scope=recording_scope
+        )
+        return BuildOutboundReport()(status=status, rows=rows)
+
+    # ── Aussenkontakte-Bericht: HTTP-Endpunkt-Runner (Muster _cve_report, Regel 4/5) ──
+    async def _outbound_report(recording_id: str | None = None) -> OutboundReportOut:
+        report = _build_outbound_report_data(recording_id)
+        return OutboundReportOut(
+            recording_label=report.recording_label,
+            recording_scope=report.recording_scope,
+            contacts_total=report.contacts_total,
+            remote_total=report.remote_total,
+            local_total=report.local_total,
+            connection_total=report.connection_total,
+            countries_total=report.countries_total,
+            operators_total=report.operators_total,
+            tracker_contacts=report.tracker_contacts,
+            threat_contacts=report.threat_contacts,
+            flagged_contacts=report.flagged_contacts,
+            country_distribution=[
+                OutboundCountryOut(country=c.country, count=c.count)
+                for c in report.country_distribution
+            ],
+            operator_distribution=[
+                OutboundOperatorOut(operator=o.operator, count=o.count)
+                for o in report.operator_distribution
+            ],
+            contact_rows=[
+                OutboundContactRowOut(
+                    remote_ip=r.remote_ip,
+                    hostname=r.hostname,
+                    country=r.country,
+                    operator=r.operator,
+                    asn=r.asn,
+                    app_name=r.app_name,
+                    first_seen_text=r.first_seen_text,
+                    last_seen_text=r.last_seen_text,
+                    first_seen_ts=r.first_seen_ts,
+                    last_seen_ts=r.last_seen_ts,
+                    total_count=r.total_count,
+                    peak_count=r.peak_count,
+                    is_local=r.is_local,
+                    tracker_lists=list(r.tracker_lists),
+                    threat_lists=list(r.threat_lists),
+                )
+                for r in report.contact_rows
+            ],
+        )
+
+    # ── Aussenkontakte-Bericht: PDF-Projektion + Download-Runner (Muster _cve_report_pdf) ──
+    # Die Bezugsrahmen-Zeile + das "Alle Aufzeichnungen"-Label werden HIER (am Rand) lokalisiert;
+    # die reine Aggregation bleibt sprach-/anzeigefrei. Die Bewertungs-Spalte je Zeile wird hier
+    # zu fertigem Text (Threat hat Vorrang in der Anzeige).
+    def _project_outbound_pdf_model(
+        report: OutboundReport, generated_at_text: str, lang: Lang = "de"
+    ) -> OutboundPdfModel:
+        # (E3c) Bezugsrahmen zweisprachig: de unveraendert (deutsche Anfuehrungszeichen),
+        # en mit geraden doppelten Anfuehrungszeichen. Der Roh-Schluessel ``recording_scope``
+        # bleibt unangetastet -- nur der Anzeigetext wird uebersetzt.
+        ist_einzeln = report.recording_scope == "single" and bool(report.recording_label)
+        if ist_einzeln:
+            if lang == "de":
+                scope_text = f"Bezug: Aufzeichnung „{report.recording_label}“"
+            else:
+                scope_text = f'Scope: recording "{report.recording_label}"'
+            recording_label_display = report.recording_label
+        elif lang == "de":
+            scope_text = "Bezug: Alle Aufzeichnungen"
+            recording_label_display = "Alle Aufzeichnungen"
+        else:
+            scope_text = "Scope: All recordings"
+            recording_label_display = "All recordings"
+
+        def _bewertung(row: OutboundContactRow, lang: Lang = "de") -> str:
+            # Threat hat Vorrang in der Anzeige; sonst Tracker; sonst "-".
+            if row.threat_lists:
+                praefix = "Bedrohung: " if lang == "de" else "Threat: "
+                return praefix + ", ".join(row.threat_lists)
+            if row.tracker_lists:
+                return "Tracker: " + ", ".join(row.tracker_lists)
+            return "-"
+
+        # Lokale/Infrastruktur-Gegenstellen bleiben in der Liste sichtbar, werden aber in der
+        # Gegenstellen-Spalte als solche gekennzeichnet -- sonst stehen sie ununterscheidbar
+        # zwischen den echten Aussenkontakten. Reine Anzeige (Achse B: einordnen, nicht urteilen);
+        # die Kennzahlen (remote_total/local_total) bleiben davon unberuehrt.
+        lokal_marke = " (lokal)" if lang == "de" else " (local)"
+
+        country_rows = tuple((c.country, str(c.count)) for c in report.country_distribution)
+        operator_rows = tuple((o.operator, str(o.count)) for o in report.operator_distribution)
+        # Spalten-Reihenfolge: Gegenstelle, Name, Land, Betreiber, Kontakte, Bewertung.
+        contact_rows = tuple(
+            (
+                r.remote_ip + (lokal_marke if r.is_local else ""),
+                r.hostname or "—",
+                r.country or "—",
+                r.operator or "—",
+                str(r.total_count),
+                _bewertung(r, lang),
+            )
+            for r in report.contact_rows
+        )
+        return OutboundPdfModel(
+            title=REPORT_TITLE_OUTBOUND.get(lang),
+            generated_at_text=generated_at_text,
+            footer_left=REPORT_FOOTER_OUTBOUND.get(lang),
+            achse_b_fussnote=ACHSE_B_FUSSNOTE.get(lang),
+            einleitung=REPORT_INTRO_OUTBOUND.get(lang),
+            recording_label=recording_label_display,
+            scope_text=scope_text,
+            contacts_total=report.contacts_total,
+            remote_total=report.remote_total,
+            local_total=report.local_total,
+            connection_total=report.connection_total,
+            countries_total=report.countries_total,
+            operators_total=report.operators_total,
+            tracker_contacts=report.tracker_contacts,
+            threat_contacts=report.threat_contacts,
+            flagged_contacts=report.flagged_contacts,
+            country_rows=country_rows,
+            operator_rows=operator_rows,
+            contact_rows=contact_rows,
+        )
+
+    @dataclass(frozen=True)
+    class _OutboundPdfResult:
+        content: bytes
+        media_type: str
+        filename: str
+
+    async def _outbound_report_pdf(
+        recording_id: str | None = None, lang: str = "de"
+    ) -> _OutboundPdfResult:
+        # lang normalisieren: "en" bleibt, jeder andere Wert faellt auf "de" (Muster _manual_pdf).
+        normalized: Lang = "en" if lang == "en" else "de"
+        report = _build_outbound_report_data(recording_id)
+        # Wanduhr GENAU HIER lesen (einziger Ort) -- Projektion und Modell bleiben rein.
+        import time
+
+        now = time.time()
+        generated_at_text = format_generated_at(now, normalized)
+        datumsteil = format_datum_kurz(now, normalized)
+        model = _project_outbound_pdf_model(report, generated_at_text, normalized)
+        pdf_bytes = ReportlabRenderer().render_outbound_report_pdf(model, normalized)
+        name = (
+            "Network-External-Contacts-Report"
+            if normalized == "en"
+            else "Netzwerk-Aussenkontakte-Bericht"
+        )
+        return _OutboundPdfResult(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            filename=f"CERNISPRO_{name}_{datumsteil}.pdf",
+        )
+
+    # ── DNS-Waechter-Bericht: Datenseite (Muster _build_outbound_report_data, Regel 4/5) ──
+    # ASYNC, weil die schon verdrahtete Live-Naht _dns_watch() async ist -- sie wird hier
+    # WIEDERVERWENDET (NICHT neu verdrahtet; genau wie der Sicherheitsbericht "await _dns_watch()"
+    # ruft). Aus der Overview-Sicht werden die neutralen Berichts-Zeilen + Rahmen-Angaben
+    # projiziert; die reine Aggregation macht danach der Use-Case. KEINE Uhr hier.
+    async def _build_dns_watch_report_data() -> DnsWatchReport:
+        overview = await _dns_watch()
+        rows = [
+            DnsWatchContactRow(
+                remote_ip=c.remote_ip,
+                hostname=c.hostname or "",
+                category=c.category,
+                app_name=c.app_name or "",
+                port=c.remote_port or 0,
+                connection_count=c.connection_count,
+                acknowledged=c.acknowledged,
+            )
+            for c in overview.contacts
+        ]
+        status = DnsWatchReportInput(
+            host_scope=overview.host_scope,
+            expected_servers=tuple(overview.expected_servers),
+            doh_providers=tuple(overview.doh_providers),
+        )
+        return BuildDnsWatchReport()(status=status, rows=rows)
+
+    # ── DNS-Waechter-Bericht: HTTP-Endpunkt-Runner (Muster _outbound_report, Regel 4/5) ──
+    async def _dns_watch_report() -> DnsWatchReportOut:
+        report = await _build_dns_watch_report_data()
+        return DnsWatchReportOut(
+            host_scope=report.host_scope,
+            expected_servers=list(report.expected_servers),
+            doh_providers=list(report.doh_providers),
+            contacts_total=report.contacts_total,
+            active_total=report.active_total,
+            acknowledged_total=report.acknowledged_total,
+            expected_active=report.expected_active,
+            open_active=report.open_active,
+            doh_active=report.doh_active,
+            flagged_active=report.flagged_active,
+            category_distribution=[
+                DnsCategoryCountOut(category=c.category, count=c.count)
+                for c in report.category_distribution
+            ],
+            app_distribution=[
+                DnsAppCountOut(app_name=a.app_name, count=a.count) for a in report.app_distribution
+            ],
+            contact_rows=[
+                DnsWatchContactRowOut(
+                    remote_ip=r.remote_ip,
+                    hostname=r.hostname,
+                    category=r.category,
+                    app_name=r.app_name,
+                    port=r.port,
+                    connection_count=r.connection_count,
+                    acknowledged=r.acknowledged,
+                )
+                for r in report.contact_rows
+            ],
+        )
+
+    # ── DNS-Waechter-Bericht: PDF-Projektion + Download-Runner (Muster _project_outbound_pdf_model)
+    # Die Anzeige-Texte (Kategorie-Labels, die beiden Rahmen-Zeilen) werden HIER (am Rand)
+    # lokalisiert -- ECHTE Umlaute; die reine Aggregation bleibt sprach-/anzeigefrei.
+    def _project_dns_watch_pdf_model(
+        report: DnsWatchReport, generated_at_text: str, lang: Lang = "de"
+    ) -> DnsWatchPdfModel:
+        # (E3c) Kategorie-ANZEIGE-Labels je Sprache (roher Schluessel -> Text). Der rohe
+        # Schluessel bleibt der technische Schluessel; unbekannte Schluessel bleiben roh.
+        kategorie_labels = (
+            {
+                "offen": "Offen (fremder Resolver)",
+                "moegliche_doh": "Möglicher DoH",
+                "erwartungsgemaess": "Erwartungsgemäß",
+            }
+            if lang == "de"
+            else {
+                "offen": "Open (foreign resolver)",
+                "moegliche_doh": "Possible DoH",
+                "erwartungsgemaess": "As expected",
+            }
+        )
+
+        def _label(schluessel: str) -> str:
+            return kategorie_labels.get(schluessel, schluessel)
+
+        if lang == "de":
+            expected_text = "Erwartete DNS-Server: " + (
+                ", ".join(report.expected_servers) if report.expected_servers else "(keine)"
+            )
+            doh_text = "Bekannte DoH-Anbieter: " + (
+                ", ".join(report.doh_providers) if report.doh_providers else "(keine)"
+            )
+        else:
+            expected_text = "Expected DNS servers: " + (
+                ", ".join(report.expected_servers) if report.expected_servers else "(none)"
+            )
+            doh_text = "Known DoH providers: " + (
+                ", ".join(report.doh_providers) if report.doh_providers else "(none)"
+            )
+
+        category_rows = tuple(
+            (_label(x.category), str(x.count)) for x in report.category_distribution
+        )
+        app_rows = tuple((x.app_name or "—", str(x.count)) for x in report.app_distribution)
+        # Spalten-Reihenfolge: Kategorie, Gegenstelle, Name, Programm, Kontakte, Status.
+        contact_rows = tuple(
+            (
+                _label(r.category),
+                r.remote_ip,
+                r.hostname or "—",
+                r.app_name or "—",
+                str(r.connection_count),
+                (
+                    ("Quittiert" if r.acknowledged else "Aktiv")
+                    if lang == "de"
+                    else ("Acknowledged" if r.acknowledged else "Active")
+                ),
+            )
+            for r in report.contact_rows
+        )
+        return DnsWatchPdfModel(
+            title=REPORT_TITLE_DNS_WATCH.get(lang),
+            generated_at_text=generated_at_text,
+            footer_left=REPORT_FOOTER_DNS_WATCH.get(lang),
+            achse_b_fussnote=ACHSE_B_FUSSNOTE.get(lang),
+            einleitung=REPORT_INTRO_DNS_WATCH.get(lang),
+            scope_text=(
+                "Sicht: nur dieser Rechner (nicht netzweit)"
+                if lang == "de"
+                else "View: this computer only (not network-wide)"
+            ),
+            expected_text=expected_text,
+            doh_text=doh_text,
+            contacts_total=report.contacts_total,
+            active_total=report.active_total,
+            acknowledged_total=report.acknowledged_total,
+            expected_active=report.expected_active,
+            open_active=report.open_active,
+            doh_active=report.doh_active,
+            flagged_active=report.flagged_active,
+            category_rows=category_rows,
+            app_rows=app_rows,
+            contact_rows=contact_rows,
+        )
+
+    @dataclass(frozen=True)
+    class _DnsWatchPdfResult:
+        content: bytes
+        media_type: str
+        filename: str
+
+    async def _dns_watch_report_pdf(lang: str) -> _DnsWatchPdfResult:
+        # lang normalisieren: "en" bleibt, jeder andere Wert faellt auf "de" (Muster _manual_pdf).
+        normalized: Lang = "en" if lang == "en" else "de"
+        report = await _build_dns_watch_report_data()
+        # Wanduhr GENAU HIER lesen (einziger Ort) -- Projektion und Modell bleiben rein.
+        import time
+
+        now = time.time()
+        generated_at_text = format_generated_at(now, normalized)
+        datumsteil = format_datum_kurz(now, normalized)
+        model = _project_dns_watch_pdf_model(report, generated_at_text, normalized)
+        pdf_bytes = ReportlabRenderer().render_dns_watch_report_pdf(model, normalized)
+        name = "DNS-Watch-Report" if normalized == "en" else "DNS-Waechter-Bericht"
+        return _DnsWatchPdfResult(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            filename=f"CERNISPRO_{name}_{datumsteil}.pdf",
+        )
+
+    # ── DNS-Umgehungs-Bericht (Etappe 5): die Naht zu den PERSISTENTEN Umgehungs-Laeufen ──
+    # NEUER, EIGENER Bericht NEBEN dem host-lokalen _dns_watch_report (der bleibt UNANGETASTET,
+    # ehrlich getrennt -- ADR 0042). Muster _build_outbound_report_data (Bezugsrahmen-Wahl EINE
+    # Aufzeichnung ODER alle) -- aber gegen die dns_bypass-Repos (Etappe 3). Regel 5: die
+    # Anreicherung (device_name ueber _dns_bypass_name_by_ip, is_doh/doh_source_name ueber
+    # _dns_bypass_doh_lookup) faellt HIER -- DIESELBEN Nahtstellen wie im Live-View
+    # _dns_bypass_view. expected_servers als Beleg: bei "single" die eingefrorene Menge der
+    # Aufzeichnung (gegen die beim Schreiben klassifiziert wurde), bei "all" die AKTUELL
+    # erwartete Menge = TRUSTED-Menge (ADR 0043, E4, wie im Live-View) -- dokumentierte,
+    # ehrliche Wahl.
+
+    # Recordings-Runner fuers Dropdown: die Aufzeichnungs-Definitionen auf die schlanke
+    # Wire-Form projizieren. Leer -> [] (ein ehrliches Datum, kein Fehler).
+    async def _dns_bypass_report_recordings() -> list[DnsBypassReportRecordingOut]:
+        recordings = dns_bypass_recording_repository().list_all()
+        return [
+            DnsBypassReportRecordingOut(id=rec.id, label=rec.label or rec.id) for rec in recordings
+        ]
+
+    async def _build_dns_bypass_report_data(recording_id: str | None) -> DnsBypassReport:
+        # ASYNC, weil die Anreicherung (Resolver-Namen ueber PTR, is_doh) unten await braucht
+        # -- DIESELBE Naht wie im Live-View _dns_bypass_view. Die aktuell erwartete Menge bei
+        # "all" kommt jetzt SYNCHRON aus der TRUSTED-Menge (ADR 0043, E4).
+        import time
+
+        recordings_repo = dns_bypass_recording_repository()
+        aggregate_repo = dns_bypass_aggregate_repository()
+        detail_repo = dns_bypass_detail_repository()
+        until = time.time()
+
+        # (1) Bezugsrahmen bestimmen + Aggregate/queries_total/expected_servers sammeln.
+        if recording_id:
+            # Nur DIESE Aufzeichnung. Label aus der Definition (auf id zurueckfallen), Aggregate
+            # + DETAIL-Zaehler des Laufs, expected_servers = eingefrorener Beleg der Aufzeichnung.
+            rec = recordings_repo.get(recording_id)
+            recording_label = (rec.label if rec is not None else "") or recording_id
+            recording_scope = "single"
+            aggregates = list(aggregate_repo.list_for(recording_id))
+            queries_total = len(detail_repo.range(recording_id, 0.0, until))
+            expected_servers = tuple(rec.expected_servers) if rec is not None else ()
+        else:
+            # ALLE Aufzeichnungen zusammengefasst. Der Rand/PDF setzt die "Alle Aufzeichnungen"-
+            # Anzeige -> recording_label hier bewusst leer, recording_scope = "all". Je
+            # (src_ip, dst_ip) ueber alle Laeufe mergen: query_count summieren, first_seen min,
+            # last_seen max, sample_qnames distinct bis Deckel. queries_total = Summe der
+            # DETAIL-Zeilen aller Laeufe. expected_servers = AKTUELL erwartete Menge =
+            # TRUSTED-Menge (ADR 0043, E4, wie der Live-View sie fuer die Anzeige bildet).
+            recording_label = ""
+            recording_scope = "all"
+            gemergt: dict[tuple[str, str], AggregatedBypass] = {}
+            queries_total = 0
+            for rec in recordings_repo.list_all():
+                queries_total += len(detail_repo.range(rec.id, 0.0, until))
+                for a in aggregate_repo.list_for(rec.id):
+                    key = (a.src_ip, a.dst_ip)
+                    vorhanden = gemergt.get(key)
+                    if vorhanden is None:
+                        gemergt[key] = a
+                        continue
+                    # sample_qnames distinct zusammenfuehren, Deckel 5 (Muster Domaene).
+                    zusammen = list(vorhanden.sample_qnames)
+                    for qname in a.sample_qnames:
+                        if qname and qname not in zusammen and len(zusammen) < 5:
+                            zusammen.append(qname)
+                    gemergt[key] = AggregatedBypass(
+                        src_ip=vorhanden.src_ip,
+                        dst_ip=vorhanden.dst_ip,
+                        first_seen=min(vorhanden.first_seen, a.first_seen),
+                        last_seen=max(vorhanden.last_seen, a.last_seen),
+                        query_count=vorhanden.query_count + a.query_count,
+                        sample_qnames=tuple(zusammen),
+                    )
+            aggregates = list(gemergt.values())
+            # expected_servers = AKTUELL erwartete Menge = TRUSTED-Menge (ADR 0043, E4 --
+            # DIESELBE Quelle wie Recorder/Live-View/host-lokaler Waechter, FRISCH gelesen
+            # und deterministisch geordnet).
+            expected_servers = tuple(_dns_trust_expected_servers())
+
+        # (2) Anreicherung (Regel 5, faellt NUR hier): Geraete-Namens-Map einmal, DoH-Bewertung
+        # je Aggregat ueber die eigene Lookup-Naht (Ziel-IP + best-effort erstes sample_qname) --
+        # DIESELBEN Nahtstellen wie im Live-View _dns_bypass_view.
+        devices = GetDevices(device_repository())(known_only=False)
+        name_by_ip = _dns_bypass_name_by_ip(devices)
+        # IPs der eigenen Hosts (source=SELF) -- DIESELBE Naht wie im Live-View
+        # _dns_bypass_view, damit der Bericht die Zeile des eigenen Rechners markieren kann.
+        self_ips = _dns_bypass_self_ips(devices)
+        # Ziel-Resolver-Namen einmal best-effort aufloesen (Bestand > bekannte Resolver >
+        # PTR) -- DIESELBE Naht wie im Live-View _dns_bypass_view.
+        resolver_names = await _dns_bypass_resolver_names(
+            {agg.dst_ip for agg in aggregates}, name_by_ip
+        )
+        sources = blocklist_source_repository()
+        entries = blocklist_entry_repository()
+
+        rows: list[DnsBypassReportRow] = []
+        for agg in aggregates:
+            qname = agg.sample_qnames[0] if agg.sample_qnames else ""
+            is_doh, doh_source_name = _dns_bypass_doh_lookup(sources, entries, agg.dst_ip, qname)
+            rows.append(
+                DnsBypassReportRow(
+                    src_ip=agg.src_ip,
+                    # "" statt None (der Bericht traegt Leerstring, Muster outbound-Bericht).
+                    device_name=name_by_ip.get(agg.src_ip, "") or "",
+                    dst_ip=agg.dst_ip,
+                    resolver_name=resolver_names.get(agg.dst_ip, ""),
+                    is_doh=is_doh,
+                    doh_source_name=doh_source_name or "",
+                    query_count=agg.query_count,
+                    sample_qnames=tuple(agg.sample_qnames),
+                    is_self=agg.src_ip in self_ips,
+                )
+            )
+
+        # (3) Bezugsrahmen-Kennzahlen setzen + ueber die reine Funktion aggregieren.
+        status = DnsBypassReportInput(
+            recording_label=recording_label,
+            recording_scope=recording_scope,
+            expected_servers=expected_servers,
+        )
+        return build_dns_bypass_report(status, rows, queries_total)
+
+    async def _dns_bypass_report(recording_id: str | None = None) -> DnsBypassReportOut:
+        report = await _build_dns_bypass_report_data(recording_id)
+        return DnsBypassReportOut(
+            recording_label=report.recording_label,
+            recording_scope=report.recording_scope,
+            expected_servers=list(report.expected_servers),
+            queries_total=report.queries_total,
+            bypass_total=report.bypass_total,
+            expected_total=report.expected_total,
+            bypass_devices=report.bypass_devices,
+            resolver_distribution=[
+                DnsBypassResolverOut(dst_ip=r.dst_ip, count=r.count, resolver_name=r.resolver_name)
+                for r in report.resolver_distribution
+            ],
+            bypass_rows=[
+                DnsBypassReportRowOut(
+                    src_ip=r.src_ip,
+                    device_name=r.device_name,
+                    is_self=r.is_self,
+                    dst_ip=r.dst_ip,
+                    resolver_name=r.resolver_name,
+                    is_doh=r.is_doh,
+                    doh_source_name=r.doh_source_name,
+                    query_count=r.query_count,
+                    sample_qnames=list(r.sample_qnames),
+                )
+                for r in report.bypass_rows
+            ],
+        )
+
+    # ── DNS-Umgehungs-Bericht: PDF-Projektion + Download-Runner (Muster _project_outbound_pdf) ──
+    # Die Bezugsrahmen-Zeile + das "Alle Aufzeichnungen"-Label + die erwartete-Server-Zeile werden
+    # HIER (am Rand) lokalisiert; die reine Aggregation bleibt sprach-/anzeigefrei.
+    def _project_dns_bypass_pdf_model(
+        report: DnsBypassReport, generated_at_text: str, lang: Lang = "de"
+    ) -> DnsBypassPdfModel:
+        # (E3c) Bezugsrahmen + erwartete-Server-Zeile zweisprachig (Muster
+        # _project_outbound_pdf_model): de unveraendert, en mit geraden Anfuehrungszeichen.
+        # Der Roh-Schluessel ``recording_scope`` bleibt unangetastet.
+        ist_einzeln = report.recording_scope == "single" and bool(report.recording_label)
+        if ist_einzeln:
+            if lang == "de":
+                scope_text = f"Bezug: Aufzeichnung „{report.recording_label}“"
+            else:
+                scope_text = f'Scope: recording "{report.recording_label}"'
+            recording_label_display = report.recording_label
+        elif lang == "de":
+            scope_text = "Bezug: Alle Aufzeichnungen"
+            recording_label_display = "Alle Aufzeichnungen"
+        else:
+            scope_text = "Scope: All recordings"
+            recording_label_display = "All recordings"
+
+        if lang == "de":
+            expected_text = "Erwartete DNS-Server: " + (
+                ", ".join(report.expected_servers) if report.expected_servers else "(keine)"
+            )
+        else:
+            expected_text = "Expected DNS servers: " + (
+                ", ".join(report.expected_servers) if report.expected_servers else "(none)"
+            )
+
+        # Ziel-Resolver-Zelle: bekannter Name als Haupttext, rohe IP dezent dahinter
+        # (der Name ist Beigabe, die IP bleibt sichtbar). Fehlt der Name -> nur die IP.
+        def _resolver_zelle(resolver_name: str, dst_ip: str) -> str:
+            return f"{resolver_name} ({dst_ip})" if resolver_name else dst_ip
+
+        # Verteilungs-Grafik (Variante C): strukturiert (Name, IP, Anzahl), damit der
+        # Adapter Balken + Legende zeichnet -- die ALLEINIGE Verteilungs-Darstellung (die
+        # frueher zusaetzliche Tabelle "Verteilung nach Ziel-Resolver" war redundant, entfernt).
+        resolver_distribution = tuple(
+            (r.resolver_name, r.dst_ip, r.count) for r in report.resolver_distribution
+        )
+
+        # Geraet-Zelle (Regel 5, fertige Projektion): beim eigenen Host (is_self) ZWEIZEILIG --
+        # Hostname oben, die Kennzeichnung "Dieser Rechner" dezent darunter (durch ein einzelnes
+        # "\n" getrennt; der Adapter rendert die zweite Zeile gedaempft). Faellt der Name leer,
+        # dient die Quell-IP als Name-Zeile (nie der Leer-Marker fuer den eigenen Host). Bei
+        # Nicht-Self bleibt es einzeilig (Name, sonst Leer-Marker) -- unveraendert.
+        def _geraet_zelle(device_name: str, src_ip: str, is_self: bool, lang: Lang = "de") -> str:
+            if is_self:
+                zusatz = "Dieser Rechner" if lang == "de" else "This computer"
+                return f"{device_name or src_ip}\n{zusatz}"
+            return device_name or "—"
+
+        # Spalten-Reihenfolge: Geraet, Quell-IP, Ziel-Resolver, DoH, Anfragen, Abgefragte Namen.
+        # DoH-Spalte im PDF kurz: "Bekannt" bei Treffer, sonst der Leer-Marker. Ziel-Resolver wie
+        # in der Verteilung (Name + IP).
+        bypass_rows = tuple(
+            (
+                _geraet_zelle(r.device_name, r.src_ip, r.is_self, lang),
+                r.src_ip,
+                _resolver_zelle(r.resolver_name, r.dst_ip),
+                ("Bekannt" if lang == "de" else "Known") if r.is_doh else "—",
+                str(r.query_count),
+                ", ".join(r.sample_qnames) if r.sample_qnames else "—",
+            )
+            for r in report.bypass_rows
+        )
+        return DnsBypassPdfModel(
+            title=REPORT_TITLE_DNS_BYPASS.get(lang),
+            generated_at_text=generated_at_text,
+            footer_left=REPORT_FOOTER_DNS_BYPASS.get(lang),
+            achse_b_fussnote=ACHSE_B_FUSSNOTE.get(lang),
+            einleitung=REPORT_INTRO_DNS_BYPASS.get(lang),
+            recording_label=recording_label_display,
+            scope_text=scope_text,
+            expected_text=expected_text,
+            queries_total=report.queries_total,
+            bypass_total=report.bypass_total,
+            expected_total=report.expected_total,
+            bypass_devices=report.bypass_devices,
+            resolver_distribution=resolver_distribution,
+            bypass_rows=bypass_rows,
+        )
+
+    @dataclass(frozen=True)
+    class _DnsBypassPdfResult:
+        content: bytes
+        media_type: str
+        filename: str
+
+    async def _dns_bypass_report_pdf(
+        recording_id: str | None = None, lang: str = "de"
+    ) -> _DnsBypassPdfResult:
+        # lang normalisieren: "en" bleibt, jeder andere Wert faellt auf "de" (Muster _manual_pdf).
+        normalized: Lang = "en" if lang == "en" else "de"
+        report = await _build_dns_bypass_report_data(recording_id)
+        # Wanduhr GENAU HIER lesen (einziger Ort) -- Projektion und Modell bleiben rein.
+        import time
+
+        now = time.time()
+        generated_at_text = format_generated_at(now, normalized)
+        datumsteil = format_datum_kurz(now, normalized)
+        model = _project_dns_bypass_pdf_model(report, generated_at_text, normalized)
+        pdf_bytes = ReportlabRenderer().render_dns_bypass_report_pdf(model, normalized)
+        name = (
+            "Network-DNS-Bypass-Report" if normalized == "en" else "Netzwerk-DNS-Umgehungs-Bericht"
+        )
+        return _DnsBypassPdfResult(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            filename=f"CERNISPRO_{name}_{datumsteil}.pdf",
+        )
+
+    # ── Verhaltensprofil-Bericht (Block 4, Etappe 3): Daten- und Tasks-Runner ──────
+    # Muster _dns_bypass_report (Bezugsrahmen-Wahl EINE Aufgabe ODER alle), aber gegen die
+    # Logging-Repos. Der PDF-Runner kommt erst in Etappe 4 -- hier NUR report + tasks.
+    #
+    # Regel 5 / api-Ring: die Naht Unix-ts -> ProfileSample faellt HIER (Server-Zeitzone) --
+    # WORTGLEICH zu _enrich_behavior_local am Router-Rand (die zeitfreie Aggregation rechnet
+    # keine Wanduhr, ADR 0002). Der api-Rand _enrich_behavior_local wird NICHT importiert
+    # (api-Ring); die Logik ist hier gespiegelt.
+    def _enrich_behavior_samples_root(rtt: list[Any]) -> list[ProfileSample]:
+        enriched: list[ProfileSample] = []
+        for sample in rtt:
+            local = datetime.fromtimestamp(sample.ts)
+            enriched.append(
+                ProfileSample(
+                    weekday=local.date().weekday(),
+                    minute_of_day=local.hour * 60 + local.minute,
+                    day_key=local.date().isoformat(),
+                    alive=sample.alive,
+                )
+            )
+        return enriched
+
+    # Use-Case-Instanzen einmal bauen (Reuse der bestehenden Logging-Repos, wie die anderen
+    # logging-overrides).
+    list_tasks = ListLoggingTasks(logging_task_repository())
+    get_rtt = GetLoggingTaskRtt(logging_task_repository(), logging_rtt_repository())
+    get_detail = GetLoggingTaskDetail(logging_task_repository())
+
+    def _project_behavior_report(report: BehaviorReport) -> BehaviorReportOut:
+        # Projektion application-Sicht -> Wire-Form (Regel 4: der api-Ring kennt application
+        # nicht, DIESE Naht faellt im Composition Root). Muster _dns_bypass_report.
+        return BehaviorReportOut(
+            scope=report.scope,
+            report_label=(report.single_label if report.scope == "single" else "") or "",
+            entries=[
+                BehaviorReportEntryOut(
+                    label=e.label,
+                    recorded_days=e.recorded_days,
+                    has_enough_data=e.has_enough_data,
+                    deviation_count=e.deviation_count,
+                    busiest_slot_start=e.busiest_slot_start,
+                    busiest_weekday=e.busiest_weekday,
+                )
+                for e in report.entries
+            ],
+            single_profile=(
+                None
+                if report.single_profile is None
+                else BehaviorSingleProfileOut(
+                    recorded_days=report.single_profile.recorded_days,
+                    has_enough_data=report.single_profile.has_enough_data,
+                    deviation_count=report.single_profile.deviation_count,
+                    day_band=[
+                        BehaviorDayBandSlotOut(
+                            slot_start=s.slot_start,
+                            activity_count=s.activity_count,
+                            is_deviation=s.is_deviation,
+                        )
+                        for s in report.single_profile.day_band
+                    ],
+                    week_heatmap=[
+                        BehaviorWeekSlotOut(
+                            weekday=s.weekday,
+                            slot_start=s.slot_start,
+                            activity_count=s.activity_count,
+                            is_deviation=s.is_deviation,
+                        )
+                        for s in report.single_profile.week_heatmap
+                    ],
+                )
+            ),
+            single_label=report.single_label,
+        )
+
+    async def _behavior_report_tasks() -> list[BehaviorReportTaskOut]:
+        # Waehlbare Aufgaben fuers Dropdown: NUR RECURRING (das Verhaltensprofil ergibt nur
+        # fuer wiederkehrende Serien Sinn). Leer -> [] (ein ehrliches Datum, kein Fehler).
+        return [
+            BehaviorReportTaskOut(id=task.id, label=task.label or task.id)
+            for task in list_tasks()
+            if task.operation_mode is OperationMode.RECURRING
+        ]
+
+    async def _build_behavior_report_data(task_id: str | None = None) -> BehaviorReport:
+        # Gemeinsame Bericht-Bildung fuer BEIDE Runner (Wire-Ansicht _behavior_report UND
+        # PDF-Runner _behavior_report_pdf): liefert das application-``BehaviorReport`` (nicht
+        # die Wire-Form). Bezugsrahmen ueber task_id: gesetzt = EINE Aufgabe (scope="single"),
+        # None/leer = ALLE RECURRING-Aufgaben zusammengefasst (scope="all"). KEIN 404: leerer
+        # Stand ist ein DATUM (Muster _dns_bypass_report). Reine Datenlogik, KEINE Projektion.
+        if task_id:
+            # EINE Aufgabe. Unbekannte id -> leerer "single"-Bericht (single_label=""), kein
+            # 404: build_single_behavior_report ueber leere Samples liefert ein leeres Profil.
+            try:
+                task = get_detail(task_id)
+            except LoggingTaskNotFound:
+                return build_single_behavior_report(
+                    BehaviorTaskInput(task_id=task_id, label="", samples=[])
+                )
+            samples = _enrich_behavior_samples_root(get_rtt(task_id, since=None, until=None))
+            ti = BehaviorTaskInput(task_id=task_id, label=task.label or task_id, samples=samples)
+            return build_single_behavior_report(ti)
+
+        # ALLE RECURRING-Aufgaben: je Aufgabe rtt laden, Samples anreichern, sammeln.
+        inputs: list[BehaviorTaskInput] = []
+        for task in list_tasks():
+            if task.operation_mode is not OperationMode.RECURRING:
+                continue
+            samples = _enrich_behavior_samples_root(get_rtt(task.id, since=None, until=None))
+            inputs.append(
+                BehaviorTaskInput(task_id=task.id, label=task.label or task.id, samples=samples)
+            )
+        return build_all_behavior_report(inputs)
+
+    async def _behavior_report(task_id: str | None = None) -> BehaviorReportOut:
+        # Baut den Bericht ueber die gemeinsame Datenlogik und projiziert ihn auf die Wire-Form
+        # (Regel 4: der api-Ring kennt application nicht, DIESE Naht faellt im Composition Root).
+        report = await _build_behavior_report_data(task_id)
+        return _project_behavior_report(report)
+
+    # ── Verhaltensprofil-Bericht (Etappe 4b): PDF-Projektion + Runner ──────────────
+    # Reine Projektion application-``BehaviorReport`` -> render-fertiges ``BehaviorPdfModel``
+    # (Muster _project_dns_bypass_pdf_model): ALLE lokalisierten Texte fallen HIER. Das Modell
+    # traegt nur fertige Strings/Tupel; der reportlab-Adapter rechnet nichts.
+    def _project_behavior_pdf_model(
+        report: BehaviorReport, generated_at_text: str, lang: Lang = "de"
+    ) -> BehaviorPdfModel:
+        # Lokalisierte Wochentagskuerzel (Mo..So, Index = weekday 0..6) -- der Adapter
+        # beschriftet damit die Heatmap-Zeilen; auch als Klartext fuer den "aktivsten Tag".
+        # (E3c) Nur die KUERZEL sind zweisprachig; die REIHENFOLGE bleibt in beiden Sprachen
+        # gleich (Montag = Index 0), weil der Index der rohe weekday-Schluessel ist.
+        wochentage = (
+            ("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So")
+            if lang == "de"
+            else ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+        )
+
+        # Tagesminute -> "HH:MM" (rein, deterministisch; keine Wanduhr).
+        def _hhmm(minute: int) -> str:
+            return f"{minute // 60:02d}:{minute % 60:02d}"
+
+        # (E3c) Bezugsrahmen zweisprachig; der Roh-Schluessel ``scope`` (single/all) bleibt roh.
+        scope = report.scope
+        if scope == "single":
+            if lang == "de":
+                scope_text = (
+                    f"Bezug: Aufgabe „{report.single_label}“"
+                    if report.single_label
+                    else "Bezug: Aufgabe (unbekannt)"
+                )
+            else:
+                scope_text = (
+                    f'Scope: task "{report.single_label}"'
+                    if report.single_label
+                    else "Scope: task (unknown)"
+                )
+        elif lang == "de":
+            scope_text = "Bezug: Alle Geräte"
+        else:
+            scope_text = "Scope: All devices"
+
+        single_kennzahlen: tuple[tuple[str, str], ...] = ()
+        day_band: tuple[tuple[int, int, bool], ...] = ()
+        week_heatmap: tuple[tuple[int, int, int, bool], ...] = ()
+        entry_rows: tuple[tuple[str, ...], ...] = ()
+
+        if scope == "single" and report.single_profile is not None:
+            p = report.single_profile
+            single_kennzahlen = (
+                ("Aufzeichnungstage", str(p.recorded_days)),
+                ("Genug Daten", "ja" if p.has_enough_data else "nein"),
+                ("Abweichungen", str(p.deviation_count)),
+            )
+            day_band = tuple((s.slot_start, s.activity_count, s.is_deviation) for s in p.day_band)
+            week_heatmap = tuple(
+                (s.weekday, s.slot_start, s.activity_count, s.is_deviation) for s in p.week_heatmap
+            )
+        elif scope == "all":
+            # Je Eintrag eine Zeile in BEHAVIOR_ENTRY_COLUMNS-Reihenfolge (Gerät,
+            # Aufzeichnungstage, Genug Daten, Abweichungen, Aktivste Zeit, Aktivster Tag).
+            entry_rows = tuple(
+                (
+                    e.label,
+                    str(e.recorded_days),
+                    "ja" if e.has_enough_data else "nein",
+                    str(e.deviation_count),
+                    _hhmm(e.busiest_slot_start) if e.busiest_slot_start is not None else "—",
+                    wochentage[e.busiest_weekday] if e.busiest_weekday is not None else "—",
+                )
+                for e in report.entries
+            )
+
+        return BehaviorPdfModel(
+            title=REPORT_TITLE_BEHAVIOR.get(lang),
+            generated_at_text=generated_at_text,
+            footer_left=REPORT_FOOTER_BEHAVIOR.get(lang),
+            achse_b_fussnote=ACHSE_B_FUSSNOTE.get(lang),
+            einleitung=REPORT_INTRO_BEHAVIOR.get(lang),
+            scope=scope,
+            scope_text=scope_text,
+            single_kennzahlen=single_kennzahlen,
+            day_band=day_band,
+            week_heatmap=week_heatmap,
+            slot_minutes=60,
+            weekday_labels=wochentage,
+            entry_rows=entry_rows,
+        )
+
+    @dataclass(frozen=True)
+    class _BehaviorPdfResult:
+        content: bytes
+        media_type: str
+        filename: str
+
+    async def _behavior_report_pdf(
+        task_id: str | None = None, lang: str = "de"
+    ) -> _BehaviorPdfResult:
+        # lang normalisieren: "en" bleibt, jeder andere Wert faellt auf "de" (Muster _manual_pdf).
+        normalized: Lang = "en" if lang == "en" else "de"
+        report = await _build_behavior_report_data(task_id)
+        # Wanduhr GENAU HIER lesen (einziger Ort) -- Projektion und Modell bleiben rein.
+        import time
+
+        now = time.time()
+        generated_at_text = format_generated_at(now, normalized)
+        datumsteil = format_datum_kurz(now, normalized)
+        model = _project_behavior_pdf_model(report, generated_at_text, normalized)
+        pdf_bytes = ReportlabRenderer().render_behavior_report_pdf(model, normalized)
+        name = "Behavior-Profile-Report" if normalized == "en" else "Verhaltensprofil-Bericht"
+        return _BehaviorPdfResult(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            filename=f"CERNISPRO_{name}_{datumsteil}.pdf",
+        )
+
+    app.include_router(report_router)
+    app.dependency_overrides[provide_security_report] = lambda: _security_report
+    app.dependency_overrides[provide_security_report_pdf] = lambda: _security_report_pdf
+    app.dependency_overrides[provide_manual_pdf] = lambda: _manual_pdf
+    app.dependency_overrides[provide_inventory_report] = lambda: _inventory_report
+    app.dependency_overrides[provide_inventory_report_pdf] = lambda: _inventory_report_pdf
+    app.dependency_overrides[provide_cve_report] = lambda: _cve_report
+    app.dependency_overrides[provide_cve_report_pdf] = lambda: _cve_report_pdf
+    app.dependency_overrides[provide_outbound_report] = lambda: _outbound_report
+    app.dependency_overrides[provide_outbound_report_pdf] = lambda: _outbound_report_pdf
+    app.dependency_overrides[provide_outbound_report_recordings] = lambda: (
+        _outbound_report_recordings
+    )
+    app.dependency_overrides[provide_dns_watch_report] = lambda: _dns_watch_report
+    app.dependency_overrides[provide_dns_watch_report_pdf] = lambda: _dns_watch_report_pdf
+    app.dependency_overrides[provide_dns_bypass_report] = lambda: _dns_bypass_report
+    app.dependency_overrides[provide_dns_bypass_report_pdf] = lambda: _dns_bypass_report_pdf
+    app.dependency_overrides[provide_dns_bypass_report_recordings] = lambda: (
+        _dns_bypass_report_recordings
+    )
+    app.dependency_overrides[provide_behavior_report] = lambda: _behavior_report
+    app.dependency_overrides[provide_behavior_report_pdf] = lambda: _behavior_report_pdf
+    app.dependency_overrides[provide_behavior_report_tasks] = lambda: _behavior_report_tasks
+
+    # ── Route zum Ziel (ADR 0036): traceroute-Hops + Geo/ASN, zwei getrennte Naehte ──
+    # Regel 5: die Quer-Domaenen-Naht (diagnostics-Hops + resolver-Geo/RDAP) faellt
+    # AUSSCHLIESSLICH hier im Composition Root. WEDER die diagnostics-Domaene NOCH ihr Port
+    # nennt resolver -- die Use-Cases bekommen quellen-agnostische Callables herein (Muster
+    # BuildTopology/export.ScanProvider). Bewusst HIER (nach dem resolver-Block), weil beide
+    # resolver-Adapter (geo_asn_db/RdapClient) schon in Scope sind -- keine zweite Instanz.
+    #
+    # HAUPTPFAD (lokal+synchron, schnell, root-frei): BuildRouteGeo bekommt den eigenen
+    # RunTraceroute-Use-Case (Hop-Quelle) + ein Geo-Callable, das HIER den lazy geladenen
+    # CsvGeoAsnDb-Lookup auf ein rohes dict PROJIZIERT (asn_org bleibt None -- die CSV-DB
+    # kennt nur Land + ASN-Nummer; der Klartext-Org-Name kommt optional ueber die zweite
+    # Naht, NICHT hier geraten -- ehrliche Leere, kein stiller Fallback S3).
+    def _route_geo_lookup(ip: str) -> dict[str, str | None]:
+        record = geo_asn_db().lookup(ip)
+        return {"country": record.country, "asn": record.asn, "asn_org": record.asn_org}
+
+    async def _build_route_geo(target: str, privileged: bool) -> Any:
+        # ZWEITE traceroute-Naht: bewusst DERSELBE ``_traceroute_runner`` wie oben (die
+        # Plattformweiche faellt genau einmal, im diagnostics-Block). Frueher stand hier
+        # ein zweites ``SystemTracerouteRunner()`` -- genau daran blieb diese Naht auf
+        # Windows haengen, waehrend die andere schon versorgt gewesen waere.
+        return await BuildRouteGeo(RunTraceroute(_traceroute_runner), _route_geo_lookup)(
+            target, privileged
+        )
+
+    # OPTIONALE NACHLADUNG (Netz-I/O ueber RDAP, NUR auf expliziten Abruf): EnrichRouteOrgs
+    # bekommt ein Org-Callable, das HIER pro IP den RdapClient ruft und dessen ``org``-Feld
+    # (registrant/administrative entity, der Betreibername je IP) auf den rohen ``str | None``
+    # PROJIZIERT. Der RdapClient ist laut Port-Vertrag STRENG fehlertolerant (liefert bei
+    # jedem Fehlschlag leere Fakten, wirft NIE) -- die Nachladung blockiert/faelscht NIE.
+    async def _route_org_lookup(ip: str) -> str | None:
+        facts = await RdapClient().lookup(ip)
+        return facts.org
+
+    async def _enrich_route_orgs(ips: list[str]) -> Any:
+        return await EnrichRouteOrgs(_route_org_lookup)(ips)
+
+    app.dependency_overrides[provide_build_route_geo] = lambda: _build_route_geo
+    app.dependency_overrides[provide_enrich_route_orgs] = lambda: _enrich_route_orgs
+
+    # ── export-Domaene v2 verdrahten (Block 1: gespeicherter Scan -> CSV/JSON/PDF, ADR 0015) ──
+    # Der ExportScan-Use-Case kennt KEINE scanning-Domaene: er bekommt den Scan ueber ein
+    # schlankes scan_provider-Callable (scan_id -> ExportableScan | None), das HIER im
+    # Composition Root die scanning-Daten holt UND auf domain.export.Exportable* PROJIZIERT
+    # (genau das analysis-Muster mit seiner Observed*-Projektion -- Fremd-Domaenen-Kopplung
+    # gehoert in die Verdrahtung, NICHT in domain.export, independence-Contract). Reuse des
+    # bestehenden GetScanDetail + scan_history_repository() (lru_cache, im scanning-Block
+    # verdrahtet) -- KEINE zweite Instanz. Der Renderer ist der zustandslose ReportlabRenderer.
+    def _project_scan_to_exportable(record: Any) -> ExportableScan:
+        # record ist ein domain.scanning.ScanRecord; per Attribut-Zugriff auf die schlanken
+        # export-Typen projiziert (independence: domain.export kennt scanning NICHT). Die
+        # Listen werden so verlustarm uebernommen, wie JSON sie braucht: ports als
+        # ExportablePort (protocol fest "tcp" -- PortInfo traegt kein Protokoll-Feld, der
+        # socket-/nmap-Scan ist TCP, ADR 0015), mdns/ssdp als menschenlesbare String-Tupel
+        # (mDNS-Typ bzw. SSDP-server/st -- so viel, wie verlustarm noetig, ohne die volle
+        # scanning-Komplexitaet zu duplizieren).
+        hosts = tuple(
+            ExportableHost(
+                ip=host.ip,
+                mac=host.mac,
+                vendor=host.vendor,
+                hostname=host.hostname,
+                rtt_ms=host.rtt_ms,
+                os_guess=host.os_guess,
+                os_accuracy=host.os_accuracy,
+                category=host.category,
+                label=host.label,
+                tags=tuple(host.tags),
+                source=host.source,
+                ports=tuple(
+                    ExportablePort(port=p.port, protocol="tcp", service=p.service)
+                    for p in host.ports
+                ),
+                mdns_services=tuple(
+                    svc.type or svc.name for svc in host.mdns_services if (svc.type or svc.name)
+                ),
+                ssdp_services=tuple(
+                    svc.server or svc.st for svc in host.ssdp_services if (svc.server or svc.st)
+                ),
+            )
+            for host in record.hosts
+        )
+        return ExportableScan(
+            scan_id=record.scan_id,
+            cidr=record.cidr,
+            host_count=record.host_count,
+            scanned_at=record.scanned_at,
+            hosts=hosts,
+        )
+
+    def _scan_provider(scan_id: int) -> ExportableScan | None:
+        # GetScanDetail liefert den ScanRecord | None (None = Scan-ID gibt es nicht, ein
+        # gueltiger Zustand). Nur ein gefundener Scan wird projiziert; None reicht der
+        # Use-Case in seine ScanNotFoundError -> 404 (kein stiller leerer Export, ADR 0001).
+        record = GetScanDetail(scan_history_repository())(scan_id)
+        if record is None:
+            return None
+        return _project_scan_to_exportable(record)
+
+    def _export_scan(scan_id: int, fmt: Literal["csv", "json", "pdf"]) -> Any:
+        return ExportScan(_scan_provider, ReportlabRenderer())(scan_id, fmt)
+
+    app.include_router(export_router)
+    app.dependency_overrides[provide_export_scan] = lambda: _export_scan
+
+    @app.exception_handler(ScanNotFoundError)
+    async def _on_scan_not_found(_request: Request, exc: ScanNotFoundError) -> JSONResponse:
+        # Nicht existierende scan_id -> 404 (die Ressource gibt es nicht, kein leerer Export).
+        # Muster der diagnostics-Rechte-/Dienst-Naht: das Mapping sitzt am Composition Root,
+        # der api-Ring bleibt clean. Reiner application-Zustand (der scan_provider lieferte
+        # None) -- kein infra-Ausfall.
+        logger.info("export_scan_not_found", scan_id=exc.scan_id)
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+    # ── analysis-Domaene v2 verdrahten (AN.3 + A.2, reine Lese-/Rechen-Domaene) ───
+    # Lazy-memoisiertes User-Regel-Repo (lru_cache, Muster scan_history_repository):
+    # teilt die cernis.db mit dem uebrigen Bestand. Es erfuellt BEIDE analysis-Ports
+    # (RuleProvider als Lese-Quelle + UserRuleStore als Verwaltungs-Vertrag).
+    @lru_cache(maxsize=1)
+    def analysis_rule_repository() -> SqliteUserRuleRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteUserRuleRepository(get_db_path())
+
+    # Host-Historie-Repo (C.2): analysis' erstes GEDAECHTNIS (gesehene Host-MACs),
+    # teilt die cernis.db (lru_cache, Muster analysis_rule_repository). Zwei getrennte
+    # Naehte greifen darauf zu: die SCHREIB-Naht am Scan (ws_scan, record_seen) pflegt
+    # die Historie, die LESE-Naht in _analyze_snapshot (known_macs) fuellt daraus
+    # ObservedHost.is_known. Scan schreibt, GET /api/analysis liest -- siehe ADR 0013.
+    host_history_clock = SystemClock()
+
+    @lru_cache(maxsize=1)
+    def host_history_repository() -> SqliteHostHistoryRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteHostHistoryRepository(get_db_path(), host_history_clock)
+
+    # Acknowledge-Audit-Repo (ADR 0031): das append-only Log der quittierten
+    # Achse-B-Befunde, teilt die cernis.db (lru_cache, Muster host_history_repository).
+    # Zwei Naehte greifen darauf zu: die SCHREIB-Naht am Endpunkt (POST /api/analysis/
+    # acknowledge, record) und die LESE-Naht im axis_b-Pfad (acknowledged_ports), die
+    # quittierte Ports aus der Bewertung nimmt und ins host_detail-Frame traegt.
+    acknowledgement_clock = SystemClock()
+
+    @lru_cache(maxsize=1)
+    def acknowledgement_repository() -> SqliteAcknowledgementRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteAcknowledgementRepository(get_db_path(), acknowledgement_clock)
+
+    # Kein Poller, kein app.state, kein lifespan-Eingriff -- wie process. Die zwei
+    # Adapter (BuiltinRuleProvider/StaticHelpLinkResolver) sind zustandslos. Die
+    # SNAPSHOT-PROJEKTION aus traffic+process lebt HIER im Composition Root, NICHT im
+    # Use-Case oder Adapter -- sie kennt BEIDE Fremd-Domaenen (Muster _list_app_traffic /
+    # _list_processes / _build_run_network_scan: Fremd-Domaenen-Kopplung gehoert in die
+    # Verdrahtung). Reuse der bestehenden Helfer _traffic_adapter()/_process_adapter()
+    # (beide oben im traffic- bzw. process-Block definiert) -- KEINE zweite Adapter-Instanz.
+    async def _analyze_snapshot() -> list[Any]:
+        # Verbindungssicht frisch holen -- DIESELBE Quelle wie _list_app_traffic, aber
+        # OHNE Raten (analysis braucht nur die Verbindungen, nicht den Durchsatz -> Stufe 1,
+        # rates leer). ListAppTraffic liefert AppTraffic-Gruppen mit .connections; die
+        # Connections aller Apps flachen wir zu ObservedConnection.
+        apps = await ListAppTraffic(_traffic_adapter())({})
+        observed_connections = tuple(
+            ObservedConnection(
+                app_name=conn.app_name,
+                pid=conn.pid,
+                remote_ip=conn.remote.ip if conn.remote else None,
+                remote_port=conn.remote.port if conn.remote else None,
+                l4=conn.l4,
+                status=conn.status,
+            )
+            for app_traffic in apps
+            for conn in app_traffic.connections
+        )
+        # Prozess-Sicht frisch holen (flache ProcessInfo-Liste) und zu ObservedProcess
+        # projizieren -- exe_path ist die analysis-relevante Quelle (P.5).
+        processes = await ListProcesses(_process_adapter()).flat()
+        observed_processes = tuple(
+            ObservedProcess(
+                pid=p.pid,
+                name=p.name,
+                kind=classify_kind(p),
+                exe_path=p.exe_path,
+                cmdline=p.cmdline,
+            )
+            for p in processes
+        )
+        # Rechte-Status als Eingabe-Faktum des Snapshots: rootless schweigt der
+        # kein-Pfad-Tarnverdacht (mehrdeutig), Root zeigt ihn als notable (AN.3-fix-2).
+        # Reuse des BESTEHENDEN Permission-Pfads (CheckProcessPermission +
+        # ProcessPermissionAdapter, beide schon im process-Block verdrahtet) -- NICHT
+        # os.geteuid direkt, KEINE zweite Instanz-Logik. Die Kopplung an den
+        # Permission-Adapter lebt hier in der Verdrahtung; die Domaene sieht nur ein bool.
+        perm = CheckProcessPermission(ProcessPermissionAdapter())()
+        full_visibility = bool(perm["ok"])
+        # hosts-Projektion (B): die dritte Datenquelle ist der JUENGSTE gespeicherte Scan.
+        # Anders als connections/processes (live gelesen) sind Hosts nur so aktuell wie
+        # dieser Scan -- die Sicht ist "Stand juengster Scan", keine Live-Host-Sicht (das
+        # ist die Natur der Quelle, kein Mangel). Reuse des bestehenden
+        # scan_history_repository() (lru_cache, im scanning-Block verdrahtet) -- KEINE
+        # zweite Instanz. Die Projektion EnrichedHost -> ObservedHost lebt HIER im
+        # Composition Root (Fremd-Domaenen-Kopplung gehoert in die Verdrahtung); analysis
+        # bekommt nur die offenen Port-NUMMERN (state == "open"), nicht die PortInfo-Objekte
+        # (independence-Contract). Kein Scan -> leer (gueltiger Zustand, keine host-Beobachtung).
+        summaries = scan_history_repository().list(1)
+        hosts_observed: tuple[ObservedHost, ...] = ()
+        if summaries:
+            try:
+                record = scan_history_repository().get(summaries[0].scan_id)
+            except CorruptScanError:
+                # Host-Schicht ausfallsicher (Entscheidung A): ein unlesbarer juengster
+                # Scan darf den Lageueberblick (traffic/process) nicht faellen. KEIN
+                # stiller Fallback im verbotenen Sinn -- scan_history.get() wirft weiterhin
+                # laut, wer den Scan gezielt abruft; nur diese interpretierende Projektion
+                # ueberspringt die unlesbare Host-Quelle. Spaeter in der GUI sichtbar machen
+                # ("Host-Daten aus letztem Scan nicht lesbar").
+                logger.warning("analysis.hosts_skipped_corrupt_scan", scan_id=summaries[0].scan_id)
+                record = None
+            if record is not None:
+                # Lese-Naht (C.2): die bekannten MACs EINMAL holen (Bulk, statt N
+                # is_known-Aufrufe) und je Host is_known setzen. REINER Lesevorgang --
+                # die Historie wird beim SCANNEN gepflegt (Schreib-Naht in ws_scan),
+                # NICHT hier: GET /api/analysis schreibt nicht (Variante 2, ADR 0013).
+                # MAC-lose Hosts -> is_known True (nicht als neu werten, gleiche Linie
+                # wie das Repository). Daraus folgt die Baseline: nach dem ersten Scan
+                # sind alle gesehenen Hosts bekannt; new_host_seen feuert ab dem zweiten
+                # Scan fuer echte Neuzugaenge.
+                known = host_history_repository().known_macs()
+                # Leere Historie (allererster Scan, kein Vorzustand) -> JEDER Host bekannt:
+                # "neu" ist gegen eine leere Baseline bedeutungslos, sonst flaggt der erste
+                # Scan ALLE Hosts als new_host_seen. Ab dem zweiten Scan normaler Abgleich.
+                # Linie wie MAC-lose -> True.
+                history_empty = not known
+                hosts_observed = tuple(
+                    _observed_host(
+                        h,
+                        is_known=True if history_empty or not h.mac else (h.mac in known),
+                    )
+                    for h in record.hosts
+                )
+        snapshot = Snapshot(
+            connections=observed_connections,
+            processes=observed_processes,
+            hosts=hosts_observed,
+            full_process_visibility=full_visibility,
+        )
+        # ADDITIV (A.2): die Engine sieht die eingebauten Defaults UND die gespeicherten
+        # eigenen Regeln -- ueber den CompositeRuleProvider (Defaults zuerst, dann DB).
+        # NUR diese eine Zeile der AN.3-Verdrahtung aendert sich; der Rest bleibt.
+        # ADR 0023: der Composite-Provider wird zusaetzlich umschlossen, damit per
+        # Settings (``analysis_disabled_rules``) abgeschaltete Regel-IDs herausgefiltert
+        # werden. Default (kein Key) = alle Regeln aktiv -- rein additiv.
+        # ADR 0027: zwischen Composite und Filter sitzt der _ConfiguredRuleProvider, der
+        # die per Setting konfigurierbaren Built-in-Regel-Parameter (Schwelle der
+        # host_many_high_ports-Regel + die Portlisten von host_remote_access_port/
+        # host_backdoor_port) defensiv aus den Settings liest und per dataclasses.replace
+        # ueberschreibt. Default (kein/kaputter Key) = die Built-in-Werte aus rules.py.
+        # Provider-Stack Composite -> Configured -> Filtered als Single Source (ADR 0029):
+        # die frueher hier inline aufgebaute Kette lebt jetzt in _build_filtered_provider
+        # (dieselbe Funktion, die auch die WS-Severity-Verdrahtung nutzt). Kein
+        # Verhaltenswechsel -- die Engine sieht weiterhin den GEFILTERTEN Stack.
+        rule_provider = _build_filtered_provider(analysis_rule_repository(), repository())
+        return AnalyzeSnapshot(rule_provider, StaticHelpLinkResolver())(snapshot)
+
+    # ── export-Domaene Block 2 verdrahten (Analyse-Befunde -> CSV/JSON/PDF, ADR 0015) ──
+    # Der ExportAnalysis-Use-Case kennt KEINE analysis-Domaene: er bekommt die Befunde ueber
+    # ein schlankes, ASYNC analysis_provider-Callable, das HIER im Composition Root die
+    # AKTUELLE Analyse frisch erzeugt (Reuse von _analyze_snapshot -- KEINE zweite Snapshot-
+    # Projektion) UND auf domain.export.ExportableAnalysis PROJIZIERT (Muster
+    # _project_scan_to_exportable / analysis' Observed*-Projektion -- Fremd-Domaenen-Kopplung
+    # gehoert in die Verdrahtung, NICHT in domain.export, independence-Contract). generated_at
+    # kommt aus der EINEN Zeitquelle (SystemClock, UTC, ISO) -- die Domaene fragt keine Uhr;
+    # der Composition Root setzt das Feld direkt in die projizierte ExportableAnalysis. Der
+    # Renderer ist der zustandslose ReportlabRenderer (derselbe wie Block 1, generisches
+    # PdfReportModel). Anders als der Scan-Export: ASYNC + KEIN analysis_id (die Analyse hat
+    # keinen gespeicherten Stand -> "die Analyse von jetzt", kein NotFound).
+    export_clock = SystemClock()
+
+    def _project_analysis_to_exportable(
+        resolved: list[Any], generated_at: str
+    ) -> ExportableAnalysis:
+        # resolved ist die list[ResolvedObservation] aus _analyze_snapshot (.observation +
+        # .help_url); per Attribut-Zugriff auf die schlanken export-Typen projiziert
+        # (independence: domain.export kennt analysis NICHT). severity kommt als str herein
+        # (kein Severity-Import). Die Befund-Reihenfolge bleibt die der Eingabe (AnalyzeSnapshot
+        # liefert bereits deterministisch sortiert). generated_at ist der ISO-Zeitstempel des
+        # Exports (von der Uhr, hier hereingereicht -- die Domaene fragt keine Uhr).
+        findings = tuple(
+            ExportableFinding(
+                rule_id=r.observation.rule_id,
+                severity=r.observation.severity,
+                title=r.observation.title,
+                detail=r.observation.detail,
+                subject=r.observation.subject,
+                help_kind=r.observation.help_kind,
+                help_url=r.help_url,
+            )
+            for r in resolved
+        )
+        return ExportableAnalysis(
+            generated_at=generated_at,
+            findings=findings,
+            finding_count=len(findings),
+        )
+
+    async def _analysis_provider() -> ExportableAnalysis:
+        # Die AKTUELLE Analyse frisch erzeugen -- DERSELBE Pfad wie GET /api/analysis (Reuse
+        # _analyze_snapshot, async). generated_at ist der Erzeugungs-Zeitpunkt des Exports
+        # (SystemClock, UTC) als ISO-String. Dann auf ExportableAnalysis projizieren.
+        resolved = await _analyze_snapshot()
+        generated_at = export_clock.now().isoformat()
+        return _project_analysis_to_exportable(resolved, generated_at)
+
+    async def _export_analysis(fmt: Literal["csv", "json", "pdf"]) -> Any:
+        return await ExportAnalysis(_analysis_provider, ReportlabRenderer())(fmt)
+
+    app.dependency_overrides[provide_export_analysis] = lambda: _export_analysis
+
+    # ── export-Domaene Block 3 verdrahten (Logging-Report -> CSV/JSON/PDF, Schnitt 1a) ──
+    # Der ExportLoggingReport-Use-Case kennt KEINE monitoring-Domaene: er bekommt den Report
+    # ueber ein schlankes logging_report_provider-Callable (task_id + since/until -> projizierter
+    # Report | None), das HIER im Composition Root die drei Logging-Repos liest, den SLA-Kopf
+    # ueber die reine compute_sla_stats rechnet UND auf domain.export.ExportableLoggingReport
+    # PROJIZIERT (Muster _project_scan_to_exportable / _analysis_provider -- Fremd-Domaenen-
+    # Kopplung gehoert in die Verdrahtung, NICHT in domain.export, independence-Contract).
+    # Reuse der bestehenden Logging-Repos (logging_task_repository/logging_rtt_repository/
+    # logging_event_repository, lru_cache, im Logging-Block verdrahtet) + des export_clock --
+    # KEINE zweiten Instanzen. Der Renderer ist der zustandslose ReportlabRenderer.
+    #
+    # ZEITRAUM-NAHT (markierte Stelle): RTT hat ein all_for (alle Punkte eines Tasks); der
+    # LoggingEventRepository hat dagegen KEIN all_for, nur range(task_id, since, until). Statt
+    # den Port um ein all_for zu erweitern (schwergewichtig fuer einen Effekt, den range schon
+    # liefert) loesen wir den offenen Zeitraum schlank ueber range mit since=0 / until=now+Puffer
+    # (die Uhr aus export_clock, der EINEN Zeitquelle -- der Puffer faengt Mess-ts ab, die
+    # minimal nach now liegen). Bei gesetztem since/until gilt das halb-offene Fenster [since,
+    # until) beider range-Methoden direkt. RTT nutzt all_for nur im voll-offenen Fall (since UND
+    # until None) -- sonst ebenfalls range, damit RTT- und Event-Reihe denselben Ausschnitt
+    # zeigen.
+    def _project_logging_to_exportable(
+        task: LoggingTask,
+        since: float | None,
+        until: float | None,
+        generated_at: str,
+    ) -> ExportableLoggingReport:
+        # Effektive Grenzen fuer die range-Reads: offener since -> 0.0, offener until ->
+        # now+Puffer (die Uhr; Mess-ts liegen nie weit in der Zukunft). Beide range-Methoden
+        # sind halb-offen [since, until), konsistent zur Domaenen-Fenster-Semantik.
+        eff_since = since if since is not None else 0.0
+        eff_until = until if until is not None else export_clock.now().timestamp() + 86400.0
+        # RTT-Punkte: voll-offen -> all_for (alle Punkte des Tasks); sonst der range-Ausschnitt.
+        if since is None and until is None:
+            rtt_samples = logging_rtt_repository().all_for(task.id)
+        else:
+            rtt_samples = logging_rtt_repository().range(task.id, eff_since, eff_until)
+        # Events: es gibt kein all_for -- immer range (im offenen Fall mit 0/now+Puffer).
+        event_rows = logging_event_repository().range(task.id, eff_since, eff_until)
+        # SLA-Kopf ueber die reine compute_sla_stats (Muster GetLoggingTaskSla): die
+        # LoggingRttSample (rtt_ms/loss_pct/alive/ts) zu (alive, rtt_ms, ts)-Tupeln formen --
+        # das Eingabeformat der Domaenen-Rechnung. interval_s=task.interval_s (korrekte
+        # Downtime-Schaetzung pro Task). days=0: KEIN Zeitfenster (der Report rechnet ueber den
+        # geladenen Ausschnitt, nicht ueber ein days-Fenster -- GetLoggingTaskSla-Linie).
+        sla_rows = [(float(s.alive), s.rtt_ms, s.ts) for s in rtt_samples]
+        stats = compute_sla_stats(sla_rows, days=0, interval_s=task.interval_s)
+        # Projektion auf die schlanken export-Typen (independence: domain.export kennt
+        # monitoring NICHT). generated_at + period_from/to kommen als ISO-Strings herein (die
+        # Domaene fragt keine Uhr); offene Grenze -> "".
+        rtt_points = tuple(
+            ExportableLoggingRtt(ts=s.ts, rtt_ms=s.rtt_ms, loss_pct=s.loss_pct, alive=s.alive)
+            for s in rtt_samples
+        )
+        events = tuple(
+            ExportableLoggingEvent(ts=e.ts, event_type=e.event_type, rtt_ms=e.rtt_ms)
+            for e in event_rows
+        )
+        # period_from/to als lesbare ISO-Strings der since/until-Grenzen (offene Grenze ->
+        # ""). BEWUSST die LOKALE fromtimestamp (datetime.fromtimestamp ohne tz) -- konsistent
+        # zu domain._ts_to_iso, das die Mess-/Event-Zeitstempel im selben Bericht ebenfalls
+        # lokal darstellt; so passen Kopf-Zeitraum und Punkt-Zeitstempel zusammen (der
+        # generated_at-Kopf ist UTC, aber das ist der Erzeugungs-, kein Mess-Zeitstempel).
+        return ExportableLoggingReport(
+            task_label=task.label,
+            task_purpose=task.purpose,
+            target_id=task.target_id,
+            generated_at=generated_at,
+            period_from=datetime.fromtimestamp(since).isoformat() if since is not None else "",
+            period_to=datetime.fromtimestamp(until).isoformat() if until is not None else "",
+            uptime_pct=stats["uptime_pct"],
+            avg_rtt_ms=stats["avg_rtt_ms"],
+            downtime_mins=stats["downtime_mins"],
+            sample_count=stats["samples"],
+            rtt_points=rtt_points,
+            events=events,
+        )
+
+    def _logging_report_provider(
+        task_id: str, since: float | None, until: float | None
+    ) -> ExportableLoggingReport | None:
+        # logging_task_repository().get liefert den LoggingTask | None (None = task_id gibt es
+        # nicht, ein gueltiger Zustand). Nur ein gefundener Task wird projiziert; None reicht
+        # der Use-Case in seine LoggingReportNotFound -> 404 (kein stiller leerer Export).
+        task = logging_task_repository().get(task_id)
+        if task is None:
+            return None
+        generated_at = export_clock.now().isoformat()
+        return _project_logging_to_exportable(task, since, until, generated_at)
+
+    def _export_logging(
+        task_id: str, fmt: Literal["csv", "json", "pdf"], since: float | None, until: float | None
+    ) -> Any:
+        return ExportLoggingReport(_logging_report_provider, ReportlabRenderer())(
+            task_id, fmt, since, until
+        )
+
+    app.dependency_overrides[provide_export_logging] = lambda: _export_logging
+
+    @app.exception_handler(LoggingReportNotFound)
+    async def _on_logging_report_not_found(
+        _request: Request, exc: LoggingReportNotFound
+    ) -> JSONResponse:
+        # Nicht existierende task_id -> 404 (die Ressource gibt es nicht, kein leerer Export).
+        # Muster des ScanNotFoundError-Handlers: das Mapping sitzt am Composition Root, der
+        # api-Ring bleibt clean. Reiner application-Zustand (der Provider lieferte None).
+        logger.info("export_logging_not_found", task_id=exc.task_id)
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+    # A.2-Verwaltungs-Runner: der api-Ring bleibt domain-frei -- das Bauen der
+    # domain.Rule aus dem Request-DTO + der Aufruf der Use-Cases passiert HIER im
+    # Composition Root (Muster _analyze_snapshot). Alle drei nutzen dasselbe Repo.
+    def _add_user_rules(bodies: list[UserRuleBody]) -> list[Any]:
+        new_rules = [
+            Rule(
+                id=body.id,
+                severity=body.severity,  # type: ignore[arg-type]
+                help_kind=body.help_kind,  # type: ignore[arg-type]
+                kind=body.kind,  # type: ignore[arg-type]
+                title=body.title,
+                detail_template=body.detail_template,
+                path_prefixes=tuple(body.path_prefixes),
+                ports=frozenset(body.ports),
+                threshold=body.threshold,
+            )
+            for body in bodies
+        ]
+        return AddUserRules(analysis_rule_repository())(new_rules)
+
+    def _list_user_rules() -> list[Any]:
+        return list(ListUserRules(analysis_rule_repository())())
+
+    def _list_all_rules() -> list[tuple[Any, bool]]:
+        # ADR 0028: ALLE aktuell aktiven Regeln (Built-in + User) fuer den UI-Block
+        # "Regel-An/Aus". Quelle ist DERSELBE Provider-Stack wie die Engine, aber bewusst
+        # nur bis ``configured`` (NACH der 5a-Injektion von Schwelle/Portlisten) -- der
+        # ``_FilteredRuleProvider`` wird hier NICHT angewandt, denn die UI muss auch die
+        # deaktivierten Regeln sehen, um sie wieder einschalten zu koennen. Das
+        # ``disabled``-Flag pro Regel kommt aus DERSELBEN defensiven Lese-Quelle wie der
+        # Filter (``_read_disabled_rule_ids``) -- so sehen Engine-Filter und UI-Liste
+        # garantiert dieselbe Menge. Kaputtes/fehlendes Setting -> leere disabled-Menge
+        # (fail-safe: die UI zeigt im Zweifel alles als aktiv, niemand wird heimlich
+        # abgeschaltet; S3-konform geloggt in der freien Funktion).
+        # UNGEFILTERTER Stack bis ``configured`` (ADR 0029, Single Source): dieselbe
+        # Composite->Configured-Kette wie der Engine-Pfad, aber OHNE den
+        # ``_FilteredRuleProvider`` -- die UI muss auch deaktivierte Regeln sehen, um sie
+        # wieder einschalten zu koennen. Das ``disabled``-Flag kommt aus DERSELBEN
+        # defensiven Lese-Quelle wie der Filter (``_read_disabled_rule_ids``).
+        configured = _build_configured_provider(analysis_rule_repository(), repository())
+        disabled = _read_disabled_rule_ids(repository())
+        return [(rule, rule.id in disabled) for rule in configured.get_rules()]
+
+    def _delete_user_rule(rule_id: str) -> None:
+        analysis_rule_repository().delete_rule(rule_id)
+
+    # Acknowledge-Schreibnaht (ADR 0031): reicht den record-Schreibpfad des Audit-Repos
+    # als AcknowledgeRunner heraus (Pass-Through, Muster _delete_user_rule). Der api-Ring
+    # bleibt repo-frei; die Validierung (port-Range/severity/action) macht das Body-DTO.
+    def _acknowledge(mac: str, port: int, severity: str, action: str) -> None:
+        acknowledgement_repository().record(mac, port, severity, action)
+
+    app.include_router(analysis_router)
+    app.dependency_overrides[provide_analyze] = lambda: _analyze_snapshot
+    # Service-Lookup (Stueck 1): der reine domain-Lookup ``service_for_port`` wird hier
+    # als ServiceLookupRunner herausgereicht -- der api-Ring bleibt domain-frei, die
+    # Kopplung an die Domaene lebt im Composition Root.
+    app.dependency_overrides[provide_service_lookup] = lambda: service_for_port
+    app.dependency_overrides[provide_add_user_rules] = lambda: _add_user_rules
+    app.dependency_overrides[provide_list_user_rules] = lambda: _list_user_rules
+    app.dependency_overrides[provide_list_all_rules] = lambda: _list_all_rules
+    app.dependency_overrides[provide_delete_user_rule] = lambda: _delete_user_rule
+    app.dependency_overrides[provide_acknowledge] = lambda: _acknowledge
+
+    # ── usage-Zaehlung verdrahten (Nutzungs-Ranking des Startseiten-Schnellzugriffs) ──
+    # Lazy-memoisiertes Zaehl-Repo (lru_cache, Muster analysis_rule_repository): teilt die
+    # cernis.db mit dem uebrigen Bestand (eigene Tabelle usage_stats). Persistent ueber
+    # Neustarts. Der db_path kommt aus derselben Aufloesung wie alle Repos (get_db_path).
+    @lru_cache(maxsize=1)
+    def usage_stats_repository() -> SqliteUsageStatsRepository:
+        from modules.db_path import get_db_path
+
+        return SqliteUsageStatsRepository(get_db_path())
+
+    # Die zwei duennen Use-Cases als Runner herausreichen (Muster _delete_user_rule /
+    # _list_user_rules): der api-Ring bleibt repo-/use-case-frei; die Kopplung lebt hier.
+    def _record_feature_usage(feature_id: str) -> None:
+        RecordFeatureUsage(usage_stats_repository())(feature_id)
+
+    def _top_features(limit: int) -> list[Any]:
+        return list(GetTopFeatures(usage_stats_repository())(limit))
+
+    app.include_router(usage_router)
+    app.dependency_overrides[provide_record_usage] = lambda: _record_feature_usage
+    app.dependency_overrides[provide_top_features] = lambda: _top_features
+
+    # ── maintenance-Domaene v2 verdrahten (Etappe 3, Regel 5: ports<->infra nur hier) ──
+    # Die Wartungs-Funktion (Daten loeschen) komponiert die zwei Stufen aus den BEREITS
+    # vorhandenen Repo-Factories des uebrigen Bestands -- KEINE eigenen Repos, KEINE
+    # zweiten Instanzen. Stufe 1 (ResetScanData) leert die Befund-/Verlaufstabellen;
+    # Stufe 2 (FactoryReset) fuehrt erst die ganze Stufe 1 aus (dieselbe Instanz, die
+    # auch der Stufe-1-Endpunkt nutzt -- der Use-Case komponiert sie selbst) und raeumt
+    # DANACH Geraete, Settings, Regeln, Monitoring (Scheduler-Jobs zuerst, dann Tabellen),
+    # Alert-Regeln und Agenten ab. Der Scheduler ist die SELBE gecachte Instanz wie bei
+    # ManageSchedules (job_scheduler(), lru_cache) -- KEINE zweite. Die Factories liegen
+    # ueber den gesamten create_app-Scope verteilt; die Closures loesen ihre Namen erst
+    # beim Request auf (alle Factories sind dann definiert).
+    #
+    # Verdrahtet als Use-Case-INSTANZ (Muster der devices-POST-Use-Cases): das Override
+    # liefert die Instanz, der Router ruft ihre ``run``-Methode. Stufe-1- und Stufe-2-
+    # Instanz teilen sich DIESELBE ResetScanData (FactoryReset komponiert sie) -- darum
+    # einmal lazy memoisiert, damit beide Endpunkte/Use-Cases dieselbe Instanz sehen.
+    @lru_cache(maxsize=1)
+    def reset_scan_data_use_case() -> ResetScanData:
+        return ResetScanData(
+            scan_history=scan_history_repository(),
+            cve_findings=cve_finding_repository(),
+            cve_checkstate=cve_checkstate_repository(),
+            cve_acknowledgements=cve_acknowledgement_repository(),
+            known_hosts=host_history_repository(),
+            analysis_acknowledgements=acknowledgement_repository(),
+            arp_guard=arp_guard_repository(),
+        )
+
+    @lru_cache(maxsize=1)
+    def factory_reset_use_case() -> FactoryReset:
+        return FactoryReset(
+            reset_scan_data=reset_scan_data_use_case(),
+            devices=device_repository(),
+            settings=repository(),
+            user_rules=analysis_rule_repository(),
+            schedules=schedule_repository(),
+            scheduler=job_scheduler(),
+            rtt_history=rtt_history_repository(),
+            monitor_events=monitor_event_repository(),
+            sla_samples=sla_sample_repository(),
+            logging_tasks=logging_task_repository(),
+            logging_rtt=logging_rtt_repository(),
+            logging_events=logging_event_repository(),
+            outbound_recordings=outbound_recording_repository(),
+            outbound_detail=outbound_detail_repository(),
+            outbound_aggregate=outbound_aggregate_repository(),
+            dns_bypass_recordings=dns_bypass_recording_repository(),
+            dns_bypass_detail=dns_bypass_detail_repository(),
+            dns_bypass_aggregate=dns_bypass_aggregate_repository(),
+            dns_trust=dns_trust_repository(),
+            alert_rules=alert_rule_repository(),
+            agents=agent_repository(),
+            dns_watch_acknowledgements=dns_watch_acknowledgement_repository(),
+            scheduled_jobs=scheduled_job_repository(),
+            secret_store=secret_store(),
+        )
+
+    # Granularer Baukasten (Stufe 1 waehlbar): zieht alle Repos aus den BESTEHENDEN
+    # Factories -- KEINE eigenen Repos, KEINE zweiten Instanzen (Muster ResetScanData).
+    @lru_cache(maxsize=1)
+    def delete_selected_use_case() -> DeleteSelectedData:
+        return DeleteSelectedData(
+            scan_history=scan_history_repository(),
+            cve_findings=cve_finding_repository(),
+            cve_checkstate=cve_checkstate_repository(),
+            cve_acknowledgements=cve_acknowledgement_repository(),
+            arp_guard=arp_guard_repository(),
+            analysis_acknowledgements=acknowledgement_repository(),
+            known_hosts=host_history_repository(),
+            rtt_history=rtt_history_repository(),
+            monitor_events=monitor_event_repository(),
+            sla_samples=sla_sample_repository(),
+            logging_tasks=logging_task_repository(),
+            logging_rtt=logging_rtt_repository(),
+            logging_events=logging_event_repository(),
+            outbound_recordings=outbound_recording_repository(),
+            outbound_detail=outbound_detail_repository(),
+            outbound_aggregate=outbound_aggregate_repository(),
+            dns_bypass_recordings=dns_bypass_recording_repository(),
+            dns_bypass_detail=dns_bypass_detail_repository(),
+            dns_bypass_aggregate=dns_bypass_aggregate_repository(),
+            dns_trust=dns_trust_repository(),
+        )
+
+    app.include_router(maintenance_router)
+    app.dependency_overrides[provide_reset_scan_data] = reset_scan_data_use_case
+    app.dependency_overrides[provide_delete_selected] = delete_selected_use_case
+    app.dependency_overrides[provide_factory_reset] = factory_reset_use_case
 
     # ── Frontend-Serving ── MUSS als LETZTES registriert werden ──────────────────
     # Der "/"-Mount faengt alle zuvor NICHT gematchten Pfade. Deshalb hier ganz am
@@ -391,6 +8226,86 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         logger.info("frontend_serving_enabled", directory=str(frontend_dir))
     else:
         logger.info("frontend_serving_disabled")
+
+    # ── Schemanaht, zweite Haelfte: die HANDLUNG (S88-P1a) ────────────────────────
+    # Erste Haelfte ist ``schema_pruefen`` ganz am Anfang dieser Funktion -- dort faellt
+    # die Entscheidung (Fall D verweigert, Fall C sichert und migriert), hier laufen
+    # die Aufbauschritte und hier wird ``user_version`` als letzte Handlung gesetzt.
+    # Die Zweiteilung ist eine ENTSCHEIDUNG, kein Versehen: die Entscheidung muss
+    # frueh fallen, der Aufbau kann erst hier laufen -- die 34 Factory-Funktionen sind
+    # lokale Funktionen von create_app und existieren erst ab dieser Stelle
+    # vollzaehlig (die letzte, ``usage_stats_repository``, entsteht weiter oben).
+    #
+    # Der Block steht am Ende von create_app, aber VOR ``return app`` und AUSSERHALB
+    # des Lifespan. Er haengt NICHT an ``cfg.bootstrap_on_startup`` -- ebenso wenig wie
+    # die Pruefung am Anfang, aus demselben Grund: sechs Repositories entstehen auch
+    # ohne diesen Schalter, also darf die Fassungspflege nicht dahinter liegen.
+    #
+    # REIHENFOLGE -- nachgemessen, nicht geschaetzt: sie bildet GENAU das heutige
+    # Startverhalten nach (Messung an einer leeren Wegwerf-Datenbank, instrumentierte
+    # sqlite3-Verbindung, Auslieferungsweg ``app:app`` mit bootstrap_on_startup=true).
+    # Entscheidend ist der devices-Block: ``init_devices_db`` laeuft VOR
+    # ``device_repository`` -- auf leerer Datenbank gewinnt damit der Altcode-CREATE
+    # mit 14 Spalten, und die sechs v2-Spalten kommen per additivem ALTER nach (20
+    # Spalten). Eine andere Folge erzeugte ein anderes Spaltenbild.
+    #
+    # Die Gliederung spiegelt die drei heutigen Entstehungszeitpunkte:
+    #   1. Koerper von create_app (6 Repos) -- entstanden schon bisher ohne Schalter,
+    #   2. Lifespan-Bootstrap (3 Altcode-Initialisierer + 15 Repos),
+    #   3. bisher erst bei Gebrauch (13 Repos) -- sie ziehen die restlichen Tabellen
+    #      nach, damit eine frische Datenbank alle 38 Tabellen traegt statt 24.
+    # ``_bauen`` verwirft den Rueckgabewert der Factory: die Aufbauschritte sind
+    # ``Callable[[], None]`` -- gebraucht wird allein der Seiteneffekt (der
+    # Konstruktor legt ueber ``_ensure_schema`` sein Stueck Schema an).
+    def _bauen(fabrik: Callable[[], object]) -> Callable[[], None]:
+        def schritt() -> None:
+            fabrik()
+
+        return schritt
+
+    _schema_aufbauschritte: list[Callable[[], None]] = [
+        # 1. bisher im Koerper von create_app
+        _bauen(default_creds_list_repository),
+        _bauen(logging_task_repository),
+        _bauen(blocklist_source_repository),
+        _bauen(blocklist_entry_repository),
+        _bauen(dns_trust_repository),
+        _bauen(logging_rtt_repository),
+        # 2. bisher im Lifespan-Bootstrap -- init_db/init_devices_db ZUERST (s. o.)
+        init_db,
+        init_devices_db,
+        _bauen(device_repository),
+        _bauen(repository),
+        _bauen(rtt_history_repository),
+        _bauen(monitor_event_repository),
+        _bauen(alert_rule_repository),
+        _bauen(logging_event_repository),
+        _bauen(schedule_repository),
+        _bauen(cve_finding_repository),
+        _bauen(cve_checkstate_repository),
+        _bauen(cve_acknowledgement_repository),
+        _bauen(outbound_recording_repository),
+        _bauen(outbound_detail_repository),
+        _bauen(outbound_aggregate_repository),
+        _bauen(scheduled_job_repository),
+        init_alerts_db,
+        _bauen(scan_history_repository),
+        # 3. bisher erst bei Gebrauch
+        _bauen(sla_sample_repository),
+        _bauen(arp_guard_repository),
+        _bauen(default_creds_history_repository),
+        _bauen(agent_repository),
+        _bauen(rogue_dhcp_repository),
+        _bauen(dns_watch_acknowledgement_repository),
+        _bauen(dns_bypass_recording_repository),
+        _bauen(dns_bypass_detail_repository),
+        _bauen(dns_bypass_aggregate_repository),
+        _bauen(analysis_rule_repository),
+        _bauen(host_history_repository),
+        _bauen(acknowledgement_repository),
+        _bauen(usage_stats_repository),
+    ]
+    schema_aufbauen(_schema_db_pfad, _vorgefundene_schema_fassung, _schema_aufbauschritte)
 
     return app
 

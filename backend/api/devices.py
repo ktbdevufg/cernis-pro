@@ -16,20 +16,32 @@ HTTP-Mapping: ``DeviceNotFoundError`` (aus application importierbar) -> 404 hier
 im Router. Loeschen ist idempotent -> kein 404.
 """
 
+from collections.abc import Callable
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from application.devices import (
+    AnswerArchivePrompt,
+    ArchiveDevice,
+    CreateDevice,
     DeleteDevice,
+    DeviceAlreadyExistsError,
+    DeviceBroadcastMacError,
     DeviceNotFoundError,
+    DismissDeviceFromWatch,
+    GetArchivedDevices,
     GetDevice,
     GetDevices,
     GetDeviceStats,
+    GetUnclassifiedDevices,
+    InvalidTrustStateError,
     RecordScannedHost,
+    RestoreDevice,
     UpdateDeviceMeta,
 )
+from application.maintenance import EntferneGeraeteMenge, GruppiereGeraeteNachNetz
 
 router = APIRouter(prefix="/api/devices", tags=["devices"])
 
@@ -62,6 +74,49 @@ def provide_record_scanned_host() -> RecordScannedHost:
     raise NotImplementedError("RecordScannedHost wird in app.py verdrahtet")
 
 
+def provide_get_unclassified_devices() -> GetUnclassifiedDevices:
+    raise NotImplementedError("GetUnclassifiedDevices wird in app.py verdrahtet")
+
+
+def provide_dismiss_device_from_watch() -> DismissDeviceFromWatch:
+    raise NotImplementedError("DismissDeviceFromWatch wird in app.py verdrahtet")
+
+
+def provide_create_device() -> CreateDevice:
+    raise NotImplementedError("CreateDevice wird in app.py verdrahtet")
+
+
+def provide_archive_device() -> ArchiveDevice:
+    raise NotImplementedError("ArchiveDevice wird in app.py verdrahtet")
+
+
+def provide_restore_device() -> RestoreDevice:
+    raise NotImplementedError("RestoreDevice wird in app.py verdrahtet")
+
+
+def provide_get_archived_devices() -> GetArchivedDevices:
+    raise NotImplementedError("GetArchivedDevices wird in app.py verdrahtet")
+
+
+def provide_get_archive_candidates() -> Callable[[], list[Any]]:
+    # Liefert ein fertig parametriertes Callable (Schwelle aus dem Setting im
+    # Composition Root eingesetzt), das der Endpunkt argumentlos aufruft -- der
+    # api-Ring kennt weder den domain-Device-Typ noch die Tage-Schwelle.
+    raise NotImplementedError("get_archive_candidates wird in app.py verdrahtet")
+
+
+def provide_answer_archive_prompt() -> AnswerArchivePrompt:
+    raise NotImplementedError("AnswerArchivePrompt wird in app.py verdrahtet")
+
+
+def provide_gruppiere_nach_netz() -> GruppiereGeraeteNachNetz:
+    raise NotImplementedError("GruppiereGeraeteNachNetz wird in app.py verdrahtet")
+
+
+def provide_entferne_geraete_menge() -> EntferneGeraeteMenge:
+    raise NotImplementedError("EntferneGeraeteMenge wird in app.py verdrahtet")
+
+
 class DeviceMetaBody(BaseModel):
     """Partielles Update der User-Metadaten -- alle Felder optional (None = nicht aendern)."""
 
@@ -70,6 +125,47 @@ class DeviceMetaBody(BaseModel):
     notes: str | None = None
     category: str | None = None
     is_known: bool | None = None
+    # Als roher str entgegengenommen (kein domain-Import im api-Ring). Die
+    # Validierung gegen die erlaubten Werte und die Hebung str->TrustState macht
+    # der Use-Case; ein ungueltiger Wert wird unten auf HTTP 422 abgebildet.
+    trust_state: str | None = None
+    # Wache-Wegleg-Flag ueber den generischen Update-Pfad (None = nicht aendern).
+    watch_dismissed: bool | None = None
+
+
+class DismissBody(BaseModel):
+    """Body von POST /{mac}/dismiss: ``dismissed`` legt weg (True) bzw. holt zurueck (False)."""
+
+    dismissed: bool
+
+
+class CreateDeviceBody(BaseModel):
+    """Body von POST "": ein Geraet von Hand anlegen (``mac`` Pflicht, Rest optional)."""
+
+    mac: str
+    label: str = ""
+    notes: str = ""
+    category: str = ""
+    tags: list[str] | None = None
+
+
+class ArchivePromptBody(BaseModel):
+    """Body von POST /{mac}/archive-prompt: ``archive`` -> Ja (True) / Nein (False)."""
+
+    archive: bool
+
+
+class EntferneMengeBody(BaseModel):
+    """Body von POST /remove-many: ``macs`` als Liste roher MAC-Strings.
+
+    Bauform gemessen am Bestand (Auftrag 1.4): ``DeleteSelectedBody`` in
+    ``api/maintenance.py`` fuehrt genauso EIN Listenfeld roher Strings, das der
+    Use-Case autoritativ auswertet -- der Router validiert den Inhalt NICHT.
+    Hier ist das ebenso richtig: die Schreibweise/Gueltigkeit einer MAC ist eine
+    Frage des Loeschwegs, nicht des HTTP-Rands.
+    """
+
+    macs: list[str]
 
 
 def _device_to_dict(device: Any) -> dict[str, Any]:
@@ -82,6 +178,9 @@ def _device_to_dict(device: Any) -> dict[str, Any]:
         "notes": device.notes,
         "category": device.category,
         "is_known": device.is_known,
+        "trust_state": device.trust_state.value,
+        "source": device.source.value,
+        "watch_dismissed": device.watch_dismissed,
         "hostname": device.hostname,
         "os_guess": device.os_guess,
         "tags": list(device.tags),
@@ -121,6 +220,114 @@ def list_devices(
     return [_device_to_dict(device) for device in get_devices(known_only)]
 
 
+@router.post("")
+def create_device(
+    body: CreateDeviceBody,
+    create_device: Annotated[CreateDevice, Depends(provide_create_device)],
+) -> dict[str, Any]:
+    """Legt ein Geraet von Hand an; bekannte MAC -> 409, ungueltige/Broadcast-MAC -> 422."""
+    try:
+        created = create_device(
+            body.mac,
+            label=body.label,
+            notes=body.notes,
+            category=body.category,
+            tags=body.tags,
+        )
+    except DeviceAlreadyExistsError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Geraet existiert bereits. (E-506)",
+        ) from exc
+    except DeviceBroadcastMacError as exc:
+        # Kein Konflikt, sondern ungueltige Eingabe -> 422 (bare, wie der uebrige
+        # Router). Die Broadcast-Adresse ist kein Geraet.
+        raise HTTPException(
+            status_code=422,
+            detail="Die Broadcast-Adresse ist kein Geraet. (E-506)",
+        ) from exc
+    except ValueError as exc:
+        # Ungueltige MAC aus normalize_mac im Use-Case. Bare 422 wie der
+        # InvalidTrustState-Pfad (vermeidet den deprecateten status-Alias).
+        raise HTTPException(status_code=422, detail="Ungueltige MAC. (E-506)") from exc
+    return _device_to_dict(created)
+
+
+# /unclassified VOR /{mac} deklarieren, sonst faengt der Pfad-Parameter
+# "unclassified" als MAC.
+@router.get("/unclassified")
+def list_unclassified_devices(
+    get_unclassified: Annotated[GetUnclassifiedDevices, Depends(provide_get_unclassified_devices)],
+) -> list[dict[str, Any]]:
+    """Die Gaeste-/Unbekannt-Wache: noch nicht eingeordnete, nicht weggelegte Geraete."""
+    return [_device_to_dict(device) for device in get_unclassified()]
+
+
+# /archived VOR /{mac} deklarieren, sonst faengt der Pfad-Parameter "archived".
+@router.get("/archived")
+def list_archived_devices(
+    get_archived: Annotated[GetArchivedDevices, Depends(provide_get_archived_devices)],
+) -> list[dict[str, Any]]:
+    """Die Archiv-Liste: alle archivierten Geraete (``last_seen`` absteigend)."""
+    return [_device_to_dict(device) for device in get_archived()]
+
+
+# /archive-candidates VOR /{mac} deklarieren, sonst faengt der Pfad-Parameter
+# "archive-candidates" als MAC.
+@router.get("/archive-candidates")
+def archive_candidates(
+    get_archive_candidates: Annotated[
+        Callable[[], list[Any]], Depends(provide_get_archive_candidates)
+    ],
+) -> list[dict[str, Any]]:
+    """Nachfrage-Kandidaten: lange nicht gesehene Geraete (Schwelle aus dem Setting).
+
+    Passiver Lese-Endpunkt, den das Frontend nach Scan-Abschluss abfragt; es wird
+    nichts automatisch archiviert. Die Schwelle ist im Composition Root eingesetzt,
+    daher argumentloser Aufruf.
+    """
+    candidates = get_archive_candidates()
+    return [_device_to_dict(device) for device in candidates]
+
+
+# /netz-gruppen VOR /{mac} deklarieren, sonst faengt der Pfad-Parameter
+# "netz-gruppen" als MAC (Bestandsmuster /stats, /archived, /unclassified).
+@router.get("/netz-gruppen")
+def netz_gruppen(
+    gruppiere: Annotated[GruppiereGeraeteNachNetz, Depends(provide_gruppiere_nach_netz)],
+) -> list[dict[str, Any]]:
+    """Die Netzgruppen des aktiven Bestands: je Gruppe Netzangabe, Anzahl und MACs.
+
+    Reine Rechnung ueber die vorhandene ``last_ip`` -- nichts wird gespeichert
+    (Auftrag 2.4). Archivierte Geraete sind wie in der aktiven Liste aussen vor.
+    Leerer Bestand -> ``[]``.
+    """
+    return [
+        {"netz": gruppe.netz, "anzahl": gruppe.anzahl, "macs": list(gruppe.macs)}
+        for gruppe in gruppiere()
+    ]
+
+
+# /remove-many VOR /{mac} deklarieren (s. o.). Bewusst POST und nicht DELETE: ein
+# DELETE mit Body ist zwar nicht verboten, wird aber von Zwischenschichten
+# uneinheitlich behandelt -- und der Bestand fuehrt jede Mengen-Loeschung
+# ebenfalls als POST (``/api/maintenance/reset-selected``).
+@router.post("/remove-many")
+def remove_many_devices(
+    body: EntferneMengeBody,
+    entferne: Annotated[EntferneGeraeteMenge, Depends(provide_entferne_geraete_menge)],
+) -> dict[str, Any]:
+    """Loescht eine MENGE von Geraeten samt aller MAC-gebundenen Nebendaten.
+
+    Idempotent wie ``DELETE /{mac}``: unbekannte oder ungueltige MACs sind KEIN
+    Fehler, sie raeumen nur nichts ab (Begruendung im Use-Case). Eine leere Liste
+    loescht nichts und ist ebenfalls kein Fehler. ``entfernt`` meldet, wie viele
+    Geraete tatsaechlich weg sind.
+    """
+    entfernt = entferne(body.macs)
+    return {"ok": True, "entfernt": entfernt}
+
+
 @router.get("/{mac}")
 def get_device(
     mac: str,
@@ -131,7 +338,8 @@ def get_device(
         result = get_device(mac)
     except DeviceNotFoundError as exc:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Geraet nicht gefunden."
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Geraet nicht gefunden. (E-505)",
         ) from exc
     return {
         **_device_to_dict(result.device),
@@ -154,10 +362,20 @@ def put_device(
             notes=body.notes,
             category=body.category,
             is_known=body.is_known,
+            trust_state=body.trust_state,
+            watch_dismissed=body.watch_dismissed,
         )
     except DeviceNotFoundError as exc:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Geraet nicht gefunden."
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Geraet nicht gefunden. (E-505)",
+        ) from exc
+    except InvalidTrustStateError as exc:
+        # Bare 422 wie der uebrige Router (monitoring/analysis): vermeidet die
+        # Deprecation des status.HTTP_422_*-Alias der installierten Starlette.
+        raise HTTPException(
+            status_code=422,
+            detail=f"Ungueltiger trust_state: {exc.value!r}. (E-506)",
         ) from exc
     return _device_to_dict(updated)
 
@@ -170,3 +388,73 @@ def delete_device(
     """Loescht ein Geraet (inkl. IP-History). Idempotent -> kein 404."""
     delete_device(mac)
     return {"ok": True}
+
+
+@router.post("/{mac}/dismiss")
+def dismiss_device(
+    mac: str,
+    body: DismissBody,
+    dismiss_from_watch: Annotated[
+        DismissDeviceFromWatch, Depends(provide_dismiss_device_from_watch)
+    ],
+) -> dict[str, Any]:
+    """Legt ein Geraet aus der Wache weg (``dismissed=true``) bzw. holt es zurueck;
+    unbekannte MAC -> 404. Anders als DELETE bleibt das Geraet im Bestand."""
+    try:
+        updated = dismiss_from_watch(mac, body.dismissed)
+    except DeviceNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Geraet nicht gefunden. (E-505)",
+        ) from exc
+    return _device_to_dict(updated)
+
+
+@router.post("/{mac}/archive")
+def archive_device(
+    mac: str,
+    archive_device: Annotated[ArchiveDevice, Depends(provide_archive_device)],
+) -> dict[str, Any]:
+    """Archiviert ein Geraet direkt; unbekannte MAC -> 404."""
+    try:
+        updated = archive_device(mac)
+    except DeviceNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Geraet nicht gefunden. (E-505)",
+        ) from exc
+    return _device_to_dict(updated)
+
+
+@router.post("/{mac}/restore")
+def restore_device(
+    mac: str,
+    restore_device: Annotated[RestoreDevice, Depends(provide_restore_device)],
+) -> dict[str, Any]:
+    """Holt ein archiviertes Geraet zurueck in den aktiven Bestand; unbekannte MAC -> 404."""
+    try:
+        updated = restore_device(mac)
+    except DeviceNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Geraet nicht gefunden. (E-505)",
+        ) from exc
+    return _device_to_dict(updated)
+
+
+@router.post("/{mac}/archive-prompt")
+def answer_archive_prompt(
+    mac: str,
+    body: ArchivePromptBody,
+    answer_archive_prompt: Annotated[AnswerArchivePrompt, Depends(provide_answer_archive_prompt)],
+) -> dict[str, Any]:
+    """Nutzerantwort auf die Scan-Nachfrage: Ja -> archivieren, Nein -> Zaehler hoch;
+    unbekannte MAC -> 404."""
+    try:
+        updated = answer_archive_prompt(mac, body.archive)
+    except DeviceNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Geraet nicht gefunden. (E-505)",
+        ) from exc
+    return _device_to_dict(updated)

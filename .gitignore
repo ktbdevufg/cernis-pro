@@ -48,9 +48,29 @@ desktop.ini
 npm-debug.log*
 src-tauri/gen/
 src-tauri/cernis-backend-*
+src-tauri/cernis-sniffd-*
+
+# Bauergebnisse aus build-linux.sh Schritt 5: die erzeugte Lizenzaufstellung und
+# die Kopie der Wurzel-LICENSE. Beide kommen ueber bundle.resources ins Paket und
+# gehoeren nicht ins Repo -- das Original LICENSE in der Wurzel bleibt versioniert.
+src-tauri/lizenzaufstellung.json
+src-tauri/LICENSE
+
+# Ebenfalls aus Schritt 5: die beiden Debian-Beilagen, aus derselben Aufstellung
+# erzeugt. Sie gehen ueber bundle.linux.deb.files nach
+# /usr/share/doc/cernis-pro/ und sind reine Bauergebnisse.
+src-tauri/debian/
+
+# Ebenfalls aus Schritt 5: die beiden RPM-Beilagen, aus derselben Aufstellung
+# erzeugt. Sie gehen ueber bundle.linux.rpm.files nach
+# /usr/share/licenses/cernis-pro/ und sind reine Bauergebnisse.
+src-tauri/rpm/
 
 # Claude Code
 .claude/
+
+# CI-generierte Build-Version (nur im Workflow erzeugt, nie committet)
+backend/infrastructure/_build_version.py
 
 # Sensitive file types
 *.p12
@@ -58,3 +78,12 @@ src-tauri/cernis-backend-*
 *.sqlite
 *.bak
 *.backup
+
+# Laufzeit-Datenbank (nie einchecken; wird beim Start erzeugt)
+*.db
+
+# Laufzeit-Versionsstempel (beim Start erzeugt)
+backend/data/.version
+
+# Quelltextarchiv aus build-linux.yml
+dist-source/

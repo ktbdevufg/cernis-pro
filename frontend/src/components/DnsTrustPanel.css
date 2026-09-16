@@ -1,0 +1,456 @@
+/* DNS-Vertrauens-Panel: nach Kategorie gruppierte Server-Liste mit Entscheidungs-
+   Knoepfen und deskriptiven Plausibilitaets-Indizien. Dezent, dunkel-tauglich,
+   nutzt ausschliesslich die Design-Tokens (gleiche Token-Sprache wie
+   BlocklistPanel.css; dt-* statt bl-*). Keine erfundenen Farben. Der Warn-Ton
+   (Bedrohungsliste) laeuft ueber die --sev-high-*-Tokens. */
+
+.dt-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-height: 0;
+  /* Ruhiger Abschluss bei langer, scrollender Liste (wie bl-panel). */
+  padding-bottom: 32px;
+}
+
+.dt-loading {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-sec);
+}
+
+/* ── Erklaer-Kopf ────────────────────────────────────────────────────────────── */
+
+.dt-intro {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dt-intro__desc {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--color-text-sec);
+}
+
+/* Die „rote Linie": die Vision-Aussage (zeigen + einordnen, nicht urteilen). */
+.dt-intro__redline {
+  margin: 0;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.5;
+  color: var(--color-text);
+  background: var(--color-accent-bg);
+  border: 1px solid var(--color-accent-border);
+  border-left: 3px solid var(--color-accent);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+}
+
+/* Globaler Fehlerhinweis (mittlerer Severity-Ton). */
+.dt-error {
+  margin: 0;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--sev-med-text);
+  background: var(--sev-med-bg);
+  border: 1px solid var(--sev-med-bd);
+  border-radius: var(--radius-md);
+}
+
+.dt-empty {
+  margin: 0;
+  padding: 14px 16px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--color-text-tert);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* ── Gruppe ──────────────────────────────────────────────────────────────────── */
+
+.dt-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.dt-group__title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-tert);
+}
+
+/* Ton je Gruppe: „ok" akzentuiert, „warn" (Bedrohung) rot ueber sev-high,
+   „danger" (Abgelehnt) ebenfalls warnend, „neutral" bleibt zurueckhaltend. */
+.dt-group[data-ton="ok"] .dt-group__title {
+  color: var(--status-active-text);
+}
+
+.dt-group[data-ton="warn"] .dt-group__title,
+.dt-group[data-ton="danger"] .dt-group__title {
+  color: var(--sev-high-text);
+}
+
+.dt-group__lead {
+  margin: 0 0 8px 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-sec);
+}
+
+.dt-group__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ── Server-Zeile ────────────────────────────────────────────────────────────── */
+
+.dt-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* Warnende/abgelehnte Zeilen bekommen einen linken Akzentstreifen im Ton. */
+.dt-group[data-ton="warn"] .dt-row,
+.dt-group[data-ton="danger"] .dt-row {
+  border-left: 3px solid var(--sev-high-bd);
+}
+
+.dt-row__ident {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 260px;
+}
+
+.dt-row__name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+  word-break: break-all;
+}
+
+.dt-row__ip {
+  font-size: 12px;
+  color: var(--color-text-tert);
+  word-break: break-all;
+}
+
+.dt-row__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* ── Marken (Kategorie + Zustand) ────────────────────────────────────────────── */
+
+.dt-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 11px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-sec);
+  background: var(--color-bar);
+  white-space: nowrap;
+}
+
+/* Platzhalter-Marke: funktionsloser Windows-Vorgabe-DNS-Server (fec0:0:0:ffff::1..3).
+   BEWUSST informativer Akzent-Ton (kein sev-high/Warn-/Fehlerton) -- es ist kein
+   Problem, nur ein Hinweis. Neben der Kategorie-Marke, nicht an ihrer Stelle. */
+.dt-badge--placeholder {
+  color: var(--color-accent);
+  border-color: var(--color-accent-border);
+  background: var(--color-accent-bg);
+}
+
+/* Einmaliger Erklaertext unterhalb der Liste (nur wenn mind. ein Platzhalter da ist).
+   Gleicher informativer Akzent-Ton wie die Marke, ruhig. */
+.dt-placeholder-note {
+  margin: 0;
+  padding: 10px 14px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--color-text-sec);
+  background: var(--color-accent-bg);
+  border: 1px solid var(--color-accent-border);
+  border-left: 3px solid var(--color-accent);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+}
+
+/* ── Plausibilitaets-Indizien (deskriptiv) ───────────────────────────────────── */
+
+.dt-hints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+
+.dt-hint {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--color-text-sec);
+}
+
+/* „nicht im Bestand" bleibt dezent (kein Urteil, nur ein Hinweis). */
+.dt-hint--absent {
+  color: var(--color-text-tert);
+  font-style: italic;
+}
+
+/* ── Aktionen ────────────────────────────────────────────────────────────────── */
+
+.dt-row__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+/* Dezenter Hinweis an Stelle der Entscheidungs-Knoepfe bei funktionslosen
+   Platzhaltern (kein Button, nicht fokussierbar). Gleiche vertikale Metrik wie
+   ein Knopf (Padding/Schriftgroesse), damit die Zeilenhoehe und Ausrichtung
+   erhalten bleiben und keine Luecke entsteht -- nur ohne Rahmen/Hintergrund. */
+.dt-actions-note {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 0;
+  font-size: 12px;
+  color: var(--color-text-sec);
+  font-style: italic;
+}
+
+.dt-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-sec);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.dt-action:hover:not(:disabled) {
+  color: var(--color-accent);
+  border-color: var(--color-accent-border);
+  background: var(--color-accent-bg);
+}
+
+.dt-action:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.dt-action:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* „Vertrauen" (regulaer): akzentuierter, positiver Grundton. */
+.dt-action--trust {
+  color: var(--color-accent);
+  border-color: var(--color-accent-border);
+  background: var(--color-accent-bg);
+}
+
+.dt-action--trust:hover:not(:disabled) {
+  color: var(--color-bg);
+  background: var(--color-accent);
+}
+
+/* „Ablehnen": warnender Hover (kritisch), ruhig im Grundzustand. */
+.dt-action--reject:hover:not(:disabled) {
+  color: var(--sev-high-text);
+  border-color: var(--sev-high-bd);
+  background: var(--sev-high-bg);
+}
+
+/* Gateway-Ablehnen: bewusst leiser (kein Zwang, muendiger Nutzer). */
+.dt-action--subtle {
+  opacity: 0.72;
+}
+
+.dt-action--subtle:hover:not(:disabled) {
+  opacity: 1;
+}
+
+/* „Trotz Bedrohungslisten-Eintrag vertrauen": klare Warn-Optik ueber sev-high --
+   NICHT als neutrale Wahl. */
+.dt-action--warn {
+  color: var(--sev-high-text);
+  border-color: var(--sev-high-bd);
+  background: var(--sev-high-bg);
+}
+
+.dt-action--warn:hover:not(:disabled) {
+  color: var(--color-bg);
+  border-color: var(--sev-high-bd);
+  background: var(--sev-high-bd);
+}
+
+/* ── Variante H: Rang-Badge + Rang-Knoepfe (Bereich „Erwartet — geordnet") ───── */
+
+/* Rang-Badge: laufende Position 1..N, ruhig akzentuiert, feste Breite fuer
+   ruhige Ausrichtung der Zeilen untereinander. */
+.dt-rank {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-accent);
+  background: var(--color-accent-bg);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+  flex: 0 0 auto;
+}
+
+/* Hoch-/Runter-/Entfernen-Knoepfe: quadratisch, dezent; disabled ausgegraut. */
+.dt-rank-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: var(--color-text-sec);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.dt-rank-btn:hover:not(:disabled) {
+  color: var(--color-accent);
+  border-color: var(--color-accent-border);
+  background: var(--color-accent-bg);
+}
+
+.dt-rank-btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.dt-rank-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* Entfernen (X): warnender Hover, ruhig im Grundzustand. */
+.dt-rank-btn--remove:hover:not(:disabled) {
+  color: var(--sev-high-text);
+  border-color: var(--sev-high-bd);
+  background: var(--sev-high-bg);
+}
+
+/* Leertext innerhalb eines Bereichs (z.B. noch kein erwarteter Server). */
+.dt-group__empty {
+  margin: 0;
+  padding: 10px 14px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-tert);
+  background: var(--color-card);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* ── Variante H: eingeklappter „Abgelehnt"-Bereich ───────────────────────────── */
+
+.dt-collapsible__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0;
+  background: none;
+  border: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dt-collapsible__head:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-md);
+}
+
+.dt-collapsible__toggle {
+  font-size: 12px;
+  color: var(--color-text-tert);
+  white-space: nowrap;
+}
+
+.dt-collapsible__head:hover .dt-collapsible__toggle {
+  color: var(--color-accent);
+}
+
+/* ── Von Hand festgelegt: Hinweis + Anlege-Formular (S63 L7d) ────────────────── */
+
+/* „noch nicht beobachtet" -- dezent und kursiv wie der „nicht im Bestand"-Hinweis:
+   beides sind ruhige Feststellungen, kein Urteil und keine Warnung. */
+.dt-hint--manual {
+  color: var(--color-text-tert);
+  font-style: italic;
+}
+
+/* Das Hinzufuegen-Formular sitzt am Ende des Von-Hand-Bereichs. Gleiche Metrik wie
+   eine Zeile (dt-row), damit es sich einfuegt statt aufzufallen. */
+.dt-addform {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 12px 14px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* Eingabefelder im Haus-Stil (Muster dm-form__input): flexibel in der Breite, damit
+   IP- und Namensfeld die Zeile teilen und auf schmalen Fenstern umbrechen. */
+.dt-addform__input {
+  flex: 1 1 160px;
+  min-width: 0;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-sizing: border-box;
+}
+
+.dt-addform__input:focus-visible {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-bg);
+}

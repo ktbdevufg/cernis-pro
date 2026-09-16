@@ -1,7 +1,8 @@
 {
   "name": "cernis-pro",
   "private": true,
-  "version": "1.0.0",
+  "version": "2.1.2",
+  "license": "GPL-2.0-only",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,9 +10,13 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@tauri-apps/plugin-dialog": "^2.7.1",
+    "@tauri-apps/plugin-fs": "^2.5.1",
+    "i18next": "^26.3.1",
+    "lucide-react": "^0.383.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "lucide-react": "^0.383.0"
+    "react-i18next": "^17.0.8"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.0",

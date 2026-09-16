@@ -10,14 +10,16 @@ genau wie der devices-/settings-Router das haelt).
 Endpunkte (Shapes am S.1-Characterization-Contract):
 
 * ``GET /api/history``       -> Liste der Scans (id/scanned_at/cidr/host_count).
-* ``GET /api/history/{id}``  -> ein Scan mit vollen Hosts; unbekannte ID -> 404.
+* ``GET /api/history/{id}``  -> ein Scan mit vollen Hosts + ``interception``
+  (Gegenprobe auf lokal abgefangene Ports, Befund 53); unbekannte ID -> 404.
 * ``GET /api/vendor/{mac}``  -> ``{"mac": ..., "vendor": ...}``.
+* ``GET /api/arp``           -> roher ARP-Cache als ``{ip: mac}`` (S.7a).
 
-BEWUSST NICHT hier (S.7): ``GET /api/arp``. Es braucht einen ``ArpTablePort`` +
-Adapter (im Altcode ``modules.get_arp_table`` direkt), der zum ARP-Merge-Block
-gehoert -- dieser ist zusammen mit FritzHosts-Merge + devices-Projektion nach S.7
-verschoben. ``/api/arp`` kommt mit dem ARP-Port in S.7 (NICHT als Luecke
-uebersehen).
+``GET /api/arp`` (S.7a) liefert die rohe ARP-/Neighbor-Tabelle ueber den
+``ArpTablePort`` -- Form exakt am S.1-Characterization-Contract (``{ip: mac}``,
+KEINE Liste). Der ARP-MERGE in den Scan-Flow (synthetische Hosts, die der
+Ping-Sweep nicht fand) ist NICHT Teil von S.7a -- der gehoert mit
+FritzHosts-Merge + devices-Projektion nach S.7b und beruehrt ``RunNetworkScan``.
 
 Der WS-Endpunkt ``/ws/scan`` liegt NICHT hier, sondern im Composition Root
 (``backend/ws_scan.py``): seine Event->Frame-Uebersetzung braucht die
@@ -30,7 +32,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from application.scanning import GetScanDetail, GetScanHistory, LookupVendor
+from application.scanning import GetArpTable, GetScanDetail, GetScanHistory, LookupVendor
 
 router = APIRouter(prefix="/api", tags=["scanning"])
 
@@ -47,6 +49,10 @@ def provide_get_scan_detail() -> GetScanDetail:
 
 def provide_lookup_vendor() -> LookupVendor:
     raise NotImplementedError("LookupVendor wird in app.py verdrahtet")
+
+
+def provide_get_arp_table() -> GetArpTable:
+    raise NotImplementedError("GetArpTable wird in app.py verdrahtet")
 
 
 def _summary_to_dict(summary: Any) -> dict[str, Any]:
@@ -80,6 +86,19 @@ def _ssdp_to_dict(svc: Any) -> dict[str, Any]:
     return {"server": svc.server, "st": svc.st, "location": svc.location, "ip": svc.ip}
 
 
+def _interception_to_dict(interception: Any) -> dict[str, Any]:
+    # interception ist ein domain.PortInterception (Befund 53). ``checked``
+    # unterscheidet "geprueft, nichts gefunden" (True + leere Portliste) von
+    # "nicht geprueft" (False + ``reason``) -- der Client darf beides NICHT
+    # gleich behandeln, deshalb wandern beide Felder mit hinaus.
+    return {
+        "checked": interception.checked,
+        "control_ips": list(interception.control_ips),
+        "intercepted_ports": list(interception.intercepted_ports),
+        "reason": interception.reason,
+    }
+
+
 def _host_to_dict(host: Any) -> dict[str, Any]:
     # host ist ein domain.EnrichedHost; verschachtelte Domaenen-Objekte werden
     # ebenfalls per Attribut-Zugriff serialisiert (kein domain-Import, tuple->list).
@@ -105,6 +124,12 @@ def _host_to_dict(host: Any) -> dict[str, Any]:
         "label": host.label,
         "tags": list(host.tags),
         "notes": host.notes,
+        # source (ping/arp/fritzbox) auch ueber die REST-History (S.7f): die Quelle
+        # ist ueber JEDEN Lese-Pfad konsistent sichtbar (WS-host_detail + hier).
+        "source": host.source,
+        # Weitere IPs derselben MAC (MAC-Gruppierung): Proxy-ARP/Spoofing-Info,
+        # verlustfrei am primaeren Host -- leere Liste im Normalfall.
+        "additional_ips": list(host.additional_ips),
     }
 
 
@@ -125,13 +150,20 @@ def get_history_detail(
     """Ein Scan mit seinen vollen Hosts; unbekannte ID -> 404."""
     record = get_scan_detail(scan_id)
     if record is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scan nicht gefunden.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Scan nicht gefunden. (E-505)",
+        )
     return {
         "id": record.scan_id,
         "scanned_at": record.scanned_at,
         "cidr": record.cidr,
         "host_count": record.host_count,
         "hosts": [_host_to_dict(h) for h in record.hosts],
+        # Ergebnis der Gegenprobe auf lokal abgefangene Ports (Befund 53) -- am
+        # Scan, nicht am Host. Die ANZEIGE folgt in einem eigenen Auftrag; hier
+        # wird der Wert nur abrufbar gemacht.
+        "interception": _interception_to_dict(record.interception),
     }
 
 
@@ -142,3 +174,11 @@ def get_vendor(
 ) -> dict[str, str]:
     """Hersteller zur OUI einer MAC; ``""`` wenn nicht gefunden."""
     return {"mac": mac, "vendor": lookup_vendor(mac)}
+
+
+@router.get("/arp")
+async def get_arp(
+    get_arp_table: Annotated[GetArpTable, Depends(provide_get_arp_table)],
+) -> dict[str, str]:
+    """Roher System-ARP-/Neighbor-Cache als ``{ip: mac}``; leer -> ``{}``."""
+    return await get_arp_table()

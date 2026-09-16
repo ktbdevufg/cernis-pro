@@ -1,0 +1,63 @@
+/* Kopfzeilen-Pill "Aussenkontakte-Aufzeichnung laeuft" (F3). Gelbes Pendant zum
+   roten LivePill: gespiegelte Struktur, aber der gelbe Ton kommt aus den Medium-
+   Severity-Tokens (--sev-med-*, dasselbe Gelb-Set wie die F1-Leiste). Nur Token-
+   Variablen (tokens.css), nie feste Farben. Eigene Puls-Keyframes statt der
+   live-pill-puls aus LivePill.css -- nicht auf die Ladereihenfolge eines fremden
+   Component-CSS verlassen. */
+
+.outboundrec-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 11px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--sev-med-text);
+  background: var(--sev-med-bg);
+  border: 1px solid var(--sev-med-bd);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.outboundrec-pill:hover {
+  background: var(--sev-med-bg);
+  border-color: var(--sev-med-text);
+}
+
+.outboundrec-pill:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Pulsierender Punkt: gelber Ton aus dem Severity-Set (kein --status-offline, das
+   waere rot; keine feste Hex-Farbe). */
+.outboundrec-pill__punkt {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--sev-med-text);
+  box-shadow: 0 0 5px var(--sev-med-text);
+  animation: outboundrec-pill-puls 1.4s ease-in-out infinite;
+}
+
+@keyframes outboundrec-pill-puls {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.outboundrec-pill__text {
+  white-space: nowrap;
+}
+
+/* Restzeit dezenter als der Haupttext. */
+.outboundrec-pill__rest {
+  color: var(--sev-med-text);
+  opacity: 0.8;
+  white-space: nowrap;
+}

@@ -1,0 +1,938 @@
+/* Einstellungs-Ansicht: Sektionen mit Zeilen (Label links, Bedienelement rechts) */
+
+.settings {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  max-width: 560px;
+}
+
+/* Teil A — Gesamt-Layout: Navigation links, Inhalt rechts. Eine schmale Rubriken-
+   Spalte mit Trenner rechts, daneben der breite Inhaltsbereich. Hebt das
+   max-width des Einzel-Spalten-Layouts auf, der Inhalt nutzt die volle Breite. */
+.settings--layout {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 24px;
+  max-width: none;
+}
+
+.settings__nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 0 0 180px;
+  padding-right: 16px;
+  border-right: 1px solid var(--color-border);
+}
+
+/* Eine Rubrik in der linken Spalte: ruhig, aktive Rubrik mit dezentem
+   Token-Akzent (Hintergrund + linker Akzentstreifen). */
+.settings__nav-item {
+  padding: 8px 12px;
+  font-size: 14px;
+  text-align: left;
+  color: var(--color-text-sec);
+  background: none;
+  border: none;
+  border-left: 3px solid transparent;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  cursor: pointer;
+}
+
+.settings__nav-item:hover {
+  color: var(--color-text);
+  background: var(--color-card);
+}
+
+.settings__nav-item--aktiv {
+  color: var(--color-text);
+  font-weight: 600;
+  background: var(--color-accent-bg);
+  border-left-color: var(--color-accent);
+}
+
+.settings__nav-item:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Rechter Inhaltsbereich: gestapelte Sektionen, auf eine angenehme Lesebreite
+   begrenzt und linksbündig. Ohne diese Grenze liefen die Port-Zeilen (Bezeichnung)
+   über die gesamte Fensterbreite ins Leere. 620px liegt mittig im Richtwert
+   560–680px und lässt Port + Bezeichnung + Kästchen (+ Mülleimer) ausgewogen wirken. */
+.settings__content {
+  flex: 0 1 620px;
+  min-width: 0;
+  max-width: 620px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* Schmale Fenster: Navigation und Inhalt untereinander statt nebeneinander. */
+@media (max-width: 720px) {
+  .settings--layout {
+    flex-direction: column;
+  }
+
+  .settings__nav {
+    flex: 0 0 auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    padding-right: 0;
+    padding-bottom: 12px;
+    border-right: none;
+    border-bottom: 1px solid var(--color-border);
+  }
+}
+
+/* Eine benannte Sektion. */
+.settings__section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings__section-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-tert);
+}
+
+.settings__section-body {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-border);
+  /* Dezenter linker Akzentstreifen, der jede Rubrik klar als eigenen Block
+     ausweist. Design-System-Regel: einseitiger Akzent-Border -> keine runden
+     Ecken auf dieser Seite, sonst sitzt der Streifen unsauber. */
+  border-left: 3px solid var(--color-accent);
+  border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
+  background: var(--color-card);
+  overflow: hidden;
+}
+
+/* Dezentes "Gespeichert"-Feedback: ruhiger ok-Ton, blendet kurz ein. Reserviert
+   über min-height keinen Dauerplatz, der Layout-Sprung beim Ein-/Ausblenden
+   bleibt aus, weil die Höhe der Zeile konstant ist. */
+.settings__saved {
+  min-height: 16px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-ok-text);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.settings__saved--shown {
+  opacity: 1;
+}
+
+/* Eine Zeile: Label links, Bedienelement rechts. */
+.settings__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+}
+
+/* Trennlinie zwischen Zeilen derselben Sektion. */
+.settings__row + .settings__row {
+  border-top: 1px solid var(--color-border);
+}
+
+.settings__row-label {
+  font-size: 14px;
+  color: var(--color-text);
+}
+
+.settings__row-control {
+  display: flex;
+  align-items: center;
+}
+
+/* Dropdown im Stil der übrigen Bedienelemente. */
+.settings__select {
+  /* background-color (nicht das background-Shorthand), damit der globale
+     Custom-Chevron (background-image aus global.css) nicht zurückgesetzt wird.
+     padding-right auf 28px für den Pfeilplatz. */
+  padding: 6px 28px 6px 12px;
+  font-size: 14px;
+  color: var(--color-text);
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.settings__select:hover {
+  background-color: var(--color-accent-bg);
+}
+
+.settings__select:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Texteingabe im Stil des Dropdowns (gleiche Bordüre/Radien). */
+.settings__input {
+  min-width: 200px;
+  padding: 6px 12px;
+  font-size: 14px;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+}
+
+.settings__input:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Feld-Spalte rechts in einer Zeile: Eingabe plus Hinweis/Aktion darunter. */
+.settings__field {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+/* Dezenter Hinweis-/Statustext (Passwort gesetzt, Laden, Fehler). */
+.settings__hint {
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+/* Fehlertext bleibt dezent: das Token-Set kennt keine eigene Fehlerfarbe, daher
+   der sekundäre Textton statt einer erfundenen roten Optik. */
+.settings__hint--error {
+  color: var(--color-text-sec);
+}
+
+/* Aktionszeile: Statustext links, Speichern-Button rechts. */
+.settings__row--actions {
+  justify-content: space-between;
+}
+
+/* Primärer Speichern-Button im Akzent-Stil. */
+.settings__button {
+  padding: 6px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text);
+  background: var(--color-accent-bg);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.settings__button:hover:not(:disabled) {
+  background: var(--color-accent);
+}
+
+.settings__button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.settings__button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Dezenter Link-artiger Button (Passwort entfernen). */
+.settings__link-button {
+  padding: 0;
+  font-size: 12px;
+  color: var(--color-text-tert);
+  background: none;
+  border: none;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.settings__link-button:hover:not(:disabled) {
+  color: var(--color-text);
+}
+
+.settings__link-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* ── Sektion „Zugriff für den Mitschnitt" (Widerruf) ──────────────────────── */
+
+/* Aufzählung im Hinweis-Ton: was eingerichtet ist bzw. welche Konten betroffen
+   wären. Bewusst dieselbe Größe/Farbe wie .settings__hint — es ist erläuternder
+   Text, keine eigenständige Datenliste. */
+.settings__liste {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--color-text-tert);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Der Bestätigungsblock. Kein Overlay-Dialog wie beim Einrichten, sondern ein
+   eingebetteter Block: der Widerruf ist eine Einstellung, kein Zwischenruf — der
+   Nutzer soll den Kontext (was eingerichtet ist) weiter sehen. Die abgesetzte
+   Fläche macht ihn trotzdem als eigenen Entscheidungsschritt kenntlich. */
+.settings__widerruf {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.settings__widerruf-titel {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+/* Im geteilten Fall stehen zwei gleichwertige Aktionen nebeneinander: die
+   schonende darf nicht wie eine Nebensache aussehen. Umbruch erlaubt, damit sie
+   in einem schmalen Fenster untereinander rutschen statt zu überlaufen. */
+.settings__widerruf-aktionen {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* ── Sektion „Was ist auffällig?" ─────────────────────────────────────────── */
+
+/* Ein Block innerhalb der Sektion (Tabellen-Paar, Schwelle, Regeln, Hinweis).
+   Blöcke sitzen untereinander, durch die Sektions-Trennlinie abgesetzt. */
+.auffaelligkeit__block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+}
+
+.auffaelligkeit__block + .auffaelligkeit__block {
+  border-top: 1px solid var(--color-border);
+}
+
+/* Badge je Tabelle/Block: trägt den severity-Akzent (auffällig/kritisch). Der
+   neutrale Variantentext nutzt den Sektions-Titel-Ton (kein severity-Akzent). */
+.auffaelligkeit__badge {
+  align-self: flex-start;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.auffaelligkeit__badge--neutral {
+  color: var(--color-text-tert);
+}
+
+/* Eine Port-Tabelle: linker Akzentstreifen in der severity-Farbe, analog zum
+   Sektions-Body, damit beide Listen optisch klar getrennt sind. */
+.auffaelligkeit__table {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-border);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  background: var(--color-bg);
+}
+
+.auffaelligkeit__table + .auffaelligkeit__table {
+  margin-top: 12px;
+}
+
+.auffaelligkeit__table--auffaellig {
+  border-left-color: var(--severity-auffaellig);
+}
+
+.auffaelligkeit__table--auffaellig .auffaelligkeit__badge {
+  color: var(--severity-auffaellig);
+}
+
+.auffaelligkeit__table--kritisch {
+  border-left-color: var(--severity-kritisch);
+}
+
+.auffaelligkeit__table--kritisch .auffaelligkeit__badge {
+  color: var(--severity-kritisch);
+}
+
+.auffaelligkeit__table-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* Teil E — oranger Hinweis unter der Listen-Überschrift (nur wenn abgewählte
+   Ports existieren). Dezent, in der severity-orange-Farbe der Auffälligkeit. */
+.auffaelligkeit__disabled-hint {
+  font-size: 12px;
+  color: var(--severity-auffaellig);
+}
+
+.auffaelligkeit__empty {
+  color: var(--color-text-tert);
+  font-style: italic;
+}
+
+/* Teil C — Port-Liste im Box-Schema: Einträge UNTEREINANDER, je Zeile vier
+   abgesetzte Boxen mit Abstand. */
+.auffaelligkeit__portlist {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Eine Port-Zeile: Port-Box (FEST) · Bezeichnungs-Box (1fr) · Kästchen-Box ·
+   Entfernen-Box. Grid hält die Spalten über alle Zeilen bündig untereinander.
+   Die erste Spalte hat eine FESTE Breite, bemessen an einer 5-stelligen Zahl
+   (5ch) plus den seitlichen Box-Innenabständen (2×12px). Dadurch ist jede
+   Port-Box gleich breit; kurze Nummern stehen rechtsbündig (siehe __port-box),
+   links bleibt entsprechend Platz. */
+.auffaelligkeit__portrow {
+  display: grid;
+  grid-template-columns: calc(5ch + 24px) 1fr auto auto;
+  align-items: stretch;
+  gap: 8px;
+}
+
+/* Abgewählte Zeile (Teil D): gedämpft, aber sichtbar und wieder anhakbar. */
+.auffaelligkeit__portrow--inaktiv {
+  opacity: 0.55;
+}
+
+/* 1) Port-Nummer-Box: eng um die Zahl, symmetrischer Innenabstand, tabular-nums
+   und rechtsbündig, damit kurze/lange Ports sauber untereinander stehen. */
+.auffaelligkeit__port-box {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 10px 12px;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--color-text);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* 2) Bezeichnungs-Box: restliche Breite, Service-Name (oder dezent leer). */
+.auffaelligkeit__port-service {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 10px 12px;
+  font-size: 14px;
+  color: var(--color-text-sec);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* 3) Kästchen-Box und 4) Entfernen-Box: gleiche Box-Optik, mittig. */
+.auffaelligkeit__port-toggle,
+.auffaelligkeit__port-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 12px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* Leerer Platzhalter an der Mülleimer-Stelle für Standard-Ports: gleiche
+   Grundfläche wie die Entfernen-Box (transparente Bordüre = identische Breite),
+   aber ohne sichtbaren Rahmen/Hintergrund, damit die Spalten bündig bleiben. */
+.auffaelligkeit__port-remove--leer {
+  background: none;
+  border-color: transparent;
+}
+
+/* DNS-Wächter-IP-Listen: schmales, ruhiges 2-Spalten-Grid (IP-Box dehnt sich,
+   Entfernen-Knopf rechts) — bewusst anders als die 4-spaltige Port-Tabelle, weil
+   IPs keine rechtsbündigen Spalten brauchen. */
+.dnsip__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dnsip__row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: stretch;
+  gap: 8px;
+}
+
+/* IP-Box: gleiche Box-Optik wie __port-box, aber LINKSbündig (IPs liest man von
+   links), restliche Breite. */
+.dnsip__box {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 10px 12px;
+  font-size: 14px;
+  color: var(--color-text);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.auffaelligkeit__remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  color: var(--color-text-tert);
+  background: none;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.auffaelligkeit__remove:hover {
+  color: var(--color-text);
+  background: var(--color-card);
+}
+
+.auffaelligkeit__remove:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+/* „Port hinzufügen"-Zeile: schmales Zahlenfeld, Live-Service, Hinzufügen-Knopf. */
+.auffaelligkeit__add {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.auffaelligkeit__add-input {
+  min-width: 0;
+  width: 110px;
+}
+
+.auffaelligkeit__add-service {
+  flex: 1;
+  font-size: 13px;
+  color: var(--color-text-sec);
+}
+
+/* Tabelle + zugehöriger Upload als eine optische Gruppe (Schnitt 7). */
+.auffaelligkeit__listengruppe {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.auffaelligkeit__listengruppe + .auffaelligkeit__listengruppe {
+  margin-top: 12px;
+}
+
+/* Portlisten-Upload (Schnitt 7): Trigger-Zeile + inline-Vorschau, eingerückt unter
+   der Tabelle. Der farbige Rand greift die severity-Variante der Liste auf. */
+.auffaelligkeit__upload {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-left: 12px;
+  border-left: 3px solid var(--color-border);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+}
+
+.auffaelligkeit__upload--auffaellig {
+  border-left-color: var(--severity-auffaellig);
+}
+
+.auffaelligkeit__upload--kritisch {
+  border-left-color: var(--severity-kritisch);
+}
+
+.auffaelligkeit__upload-trigger {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Das native File-Input verbergen; ausgelöst über den gestylten Button. */
+.auffaelligkeit__upload-input {
+  display: none;
+}
+
+.auffaelligkeit__upload-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.auffaelligkeit__upload-hint {
+  flex: 1;
+}
+
+/* Inline-Vorschau VOR dem Schreiben. */
+.auffaelligkeit__preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+}
+
+.auffaelligkeit__preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.auffaelligkeit__upload--auffaellig .auffaelligkeit__preview .auffaelligkeit__badge {
+  color: var(--severity-auffaellig);
+}
+
+.auffaelligkeit__upload--kritisch .auffaelligkeit__preview .auffaelligkeit__badge {
+  color: var(--severity-kritisch);
+}
+
+.auffaelligkeit__preview-file {
+  font-size: 12px;
+  color: var(--color-text-tert);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Erkannte Ports als Chips (Port · Service-Name). */
+.auffaelligkeit__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.auffaelligkeit__chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 8px;
+  font-size: 13px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-card);
+}
+
+.auffaelligkeit__chip-port {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.auffaelligkeit__chip-service {
+  font-size: 12px;
+  color: var(--color-text-sec);
+}
+
+.auffaelligkeit__preview-invalid {
+  color: var(--severity-auffaellig);
+}
+
+.auffaelligkeit__preview-empty {
+  color: var(--color-text-tert);
+  font-style: italic;
+}
+
+.auffaelligkeit__preview-empty-hint {
+  color: var(--color-text-tert);
+}
+
+.auffaelligkeit__preview-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Block 2: Schwellen-Zeile (Label · Select · Einheit). */
+.auffaelligkeit__threshold {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Block 3 / Teil B: Regel-Zeilen als abgesetzte Boxen. Jede Zeile besteht aus
+   einer breiten Text-Box (mit optionalem Severity-Böppel davor) und — mit
+   klarem Abstand — einer separaten Box mit dem Kästchen rechts. */
+.auffaelligkeit__rules {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.auffaelligkeit__rule {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* Text-Box: dezente Füller-Fläche, abgerundet, angenehmer Innenabstand. Nimmt
+   die restliche Breite; Severity-Böppel + Titel sitzen darin. */
+.auffaelligkeit__rule-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+  padding: 10px 12px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.auffaelligkeit__rule-title {
+  font-size: 14px;
+  color: var(--color-text);
+}
+
+/* Kästchen-Box: eigene abgesetzte Box rechts, gleiche Optik wie die Text-Box. */
+.auffaelligkeit__rule-switchbox {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  padding: 10px 14px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* Severity-Böppel-Box: eigenes kleines abgesetztes Kästchen ganz links. */
+.auffaelligkeit__rule-sevbox {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  padding: 10px 12px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* Dezenter Severity-Böppel je Regel — als eigenes kleines Kästchen ganz links. */
+.auffaelligkeit__dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-text-tert);
+}
+
+.auffaelligkeit__dot--auffaellig {
+  background: var(--severity-auffaellig);
+}
+
+.auffaelligkeit__dot--kritisch {
+  background: var(--severity-kritisch);
+}
+
+.auffaelligkeit__dot--neutral {
+  background: var(--color-border);
+}
+
+.auffaelligkeit__switch {
+  flex: 0 0 auto;
+  accent-color: var(--color-accent-strong);
+  cursor: pointer;
+}
+
+/* Block 4: Hinweistext (ruhig, kein Akzent). */
+.auffaelligkeit__honesty p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* Startseite-Sektion: status_monitoring als eingerückter Unterpunkt der
+   Status-Zeile. Nutzt sonst die auffaelligkeit__rule/__switch-Optik. */
+.startseite__rule--sub {
+  padding-left: 20px;
+}
+
+.startseite__rule--sub .auffaelligkeit__rule-title {
+  color: var(--color-text-sec);
+}
+
+/* ── Sektion „Wartung" ─────────────────────────────────────────────────────── */
+
+/* Erklärtext unter der „Daten löschen"-Zeile: dezent, eingerückt wie der
+   Zeilen-Innenabstand (die Zeile selbst hat 12px/16px Padding). */
+.settings__wartung-hint {
+  padding: 0 16px 12px;
+}
+
+/* Ruhiger „erledigt"-Hinweis nach erfolgreicher Löschung (ok-Ton). */
+.settings__wartung-done {
+  padding: 0 16px 12px;
+  color: var(--color-ok-text);
+}
+
+/* ── Sektion „Standardzugänge-Liste" (Etappe C) ────────────────────────────── */
+/* Verwaltung der Credential-Datenbank. Nutzt die vorhandenen settings__- und
+   auffaelligkeit__-Tokens; die dcreds__-Regeln fügen nur das Karten-/Listen-
+   Layout hinzu, das die Bausteine der Auffälligkeits-Sektion nicht abdecken. */
+
+.dcreds__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 0 16px;
+}
+
+.dcreds__liste {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Eine Eintrags-Karte: abgesetzte Box im Karten-Ton. */
+.dcreds__karte {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-card);
+}
+
+.dcreds__karte--neu {
+  border-color: var(--color-accent-border);
+  background: var(--color-accent-bg);
+}
+
+.dcreds__karte-kopf {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.dcreds__titel {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.dcreds__hersteller {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.dcreds__modell {
+  color: var(--color-text-sec);
+}
+
+.dcreds__badges {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* Kandidaten-Liste (Lese-Ansicht): eine Zeile je Kandidat. */
+.dcreds__kandidaten {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dcreds__kandidat {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.dcreds__kandidat-user,
+.dcreds__kandidat-pass {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--color-text);
+}
+
+.dcreds__kandidat-pass {
+  color: var(--color-text-sec);
+}
+
+.dcreds__quelle {
+  word-break: break-all;
+}
+
+.dcreds__karte-aktionen {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* Kandidaten-Editor (Formular): je Zeile Felder + Entfernen-Knopf. */
+.dcreds__kandidaten-edit {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dcreds__kandidat-edit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.dcreds__kandidat-edit .settings__input {
+  flex: 1 1 120px;
+  min-width: 0;
+}

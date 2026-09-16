@@ -1,0 +1,71 @@
+/* Bereichs-Hülle: Kachel-Gitter + geöffnete Funktion */
+
+/* Responsives Kachel-Gitter für die Bereichs-Übersicht. */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+  align-content: start;
+  grid-auto-rows: 1fr;
+}
+
+/* Geöffnete Funktion: füllt die Resthöhe des Bereichs. */
+.function-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
+  min-height: 0;
+}
+
+.function-shell__bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-shrink: 0;
+}
+
+/* Zurück-Weg: dezenter Text-Button mit Pfeil. */
+.function-shell__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  color: var(--color-text-sec);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.function-shell__back:hover {
+  color: var(--color-accent);
+  border-color: var(--color-accent-border);
+  background: var(--color-accent-bg);
+}
+
+.function-shell__back:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.function-shell__title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+/* Funktionsinhalt füllt die Resthöhe (z.B. für die intern scrollende Tabelle). */
+.function-shell__body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.function-shell__wip {
+  margin: 0;
+  color: var(--color-text-sec);
+}

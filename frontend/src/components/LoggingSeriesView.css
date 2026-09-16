@@ -1,0 +1,259 @@
+/* Serien-Auswertung einer Logging-Aufgabe (Block 3c). Designsprache wie
+   LoggingTaskDetail/SlaChart: Card-Flaechen, --color-border, radius, Akzent-Token
+   fuer den aktiven Zustand. Nur Token-Variablen, nie feste Farben. */
+
+.logging-serie {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.logging-serie__mono {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+.logging-serie__titel {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+/* Dezenter Fehlerhinweis (Ladefehler kippt die Ansicht nicht). */
+.logging-serie__fehler {
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--sev-med-text);
+  background: var(--sev-med-bg);
+  border: 1px solid var(--sev-med-bd);
+  border-radius: var(--radius-md);
+}
+
+/* ── Kennzahlen (vier Kacheln, Optik wie LoggingTaskDetail) ─────────────────── */
+.logging-serie__kennzahlen {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.logging-serie__kennzahl {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.logging-serie__kennzahl-wert {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.logging-serie__kennzahl-label {
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+/* ── Segmentierte Controls ──────────────────────────────────────────────────── */
+.logging-serie__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+}
+
+.logging-serie__control {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.logging-serie__control-label {
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--color-text-tert);
+}
+
+.logging-serie__segmente {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.logging-serie__segment {
+  padding: 6px 14px;
+  font-size: 13px;
+  color: var(--color-text-sec);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.logging-serie__segment:hover:not(:disabled) {
+  color: var(--color-text);
+  border-color: var(--color-accent-border);
+}
+
+/* Aktive Auswahl traegt den CERNIS-Akzent-Rahmen (folgt der Auswahl, NICHT der
+   Empfehlung). */
+.logging-serie__segment--aktiv {
+  color: var(--color-accent-strong);
+  background: var(--color-accent-bg);
+  border-color: var(--color-accent-border);
+}
+
+.logging-serie__segment:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* ── CERNIS-Empfehlung (reine Textzeile, KEIN Punkt-Indikator) ──────────────── */
+.logging-serie__empfehlung {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--color-text-sec);
+}
+
+.logging-serie__empfehlung-link {
+  padding: 2px 8px;
+  font-size: 13px;
+  color: var(--color-link);
+  background: transparent;
+  border: none;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.logging-serie__empfehlung-link:hover {
+  color: var(--color-accent-strong);
+}
+
+/* ── Median+Band-Ueberlagerung ──────────────────────────────────────────────── */
+.logging-serie__overlay {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--color-text-sec);
+  cursor: pointer;
+}
+
+.logging-serie__overlay input:disabled {
+  cursor: default;
+}
+
+/* Erklaerzeile bei fehlender Latenz (warum die Optionen ausgegraut sind). */
+.logging-serie__keine-latenz {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+/* ── Visualisierung ─────────────────────────────────────────────────────────── */
+.logging-serie__visual {
+  display: flex;
+  flex-direction: column;
+}
+
+.logging-serie__chart {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* Gestrecktes SVG-Feld (preserveAspectRatio="none" verzerrt — die Achsen-Texte
+   liegen darum als Overlay daneben, nicht im SVG). */
+.logging-serie__svg {
+  width: 100%;
+  height: 150px;
+  display: block;
+}
+
+/* Tageszeit-Achse unter dem SVG: HH:MM-Marken absolut positioniert. */
+.logging-serie__zeit-achse {
+  position: relative;
+  height: 14px;
+}
+
+.logging-serie__zeit-marke {
+  position: absolute;
+  transform: translateX(-50%);
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+  color: var(--color-text-tert);
+}
+
+/* ── Rangliste / Detailtabelle ──────────────────────────────────────────────── */
+.logging-serie__rangliste,
+.logging-serie__tabelle {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.logging-serie__rangliste th,
+.logging-serie__tabelle th {
+  text-align: left;
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--color-text-tert);
+  background: var(--color-card);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.logging-serie__rangliste td,
+.logging-serie__tabelle td {
+  padding: 8px 14px;
+  color: var(--color-text);
+  background: var(--color-card);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.logging-serie__rangliste tr:last-child td,
+.logging-serie__tabelle tr:last-child td {
+  border-bottom: none;
+}
+
+.logging-serie__tabelle-titel {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+/* Ruhige Leer-Meldung (statt leerem Kasten). */
+.logging-serie__leer {
+  margin: 0;
+  padding: 24px 12px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--color-text-sec);
+}
+
+/* Dezenter Lade-Indikator (schmaler Balken oben am Container). */
+.logging-serie__laedt {
+  height: 2px;
+  background: var(--color-accent);
+  border-radius: var(--radius-md);
+  opacity: 0.6;
+}

@@ -43,6 +43,39 @@ class DeviceRepository(Protocol):
         """
         ...
 
+    def get_unclassified(self) -> list[Device]:
+        """Die Wache-Liste: Geraete mit ``is_known=0 AND watch_dismissed=0``.
+
+        Noch nie eingeordnete (``is_known`` False) und nicht weggelegte
+        (``watch_dismissed`` False) Geraete, ``last_seen`` absteigend (neueste
+        zuerst). Leerer Bestand -> ``[]``, niemals ``None``. Die Sortierung ist
+        Sache des Adapters.
+        """
+        ...
+
+    def get_archived(self) -> list[Device]:
+        """Alle archivierten Geraete (``archived=1``), ``last_seen`` absteigend.
+
+        Das Archiv-Gegenstueck zu ``get_all`` (das archivierte Geraete
+        ausblendet): hier kommen genau die heraus, die aus den Wertungen und
+        Listen weggeraeumt, aber nicht geloescht wurden. Leerer Bestand -> ``[]``,
+        niemals ``None``. Die Sortierung ist Sache des Adapters.
+        """
+        ...
+
+    def get_archive_candidates(self, not_seen_since: datetime) -> list[Device]:
+        """Geraete, die fuer die Archiv-Nachfrage in Frage kommen.
+
+        Liefert die Geraete, die ``archived=0`` UND ``archive_prompt_dismissed=0``
+        sind UND deren ``last_seen <= not_seen_since`` liegt (seit der Schwelle
+        nicht mehr gesehen), ``last_seen`` aufsteigend (am laengsten verschollene
+        zuerst). Die Zeitgrenze ``not_seen_since`` kommt VOM Use-Case
+        (``now - threshold``), nicht aus dem Repo -- so gibt es keine versteckte
+        Uhr in der Persistenz (Muster ``stats``). Leerer Bestand -> ``[]``,
+        niemals ``None``. Die Sortierung ist Sache des Adapters.
+        """
+        ...
+
     def save(self, device: Device) -> None:
         """Upsert auf ``device.mac`` -- legt an oder aktualisiert.
 
@@ -81,6 +114,10 @@ class DeviceRepository(Protocol):
         Die Zeitgrenze kommt VOM Use-Case (z. B. ``now - 24h``), nicht aus dem
         Repo -- so gibt es keine versteckte Uhr in der Persistenz.
         """
+        ...
+
+    def clear_all(self) -> None:
+        """Leert Geraete UND ihre IP-History (nur die eigenen Tabellen)."""
         ...
 
 

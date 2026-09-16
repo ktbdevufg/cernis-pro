@@ -30,7 +30,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from domain.devices import Device, DeviceStats, IpHistoryEntry, normalize_mac
+from domain.devices import (
+    Device,
+    DeviceSource,
+    DeviceStats,
+    IpHistoryEntry,
+    TrustState,
+    normalize_mac,
+)
 
 
 class CorruptDeviceError(Exception):
@@ -77,6 +84,48 @@ def _decode_list(mac: str, column: str, raw: str) -> tuple[Any, ...]:
     return tuple(decoded)
 
 
+def _row_value(row: sqlite3.Row, column: str, default: Any) -> Any:
+    """Liest eine Spalte aus einer ``sqlite3.Row`` defensiv (fehlt sie -> Default).
+
+    ``sqlite3.Row`` hat kein ``.get`` -- ein Zugriff auf eine nicht vorhandene
+    Spalte wuerfe ``IndexError``. Fuer additiv eingefuehrte Spalten (z. B.
+    ``watch_dismissed``) braucht es einen Fallback, falls eine Row aus einer
+    Alt-Tabelle ohne diese Spalte stammt (doppelte Absicherung neben dem
+    ALTER-Default).
+    """
+    # sqlite3.Row ist kein dict; ``in`` pruefte Werte, nicht Spaltennamen --
+    # darum explizit ueber die Spaltennamen-Liste von ``keys()``.
+    if column in list(row.keys()):
+        return row[column]
+    return default
+
+
+def _row_to_trust_state(raw: Any) -> TrustState:
+    """TEXT-Spalte -> ``TrustState``. NULL/leer -> Default NEUTRAL (defensiv).
+
+    Eine fehlende oder leere Spalte (z. B. eine vor der Migration angelegte
+    Zeile, deren ALTER-Default griffe -- hier doppelt abgesichert) faellt auf
+    NEUTRAL zurueck. Ein nicht-leerer, aber unbekannter Wert ist hingegen KEIN
+    stiller Fallback, sondern ein Fehler ueber ``TrustState(...)`` (Finding S3).
+    """
+    if raw is None or raw == "":
+        return TrustState.NEUTRAL
+    return TrustState(raw)
+
+
+def _row_to_source(raw: Any) -> DeviceSource:
+    """TEXT-Spalte -> ``DeviceSource``. NULL/leer -> Default SCAN (defensiv).
+
+    Eine fehlende oder leere Spalte (z. B. eine vor der Migration angelegte
+    Zeile, deren ALTER-Default griffe -- hier doppelt abgesichert) faellt auf
+    SCAN zurueck. Ein nicht-leerer, aber unbekannter Wert ist hingegen KEIN
+    stiller Fallback, sondern ein Fehler ueber ``DeviceSource(...)`` (Finding S3).
+    """
+    if raw is None or raw == "":
+        return DeviceSource.SCAN
+    return DeviceSource(raw)
+
+
 def _row_to_device(row: sqlite3.Row) -> Device:
     mac = row["mac"]
     return Device(
@@ -86,6 +135,18 @@ def _row_to_device(row: sqlite3.Row) -> Device:
         last_ip=row["last_ip"],
         times_seen=row["times_seen"],
         is_known=bool(row["is_known"]),
+        trust_state=_row_to_trust_state(row["trust_state"]),
+        # Defensiv: eine vor der Migration angelegte Zeile hat die Spalte evtl.
+        # nicht (der ALTER-Default griffe -- hier doppelt abgesichert). Fehlt
+        # die Spalte ganz, gilt False (in der Wache, nicht weggelegt).
+        watch_dismissed=bool(_row_value(row, "watch_dismissed", 0)),
+        # Lebenszyklus-Felder, defensiv gelesen (Muster wie watch_dismissed):
+        # fehlt die Spalte ganz (Zeile aus einer Alt-Tabelle), gilt der Default
+        # -- nicht archiviert, Herkunft SCAN, noch nie nachgefragt.
+        archived=bool(_row_value(row, "archived", 0)),
+        source=_row_to_source(_row_value(row, "source", None)),
+        archive_prompt_count=_row_value(row, "archive_prompt_count", 0),
+        archive_prompt_dismissed=bool(_row_value(row, "archive_prompt_dismissed", 0)),
         vendor=row["vendor"],
         label=row["label"],
         notes=row["notes"],
@@ -116,8 +177,8 @@ class SqliteDeviceRepository:
             conn.close()
 
     def _ensure_schema(self) -> None:
-        # Schema exakt wie der Bestand (devices 14 Spalten, device_ip_history) --
-        # known_devices wird bewusst NICHT angelegt.
+        # Schema wie der Bestand (devices + trust_state = 15 Spalten,
+        # device_ip_history) -- known_devices wird bewusst NICHT angelegt.
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:
             conn.executescript(
@@ -130,6 +191,12 @@ class SqliteDeviceRepository:
                     notes        TEXT DEFAULT '',
                     category     TEXT DEFAULT '',
                     is_known     INTEGER DEFAULT 0,
+                    trust_state  TEXT NOT NULL DEFAULT 'neutral',
+                    watch_dismissed INTEGER NOT NULL DEFAULT 0,
+                    archived     INTEGER NOT NULL DEFAULT 0,
+                    source       TEXT NOT NULL DEFAULT 'scan',
+                    archive_prompt_count INTEGER NOT NULL DEFAULT 0,
+                    archive_prompt_dismissed INTEGER NOT NULL DEFAULT 0,
                     first_seen   TEXT DEFAULT (datetime('now')),
                     last_seen    TEXT DEFAULT (datetime('now')),
                     last_ip      TEXT DEFAULT '',
@@ -146,6 +213,41 @@ class SqliteDeviceRepository:
                 );
                 """
             )
+            # SCHEMA-GUARD (additive Migration, Hausmuster wie monitoring_log_tasks):
+            # eine vor dieser Etappe angelegte devices-Tabelle bekommt trust_state
+            # per ALTER nachgeruestet. NOT NULL DEFAULT 'neutral' -> bestehende
+            # Zeilen erhalten verlustfrei den Default, kein Datenverlust.
+            cols = {row["name"] for row in conn.execute("PRAGMA table_info(devices)")}
+            if "trust_state" not in cols:
+                conn.execute(
+                    "ALTER TABLE devices ADD COLUMN trust_state TEXT NOT NULL DEFAULT 'neutral'"
+                )
+            # Zweiter additiver Schema-Guard (gleiches Muster wie trust_state):
+            # eine vor der Wache-Etappe angelegte devices-Tabelle bekommt
+            # watch_dismissed per ALTER nachgeruestet. NOT NULL DEFAULT 0 ->
+            # bestehende Zeilen erhalten verlustfrei "nicht weggelegt".
+            if "watch_dismissed" not in cols:
+                conn.execute(
+                    "ALTER TABLE devices ADD COLUMN watch_dismissed INTEGER NOT NULL DEFAULT 0"
+                )
+            # Weitere additive Schema-Guards (gleiches Muster): eine vor der
+            # Lebenszyklus-Etappe angelegte devices-Tabelle bekommt die vier
+            # Felder per ALTER nachgeruestet. Gleiche NOT NULL DEFAULTs wie im
+            # CREATE TABLE -> bestehende Zeilen erhalten verlustfrei den Default
+            # (nicht archiviert, Herkunft 'scan', count 0, nicht weggelegt).
+            if "archived" not in cols:
+                conn.execute("ALTER TABLE devices ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
+            if "source" not in cols:
+                conn.execute("ALTER TABLE devices ADD COLUMN source TEXT NOT NULL DEFAULT 'scan'")
+            if "archive_prompt_count" not in cols:
+                conn.execute(
+                    "ALTER TABLE devices ADD COLUMN archive_prompt_count INTEGER NOT NULL DEFAULT 0"
+                )
+            if "archive_prompt_dismissed" not in cols:
+                conn.execute(
+                    "ALTER TABLE devices ADD COLUMN"
+                    " archive_prompt_dismissed INTEGER NOT NULL DEFAULT 0"
+                )
 
     def get(self, mac: str) -> Device | None:
         with self._connect() as conn:
@@ -157,28 +259,80 @@ class SqliteDeviceRepository:
         return _row_to_device(row)
 
     def get_all(self, known_only: bool) -> list[Device]:
-        query = "SELECT * FROM devices"
+        # Archivierte Geraete sind aus der Standard-Liste raus (archived = 0).
         if known_only:
-            query += " WHERE is_known = 1"
+            query = "SELECT * FROM devices WHERE is_known = 1 AND archived = 0"
+        else:
+            query = "SELECT * FROM devices WHERE archived = 0"
         query += " ORDER BY last_seen DESC"
         with self._connect() as conn:
             rows = conn.execute(query).fetchall()
+        return [_row_to_device(row) for row in rows]
+
+    def get_unclassified(self) -> list[Device]:
+        # Die Wache: noch nicht eingeordnet (is_known=0) UND nicht weggelegt
+        # (watch_dismissed=0) UND nicht archiviert (archived=0), neueste zuerst.
+        # Leerer Bestand -> [].
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM devices"
+                " WHERE is_known = 0 AND watch_dismissed = 0 AND archived = 0"
+                " ORDER BY last_seen DESC"
+            ).fetchall()
+        return [_row_to_device(row) for row in rows]
+
+    def get_archived(self) -> list[Device]:
+        # Das Archiv: ausschliesslich archivierte Geraete (archived = 1),
+        # neueste zuerst. Gegenstueck zu get_all (das archived = 0 filtert).
+        # Leerer Bestand -> [].
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM devices WHERE archived = 1 ORDER BY last_seen DESC"
+            ).fetchall()
+        return [_row_to_device(row) for row in rows]
+
+    def get_archive_candidates(self, not_seen_since: datetime) -> list[Device]:
+        # Kandidaten der Archiv-Nachfrage: nicht archiviert (archived = 0) UND
+        # die Nachfrage nicht dauerhaft weggelegt (archive_prompt_dismissed = 0)
+        # UND seit der Schwelle nicht mehr gesehen (last_seen <= not_seen_since),
+        # am laengsten verschollene zuerst (last_seen aufsteigend). Die Zeitgrenze
+        # kommt vom Use-Case; _fmt_dt fuer den lexikografischen TEXT-Vergleich
+        # (Muster stats). Leerer Bestand -> [].
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM devices"
+                " WHERE archived = 0 AND archive_prompt_dismissed = 0 AND last_seen <= ?"
+                " ORDER BY last_seen ASC",
+                (_fmt_dt(not_seen_since),),
+            ).fetchall()
         return [_row_to_device(row) for row in rows]
 
     def save(self, device: Device) -> None:
         with self._connect() as conn:
             conn.execute(
                 "INSERT INTO devices ("
-                " mac, vendor, label, tags, notes, category, is_known,"
+                " mac, vendor, label, tags, notes, category, is_known, trust_state,"
+                " watch_dismissed,"
+                " archived, source, archive_prompt_count, archive_prompt_dismissed,"
                 " first_seen, last_seen, last_ip, times_seen, open_ports, hostname, os_guess"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(mac) DO UPDATE SET"
                 " vendor = excluded.vendor, label = excluded.label, tags = excluded.tags,"
                 " notes = excluded.notes, category = excluded.category,"
-                " is_known = excluded.is_known, first_seen = excluded.first_seen,"
+                " is_known = excluded.is_known, trust_state = excluded.trust_state,"
+                " watch_dismissed = excluded.watch_dismissed,"
+                " archived = excluded.archived, source = excluded.source,"
+                " archive_prompt_count = excluded.archive_prompt_count,"
+                " archive_prompt_dismissed = excluded.archive_prompt_dismissed,"
+                " first_seen = excluded.first_seen,"
                 " last_seen = excluded.last_seen, last_ip = excluded.last_ip,"
                 " times_seen = excluded.times_seen, open_ports = excluded.open_ports,"
-                " hostname = excluded.hostname, os_guess = excluded.os_guess",
+                # Ueberschreibschutz: ein leerer Hostname heisst "beim Scan gerade
+                # nicht ermittelt" (z.B. Resolver-Loeschfenster), NICHT "hat keinen
+                # Namen" -- ein bekannter Name darf davon nicht geloescht werden.
+                " hostname = CASE WHEN excluded.hostname != '' THEN excluded.hostname"
+                " ELSE hostname END,"
+                " os_guess = excluded.os_guess",
                 (
                     device.mac,
                     device.vendor,
@@ -187,6 +341,12 @@ class SqliteDeviceRepository:
                     device.notes,
                     device.category,
                     int(device.is_known),
+                    device.trust_state.value,
+                    int(device.watch_dismissed),
+                    int(device.archived),
+                    device.source.value,
+                    device.archive_prompt_count,
+                    int(device.archive_prompt_dismissed),
                     _fmt_dt(device.first_seen),
                     _fmt_dt(device.last_seen),
                     device.last_ip,
@@ -203,6 +363,12 @@ class SqliteDeviceRepository:
         with self._connect() as conn:
             conn.execute("DELETE FROM devices WHERE mac = ?", (norm,))
             conn.execute("DELETE FROM device_ip_history WHERE mac = ?", (norm,))
+
+    def clear_all(self) -> None:
+        # Beide eigenen Tabellen in EINER Transaktion raeumen (Muster wie delete).
+        with self._connect() as conn:
+            conn.execute("DELETE FROM devices")
+            conn.execute("DELETE FROM device_ip_history")
 
     def append_ip_history(self, entry: IpHistoryEntry) -> None:
         with self._connect() as conn:
@@ -224,11 +390,15 @@ class SqliteDeviceRepository:
         ]
 
     def stats(self, active_since: datetime) -> DeviceStats:
+        # Archivierte Geraete zaehlen in KEINER Kennzahl mit (sie sind aus den
+        # Wertungen raus) -- jede Zaehlung auf archived = 0 einschraenken.
         with self._connect() as conn:
-            total = conn.execute("SELECT COUNT(*) FROM devices").fetchone()[0]
-            known = conn.execute("SELECT COUNT(*) FROM devices WHERE is_known = 1").fetchone()[0]
+            total = conn.execute("SELECT COUNT(*) FROM devices WHERE archived = 0").fetchone()[0]
+            known = conn.execute(
+                "SELECT COUNT(*) FROM devices WHERE is_known = 1 AND archived = 0"
+            ).fetchone()[0]
             active = conn.execute(
-                "SELECT COUNT(*) FROM devices WHERE last_seen >= ?",
+                "SELECT COUNT(*) FROM devices WHERE last_seen >= ? AND archived = 0",
                 (_fmt_dt(active_since),),
             ).fetchone()[0]
         return DeviceStats(total=total, known=known, unknown=total - known, active=active)

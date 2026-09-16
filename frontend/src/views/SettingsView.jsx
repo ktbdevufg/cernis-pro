@@ -1,506 +1,2185 @@
-import React, { useState, useEffect } from 'react'
-import { Settings, Save, RotateCcw, Plus, Trash2, Play, Clock, Wifi, Database, Radar } from 'lucide-react'
+// Einstellungs-Ansicht (CERNIS PRO 2.0)
+// Eigener Modus (kein Reiter), erreichbar über das Zahnrad in der Kopfzeile.
+// Nutzt das function-shell-Muster der übrigen Bereiche: Zurück-Weg + Titel
+// über dem Inhalt. Aufgebaut aus benannten Sektionen, sodass weitere Optionen
+// später einfach als zusätzliche Sektionen/Zeilen dazukommen.
+//
+// Die View hält keinen eigenen State und keine localStorage-Logik. Die Sprache
+// kommt als Prop (lang) und wird über onLangChange zurückgemeldet — die
+// Persistenz bleibt in App.jsx (single source of truth).
 
-const css = `
-.settings-view { position: absolute; inset: 0; display: flex; flex-direction: column; }
-.sv-header {
-  display: flex; align-items: center; gap: 10px;
-  padding: 12px 20px; border-bottom: 1px solid var(--border);
-  background: var(--bg-1); flex-shrink: 0;
+import { Trash2, Upload } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+
+import { fetchAllRules, lookupService, parsePortliste } from "../api/analysis.js";
+import {
+  CAPTURE_ACCESS_REVOKE_OUTCOME,
+  CAPTURE_ACCESS_STATE,
+  fetchCaptureAccess,
+  revokeCaptureAccess,
+} from "../api/captureAccess.js";
+import {
+  fetchDefaultCredsState,
+  armDefaultCreds,
+} from "../api/security.js";
+import {
+  fetchSettings,
+  updateSetting,
+  updateSecret,
+  secretGesetzt,
+} from "../api/settings.js";
+import { CODES, mitCode } from "../lib/fehlercodes.js";
+import {
+  TRAFFIC_UNAVAILABLE_KEY,
+  leseTrafficSichtbar,
+} from "../components/TrafficView.jsx";
+import { FunctionShell } from "../components/AreaShell.jsx";
+import DefaultCredsConsentDialog from "../components/DefaultCredsConsentDialog.jsx";
+import DefaultCredsListeSektion from "../components/DefaultCredsListeSektion.jsx";
+import "./SettingsView.css";
+
+// Default-Portmengen der Auffälligkeits-Engine. SPIEGELT bewusst die Backend-
+// Defaults aus backend/domain/analysis/rules.py (Regeln host_remote_access_port
+// bzw. host_backdoor_port). Doppelquelle ist gewollt und dokumentiert: das
+// Backend liefert bei frischer DB KEINEN Setting-Wert (dann greift dort der
+// Built-in-Default), das Frontend würde sonst leere Tabellen zeigen. Hier nur die
+// Zahlen-Defaults — die Regel-Liste selbst kommt live aus GET /api/analysis/rules/all.
+const DEFAULT_AUFFAELLIGE_PORTS = [
+  21, 23, 139, 445, 2049, 3306, 3389, 5432, 5800, 5900, 5984, 6379, 8080, 8443,
+  9200, 27017,
+];
+const DEFAULT_KRITISCHE_PORTS = [
+  1243, 1337, 6670, 6711, 6712, 6713, 6771, 12345, 12346, 20034, 27374, 27444,
+  27665, 30303, 31335, 31337, 31338, 32768, 54283, 65000,
+];
+
+// Auswahlwerte des Schwellen-Dropdowns „Viele hohe Ports". Default-Anzeige 10
+// (entspricht dem Backend-Default threshold der Regel host_many_high_ports).
+const PORT_COUNT_OPTIONEN = [5, 8, 10, 12, 15, 20];
+const DEFAULT_PORT_COUNT = 10;
+
+// Obergrenze für den Portlisten-Upload (Schnitt 7). Eine .txt mit Portnummern
+// ist winzig; alles über 1 MB wird abgelehnt, statt den Browser zu blockieren.
+const UPLOAD_MAX_BYTES = 1024 * 1024;
+
+// Settings-Key der EINEN verbliebenen editierbaren DNS-Wächter-Liste (JSON-Array von
+// IP-Strings). SPIEGELT bewusst die Modulkonstante aus backend/api/dns_watch.py
+// (DNS_DOH_PROVIDERS_KEY) — ein normales Listen-Setting, leeres Array zulässig (dann
+// greift die eingebaute DoH-Startliste des Backends).
+//
+// Die frühere Liste „Erwartete DNS-Server" ist hier ENTFALLEN (S62 L7a): die erwartete
+// Menge kommt jetzt aus dem Vertrauensmodell und wird in der Verwaltungs-Rubrik
+// „DNS-Server & Vertrauen" gepflegt, nicht mehr über eine eigene Einstellung.
+const DNS_DOH_PROVIDERS_KEY = "dns_doh_providers";
+
+// Grobe IP-Prüfung ohne Library (analog OutboundView.istLokaleIp): IPv4 als vier
+// 0–255-Oktette ODER ein IPv6-Kandidat (enthält ":" und nur Hex/Doppelpunkt).
+// Bewusst pragmatisch — die Listen sind editierbare Hinweise, keine sicherheits-
+// kritische Eingabe; offensichtlicher Müll wird abgewiesen, nicht jeder Edge-Case.
+function istGueltigeIp(roh) {
+  const ip = String(roh).trim();
+  if (ip === "") {
+    return false;
+  }
+  // IPv4: vier Oktette 0–255.
+  const v4 = ip.split(".");
+  if (v4.length === 4) {
+    return v4.every((teil) => {
+      if (!/^\d{1,3}$/.test(teil)) {
+        return false;
+      }
+      const zahl = Number(teil);
+      return zahl >= 0 && zahl <= 255;
+    });
+  }
+  // IPv6: grob — enthält ":" und besteht nur aus Hex-Ziffern/Doppelpunkten.
+  if (ip.includes(":")) {
+    return /^[0-9a-fA-F:]+$/.test(ip) && ip.length >= 2;
+  }
+  return false;
 }
-.sv-title { font-size: 13px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); }
-.sv-body { flex: 1; overflow-y: auto; padding: 20px 24px 0; display: flex; flex-direction: column; gap: 20px; }
 
-.sv-card { background: var(--bg-2); border: 1px solid var(--border); border-radius: 6px; }
-.sv-card-title {
-  display: flex; align-items: center; gap: 8px;
-  padding: 14px 20px; border-bottom: 1px solid var(--border);
-  font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-muted);
+// Eine Settings-Zeile: Label links, Bedienelement rechts.
+function SettingsZeile({ label, children }) {
+  return (
+    <div className="settings__row">
+      <span className="settings__row-label">{label}</span>
+      <div className="settings__row-control">{children}</div>
+    </div>
+  );
 }
-.sv-card-body { padding: 20px 22px; display: flex; flex-direction: column; gap: 16px; }
 
-.sv-row { display: flex; align-items: center; gap: 12px; min-height: 36px; padding: 4px 0; }
-.sv-label { flex: 1; font-size: 13px; color: var(--text-secondary); }
-.sv-label small { display: block; font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 3px; line-height: 1.5; }
-
-.sv-input {
-  background: var(--bg-3); border: 1px solid var(--border);
-  color: var(--text-primary); padding: 6px 10px; border-radius: 4px;
-  font-size: 12px; font-family: var(--font-mono);
+// Eine benannte Sektion mit Überschrift und Zeilen.
+function SettingsSektion({ title, children }) {
+  return (
+    <section className="settings__section">
+      <h3 className="settings__section-title">{title}</h3>
+      <div className="settings__section-body">{children}</div>
+    </section>
+  );
 }
-.sv-input:focus { border-color: var(--accent-dim); outline: none; }
-.sv-input.wide { width: 220px; }
-.sv-input.narrow { width: 90px; text-align: right; }
 
-.toggle { position: relative; width: 36px; height: 20px; flex-shrink: 0; }
-.toggle input { opacity: 0; width: 0; height: 0; }
-.toggle-slider {
-  position: absolute; inset: 0; background: var(--bg-4); border-radius: 20px;
-  cursor: pointer; transition: background 0.2s; border: 1px solid var(--border);
+// Setting-Key der Startseiten-Bereichsschalter. Wert ist ein JSON-Objekt mit
+// Booleans; fehlt der Key -> alle Defaults true. SPIEGELT bewusst OverviewView
+// (SECTIONS_KEY / SECTION_DEFAULTS): OverviewView liest, diese Sektion schreibt.
+const STARTSEITE_KEY = "overview_sections";
+
+// Setting-Key + Lesefunktion der Darstellung nicht verfügbarer Durchsatz-Angaben
+// kommen aus TrafficView (dort werden sie ausgewertet) — EINE Quelle, keine zweite
+// Kopie, die auseinanderlaufen könnte. Hier wird nur geschrieben.
+
+// Default-Sichtbarkeit aller Startseiten-Bereiche (alle true). Identisch zu
+// OverviewView.SECTION_DEFAULTS — fehlt ein einzelner Schalter, gilt sein Default.
+const STARTSEITE_DEFAULTS = {
+  status: true,
+  schnellzugriff: true,
+  beachtenswert: true,
+  cve: true,
+  kennzahlen: true,
+  status_monitoring: true,
+};
+
+// Liest `overview_sections` aus dem rohen Settings-Dict und mischt es über die
+// Defaults. Toleriert Objekt UND JSON-String (Backend-Settings tragen Werte teils
+// als String) — exakt OverviewView.leseSektionen. Nur echte Booleans werden
+// übernommen, alles andere fällt auf den Default true zurück; unparsbar -> Defaults.
+function leseStartseite(settings) {
+  const roh = settings?.[STARTSEITE_KEY];
+  let obj = null;
+  if (roh && typeof roh === "object") {
+    obj = roh;
+  } else if (typeof roh === "string" && roh.length > 0) {
+    try {
+      const geparst = JSON.parse(roh);
+      if (geparst && typeof geparst === "object") {
+        obj = geparst;
+      }
+    } catch {
+      obj = null;
+    }
+  }
+  if (!obj) {
+    return { ...STARTSEITE_DEFAULTS };
+  }
+  const ergebnis = { ...STARTSEITE_DEFAULTS };
+  for (const key of Object.keys(STARTSEITE_DEFAULTS)) {
+    if (typeof obj[key] === "boolean") {
+      ergebnis[key] = obj[key];
+    }
+  }
+  return ergebnis;
 }
-.toggle-slider::before {
-  content: ''; position: absolute; width: 14px; height: 14px;
-  left: 2px; top: 2px; background: var(--text-muted);
-  border-radius: 50%; transition: transform 0.2s, background 0.2s;
+
+// Startseiten-Sektion: eigener Daten-State analog FritzBoxSektion/Auffaelligkeit-
+// Sektion (laden beim Mount, schreiben pro Änderung gegen die Settings-API).
+// onGespeichert ist das gemeinsame zeigeGespeichert-Feedback aus SettingsView.
+//
+// Pro Bereich ein Toggle im auffaelligkeit__rule/__switch-Stil. status_monitoring
+// ist ein Detail der Status-Zeile -> eingerückt und deaktiviert, solange status aus
+// ist (nicht versteckt, damit der Nutzer es kennt).
+function OverviewSektion({ onGespeichert }) {
+  const { t } = useTranslation();
+
+  const [sektionen, setSektionen] = useState(STARTSEITE_DEFAULTS);
+  const [ladeStatus, setLadeStatus] = useState("laedt"); // laedt | bereit | fehler
+  const [speicherFehler, setSpeicherFehler] = useState(false);
+
+  // Einmal beim Mount laden, über die Defaults mischen. Fehler nicht verschlucken
+  // (console.error) und in den Lade-Fehlerzustand gehen.
+  useEffect(() => {
+    let aktiv = true;
+    (async () => {
+      try {
+        const settings = await fetchSettings();
+        if (!aktiv) {
+          return;
+        }
+        setSektionen(leseStartseite(settings));
+        setLadeStatus("bereit");
+      } catch (fehler) {
+        if (!aktiv) {
+          return;
+        }
+        console.error("Startseiten-Einstellungen laden fehlgeschlagen:", fehler);
+        setLadeStatus("fehler");
+      }
+    })();
+    return () => {
+      aktiv = false;
+    };
+  }, []);
+
+  // Einen Bereich umschalten: lokal spiegeln, dann das KOMPLETTE Objekt schreiben
+  // (updateSetting serialisiert wie bei den anderen Objekt-Settings). Bei Fehler
+  // den Speicher-Fehlerzustand setzen, lokalen Zustand belassen.
+  const handleToggle = async (key, an) => {
+    setSpeicherFehler(false);
+    const naechste = { ...sektionen, [key]: an };
+    setSektionen(naechste);
+    try {
+      await updateSetting(STARTSEITE_KEY, naechste);
+      onGespeichert();
+    } catch (fehler) {
+      console.error("overview_sections speichern fehlgeschlagen:", fehler);
+      setSpeicherFehler(true);
+    }
+  };
+
+  if (ladeStatus === "laedt") {
+    return (
+      <SettingsSektion title={t("settings.startseite.title")}>
+        <div className="settings__row">
+          <span className="settings__hint">
+            {t("settings.startseite.loading")}
+          </span>
+        </div>
+      </SettingsSektion>
+    );
+  }
+
+  if (ladeStatus === "fehler") {
+    return (
+      <SettingsSektion title={t("settings.startseite.title")}>
+        <div className="settings__row">
+          <span className="settings__hint settings__hint--error">
+            {t("settings.startseite.loadError")}
+          </span>
+        </div>
+      </SettingsSektion>
+    );
+  }
+
+  // Reihenfolge laut Briefing. status_monitoring folgt direkt auf status, optisch
+  // als dessen Unterpunkt.
+  return (
+    <SettingsSektion title={t("settings.startseite.title")}>
+      {/* Teil B — Bereichs-Schalter als abgesetzte Boxen (Text-Box + Kästchen-Box).
+          status_monitoring ist Detail der Status-Zeile: eingerückt und deaktiviert,
+          solange status aus ist. Datengetrieben, Reihenfolge laut Briefing.
+          Im auffaelligkeit__block, damit die Schalter denselben seitlichen
+          Innenabstand wie Port- und Regel-Zeilen haben (nicht am Rand kleben). */}
+      <div className="auffaelligkeit__block">
+        <ul className="auffaelligkeit__rules">
+        {[
+          { key: "status", sub: false, disabled: false },
+          { key: "statusMonitoring", schalter: "status_monitoring", sub: true },
+          { key: "schnellzugriff", sub: false },
+          { key: "beachtenswert", sub: false },
+          { key: "cve", sub: false },
+          { key: "kennzahlen", sub: false },
+        ].map((eintrag) => {
+          const schalter = eintrag.schalter ?? eintrag.key;
+          const istDeaktiviert = schalter === "status_monitoring" && !sektionen.status;
+          return (
+            <li
+              key={schalter}
+              className={
+                eintrag.sub
+                  ? "auffaelligkeit__rule startseite__rule--sub"
+                  : "auffaelligkeit__rule"
+              }
+            >
+              <span className="auffaelligkeit__rule-label">
+                <span className="auffaelligkeit__rule-title">
+                  {t(`settings.startseite.${eintrag.key}`)}
+                </span>
+              </span>
+              <span className="auffaelligkeit__rule-switchbox">
+                <input
+                  type="checkbox"
+                  className="auffaelligkeit__switch"
+                  checked={sektionen[schalter]}
+                  disabled={istDeaktiviert}
+                  onChange={(e) => handleToggle(schalter, e.target.checked)}
+                />
+              </span>
+            </li>
+          );
+        })}
+        </ul>
+      </div>
+
+      <p className="settings__hint">{t("settings.startseite.hint")}</p>
+
+      {speicherFehler ? (
+        <span className="settings__hint settings__hint--error">
+          {mitCode(t("settings.startseite.saveError"), CODES.E_501)}
+        </span>
+      ) : null}
+    </SettingsSektion>
+  );
 }
-.toggle input:checked + .toggle-slider { background: rgba(0,212,255,0.2); border-color: var(--accent-dim); }
-.toggle input:checked + .toggle-slider::before { transform: translateX(16px); background: var(--accent); }
 
-/* Profiles */
-.profile-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
-.profile-card {
-  background: var(--bg-3); border: 1px solid var(--border); border-radius: 5px;
-  padding: 16px 14px; cursor: pointer; transition: all 0.12s;
-  display: flex; flex-direction: column; gap: 6px;
-}
-.profile-card:hover { border-color: var(--border-bright); }
-.profile-card.builtin { border-left: 2px solid var(--accent-dim); }
-.profile-card.custom  { border-left: 2px solid var(--purple); }
-.profile-name { font-size: 12px; font-weight: 700; color: var(--text-primary); }
-.profile-desc { font-size: 10px; color: var(--text-muted); line-height: 1.4; }
-.profile-icon { font-size: 18px; margin-bottom: 4px; }
+// FritzBox-Sektion: einzige Sektion mit eigenem Daten-State (laden + schreiben
+// gegen die Settings-API). onGespeichert ist das vorhandene zeigeGespeichert
+// aus SettingsView — gemeinsames Feedback-Muster, nicht neu erfunden.
+//
+// Klartext-Passwörter kommen NIE vom Server: passwortWert startet leer und wird
+// nur beim Tippen befüllt; ist es beim Speichern leer, bleibt ein gesetztes
+// Secret unangetastet.
+function FritzBoxSektion({ onGespeichert }) {
+  const { t } = useTranslation();
 
-/* Schedules */
-.schedule-list { display: flex; flex-direction: column; gap: 6px; }
-.schedule-item {
-  display: flex; align-items: center; gap: 10px;
-  padding: 8px 12px; border-radius: 4px; background: var(--bg-3);
-  border: 1px solid var(--border);
-}
-.schedule-item.disabled { opacity: 0.5; }
-.schedule-name { font-size: 12px; font-weight: 600; color: var(--text-primary); flex: 1; }
-.schedule-meta { font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); }
-.schedule-next { font-size: 10px; color: var(--accent); font-family: var(--font-mono); }
+  const [hostWert, setHostWert] = useState("");
+  const [userWert, setUserWert] = useState("");
+  const [passwortWert, setPasswortWert] = useState("");
+  const [passwortGesetzt, setPasswortGesetzt] = useState(false);
+  const [ladeStatus, setLadeStatus] = useState("laedt"); // laedt | bereit | fehler
+  const [speicherStatus, setSpeicherStatus] = useState("idle"); // idle | speichert | fehler
 
-.add-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
-.sv-select {
-  background: var(--bg-3); border: 1px solid var(--border);
-  color: var(--text-primary); padding: 6px 8px; border-radius: 4px;
-  font-size: 12px; font-family: var(--font-mono);
-}
-.sv-btn {
-  display: flex; align-items: center; gap: 5px;
-  padding: 6px 14px; border-radius: 4px; font-size: 11px; font-weight: 700;
-  text-transform: uppercase; letter-spacing: 0.06em; cursor: pointer; border: none;
-  transition: all 0.12s;
-}
-.sv-btn.primary { background: var(--accent); color: var(--bg-0); }
-.sv-btn.primary:hover { background: #33ddff; }
-.sv-btn.danger { background: rgba(255,61,61,0.1); color: var(--red); border: 1px solid rgba(255,61,61,0.3); }
-.sv-btn.danger:hover { background: rgba(255,61,61,0.2); }
-.sv-btn.secondary { background: var(--bg-3); border: 1px solid var(--border); color: var(--text-secondary); }
-.sv-btn.secondary:hover { color: var(--text-primary); border-color: var(--border-bright); }
+  // Einmal beim Mount laden. Fehler nicht verschlucken (console.error) und in
+  // den Lade-Fehlerzustand gehen.
+  useEffect(() => {
+    let aktiv = true;
+    (async () => {
+      try {
+        const settings = await fetchSettings();
+        if (!aktiv) {
+          return;
+        }
+        setHostWert(String(settings.fritz_host ?? ""));
+        setUserWert(String(settings.fritz_user ?? ""));
+        setPasswortGesetzt(secretGesetzt(settings, "fritz_password"));
+        setLadeStatus("bereit");
+      } catch (fehler) {
+        if (!aktiv) {
+          return;
+        }
+        console.error("FritzBox-Einstellungen laden fehlgeschlagen:", fehler);
+        setLadeStatus("fehler");
+      }
+    })();
+    return () => {
+      aktiv = false;
+    };
+  }, []);
 
-.version-badge {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 4px 10px; border-radius: 4px;
-  background: rgba(0,212,255,0.1); color: var(--accent);
-  border: 1px solid rgba(0,212,255,0.2);
-  font-family: var(--font-mono); font-size: 12px; font-weight: 700;
-}
-`
+  // Passwort entfernen: leerer Wert löscht das Secret serverseitig (idempotent).
+  const handlePasswortEntfernen = async () => {
+    setSpeicherStatus("speichert");
+    try {
+      await updateSecret("fritz_password", "");
+      setPasswortGesetzt(false);
+      setPasswortWert("");
+      setSpeicherStatus("idle");
+      onGespeichert();
+    } catch (fehler) {
+      console.error("FritzBox-Passwort entfernen fehlgeschlagen:", fehler);
+      setSpeicherStatus("fehler");
+    }
+  };
 
-const SCHEDULE_OPTIONS = [
-  { value: "interval:30m",   label: "Every 30 min" },
-  { value: "interval:1h",    label: "Every 1 hour" },
-  { value: "interval:6h",    label: "Every 6 hours" },
-  { value: "interval:12h",   label: "Every 12 hours" },
-  { value: "interval:24h",   label: "Every 24 hours" },
-  { value: "cron:0 2 * * *", label: "Daily at 02:00" },
-  { value: "cron:0 8 * * 1", label: "Weekly Mon 08:00" },
-]
+  // Sektion speichern: Host/User immer, Passwort nur wenn etwas getippt wurde.
+  // Bei Fehler abbrechen (try/catch ums Ganze).
+  const handleSpeichern = async () => {
+    setSpeicherStatus("speichert");
+    try {
+      await updateSetting("fritz_host", hostWert);
+      await updateSetting("fritz_user", userWert);
+      if (passwortWert !== "") {
+        await updateSecret("fritz_password", passwortWert);
+        setPasswortGesetzt(true);
+        setPasswortWert("");
+      }
+      setSpeicherStatus("idle");
+      onGespeichert();
+    } catch (fehler) {
+      console.error("FritzBox-Einstellungen speichern fehlgeschlagen:", fehler);
+      setSpeicherStatus("fehler");
+    }
+  };
 
+  if (ladeStatus === "laedt") {
+    return (
+      <SettingsSektion title={t("settings.fritzbox.title")}>
+        <div className="settings__row">
+          <span className="settings__hint">{t("settings.fritzbox.loading")}</span>
+        </div>
+      </SettingsSektion>
+    );
+  }
 
-function ShodanKeyRow() {
-  const [key, setKey]       = React.useState('')
-  const [saved, setSaved]   = React.useState(false)
-  const [loading, setLoading] = React.useState(true)
-
-  React.useEffect(() => {
-    fetch('/api/settings').then(r=>r.json()).then(d => {
-      if (d.shodan_api_key) setKey('••••••••')
-      setLoading(false)
-    }).catch(() => setLoading(false))
-  }, [])
-
-  const save = async () => {
-    if (key === '••••••••') return
-    await fetch('/api/settings/shodan-key', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ api_key: key })
-    })
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
+  if (ladeStatus === "fehler") {
+    return (
+      <SettingsSektion title={t("settings.fritzbox.title")}>
+        <div className="settings__row">
+          <span className="settings__hint settings__hint--error">
+            {t("settings.fritzbox.loadError")}
+          </span>
+        </div>
+      </SettingsSektion>
+    );
   }
 
   return (
-    <div className="sv-row" style={{ flexWrap:'wrap', gap:8 }}>
-      <div className="sv-label">
-        Shodan API Key
-        <small>Optional — enables full Shodan lookup. Free key at shodan.io</small>
-      </div>
-      <div style={{ display:'flex', gap:6 }}>
-        <input className="sv-input" type="password"
-          value={key} onChange={e => setKey(e.target.value)}
-          placeholder="Enter Shodan API key…"
-          style={{ width:200 }} />
-        <button className="sv-btn primary" onClick={save}>
-          {saved ? '✓ Saved' : 'Save'}
+    <SettingsSektion title={t("settings.fritzbox.title")}>
+      <SettingsZeile label={t("settings.fritzbox.host")}>
+        <input
+          className="settings__input"
+          type="text"
+          value={hostWert}
+          onChange={(e) => setHostWert(e.target.value)}
+          placeholder={t("settings.fritzbox.hostPlaceholder")}
+        />
+      </SettingsZeile>
+
+      <SettingsZeile label={t("settings.fritzbox.user")}>
+        <input
+          className="settings__input"
+          type="text"
+          value={userWert}
+          onChange={(e) => setUserWert(e.target.value)}
+          placeholder={t("settings.fritzbox.userPlaceholder")}
+        />
+      </SettingsZeile>
+
+      <SettingsZeile label={t("settings.fritzbox.password")}>
+        <div className="settings__field">
+          <input
+            className="settings__input"
+            type="password"
+            value={passwortWert}
+            onChange={(e) => setPasswortWert(e.target.value)}
+            autoComplete="new-password"
+          />
+          {passwortGesetzt && passwortWert === "" ? (
+            <span className="settings__hint">
+              {t("settings.fritzbox.passwordIsSet")}
+            </span>
+          ) : null}
+          {passwortGesetzt ? (
+            <button
+              type="button"
+              className="settings__link-button"
+              onClick={handlePasswortEntfernen}
+              disabled={speicherStatus === "speichert"}
+            >
+              {t("settings.fritzbox.passwordRemove")}
+            </button>
+          ) : null}
+        </div>
+      </SettingsZeile>
+
+      <div className="settings__row settings__row--actions">
+        {speicherStatus === "fehler" ? (
+          <span className="settings__hint settings__hint--error">
+            {mitCode(t("settings.fritzbox.saveError"), CODES.E_501)}
+          </span>
+        ) : (
+          <span />
+        )}
+        <button
+          type="button"
+          className="settings__button"
+          onClick={handleSpeichern}
+          disabled={speicherStatus === "speichert"}
+        >
+          {t("settings.fritzbox.save")}
         </button>
       </div>
-    </div>
-  )
+    </SettingsSektion>
+  );
 }
 
-function ScanConfigCard({ config, onChange }) {
-  const set = (k, v) => onChange({ ...config, [k]: v })
-  const Toggle = ({ k }) => (
-    <label className="toggle">
-      <input type="checkbox" checked={!!config[k]} onChange={e => set(k, e.target.checked)} />
-      <span className="toggle-slider" />
-    </label>
-  )
-  return (
-    <div className="sv-card">
-      <div className="sv-card-title"><Radar size={11} /> Scan Configuration</div>
-      <div className="sv-card-body">
-        {/* Discovery */}
-        <div style={{ fontSize:9, fontWeight:700, letterSpacing:'0.1em', textTransform:'uppercase', color:'var(--text-muted)', marginBottom:4 }}>Host Discovery</div>
-        <div className="sv-row">
-          <div className="sv-label">Ping Timeout (s)<small>Lower = faster, less reliable</small></div>
-          <input className="sv-input narrow" type="number" min={0.2} max={5} step={0.1}
-            value={config.ping_timeout || 1} onChange={e => set('ping_timeout', parseFloat(e.target.value))} />
-        </div>
-        <div className="sv-row">
-          <div className="sv-label">Concurrent Pings<small>Max parallel pings</small></div>
-          <input className="sv-input narrow" type="number" min={8} max={254} step={8}
-            value={config.max_concurrent_ping || 64} onChange={e => set('max_concurrent_ping', parseInt(e.target.value))} />
-        </div>
-        <div className="sv-row">
-          <div className="sv-label">Hostname Resolution<small>Reverse DNS per host</small></div>
-          <Toggle k="resolve_hostnames" />
-        </div>
-        <div className="sv-row">
-          <div className="sv-label">NetBIOS / SMB Names<small>Requires nmblookup — slower</small></div>
-          <Toggle k="smb_scan" />
-        </div>
+// Service-Name zu einem gelisteten Port: zeigt den gecachten Namen oder lädt ihn
+// einmalig per GET /api/analysis/service nach. Der Cache liegt in der Sektion
+// (über beide Tabellen geteilt), damit ein Port nur einmal aufgelöst wird. Ein
+// fehlgeschlagener Lookup oder ein unbekannter Port -> „—", kein Crash.
+function ServiceZelle({ port, serviceCache, onServiceGeladen }) {
+  const { t } = useTranslation();
+  const eintragVorhanden = Object.prototype.hasOwnProperty.call(
+    serviceCache,
+    port,
+  );
 
-        {/* Port Scan */}
-        <div style={{ fontSize:9, fontWeight:700, letterSpacing:'0.1em', textTransform:'uppercase', color:'var(--text-muted)', marginTop:16, marginBottom:4 }}>Port Scanning</div>
-        <div className="sv-row">
-          <div className="sv-label">Port Scan Enabled</div>
-          <Toggle k="port_scan" />
-        </div>
-        <div className="sv-row">
-          <div className="sv-label">Scan Mode<small>socket = fast async · nmap = deep + OS</small></div>
-          <div style={{ display:'flex', gap:6 }}>
-            {['socket','nmap'].map(m => (
-              <button key={m} onClick={() => set('port_mode', m)}
-                style={{
-                  padding:'4px 10px', borderRadius:4, fontSize:11, cursor:'pointer', fontFamily:'var(--font-mono)',
-                  border: `1px solid ${config.port_mode === m ? 'var(--accent-dim)' : 'var(--border)'}`,
-                  background: config.port_mode === m ? 'rgba(0,212,255,0.08)' : 'var(--bg-3)',
-                  color: config.port_mode === m ? 'var(--accent)' : 'var(--text-secondary)',
-                }}>{m}</button>
-            ))}
-          </div>
-        </div>
-        <div className="sv-row">
-          <div className="sv-label">Concurrent Port Checks</div>
-          <input className="sv-input narrow" type="number" min={20} max={500} step={20}
-            value={config.max_concurrent_ports || 100} onChange={e => set('max_concurrent_ports', parseInt(e.target.value))} />
-        </div>
-
-        {/* Service Discovery */}
-        <div style={{ fontSize:9, fontWeight:700, letterSpacing:'0.1em', textTransform:'uppercase', color:'var(--text-muted)', marginTop:16, marginBottom:4 }}>Service Discovery</div>
-        <div className="sv-row">
-          <div className="sv-label">mDNS / Bonjour / NDI<small>Discovers AirPlay, NDI, printers…</small></div>
-          <Toggle k="mdns_scan" />
-        </div>
-        <div className="sv-row">
-          <div className="sv-label">mDNS Duration (s)<small>Listen time for responses</small></div>
-          <input className="sv-input narrow" type="number" min={2} max={30} step={1}
-            value={config.mdns_duration || 5} onChange={e => set('mdns_duration', parseFloat(e.target.value))} />
-        </div>
-        <div className="sv-row">
-          <div className="sv-label">UPnP / SSDP<small>Smart TVs, routers, NAS devices</small></div>
-          <Toggle k="ssdp_scan" />
-        </div>
-      </div>
-    </div>
-  )
-}
-
-export default function SettingsView({ interfaces, cidr, scanConfig, onScanConfigChange }) {
-  const [profiles, setProfiles] = useState({ defaults: [], custom: [] })
-  const [schedules, setSchedules] = useState([])
-  // New schedule form
-  const [newSched, setNewSched] = useState({ name: '', cidr: cidr || '192.168.1.0/24', profile_id: 'standard', schedule: 'interval:1h' })
-
-  const [sysInfo, setSysInfo] = useState({})
-  const [installing, setInstalling] = useState({})
-
-  const installPkg = async (pkg) => {
-    setInstalling(p => ({ ...p, [pkg]: true }))
-    try {
-      const res = await fetch('/api/system/install', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ package: pkg })
-      })
-      const data = await res.json()
-      if (data.ok) {
-        setSysInfo(p => ({ ...p, [pkg]: true }))
+  useEffect(() => {
+    if (eintragVorhanden) {
+      return undefined;
+    }
+    let aktiv = true;
+    (async () => {
+      try {
+        const name = await lookupService(port);
+        if (aktiv) {
+          onServiceGeladen(port, name);
+        }
+      } catch (ursache) {
+        console.error("Service-Lookup fehlgeschlagen:", ursache);
+        if (aktiv) {
+          onServiceGeladen(port, null);
+        }
       }
-    } catch (e) {}
-    setInstalling(p => ({ ...p, [pkg]: false }))
-  }
+    })();
+    return () => {
+      aktiv = false;
+    };
+  }, [port, eintragVorhanden, onServiceGeladen]);
 
-  const loadAll = async () => {
-    fetch('/api/system/info').then(r=>r.json()).then(d => { setSysInfo(d); }).catch(()=>{})
-    const [p, s] = await Promise.all([
-      fetch('/api/profiles').then(r => r.json()).catch(() => ({ defaults: [], custom: [] })),
-      fetch('/api/schedules').then(r => r.json()).catch(() => []),
-    ])
-    setProfiles(p)
-    setSchedules(s)
-  }
+  const service = serviceCache[port];
+  return <>{service ?? t("settings.auffaelligkeit.serviceUnknown")}</>;
+}
 
-  useEffect(() => { loadAll() }, [])
+// Eine Port→Service-Liste (auffällig ODER kritisch) im Box-Schema. Stateless bzgl.
+// Persistenz: aktive und abgewählte Ports kommen als Props, jede Änderung meldet
+// die Sektion über die Handler zurück (sie hält das Speichern). variante steuert
+// nur die Optik ("auffaellig"|"kritisch") über die severity-Tokens. Der
+// serviceCache wird über beide Listen geteilt (siehe ServiceZelle).
+//
+// Anzeige-Liste = Vereinigung aus aktivePorts (angehakt) + disabledPorts
+// (abgewählt), sortiert nach Portnummer. Das Kästchen schaltet einen Port zwischen
+// aktiv/abgewählt; der Mülleimer entfernt ihn endgültig aus BEIDEN Listen.
+function PortTabelle({
+  variante,
+  titel,
+  aktivePorts,
+  disabledPorts,
+  standardPorts,
+  onToggle,
+  onRemove,
+  onAdd,
+  onReset,
+  serviceCache,
+  onServiceGeladen,
+}) {
+  const { t } = useTranslation();
 
-  const addSchedule = async () => {
-    if (!newSched.name || !newSched.cidr) return
-    await fetch('/api/schedules', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newSched),
-    })
-    loadAll()
-    setNewSched({ name: '', cidr: cidr || '192.168.1.0/24', profile_id: 'standard', schedule: 'interval:1h' })
-  }
+  const [eingabe, setEingabe] = useState("");
+  const [service, setService] = useState(null); // Auto-Lookup-Ergebnis (oder null)
+  const [fehler, setFehler] = useState(""); // dezente Inline-Meldung (i18n-Key)
 
-  const toggleSchedule = async (id, enabled) => {
-    await fetch(`/api/schedules/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ enabled: !enabled }),
-    })
-    loadAll()
-  }
+  // Anzeige-Liste: Vereinigung beider Listen, dedupliziert + sortiert. Ein Set der
+  // aktiven Ports steuert das Kästchen; ein Set ALLER Ports verhindert Duplikate
+  // beim Hinzufügen (ein abgewählter Port zählt als vorhanden).
+  const aktivSet = new Set(aktivePorts);
+  const alleSet = new Set([...aktivePorts, ...disabledPorts]);
+  const anzeigePorts = [...alleSet].sort((a, b) => a - b);
 
-  const deleteSchedule = async (id) => {
-    await fetch(`/api/schedules/${id}`, { method: 'DELETE' })
-    loadAll()
-  }
+  // Standard-Ports der Rubrik (aus konfig.defaults durchgereicht): nur SELBST
+  // hinzugefügte Ports (nicht in dieser Menge) bekommen den Mülleimer. Standard-
+  // Ports behalten ihr Kästchen, aber kein Entfernen.
+  const standardSet = new Set(standardPorts);
 
-  const allProfiles = [...profiles.defaults, ...profiles.custom]
+  // Auto-Lookup beim Tippen, entprellt (~300ms). Eine leere/ungültige Eingabe
+  // löst keinen Aufruf aus; ein fehlgeschlagener Lookup ist „—", kein Crash.
+  useEffect(() => {
+    const roh = eingabe.trim();
+    if (roh === "") {
+      setService(null);
+      return undefined;
+    }
+    const port = Number(roh);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      setService(null);
+      return undefined;
+    }
+    let aktiv = true;
+    const handle = setTimeout(async () => {
+      try {
+        const name = await lookupService(port);
+        if (aktiv) {
+          setService(name);
+        }
+      } catch (ursache) {
+        // Lookup fehlgeschlagen -> Leer-Zustand „—", nicht crashen.
+        console.error("Service-Lookup fehlgeschlagen:", ursache);
+        if (aktiv) {
+          setService(null);
+        }
+      }
+    }, 300);
+    return () => {
+      aktiv = false;
+      clearTimeout(handle);
+    };
+  }, [eingabe]);
+
+  // Port hinzufügen: Range 1–65535 erzwingen (ungültig -> Inline-Meldung, kein
+  // Eintrag), Duplikate gegen die GESAMTE Anzeige-Liste verhindern (aktiv ODER
+  // abgewählt). Der neue Port kommt aktiv (angehakt) hinzu — das übernimmt onAdd.
+  const handleHinzufuegen = () => {
+    const port = Number(eingabe.trim());
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      setFehler("portInvalid");
+      return;
+    }
+    if (alleSet.has(port)) {
+      setFehler("portDuplicate");
+      return;
+    }
+    onAdd(port);
+    setEingabe("");
+    setService(null);
+    setFehler("");
+  };
+
+  const handleEingabe = (wert) => {
+    setEingabe(wert);
+    if (fehler !== "") {
+      setFehler("");
+    }
+  };
+
+  const klasse = `auffaelligkeit__table auffaelligkeit__table--${variante}`;
 
   return (
-    <>
-      <style>{css}</style>
-      <div className="settings-view">
-        <div className="sv-header">
-          <Settings size={14} color="var(--accent)" />
-          <span className="sv-title">Settings</span>
-          <div className="version-badge" style={{ marginLeft: 'auto' }}>
-            CERNIS PRO v{sysInfo.version || '1.0.0'}
+    <div className={klasse}>
+      <div className="auffaelligkeit__table-head">
+        <span className="auffaelligkeit__badge">{titel}</span>
+        <button
+          type="button"
+          className="settings__link-button"
+          onClick={onReset}
+        >
+          {t("settings.auffaelligkeit.reset")}
+        </button>
+      </div>
+
+      {/* Teil E — oranger Hinweis, nur wenn abgewählte Ports existieren. */}
+      {disabledPorts.length > 0 ? (
+        <span className="auffaelligkeit__disabled-hint">
+          {t("settings.auffaelligkeit.disabledHint", {
+            count: disabledPorts.length,
+          })}
+        </span>
+      ) : null}
+
+      {/* Box-Schema: pro Zeile vier abgesetzte Boxen, Einträge untereinander. */}
+      {anzeigePorts.length === 0 ? (
+        <span className="auffaelligkeit__empty">
+          {t("settings.auffaelligkeit.empty")}
+        </span>
+      ) : (
+        <ul className="auffaelligkeit__portlist">
+          {anzeigePorts.map((port) => {
+            const aktiv = aktivSet.has(port);
+            const istStandard = standardSet.has(port);
+            const zeilenKlasse = aktiv
+              ? "auffaelligkeit__portrow"
+              : "auffaelligkeit__portrow auffaelligkeit__portrow--inaktiv";
+            return (
+              <li key={port} className={zeilenKlasse}>
+                <span className="auffaelligkeit__port-box">{port}</span>
+                <span className="auffaelligkeit__port-service">
+                  <ServiceZelle
+                    port={port}
+                    serviceCache={serviceCache}
+                    onServiceGeladen={onServiceGeladen}
+                  />
+                </span>
+                <span className="auffaelligkeit__port-toggle">
+                  <input
+                    type="checkbox"
+                    className="auffaelligkeit__switch"
+                    checked={aktiv}
+                    aria-label={t(
+                      aktiv
+                        ? "settings.auffaelligkeit.portActive"
+                        : "settings.auffaelligkeit.portInactive",
+                    )}
+                    onChange={(e) => onToggle(port, e.target.checked)}
+                  />
+                </span>
+                {/* Mülleimer nur bei selbst hinzugefügten Ports. Standard-Ports
+                    (in der defaults-Liste) bekommen an gleicher Stelle einen
+                    leeren Platzhalter, damit die Spalten bündig bleiben. */}
+                {istStandard ? (
+                  <span
+                    className="auffaelligkeit__port-remove auffaelligkeit__port-remove--leer"
+                    aria-hidden="true"
+                  />
+                ) : (
+                  <span className="auffaelligkeit__port-remove">
+                    <button
+                      type="button"
+                      className="auffaelligkeit__remove"
+                      aria-label={t("settings.auffaelligkeit.remove")}
+                      title={t("settings.auffaelligkeit.remove")}
+                      onClick={() => onRemove(port)}
+                    >
+                      <Trash2 size={14} aria-hidden="true" />
+                    </button>
+                  </span>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      <div className="auffaelligkeit__add">
+        <input
+          className="settings__input auffaelligkeit__add-input"
+          type="number"
+          min={1}
+          max={65535}
+          inputMode="numeric"
+          value={eingabe}
+          onChange={(e) => handleEingabe(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              handleHinzufuegen();
+            }
+          }}
+          placeholder={t("settings.auffaelligkeit.addPortPlaceholder")}
+        />
+        <span className="auffaelligkeit__add-service">
+          {service ?? t("settings.auffaelligkeit.serviceUnknown")}
+        </span>
+        <button
+          type="button"
+          className="settings__button"
+          onClick={handleHinzufuegen}
+        >
+          {t("settings.auffaelligkeit.add")}
+        </button>
+      </div>
+      {fehler !== "" ? (
+        <span className="settings__hint settings__hint--error">
+          {t(`settings.auffaelligkeit.${fehler}`)}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+// Portlisten-Upload (Schnitt 7, Konzept §3.2) für EINE Liste (auffällig ODER
+// kritisch), eingebettet direkt unter der jeweiligen PortTabelle. Liest clientseitig
+// eine .txt per FileReader, parst sie über die reine parsePortliste, zeigt eine
+// inline-Vorschau (Chips mit Service-Name, ungültig-Zähler, Überschneidung mit der
+// bestehenden Liste) und schreibt erst beim Klick auf „Ergänzen"/„Ersetzen" — über
+// den GLEICHEN onChange-Pfad wie die Tabelle (schreibePortliste). Die rohe Datei
+// verlässt das Frontend NIE; nur das validierte Array geht ans Backend.
+//
+// variante steuert (wie bei PortTabelle) nur die Optik über die severity-Tokens.
+// bestehendePorts ist die aktuelle Liste (für Union beim Ergänzen + Überschneidungs-
+// Hinweis). serviceCache/onServiceGeladen werden mit den Tabellen geteilt, damit ein
+// schon bekannter Port nicht erneut nachgeschlagen wird.
+function PortUpload({
+  variante,
+  bestehendePorts,
+  onErsetzen,
+  onErgaenzen,
+  serviceCache,
+  onServiceGeladen,
+}) {
+  const { t } = useTranslation();
+  const dateiInputRef = useRef(null);
+
+  // Vorschau-Zustand: null = keine Datei gewählt. Sonst das Parse-Ergebnis plus der
+  // Dateiname (rein informativ in der Vorschau).
+  const [vorschau, setVorschau] = useState(null); // { name, gueltig, ungueltig, gesamt }
+  const [fehler, setFehler] = useState(""); // dezenter Inline-Fehler (i18n-Key) oder ""
+
+  const bestehendSet = new Set(bestehendePorts);
+
+  const handleDatei = (datei) => {
+    if (!datei) {
+      return;
+    }
+    setFehler("");
+    setVorschau(null);
+    // Größengrenze VOR dem Lesen prüfen — eine Portliste ist winzig.
+    if (datei.size > UPLOAD_MAX_BYTES) {
+      setFehler("uploadTooLarge");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = typeof reader.result === "string" ? reader.result : "";
+      const ergebnis = parsePortliste(text);
+      setVorschau({ name: datei.name, ...ergebnis });
+    };
+    reader.onerror = () => {
+      console.error("Datei lesen fehlgeschlagen:", reader.error);
+      setFehler("uploadReadError");
+    };
+    reader.readAsText(datei);
+  };
+
+  // Nach Schreiben (oder Abbrechen) die Vorschau verwerfen und das File-Input
+  // zurücksetzen, damit dieselbe Datei erneut gewählt werden kann.
+  const verwerfen = () => {
+    setVorschau(null);
+    setFehler("");
+    if (dateiInputRef.current) {
+      dateiInputRef.current.value = "";
+    }
+  };
+
+  const klasse = `auffaelligkeit__upload auffaelligkeit__upload--${variante}`;
+
+  // Vorschau-Kennzahlen.
+  const gueltig = vorschau ? vorschau.gueltig : [];
+  const bereitsVorhanden = gueltig.filter((p) => bestehendSet.has(p)).length;
+  const leer = gueltig.length === 0;
+
+  return (
+    <div className={klasse}>
+      <div className="auffaelligkeit__upload-trigger">
+        <input
+          ref={dateiInputRef}
+          type="file"
+          accept=".txt,text/plain"
+          className="auffaelligkeit__upload-input"
+          onChange={(e) => handleDatei(e.target.files?.[0] ?? null)}
+        />
+        <button
+          type="button"
+          className="settings__button auffaelligkeit__upload-button"
+          onClick={() => dateiInputRef.current?.click()}
+        >
+          <Upload size={14} aria-hidden="true" />
+          {t("settings.auffaelligkeit.upload")}
+        </button>
+        <span className="settings__hint auffaelligkeit__upload-hint">
+          {t("settings.auffaelligkeit.uploadHint")}
+        </span>
+      </div>
+
+      {fehler !== "" ? (
+        <span className="settings__hint settings__hint--error">
+          {t(`settings.auffaelligkeit.${fehler}`)}
+        </span>
+      ) : null}
+
+      {vorschau ? (
+        <div className="auffaelligkeit__preview">
+          <div className="auffaelligkeit__preview-head">
+            <span className="auffaelligkeit__badge">
+              {t("settings.auffaelligkeit.previewTitle")}
+            </span>
+            <span className="auffaelligkeit__preview-file">{vorschau.name}</span>
           </div>
-        </div>
 
-        <div className="sv-body">
+          <span className="settings__hint">
+            {t("settings.auffaelligkeit.previewValidCount", {
+              count: gueltig.length,
+            })}
+          </span>
 
-          {/* About */}
-          <div className="sv-card">
-            <div className="sv-card-title"><Settings size={11} /> About CERNIS PRO</div>
-            <div className="sv-card-body">
-              <div className="sv-row">
-                <div className="sv-label">Version<small>CERNIS PRO</small></div>
-                <span style={{ fontFamily:'var(--font-mono)', fontSize:13, color:'var(--accent)' }}>v{sysInfo.version || '…'}</span>
-              </div>
-              <div className="sv-row">
-                <div className="sv-label">Backend API<small>FastAPI on port 8765</small></div>
-                <a href="http://localhost:8765/docs" target="_blank" rel="noreferrer"
-                  style={{ color:'var(--accent)', fontSize:11, fontFamily:'var(--font-mono)' }}>
-                  localhost:8765/docs
-                </a>
-              </div>
-              <div className="sv-row">
-                <div className="sv-label">OUI Vendor DB<small>IEEE MAC vendor database</small></div>
-                <button className="sv-btn secondary" onClick={() => fetch('/api/settings')}>
-                  <RotateCcw size={11} /> Reload
-                </button>
-              </div>
+          {leer ? (
+            <span className="auffaelligkeit__preview-empty">
+              {t("settings.auffaelligkeit.previewNone")}
+            </span>
+          ) : (
+            <div className="auffaelligkeit__chips">
+              {gueltig.map((port) => (
+                <span key={port} className="auffaelligkeit__chip">
+                  <span className="auffaelligkeit__chip-port">{port}</span>
+                  <span className="auffaelligkeit__chip-service">
+                    <ServiceZelle
+                      port={port}
+                      serviceCache={serviceCache}
+                      onServiceGeladen={onServiceGeladen}
+                    />
+                  </span>
+                </span>
+              ))}
             </div>
-          </div>
-
-          {/* Scan Configuration */}
-          {scanConfig && onScanConfigChange && (
-            <ScanConfigCard config={scanConfig} onChange={onScanConfigChange} />
           )}
 
-          {/* Scan Profiles */}
-          <div className="sv-card">
-            <div className="sv-card-title"><Wifi size={11} /> Scan Profiles</div>
-            <div className="sv-card-body">
-              <div style={{ fontSize:11, color:'var(--text-muted)', marginBottom:4 }}>
-                Built-in profiles — select in toolbar before scanning
-              </div>
-              <div className="profile-grid">
-                {profiles.defaults.map(p => (
-                  <div key={p.id} className="profile-card builtin">
-                    <div className="profile-icon">{p.icon}</div>
-                    <div className="profile-name">{p.name}</div>
-                    <div className="profile-desc">{p.description}</div>
-                  </div>
-                ))}
-                {profiles.custom.map(p => (
-                  <div key={p.id} className="profile-card custom" style={{ position:'relative' }}>
-                    <button onClick={() => fetch(`/api/profiles/${p.id}`, { method:'DELETE' }).then(loadAll)}
-                      style={{ position:'absolute', top:4, right:4, background:'none', border:'none', color:'var(--text-muted)', cursor:'pointer' }}>
-                      <Trash2 size={11} />
-                    </button>
-                    <div className="profile-icon">{p.icon || '⚙'}</div>
-                    <div className="profile-name">{p.name}</div>
-                    <div className="profile-desc">{p.description}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
+          {vorschau.ungueltig > 0 ? (
+            <span className="settings__hint auffaelligkeit__preview-invalid">
+              {t("settings.auffaelligkeit.previewInvalidLines", {
+                count: vorschau.ungueltig,
+              })}
+            </span>
+          ) : null}
+
+          {bereitsVorhanden > 0 ? (
+            <span className="settings__hint">
+              {t("settings.auffaelligkeit.previewAlreadyPresent", {
+                count: bereitsVorhanden,
+              })}
+            </span>
+          ) : null}
+
+          <div className="auffaelligkeit__preview-actions">
+            <button
+              type="button"
+              className="settings__button"
+              disabled={leer}
+              onClick={() => {
+                // Ergänzen: Union mit der bestehenden Liste, dedupliziert + sortiert.
+                const vereint = [
+                  ...new Set([...bestehendePorts, ...gueltig]),
+                ].sort((a, b) => a - b);
+                onErgaenzen(vereint);
+                verwerfen();
+              }}
+            >
+              {t("settings.auffaelligkeit.previewAdd")}
+            </button>
+            <button
+              type="button"
+              className="settings__button"
+              disabled={leer}
+              onClick={() => {
+                // Ersetzen: die hochgeladene Liste ersetzt die bestehende komplett.
+                onErsetzen([...gueltig]);
+                verwerfen();
+              }}
+            >
+              {t("settings.auffaelligkeit.previewReplace")}
+            </button>
+            <button
+              type="button"
+              className="settings__link-button"
+              onClick={verwerfen}
+            >
+              {t("settings.auffaelligkeit.previewCancel")}
+            </button>
           </div>
 
-          {/* Scheduled Scans */}
-          <div className="sv-card">
-            <div className="sv-card-title"><Clock size={11} /> Scheduled Scans</div>
-            <div className="sv-card-body">
-              {schedules.length === 0 && (
-                <div style={{ color:'var(--text-muted)', fontSize:12, padding:'8px 0' }}>
-                  No schedules configured yet.
-                </div>
-              )}
-              <div className="schedule-list">
-                {schedules.map(s => (
-                  <div key={s.id} className={`schedule-item${!s.enabled ? ' disabled' : ''}`}>
-                    <label className="toggle" style={{ flexShrink:0 }}>
-                      <input type="checkbox" checked={!!s.enabled} onChange={() => toggleSchedule(s.id, s.enabled)} />
-                      <span className="toggle-slider" />
-                    </label>
-                    <div style={{ flex:1, minWidth:0 }}>
-                      <div className="schedule-name">{s.name}</div>
-                      <div className="schedule-meta">{s.cidr} · {s.profile_id} · {s.schedule}</div>
-                      {s.next_run && <div className="schedule-next">Next: {new Date(s.next_run).toLocaleString('de-DE')}</div>}
-                    </div>
-                    <button className="sv-btn danger" onClick={() => deleteSchedule(s.id)}>
-                      <Trash2 size={11} />
-                    </button>
-                  </div>
-                ))}
-              </div>
+          {leer ? (
+            <span className="settings__hint auffaelligkeit__preview-empty-hint">
+              {t("settings.auffaelligkeit.previewEmptyHint")}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
-              {/* Add new schedule */}
-              <div style={{ borderTop:'1px solid var(--border)', paddingTop:12, marginTop:4 }}>
-                <div style={{ fontSize:10, color:'var(--text-muted)', marginBottom:8, textTransform:'uppercase', letterSpacing:'0.08em', fontWeight:700 }}>
-                  Add Schedule
-                </div>
-                <div className="add-row">
-                  <input className="sv-input" value={newSched.name}
-                    onChange={e => setNewSched(p => ({ ...p, name: e.target.value }))}
-                    placeholder="Schedule name" style={{ flex:1, minWidth:120 }} />
-                  <input className="sv-input" value={newSched.cidr}
-                    onChange={e => setNewSched(p => ({ ...p, cidr: e.target.value }))}
-                    placeholder="CIDR" style={{ width:150 }} />
-                </div>
-                <div className="add-row" style={{ marginTop:6 }}>
-                  <select className="sv-select" value={newSched.profile_id}
-                    onChange={e => setNewSched(p => ({ ...p, profile_id: e.target.value }))}>
-                    {allProfiles.map(p => <option key={p.id} value={p.id}>{p.icon} {p.name}</option>)}
-                  </select>
-                  <select className="sv-select" value={newSched.schedule}
-                    onChange={e => setNewSched(p => ({ ...p, schedule: e.target.value }))}>
-                    {SCHEDULE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
-                  <button className="sv-btn primary" onClick={addSchedule}>
-                    <Plus size={12} /> Add
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
+// Sektion „Was ist auffällig?": eigener Daten-State analog FritzBoxSektion (laden
+// beim Mount, schreiben pro Änderung gegen die Settings-/analysis-API).
+// onGespeichert ist das gemeinsame zeigeGespeichert-Feedback aus SettingsView.
+//
+// Vier Blöcke: (1) zwei Port→Service-Tabellen, (2) Schwellen-Dropdown, (3) Regel-
+// An/Aus, (4) Ehrlichkeits-Hinweis.
+function AuffaelligkeitSektion({ onGespeichert }) {
+  const { t } = useTranslation();
 
+  const [auffaelligePorts, setAuffaelligePorts] = useState([]);
+  const [kritischePorts, setKritischePorts] = useState([]);
+  // Abgewählte Ports je Liste (Teil D): reine Frontend-Keys, additiv. Sie ändern
+  // NICHT, was das Backend auswertet — dort steht nur die jeweils aktive Liste.
+  const [auffaelligDisabled, setAuffaelligDisabled] = useState([]);
+  const [kritischDisabled, setKritischDisabled] = useState([]);
+  const [portCount, setPortCount] = useState(DEFAULT_PORT_COUNT);
+  const [regeln, setRegeln] = useState([]); // [{ id, title, severity, disabled }]
+  const [serviceCache, setServiceCache] = useState({}); // port -> name|null
+  const [ladeStatus, setLadeStatus] = useState("laedt"); // laedt | bereit | fehler
+  const [speicherFehler, setSpeicherFehler] = useState(false);
 
-          {/* System / Dependencies */}
-          <div className="sv-card">
-            <div className="sv-card-title"><Settings size={11} /> Dependencies</div>
-            <div className="sv-card-body">
-              {[
-                ['fritzconnection', 'FritzBox TR-064 Integration',      'pip install fritzconnection', false],
-                ['scapy',          'Packet Capture, LLDP, Rogue DHCP', 'pip install scapy',           true],
-                ['pysnmp',         'SNMP Discovery',                    'pip install pysnmp',          false],
-                ['dnspython',      'Advanced DNS Lookup',               'pip install dnspython',       false],
-                ['reportlab',      'PDF Report Export',                 'pip install reportlab',       false],
-                ['cryptography',   'Credential Encryption (AES-128)',   'pip install cryptography',    false],
-                ['apscheduler',    'Scheduled Scans',                   'pip install apscheduler',     false],
-                ['websockets',     'Remote Agent WebSocket',            'pip install websockets',      false],
-                ['nmap',           'Deep Port Scan (optional)',          navigator.platform?.includes('Win') ? 'winget install Insecure.Nmap' : 'brew install nmap', true],
-              ].map(([pkg, desc, cmd, isOptional]) => (
-                <div key={pkg} className="sv-row" style={{ flexWrap:'wrap', gap:6 }}>
-                  <div className="sv-label" style={{ minWidth:160 }}>
-                    {desc}
-                    <small>{pkg}{isOptional ? ' (optional)' : ''}</small>
-                  </div>
-                  {sysInfo[pkg] === true
-                    ? <span style={{ color:'var(--green)', fontSize:11, fontFamily:'var(--font-mono)', fontWeight:700 }}>✓ installed</span>
-                    : sysInfo[pkg] === false
-                    ? <div style={{ display:'flex', gap:6, alignItems:'center', flexWrap:'wrap' }}>
-                        <span style={{ color:'var(--red)', fontSize:11, fontFamily:'var(--font-mono)' }}>✗ missing</span>
-                        {!pkg.includes('nmap') && (
-                          <button
-                            onClick={() => installPkg(pkg)}
-                            disabled={installing[pkg]}
-                            style={{ padding:'2px 9px', borderRadius:3, fontSize:10, fontWeight:700, cursor:'pointer', border:'1px solid rgba(0,212,255,0.3)', background:'rgba(0,212,255,0.1)', color:'var(--accent)', textTransform:'uppercase', letterSpacing:'0.06em' }}>
-                            {installing[pkg] ? 'Installing…' : '⬇ Install'}
-                          </button>
-                        )}
-                        <code style={{ fontSize:10, fontFamily:'var(--font-mono)', background:'var(--bg-4)', padding:'2px 7px', borderRadius:3, color:'var(--text-secondary)' }}>{cmd}</code>
-                      </div>
-                    : <span style={{ color:'var(--text-muted)', fontSize:11 }}>…</span>
-                  }
-                </div>
-              ))}
-              <div style={{ marginTop:8, padding:'8px 12px', background:'var(--bg-3)', borderRadius:4, fontSize:11, color:'var(--text-muted)', fontFamily:'var(--font-mono)' }}>
-                💡 {navigator.platform?.includes('Win')
-                  ? <>On Windows, install <span style={{ color:'var(--accent)' }}>Npcap</span> (npcap.com) and <span style={{ color:'var(--accent)' }}>Nmap</span> (nmap.org) separately</>
-                  : <>Run <span style={{ color:'var(--accent)' }}>./start.sh</span> to auto-install all available packages</>}
-              </div>
-            </div>
-          </div>
-          {/* Data */}
-          <div className="sv-card">
-            <div className="sv-card-title"><Database size={11} /> Data & Storage</div>
-            <div className="sv-card-body">
-              <div className="sv-row">
-                <div className="sv-label">Scan History<small>Stored in SQLite locally</small></div>
-                <a href="/api/history" target="_blank" style={{ color:'var(--accent)', fontSize:11 }}>View</a>
-              </div>
-              <div className="sv-row">
-                <div className="sv-label">Encryption Key<small>~/.cernis/keyring (0600)</small></div>
-                <span style={{ fontSize:11, color:'var(--green)', fontFamily:'var(--font-mono)' }}>AES-128 · Active</span>
-              </div>
-            </div>
-          </div>
+  // Cache-Schreiber für die ServiceZelle. useCallback, damit der useEffect der
+  // Zelle nicht bei jedem Render neu feuert.
+  const merkeService = useCallback((port, name) => {
+    setServiceCache((vorher) => ({ ...vorher, [port]: name }));
+  }, []);
 
-          {/* Internet / API Keys */}
-          <div className="sv-card">
-            <div className="sv-card-title"><Database size={11} /> API Keys</div>
-            <div className="sv-card-body">
-              <ShodanKeyRow />
-            </div>
-          </div>
+  // Einmal beim Mount laden: Settings (Portlisten/Schwelle/Deaktivierungen) und
+  // die Regel-Liste. Fehlt ein Port-Listen-Key (frische DB), greift im Backend der
+  // Built-in-Default und das Frontend sieht KEINEN Wert -> dann die Default-
+  // Konstanten zeigen. Fehler nicht verschlucken; in den Lade-Fehlerzustand gehen.
+  useEffect(() => {
+    let aktiv = true;
+    (async () => {
+      try {
+        const [settings, alleRegeln] = await Promise.all([
+          fetchSettings(),
+          fetchAllRules(),
+        ]);
+        if (!aktiv) {
+          return;
+        }
+        setAuffaelligePorts(
+          Array.isArray(settings.analysis_suspicious_ports)
+            ? [...settings.analysis_suspicious_ports].sort((a, b) => a - b)
+            : DEFAULT_AUFFAELLIGE_PORTS,
+        );
+        setKritischePorts(
+          Array.isArray(settings.analysis_critical_ports)
+            ? [...settings.analysis_critical_ports].sort((a, b) => a - b)
+            : DEFAULT_KRITISCHE_PORTS,
+        );
+        // Disabled-Listen: fehlt der Key (alte DB), als leeres Array behandeln.
+        setAuffaelligDisabled(
+          Array.isArray(settings.analysis_suspicious_ports_disabled)
+            ? [...settings.analysis_suspicious_ports_disabled].sort(
+                (a, b) => a - b,
+              )
+            : [],
+        );
+        setKritischDisabled(
+          Array.isArray(settings.analysis_critical_ports_disabled)
+            ? [...settings.analysis_critical_ports_disabled].sort(
+                (a, b) => a - b,
+              )
+            : [],
+        );
+        setPortCount(
+          Number.isInteger(settings.analysis_port_count_threshold)
+            ? settings.analysis_port_count_threshold
+            : DEFAULT_PORT_COUNT,
+        );
+        setRegeln(
+          alleRegeln.map((r) => ({
+            id: r.id,
+            title: r.title,
+            severity: r.severity,
+            disabled: Boolean(r.disabled),
+          })),
+        );
+        setLadeStatus("bereit");
+      } catch (fehler) {
+        if (!aktiv) {
+          return;
+        }
+        console.error("Auffälligkeits-Einstellungen laden fehlgeschlagen:", fehler);
+        setLadeStatus("fehler");
+      }
+    })();
+    return () => {
+      aktiv = false;
+    };
+  }, []);
 
-        {/* Spacer to ensure last card is fully visible when scrolled */}
-        <div style={{ height: 200, flexShrink: 0 }} />
+  // Block 1: eine Portliste schreiben (auffällig/kritisch). Erst lokal spiegeln,
+  // dann persistieren; bei Fehler den Speicher-Fehlerzustand setzen.
+  const schreibePortliste = async (key, setLocal, neueListe) => {
+    setSpeicherFehler(false);
+    setLocal(neueListe);
+    try {
+      await updateSetting(key, neueListe);
+      onGespeichert();
+    } catch (fehler) {
+      console.error(`${key} speichern fehlgeschlagen:`, fehler);
+      setSpeicherFehler(true);
+    }
+  };
+
+  // Schreibt BEIDE Listen einer Rubrik (aktiv + disabled) atomar gegen die API.
+  // Erst lokal spiegeln, dann zwei updateSetting-Aufrufe; bei Fehler den
+  // Speicher-Fehlerzustand setzen. Genutzt von Kästchen-Toggle und Mülleimer.
+  const schreibeListenpaar = async (konfig, neuAktiv, neuDisabled) => {
+    setSpeicherFehler(false);
+    konfig.setAktiv(neuAktiv);
+    konfig.setDisabled(neuDisabled);
+    try {
+      await updateSetting(konfig.aktivKey, neuAktiv);
+      await updateSetting(konfig.disabledKey, neuDisabled);
+      onGespeichert();
+    } catch (fehler) {
+      console.error(`${konfig.aktivKey} speichern fehlgeschlagen:`, fehler);
+      setSpeicherFehler(true);
+    }
+  };
+
+  // Kästchen umschalten (Teil D). Anhaken: Port aus disabled raus, in aktiv rein.
+  // Abwählen: Port aus aktiv raus, in disabled rein. Beide Listen sortiert.
+  const handlePortToggle = (konfig, port, anhaken) => {
+    if (anhaken) {
+      const neuAktiv = [...konfig.aktiv, port].sort((a, b) => a - b);
+      const neuDisabled = konfig.disabled.filter((p) => p !== port);
+      schreibeListenpaar(konfig, neuAktiv, neuDisabled);
+    } else {
+      const neuAktiv = konfig.aktiv.filter((p) => p !== port);
+      const neuDisabled = [...konfig.disabled, port].sort((a, b) => a - b);
+      schreibeListenpaar(konfig, neuAktiv, neuDisabled);
+    }
+  };
+
+  // Mülleimer (Teil D): Port endgültig aus BEIDEN Listen entfernen.
+  const handlePortRemove = (konfig, port) => {
+    const neuAktiv = konfig.aktiv.filter((p) => p !== port);
+    const neuDisabled = konfig.disabled.filter((p) => p !== port);
+    schreibeListenpaar(konfig, neuAktiv, neuDisabled);
+  };
+
+  // „Hinzufügen" (Teil D): neuer Port kommt aktiv (angehakt) hinzu, disabled bleibt.
+  const handlePortAdd = (konfig, port) => {
+    const neuAktiv = [...konfig.aktiv, port].sort((a, b) => a - b);
+    schreibePortliste(konfig.aktivKey, konfig.setAktiv, neuAktiv);
+  };
+
+  // „Auf Standard zurücksetzen" (Teil D): aktive Liste auf die Standard-Ports,
+  // disabled-Liste leeren — alle Standard-Ports also wieder aktiv.
+  const handlePortReset = (konfig) => {
+    schreibeListenpaar(konfig, [...konfig.defaults], []);
+  };
+
+  // Upload-Pfad (Schnitt 7): geschriebene Liste ist die aktive Liste; die darin
+  // enthaltenen Ports werden aus disabled entfernt (sonst Doppelung aktiv+disabled).
+  const handlePortUpload = (konfig, neueAktiv) => {
+    const aktivSet = new Set(neueAktiv);
+    const neuDisabled = konfig.disabled.filter((p) => !aktivSet.has(p));
+    schreibeListenpaar(konfig, neueAktiv, neuDisabled);
+  };
+
+  // Block 2: die Schwelle schreiben.
+  const handlePortCount = async (wert) => {
+    const zahl = Number(wert);
+    setSpeicherFehler(false);
+    setPortCount(zahl);
+    try {
+      await updateSetting("analysis_port_count_threshold", zahl);
+      onGespeichert();
+    } catch (fehler) {
+      console.error("analysis_port_count_threshold speichern fehlgeschlagen:", fehler);
+      setSpeicherFehler(true);
+    }
+  };
+
+  // Block 3: eine Regel an-/ausschalten. Schalter aus -> id ins
+  // analysis_disabled_rules-Array; Schalter an -> id raus. Nach dem Schreiben
+  // lokal spiegeln (konsistenter Zustand ohne erneuten Roundtrip).
+  const handleRegelToggle = async (regelId, neuDisabled) => {
+    setSpeicherFehler(false);
+    const naechste = regeln.map((r) =>
+      r.id === regelId ? { ...r, disabled: neuDisabled } : r,
+    );
+    setRegeln(naechste);
+    const disabledIds = naechste.filter((r) => r.disabled).map((r) => r.id);
+    try {
+      await updateSetting("analysis_disabled_rules", disabledIds);
+      onGespeichert();
+    } catch (fehler) {
+      console.error("analysis_disabled_rules speichern fehlgeschlagen:", fehler);
+      setSpeicherFehler(true);
+    }
+  };
+
+  if (ladeStatus === "laedt") {
+    return (
+      <SettingsSektion title={t("settings.auffaelligkeit.title")}>
+        <div className="settings__row">
+          <span className="settings__hint">
+            {t("settings.auffaelligkeit.loading")}
+          </span>
+        </div>
+      </SettingsSektion>
+    );
+  }
+
+  if (ladeStatus === "fehler") {
+    return (
+      <SettingsSektion title={t("settings.auffaelligkeit.title")}>
+        <div className="settings__row">
+          <span className="settings__hint settings__hint--error">
+            {t("settings.auffaelligkeit.loadError")}
+          </span>
+        </div>
+      </SettingsSektion>
+    );
+  }
+
+  // Listen-Konfigurationen: bündeln je Rubrik die beiden Settings-Keys, die
+  // Standard-Ports und die State-Setter. Die Handler oben arbeiten generisch
+  // darauf, sodass auffällig/kritisch denselben Pfad teilen.
+  const auffaelligKonfig = {
+    aktivKey: "analysis_suspicious_ports",
+    disabledKey: "analysis_suspicious_ports_disabled",
+    defaults: DEFAULT_AUFFAELLIGE_PORTS,
+    aktiv: auffaelligePorts,
+    disabled: auffaelligDisabled,
+    setAktiv: setAuffaelligePorts,
+    setDisabled: setAuffaelligDisabled,
+  };
+  const kritischKonfig = {
+    aktivKey: "analysis_critical_ports",
+    disabledKey: "analysis_critical_ports_disabled",
+    defaults: DEFAULT_KRITISCHE_PORTS,
+    aktiv: kritischePorts,
+    disabled: kritischDisabled,
+    setAktiv: setKritischePorts,
+    setDisabled: setKritischDisabled,
+  };
+
+  return (
+    <SettingsSektion title={t("settings.auffaelligkeit.title")}>
+      {/* Block 1 — zwei getrennte Port-Listen, je mit Upload darunter. */}
+      <div className="auffaelligkeit__block">
+        <div className="auffaelligkeit__listengruppe">
+          <PortTabelle
+            variante="auffaellig"
+            titel={t("settings.auffaelligkeit.suspiciousTitle")}
+            aktivePorts={auffaelligePorts}
+            disabledPorts={auffaelligDisabled}
+            standardPorts={auffaelligKonfig.defaults}
+            serviceCache={serviceCache}
+            onServiceGeladen={merkeService}
+            onToggle={(port, anhaken) =>
+              handlePortToggle(auffaelligKonfig, port, anhaken)
+            }
+            onRemove={(port) => handlePortRemove(auffaelligKonfig, port)}
+            onAdd={(port) => handlePortAdd(auffaelligKonfig, port)}
+            onReset={() => handlePortReset(auffaelligKonfig)}
+          />
+          <PortUpload
+            variante="auffaellig"
+            bestehendePorts={auffaelligePorts}
+            serviceCache={serviceCache}
+            onServiceGeladen={merkeService}
+            onErgaenzen={(neu) => handlePortUpload(auffaelligKonfig, neu)}
+            onErsetzen={(neu) => handlePortUpload(auffaelligKonfig, neu)}
+          />
+        </div>
+        <div className="auffaelligkeit__listengruppe">
+          <PortTabelle
+            variante="kritisch"
+            titel={t("settings.auffaelligkeit.criticalTitle")}
+            aktivePorts={kritischePorts}
+            disabledPorts={kritischDisabled}
+            standardPorts={kritischKonfig.defaults}
+            serviceCache={serviceCache}
+            onServiceGeladen={merkeService}
+            onToggle={(port, anhaken) =>
+              handlePortToggle(kritischKonfig, port, anhaken)
+            }
+            onRemove={(port) => handlePortRemove(kritischKonfig, port)}
+            onAdd={(port) => handlePortAdd(kritischKonfig, port)}
+            onReset={() => handlePortReset(kritischKonfig)}
+          />
+          <PortUpload
+            variante="kritisch"
+            bestehendePorts={kritischePorts}
+            serviceCache={serviceCache}
+            onServiceGeladen={merkeService}
+            onErgaenzen={(neu) => handlePortUpload(kritischKonfig, neu)}
+            onErsetzen={(neu) => handlePortUpload(kritischKonfig, neu)}
+          />
         </div>
       </div>
-    </>
-  )
+
+      {/* Block 2 — Schwellen-Dropdown „Viele hohe Ports". */}
+      <div className="auffaelligkeit__block">
+        <span className="auffaelligkeit__badge auffaelligkeit__badge--neutral">
+          {t("settings.auffaelligkeit.thresholdTitle")}
+        </span>
+        <div className="auffaelligkeit__threshold">
+          <span className="settings__row-label">
+            {t("settings.auffaelligkeit.thresholdLabel")}
+          </span>
+          <select
+            className="settings__select"
+            value={portCount}
+            onChange={(e) => handlePortCount(e.target.value)}
+          >
+            {PORT_COUNT_OPTIONEN.map((wert) => (
+              <option key={wert} value={wert}>
+                {wert}
+              </option>
+            ))}
+          </select>
+          <span className="settings__row-label">
+            {t("settings.auffaelligkeit.thresholdUnit")}
+          </span>
+        </div>
+        <span className="settings__hint">
+          {t("settings.auffaelligkeit.thresholdHint")}
+        </span>
+      </div>
+
+      {/* Block 3 — Regel-An/Aus. */}
+      <div className="auffaelligkeit__block">
+        <span className="auffaelligkeit__badge auffaelligkeit__badge--neutral">
+          {t("settings.auffaelligkeit.rulesTitle")}
+        </span>
+        <span className="settings__hint">
+          {t("settings.auffaelligkeit.rulesHint")}
+        </span>
+        {regeln.length === 0 ? (
+          <span className="settings__hint">
+            {t("settings.auffaelligkeit.rulesEmpty")}
+          </span>
+        ) : (
+          <ul className="auffaelligkeit__rules">
+            {regeln.map((regel) => {
+              const dotVariante =
+                regel.severity === "critical"
+                  ? "kritisch"
+                  : regel.severity === "notable"
+                    ? "auffaellig"
+                    : "neutral";
+              return (
+                <li key={regel.id} className="auffaelligkeit__rule">
+                  {/* Severity-Böppel als eigenes abgesetztes Kästchen ganz links. */}
+                  <span className="auffaelligkeit__rule-sevbox">
+                    <span
+                      className={`auffaelligkeit__dot auffaelligkeit__dot--${dotVariante}`}
+                      aria-hidden="true"
+                    />
+                  </span>
+                  {/* Breite Text-Box mit der Bezeichnung. */}
+                  <span className="auffaelligkeit__rule-label">
+                    <span className="auffaelligkeit__rule-title">
+                      {regel.title}
+                    </span>
+                  </span>
+                  {/* Separate Box mit dem Kästchen rechts. */}
+                  <span className="auffaelligkeit__rule-switchbox">
+                    <input
+                      type="checkbox"
+                      className="auffaelligkeit__switch"
+                      checked={!regel.disabled}
+                      onChange={(e) =>
+                        handleRegelToggle(regel.id, !e.target.checked)
+                      }
+                    />
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+
+      {/* Block 4 — Ehrlichkeits-Hinweis. */}
+      <div className="auffaelligkeit__block auffaelligkeit__honesty">
+        <span className="auffaelligkeit__badge auffaelligkeit__badge--neutral">
+          {t("settings.auffaelligkeit.honestyTitle")}
+        </span>
+        <p className="settings__hint">
+          {t("settings.auffaelligkeit.honestyText")}
+        </p>
+      </div>
+
+      {speicherFehler ? (
+        <span className="settings__hint settings__hint--error">
+          {mitCode(t("settings.auffaelligkeit.saveError"), CODES.E_501)}
+        </span>
+      ) : null}
+    </SettingsSektion>
+  );
+}
+
+// Eine editierbare IP-Liste (DNS-Wächter): Liste der IP-Strings mit Mülleimer je
+// Eintrag + Eingabefeld zum Hinzufügen. Stateless bzgl. Persistenz — die aktuelle
+// Liste kommt als Prop, jede Änderung meldet die Sektion über onChange zurück (sie
+// hält das Speichern). Leeres Array ist zulässig (dann greift der Backend-Default).
+// Validierung über istGueltigeIp; Duplikate werden abgewiesen (Inline-Meldung).
+function IpListe({ titel, hinweis, ips, onChange }) {
+  const { t } = useTranslation();
+
+  const [eingabe, setEingabe] = useState("");
+  const [fehler, setFehler] = useState(""); // dezente Inline-Meldung (i18n-Key) oder ""
+
+  const handleHinzufuegen = () => {
+    const ip = eingabe.trim();
+    if (!istGueltigeIp(ip)) {
+      setFehler("ipInvalid");
+      return;
+    }
+    if (ips.includes(ip)) {
+      setFehler("ipDuplicate");
+      return;
+    }
+    onChange([...ips, ip]);
+    setEingabe("");
+    setFehler("");
+  };
+
+  const handleEingabe = (wert) => {
+    setEingabe(wert);
+    if (fehler !== "") {
+      setFehler("");
+    }
+  };
+
+  const handleEntfernen = (ip) => {
+    onChange(ips.filter((eintrag) => eintrag !== ip));
+  };
+
+  return (
+    <div className="auffaelligkeit__block">
+      <span className="auffaelligkeit__badge auffaelligkeit__badge--neutral">
+        {titel}
+      </span>
+      <span className="settings__hint">{hinweis}</span>
+
+      {ips.length === 0 ? (
+        <span className="auffaelligkeit__empty">
+          {t("settings.dnswatch.listEmpty")}
+        </span>
+      ) : (
+        <ul className="dnsip__list">
+          {ips.map((ip) => (
+            <li key={ip} className="dnsip__row">
+              <span className="dnsip__box">{ip}</span>
+              <span className="auffaelligkeit__port-remove">
+                <button
+                  type="button"
+                  className="auffaelligkeit__remove"
+                  aria-label={t("settings.dnswatch.remove")}
+                  title={t("settings.dnswatch.remove")}
+                  onClick={() => handleEntfernen(ip)}
+                >
+                  <Trash2 size={14} aria-hidden="true" />
+                </button>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="auffaelligkeit__add">
+        <input
+          className="settings__input auffaelligkeit__add-input"
+          type="text"
+          value={eingabe}
+          onChange={(e) => handleEingabe(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              handleHinzufuegen();
+            }
+          }}
+          placeholder={t("settings.dnswatch.addPlaceholder")}
+        />
+        <button
+          type="button"
+          className="settings__button"
+          onClick={handleHinzufuegen}
+        >
+          {t("settings.dnswatch.add")}
+        </button>
+      </div>
+      {fehler !== "" ? (
+        <span className="settings__hint settings__hint--error">
+          {t(`settings.dnswatch.${fehler}`)}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+// DNS-Wächter-Sektion: EINE editierbare IP-Liste (bekannte DoH-Anbieter). Eigener
+// Daten-State analog AuffaelligkeitSektion (laden beim Mount, schreiben pro Änderung
+// gegen die Settings-API). onGespeichert ist das gemeinsame zeigeGespeichert-Feedback
+// aus SettingsView. Fehlt der Key (frische DB), gilt das leere Array — dann greift im
+// Backend die eingebaute DoH-Startliste.
+//
+// Die Liste „Erwartete DNS-Server" ist hier ENTFALLEN (S62 L7a): die erwartete Menge
+// ist jetzt die Menge der als vertraut markierten Server aus dem Vertrauensmodell und
+// wird unter „DNS-Server & Vertrauen" gepflegt.
+function DnsWatchSektion({ onGespeichert }) {
+  const { t } = useTranslation();
+
+  const [dohProviders, setDohProviders] = useState([]);
+  const [ladeStatus, setLadeStatus] = useState("laedt"); // laedt | bereit | fehler
+  const [speicherFehler, setSpeicherFehler] = useState(false);
+
+  // Einmal beim Mount laden. Nur valide String-Arrays übernehmen; sonst leeres
+  // Array (Backend-Default greift). Fehler nicht verschlucken; Lade-Fehlerzustand.
+  useEffect(() => {
+    let aktiv = true;
+    (async () => {
+      try {
+        const settings = await fetchSettings();
+        if (!aktiv) {
+          return;
+        }
+        setDohProviders(
+          Array.isArray(settings[DNS_DOH_PROVIDERS_KEY])
+            ? settings[DNS_DOH_PROVIDERS_KEY].filter(
+                (eintrag) => typeof eintrag === "string",
+              )
+            : [],
+        );
+        setLadeStatus("bereit");
+      } catch (fehler) {
+        if (!aktiv) {
+          return;
+        }
+        console.error("DNS-Wächter-Einstellungen laden fehlgeschlagen:", fehler);
+        setLadeStatus("fehler");
+      }
+    })();
+    return () => {
+      aktiv = false;
+    };
+  }, []);
+
+  // Eine Liste schreiben: erst lokal spiegeln, dann persistieren; bei Fehler den
+  // Speicher-Fehlerzustand setzen (Muster wie AuffaelligkeitSektion.schreibePortliste).
+  const schreibeListe = async (key, setLocal, neueListe) => {
+    setSpeicherFehler(false);
+    setLocal(neueListe);
+    try {
+      await updateSetting(key, neueListe);
+      onGespeichert();
+    } catch (fehler) {
+      console.error(`${key} speichern fehlgeschlagen:`, fehler);
+      setSpeicherFehler(true);
+    }
+  };
+
+  if (ladeStatus === "laedt") {
+    return (
+      <SettingsSektion title={t("settings.dnswatch.title")}>
+        <div className="settings__row">
+          <span className="settings__hint">{t("settings.dnswatch.loading")}</span>
+        </div>
+      </SettingsSektion>
+    );
+  }
+
+  if (ladeStatus === "fehler") {
+    return (
+      <SettingsSektion title={t("settings.dnswatch.title")}>
+        <div className="settings__row">
+          <span className="settings__hint settings__hint--error">
+            {t("settings.dnswatch.loadError")}
+          </span>
+        </div>
+      </SettingsSektion>
+    );
+  }
+
+  return (
+    <SettingsSektion title={t("settings.dnswatch.title")}>
+      <IpListe
+        titel={t("settings.dnswatch.dohTitle")}
+        hinweis={t("settings.dnswatch.dohHint")}
+        ips={dohProviders}
+        onChange={(neu) =>
+          schreibeListe(DNS_DOH_PROVIDERS_KEY, setDohProviders, neu)
+        }
+      />
+
+      {speicherFehler ? (
+        <span className="settings__hint settings__hint--error">
+          {mitCode(t("settings.dnswatch.saveError"), CODES.E_501)}
+        </span>
+      ) : null}
+    </SettingsSektion>
+  );
+}
+
+// Standardzugangs-Sektion (Etappe 2): scharfer Session-Schalter für die Opt-in-
+// Sonderfunktion „Standardzugänge prüfen". Anders als die übrigen Sektionen
+// schreibt sie NICHT gegen die Settings-API, sondern liest/setzt den sitzungs-
+// weiten Freischalt-Zustand über den Security-Endpunkt. Der Zustand ist NICHT
+// persistent (kein localStorage) — beim Mount wird er gelesen und der Schalter
+// danach gesetzt.
+//
+// Einschalten (aus -> an) verlangt ZUERST einen Bestätigungs-Dialog (aktiver
+// Login-Versuch, nur Sitzung). Erst nach Bestätigung armDefaultCreds(true) und
+// Schalter an. Abbrechen -> nichts passiert. Ausschalten (an -> aus) braucht
+// KEINE Bestätigung: direkt armDefaultCreds(false). Fehler (Backend nicht
+// erreichbar) werden ruhig behandelt: der Schalter bleibt im letzten sicheren
+// Zustand, eine kurze Meldung erscheint, kein Absturz.
+// Per-App-Verkehr: Darstellung nicht verfügbarer Durchsatz-Angaben (A3).
+//
+// Betrifft AUSSCHLIESSLICH Angaben, die diese Plattform nicht liefern kann (macOS
+// misst den Durchsatz je Programm nicht). Liefert eine Plattform echte Werte, sind
+// sie IMMER sichtbar — diese Einstellung verbirgt niemals vorhandene Daten.
+//
+// Default ist SICHTBAR mit Erklärung: eine still fehlende Angabe ließe den Nutzer
+// im Unklaren. Die Anwendung zeigt und ordnet ein, statt zu verschweigen. Wer die
+// Erklärung nicht braucht, kann sie bewusst abwählen — dann entfallen sowohl die
+// Durchsatz-Darstellung als auch der erklärende Streifen.
+function TrafficDarstellungSektion({ onGespeichert }) {
+  const { t } = useTranslation();
+
+  const [sichtbar, setSichtbar] = useState(true);
+  const [ladeStatus, setLadeStatus] = useState("laedt"); // laedt | bereit | fehler
+  const [speicherFehler, setSpeicherFehler] = useState(false);
+
+  // Einmal beim Mount laden. Fehlt der Wert, gilt der Default true (sichtbar) —
+  // kein stiller Rückfall auf "ausblenden", das wäre die verschweigende Variante.
+  useEffect(() => {
+    let aktiv = true;
+    (async () => {
+      try {
+        const settings = await fetchSettings();
+        if (!aktiv) {
+          return;
+        }
+        setSichtbar(leseTrafficSichtbar(settings));
+        setLadeStatus("bereit");
+      } catch (fehler) {
+        if (!aktiv) {
+          return;
+        }
+        console.error("Verkehrs-Darstellung laden fehlgeschlagen:", fehler);
+        setLadeStatus("fehler");
+      }
+    })();
+    return () => {
+      aktiv = false;
+    };
+  }, []);
+
+  const handleToggle = async (an) => {
+    setSpeicherFehler(false);
+    setSichtbar(an);
+    try {
+      await updateSetting(TRAFFIC_UNAVAILABLE_KEY, an);
+      onGespeichert();
+    } catch (fehler) {
+      console.error(`${TRAFFIC_UNAVAILABLE_KEY} speichern fehlgeschlagen:`, fehler);
+      setSpeicherFehler(true);
+    }
+  };
+
+  if (ladeStatus === "laedt") {
+    return (
+      <SettingsSektion title={t("settings.trafficDarstellung.title")}>
+        <div className="settings__row">
+          <span className="settings__hint">
+            {t("settings.trafficDarstellung.loading")}
+          </span>
+        </div>
+      </SettingsSektion>
+    );
+  }
+
+  if (ladeStatus === "fehler") {
+    return (
+      <SettingsSektion title={t("settings.trafficDarstellung.title")}>
+        <div className="settings__row">
+          <span className="settings__hint settings__hint--error">
+            {t("settings.trafficDarstellung.loadError")}
+          </span>
+        </div>
+      </SettingsSektion>
+    );
+  }
+
+  return (
+    <SettingsSektion title={t("settings.trafficDarstellung.title")}>
+      <p className="settings__hint">{t("settings.trafficDarstellung.hint")}</p>
+
+      <div className="auffaelligkeit__block">
+        <ul className="auffaelligkeit__rules">
+          <li className="auffaelligkeit__rule">
+            <span className="auffaelligkeit__rule-label">
+              <span className="auffaelligkeit__rule-title">
+                {t("settings.trafficDarstellung.toggleLabel")}
+              </span>
+            </span>
+            <span className="auffaelligkeit__rule-switchbox">
+              <input
+                type="checkbox"
+                className="auffaelligkeit__switch"
+                checked={sichtbar}
+                onChange={(e) => handleToggle(e.target.checked)}
+              />
+            </span>
+          </li>
+        </ul>
+      </div>
+
+      {speicherFehler ? (
+        <span className="settings__hint settings__hint--error">
+          {mitCode(t("settings.trafficDarstellung.saveError"), CODES.E_501)}
+        </span>
+      ) : null}
+    </SettingsSektion>
+  );
+}
+
+function DefaultCredsSektion({ onGespeichert }) {
+  const { t } = useTranslation();
+
+  const [armed, setArmed] = useState(false);
+  const [ladeStatus, setLadeStatus] = useState("laedt"); // laedt | bereit | fehler
+  const [dialogOffen, setDialogOffen] = useState(false);
+  const [fehler, setFehler] = useState(false); // Schreibfehler beim arm
+
+  // Einmal beim Mount den sitzungsweiten Zustand lesen. Fehler nicht verschlucken
+  // (console.error) und in den Lade-Fehlerzustand gehen — KEIN stiller Fallback
+  // auf „armed".
+  useEffect(() => {
+    let aktiv = true;
+    (async () => {
+      try {
+        const zustand = await fetchDefaultCredsState();
+        if (!aktiv) {
+          return;
+        }
+        setArmed(Boolean(zustand?.armed));
+        setLadeStatus("bereit");
+      } catch (ursache) {
+        if (!aktiv) {
+          return;
+        }
+        console.error("Standardzugangs-Zustand laden fehlgeschlagen:", ursache);
+        setLadeStatus("fehler");
+      }
+    })();
+    return () => {
+      aktiv = false;
+    };
+  }, []);
+
+  // Schalter-Änderung: Einschalten öffnet erst den Dialog; Ausschalten läuft
+  // direkt. Der Schalter selbst wird NICHT sofort umgelegt — er folgt dem
+  // tatsächlichen Backend-Zustand (nach Bestätigung bzw. nach dem arm-Aufruf).
+  const handleToggle = (an) => {
+    if (an) {
+      setDialogOffen(true);
+    } else {
+      setzeArmed(false);
+    }
+  };
+
+  // armDefaultCreds aufrufen und den Schalter dem Ergebnis folgen lassen. Bei
+  // Fehler bleibt der Schalter im letzten sicheren Zustand und eine Meldung
+  // erscheint (kein stiller Fallback).
+  const setzeArmed = async (an) => {
+    setFehler(false);
+    try {
+      const zustand = await armDefaultCreds(an);
+      setArmed(Boolean(zustand?.armed));
+      onGespeichert();
+    } catch (ursache) {
+      console.error("Standardzugangs-Zustand setzen fehlgeschlagen:", ursache);
+      setFehler(true);
+    }
+  };
+
+  // Dialog bestätigt: schließen, dann freischalten.
+  const handleBestaetigen = () => {
+    setDialogOffen(false);
+    setzeArmed(true);
+  };
+
+  // Dialog abgebrochen: nur schließen, nichts passiert (Schalter bleibt aus).
+  const handleAbbrechen = () => {
+    setDialogOffen(false);
+  };
+
+  if (ladeStatus === "laedt") {
+    return (
+      <SettingsSektion title={t("settings.defaultCreds.title")}>
+        <div className="settings__row">
+          <span className="settings__hint">
+            {t("settings.defaultCreds.loading")}
+          </span>
+        </div>
+      </SettingsSektion>
+    );
+  }
+
+  if (ladeStatus === "fehler") {
+    return (
+      <SettingsSektion title={t("settings.defaultCreds.title")}>
+        <div className="settings__row">
+          <span className="settings__hint settings__hint--error">
+            {t("settings.defaultCreds.loadError")}
+          </span>
+        </div>
+      </SettingsSektion>
+    );
+  }
+
+  return (
+    <SettingsSektion title={t("settings.defaultCreds.title")}>
+      {/* Ruhiger Warn-/Erklärungsabsatz. */}
+      <p className="settings__hint">{t("settings.defaultCreds.warn")}</p>
+
+      {/* Session-Schalter im auffaelligkeit__switch-Stil (bestehendes Toggle-
+          Muster der View), eingerückt im auffaelligkeit__block. */}
+      <div className="auffaelligkeit__block">
+        <ul className="auffaelligkeit__rules">
+          <li className="auffaelligkeit__rule">
+            <span className="auffaelligkeit__rule-label">
+              <span className="auffaelligkeit__rule-title">
+                {t("settings.defaultCreds.toggleLabel")}
+              </span>
+            </span>
+            <span className="auffaelligkeit__rule-switchbox">
+              <input
+                type="checkbox"
+                className="auffaelligkeit__switch"
+                checked={armed}
+                onChange={(e) => handleToggle(e.target.checked)}
+              />
+            </span>
+          </li>
+        </ul>
+      </div>
+
+      {fehler ? (
+        <span className="settings__hint settings__hint--error">
+          {mitCode(t("settings.defaultCreds.saveError"), CODES.E_501)}
+        </span>
+      ) : null}
+
+      {dialogOffen ? (
+        <DefaultCredsConsentDialog
+          onConfirm={handleBestaetigen}
+          onCancel={handleAbbrechen}
+        />
+      ) : null}
+    </SettingsSektion>
+  );
+}
+
+// Widerrufs-Sektion des Mitschnitt-Zugriffs (Etappe 3). Gegenstück zur Einrichtung
+// in OutboundView: dort wird erteilt, hier zurückgenommen — die Zusage „jederzeit
+// widerrufbar" aus dem Einwilligungs-Dialog wird damit einlösbar.
+//
+// Die Sektion erscheint NUR, wenn der Zugriff tatsächlich eingerichtet ist (state
+// granted). Bei „missing" gibt es nichts zu widerrufen, bei „not_applicable" (Linux)
+// gibt es diese Einrichtung gar nicht — beides zeigt keinen Abschnitt, statt einen
+// wirkungslosen Knopf anzubieten.
+//
+// Der Klick auf „Widerrufen" öffnet ZUERST eine Bestätigung und NICHT sofort den
+// Systemdialog: ein unangekündigtes Passwortfenster wäre für eine zerstörende
+// Aktion die falsche Reihenfolge (dasselbe Prinzip wie CaptureAccessDialog vor dem
+// Einrichten).
+//
+// Die Bestätigung unterscheidet zwei Fälle anhand von members. Grund: die
+// Mitschnitt-Geräte und der Systemdienst sind SYSTEMWEITE Ressourcen, die sich alle
+// macOS-Konten der Maschine teilen. Ein vollständiges Abräumen nimmt allen anderen
+// Mitgliedern den Zugriff — das darf nicht unbemerkt passieren.
+//   genau ein Mitglied  -> Alleinbesitz: eine einfache Bestätigung, vollständig.
+//   mehrere Mitglieder  -> die anderen Namen werden genannt, und es gibt ZWEI
+//                          getrennte Aktionen (nur eigener Zugriff / vollständig).
+// Den eigenen Login-Namen liefert das Backend bewusst nicht; die Länge der Liste
+// genügt für diese Unterscheidung.
+function CaptureAccessSektion({ status, onNeuLaden }) {
+  const { t } = useTranslation();
+
+  // ruhe | bestaetigung | laeuft | erfolg | fehler — bewusst EIN Zustand statt
+  // mehrerer Booleans, damit unmögliche Kombinationen gar nicht darstellbar sind.
+  const [phase, setPhase] = useState("ruhe");
+  const [fehlerGrund, setFehlerGrund] = useState("");
+
+  const members = status?.members ?? [];
+  // Mehr als ein Eintrag heißt: weitere Konten teilen sich diese Einrichtung.
+  const geteilt = members.length > 1;
+
+  // Widerruf ausführen. Der Aufruf DAUERT, solange der Systemdialog offen ist.
+  // Die drei Ausgänge bleiben getrennt: „cancelled" führt kommentarlos in den
+  // Ausgangszustand zurück (KEINE Fehleroptik — der Nutzer hat sich legitim anders
+  // entschieden), „failed" zeigt die Begründung im Klartext.
+  const widerrufen = async (nurMitgliedschaft) => {
+    setFehlerGrund("");
+    setPhase("laeuft");
+    try {
+      const ergebnis = await revokeCaptureAccess(nurMitgliedschaft);
+      if (ergebnis.outcome === CAPTURE_ACCESS_REVOKE_OUTCOME.REVOKED) {
+        setPhase("erfolg");
+        onNeuLaden();
+        return;
+      }
+      if (ergebnis.outcome === CAPTURE_ACCESS_REVOKE_OUTCOME.CANCELLED) {
+        setPhase("ruhe");
+        return;
+      }
+      // failed und not_applicable: beide tragen eine Begründung aus dem Backend.
+      setFehlerGrund(ergebnis.reason ?? "");
+      setPhase("fehler");
+    } catch (ursache) {
+      // Transportfehler (Backend nicht erreichbar) — nicht verschlucken.
+      console.error("Widerruf des Mitschnitt-Zugriffs fehlgeschlagen:", ursache);
+      setFehlerGrund("");
+      setPhase("fehler");
+    }
+  };
+
+  // Nach geglücktem Widerruf ERSETZT die Erfolgsmeldung den Abschnitt, statt ihn
+  // zu ergänzen: Einleitung, Was-Liste und Knopf beschreiben eine Einrichtung, die
+  // es nicht mehr gibt. Stünden sie weiter da, widersprächen sich zwei Aussagen auf
+  // demselben Bildschirm („Eingerichtet ist: …" neben „Der Zugriff wurde
+  // widerrufen"). Früher Return statt zusätzlicher Bedingungen an jedem Element —
+  // so ist der Endzustand an einer Stelle beschrieben und kann nicht auseinander-
+  // laufen. Nur der Erfolg räumt ab; bei „laeuft" und „fehler" ist der
+  // Zustandstext weiterhin richtig (es wurde ja nichts entfernt).
+  if (phase === "erfolg") {
+    return (
+      <SettingsSektion title={t("settings.captureAccess.title")}>
+        <span className="settings__hint" role="status" aria-live="polite">
+          {t("settings.captureAccess.erfolg")}
+        </span>
+      </SettingsSektion>
+    );
+  }
+
+  return (
+    <SettingsSektion title={t("settings.captureAccess.title")}>
+      <p className="settings__hint">{t("settings.captureAccess.intro")}</p>
+
+      {/* Was eingerichtet ist — kurz und in nicht-technischer Sprache, damit vor
+          dem Widerruf klar ist, was verschwindet. */}
+      <p className="settings__hint">{t("settings.captureAccess.whatTitle")}</p>
+      <ul className="settings__liste">
+        <li>{t("settings.captureAccess.whatGroup")}</li>
+        <li>{t("settings.captureAccess.whatDaemon")}</li>
+        <li>{t("settings.captureAccess.whatDevices")}</li>
+      </ul>
+
+      {phase === "ruhe" ? (
+        <div className="settings__row settings__row--actions">
+          <span className="settings__hint" />
+          <button
+            type="button"
+            className="settings__button"
+            onClick={() => setPhase("bestaetigung")}
+          >
+            {t("settings.captureAccess.revokeButton")}
+          </button>
+        </div>
+      ) : null}
+
+      {phase === "bestaetigung" ? (
+        <div className="settings__widerruf">
+          <p className="settings__widerruf-titel">
+            {geteilt
+              ? t("settings.captureAccess.confirmSharedTitle")
+              : t("settings.captureAccess.confirmTitle")}
+          </p>
+          <p className="settings__hint">
+            {geteilt
+              ? t("settings.captureAccess.confirmSharedBody")
+              : t("settings.captureAccess.confirmSoloBody")}
+          </p>
+
+          {/* Nur wenn andere betroffen sind: die Namen beim Namen nennen. */}
+          {geteilt ? (
+            <>
+              <p className="settings__hint">
+                {t("settings.captureAccess.confirmSharedMembers")}
+              </p>
+              <ul className="settings__liste">
+                {members.map((name) => (
+                  <li key={name}>{name}</li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+
+          <p className="settings__hint">
+            {t("settings.captureAccess.hinweisAnmeldung")}
+          </p>
+
+          {/* Geteilter Fall: ZWEI getrennte Aktionen, damit die schonende Variante
+              gleichwertig danebensteht und nicht in einem Menü versteckt ist.
+              Alleinbesitz: eine einzige Bestätigung, vollständig. */}
+          <div className="settings__row settings__row--actions">
+            <button
+              type="button"
+              className="settings__link-button"
+              onClick={() => setPhase("ruhe")}
+            >
+              {t("settings.captureAccess.cancel")}
+            </button>
+            <span className="settings__widerruf-aktionen">
+              {geteilt ? (
+                <>
+                  <button
+                    type="button"
+                    className="settings__button"
+                    onClick={() => widerrufen(true)}
+                  >
+                    {t("settings.captureAccess.actionMembershipOnly")}
+                  </button>
+                  <button
+                    type="button"
+                    className="settings__button"
+                    onClick={() => widerrufen(false)}
+                  >
+                    {t("settings.captureAccess.actionFull")}
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="settings__button"
+                  onClick={() => widerrufen(false)}
+                >
+                  {t("settings.captureAccess.confirm")}
+                </button>
+              )}
+            </span>
+          </div>
+        </div>
+      ) : null}
+
+      {phase === "laeuft" ? (
+        <span className="settings__hint" role="status" aria-live="polite">
+          {t("settings.captureAccess.laeuft")}
+        </span>
+      ) : null}
+
+      {/* Der Erfolgsfall kommt hier NICHT vor — er wird oben als eigener Rückgabe-
+          zweig behandelt und ersetzt den gesamten Abschnitt. */}
+
+      {/* Fehlschlag: die Begründung aus dem Backend im Klartext, nicht verschluckt. */}
+      {phase === "fehler" ? (
+        <span className="settings__hint settings__hint--error">
+          {mitCode(t("settings.captureAccess.fehler"), CODES.E_501)}
+          {fehlerGrund ? ` ${fehlerGrund}` : ""}
+        </span>
+      ) : null}
+    </SettingsSektion>
+  );
+}
+
+export default function SettingsView({ lang, onLangChange, onClose, onOpenManual }) {
+  const { t } = useTranslation();
+
+  // Dezentes "Gespeichert"-Feedback (rein visuell). Die Persistenz selbst bleibt
+  // in App.jsx; hier wird nach jeder Änderung kurz eine Bestätigung gezeigt, die
+  // nach ~1,5 s wieder verschwindet (Muster wie der Copy-Haken im LookupPanel).
+  const [gespeichert, setGespeichert] = useState(false);
+  const speicherTimeout = useRef(null);
+
+  const zeigeGespeichert = () => {
+    setGespeichert(true);
+    if (speicherTimeout.current !== null) {
+      clearTimeout(speicherTimeout.current);
+    }
+    speicherTimeout.current = setTimeout(() => {
+      setGespeichert(false);
+      speicherTimeout.current = null;
+    }, 1500);
+  };
+
+  // Wrapper um die echten Handler: erst persistieren (App.jsx), dann Feedback.
+  const handleLang = (wert) => {
+    onLangChange(wert);
+    zeigeGespeichert();
+  };
+
+  // Zustand des Mitschnitt-Zugriffs. Er entscheidet, ob die Widerrufs-Rubrik
+  // überhaupt angeboten wird — darum liegt er HIER und nicht in der Sektion: die
+  // Navigation braucht ihn genauso wie der Inhalt (eine Quelle, kein zweites Laden).
+  // null heißt „noch nicht geladen bzw. nicht ermittelbar" — dann keine Rubrik.
+  const [captureAccess, setCaptureAccess] = useState(null);
+
+  const ladeCaptureAccess = useCallback(async () => {
+    try {
+      setCaptureAccess(await fetchCaptureAccess());
+    } catch (ursache) {
+      // Ruhig behandeln: der Zugriffs-Status ist eine Zusatzauskunft. Fehlt er,
+      // entfällt die Rubrik — die übrigen Einstellungen bleiben benutzbar.
+      console.error("Status des Mitschnitt-Zugriffs laden fehlgeschlagen:", ursache);
+      setCaptureAccess(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    ladeCaptureAccess();
+  }, [ladeCaptureAccess]);
+
+  // Nur bei „granted" gibt es etwas zu widerrufen (siehe CaptureAccessSektion).
+  const captureAccessWiderrufbar =
+    captureAccess?.state === CAPTURE_ACCESS_STATE.GRANTED;
+
+  // Teil A — Navigation links, Inhalt rechts. Eine Rubrik zur Zeit sichtbar; der
+  // State bleibt lokal (kein Routing). Default ist die erste Rubrik.
+  const [rubrik, setRubrik] = useState("general");
+  const rubriken = [
+    { id: "general", label: t("settings.nav.general") },
+    { id: "startseite", label: t("settings.nav.startseite") },
+    { id: "fritzbox", label: t("settings.nav.fritzbox") },
+    { id: "auffaelligkeit", label: t("settings.nav.auffaelligkeit") },
+    { id: "dnswatch", label: t("settings.nav.dnswatch") },
+    { id: "trafficDarstellung", label: t("settings.nav.trafficDarstellung") },
+    { id: "defaultcreds", label: t("settings.nav.defaultcreds") },
+    { id: "defaultcredsList", label: t("settings.nav.defaultcredsList") },
+    ...(captureAccessWiderrufbar
+      ? [{ id: "captureAccess", label: t("settings.nav.captureAccess") }]
+      : []),
+  ];
+
+  return (
+    <FunctionShell
+      title={t("settings.title")}
+      onBack={onClose}
+      helpId="help.settings.uebersicht"
+      onOpenManual={onOpenManual}
+    >
+      <div className="settings settings--layout">
+        {/* Linke Navigations-Spalte: Rubriken-Liste, aktive dezent hervorgehoben. */}
+        <nav className="settings__nav" aria-label={t("settings.title")}>
+          {rubriken.map((eintrag) => (
+            <button
+              key={eintrag.id}
+              type="button"
+              className={
+                rubrik === eintrag.id
+                  ? "settings__nav-item settings__nav-item--aktiv"
+                  : "settings__nav-item"
+              }
+              aria-current={rubrik === eintrag.id ? "page" : undefined}
+              onClick={() => setRubrik(eintrag.id)}
+            >
+              {eintrag.label}
+            </button>
+          ))}
+        </nav>
+
+        {/* Rechter Inhaltsbereich: zeigt die aktive Rubrik. */}
+        <div className="settings__content">
+          {/* Dezente Bestätigungszeile; aria-live für Screenreader. Reserviert
+              keinen festen Platz — sie erscheint nur kurz nach einer Änderung. */}
+          <span
+            className={
+              gespeichert
+                ? "settings__saved settings__saved--shown"
+                : "settings__saved"
+            }
+            role="status"
+            aria-live="polite"
+          >
+            {gespeichert ? t("settings.saved") : ""}
+          </span>
+
+          {rubrik === "general" ? (
+            <SettingsSektion title={t("settings.sectionGeneral")}>
+              <SettingsZeile label={t("settings.language")}>
+                {/* Sprachnamen in ihrer eigenen Schreibweise — Konvention bei
+                    Sprachwahl, daher nicht übersetzt. */}
+                <select
+                  className="settings__select"
+                  value={lang}
+                  onChange={(e) => handleLang(e.target.value)}
+                >
+                  <option value="de">Deutsch</option>
+                  <option value="en">English</option>
+                </select>
+              </SettingsZeile>
+            </SettingsSektion>
+          ) : null}
+
+          {rubrik === "startseite" ? (
+            <OverviewSektion onGespeichert={zeigeGespeichert} />
+          ) : null}
+
+          {rubrik === "fritzbox" ? (
+            <FritzBoxSektion onGespeichert={zeigeGespeichert} />
+          ) : null}
+
+          {rubrik === "auffaelligkeit" ? (
+            <AuffaelligkeitSektion onGespeichert={zeigeGespeichert} />
+          ) : null}
+
+          {rubrik === "dnswatch" ? (
+            <DnsWatchSektion onGespeichert={zeigeGespeichert} />
+          ) : null}
+
+          {rubrik === "trafficDarstellung" ? (
+            <TrafficDarstellungSektion onGespeichert={zeigeGespeichert} />
+          ) : null}
+
+          {rubrik === "defaultcreds" ? (
+            <DefaultCredsSektion onGespeichert={zeigeGespeichert} />
+          ) : null}
+
+          {rubrik === "defaultcredsList" ? (
+            <DefaultCredsListeSektion onGespeichert={zeigeGespeichert} />
+          ) : null}
+
+          {/* Nach einem geglückten Widerruf meldet der Status nicht mehr „granted";
+              die Rubrik verschwindet dann aus der Navigation. Der Inhalt bleibt so
+              lange stehen, bis der Nutzer selbst weiterklickt — die Erfolgsmeldung
+              soll nicht unter ihm wegspringen. */}
+          {rubrik === "captureAccess" && captureAccess !== null ? (
+            <CaptureAccessSektion
+              status={captureAccess}
+              onNeuLaden={ladeCaptureAccess}
+            />
+          ) : null}
+        </div>
+      </div>
+    </FunctionShell>
+  );
 }

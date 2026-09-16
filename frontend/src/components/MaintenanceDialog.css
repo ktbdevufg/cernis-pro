@@ -1,0 +1,346 @@
+/* Wartungs-Dialog „Daten löschen": zentrierter Overlay-Dialog (CERNIS PRO 2.0).
+   Nur CSS-Tokens; orange/rot über die Severity-Tokens, keine hartkodierten
+   Farben (Ausnahme: der halbtransparente Backdrop-Schwarzton, wie im Projekt
+   üblich für Schatten/Überdeckung). */
+
+/* Backdrop: deckt die ganze App, zentriert den Dialog. */
+.maint-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+/* Der Dialog selbst: Karten-Optik, dezenter Akzentstreifen links wie die
+   Settings-Sektionen, angenehme Breite, scrollt bei wenig Höhe. */
+.maint-dialog {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 480px;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-accent);
+  border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.28);
+}
+
+.maint-dialog__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.maint-dialog__title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+/* Schließen-X: dezenter Icon-Button (wie die übrigen Icon-Knöpfe). */
+.maint-dialog__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  color: var(--color-text-tert);
+  background: none;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.maint-dialog__close:hover:not(:disabled) {
+  color: var(--color-text);
+  background: var(--color-card);
+}
+
+.maint-dialog__close:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.maint-dialog__close:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.maint-dialog__body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+}
+
+/* ── FENSTER 1 — Stufen-Blöcke ─────────────────────────────────────────────── */
+
+/* Ein wählbarer Block: ganzflächiger Knopf mit severity-farbigem Akzentstreifen
+   links. Orange = Scan-Daten, rot = Werkszustand. */
+.maint-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  padding: 14px 16px;
+  text-align: left;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-border);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  cursor: pointer;
+}
+
+.maint-choice:hover {
+  border-color: var(--color-accent-border);
+}
+
+.maint-choice:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.maint-choice--scan {
+  border-left-color: var(--severity-auffaellig);
+}
+
+.maint-choice--scan:hover {
+  background: color-mix(in srgb, var(--severity-auffaellig) 8%, var(--color-card));
+  border-color: var(--severity-auffaellig);
+}
+
+.maint-choice--factory {
+  border-left-color: var(--severity-kritisch);
+}
+
+.maint-choice--factory:hover {
+  background: color-mix(in srgb, var(--severity-kritisch) 8%, var(--color-card));
+  border-color: var(--severity-kritisch);
+}
+
+.maint-choice__title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.maint-choice--scan .maint-choice__title {
+  color: var(--severity-auffaellig);
+}
+
+.maint-choice--factory .maint-choice__title {
+  color: var(--severity-kritisch);
+}
+
+.maint-choice__line {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--color-text-sec);
+}
+
+.maint-choice__line--keep {
+  color: var(--color-text-tert);
+}
+
+/* ── FENSTER 1b — Baukasten (gruppierte Ankreuz-Liste) ─────────────────────── */
+
+/* Eine Gruppe (Überschrift + Posten-Zeilen). */
+.maint-builder__group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.maint-builder__group-title {
+  margin: 0 0 2px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-tert);
+}
+
+/* Eine Posten-Zeile: Checkbox + (optional „+") + Label, ganzflächig klickbar. */
+.maint-builder__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 2px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.maint-builder__checkbox {
+  flex: 0 0 auto;
+  accent-color: var(--color-accent-strong);
+  cursor: pointer;
+}
+
+/* Das vorangestellte „+" der erzwungenen Posten: türkiser Akzent. */
+.maint-builder__plus {
+  flex: 0 0 auto;
+  font-weight: 700;
+  color: var(--color-accent);
+}
+
+.maint-builder__label {
+  min-width: 0;
+}
+
+/* Eingerückter Container der abgeleiteten Posten: macht die Hierarchie sichtbar
+   (Scan-Historie ist die Wurzel, die vier Posten hängen darunter). Linker Einzug
+   plus dezente Leitlinie in --color-border — rein optisch, keine Funktion. */
+.maint-builder__children {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-left: 9px;
+  padding-left: 12px;
+  border-left: 1px solid var(--color-border);
+}
+
+/* Abgeleiteter Posten als Unterpunkt der Wurzel-Zeile (nur Markierung für die
+   Einrückung; die gedämpfte Locked-Optik kommt zusätzlich darüber). */
+.maint-builder__item--child {
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+/* Erzwungener (mit-gezogener) Posten: gesperrt + gedämpft. */
+.maint-builder__item--locked {
+  cursor: default;
+}
+
+.maint-builder__item--locked .maint-builder__checkbox {
+  cursor: default;
+}
+
+.maint-builder__item--locked .maint-builder__label {
+  color: var(--color-text-tert);
+}
+
+/* Kleiner Hinweis, warum die vier abgeleiteten Posten mitgezogen werden. */
+.maint-builder__hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-text-tert);
+}
+
+/* ── FENSTER 2 — Bestätigung ───────────────────────────────────────────────── */
+
+.maint-confirm__lead {
+  margin: 0;
+  font-size: 14px;
+  color: var(--color-text);
+}
+
+.maint-confirm__list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.maint-confirm__item {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--color-text-sec);
+}
+
+/* Secrets-Kästchen (nur Stufe 2). */
+.maint-confirm__secrets {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.maint-confirm__checkbox {
+  margin-top: 2px;
+  flex: 0 0 auto;
+  accent-color: var(--color-accent-strong);
+  cursor: pointer;
+}
+
+/* Roter Schluss-Hinweis-Kasten: gefüllter Kritisch-Ton (color-mix wie an
+   anderen Stellen im Projekt). */
+.maint-confirm__warn {
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.45;
+  color: var(--severity-kritisch);
+  background: color-mix(in srgb, var(--severity-kritisch) 12%, transparent);
+  border: 1px solid var(--severity-kritisch);
+  border-radius: var(--radius-md);
+}
+
+/* Dezenter Inline-Fehler im Dialog (bleibt offen bei ApiError). */
+.maint-dialog__error {
+  font-size: 12px;
+  color: var(--severity-kritisch);
+}
+
+/* Knopfzeile unten, rechtsbündig. */
+.maint-dialog__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Knöpfe im Settings-Stil (Akzent), plus eine Danger-Variante in Rot. */
+.maint-button {
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text);
+  background: var(--color-accent-bg);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.maint-button:hover:not(:disabled) {
+  background: var(--color-accent);
+}
+
+.maint-button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.maint-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.maint-button--danger {
+  color: var(--severity-kritisch);
+  background: color-mix(in srgb, var(--severity-kritisch) 12%, transparent);
+  border-color: var(--severity-kritisch);
+}
+
+.maint-button--danger:hover:not(:disabled) {
+  color: var(--color-bg);
+  background: var(--severity-kritisch);
+}
+
+.maint-button--danger:focus-visible {
+  outline-color: var(--severity-kritisch);
+}

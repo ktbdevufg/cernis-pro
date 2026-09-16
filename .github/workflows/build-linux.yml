@@ -1,0 +1,674 @@
+name: Build Linux
+
+# Baut das verteilbare Linux-Paket (deb + rpm) auf der Debian-12-
+# Werkbank. Grund: Ubuntus libpcap.so.0.8 ist gegen libibverbs.so.1 (RDMA)
+# gelinkt; Debian-Ziele haben libibverbs nicht. cernis-sniffd traegt cap_net_raw
+# via setcap und laeuft als AT_SECURE-Prozess -- glibc ignoriert dann
+# LD_LIBRARY_PATH, die mitgebundelte libibverbs ist unerreichbar, dlopen(libpcap)
+# scheitert ("libpcap is not available"). Ein Debian-Build bundelt eine
+# libpcap OHNE libibverbs-NEEDED und loest den SNI-Blocker.
+#
+# Bookworm statt Trixie: eine Debian-13-Werkbank hinterliess in der
+# Rust-Laufzeit eine GLIBC_2.39-Forderung (WEAK-Symbole pidfd_spawnp und
+# pidfd_getpid), an der der Loader auf aelteren Zielen hart abbrach. Debian 12
+# ist der tiefste moegliche Boden -- Debian 11 fuehrt kein libwebkit2gtk-4.1-dev.
+#
+# Container-Strategie: Das Image wird im Workflow aus der im Repo liegenden
+# Dockerfile.build.debian12 gebaut (docker build) und die Build-Schritte laufen
+# DARIN. Bewusst NICHT das container:-Feld von Actions mit einer im YAML
+# wiederholten Paketliste: das Dockerfile bleibt so die EINZIGE Quelle der
+# Wahrheit fuer Toolchain und System-Pakete (Node/Rust/uv/Python 3.12, libpcap,
+# file, desktop-file-utils). Kein Drift zwischen Dockerfile und Workflow.
+# build-linux.sh selbst bleibt unveraendert -- der Container ruft es nur auf.
+
+on:
+  # Manueller Knopf (Actions-Tab) ...
+  workflow_dispatch:
+  push:
+    # ... und automatisch bei Release-Tags v*.
+    tags:
+      - "v*"
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    # Schreibrecht auf contents ist noetig, damit der Workflow bei v-Tags ein
+    # GitHub-Release anlegen und Assets hochladen darf. Bewusst auf Job-Ebene
+    # (nicht Workflow-Ebene) und nur dieses eine Recht -- minimale Rechte: die
+    # Dispatch-Builds brauchen es nicht, schaden aber nicht.
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # Das Build-Image aus der repo-eigenen Dockerfile.build.debian12 bauen.
+      # Alle Toolchains (Node 20, Rust stable, uv, Python 3.12) und System-Deps
+      # (libpcap0.8-dev, file, desktop-file-utils, Tauri-GTK-Deps) sind
+      # bereits im Image -- deshalb entfallen setup-node / rust-toolchain /
+      # setup-uv und der separate System-Abhaengigkeiten-apt-Schritt.
+      - name: Build-Image bauen (Debian 12, Quelle der Wahrheit)
+        run: docker build -f Dockerfile.build.debian12 -t cernis-build:debian12 .
+
+      # Build-Version zur BUILD-ZEIT als Python-Datei erzeugen. config.py liest
+      # os.environ NICHT -- es importiert diese Datei. PyInstaller friert sie
+      # mit ein, damit die installierte App die volle Version kennt (kein
+      # Laufzeit-Env noetig). Der Suffix nennt nur die Architektur (x64), NICHT
+      # das Paketformat: ein Build erzeugt aus denselben Binaries deb und
+      # rpm -- ein Format-Suffix waere bei einem von zwei Bundles falsch. Das
+      # Format sieht der Nutzer an der Dateiendung. Die Architektur bleibt drin,
+      # weil spaeter ARM-Builds dazukommen.
+      # git laeuft auf dem Host (Runner), die Datei landet im ausgecheckten Repo
+      # und ist beim spaeteren Bind-Mount im Container sichtbar.
+      - name: Build-Version erzeugen (_build_version.py)
+        run: |
+          SHORT_SHA=$(git rev-parse --short=7 HEAD)
+          # Produktversion aus pyproject.toml ableiten (Quelle der Wahrheit) --
+          # nicht fest eintippen, damit der naechste Bump automatisch ankommt.
+          PRODUCT_VERSION=$(grep -m1 -E '^version = ' pyproject.toml | sed -E 's/^version = "(.*)"/\1/')
+          [ -n "$PRODUCT_VERSION" ] || { echo "FEHLER: Produktversion aus pyproject.toml nicht lesbar"; exit 1; }
+          BUILD_VERSION="${PRODUCT_VERSION}+linuxx64.${SHORT_SHA}"
+          echo "Build-Version: ${BUILD_VERSION}"
+          cat > backend/infrastructure/_build_version.py <<EOF
+          """Im CI erzeugte Build-Version. Nicht committet (siehe .gitignore)."""
+
+          BUILD_VERSION = "${BUILD_VERSION}"
+          EOF
+
+      # Quelltextarchiv NUR im x64-Job -- der Quelltext ist architekturunabhaengig,
+      # ein zweites identisches Archiv aus dem ARM-Job waere Dopplung und wuerde
+      # beim Release-Upload mit demselben Dateinamen kollidieren.
+      #
+      # Platzierung: nach dem Versionsschritt und VOR dem Bau. Grund: das Archiv
+      # entsteht auf dem RUNNER (nicht im Container), wo git nutzbar ist -- der
+      # Schritt Zeile 60 nutzt dort bereits 'git rev-parse'. Ablage in dist-source/
+      # im Repo-Wurzelverzeichnis, bewusst AUSSERHALB von src-tauri/target, damit
+      # der spaetere chown-Schritt und Cargos target-Aufraeumen es nicht beruehren.
+      # Weil der Schritt als Runner-User laeuft, gehoeren die Dateien ihm bereits --
+      # kein chown noetig.
+      #
+      # 'git archive HEAD' liest den COMMIT, nicht das Arbeitsverzeichnis: der
+      # flache Klon (checkout ohne fetch-depth) genuegt, und spaetere Build-
+      # Artefakte im Baum koennen den Inhalt nicht verfaelschen.
+      #
+      # Die Produktfassung stammt aus derselben Quelle wie oben (pyproject.toml),
+      # NICHT aus dem Tag-Namen und nicht aus github.ref -- damit das Archiv auch
+      # bei workflow_dispatch korrekt benannt ist. Sie wird hier neu abgeleitet,
+      # weil PRODUCT_VERSION oben shell-lokal ist und nicht exportiert wird.
+      # Deshalb traegt dieser Schritt auch KEINE if-Bedingung: er laeuft bei jedem
+      # Trigger, damit ein Dispatch-Lauf die Archiverzeugung mitprueft.
+      - name: Quelltextarchiv und Pruefsumme erzeugen
+        run: |
+          set -euo pipefail
+          PRODUCT_VERSION=$(grep -m1 -E '^version = ' pyproject.toml | sed -E 's/^version = "(.*)"/\1/')
+          [ -n "$PRODUCT_VERSION" ] || { echo "FEHLER: Produktversion aus pyproject.toml nicht lesbar"; exit 1; }
+          SHORT_SHA=$(git rev-parse --short=7 HEAD)
+
+          OUT_DIR="dist-source"
+          mkdir -p "$OUT_DIR"
+          ARCHIV="${OUT_DIR}/CernisPro_${PRODUCT_VERSION}_source.tar.gz"
+
+          git archive --format=tar.gz \
+            --prefix="CernisPro-${PRODUCT_VERSION}/" \
+            -o "$ARCHIV" HEAD
+
+          # Abbruch mit benannter Meldung, wenn das Archiv fehlt oder leer ist.
+          # Kein stiller Durchlauf: ein gruener Lauf allein belegt nichts.
+          [ -f "$ARCHIV" ] || { echo "FEHLER: Quelltextarchiv ${ARCHIV} wurde nicht erzeugt"; exit 1; }
+          [ -s "$ARCHIV" ] || { echo "FEHLER: Quelltextarchiv ${ARCHIV} ist leer"; exit 1; }
+
+          # Pruefsummendatei im Format von sha256sum, mit blossem Dateinamen ohne
+          # Pfad -- so traegt 'sha256sum -c' im Verzeichnis der Datei.
+          ( cd "$OUT_DIR" && sha256sum "$(basename "$ARCHIV")" > "$(basename "$ARCHIV").sha256" )
+
+          # Nur echte Dateien zaehlen: tar listet auch Verzeichniseintraege (auf
+          # / endend). Ohne den Filter meldete die Konsole eine zu hohe Zahl, die
+          # nicht mehr mit 'git ls-files' vergleichbar waere.
+          # '|| true' faengt den Exit-Status 1 von grep bei null Treffern ab --
+          # unter 'set -e' braeche der Schritt sonst hier kommentarlos ab, statt
+          # gleich darunter mit der benannten Meldung.
+          ANZAHL=$(tar -tzf "$ARCHIV" | grep -vc '/$' || true)
+          GROESSE=$(wc -c < "$ARCHIV")
+          [ "$ANZAHL" -gt 0 ] || { echo "FEHLER: Quelltextarchiv ${ARCHIV} enthaelt keine Dateien"; exit 1; }
+
+          echo "--- Quelltextarchiv ---"
+          echo "Dateiname:     $(basename "$ARCHIV")"
+          echo "Groesse:       ${GROESSE} Bytes"
+          echo "Eintraege:     ${ANZAHL}"
+          echo "Pruefsumme:    $(cat "${ARCHIV}.sha256")"
+          echo "Commit (kurz): ${SHORT_SHA}"
+
+      # Den unveraenderten build-linux.sh IM Container ausfuehren. Das Repo wird
+      # nach /build gemountet, die erzeugten Bundles landen so wieder auf dem
+      # Host (fuer den Artefakt-Upload sichtbar). '-v /build/.venv' legt ein
+      # anonymes Volume ueber .venv -> der Container synchronisiert dort frisch
+      # (uv sync), ohne eine evtl. vorhandene Host-.venv zu beruehren.
+      - name: Linux-Build im Container (Frontend + Binaries + Tauri-Bundle)
+        run: |
+          docker run --rm \
+            -v "$PWD":/build \
+            -v /build/.venv \
+            -w /build \
+            cernis-build:debian12 \
+            bash -c '
+              set -e
+              echo "--- uv sync (Deps + .venv, inkl. Dev-Gruppe fuer PyInstaller) ---"
+              uv sync --locked --group dev
+              echo "--- build-linux.sh (unveraendert) ---"
+              bash build-linux.sh
+            '
+
+      # Kernbeweis: verhindert, dass je wieder ein Bundle mit RDMA-gelinkter
+      # libpcap ausgeliefert wird. Das erzeugte deb wird entpackt, der enthaltene
+      # cernis-sniffd kurz gestartet (er entpackt sich als PyInstaller-onefile
+      # nach /tmp/_MEI...), dort libpcap.so.0.8 gesucht und per readelf -d
+      # geprueft, dass KEIN libibverbs in den NEEDED-Eintraegen steht. Schlaegt
+      # die Pruefung fehl, bricht der Workflow ab. Laeuft im selben Debian-Image
+      # (readelf/dpkg-deb vorhanden), Repo erneut nach /build gemountet.
+      - name: Verifikation -- gebundelte libpcap ohne libibverbs
+        run: |
+          docker run --rm \
+            -v "$PWD":/build \
+            -w /build \
+            cernis-build:debian12 \
+            bash -c '
+              set -e
+              TRIPLE="x86_64-unknown-linux-gnu"
+              BUNDLE="/build/src-tauri/target/$TRIPLE/release/bundle"
+              DEB=$(find "$BUNDLE/deb" -name "*.deb" -print -quit)
+              [ -n "$DEB" ] || { echo "FEHLER: kein deb gefunden"; exit 1; }
+              echo "deb: $DEB"
+
+              WORK=$(mktemp -d)
+              dpkg-deb -x "$DEB" "$WORK"
+              SNIFFD=$(find "$WORK" -name "cernis-sniffd" -type f -print -quit)
+              [ -n "$SNIFFD" ] || { echo "FEHLER: cernis-sniffd nicht im deb"; exit 1; }
+              chmod +x "$SNIFFD"
+
+              # onefile-sniffd starten; er entpackt sich nach TMPDIR/_MEI...
+              MEIROOT=$(mktemp -d)
+              TMPDIR="$MEIROOT" "$SNIFFD" >/tmp/sniffd.log 2>&1 &
+              PID=$!
+              LIB=""
+              for _ in $(seq 1 60); do
+                LIB=$(find "$MEIROOT" -name "libpcap.so.0.8" -print -quit 2>/dev/null || true)
+                [ -n "$LIB" ] && break
+                sleep 0.25
+              done
+              kill $PID 2>/dev/null || true
+              [ -n "$LIB" ] || { echo "FEHLER: libpcap.so.0.8 nicht im _MEI entpackt"; cat /tmp/sniffd.log; exit 1; }
+              echo "geprueft: $LIB"
+
+              echo "--- readelf -d NEEDED ---"
+              readelf -d "$LIB" | grep NEEDED || true
+              if readelf -d "$LIB" | grep -qi ibverbs; then
+                echo "FEHLER: libibverbs in NEEDED der gebundelten libpcap -- RDMA-gelinkt, SNI-Blocker!"
+                exit 1
+              fi
+              echo "OK: KEIN libibverbs in NEEDED"
+            '
+
+      # Der Container laeuft als root, die im Container erzeugten Bundles
+      # gehoeren daher root. Der Artefakt-Upload laeuft als Runner-User und
+      # braucht Lesezugriff -- also die Besitzrechte der erzeugten Dateien im
+      # Container auf die vom Host uebergebene UID/GID des Runner-Users
+      # zuruecksetzen. Betroffen ist mindestens src-tauri/target/, dazu die
+      # Python-Build-Artefakte und node_modules.
+      - name: Besitzrechte der Bundle-Dateien auf Runner-User zuruecksetzen
+        run: |
+          docker run --rm \
+            -v "$PWD":/build \
+            -w /build \
+            cernis-build:debian12 \
+            bash -c "chown -R $(id -u):$(id -g) \
+              src-tauri/target backend/dist backend/build node_modules 2>/dev/null || true"
+
+      # Pruefsummen der Pakete. Platzierung zwingend NACH dem Bau und NACH dem
+      # chown-Schritt darueber: der Bau laeuft im Container als root, die Bundles
+      # gehoeren danach root. Erst der chown gibt sie an den Runner-User zurueck --
+      # vorher koennte dieser Schritt die .sha256-Dateien nicht neben die Pakete
+      # legen. Laeuft auf dem Runner, nicht im Container.
+      #
+      # KEINE if-Bedingung: die Pruefsummen entstehen bei jedem Trigger, damit ein
+      # Dispatch-Lauf den Schritt mitprueft und nicht erst der Tag-Lauf.
+      #
+      # Format: sha256sum schreibt "Pruefsumme, zwei Leerzeichen, Dateiname". Durch
+      # den Wechsel ins Verzeichnis der Datei steht dort der blosse Dateiname ohne
+      # Pfad -- so traegt 'sha256sum -c datei.sha256' im Zielverzeichnis.
+      - name: Pruefsummen der Pakete erzeugen
+        run: |
+          set -euo pipefail
+          BUNDLE="src-tauri/target/x86_64-unknown-linux-gnu/release/bundle"
+
+          ANZAHL=0
+          while IFS= read -r PAKET; do
+            ( cd "$(dirname "$PAKET")" && sha256sum "$(basename "$PAKET")" > "$(basename "$PAKET").sha256" )
+            echo "$(cat "${PAKET}.sha256")"
+            ANZAHL=$((ANZAHL + 1))
+          done < <(find "$BUNDLE" -type f \( -name '*.deb' -o -name '*.rpm' \) | sort)
+
+          # Abbruch mit benannter Meldung, wenn keine einzige Paketdatei gefunden
+          # wurde. Kein stiller Durchlauf, kein Rueckfall auf eine schwaechere
+          # Pruefung -- ein leerer Fund ist ein Fehler, kein Normalfall.
+          [ "$ANZAHL" -gt 0 ] || { echo "FEHLER: keine deb- oder rpm-Datei unter ${BUNDLE} gefunden"; exit 1; }
+          echo "Pruefsummen erzeugt: ${ANZAHL}"
+
+      # Die Lizenzaufstellung als EIGENSTAENDIGE Beigabe bereitstellen. Sie
+      # entsteht im Bau unter src-tauri/lizenzaufstellung.json und geht ueber
+      # bundle.resources in deb und rpm -- also nur INNERHALB der Pakete. Das
+      # Website-Projekt erzeugt daraus die oeffentliche Lizenzseite und kann kein
+      # Paket auspacken; darum hier eine benannte Kopie neben den Paketen.
+      #
+      # NAMENSSCHEMA <paketdateiname>.lizenzaufstellung.json: die Beigabe traegt
+      # den Namen des Pakets, neben dem sie liegt -- dieselbe Konvention wie bei
+      # den .sha256-Dateien des Schritts darueber. Der Linux-Bau erzeugt deb UND
+      # rpm; es entstehen daher ZWEI inhaltsgleiche Kopien, je eine neben ihrem
+      # Paket, genau wie bei den Pruefsummen.
+      #
+      # EINDEUTIGKEIT IM RELEASE folgt damit aus dem Paketnamen: der traegt
+      # Fassung und Architektur bereits und ist je Job verschieden -- ein
+      # gleichnamiges zweites Asset kann nicht entstehen.
+      #
+      # Die Pakete werden auf DEMSELBEN Weg ermittelt wie im unmittelbar davor
+      # stehenden Pruefsummen-Schritt (gleiches find-Suchmuster, gleiche
+      # Sortierung) -- kein zweites, eigenes Suchmuster, das auseinanderlaufen
+      # koennte.
+      #
+      # GEGENPROBE PRODUKTVERSION: der Name stammt jetzt vom PAKET, nicht mehr
+      # aus der Datei. Damit Inhalt und Name nicht auseinanderlaufen koennen,
+      # wird die produktversion aus der Aufstellung gelesen und geprueft, dass
+      # diese Zeichenfolge im Paketdateinamen vorkommt. Trifft sie nicht zu,
+      # gehoeren Aufstellung und Paket zu verschiedenen Fassungen -- Abbruch mit
+      # benannter Meldung, die BEIDE Werte nennt. Die plattform wird weiterhin
+      # gelesen und ausgegeben, damit im Bauprotokoll sichtbar bleibt, welche
+      # Aufstellung entstand.
+      #
+      # Kein stiller Ausfall: fehlt die Datei, ist sie leer, kein gueltiges JSON,
+      # fehlt eines der beiden Felder oder findet sich kein Paket, bricht der
+      # Schritt mit benannter Meldung ab -- dieselbe Regel wie bei
+      # if-no-files-found: error und fail_on_unmatched_files.
+      #
+      # Platzierung NACH dem chown-Schritt: die Bundles entstehen im Container
+      # als root; erst der chown erlaubt dem Runner-User, die Kopien neben die
+      # Pakete zu legen.
+      - name: Lizenzaufstellung als benannte Kopie bereitstellen
+        run: |
+          set -euo pipefail
+          QUELLE="src-tauri/lizenzaufstellung.json"
+          BUNDLE="src-tauri/target/x86_64-unknown-linux-gnu/release/bundle"
+          [ -f "$QUELLE" ] || { echo "FEHLER: ${QUELLE} wurde nicht erzeugt"; exit 1; }
+          [ -s "$QUELLE" ] || { echo "FEHLER: ${QUELLE} ist leer"; exit 1; }
+
+          PRODUKTVERSION=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("produktversion",""))' "$QUELLE")
+          PLATTFORM=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("plattform",""))' "$QUELLE")
+          [ -n "$PRODUKTVERSION" ] || { echo "FEHLER: Feld 'produktversion' fehlt oder ist leer in ${QUELLE}"; exit 1; }
+          [ -n "$PLATTFORM" ] || { echo "FEHLER: Feld 'plattform' fehlt oder ist leer in ${QUELLE}"; exit 1; }
+
+          echo "--- Lizenzaufstellung ---"
+          echo "Produktversion: ${PRODUKTVERSION}"
+          echo "Plattform:      ${PLATTFORM}"
+
+          ANZAHL=0
+          while IFS= read -r PAKET; do
+            PAKETNAME="$(basename "$PAKET")"
+            case "$PAKETNAME" in
+              *"${PRODUKTVERSION}"*) ;;
+              *)
+                echo "FEHLER: Produktversion '${PRODUKTVERSION}' aus ${QUELLE} kommt im Paketdateinamen '${PAKETNAME}' nicht vor -- Aufstellung und Paket gehoeren zu verschiedenen Fassungen"
+                exit 1
+                ;;
+            esac
+            ZIEL="${PAKET}.lizenzaufstellung.json"
+            cp "$QUELLE" "$ZIEL"
+            [ -s "$ZIEL" ] || { echo "FEHLER: Kopie ${ZIEL} ist leer"; exit 1; }
+            echo "Beigabe: $(basename "$ZIEL")"
+            ANZAHL=$((ANZAHL + 1))
+          done < <(find "$BUNDLE" -type f \( -name '*.deb' -o -name '*.rpm' \) | sort)
+
+          # Abbruch mit benannter Meldung, wenn keine einzige Paketdatei gefunden
+          # wurde -- ohne Paket gibt es keinen Namen fuer die Beigabe. Kein
+          # stiller Durchlauf, kein Rueckfall auf ein schwaecheres Schema.
+          [ "$ANZAHL" -gt 0 ] || { echo "FEHLER: keine deb- oder rpm-Datei unter ${BUNDLE} gefunden"; exit 1; }
+          echo "Lizenzaufstellungen abgelegt: ${ANZAHL}"
+
+      # Pakete aus JEDEM Lauf als Actions-Artefakt ablegen -- auch ohne v-Tag.
+      # Grund: bisher entstanden verteilbare Pakete ausschliesslich als
+      # Release-Anhang an v-Tags. Ein Bau liess sich damit nur pruefen, indem
+      # zuerst getaggt wurde -- die falsche Reihenfolge. Mit diesem Schritt ist
+      # das Paket eines Dispatch-Laufs herunterladbar und pruefbar, BEVOR ein
+      # Tag gesetzt wird.
+      #
+      # Platzierung zwingend NACH dem Pruefsummen-Schritt (sonst fehlten die
+      # .sha256-Dateien) und VOR dem Release-Schritt.
+      #
+      # KEINE if-Bedingung: laeuft bei jedem Trigger. Bei v-Tags entsteht das
+      # Paket damit doppelt (Artefakt + Release-Asset) -- das ist gewollt und
+      # billig: das Artefakt verfaellt nach der Aufbewahrungsfrist, das
+      # Release-Asset bleibt.
+      #
+      # Der Artefaktname traegt die Architektur (x64), damit der parallel
+      # laufende arm64-Job (Name: ...-arm64) ihn nicht ueberschreibt --
+      # gleichnamige Artefakte aus zwei Jobs kollidieren.
+      #
+      # Aufbewahrungsdauer 14 Tage statt der Vorgabe von 90: ein Bundle ist
+      # ~850 MB und zaehlt gegen das 2-GB-Gratis-Storage-Kontingent. Der Zweck
+      # ist die kurzfristige Pruefung eines frischen Baus vor dem Tag, nicht
+      # Archivierung -- die uebernehmen die Release-Assets, die weder gegen das
+      # Kontingent zaehlen noch verfallen. 14 Tage decken eine Pruefrunde samt
+      # Nacharbeit ab und halten das Kontingent frei.
+      #
+      # Die Pfade stammen aus dem Pruefsummen- und Release-Schritt dieses Jobs,
+      # nicht geraten. if-no-files-found: error -- ein leeres Artefakt waere ein
+      # stiller Fehlschlag; hier gilt dieselbe Regel wie bei
+      # fail_on_unmatched_files im Release-Schritt.
+      - name: Pakete als Artefakt ablegen (jeder Lauf)
+        uses: actions/upload-artifact@v7
+        with:
+          name: cernis-pro-linux-x64
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb
+            src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb.sha256
+            src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb.lizenzaufstellung.json
+            src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/rpm/*.rpm
+            src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/rpm/*.rpm.sha256
+            src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/rpm/*.rpm.lizenzaufstellung.json
+
+      # Ab hier Fallunterscheidung nach Trigger. Beide Faelle laufen ERST nach
+      # Verifikation und chown -- diese beiden Schritte oben sind unveraendert
+      # und gelten fuer beide Pfade gleichermassen.
+      #
+      # Fall a) v-Tag: zusaetzlich zum Artefakt oben als GitHub-Release-Asset
+      # veroeffentlichen. Das Artefakt dient der kurzfristigen Pruefung und
+      # verfaellt nach 14 Tagen; nur das Release-Asset ist die dauerhafte,
+      # verteilbare Fassung -- es zaehlt nicht gegen das Storage-Kontingent und
+      # verfaellt nicht.
+      #
+      # Werkzeugwahl: softprops/action-gh-release statt handgeschriebener
+      # gh-CLI-Aufrufe. Gruende: die Action legt ein fehlendes Release fuer den
+      # Tag idempotent selbst an (kein "gh release view || gh release create"
+      # noetig), haengt mehrere Dateien per Glob an und bietet mit
+      # fail_on_unmatched_files genau die geforderte Abbruch-bei-leerem-Glob-
+      # Semantik out of the box. Mit gh-CLI muesste all das von Hand in Shell
+      # nachgebaut werden (Existenzpruefung, Glob-Expansion, Fehlerabbruch) --
+      # mehr Code, mehr Wartung, mehr Fehlerquellen. Der GITHUB_TOKEN wird von
+      # der Action automatisch aus dem Job-Kontext genutzt (contents: write
+      # oben). draft bleibt false, damit die Assets sofort verfuegbar sind;
+      # prerelease ist bewusst true, weil ein Tag-Build noch keinen Plattform-Test
+      # belegt -- die Freigabe erfolgt von Hand.
+      - name: Release erstellen und Bundles als Assets anhaengen (nur v-Tags)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v3
+        with:
+          name: CERNIS PRO ${{ github.ref_name }}
+          body: "Release ${{ github.ref_name }} -- Release-Notes werden separat gepflegt."
+          draft: false
+          # Gemeinsame Festlegung ALLER Build-Workflows: prerelease true, Freigabe von Hand.
+          prerelease: true
+          # fail_on_unmatched_files bricht ab, wenn ein Glob KEINE Datei findet.
+          # Damit erfuellt: das Release bleibt nicht still leer, wenn z.B. die
+          # rpm fehlt -- der Schritt schlaegt fehl.
+          fail_on_unmatched_files: true
+          # Jedes Muster MUSS im Tag-Lauf treffen, sonst faellt das Release
+          # (fail_on_unmatched_files oben). Die .sha256-Muster treffen, weil der
+          # Schritt "Pruefsummen der Pakete erzeugen" neben JEDER deb/rpm eine
+          # gleichnamige .sha256 anlegt und sonst selbst abbricht -- gibt es ein
+          # Paket, gibt es auch seine Pruefsumme. Die beiden Quelltext-Muster
+          # treffen, weil der Schritt "Quelltextarchiv und Pruefsumme erzeugen"
+          # ohne if-Bedingung in jedem Lauf beide Dateien erzeugt und bei fehlendem
+          # oder leerem Archiv abbricht. Beide Namen sind exakt (kein Glob), die
+          # Fassung stammt aus pyproject.toml -- derselben Quelle wie im Schritt.
+          # Die Lizenz-Muster treffen aus demselben Grund wie die .sha256-Muster:
+          # der Schritt "Lizenzaufstellung als benannte Kopie bereitstellen" legt
+          # ohne if-Bedingung neben JEDER deb/rpm eine gleichnamige
+          # .lizenzaufstellung.json an und bricht sonst selbst ab -- gibt es ein
+          # Paket, gibt es auch seine Beigabe. Der Name stammt vom Paket; weil
+          # der bereits Fassung und Architektur traegt, kollidiert die Beigabe im
+          # selben Release nicht mit der des ARM-Jobs.
+          files: |
+            src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb
+            src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb.sha256
+            src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb.lizenzaufstellung.json
+            src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/rpm/*.rpm
+            src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/rpm/*.rpm.sha256
+            src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/rpm/*.rpm.lizenzaufstellung.json
+            dist-source/*_source.tar.gz
+            dist-source/*_source.tar.gz.sha256
+
+      # Fall b) kein v-Tag (workflow_dispatch): kein Release, aber das Paket ist
+      # trotzdem greifbar -- der Artefakt-Schritt oben laeuft ohne if-Bedingung
+      # in jedem Lauf. Frueher stand hier bewusst KEIN Upload (Storage-Kosten);
+      # das machte einen Bau jedoch erst nach dem Tag pruefbar. Aufgeloest wird
+      # der Zielkonflikt nicht durch Verzicht, sondern durch die kurze
+      # Aufbewahrungsfrist von 14 Tagen. Verteilbare, dauerhafte Bundles
+      # entstehen weiterhin ausschliesslich an v-Tags als Release-Asset (Fall a
+      # oben): die zaehlen separat gegen das Kontingent und verfallen nicht.
+
+  # Spiegelbild des x64-Jobs fuer aarch64. Laeuft unabhaengig und parallel
+  # (keine needs-Abhaengigkeit) auf einem nativen ARM-Runner. Abweichungen zum
+  # x64-Job: ARM-Runner, ARM-Dockerfile/Image-Tag, arm64-Versions-Suffix, das
+  # ARM-Triple via CERNIS_BUILD_TRIPLE und die aarch64-Bundle-Pfade.
+  build-linux-arm:
+    # Nativer ARM-Runner statt ubuntu-latest -- kein QEMU-Cross-Build noetig.
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # Image aus der ARM-Werkbank Dockerfile.build.debian12.arm64.
+      - name: Build-Image bauen (Debian 12 arm64, Quelle der Wahrheit)
+        run: docker build -f Dockerfile.build.debian12.arm64 -t cernis-build:debian12-arm64 .
+
+      # Wie x64, aber Versions-Suffix arm64 statt x64.
+      - name: Build-Version erzeugen (_build_version.py)
+        run: |
+          SHORT_SHA=$(git rev-parse --short=7 HEAD)
+          # Produktversion aus pyproject.toml ableiten (Quelle der Wahrheit).
+          PRODUCT_VERSION=$(grep -m1 -E '^version = ' pyproject.toml | sed -E 's/^version = "(.*)"/\1/')
+          [ -n "$PRODUCT_VERSION" ] || { echo "FEHLER: Produktversion aus pyproject.toml nicht lesbar"; exit 1; }
+          BUILD_VERSION="${PRODUCT_VERSION}+linuxarm64.${SHORT_SHA}"
+          echo "Build-Version: ${BUILD_VERSION}"
+          cat > backend/infrastructure/_build_version.py <<EOF
+          """Im CI erzeugte Build-Version. Nicht committet (siehe .gitignore)."""
+
+          BUILD_VERSION = "${BUILD_VERSION}"
+          EOF
+
+      # Wie x64, aber ARM-Image und CERNIS_BUILD_TRIPLE steuert build-linux.sh
+      # auf das aarch64-Triple.
+      - name: Linux-Build im Container (Frontend + Binaries + Tauri-Bundle)
+        run: |
+          docker run --rm \
+            -v "$PWD":/build \
+            -v /build/.venv \
+            -w /build \
+            -e CERNIS_BUILD_TRIPLE=aarch64-unknown-linux-gnu \
+            cernis-build:debian12-arm64 \
+            bash -c '
+              set -e
+              echo "--- uv sync (Deps + .venv, inkl. Dev-Gruppe fuer PyInstaller) ---"
+              uv sync --locked --group dev
+              echo "--- build-linux.sh (unveraendert) ---"
+              bash build-linux.sh
+            '
+
+      # Wie x64, aber ARM-Triple und ARM-Image.
+      - name: Verifikation -- gebundelte libpcap ohne libibverbs
+        run: |
+          docker run --rm \
+            -v "$PWD":/build \
+            -w /build \
+            cernis-build:debian12-arm64 \
+            bash -c '
+              set -e
+              TRIPLE="aarch64-unknown-linux-gnu"
+              BUNDLE="/build/src-tauri/target/$TRIPLE/release/bundle"
+              DEB=$(find "$BUNDLE/deb" -name "*.deb" -print -quit)
+              [ -n "$DEB" ] || { echo "FEHLER: kein deb gefunden"; exit 1; }
+              echo "deb: $DEB"
+
+              WORK=$(mktemp -d)
+              dpkg-deb -x "$DEB" "$WORK"
+              SNIFFD=$(find "$WORK" -name "cernis-sniffd" -type f -print -quit)
+              [ -n "$SNIFFD" ] || { echo "FEHLER: cernis-sniffd nicht im deb"; exit 1; }
+              chmod +x "$SNIFFD"
+
+              # onefile-sniffd starten; er entpackt sich nach TMPDIR/_MEI...
+              MEIROOT=$(mktemp -d)
+              TMPDIR="$MEIROOT" "$SNIFFD" >/tmp/sniffd.log 2>&1 &
+              PID=$!
+              LIB=""
+              for _ in $(seq 1 60); do
+                LIB=$(find "$MEIROOT" -name "libpcap.so.0.8" -print -quit 2>/dev/null || true)
+                [ -n "$LIB" ] && break
+                sleep 0.25
+              done
+              kill $PID 2>/dev/null || true
+              [ -n "$LIB" ] || { echo "FEHLER: libpcap.so.0.8 nicht im _MEI entpackt"; cat /tmp/sniffd.log; exit 1; }
+              echo "geprueft: $LIB"
+
+              echo "--- readelf -d NEEDED ---"
+              readelf -d "$LIB" | grep NEEDED || true
+              if readelf -d "$LIB" | grep -qi ibverbs; then
+                echo "FEHLER: libibverbs in NEEDED der gebundelten libpcap -- RDMA-gelinkt, SNI-Blocker!"
+                exit 1
+              fi
+              echo "OK: KEIN libibverbs in NEEDED"
+            '
+
+      # Wie x64, aber ARM-Image.
+      - name: Besitzrechte der Bundle-Dateien auf Runner-User zuruecksetzen
+        run: |
+          docker run --rm \
+            -v "$PWD":/build \
+            -w /build \
+            cernis-build:debian12-arm64 \
+            bash -c "chown -R $(id -u):$(id -g) \
+              src-tauri/target backend/dist backend/build node_modules 2>/dev/null || true"
+
+      # Wie x64: NACH dem Bau und NACH dem chown, ohne if-Bedingung. Einziger
+      # Unterschied ist das aarch64-Triple im Bundle-Pfad. Ein Quelltextarchiv
+      # entsteht hier bewusst NICHT -- das erzeugt allein der x64-Job, weil der
+      # Quelltext architekturunabhaengig ist.
+      - name: Pruefsummen der Pakete erzeugen
+        run: |
+          set -euo pipefail
+          BUNDLE="src-tauri/target/aarch64-unknown-linux-gnu/release/bundle"
+
+          ANZAHL=0
+          while IFS= read -r PAKET; do
+            ( cd "$(dirname "$PAKET")" && sha256sum "$(basename "$PAKET")" > "$(basename "$PAKET").sha256" )
+            echo "$(cat "${PAKET}.sha256")"
+            ANZAHL=$((ANZAHL + 1))
+          done < <(find "$BUNDLE" -type f \( -name '*.deb' -o -name '*.rpm' \) | sort)
+
+          # Abbruch mit benannter Meldung, wenn keine einzige Paketdatei gefunden
+          # wurde. Kein stiller Durchlauf, kein Rueckfall auf eine schwaechere
+          # Pruefung.
+          [ "$ANZAHL" -gt 0 ] || { echo "FEHLER: keine deb- oder rpm-Datei unter ${BUNDLE} gefunden"; exit 1; }
+          echo "Pruefsummen erzeugt: ${ANZAHL}"
+
+      # Wie im x64-Job, mit derselben Begruendung: die Aufstellung geht sonst nur
+      # INNERHALB von deb und rpm raus, das Website-Projekt kann kein Paket
+      # auspacken. Der Name stammt vom jeweiligen Paket
+      # (<paketdateiname>.lizenzaufstellung.json) -- genau deshalb kollidiert die
+      # ARM-Beigabe beim Release-Upload NICHT mit der des x64-Jobs, obwohl beide
+      # Jobs dieselbe Quelldatei src-tauri/lizenzaufstellung.json kopieren: die
+      # aarch64-Pakete heissen anders als die x86_64-Pakete. Anders als das
+      # Quelltextarchiv gehoert die Aufstellung also SEHR WOHL in beide Jobs --
+      # sie ist architekturabhaengig, der Quelltext ist es nicht.
+      # Einziger Unterschied zum x64-Job ist das aarch64-Triple im Bundle-Pfad;
+      # das Suchmuster stammt wie dort aus dem Pruefsummen-Schritt darueber.
+      - name: Lizenzaufstellung als benannte Kopie bereitstellen
+        run: |
+          set -euo pipefail
+          QUELLE="src-tauri/lizenzaufstellung.json"
+          BUNDLE="src-tauri/target/aarch64-unknown-linux-gnu/release/bundle"
+          [ -f "$QUELLE" ] || { echo "FEHLER: ${QUELLE} wurde nicht erzeugt"; exit 1; }
+          [ -s "$QUELLE" ] || { echo "FEHLER: ${QUELLE} ist leer"; exit 1; }
+
+          PRODUKTVERSION=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("produktversion",""))' "$QUELLE")
+          PLATTFORM=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("plattform",""))' "$QUELLE")
+          [ -n "$PRODUKTVERSION" ] || { echo "FEHLER: Feld 'produktversion' fehlt oder ist leer in ${QUELLE}"; exit 1; }
+          [ -n "$PLATTFORM" ] || { echo "FEHLER: Feld 'plattform' fehlt oder ist leer in ${QUELLE}"; exit 1; }
+
+          echo "--- Lizenzaufstellung ---"
+          echo "Produktversion: ${PRODUKTVERSION}"
+          echo "Plattform:      ${PLATTFORM}"
+
+          # Gegenprobe wie im x64-Job: der Name stammt vom Paket, die Fassung aus
+          # der Datei -- passen beide nicht zusammen, ist das ein Abbruch.
+          ANZAHL=0
+          while IFS= read -r PAKET; do
+            PAKETNAME="$(basename "$PAKET")"
+            case "$PAKETNAME" in
+              *"${PRODUKTVERSION}"*) ;;
+              *)
+                echo "FEHLER: Produktversion '${PRODUKTVERSION}' aus ${QUELLE} kommt im Paketdateinamen '${PAKETNAME}' nicht vor -- Aufstellung und Paket gehoeren zu verschiedenen Fassungen"
+                exit 1
+                ;;
+            esac
+            ZIEL="${PAKET}.lizenzaufstellung.json"
+            cp "$QUELLE" "$ZIEL"
+            [ -s "$ZIEL" ] || { echo "FEHLER: Kopie ${ZIEL} ist leer"; exit 1; }
+            echo "Beigabe: $(basename "$ZIEL")"
+            ANZAHL=$((ANZAHL + 1))
+          done < <(find "$BUNDLE" -type f \( -name '*.deb' -o -name '*.rpm' \) | sort)
+
+          [ "$ANZAHL" -gt 0 ] || { echo "FEHLER: keine deb- oder rpm-Datei unter ${BUNDLE} gefunden"; exit 1; }
+          echo "Lizenzaufstellungen abgelegt: ${ANZAHL}"
+
+      # Wie im x64-Job, mit denselben Begruendungen (Pruefbarkeit ohne Tag,
+      # Platzierung nach Pruefsumme und vor Release, keine if-Bedingung,
+      # 14 Tage Aufbewahrung wegen Bundle-Groesse und Storage-Kontingent).
+      # Einzige Unterschiede: der Artefaktname traegt arm64 statt x64 -- so
+      # ueberschreiben sich die beiden parallel laufenden Jobs nicht -- und die
+      # Pfade nennen das aarch64-Triple. Ein Quelltextarchiv gehoert auch hier
+      # NICHT dazu: das liefert allein der x64-Job.
+      - name: Pakete als Artefakt ablegen (jeder Lauf)
+        uses: actions/upload-artifact@v7
+        with:
+          name: cernis-pro-linux-arm64
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/deb/*.deb
+            src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/deb/*.deb.sha256
+            src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/deb/*.deb.lizenzaufstellung.json
+            src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/rpm/*.rpm
+            src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/rpm/*.rpm.sha256
+            src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/rpm/*.rpm.lizenzaufstellung.json
+
+      # Fall a) v-Tag: Release-Assets, aber aarch64-Bundle-Pfade.
+      - name: Release erstellen und Bundles als Assets anhaengen (nur v-Tags)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v3
+        with:
+          name: CERNIS PRO ${{ github.ref_name }}
+          body: "Release ${{ github.ref_name }} -- Release-Notes werden separat gepflegt."
+          draft: false
+          # Gemeinsame Festlegung ALLER Build-Workflows: prerelease true, Freigabe von Hand.
+          prerelease: true
+          fail_on_unmatched_files: true
+          # Wie x64: die .sha256-Muster treffen, weil der Pruefsummen-Schritt neben
+          # jeder deb/rpm eine gleichnamige .sha256 anlegt und sonst abbricht.
+          # KEIN Quelltextarchiv hier -- das liefert allein der x64-Job, ein
+          # zweites gleichnamiges Asset wuerde beim Upload kollidieren.
+          # Die Lizenzaufstellung dagegen SCHON: sie ist architekturabhaengig und
+          # traegt den Namen ihres Pakets, der die Architektur bereits enthaelt --
+          # sie kann also nicht mit der x64-Beigabe kollidieren.
+          files: |
+            src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/deb/*.deb
+            src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/deb/*.deb.sha256
+            src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/deb/*.deb.lizenzaufstellung.json
+            src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/rpm/*.rpm
+            src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/rpm/*.rpm.sha256
+            src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/rpm/*.rpm.lizenzaufstellung.json
+
+      # Fall b) kein v-Tag: kein Release -- gleiche Lage wie im x64-Job. Das
+      # Paket ist ueber den Artefakt-Schritt oben (ohne if-Bedingung, 14 Tage)
+      # trotzdem herunterladbar. Dauerhafte Bundles entstehen weiterhin nur an
+      # v-Tags als Release-Asset (Fall a oben).

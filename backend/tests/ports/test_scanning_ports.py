@@ -34,11 +34,13 @@ from domain.scanning import (
     EnrichedHost,
     MdnsService,
     PortInfo,
+    PortInterception,
     ScanRecord,
     ScanSummary,
     SsdpService,
 )
 from ports.scanning import (
+    ArpTablePort,
     FritzHostsPort,
     HostDiscoveryPort,
     HostnameResolverPort,
@@ -106,8 +108,15 @@ class _FakeFritz:
         return []  # keine Fritz konfiguriert -> Leer-Zustand, kein Fehler
 
 
+class _FakeArpTable:
+    async def get_arp_table(self) -> dict[str, str]:
+        return {"10.0.0.2": "AA:BB:CC:00:00:00"}
+
+
 class _FakeScanHistory:
-    def save(self, cidr: str, hosts: Sequence[EnrichedHost]) -> None:
+    def save(
+        self, cidr: str, hosts: Sequence[EnrichedHost], interception: PortInterception
+    ) -> None:
         return None
 
     def list(self, limit: int) -> list[ScanSummary]:
@@ -117,6 +126,9 @@ class _FakeScanHistory:
         if scan_id == 1:
             return ScanRecord(scan_id=1, cidr="10.0.0.0/24", hosts=())
         return None
+
+    def clear_all(self) -> None:
+        """No-op fuer den Fake (kein interner Speicher zu leeren)."""
 
 
 # ── Statische Konformitaet: mypy prueft die Zuweisung an den Port-Typ ───────
@@ -130,6 +142,7 @@ def _assert_mdns(_: MdnsPort) -> None: ...
 def _assert_ssdp(_: SsdpPort) -> None: ...
 def _assert_ipv6(_: Ipv6EnrichmentPort) -> None: ...
 def _assert_fritz(_: FritzHostsPort) -> None: ...
+def _assert_arp(_: ArpTablePort) -> None: ...
 def _assert_history(_: ScanHistoryRepository) -> None: ...
 
 
@@ -143,6 +156,7 @@ def test_fakes_satisfy_ports_statically() -> None:
     _assert_ssdp(_FakeSsdp())
     _assert_ipv6(_FakeIpv6())
     _assert_fritz(_FakeFritz())
+    _assert_arp(_FakeArpTable())
     _assert_history(_FakeScanHistory())
 
 
@@ -183,6 +197,11 @@ def test_vendor_lookup_is_sync() -> None:
     assert vendor.lookup("AA:BB:CC:00:00:00") == "ACME Corp"
 
 
+def test_arp_table_returns_ip_mac_map() -> None:
+    arp: ArpTablePort = _FakeArpTable()
+    assert asyncio.run(arp.get_arp_table()) == {"10.0.0.2": "AA:BB:CC:00:00:00"}
+
+
 def test_ipv6_enrich_preserves_hosts() -> None:
     ipv6: Ipv6EnrichmentPort = _FakeIpv6()
     hosts = [EnrichedHost(ip="10.0.0.2", mac="AA:BB:CC:00:00:00")]
@@ -191,7 +210,7 @@ def test_ipv6_enrich_preserves_hosts() -> None:
 
 def test_scan_history_roundtrip_shape() -> None:
     repo: ScanHistoryRepository = _FakeScanHistory()
-    repo.save("10.0.0.0/24", ())
+    repo.save("10.0.0.0/24", (), PortInterception())
     summaries = repo.list(20)
     assert summaries[0].cidr == "10.0.0.0/24"
     assert isinstance(repo.get(1), ScanRecord)

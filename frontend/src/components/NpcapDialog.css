@@ -1,0 +1,113 @@
+/* Npcap-Hinweis-Dialog: zentrierter Overlay-Dialog (CERNIS PRO 2.0).
+   Struktur analog PortLookupDialog/MaintenanceDialog. Nur CSS-Tokens; keine
+   hartkodierten Farben (Ausnahme: der halbtransparente Backdrop-Schwarzton, wie
+   im Projekt üblich für Überdeckung/Schatten). */
+
+/* Backdrop: deckt die ganze App, zentriert den Dialog. */
+.npcap-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+/* Der Dialog selbst: Karten-Optik, dezenter Akzentstreifen links wie die
+   Settings-Sektionen, angenehme Breite. */
+.npcap-dialog {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 440px;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-accent);
+  border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.28);
+}
+
+.npcap-dialog__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.npcap-dialog__title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+/* Schließen-X: dezenter Icon-Button (wie die übrigen Icon-Knöpfe). */
+.npcap-dialog__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  color: var(--color-text-tert);
+  background: none;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.npcap-dialog__close:hover {
+  color: var(--color-text);
+  background: var(--color-card);
+}
+
+.npcap-dialog__close:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.npcap-dialog__body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+}
+
+/* Die erklärende Beschreibung. */
+.npcap-dialog__desc {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--color-text-sec);
+}
+
+/* Download-Link: klar als extern erkennbar (Icon + Akzentfarbe), ganzflächig
+   klickbar, im Settings-Akzent-Stil (analog PortLookupDialog__wiki). */
+.npcap-dialog__download {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  padding: 8px 14px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-accent);
+  text-decoration: none;
+  background: var(--color-accent-bg);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+}
+
+.npcap-dialog__download:hover {
+  color: var(--color-text);
+  background: var(--color-accent);
+}
+
+.npcap-dialog__download:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}

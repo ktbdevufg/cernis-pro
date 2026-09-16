@@ -1,8 +1,8 @@
-# ADR 0007 — scanning-Infrastructure-Adapter dürfen `modules/` importieren (eng eingezäunt)
+# ADR 0007 — systemnahe Infrastructure-Adapter dürfen `modules/` importieren (eng eingezäunt)
 
 - **Status:** Akzeptiert
-- **Datum:** 2026-05-28
-- **Phase:** Phase 2, Schritt S.3 (scanning-Ports)
+- **Datum:** 2026-05-28 (Erweiterung um monitoring: 2026-06-03, Schritt M.4)
+- **Phase:** Phase 2, Schritt S.3 (scanning-Ports); erweitert in M.4 (monitoring-Adapter)
 - **Bezug:** `vision_features_202605.md` Abschnitt 5.2 (die eine gekapselte Ausnahme: systemnahe Adapter); CLAUDE.md (Importregeln, „neue Ringe importieren NICHT den Altcode"); ADR 0003 (`ignore_imports`/Optionen am Contract als Präzedenz); `pyproject.toml` `[tool.importlinter]`
 
 ## Kontext
@@ -49,5 +49,34 @@ Nach der Korrektur: **7 Contracts, 7 kept, 0 broken** (mit den realen S.4a-Adapt
 - Logik-Ringe bleiben rein: `ports/scanning.py` importiert nur `domain/scanning`; `application`/`domain`/`api` sehen `modules/` nie.
 
 **Kosten / Restfenster (temporär)**
-- Die Ausnahme ist **bewusst temporär.** Sie fällt weg, sobald die systemnahe Schicht ersetzt ist (Sprachwechsel gemäß 5.2 *oder* eine native Reimplementierung nach Stabilisierung). Dann wird die `ignore_imports`-Zeile gelöscht und der Contract steht wieder lückenlos für alle Ringe.
-- Solange sie besteht, ist `infrastructure/scanning/` die einzige Stelle, an der Alt- und Neu-Code aneinanderstoßen. Das ist gewollt und genau die in 5.2 vorgesehene Kapselungsgrenze.
+- Die Ausnahme ist **bewusst temporär.** Sie fällt weg, sobald die systemnahe Schicht ersetzt ist (Sprachwechsel gemäß 5.2 *oder* eine native Reimplementierung nach Stabilisierung). Dann werden die `ignore_imports`-Zeilen gelöscht und der Contract steht wieder lückenlos für alle Ringe.
+- Solange sie besteht, sind `infrastructure/scanning/` und `infrastructure/monitoring/` die einzigen Stellen, an denen Alt- und Neu-Code aneinanderstoßen. Das ist gewollt und genau die in 5.2 vorgesehene Kapselungsgrenze.
+
+## Erweiterung M.4 — monitoring (2026-06-03)
+
+Dieselbe Begründung greift für die **monitoring**-Domäne: Auch sie ist systemnah. Der Live-Connectivity-Monitor pingt Targets (`_ping_burst`/`_ping_once` — `subprocess`/`asyncio.create_subprocess_exec` mit Interface-Bindung, RTT-Regex-Parsing) und löst Desktop-Notifications aus (`_notify_macos` — `osascript`). Diese zwei Operationen in `infrastructure/monitoring/` zeilenweise zu reimplementieren wäre dieselbe Wegwerf-Arbeit vor einem möglichen Sprachwechsel, die ADR 0007 für scanning vermeidet.
+
+Daher wird die Ausnahme **auf monitoring ausgedehnt**, mit einer zweiten `ignore_imports`-Zeile am **selben** Contract (nicht als neuer ADR — es ist dieselbe Entscheidung, nur eine zweite Domäne):
+
+```toml
+ignore_imports = [
+    "infrastructure.scanning.** -> modules",
+    "infrastructure.monitoring.** -> modules",
+]
+```
+
+**SCOPED — bewusst minimaler modules-Footprint:** Der `**`-Scope erlaubt dem *ganzen* Paket `infrastructure.monitoring` den modules-Import, aber real nutzen ihn **nur zwei** Adapter:
+
+- `pinger.py` → wrappt `modules.monitor._ping_burst` (Executor),
+- `notifier.py` → wrappt `modules.monitor._notify_macos` (Executor).
+
+Die übrigen drei M.4-Adapter kommen **bewusst ohne `modules`** aus:
+
+- `rtt_history.py` / `monitor_events.py` → eigenes SQLite-Schema (Muster `SqliteScanHistoryRepository`); kein `modules`-Bezug nötig. `rtt_history` ergänzt dabei die `alive`-Spalte (M.1-Wurzel-Fix, siehe unten).
+- `target_source.py` → liest `monitor_custom_targets` über den **migrierten** `ports/settings.SettingsRepository`-Port (Adapter→Port ist erlaubt: der `infrastructure`-Contract verbietet nur `application`/`api`, nicht `ports`). Einziger modules-Bezug wäre `modules.interfaces.get_interfaces` (unmigriertes Hilfsmodul) — durch dieselbe `**`-Zeile abgedeckt.
+
+Diese Disziplin (Scope maschinell breit, realer Footprint schmal) ist absichtlich: Sie hält die Alt/Neu-Grenze auf das systemnahe Minimum (Ping/Notification), statt den ganzen monitoring-Adapter-Block an `modules` zu binden.
+
+**Begleitende Schema-Entscheidung (M.4, kein Teil dieses ADR, hier nur referenziert):** Der `rtt_history`-Adapter legt die Tabelle **mit** einer `alive`-Spalte an (`CREATE TABLE IF NOT EXISTS` + idempotenter `ALTER TABLE … ADD COLUMN alive INTEGER DEFAULT 0`-Guard für bereits vom Altcode-Loop angelegte Tabellen). Das heilt die in M.1 dokumentierte gemeinsame Wurzel dreier toter Stränge (metrics-`alive`-Block, homeassistant, influx). Es ist eine v2-Abweichung vom Altcode-Schema — die M.1-Charakterisierer bleiben unberührt, weil sie `modules.monitor` (Altcode) testen, nicht den v2-Adapter.
+
+**lint-imports nach der Erweiterung:** weiterhin 7 Contracts, 7 kept (die neue Zeile matcht ab dem ersten monitoring-Adapter real; vor dem ersten Adapter würde sie als „No matches" hart auffallen — kein `unmatched`-Schalter, wie schon für scanning entschieden).

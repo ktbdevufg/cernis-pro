@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <title>CERNIS PRO</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0d1117;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      font-family: -apple-system, 'Segoe UI', sans-serif;
+      color: #00e5ff;
+      overflow: hidden;
+      text-align: center;
+      padding: 24px;
+    }
+    .logo {
+      font-size: 48px;
+      font-weight: 700;
+      letter-spacing: 4px;
+      margin-bottom: 8px;
+      /* Die Wortmarke wird per JS Buchstabe fuer Buchstabe aufgebaut; die Zeile
+         haelt ihre Hoehe von Anfang an, damit beim Fuellen nichts springt. */
+      min-height: 1.2em;
+    }
+    /* Wortmarken-Farben. Diese Datei ist eigenstaendiges HTML ohne die App-Tokens,
+       die Werte stehen daher lokal -- bewusst auf den Header-Markenton vereinheitlicht
+       (frueher Cyan #00e5ff). Hintergrund ist dunkel (#0d1117), also die Dunkel-Werte. */
+    .logo-cernis { color: #2e9bd6; }
+    .logo-pro { color: #9aa2ac; font-weight: 600; }
+    .subtitle {
+      font-size: 13px;
+      color: #4a5568;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      margin-bottom: 48px;
+    }
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 3px solid #1a2332;
+      border-top-color: #00e5ff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-bottom: 16px;
+    }
+    .status {
+      font-size: 12px;
+      color: #4a5568;
+      letter-spacing: 1px;
+    }
+    /* Fehlerzustand: grosser Code + menschenlesbarer Text. */
+    .fehlercode {
+      font-size: 40px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      color: #ff6b6b;
+      margin-bottom: 16px;
+    }
+    .fehlertext {
+      font-size: 14px;
+      line-height: 1.6;
+      color: #c9d1d9;
+      max-width: 460px;
+    }
+    .hidden { display: none !important; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <!-- Inhalt wird per JS aufgebaut (siehe starteWortmarke) -- bewusst leer. -->
+  <div class="logo" id="logo" aria-label="CERNIS PRO"></div>
+  <div class="subtitle">LAN Scanner &amp; Monitor</div>
+  <div class="spinner" id="spinner"></div>
+  <div class="status" id="status">Starte Backend...</div>
+  <div class="fehlercode hidden" id="fehlercode"></div>
+  <div class="fehlertext hidden" id="fehlertext"></div>
+  <script>
+    var BACKEND_URL = 'http://127.0.0.1:8765';
+
+    // Menschenlesbare Texte je Fehlercode (E-1xx). Unbekannte/fehlende Codes
+    // fallen auf einen neutralen Text zurueck.
+    var FEHLERTEXTE = {
+      'E-101': 'Backend nicht erreichbar - Port 8765 ist belegt (E-101). Laeuft CERNIS PRO bereits?',
+      'E-102': 'Das Backend ist beim Start abgestuerzt (E-102). Details im Log: /tmp/cernis-backend.log',
+      'E-103': 'Zeitueberschreitung beim Backend-Start (E-103). Bitte erneut starten.',
+      'E-104': 'Programmkomponente nicht gefunden (E-104). Bitte CERNIS PRO neu installieren.',
+      'E-105': 'Die Datenbank stammt aus einer neueren Programmversion (E-105). Bitte installieren Sie die aktuelle Fassung von CERNIS PRO.'
+    };
+
+    var fertig = false;
+
+    // ── Wortmarken-Aufbau: "CERNIS PRO" Buchstabe fuer Buchstabe im Halbsekundentakt ──
+    // Reine DOM-Textmanipulation (kein innerHTML): je Schritt ein <span> mit der
+    // Zielfarbe -- "CERNIS" im Markenblau, "PRO" gedaempft/fetter. Das Leerzeichen
+    // zwischen beiden Woertern ist ein eigener Schritt (kurze Pause vor dem "P").
+    // Laeuft unabhaengig vom Backend-Poll: die Animation blockiert und verzoegert ihn
+    // nicht, und der Poll wartet nicht auf sie. Ist das Backend schneller fertig,
+    // gewinnt geheZurApp() -- die Animation muss davon nichts wissen.
+    var WORTMARKE = 'CERNIS PRO';
+    var SCHRITT_MS = 500;
+    var wortmarkeTimer = null;
+
+    function stoppeWortmarke() {
+      if (wortmarkeTimer !== null) {
+        clearInterval(wortmarkeTimer);
+        wortmarkeTimer = null;
+      }
+    }
+
+    function starteWortmarke() {
+      var logo = document.getElementById('logo');
+      if (!logo) return;
+      var index = 0;
+
+      function naechstesZeichen() {
+        var zeichen = WORTMARKE.charAt(index);
+        var span = document.createElement('span');
+        // Ab Position 7 ("PRO") die gedaempfte Farbe; davor der Markenton. Das
+        // Leerzeichen an Position 6 traegt keine sichtbare Farbe.
+        span.className = index >= 7 ? 'logo-pro' : 'logo-cernis';
+        span.textContent = zeichen;
+        logo.appendChild(span);
+        index++;
+      }
+
+      // Das "C" steht sofort (der Aufbau beginnt ohne Anfangs-Leerlauf); die
+      // uebrigen Zeichen folgen im Halbsekundentakt.
+      naechstesZeichen();
+      wortmarkeTimer = setInterval(function () {
+        if (index >= WORTMARKE.length) {
+          // Fertig aufgebaut: die vollstaendige Wortmarke bleibt stehen.
+          stoppeWortmarke();
+          return;
+        }
+        naechstesZeichen();
+      }, SCHRITT_MS);
+    }
+
+    starteWortmarke();
+
+    function zeigeFehler(code) {
+      if (fertig) return;
+      fertig = true;
+      // Der Splash-Inhalt wird gleich ausgetauscht -- kein Interval weiterlaufen lassen.
+      stoppeWortmarke();
+      var spinner = document.getElementById('spinner');
+      var status = document.getElementById('status');
+      var fehlercode = document.getElementById('fehlercode');
+      var fehlertext = document.getElementById('fehlertext');
+
+      spinner.classList.add('hidden');
+      status.classList.add('hidden');
+
+      var text = FEHLERTEXTE[code];
+      if (text) {
+        fehlercode.textContent = code;
+        fehlertext.textContent = text;
+      } else if (code) {
+        // Unbekannter Code: generischer Text, Code trotzdem anzeigen.
+        fehlercode.textContent = code;
+        fehlertext.textContent = 'Das Backend konnte nicht gestartet werden (' + code + '). Bitte erneut starten.';
+      } else {
+        // Kein Code vorhanden: neutraler Fallback.
+        fehlercode.textContent = 'Fehler';
+        fehlertext.textContent = 'Das Backend konnte nicht gestartet werden. Bitte erneut starten.';
+      }
+      fehlercode.classList.remove('hidden');
+      fehlertext.classList.remove('hidden');
+    }
+
+    // Erfolgsfall: Diese Seite wird im Ready-Fall vom Backend selbst ueber
+    // http://127.0.0.1:8765/splash.html ausgeliefert (Rust navigiert die Webview
+    // nativ dorthin). Splash und App teilen dann denselben http-Origin, daher ist
+    // die same-origin-Navigation auf "/" erlaubt (anders als tauri:// -> http://).
+    function geheZurApp() {
+      if (fertig) return;
+      fertig = true;
+      // Nach der Navigation darf kein Interval weiterlaufen.
+      stoppeWortmarke();
+      window.location.href = '/';
+    }
+
+    // 1) Fehler-Signalweg: Tauri-Event aus main.rs (backend-error). Greift auf dem
+    //    lokalen App-Protocol-Splash, der im Fehlerfall sichtbar bleibt.
+    //    withGlobalTauri stellt window.__TAURI__ bereit. KEIN backend-ready-Listener:
+    //    Der Erfolgsfall wird Rust-seitig per nativer navigate() zum http-Splash
+    //    gefahren; die same-origin-Navigation auf "/" macht dann der Poll unten.
+    try {
+      if (window.__TAURI__ && window.__TAURI__.event) {
+        window.__TAURI__.event.listen('backend-error', function (evt) {
+          zeigeFehler(evt && evt.payload ? evt.payload : '');
+        });
+      }
+    } catch (e) {}
+
+    // 2) Erfolgs-Signalweg auf dem http-Splash: /api/status pollen. Bei HTTP 200
+    //    gilt das Backend als bereit -> geheZurApp() navigiert same-origin auf "/".
+    var attempts = 0;
+    var check = setInterval(function () {
+      if (fertig) { clearInterval(check); return; }
+      attempts++;
+      fetch(BACKEND_URL + '/api/status')
+        .then(function (r) {
+          if (r.ok) {
+            clearInterval(check);
+            geheZurApp();
+          }
+        })
+        .catch(function () {});
+
+      var status = document.getElementById('status');
+      if (!fertig && status) {
+        var dots = new Array((attempts % 3) + 2).join('.');
+        status.textContent = 'Starte Backend' + dots;
+      }
+    }, 500);
+  </script>
+</body>
+</html>

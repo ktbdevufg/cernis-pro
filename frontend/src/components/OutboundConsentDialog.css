@@ -1,0 +1,134 @@
+/* Einwilligungs-Dialog für echte Domainnamen (CERNIS PRO 2.0)
+   Zentrierter Overlay-Dialog, Stil analog MaintenanceDialog.css. Nur CSS-Tokens
+   des Projekts (--color-*, --radius-*), keine hartkodierten Farben — Ausnahme:
+   der halbtransparente Backdrop-Schwarzton, wie im Projekt üblich. Dark-Mode
+   kommt automatisch über die Variablen. */
+
+/* Backdrop: deckt die ganze App, zentriert den Dialog. */
+.outbound-consent-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+/* Der Dialog selbst: Karten-Optik wie der Wartungs-Dialog. */
+.outbound-consent-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  max-width: 480px;
+  max-height: calc(100vh - 3rem);
+  overflow-y: auto;
+  padding: 1.75rem;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.28);
+}
+
+/* Titel-Zeile: Icon + Überschrift in einer Reihe. */
+.outbound-consent-titel {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--color-text);
+}
+
+.outbound-consent-h {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+/* Intro-Absatz: ruhiger Fließtext. */
+.outbound-consent-intro {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-text-sec);
+}
+
+/* Eine Eigenschaften-Zeile: Icon links, Text rechts; dezenter card-Hintergrund. */
+.outbound-consent-point {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-sec);
+}
+
+.outbound-consent-point-text {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--color-text-sec);
+}
+
+.outbound-consent-point-text strong {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+/* „Nicht mehr fragen"-Kästchen: dezente Checkbox + Label. */
+.outbound-consent-dontask {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--color-text-sec);
+  cursor: pointer;
+}
+
+.outbound-consent-dontask input {
+  cursor: pointer;
+  accent-color: var(--color-accent);
+}
+
+/* Knopfzeile, rechtsbündig. */
+.outbound-consent-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Neutraler Knopf (Ablehnen) im Settings-Stil. */
+.outbound-consent-button {
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.outbound-consent-button:hover {
+  border-color: var(--color-accent-border);
+}
+
+.outbound-consent-button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Zustimmen dezent akzentuiert — Akzent-Ton des Projekts, nicht grell. */
+.outbound-consent-button--grant {
+  color: var(--color-accent-strong);
+  background: var(--color-accent-bg);
+  border-color: var(--color-accent-border);
+}
+
+.outbound-consent-button--grant:hover {
+  background: var(--color-accent);
+}

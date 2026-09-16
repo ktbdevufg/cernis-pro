@@ -22,6 +22,7 @@ from domain.scanning import (
     EnrichedHost,
     MdnsService,
     PortInfo,
+    PortInterception,
     SsdpService,
 )
 
@@ -30,7 +31,9 @@ class CorruptScanError(Exception):
     """Ein zu deserialisierender Host-Blob ist kein gueltiges JSON-Objekt.
 
     Ersetzt den stillen ``or "[]"``-Rueckfall des Altcodes: ein kaputter Blob ist
-    ein Fehler MIT ``scan_id``-Bezug (Muster wie ``CorruptDeviceError``).
+    ein Fehler MIT ``scan_id``-Bezug (Muster wie ``CorruptDeviceError``). Dazu
+    zaehlt auch ein formfremdes verschachteltes Feld (z. B. ``mDNS``-properties als
+    flache String-Liste statt ``[key, value]``-Paaren).
     """
 
     def __init__(self, scan_id: int, raw_value: str) -> None:
@@ -46,9 +49,57 @@ def host_to_dict(host: EnrichedHost) -> dict[str, Any]:
     return asdict(host)
 
 
-def _str_pairs(raw: Any) -> tuple[tuple[str, str], ...]:
-    """JSON-Liste von [key, value]-Paaren -> tuple[tuple[str, str], ...]."""
-    return tuple((str(k), str(v)) for k, v in raw)
+def interception_to_dict(interception: PortInterception) -> dict[str, Any]:
+    """PortInterception -> JSON-taugliches dict (tuples werden zu Listen)."""
+    return asdict(interception)
+
+
+def dict_to_interception(scan_id: int, data: Any) -> PortInterception:
+    """JSON-dict -> PortInterception; ein leeres/fehlendes Feld heisst "nicht geprueft".
+
+    ``None`` (Spalte NULL) und ``{}`` sind der Altbestand-Fall: ein vor dieser
+    Etappe gespeicherter Scan wurde nicht gegengeprueft. Das ist KEIN Fehler,
+    sondern genau der Zustand, den ``checked=False`` benennt -- der Default des
+    Domaenenmodells trifft ihn ohne Sonderbehandlung.
+
+    Ein vorhandener, aber formfremder Wert (kein Objekt) ist dagegen ein echter
+    Defekt und wird als ``CorruptScanError`` gemeldet -- kein stiller Rueckfall
+    auf "nicht geprueft", weil das einen kaputten Datensatz als harmlosen
+    Normalfall tarnen wuerde (Finding S3).
+    """
+    if data is None:
+        return PortInterception()
+    if not isinstance(data, dict):
+        raise CorruptScanError(scan_id, json.dumps(data))
+    return PortInterception(
+        checked=bool(data.get("checked", False)),
+        control_ips=tuple(str(ip) for ip in data.get("control_ips", ())),
+        intercepted_ports=tuple(int(p) for p in data.get("intercepted_ports", ())),
+        reason=str(data.get("reason", "")),
+    )
+
+
+def _str_pairs(scan_id: int, raw: Any) -> tuple[tuple[str, str], ...]:
+    """JSON-Liste von [key, value]-Paaren -> tuple[tuple[str, str], ...].
+
+    Formfremdes ``properties`` (z. B. eine flache String-Liste aus altem
+    Bestandsdatensatz statt [key, value]-Paaren) wird als benannter
+    ``CorruptScanError`` (mit ``scan_id``-Bezug) gemeldet -- NICHT als nackter
+    ``ValueError``, und NICHT still repariert (kein Datenverlust). Vervollstaendigt
+    die S3-Linie ("kein stiller Fallback") an dieser Stelle.
+    """
+    pairs: list[tuple[str, str]] = []
+    try:
+        items = list(raw)
+    except TypeError as exc:
+        raise CorruptScanError(scan_id, json.dumps(raw)) from exc
+    for item in items:
+        if isinstance(item, (list, tuple)) and len(item) == 2:
+            k, v = item
+            pairs.append((str(k), str(v)))
+        else:
+            raise CorruptScanError(scan_id, json.dumps(raw))
+    return tuple(pairs)
 
 
 def dict_to_host(scan_id: int, data: Any) -> EnrichedHost:
@@ -63,7 +114,7 @@ def dict_to_host(scan_id: int, data: Any) -> EnrichedHost:
             port=m.get("port", 0),
             hostname=m.get("hostname", ""),
             is_ndi=m.get("is_ndi", False),
-            properties=_str_pairs(m.get("properties", ())),
+            properties=_str_pairs(scan_id, m.get("properties", ())),
             ip=m.get("ip", ""),
         )
         for m in data.get("mdns_services", ())
@@ -91,4 +142,8 @@ def dict_to_host(scan_id: int, data: Any) -> EnrichedHost:
         label=data.get("label", ""),
         tags=tuple(data.get("tags", ())),
         notes=data.get("notes", ""),
+        # Default "ping": alte DB-Blobs (vor S.7f) haben kein source-Feld -- ein
+        # damals gespeicherter Host war ein Ping-Host. host_to_dict nimmt source
+        # ueber asdict automatisch mit; hier der explizite Pull beim Lesen.
+        source=data.get("source", "ping"),
     )

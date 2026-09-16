@@ -29,10 +29,18 @@ Sicherheits-/Altmuster-Befund (geprueft, hier akzeptabel):
   bewusste Einschaetzung festgehalten, nicht still uebergangen.
 """
 
+import asyncio
 from typing import Any
 
 from domain.scanning import MdnsService
 from modules.mdns import discover_mdns
+
+# Wartezeit vor dem EINEN internen Wiederholungsversuch, wenn der erste Lauf
+# nichts geliefert hat. 1.5 s ist konservativ: spuerbar genug, damit ein spaet
+# antwortender Responder (frisch gestarteter Dienst, verzoegerte Multicast-
+# Zustellung) noch in den zweiten Lauf faellt, aber unkritisch fuer die
+# Gesamtdauer des Scans.
+_RETRY_DELAY = 1.5
 
 
 def _to_domain(raw: Any) -> MdnsService:
@@ -62,6 +70,16 @@ class MdnsAdapter:
 
         ``discover_mdns`` ist bereits async -- direkt awaiten. Nichts gefunden
         -> ``[]`` (siehe Modul-Docstring: best-effort, kein verdecktes Scheitern).
+
+        Bleibt der erste Lauf leer, wird GENAU EINMAL nach ``_RETRY_DELAY``
+        wiederholt -- ohne zweiten Nutzerklick. Multicast-Discovery ist
+        best-effort; ein leerer erster Durchlauf heisst oft nur, dass kein
+        Responder im Fenster geantwortet hat. Der Retry ist verlustfrei: hat der
+        erste Lauf schon etwas geliefert, passiert nichts. Genau ein Versuch --
+        keine Schleife, keine Rekursion.
         """
         raw_services = await discover_mdns(duration)
+        if not raw_services:
+            await asyncio.sleep(_RETRY_DELAY)
+            raw_services = await discover_mdns(duration)
         return [_to_domain(raw) for raw in raw_services]

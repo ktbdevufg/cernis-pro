@@ -1,0 +1,90 @@
+/* SLA-Verlaufsgraph einer Logging-Aufgabe. Designsprache wie RttGraph/die
+   Monitor-Karten: Card-Fläche, --color-border, radius. Nur Token-Variablen,
+   nie feste Farben. */
+
+.sla-chart {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 12px 14px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.sla-chart__kopf {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sla-chart__titel {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.sla-chart__label {
+  color: var(--color-text-sec);
+  font-weight: 400;
+}
+
+/* Das gestreckte SVG-Feld. preserveAspectRatio="none" verzerrt — die Achsen-Texte
+   liegen darum als eigenes Overlay daneben, nicht im SVG. */
+.sla-chart__svg {
+  width: 100%;
+  height: 180px;
+  display: block;
+}
+
+.sla-chart__grid {
+  stroke: var(--color-border);
+  stroke-width: 1;
+}
+
+/* Achsen-Beschriftungs-Overlay: absolut über dem SVG, an den Gridlinien (top in %)
+   ausgerichtet. Rechtsbündig, damit es die Linie nicht überdeckt. */
+.sla-chart__achse {
+  position: absolute;
+  /* Deckt nur die SVG-Fläche ab: Kopfzeile (~21px) + gap (8px) + padding-top. */
+  top: 41px;
+  right: 14px;
+  bottom: 12px;
+  left: 14px;
+  pointer-events: none;
+}
+
+.sla-chart__achse-wert {
+  position: absolute;
+  right: 0;
+  transform: translateY(-50%);
+  padding: 0 4px;
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+  color: var(--color-text-tert);
+  background: var(--color-card);
+  border-radius: var(--radius-md);
+}
+
+/* Dezente x-Achse unter dem SVG: erste links, letzte rechts. */
+.sla-chart__zeit {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+  color: var(--color-text-tert);
+}
+
+/* Ruhige Leer-Meldung bei zu wenigen Werten (statt leerem Kasten). */
+.sla-chart__leer {
+  margin: 0;
+  padding: 24px 12px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--color-text-sec);
+}

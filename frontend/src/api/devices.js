@@ -1,0 +1,218 @@
+// Geräte-Mapper (CERNIS PRO 2.0)
+//
+// Übersetzt die Backend-Antwort von PUT /api/devices/{mac} (kuratierte
+// Gerätenotizen: label/tags/notes etc., snake_case) in die View-Form
+// (camelCase) und kapselt den Schreibpfad. Stil bewusst wie api/interfaces.js:
+// kleine reine Helfer, kein erfundener Fallback (fehlt ein Feld -> leer/null).
+//
+// Wire-Form (aus backend/api/devices.py):
+//   { mac, vendor, label, notes, category, is_known, trust_state, hostname,
+//     os_guess, tags[], open_ports[], last_ip, times_seen, first_seen,
+//     last_seen }
+
+import { apiGet, apiPost, apiPut } from "./client.js";
+
+// Ein Wire-Gerät -> View-Gerät. snake_case -> camelCase. Fehlende Felder
+// werden leer/null, nicht erfunden.
+export function mappeDevice(wire) {
+  return {
+    mac: wire.mac,
+    vendor: wire.vendor,
+    label: wire.label,
+    notes: wire.notes,
+    category: wire.category,
+    isKnown: wire.is_known === true,
+    // Wertende Einschätzung (trusted/neutral/watch). Defensiver Default
+    // "neutral" — kein erfundener Wert, falls das Feld fehlt.
+    trustState: wire.trust_state ?? "neutral",
+    // Wache-Wegleg-Flag: nur ein echtes true zählt (fehlt das Feld -> false).
+    watchDismissed: wire.watch_dismissed === true,
+    hostname: wire.hostname,
+    osGuess: wire.os_guess,
+    tags: wire.tags ?? [],
+    openPorts: wire.open_ports ?? [],
+    lastIp: wire.last_ip ?? null,
+    timesSeen: wire.times_seen ?? null,
+    firstSeen: wire.first_seen ?? null,
+    lastSeen: wire.last_seen ?? null,
+    // Lebenszyklus-Felder (Block A): defensiv, kein erfundener Wert.
+    archived: wire.archived === true,
+    source: wire.source ?? "scan",
+    archivePromptCount: wire.archive_prompt_count ?? 0,
+    archivePromptDismissed: wire.archive_prompt_dismissed === true,
+  };
+}
+
+// Reine Funktion: kommagetrennter Text -> string[]. An "," splitten, jeden Teil
+// trimmen, leere Teile wegwerfen. "" -> []. Bewusst testbar exportiert.
+export function tagsAusText(text) {
+  return (text ?? "")
+    .split(",")
+    .map((teil) => teil.trim())
+    .filter((teil) => teil.length > 0);
+}
+
+// Schreibt die kuratierten Notizfelder (label/tags/notes) eines Geräts per
+// PUT /api/devices/{mac} und gibt das aktualisierte Gerät in View-Form zurück.
+// Der Body enthält nur die übergebenen Felder; category/is_known werden hier
+// bewusst NICHT angefasst. trust_state wird nur mitgesendet, wenn trustState
+// übergeben wurde (partielles Update — sonst weglassen).
+export async function updateDeviceMeta(mac, { label, tags, notes, trustState }) {
+  const body = { label, tags, notes };
+  if (trustState !== undefined) {
+    body.trust_state = trustState;
+  }
+  const antwort = await apiPut(
+    `/api/devices/${encodeURIComponent(mac)}`,
+    body,
+  );
+  return mappeDevice(antwort);
+}
+
+// Sofort-speichernder Helfer für den Einordnungs-Klick: schickt NUR
+// { trust_state } per PUT /api/devices/{mac} und gibt das gemappte Gerät
+// zurück. Entkoppelt vom Notizen-Speichern; is_known wird serverseitig
+// konsistent gesetzt und kommt über das gemappte Gerät zurück.
+export async function setTrustState(mac, trustState) {
+  const antwort = await apiPut(`/api/devices/${encodeURIComponent(mac)}`, {
+    trust_state: trustState,
+  });
+  return mappeDevice(antwort);
+}
+
+// Lädt die Gäste-/Unbekannt-Wache: noch nicht eingeordnete, nicht weggelegte
+// Geräte (GET /api/devices/unclassified). Liefert die gemappte View-Liste
+// (camelCase). Leere Wache -> [].
+export async function fetchUnclassifiedDevices() {
+  const antwort = await apiGet("/api/devices/unclassified");
+  return (antwort ?? []).map(mappeDevice);
+}
+
+// Legt ein Gerät aus der Wache weg (dismissed=true) oder holt es zurück
+// (dismissed=false) per POST /api/devices/{mac}/dismiss. Gibt das aktualisierte
+// Gerät in View-Form zurück. Das Gerät bleibt im Bestand — nur die Wache-
+// Sichtbarkeit ändert sich (rücknehmbar).
+export async function dismissDevice(mac, dismissed) {
+  const antwort = await apiPost(
+    `/api/devices/${encodeURIComponent(mac)}/dismiss`,
+    { dismissed },
+  );
+  return mappeDevice(antwort);
+}
+
+// Lädt den aktiven, nicht-archivierten Gerätebestand (GET /api/devices). Mit
+// knownOnly=true wird ?known_only=true angehängt (nur eingeordnete Geräte).
+// Liefert die gemappte View-Liste; leerer Bestand -> [].
+export async function fetchDevices(knownOnly = false) {
+  const antwort = await apiGet(
+    "/api/devices",
+    knownOnly ? { known_only: true } : undefined,
+  );
+  return (antwort ?? []).map(mappeDevice);
+}
+
+// Lädt die archivierten Geräte (GET /api/devices/archived). Liefert die
+// gemappte View-Liste; leeres Archiv -> [].
+export async function fetchArchivedDevices() {
+  const antwort = await apiGet("/api/devices/archived");
+  return (antwort ?? []).map(mappeDevice);
+}
+
+// Legt ein Gerät manuell an (POST /api/devices). tags ist ein string[] (der
+// Aufrufer wandelt Text via tagsAusText). Der Client-ApiError wird bewusst
+// UNVERÄNDERT weitergereicht — der Aufrufer unterscheidet 409 (MAC existiert)
+// und 422 (MAC ungültig) über .status. Kein try/catch hier.
+export async function createDevice({ mac, label, notes, category, tags }) {
+  const antwort = await apiPost("/api/devices", {
+    mac,
+    label,
+    notes,
+    category,
+    tags,
+  });
+  return mappeDevice(antwort);
+}
+
+// Archiviert ein Gerät (POST /api/devices/{mac}/archive). Das Gerät bleibt im
+// Bestand, wird aber aus Wertungen/Listen ausgenommen (rücknehmbar über
+// restoreDevice). Gibt das aktualisierte Gerät in View-Form zurück.
+export async function archiveDevice(mac) {
+  const antwort = await apiPost(
+    `/api/devices/${encodeURIComponent(mac)}/archive`,
+    {},
+  );
+  return mappeDevice(antwort);
+}
+
+// Holt ein archiviertes Gerät zurück in den aktiven Bestand
+// (POST /api/devices/{mac}/restore). Gibt das aktualisierte Gerät in View-Form
+// zurück.
+export async function restoreDevice(mac) {
+  const antwort = await apiPost(
+    `/api/devices/${encodeURIComponent(mac)}/restore`,
+    {},
+  );
+  return mappeDevice(antwort);
+}
+
+// Lädt die Archiv-Kandidaten (GET /api/devices/archive-candidates): lange nicht
+// gesehene, nicht archivierte, nicht dauerhaft weggelegte Geräte (Schwelle aus
+// Setting, Default 30 Tage). Passiver Lese-Pfad, den das Frontend nach
+// Scan-Abschluss abfragt, um beim Nutzer nachzufragen. Leere Liste -> [].
+export async function fetchArchiveCandidates() {
+  const antwort = await apiGet("/api/devices/archive-candidates");
+  return (antwort ?? []).map(mappeDevice);
+}
+
+// Beantwortet die Archiv-Nachfrage für ein Gerät
+// (POST /api/devices/{mac}/archive-prompt). Ja (archive=true) archiviert das
+// Gerät; Nein (archive=false) zählt die Nachfrage hoch — ab dem 3. Nein liefert
+// archive-candidates das Gerät serverseitig nicht mehr (3x-Regel). Gibt das
+// aktualisierte Gerät in View-Form zurück.
+export async function answerArchivePrompt(mac, archive) {
+  const antwort = await apiPost(
+    `/api/devices/${encodeURIComponent(mac)}/archive-prompt`,
+    { archive },
+  );
+  return mappeDevice(antwort);
+}
+
+// Lädt die Netzgruppen des aktiven Bestands (GET /api/devices/netz-gruppen).
+// Eine Gruppe ist das /24 der zuletzt bekannten IP; Geräte ohne brauchbare IP
+// bilden die Gruppe mit der Kennung "ohne-ip" (das Frontend übersetzt sie, das
+// Backend schickt sie unverändert). Reine Rechnung — nichts ist gespeichert,
+// jede Abfrage sieht den aktuellen Stand. Leerer Bestand -> [].
+export async function fetchNetzGruppen() {
+  const antwort = await apiGet("/api/devices/netz-gruppen");
+  return (antwort ?? []).map((wire) => ({
+    netz: wire.netz,
+    anzahl: wire.anzahl ?? 0,
+    macs: wire.macs ?? [],
+  }));
+}
+
+// Entfernt eine MENGE von Geräten samt aller MAC-gebundenen Nebendaten
+// (POST /api/devices/remove-many). Bewusst EIN Aufruf und keine Schleife über
+// DELETE /api/devices/{mac}: nur eine Transaktion im Backend hält Gerät und
+// Nebendaten zusammen. Gibt die Zahl der tatsächlich entfernten Geräte zurück.
+// Der ApiError wird unverändert weitergereicht (der Aufrufer zeigt E-502).
+export async function removeManyDevices(macs) {
+  const antwort = await apiPost("/api/devices/remove-many", { macs });
+  return antwort?.entfernt ?? 0;
+}
+
+export default {
+  updateDeviceMeta,
+  setTrustState,
+  fetchUnclassifiedDevices,
+  dismissDevice,
+  fetchDevices,
+  fetchArchivedDevices,
+  createDevice,
+  archiveDevice,
+  restoreDevice,
+  fetchArchiveCandidates,
+  answerArchivePrompt,
+  fetchNetzGruppen,
+  removeManyDevices,
+};

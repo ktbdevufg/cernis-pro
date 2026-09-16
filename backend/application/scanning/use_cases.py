@@ -18,7 +18,13 @@ Fluss (am S.1-Characterization-Contract des ``/ws/scan`` ausgerichtet):
 3. ``PhaseChanged(discovery, running)``.
 4. Discovery-Generator je CIDR durchlaufen: ``DiscoveryTick`` -> ``Progress``,
    ``DiscoveryHostFound`` -> ``HostFound``.
-5. ``PhaseChanged(discovery, done, alive_count)``.
+4a. FritzBox-Merge (S.7c): Fritz-only-Hosts (DHCP-Clients der Box, aber ping-still)
+   als ``DiscoveredHost(source="fritzbox")`` anhaengen + ``HostFound`` yielden --
+   noch in der Discovery-Phase, VOR dem ARP-Merge (Altcode-Reihenfolge).
+4b. ARP-Merge (S.7b): ARP-only-Hosts (im OS-Neighbor-Cache, aber ping-still) als
+   synthetische ``DiscoveredHost(source="arp")`` anhaengen + ``HostFound`` yielden
+   -- noch in der Discovery-Phase, vor ``done``.
+5. ``PhaseChanged(discovery, done, alive_count)`` -- ``alive_count`` inkl. Fritz+ARP.
 6. mDNS/SSDP einsammeln (per IP gruppiert).
 7. ``PhaseChanged(enrich, running, total)``.
 8. Pro lebendem Host: Hostname/SMB-Aufloesung, PortScan, mDNS/SSDP zuordnen,
@@ -27,22 +33,14 @@ Fluss (am S.1-Characterization-Contract des ``/ws/scan`` ausgerichtet):
    ``Ipv6EnrichmentPort`` arbeitet batch-weise).
 10. ``ScanHistory.save`` -> ``ScanCompleted``.
 
-BEWUSST AUFGESCHOBENE LUECKEN (KEINE vergessenen Schritte -- siehe S.6-Merkposten):
+BEWUSST AUSSERHALB dieses Use-Case (Architektur-Entscheidung, kein vergessener Schritt):
 
-* FritzHosts-Merge: Der Altcode merged zusaetzliche Hosts aus der FRITZ!Box-
-  DHCP-Tabelle (``FritzHostsPort.get_hosts``) in die Discovery-Liste -- faengt
-  ping-blockierende Geraete (iPads o.ae.). Das ist hier NICHT enthalten: der
-  ``FritzHostsPort`` ist daher (noch) NICHT injiziert -- ein ungenutzter Port
-  saehe wie ein Bug aus. Kommt mit der S.6-Verdrahtung, wenn das Merge-Verhalten
-  (Fritz-Hosts ausserhalb des gescannten Subnetzes? Reihenfolge der
-  ``HostFound``-Events?) entschieden ist.
-* ARP-Merge: analog, nutzt im Altcode ``modules.get_arp_table`` DIREKT (kein
-  Port) -- braeuchte erst einen ``ArpTablePort`` + Adapter. Ebenfalls aufgeschoben.
 * devices-Persistenz: Der Altcode ruft pro Host ``update_device_from_scan``
-  (v2: ``RecordScannedHost``). Das ist ein Seiteneffekt, KEIN Teil der
-  Event-Sequenz, und eine scanning->devices-Domaenenkopplung. Bleibt aus dem
-  Use-Case heraus; die ``EnrichedHost`` -> ``ScannedHost``-Projektion +
-  ``RecordScannedHost``-Aufruf gehoeren in die S.6-Verdrahtung.
+  (v2: ``RecordScannedHost``). Das ist ein Seiteneffekt in eine FREMDE Domaene,
+  KEIN Teil der Event-Sequenz. Er bleibt bewusst aus diesem Use-Case heraus
+  (scanning soll nicht wissen, dass es devices gibt) -- die ``EnrichedHost`` ->
+  ``ScannedHost``-Projektion + der ``RecordScannedHost``-Aufruf liegen seit S.7d
+  im Composition Root (``ws_scan.py``), wo scanning + devices zusammenkommen.
 
 HostFound-Timing: Der ``HostDiscoveryPort``-Adapter (Variante A, S.4b) buendelt
 alle ``DiscoveryHostFound`` NACH den ``DiscoveryTick``s (entkoppelt vom
@@ -67,6 +65,8 @@ from collections.abc import AsyncIterator
 from ipaddress import ip_network
 from typing import assert_never
 
+import structlog
+
 from domain.scanning import (
     DiscoveredHost,
     DiscoveryHostFound,
@@ -74,9 +74,11 @@ from domain.scanning import (
     EnrichedHost,
     HostEnriched,
     HostFound,
+    Info,
     MdnsService,
     PhaseChanged,
     PortInfo,
+    PortInterception,
     Progress,
     ScanCompleted,
     ScanConfig,
@@ -87,7 +89,11 @@ from domain.scanning import (
     SsdpService,
     classify_host,
 )
+from domain.scanning.addressing import is_device_address, is_group_mac
+from domain.scanning.interception import CONTROL_ADDRESS_COUNT, pick_control_addresses
 from ports.scanning import (
+    ArpTablePort,
+    FritzHostsPort,
     HostDiscoveryPort,
     HostnameResolverPort,
     Ipv6EnrichmentPort,
@@ -97,6 +103,8 @@ from ports.scanning import (
     SsdpPort,
     VendorLookupPort,
 )
+
+_logger = structlog.get_logger(__name__)
 
 # Port-Timeout je Verbindungsversuch im socket-Modus. ``ScanConfig`` kennt keinen
 # eigenen Wert; der Altcode nutzte den ``scan_ports_socket``-Default (0.5 s).
@@ -175,6 +183,49 @@ _TOP_100_PORTS: tuple[int, ...] = (
 )
 
 
+def _mergeable(ip_str: str, mac: str, cidrs: tuple[str, ...], source: str) -> bool:
+    """True, wenn der Eintrag als Geraet in die Liste darf (Befund 55).
+
+    Fasst die beiden Bedingungen der Merge-Stellen zusammen und protokolliert den
+    Grund, wenn eine davon verletzt ist:
+
+    * Die ADRESSE muss eine echte Host-Adresse in einem der ``cidrs`` sein
+      (``is_device_address``) -- das schliesst neben allem ausserhalb der CIDRs
+      auch Netz-, Broadcast-, Multicast-, Loopback- und link-lokale Adressen aus.
+      Die Begrenzung auf das gescannte Netz ist dabei die alte Aufgabe des
+      frueheren ``_in_any_cidr``: ein ARP-Cache enthaelt auch Eintraege ausserhalb
+      des Scans (Gateway anderer Interfaces o.ae.).
+    * Die MAC darf keine Gruppen-MAC sein (``is_group_mac``) -- eine Broadcast-
+      oder Multicast-MAC kennzeichnet keine Geraeteidentitaet, auch dann nicht,
+      wenn die IP unauffaellig aussieht.
+
+    Ein verworfener Eintrag wird NUR protokolliert: eine Adressierungsform, die
+    nie ein Geraet war, ist kein Befund, den der Anwender wegklicken muesste --
+    darin unterscheidet sich dieser Fall von Befund 53, wo eine echte Beobachtung
+    ueber das Netz des Anwenders entsteht. Deshalb kein Event, kein neues Feld an
+    der Schnittstelle.
+    """
+    if not is_device_address(ip_str, cidrs):
+        _logger.debug(
+            "scan.merge.entry_verworfen",
+            ip=ip_str,
+            mac=mac,
+            source=source,
+            grund="keine echte Host-Adresse in den gescannten Netzen",
+        )
+        return False
+    if is_group_mac(mac):
+        _logger.debug(
+            "scan.merge.entry_verworfen",
+            ip=ip_str,
+            mac=mac,
+            source=source,
+            grund="Gruppen-MAC (Broadcast/Multicast) ist keine Geraeteidentitaet",
+        )
+        return False
+    return True
+
+
 def _group_by_ip[T: (MdnsService, SsdpService)](services: list[T]) -> dict[str, tuple[T, ...]]:
     """Gruppiert Dienste nach ihrer ``ip`` (group_by_ip-Aequivalent des Altcodes).
 
@@ -186,6 +237,70 @@ def _group_by_ip[T: (MdnsService, SsdpService)](services: list[T]) -> dict[str, 
         if service.ip:
             grouped.setdefault(service.ip, []).append(service)
     return {ip: tuple(items) for ip, items in grouped.items()}
+
+
+def _group_by_mac(
+    hosts: list[DiscoveredHost],
+) -> tuple[list[DiscoveredHost], dict[str, tuple[str, ...]]]:
+    """Gruppiert die Discovery-Hosts nach MAC -- eine MAC = ein Layer-2-Geraet.
+
+    Hintergrund: Proxy-ARP der FRITZ!Box beantwortet viele IPs mit IHRER MAC; v2
+    findet diese Antworten zuverlaessig und wuerde sie sonst als separate Geraete
+    listen. Netzwerktechnisch ist eine MAC EIN Geraet -- also je MAC einen
+    primaeren Host fuehren, die weiteren IPs verlustfrei als Attribut mitfuehren
+    (mehrere IPs auf einer MAC = Proxy-ARP ODER ARP-Spoofing; die Info darf nicht
+    verloren gehen).
+
+    Logik:
+    * Hosts mit LEERER MAC ("") werden NICHT gruppiert -- eine leere MAC ist keine
+      Identitaet; jeder bleibt unveraendert ein eigener Host.
+    * Hosts mit echter MAC nach ``mac.lower()`` gruppieren.
+    * Primaerer Host je Gruppe: der mit dem NIEDRIGSTEN ``rtt_ms`` (None zaehlt als
+      schlechtester, also ganz hinten). Bei Gleichstand der erste in
+      Discovery-Reihenfolge (i.d.R. der echte Ping-Host vor den ARP-Hosts).
+    * Die IPs der NICHT-primaeren Hosts der Gruppe (sortiert) werden zu
+      ``additional_ips`` des primaeren Hosts.
+
+    Rueckgabe: (Liste der primaeren + ungruppierten Hosts in stabiler Reihenfolge
+    -- an der ersten Vorkommens-Position der jeweiligen MAC bzw. des Hosts, also
+    KEIN Umsortieren der Tabelle -, dict ``mac.lower() -> tuple(additional_ips)``).
+    """
+
+    # ``rtt_ms is None`` zaehlt als schlechtester Wert -> mit (None-Flag, rtt)
+    # sortieren, sodass None ganz hinten landet; bei Gleichstand entscheidet der
+    # stabile ``sorted`` ueber den Discovery-Index (erstes Vorkommen gewinnt).
+    def _rtt_key(host: DiscoveredHost) -> tuple[bool, float]:
+        rtt = host.rtt_ms
+        return (rtt is None, rtt if rtt is not None else 0.0)
+
+    # Ergebnisliste in stabiler Reihenfolge aufbauen: pro Host an seiner Position
+    # entweder der Host selbst (leere MAC) oder ein Platzhalter beim ERSTEN
+    # Vorkommen seiner MAC; spaetere Vorkommen derselben MAC erzeugen keinen
+    # neuen Eintrag (None markiert die spaeter zu fuellende Stelle).
+    result: list[DiscoveredHost | None] = []
+    pos_of_first: dict[str, int] = {}
+    groups: dict[str, list[DiscoveredHost]] = {}
+
+    for host in hosts:
+        if not host.mac:
+            result.append(host)
+            continue
+        key = host.mac.lower()
+        if key not in groups:
+            pos_of_first[key] = len(result)
+            result.append(None)
+        groups.setdefault(key, []).append(host)
+
+    # Pro MAC-Gruppe den primaeren Host bestimmen und an der reservierten Position
+    # einsetzen; die uebrigen IPs (sortiert) als additional_ips ins dict.
+    extra: dict[str, tuple[str, ...]] = {}
+    for key, members in groups.items():
+        primary = min(members, key=_rtt_key)
+        result[pos_of_first[key]] = primary
+        extra[key] = tuple(sorted(h.ip for h in members if h is not primary))
+
+    # Alle Platzhalter sind jetzt gefuellt (jede Gruppe hat >=1 Mitglied).
+    return [h for h in result if h is not None], extra
 
 
 class RunNetworkScan:
@@ -200,6 +315,8 @@ class RunNetworkScan:
         mdns: MdnsPort,
         ssdp: SsdpPort,
         ipv6: Ipv6EnrichmentPort,
+        fritz_hosts: FritzHostsPort,
+        arp_table: ArpTablePort,
         scan_history: ScanHistoryRepository,
     ) -> None:
         self._discovery = discovery
@@ -209,6 +326,8 @@ class RunNetworkScan:
         self._mdns = mdns
         self._ssdp = ssdp
         self._ipv6 = ipv6
+        self._fritz_hosts = fritz_hosts
+        self._arp_table = arp_table
         self._scan_history = scan_history
 
     async def run(self, config: ScanConfig) -> AsyncIterator[ScanEvent]:
@@ -265,6 +384,100 @@ class RunNetworkScan:
                         # behandelt ist -- ein neuer Event-Typ ohne case bricht hier.
                         assert_never(event)
 
+        # Geteilte Menge der bereits gefundenen IPs -- beide Merges (Fritz, dann
+        # ARP) haengen nur NEUE IPs an und aktualisieren sie fortlaufend, sodass ein
+        # Host, den Fritz schon lieferte, nicht ein zweites Mal ueber ARP kommt.
+        discovered_ips = {host.ip for host in discovered}
+
+        # ── FritzBox-Merge: DHCP-Hosts der FRITZ!Box (S.7c) ──────────────────
+        # Faengt ping-blockierende Geraete (iPads o.ae.), die der Sweep verpasst,
+        # die die Box aber als DHCP-Client kennt. Laeuft VOR dem ARP-Merge
+        # (Altcode-Reihenfolge: Fritz, dann ARP). ``FritzHostsPort`` liefert ``[]``
+        # ohne konfigurierte/erreichbare Box -- der Auth-Fehler-Fall ist im
+        # Verdrahtungs-Wrapper (app.py) zu ``[]`` + Log gefangen (Entscheidung 3C,
+        # best-effort: ein Fritz-Credential-Tippfehler killt nicht den ganzen Scan).
+        # Nur Fritz-ONLY-Hosts werden angehaengt; bekannte IPs bleiben unberuehrt.
+        for fritz_host in await self._fritz_hosts.get_hosts():
+            if fritz_host.ip in discovered_ips:
+                continue
+            if not _mergeable(fritz_host.ip, fritz_host.mac, config.cidrs, "fritzbox"):
+                continue
+            # rtt_ms=None analog ARP (Entscheidung 4A, S.7b): KEIN Zweit-Ping. Ein
+            # von der Box gemeldeter, ping-stiller Host antwortet auch beim zweiten
+            # Versuch fast sicher nicht -- das spart einen ``ping_host``-Port.
+            # ``source="fritzbox"`` setzt der Adapter bereits (S.4e); hier nur
+            # rtt_ms/is_alive auf den Merge-Zustand bringen.
+            merged = DiscoveredHost(
+                ip=fritz_host.ip,
+                mac=fritz_host.mac,
+                rtt_ms=None,
+                is_alive=True,
+                source=fritz_host.source,
+            )
+            discovered.append(merged)
+            discovered_ips.add(merged.ip)
+            vendor = self._vendor_lookup.lookup(merged.mac) if merged.mac else ""
+            yield HostFound(
+                ip=merged.ip,
+                mac=merged.mac,
+                vendor=vendor,
+                rtt_ms=merged.rtt_ms,
+                is_unknown=bool(merged.mac),
+                source=merged.source,
+            )
+
+        # ── ARP-Merge: Hosts, die der Ping-Sweep nicht fand (S.7b) ───────────
+        # Faengt ping-stille Geraete, die im OS-Neighbor-Cache stehen (z.B. per
+        # frueheren Traffic gelernt). Zweite ``get_arp_table()``-Abfrage NEBEN der
+        # adapter-internen MAC-Zuordnung (S.4b) -- bewusst akzeptiert (Entscheidung
+        # 3A): der Cache ist billig, und die Tabelle durch den HostDiscoveryPort-
+        # Vertrag durchzureichen waere ein grosser Eingriff fuer eine Mikro-
+        # Optimierung. Nur ARP-ONLY-Hosts werden angehaengt; Ping-Hosts haben ihre
+        # MAC schon -- kein Doppel, kein MAC-Nachtrag (Altcode-treu).
+        # ARP-only-Hosts werden angehaengt; die MAC-Gruppierung weiter unten fasst
+        # Proxy-ARP-Duplikate (gleiche MAC, mehrere IPs) zu einem Geraet mit
+        # additional_ips zusammen -- daher hier KEIN Vorfilter auf ECHTE Geraete-MACs.
+        # ``_mergeable`` verwirft nur, was per Definition nie ein Geraet ist
+        # (Befund 55: Netz-/Broadcast-/Multicast-/Loopback-Adresse, Gruppen-MAC) --
+        # eine gewoehnliche MAC bleibt unangetastet, auch mehrfach vorkommend.
+        for arp_ip, arp_mac in (await self._arp_table.get_arp_table()).items():
+            if arp_ip in discovered_ips:
+                continue
+            if not _mergeable(arp_ip, arp_mac, config.cidrs, "arp"):
+                continue
+            # Bewusste Abweichung vom Altcode (Entscheidung 4A): KEIN Zweit-Ping zum
+            # RTT-Messen. Ein ARP-only-Host hat per Definition gerade NICHT auf Ping
+            # geantwortet (sonst stuende er in ``discovered_ips``) -- ein zweiter Ping
+            # liefert fast sicher erneut Timeout -> None. Wir setzen ``rtt_ms=None``
+            # direkt; das spart einen ``ping_host``-Port, den wir sonst nirgends
+            # brauchen, und ist observable nahezu identisch.
+            arp_host = DiscoveredHost(
+                ip=arp_ip, mac=arp_mac, rtt_ms=None, is_alive=True, source="arp"
+            )
+            discovered.append(arp_host)
+            discovered_ips.add(arp_ip)
+            vendor = self._vendor_lookup.lookup(arp_host.mac) if arp_host.mac else ""
+            yield HostFound(
+                ip=arp_host.ip,
+                mac=arp_host.mac,
+                vendor=vendor,
+                rtt_ms=arp_host.rtt_ms,
+                is_unknown=bool(arp_host.mac),
+                source=arp_host.source,
+            )
+
+        # ── MAC-Gruppierung: eine MAC = ein Geraet (Proxy-ARP/Spoofing) ──────
+        # NACH dem kompletten Discovery (Ping + Fritz + ARP): die discovered-Liste
+        # nach MAC gruppieren. Proxy-ARP der FRITZ!Box beantwortet viele IPs mit
+        # IHRER MAC -- ohne Gruppierung waeren das ebenso viele Phantom-Geraete.
+        # Die Gruppierung ist die alleinige, generische Loesung fuer Proxy-ARP-
+        # Duplikate: ein durchgekommener Proxy-Ping-Host wird hier gruppiert. Die
+        # gruppierte Liste ERSETZT discovered -- Enrich laeuft nur noch ueber die primaeren
+        # Hosts; die Geister-IPs werden NICHT mehr angereichert, leben aber als
+        # additional_ips am primaeren Host weiter (verlustfrei, sicherheitsrelevant).
+        discovered, mac_extra = _group_by_mac(discovered)
+
+        # alive_count zaehlt die gruppierten Hosts (eine MAC = ein Geraet).
         yield PhaseChanged(phase="discovery", status="done", alive_count=len(discovered))
 
         # ── mDNS/SSDP einsammeln + per IP gruppieren (group_by_ip-Aequivalent) ──
@@ -272,6 +485,20 @@ class RunNetworkScan:
         # S.5-Vorbau ihre ``ip`` und werden im Enrich dem passenden Host zugeordnet.
         mdns_by_ip = _group_by_ip(await mdns_task) if mdns_task is not None else {}
         ssdp_by_ip = _group_by_ip(await ssdp_task) if ssdp_task is not None else {}
+
+        # ── Gegenprobe: lokal abgefangene Ports (Befund 53) ──────────────────
+        # EINMAL je Scan, nicht je Geraet: der Abfaenger sitzt auf der MESSENDEN
+        # Maschine und ist keine Eigenschaft eines einzelnen Ziels. Laeuft VOR der
+        # Enrich-Phase, damit ihr Ergebnis schon beim ersten Host greift. Ohne
+        # Portscan gibt es nichts zu bereinigen -- dann auch keine Messung.
+        interception = (
+            await self._probe_interception(config, frozenset(discovered_ips))
+            if config.port_scan
+            else PortInterception(checked=False, reason="Portscan ist abgeschaltet.")
+        )
+        if config.port_scan and not interception.checked:
+            # Protokolleintrag: "nicht geprueft" wird BENANNT, nicht verschwiegen.
+            yield Info(message=f"Gegenprobe auf abgefangene Ports: {interception.reason}")
 
         # ── Enrich ────────────────────────────────────────────────────────────
         yield PhaseChanged(phase="enrich", status="running", total=len(discovered))
@@ -283,6 +510,8 @@ class RunNetworkScan:
                 config,
                 mdns_by_ip.get(host.ip, ()),
                 ssdp_by_ip.get(host.ip, ()),
+                mac_extra.get(host.mac.lower(), ()) if host.mac else (),
+                interception,
             )
             enriched_hosts.append(enriched)
             yield HostEnriched(host=enriched)
@@ -293,8 +522,86 @@ class RunNetworkScan:
         enriched_hosts = await self._ipv6.enrich(enriched_hosts)
 
         # ── Persistenz + Abschluss ───────────────────────────────────────────
-        self._scan_history.save(cidr_display, enriched_hosts)
-        yield ScanCompleted(total_found=len(discovered))
+        # ``interception`` geht MIT in den Record: die Information, welche Ports
+        # als abgefangen erkannt wurden und auf wie vielen Kontroll-Adressen
+        # geprueft wurde, wird nicht weggeworfen, sondern ist ueber die
+        # History-Schnittstelle abrufbar.
+        self._scan_history.save(cidr_display, enriched_hosts, interception)
+        # ``interception`` reist AUSSERDEM im Abschluss-Ereignis mit: der Live-Weg
+        # soll den Hinweis zu genau DIESEM Lauf zeigen koennen, ohne ihn ueber die
+        # History nachzuschlagen (zweite Anfrage, koennte einen anderen Scan treffen).
+        yield ScanCompleted(total_found=len(discovered), interception=interception)
+
+    async def _probe_interception(
+        self, config: ScanConfig, discovered_ips: frozenset[str]
+    ) -> PortInterception:
+        """Faehrt die EINE Gegenprobe je Scan gegen lokal abgefangene Ports (Befund 53).
+
+        Misst dieselbe Portliste mit denselben Parametern wie der regulaere Scan,
+        aber gegen Adressen, an denen kein Geraet geantwortet hat. Ein Port, der
+        dort trotzdem antwortet, kann nicht dem Ziel gehoeren -- er wird lokal
+        abgefangen.
+
+        Als abgefangen gilt ein Port NUR, wenn er auf ALLEN Kontroll-Adressen
+        antwortet (Schnittmenge, nicht Vereinigung): so kippt ein einzelnes
+        ping-stilles Geraet, das an einer der Kontroll-Adressen doch Dienste
+        anbietet, das Ergebnis nicht.
+
+        Laeuft die Probe nicht (zu wenige geeignete Adressen) oder faellt sie mit
+        einer Ausnahme aus, kommt ``checked=False`` mit Grund zurueck -- der
+        Aufrufer filtert dann NICHT. Kein stiller Rueckfall auf weniger Adressen
+        und keine stille Nicht-Pruefung (ADR 0001).
+        """
+        control_ips = pick_control_addresses(config.cidrs, discovered_ips)
+        if len(control_ips) < CONTROL_ADDRESS_COUNT:
+            return PortInterception(
+                checked=False,
+                reason=(
+                    f"Nur {len(control_ips)} von {CONTROL_ADDRESS_COUNT} geeigneten "
+                    "Kontroll-Adressen im gescannten Netz -- Gegenprobe nicht gefahren, "
+                    "es wurde nicht gefiltert."
+                ),
+            )
+
+        ports = config.custom_ports or _TOP_100_PORTS
+        try:
+            # Dieselbe Portliste, derselbe Modus, dieselbe Zeitgrenze und dieselbe
+            # Nebenlaeufigkeit wie im regulaeren Scan -- sonst waere das Ergebnis
+            # nicht vergleichbar (ein knapperes Timeout wuerde die Gegenprobe
+            # leerlaufen lassen und den Abfaenger verstecken).
+            results = [
+                await self._port_scanner.scan(
+                    control_ip,
+                    ports,
+                    config.port_mode,
+                    _PORT_TIMEOUT,
+                    config.max_concurrent_ports,
+                )
+                for control_ip in control_ips
+            ]
+        except Exception as exc:
+            # Die Gegenprobe ist eine ZUSATZ-Messung: ihr Ausfall darf den Scan
+            # nicht abbrechen (anders als der regulaere Portscan, dessen
+            # Adapter-Exception bewusst durchpropagiert). Aber er darf auch nicht
+            # still zu "nichts gefunden" werden -- daher checked=False mit Grund.
+            return PortInterception(
+                checked=False,
+                reason=(
+                    f"Gegenprobe fehlgeschlagen ({type(exc).__name__}: {exc}) "
+                    "-- es wurde nicht gefiltert."
+                ),
+            )
+
+        # Schnittmenge ueber ALLE Kontroll-Adressen.
+        answering: set[int] = {info.port for info in results[0]}
+        for result in results[1:]:
+            answering &= {info.port for info in result}
+
+        return PortInterception(
+            checked=True,
+            control_ips=control_ips,
+            intercepted_ports=tuple(sorted(answering)),
+        )
 
     async def _enrich_host(
         self,
@@ -302,11 +609,17 @@ class RunNetworkScan:
         config: ScanConfig,
         mdns_services: tuple[MdnsService, ...],
         ssdp_services: tuple[SsdpService, ...],
+        additional_ips: tuple[str, ...],
+        interception: PortInterception,
     ) -> EnrichedHost:
         """Reichert einen einzelnen Host an (Hostname/SMB/Ports/Dienste/Klassifikation).
 
         ``mdns_services``/``ssdp_services`` sind die dem Host (per IP) zugeordneten
-        Dienste -- leer, wenn keine fuer diese IP gefunden wurden.
+        Dienste -- leer, wenn keine fuer diese IP gefunden wurden. ``additional_ips``
+        sind die weiteren IPs derselben MAC (MAC-Gruppierung) -- leer im Normalfall.
+        ``interception`` ist das Ergebnis der EINEN Gegenprobe dieses Scans; seine
+        ``intercepted_ports`` werden hier aus der Portliste entfernt, bevor
+        klassifiziert wird.
         """
         vendor = self._vendor_lookup.lookup(host.mac) if host.mac else ""
 
@@ -327,7 +640,16 @@ class RunNetworkScan:
                 _PORT_TIMEOUT,
                 config.max_concurrent_ports,
             )
-            ports = tuple(scanned)
+            # Lokal abgefangene Ports fliegen HIER raus -- vor classify_host, damit
+            # die Betriebssystem-Erkennung die bereinigte Liste sieht und kein
+            # zweiter Griff noetig ist. Ein abgefangener Port ist keine Eigenschaft
+            # des Geraets; er darf weder in der Scan-Tabelle noch im
+            # Sicherheitsbericht, der Gesundheitsnote oder dem CVE-Abgleich landen
+            # -- alle vier lesen ``EnrichedHost.ports``, also reicht dieser Schnitt.
+            # Lief die Gegenprobe nicht (``checked=False``), ist
+            # ``intercepted_ports`` leer und es wird nichts entfernt.
+            intercepted = set(interception.intercepted_ports)
+            ports = tuple(info for info in scanned if info.port not in intercepted)
 
         # Fingerprinting bekommt die mDNS-Dienste (altcode-treu: _ipp/_googlecast etc.
         # fliessen in die Klassifikation ein). ``is_ndi`` aus den mDNS-Diensten.
@@ -355,6 +677,13 @@ class RunNetworkScan:
             is_ndi=is_ndi,
             is_unknown=bool(host.mac),
             category=classification.category,
+            # Herkunft (ping/arp/fritzbox) ueberlebt die Enrich-Phase (S.7f): aus
+            # dem DiscoveredHost durchgereicht, damit sie in host_detail +
+            # ScanHistory landet, nicht nur im fluechtigen host_found-Frame.
+            source=host.source,
+            # Weitere IPs derselben MAC (MAC-Gruppierung): die Geister-IPs der
+            # Proxy-ARP-Antworten leben hier verlustfrei am primaeren Host weiter.
+            additional_ips=additional_ips,
         )
 
 
@@ -397,3 +726,17 @@ class LookupVendor:
 
     def __call__(self, mac: str) -> str:
         return self._vendor_lookup.lookup(mac)
+
+
+class GetArpTable:
+    """System-ARP-/Neighbor-Cache als ``{ip: mac}`` (Lese-Pfad fuer ``/api/arp``).
+
+    Asynchron, weil der Port die blockierende ``ip neigh``-Abfrage ueber
+    ``run_in_executor`` kapselt. Leerer Cache -> ``{}`` (kein Sonderfall).
+    """
+
+    def __init__(self, arp_table: ArpTablePort) -> None:
+        self._arp_table = arp_table
+
+    async def __call__(self) -> dict[str, str]:
+        return await self._arp_table.get_arp_table()

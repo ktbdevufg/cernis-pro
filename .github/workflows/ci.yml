@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: uv installieren (+ Download-Cache, gekeyt auf uv.lock)
         uses: astral-sh/setup-uv@v8.1.0
@@ -42,8 +42,70 @@ jobs:
       - name: mypy (strict)
         run: uv run mypy
 
+      # ZWEITE PRUEFRICHTUNG -- kein versehentlicher Doppelaufruf:
+      # mypy wertet `sys.platform` STATISCH aus. Der Runner hier ist Linux, also
+      # gilt jeder `if sys.platform == "win32":`-Block als unerreichbar und wird
+      # nie geprueft -- Fehler in den Windows-Zweigen faenden wir erst auf einer
+      # Windows-Maschine. Der zweite Lauf prueft darum ausdruecklich gegen win32.
+      # Eigener Cache-Ordner: ein Plattformwechsel entwertet den Zwischenspeicher,
+      # beide Laeufe wuerden sich sonst gegenseitig die Ergebnisse verwerfen.
+      # `always()`: laeuft auch nach rotem erstem Schritt, damit ein Durchlauf
+      # BEIDE Richtungen zeigt. Ein rotes Ergebnis laesst den Job weiterhin
+      # scheitern -- die Bedingung schluckt den Ausgang nicht.
+      - name: mypy (strict, Zielplattform Windows/win32)
+        if: always()
+        run: uv run mypy --platform win32 --cache-dir "${{ runner.temp }}/mypy_cache_win32"
+
       - name: import-linter (Architektur-Regeln)
         run: PYTHONPATH=backend uv run lint-imports
 
+      # NODE IM QUALITY-JOB -- kein Versehen und keine Frontend-Arbeit hier:
+      # Die Naht-Tests rufen die ECHTEN Frontend-Quellen ueber `node` auf, statt
+      # sie in Python nachzubauen (etwa `frontend/src/api/traffic.js`). Ohne node
+      # auf dem Runner griffe ihr Riegel -- die Tests uebersprangen sich hier
+      # still und die gepruefte Naht war in der CI ungedeckt. Gleiche Action und
+      # gleiche Fassung wie im frontend-Job, damit beide Jobs nicht
+      # auseinanderlaufen.
+      - name: Node einrichten (LTS 20, fuer die node-gestuetzten Naht-Tests)
+        uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      # WARUM HIER DOCH INSTALLIERT WIRD: ein Teil der Naht-Tests buendelt echte
+      # Frontend-Dateien mit `esbuild` (und rendert mit `react-dom`), zieht die
+      # Pakete also aus `frontend/node_modules`. Der blosse Interpreter reicht
+      # dafuer NICHT -- ohne diesen Schritt fiel etwa
+      # `backend/tests/test_sni_status_autorefresh_naht.py` mit
+      # ERR_MODULE_NOT_FOUND (Lauf 31816836761). Seit S89-A1 ueberspringt sich in
+      # der CI ausserdem keiner dieser Tests mehr: fehlt hier etwas, faellt es
+      # benannt auf, statt still durchzugehen (`backend/tests/naht_frontend.py`).
+      # Gleiche Schreibweise wie im frontend-Job.
+      - name: Frontend-Abhaengigkeiten installieren (fuer die node-gestuetzten Naht-Tests)
+        working-directory: frontend
+        run: npm ci
+
       - name: pytest
         run: uv run pytest
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Node einrichten (LTS 20, npm-Cache)
+        uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Dependencies installieren (aus Lockfile)
+        working-directory: frontend
+        run: npm ci
+
+      - name: Vite-Build
+        working-directory: frontend
+        run: npm run build

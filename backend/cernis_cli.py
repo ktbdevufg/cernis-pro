@@ -63,8 +63,7 @@ def cmd_version(args):
 
 
 def cmd_scan(args):
-    import websocket as ws_lib
-    import threading
+    import asyncio
 
     cidr = args.cidr or "192.168.1.0/24"
     profile = args.profile or "standard"
@@ -81,43 +80,38 @@ def cmd_scan(args):
 
     header(f"Scan {cidr} [{profile}]")
     hosts = []
-    done = threading.Event()
 
     try:
-        import websocket
-        def on_message(wsapp, msg):
-            m = json.loads(msg)
-            if m["type"] == "host_found":
-                h = m
-                status = c("●", "green")
-                unknown = c(" NEW", "yellow") if m.get("is_unknown") else ""
-                print(f"  {status} {c(m['ip'], 'cyan'):<18} {m.get('vendor',''):<25}{unknown}")
-                hosts.append(m)
-            elif m["type"] == "scan_complete":
-                print(c(f"\n  ✓ {m['total_found']} hosts found", "green"))
-                done.set()
-            elif m["type"] == "error":
-                print(c(f"  ✗ {m['message']}", "red"))
-                done.set()
+        import websockets
 
-        def on_open(wsapp):
-            wsapp.send(json.dumps(config))
+        async def run_scan():
+            # Verbinde, sende die Config beim Open, empfange Nachrichten in einer
+            # Schleife und verarbeite dieselben message-Typen wie zuvor.
+            async with websockets.connect(f"{WS_BASE}/ws/scan") as ws:
+                await ws.send(json.dumps(config))
+                async for raw in ws:
+                    m = json.loads(raw)
+                    if m["type"] == "host_found":
+                        status = c("●", "green")
+                        unknown = c(" NEW", "yellow") if m.get("is_unknown") else ""
+                        print(f"  {status} {c(m['ip'], 'cyan'):<18} {m.get('vendor',''):<25}{unknown}")
+                        hosts.append(m)
+                    elif m["type"] == "scan_complete":
+                        print(c(f"\n  ✓ {m['total_found']} hosts found", "green"))
+                        return
+                    elif m["type"] == "error":
+                        print(c(f"  ✗ {m['message']}", "red"))
+                        return
 
-        wsapp = websocket.WebSocketApp(
-            f"{WS_BASE}/ws/scan",
-            on_message=on_message,
-            on_open=on_open,
-            on_error=lambda a, e: done.set(),
-            on_close=lambda a, b, c_: done.set(),
-        )
-        t = threading.Thread(target=wsapp.run_forever, daemon=True)
-        t.start()
-        done.wait(timeout=300)
-        wsapp.close()
+        try:
+            # 300s Gesamt-Timeout ueber die async-Session (die CLI ist synchron).
+            asyncio.run(asyncio.wait_for(run_scan(), timeout=300))
+        except asyncio.TimeoutError:
+            pass
 
     except ImportError:
         # Fallback: just show last scan from history
-        print(c("  websocket-client not installed, showing last scan:", "yellow"))
+        print(c("  websockets not installed, showing last scan:", "yellow"))
         history = api("/api/history?limit=1")
         if history:
             scan = api(f"/api/history/{history[0]['id']}")

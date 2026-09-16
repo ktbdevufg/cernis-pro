@@ -1,0 +1,691 @@
+/* DNS-Waechter-Bericht — In-App-Ansicht (Etappe 3). Eigene BEM-Klassen mit Praefix
+   dns-report__, gleiche Designsprache/Tokens wie CveReportView: Card-Flaechen,
+   --color-border, radius, accent fuer Kopf/Aktionen. Kategorie-Badges ueber dieselben
+   Token-Variablen (offen wie --sev-high, moegliche_doh wie --sev-med, erwartungsgemaess
+   ruhig ueber --color-accent/--color-border). Nur Token-Variablen, nie feste Farben. */
+
+.dns-report {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.dns-report__mono {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+.dns-report__num {
+  text-align: right;
+}
+
+/* Best-effort Ziel-Resolver-Name neben der rohen IP: dezent/gedaempft, damit die IP
+   die fuehrende Information bleibt (der Name ergaenzt, ersetzt nicht). */
+.dns-report__resolver-name {
+  color: var(--color-text-tert);
+}
+
+/* ── Bezugsrahmen-Umschalter (Etappe 6, Optik der DnsWatchScreen-Reiter) ────────
+   Zwei nackte, tab-artige Knoepfe: "Dieser Rechner" vs. "Umgehung im Netz". Aktiver
+   Reiter dezent akzentuiert. Im Druck ausgeblendet (kein Sinn auf Papier). */
+.dns-report__bezug-reiter {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.dns-report__bezug-knopf {
+  padding: 7px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-sec);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+
+.dns-report__bezug-knopf:hover {
+  border-color: var(--color-accent-border);
+}
+
+.dns-report__bezug-knopf:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.dns-report__bezug-knopf--aktiv {
+  color: var(--color-accent-strong);
+  background: var(--color-accent-bg);
+  border-color: var(--color-accent-border);
+}
+
+/* Bezugsrahmen-Dropdown (netzweite Sicht: Aufzeichnungs-Auswahl). Muster
+   outbound-report__bezug. Im Druck ausgeblendet. */
+.dns-report__bezug {
+  display: flex;
+}
+
+.dns-report__bezug-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+.dns-report__bezug-select {
+  padding: 5px 28px 5px 10px;
+  font-size: 12px;
+  color: var(--color-text);
+  /* background-color (nicht background-Shorthand), damit der globale
+     Custom-Chevron erhalten bleibt; padding-right stellt den Pfeilplatz. */
+  background-color: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+/* ── 1. Bericht-Titelkopf (Logo + grosse Ueberschrift + Erstelldatum) ──────────── */
+.dns-report__kopf {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding-bottom: 14px;
+  border-bottom: 2px solid var(--color-accent);
+}
+
+.dns-report__logo {
+  height: 44px;
+  width: auto;
+  display: block;
+}
+
+.dns-report__kopf-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dns-report__titel {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--color-text);
+}
+
+.dns-report__kopf-datum {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-tert);
+}
+
+/* Einleitung: ruhiger Fliesstext unter dem Kopf (Achse-B-Haltung in Klartext). */
+.dns-report__einleitung {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--color-text-sec);
+}
+
+/* Dezenter Fehlerhinweis (Ladefehler kippt die Ansicht nicht). */
+.dns-report__fehler {
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--sev-med-text);
+  background: var(--sev-med-bg);
+  border: 1px solid var(--sev-med-bd);
+  border-radius: var(--radius-md);
+}
+
+/* ── 2. Leerzustand (keine Kontakte) ───────────────────────────────────────────── */
+.dns-report__leerzustand {
+  padding: 20px 18px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.dns-report__leerzustand-text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--color-text-sec);
+}
+
+/* ── 3.2 Kennzahlen (Zahl-Reihe) ───────────────────────────────────────────────── */
+.dns-report__kennzahlen {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.dns-report__kennzahl {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-left-width: 4px;
+  border-left-color: var(--color-accent);
+  border-radius: var(--radius-md);
+}
+
+.dns-report__kennzahl-wert {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+/* Text-Kennzahl (Kategorie-Badge / Klartext statt grosser Zahl). */
+.dns-report__kennzahl-text {
+  display: flex;
+  align-items: center;
+  min-height: 28px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.dns-report__kennzahl-label {
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+/* ── 3.3 Kategorie-Donut ───────────────────────────────────────────────────────── */
+.dns-report__donut-paar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.dns-report__donut-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 18px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.dns-report__donut {
+  position: relative;
+  width: 160px;
+  height: 160px;
+}
+
+.dns-report__donut-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.dns-report__donut-mitte {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.dns-report__donut-summe {
+  font-size: 30px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.dns-report__donut-label {
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+/* Donut-Legende (Farbpunkt + Label + Zahl). */
+.dns-report__legende {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  max-width: 240px;
+}
+
+.dns-report__legende-zeile {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--color-text-sec);
+}
+
+.dns-report__legende-punkt {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.dns-report__legende-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dns-report__legende-zahl {
+  color: var(--color-text-tert);
+}
+
+/* ── 3.4 Verteilung (Toggle + Tabelle) ─────────────────────────────────────────── */
+.dns-report__verteilung {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 18px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.dns-report__verteilung-kopf {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.dns-report__abschnitt-titel {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.dns-report__toggle {
+  display: inline-flex;
+  gap: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.dns-report__toggle-knopf {
+  padding: 6px 14px;
+  font-size: 13px;
+  color: var(--color-text-sec);
+  background: var(--color-card);
+  border: none;
+  cursor: pointer;
+}
+
+.dns-report__toggle-knopf:hover {
+  background: var(--color-accent-bg);
+}
+
+.dns-report__toggle-knopf--aktiv {
+  color: var(--color-accent);
+  background: var(--color-accent-bg);
+  font-weight: 600;
+}
+
+/* "+ X weitere"-Hinweis (Verteilungs-Tabellen; optional, konsistent zu CVE). */
+.dns-report__rest {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+/* ── 3.5 Kontaktliste (Abschnitt) ──────────────────────────────────────────────── */
+.dns-report__abschnitt {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dns-report__abschnitt-titel--num {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 6px;
+  border-bottom: 2px solid var(--color-accent);
+}
+
+.dns-report__abschnitt-nummer {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-accent);
+  background: var(--color-accent-bg);
+  border-radius: 50%;
+}
+
+/* Steuerleiste: Filter-Chips + Sortier-Auswahl (im Druck ausgeblendet). */
+.dns-report__steuerung {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.dns-report__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.dns-report__chip {
+  padding: 5px 12px;
+  font-size: 12px;
+  color: var(--color-text-sec);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.dns-report__chip:hover {
+  background: var(--color-accent-bg);
+}
+
+.dns-report__chip--aktiv {
+  color: var(--color-accent);
+  background: var(--color-accent-bg);
+  border-color: var(--color-accent-border);
+  font-weight: 600;
+}
+
+.dns-report__sortierung {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+.dns-report__sortierung-select {
+  padding: 5px 28px 5px 10px;
+  font-size: 12px;
+  color: var(--color-text);
+  /* background-color (nicht background-Shorthand), damit der globale
+     Custom-Chevron erhalten bleibt; padding-right stellt den Pfeilplatz. */
+  background-color: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+/* ── Grundlage der Einordnung (ehrlicher Beleg der verwendeten Listen) ─────────── */
+.dns-report__grundlage {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.dns-report__grundlage-zeile {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-sec);
+}
+
+/* ── Resolver-Verteilung (netzweit, Variante C): gestapelter Balken + Legende ──
+   EIN horizontaler Balken, dessen Segmente die Ziele nach count anteilig zeigen
+   (Segment-Breite = Anteil), darunter eine Legende (Farbe + Name + rohe IP + Anzahl).
+   Farben kommen inline aus stabilen Token-Variablen (KEINE festen Farben hier). */
+.dns-report__resolver-grafik {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dns-report__stapelbalken {
+  display: flex;
+  width: 100%;
+  height: 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--color-bg);
+}
+
+.dns-report__stapel-segment {
+  height: 100%;
+  min-width: 2px;
+}
+
+/* Die Resolver-Legende darf ueber die volle Breite laufen (mehr als der schmale
+   Donut-Legenden-Standard von 240px). */
+.dns-report__resolver-legende {
+  max-width: none;
+}
+
+/* Geraet-Zelle (netzweite Umgeher-Liste): Titel + optionales DoH-Badge + beim eigenen
+   Host die "Dieser Rechner"-Kennzeichnung. Die Quell-IP hat eine EIGENE Spalte (analog
+   PDF), steht also nicht mehr in dieser Zelle. Vertikaler Stapel. */
+.dns-report__geraet {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: flex-start;
+}
+
+.dns-report__geraet-titel {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+/* Kennzeichnung des eigenen Hosts (isSelf): dezente zweite Zeile unter dem Hostnamen,
+   Klartext (nicht mono) -- die IP steht schon in der Quell-IP-Spalte. */
+.dns-report__geraet-selbst {
+  font-size: 11px;
+  color: var(--color-text-tert);
+}
+
+/* Beispiel-Namen (sample_qnames): gedaempft, umbruchfaehig. */
+.dns-report__qnames {
+  font-size: 12px;
+  color: var(--color-text-tert);
+  word-break: break-all;
+}
+
+/* ── Tabelle (Muster cve-report__tabelle) ──────────────────────────────────────── */
+.dns-report__tabelle {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.dns-report__tabelle th {
+  text-align: left;
+  padding: 8px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--color-text-tert);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.dns-report__tabelle td {
+  padding: 8px 10px;
+  color: var(--color-text);
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: top;
+}
+
+.dns-report__tabelle .dns-report__num {
+  text-align: right;
+}
+
+/* Am Bildschirm werden die ueber Top-N hinausgehenden Zeilen ausgeblendet;
+   im Druck zeigt @media print alle. */
+.dns-report__zeile--ueberzaehlig {
+  display: none;
+}
+
+/* ── Kategorie-Badges (nur bestehende Tokens, kein feste Farbe) ─────────────────── */
+.dns-report__cat {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+}
+
+.dns-report__cat[data-cat="offen"] {
+  color: var(--sev-high-text);
+  background: var(--sev-high-bg);
+  border-color: var(--sev-high-bd);
+}
+
+.dns-report__cat[data-cat="moegliche_doh"] {
+  color: var(--sev-med-text);
+  background: var(--sev-med-bg);
+  border-color: var(--sev-med-bd);
+}
+
+.dns-report__cat[data-cat="erwartungsgemaess"] {
+  color: var(--color-text-sec);
+  background: var(--color-card);
+  border-color: var(--color-accent);
+}
+
+/* Status-Texte (Aktiv neutral, Quittiert dezent). */
+.dns-report__status {
+  font-size: 12px;
+}
+
+.dns-report__status--aktiv {
+  color: var(--color-text-sec);
+}
+
+.dns-report__status--quittiert {
+  color: var(--color-text-tert);
+}
+
+/* Ruhige Leer-Meldung (statt leerem Kasten). */
+.dns-report__leer {
+  margin: 0;
+  padding: 16px 12px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--color-text-sec);
+}
+
+/* Achse-B-Fussnote (beschreibt und ordnet ein — kein Urteil). */
+.dns-report__fussnote {
+  margin: 0;
+  font-size: 12px;
+  font-style: italic;
+  line-height: 1.5;
+  color: var(--color-text-tert);
+}
+
+/* Bericht-Fusszeile (UNSER Inhalt am Dokument-Ende: Wortmarke + Erstelldatum). */
+.dns-report__fusszeile {
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+  text-align: center;
+  font-size: 11px;
+  color: var(--color-text-tert);
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+/* ── PDF-Aktion (rechtsbuendig im Kopf) ────────────────────────────────────────── */
+/* Sitzt jetzt im header.dns-report__kopf; margin-left:auto schiebt den Block
+   ganz nach rechts, neben Logo + Titel. */
+.dns-report__kopf-aktionen {
+  margin-left: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.dns-report__pdf {
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-bg);
+  background: var(--color-accent);
+  border: 1px solid var(--color-accent-strong);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.dns-report__pdf:hover {
+  background: var(--color-accent-strong);
+}
+
+.dns-report__pdf:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.dns-report__pdf-fehler {
+  margin: 0;
+  font-size: 12px;
+  color: var(--sev-med-text);
+}
+
+/* Dezenter Lade-Indikator (schmaler Balken oben am Container). */
+.dns-report__laedt {
+  height: 2px;
+  background: var(--color-accent);
+  border-radius: var(--radius-md);
+  opacity: 0.6;
+}
+
+/* ── Druck: Tabellen vollstaendig, Bedien-Controls weg ─────────────────────────── */
+@media print {
+  /* Ueberzaehlige Zeilen aufs Papier holen, "weitere"-Hinweise weg. */
+  .dns-report__zeile--ueberzaehlig {
+    display: table-row;
+  }
+  .dns-report__rest {
+    display: none;
+  }
+
+  /* Bedien-Controls (kein Sinn auf Papier): Bezugsrahmen-Umschalter + -Dropdown,
+     Toggle, Filter, Sortierung, PDF-Knopf. */
+  .dns-report__bezug-reiter,
+  .dns-report__bezug,
+  .dns-report__toggle,
+  .dns-report__steuerung,
+  .dns-report__kopf-aktionen,
+  .dns-report__laedt {
+    display: none;
+  }
+}

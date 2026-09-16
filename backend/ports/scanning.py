@@ -38,6 +38,7 @@ from domain.scanning import (
     EnrichedHost,
     MdnsService,
     PortInfo,
+    PortInterception,
     ScanRecord,
     ScanSummary,
     SsdpService,
@@ -179,6 +180,29 @@ class FritzHostsPort(Protocol):
         ...
 
 
+# ── Diagnose ──────────────────────────────────────────────────────────────
+
+
+class ArpTablePort(Protocol):
+    """Lese-Zugriff auf den System-ARP-/Neighbor-Cache (``{ip: mac}``).
+
+    Reiner Lese-Pfad fuer den ``/api/arp``-Endpunkt -- die Roh-Tabelle des
+    Betriebssystems, ohne Zuordnung zu einem Scan. Der ARP-Merge in den Scan-Flow
+    (synthetische Hosts, die der Ping-Sweep nicht fand) ist NICHT Teil dieses
+    Vertrags (S.7b, beruehrt ``RunNetworkScan``).
+    """
+
+    async def get_arp_table(self) -> dict[str, str]:
+        """Aktuelle ARP-/Neighbor-Eintraege als ``{ip: mac}``-Abbildung.
+
+        Blockierender ``ip neigh``-/``arp``-Aufruf im Altcode; der Adapter kapselt
+        das ueber ``run_in_executor``, die Methode bleibt ``async``. Leerer Cache
+        (oder nicht lesbar) -> ``{}``, niemals ``None`` -- ``{}`` ist der
+        vertragliche Leer-Zustand ("keine Eintraege"), kein Fehler.
+        """
+        ...
+
+
 # ── Persistenz ──────────────────────────────────────────────────────────────
 
 
@@ -189,8 +213,20 @@ class ScanHistoryRepository(Protocol):
     (S.4), nicht in der Domaene. ``save`` nimmt die fertigen Domaenen-Objekte.
     """
 
-    def save(self, cidr: str, hosts: Sequence[EnrichedHost]) -> None:
-        """Legt einen Scan-Eintrag an (``cidr`` + die gefundenen Hosts)."""
+    def save(
+        self,
+        cidr: str,
+        hosts: Sequence[EnrichedHost],
+        interception: PortInterception,
+    ) -> None:
+        """Legt einen Scan-Eintrag an (``cidr`` + Hosts + Gegenproben-Ergebnis).
+
+        ``interception`` ist das Ergebnis der EINEN Gegenprobe dieses Scans
+        (Befund 53) -- es haengt am Scan, nicht am einzelnen Host, weil der
+        lokale Abfaenger eine Eigenschaft der messenden Maschine ist. Der
+        Adapter muss auch den ``checked=False``-Zustand ("nicht geprueft")
+        speichern; er ist NICHT dasselbe wie "geprueft, nichts gefunden".
+        """
         ...
 
     def list(self, limit: int) -> list[ScanSummary]:
@@ -205,4 +241,8 @@ class ScanHistoryRepository(Protocol):
 
         ``None`` ist ein legitimer Zustand ("Scan-ID gibt es nicht"), kein Fehler.
         """
+        ...
+
+    def clear_all(self) -> None:
+        """Leert die gesamte Scan-Historie (nur die eigene Tabelle)."""
         ...

@@ -1,0 +1,489 @@
+/* Außenkontakte: Steuerleiste (Gruppierung + Filter) über der gebündelten
+   Liste. Gleiche Designsprache wie ObserveView/TrafficView: dezent, flach,
+   ruhig. Außenkontakte urteilen nicht — KEINE Severity-Farben/Tokens. */
+
+/* Monospace für IP/Hostname/ASN — System-Monospace als Fallback. */
+.outbound-mono {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+/* Äußerer Rahmen: Banner/Hinweis/Steuerleiste über der scrollenden Liste. */
+.outbound {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Ehrlicher host_scope-Banner: ruhiger, neutraler Info-Streifen (kein Alarm). */
+.outbound__scope {
+  flex-shrink: 0;
+  padding: 9px 12px;
+  font-size: 12px;
+  color: var(--color-text-sec);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* Ruhiger Hinweis-Streifen (Ladefehler): Stil wie observe__hinweis. */
+.outbound__hinweis {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex-shrink: 0;
+  padding: 9px 12px;
+  font-size: 12px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.outbound__hinweis-title {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-tert);
+}
+
+.outbound__hinweis-text {
+  color: var(--color-text-sec);
+}
+
+/* Install-Button im Npcap-Ausgrau-Block: im Akzent-Stil, links ausgerichtet
+   unter dem Hinweistext (der Container ist column). */
+.outbound__hinweis-button {
+  align-self: flex-start;
+  margin-top: 6px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-accent-strong);
+  background: var(--color-accent-bg);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.outbound__hinweis-button:hover {
+  background: var(--color-accent);
+}
+
+.outbound__hinweis-button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Steuerleiste: Segmented Control links, Filter-Schalter rechts daneben. */
+.outbound__controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+/* Segmented Control: flacher Chip-Schalter, neutraler Rahmen. Die aktive Achse
+   ist im Akzentton gefüllt (klar gewählt), ohne laut zu sein. */
+.outbound__segmented {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.outbound__seg {
+  padding: 5px 12px;
+  font-size: 13px;
+  color: var(--color-text-sec);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease;
+}
+
+.outbound__seg:hover {
+  color: var(--color-accent-strong);
+}
+
+.outbound__seg:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.outbound__seg--aktiv,
+.outbound__seg--aktiv:hover {
+  color: var(--color-accent-strong);
+  background: var(--color-accent-bg);
+}
+
+/* Filter-Schalter: dezente Checkbox + Label, neutraler Ton. */
+.outbound__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  color: var(--color-text-sec);
+  cursor: pointer;
+}
+
+.outbound__toggle input {
+  cursor: pointer;
+  accent-color: var(--color-accent);
+}
+
+/* Ehrlicher Leerzustand (keine Kontakte nach Filter): ruhige Zeile. */
+.outbound__empty {
+  margin: 0;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--color-text-sec);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* Gruppen-Liste: zweispaltig (zwei gleichbreite Spalten, 12px Projekt-Spacing),
+   scrollt intern, füllt die Resthöhe. Grid statt flex, damit jede Gruppe eine
+   eigene Zelle ist und NICHT zwischen den Spalten zerrissen wird. align-content:
+   start, damit die Gruppen oben beginnen und nicht über die Spaltenhöhe gedehnt
+   werden. Bei schmalem Fenster (≤900px) zurück auf eine Spalte. */
+.outbound__groups {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-content: start;
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+@media (max-width: 900px) {
+  .outbound__groups {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Eine Gruppe: Kopf (Label + Mengen-Zähler) über den Kontakten.
+   KEIN overflow:hidden — auf einem Vorfahren der scrollenden .outbound__groups
+   kappte das die letzte Kontaktzeile (gleiches Muster wie der ManualView-Sticky-
+   Bug). Die Ecken-Rundung wird stattdessen direkt am Kopf (oben) und an der
+   letzten Kontaktzeile (unten) gehalten, ohne Inhalt zu kappen. */
+.outbound-group {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+}
+
+.outbound-group__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 12px;
+  background: var(--color-bar);
+  border-bottom: 1px solid var(--color-border);
+  /* Obere Ecken folgen dem Gruppen-Rahmen (zuvor von overflow:hidden gekappt). */
+  border-top-left-radius: var(--radius-md);
+  border-top-right-radius: var(--radius-md);
+}
+
+.outbound-group__label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text);
+  word-break: break-word;
+}
+
+/* Mengen-Zähler der Gruppe: ruhiger Zusatz, kein Status-Signal. */
+.outbound-group__count {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+.outbound-group__contacts {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Eine Kontakt-Zeile: Titel + Untertitel links, App-Pille + ×N rechts. */
+.outbound-contact {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.outbound-contact:last-child {
+  border-bottom: none;
+  /* Untere Ecken folgen dem Gruppen-Rahmen (zuvor von overflow:hidden gekappt). */
+  border-bottom-left-radius: var(--radius-md);
+  border-bottom-right-radius: var(--radius-md);
+}
+
+.outbound-contact__main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.outbound-contact__title {
+  font-size: 13px;
+  color: var(--color-text);
+  word-break: break-all;
+}
+
+.outbound-contact__sub {
+  font-size: 12px;
+  color: var(--color-text-tert);
+  word-break: break-word;
+}
+
+.outbound-contact__meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* App-Pille: neutraler card-Ton (kein Status-Signal). */
+.outbound-contact__app {
+  padding: 1px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 999px;
+  color: var(--color-text-sec);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+.outbound-contact__count {
+  font-size: 12px;
+  color: var(--color-text-tert);
+}
+
+/* ── Blocklist-Treffer (rein additiv) ──────────────────────────────────────────
+   Außenkontakte urteilen NICHT: die Badges zeigen reine Listen-Mitgliedschaft mit
+   Quellenangabe, KEIN CERNIS-Urteil. Darum bewusst KEINE kritisch-rote Severity-
+   Optik. tracker_ads bleibt im neutralen Akzent-Ton; threat erhält höchstens den
+   ZURÜCKHALTENDEN orangen Warn-Ton (--sev-med-*), nicht das kritische Rot der
+   Sicherheits-Ansichten. */
+
+/* Einmaliger Quell-Hinweis (rote Linie): ruhiger note-Streifen wie outbound__scope,
+   bewusst zurückhaltend. */
+.outbound__listen-hinweis {
+  flex-shrink: 0;
+  padding: 9px 12px;
+  font-size: 12px;
+  color: var(--color-text-sec);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* Treffer-Bereich einer Zeile: sitzt unter Titel/Untertitel im __main-Block. */
+.outbound-contact__listen {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+/* Eine Gruppen-Zeile: Badge links, Quellen-Auflistung daneben. */
+.outbound-listen-treffer {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Quellen-Auflistung: klein, ruhig, tertiär. Die Quellenangabe ist die rote Linie
+   (der Nutzer MUSS die Quelle erfahren können) — darum sichtbar, nicht nur im
+   title-Tooltip. */
+.outbound-listen-quellen {
+  font-size: 11px;
+  color: var(--color-text-tert);
+  word-break: break-word;
+}
+
+/* Das Badge selbst: klein, flach, rund — wie die App-Pille, kein Status-Signal. */
+.outbound-badge {
+  padding: 1px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 999px;
+  white-space: nowrap;
+  border: 1px solid var(--color-border);
+}
+
+/* tracker_ads: neutraler Akzent-Ton (dezent, kein Alarm). */
+.outbound-badge--tracker {
+  color: var(--color-accent-strong);
+  background: var(--color-accent-bg);
+  border-color: var(--color-accent-border);
+}
+
+/* threat: zurückhaltender oranger Warn-Ton als MAXIMUM (--sev-med-*),
+   NICHT das kritisch-rote --sev-high. */
+.outbound-badge--threat {
+  color: var(--sev-med-text);
+  background: var(--sev-med-bg);
+  border-color: var(--sev-med-bd);
+}
+
+/* ── SNI-Block (Etappe 3b): Hinweis- und Threat-Streifen ───────────────────────
+   Stil an die vorhandenen note-Streifen (outbound__scope/__hinweis/__listen-
+   hinweis) angelehnt, dieselben CSS-Variablen. Threat-Ton bewusst zurückhaltend
+   über --sev-med-* (wie outbound-badge--threat), KEIN grelles Rot. */
+
+/* SNI-aus-Hinweis: einzeiliger ruhiger Streifen, Knopf rechts (margin-left:auto). */
+.outbound__sni-hinweis {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 9px 12px;
+  font-size: 12px;
+  color: var(--color-text-sec);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.outbound__sni-hinweis svg {
+  flex-shrink: 0;
+  color: var(--color-text-tert);
+}
+
+.outbound__sni-hinweis-text {
+  min-width: 0;
+}
+
+/* „Anzeigen"-Knopf im Off-Streifen: dezenter Akzent-Chip, rechtsbündig. */
+.outbound__sni-hinweis-button {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-accent-strong);
+  background: var(--color-accent-bg);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.outbound__sni-hinweis-button:hover {
+  background: var(--color-accent);
+}
+
+.outbound__sni-hinweis-button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Aggregierter Threat-Streifen: zweizeilig (Hauptzeile + Disclaimer). Icon links,
+   Knopf rechts. Zurückhaltender Warn-Ton über --sev-med-* (kein grelles Rot). */
+.outbound__threat-streifen {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 9px 12px;
+  font-size: 12px;
+  color: var(--sev-med-text);
+  background: var(--sev-med-bg);
+  border: 1px solid var(--sev-med-bd);
+  border-radius: var(--radius-md);
+}
+
+.outbound__threat-streifen svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--sev-med-text);
+}
+
+.outbound__threat-streifen-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.outbound__threat-streifen-text {
+  font-weight: 500;
+}
+
+.outbound__threat-streifen-disclaimer {
+  font-size: 11px;
+  color: var(--color-text-tert);
+}
+
+/* Gefiltert-Zustand: einzeilig, leicht hervorgehoben (--sev-med-bg), Filter-Icon
+   + „Filter aufheben"-Knopf rechts. */
+.outbound__threat-gefiltert {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 9px 12px;
+  font-size: 12px;
+  color: var(--sev-med-text);
+  background: var(--sev-med-bg);
+  border: 1px solid var(--sev-med-bd);
+  border-radius: var(--radius-md);
+}
+
+.outbound__threat-gefiltert svg {
+  flex-shrink: 0;
+  color: var(--sev-med-text);
+}
+
+.outbound__threat-gefiltert-text {
+  min-width: 0;
+  font-weight: 500;
+}
+
+/* Gemeinsamer Knopf der Threat-Streifen: rechtsbündig, dezenter neutraler Chip
+   (urteilt nicht laut). */
+.outbound__threat-button {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-sec);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.outbound__threat-button:hover {
+  border-color: var(--color-accent-border);
+}
+
+.outbound__threat-button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}

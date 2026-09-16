@@ -6,6 +6,7 @@ Tracks WLAN / LAN / Internet independently using interface-bound pings.
 import asyncio
 import subprocess
 import platform
+import os
 import re
 import time
 import sqlite3
@@ -15,6 +16,7 @@ from datetime import datetime
 from pathlib import Path
 
 from modules.db_path import DB_PATH  # noqa
+from infrastructure.osascript_escape import escape_applescript_literal
 
 # ── Data structures ───────────────────────────────────────────
 
@@ -131,21 +133,34 @@ def get_rtt_history(target_id: str, limit: int = 120) -> list[dict]:
 async def _ping_once(host: str, interface: str = "", timeout: float = 2.0) -> tuple[bool, float]:
     """Returns (alive, rtt_ms). Uses interface binding on macOS."""
     system = platform.system()
+    if system == "Windows":
+        # Windows: nativer ICMP-Echo statt ping.exe. Lokalisierte ping.exe-Ausgabe
+        # (deutsch Zeit<, englisch time=) laesst jeden Regex still scheitern; die
+        # native iphlpapi liefert Status/RoundTripTime als Zahl. Der Import steht
+        # im Windows-Zweig (auf Nicht-Windows nie erreicht).
+        from infrastructure.icmp_windows import icmp_echo
+
+        return await icmp_echo(host, timeout)
+
     if system == "Darwin":
         cmd = ["ping", "-c", "1", "-W", str(int(timeout * 1000)), "-t", "2"]
         if interface:
             cmd += ["-b", interface]
-        cmd.append(host)
-    elif system == "Windows":
-        cmd = ["ping", "-n", "1", "-w", str(int(timeout * 1000)), host]
+        cmd += ["--", host]
     else:
-        cmd = ["ping", "-c", "1", "-W", str(int(timeout)), host]
+        cmd = ["ping", "-c", "1", "-W", str(int(timeout)), "--", host]
 
     try:
+        # ping wird mit erzwungener C-Locale gestartet, weil lokalisierte
+        # ping-Ausgaben (z.B. Zeit= statt time= auf Fedora mit deutscher
+        # Locale) das RTT-Parsing sonst scheitern lassen und den Sentinel
+        # -1.0 liefern, obwohl der Host erreichbar ist.
+        ping_env = {**os.environ, "LC_ALL": "C", "LANG": "C"}
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
+            env=ping_env,
         )
         stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout + 1)
         output = stdout.decode("utf-8", errors="replace")
@@ -168,7 +183,10 @@ async def _ping_burst(host: str, interface: str = "", count: int = 3) -> PingRes
         await asyncio.sleep(0.2)
 
     alive_count = sum(1 for a, _ in results if a)
-    rtts = [r for _, r in results if r > 0]
+    # 0.0 ist eine gueltige RTT (Windows-DWORD RoundTripTime rundet sub-ms auf 0);
+    # nur -1.0 ist der Sentinel. Daher r >= 0 statt r > 0, sonst wird eine echte
+    # 0.0-Messung faelschlich verworfen und die Aggregation faellt auf -1.0 zurueck.
+    rtts = [r for _, r in results if r >= 0]
     loss_pct = (1 - alive_count / count) * 100
     avg_rtt = sum(rtts) / len(rtts) if rtts else -1.0
     return PingResult(
@@ -184,7 +202,7 @@ async def _ping_burst(host: str, interface: str = "", count: int = 3) -> PingRes
 
 def _notify_macos(title: str, message: str):
     try:
-        script = f'display notification "{message}" with title "{title}" sound name "Basso"'
+        script = f'display notification "{escape_applescript_literal(message)}" with title "{escape_applescript_literal(title)}" sound name "Basso"'
         subprocess.run(["osascript", "-e", script], timeout=3, capture_output=True)
     except Exception:
         pass

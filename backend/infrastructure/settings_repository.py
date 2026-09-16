@@ -106,3 +106,8 @@ class SqliteSettingsRepository:
         # Idempotent: DELETE auf einen fehlenden Key ist kein Fehler.
         with self._connect() as conn:
             conn.execute("DELETE FROM settings WHERE key = ?", (key,))
+
+    def clear_all(self) -> None:
+        # Leert alle Settings (nur die eigene Tabelle settings).
+        with self._connect() as conn:
+            conn.execute("DELETE FROM settings")
